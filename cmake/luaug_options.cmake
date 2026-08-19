@@ -24,12 +24,12 @@ cmake_dependent_option(LUAUG_LUAU_COMPILER
 # `rhi_null` is not a debugging convenience: headless logic tests and the future
 # dedicated server need an IDevice that renders nothing, so it is part of the
 # normal build rather than something a preset turns on.
-# SDLGPU and CAPTURE default OFF only because their sources do not exist yet;
-# each flips to ON in the commit that adds it. An option that can be switched on
-# to produce a link error would be worse than no option at all.
+# SDLGPU defaults OFF only because its sources do not exist yet; it flips to ON
+# in the commit that adds it. An option that can be switched on to produce a
+# link error would be worse than no option at all.
 option(LUAUG_RHI_NULL "Build the no-op render backend" ON)
+option(LUAUG_RHI_CAPTURE "Build the command-stream recording render backend" ON)
 option(LUAUG_RHI_SDLGPU "Build the SDL3 GPU render backend (the v1 default)" OFF)
-option(LUAUG_RHI_CAPTURE "Build the command-stream recording render backend" OFF)
 
 set(LUAUG_SANITIZE "" CACHE STRING
     "Comma-separated sanitizer list passed to -fsanitize (e.g. address,undefined)")

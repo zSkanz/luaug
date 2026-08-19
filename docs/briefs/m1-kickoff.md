@@ -214,6 +214,20 @@ compile-only — no runtime verification, which stays post-v1.
    instead: monotonic by standard guarantee, no bring-up, same resolution on
    every target.
 
+4. **Changing an `option()`'s default does not reach an existing build
+   directory.** CMake's `option` only writes the cache when the entry is
+   absent, so flipping a default in `luaug_options.cmake` leaves every
+   already-configured tree on the old value — and the failure surfaces
+   somewhere else entirely (a test target naming a module that was not built).
+   Fix locally with `-DLUAUG_X=ON` on the next configure; the durable fix is
+   what the RHI CMakeLists does now, which is to build its target lists from
+   what is actually enabled rather than naming things unconditionally.
+
+5. **SDL's Linux dependency check is all-or-nothing per feature.** Assembling
+   the package list from whatever the last CI failure named costs one round
+   trip per missing package (X11 found → XTEST missing → …). The list is in
+   `third_party/sdl3/docs/README-linux.md`; take it from there.
+
 ## Attempted / abandoned
 
 (append during the milestone; §12)

@@ -14,7 +14,9 @@ namespace luaug::rhi
 {
 
 using core::f32;
+using core::f64;
 using core::i32;
+using core::i64;
 using core::u16;
 using core::u32;
 using core::u64;

@@ -29,6 +29,11 @@ if(LUAUG_RHI_CAPTURE AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/capture")
     message(FATAL_ERROR "LUAUG_RHI_CAPTURE is ON but the backend has not been written yet")
 endif()
 
+# Accumulated rather than written out, so the test target links exactly the
+# backends this configuration built. Naming one unconditionally would turn
+# switching a backend off into a confusing CMake error in an unrelated file.
+set(luaug_rhi_test_modules rhi_api)
+
 if(LUAUG_RHI_NULL)
     luaug_add_module(rhi_null
         LAYER 2
@@ -39,12 +44,34 @@ if(LUAUG_RHI_NULL)
         API_DEPS
             rhi_api
     )
+    list(APPEND luaug_rhi_test_modules rhi_null)
+endif()
+
+if(LUAUG_RHI_CAPTURE)
+    luaug_add_module(rhi_capture
+        LAYER 2
+        SOURCES
+            src/capture/capture_device.cpp
+        DEPS
+            core
+        API_DEPS
+            rhi_api
+    )
+    list(APPEND luaug_rhi_test_modules rhi_capture)
+endif()
+
+# rhi_api_tests links no backend at all -- if it ever needs one, the seam has
+# grown an implementation dependency and the neutrality claim is gone. The
+# others come with theirs.
+set(luaug_rhi_test_sources tests/rhi_api_tests.cpp)
+if(LUAUG_RHI_NULL)
+    list(APPEND luaug_rhi_test_sources tests/rhi_null_tests.cpp)
+endif()
+if(LUAUG_RHI_CAPTURE AND LUAUG_RHI_NULL)
+    list(APPEND luaug_rhi_test_sources tests/rhi_capture_tests.cpp)
 endif()
 
 luaug_add_module_tests(rhi
-    MODULES
-        rhi_api
-        rhi_null
-    SOURCES
-        tests/rhi_api_tests.cpp
+    MODULES ${luaug_rhi_test_modules}
+    SOURCES ${luaug_rhi_test_sources}
 )
