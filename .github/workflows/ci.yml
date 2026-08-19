@@ -9,18 +9,24 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Builds are always out-of-tree (rule R14). runner.temp is outside the
+  # checkout, so an in-tree build would fail the root CMakeLists guard.
+  ROKIT_VERSION: "1.2.0"
+
 jobs:
   # ---------------------------------------------------------------------------
-  # ACTIVE NOW (docs-first phase): keeps the documentation package itself
-  # verifiable — every relative link resolves, pinned versions are consistent,
-  # no stray Roblox references outside the allowed files (rule R7 sweep).
-  # ---------------------------------------------------------------------------
+  # Keeps the documentation package itself verifiable: every relative link
+  # resolves, pinned versions are named consistently, no stray Roblox
+  # references outside the allowed files (rule R7 sweep).
+  #
   # NOTE ON `--exclude-dir=third_party` BELOW: every step in this job checks
   # documentation *we* authored. Vendored upstream trees are governed by
   # ADR 0021 (pinned + never edited in place, R13), carry their own licenses,
   # and legitimately contain both broken relative links and the word "Roblox"
   # (Luau is a Roblox project). Linting them would be meaningless and a
   # permanent source of false failures.
+  # ---------------------------------------------------------------------------
   docs-lint:
     runs-on: ubuntu-latest
     steps:
@@ -87,27 +93,106 @@ jobs:
           echo "ledger ok"
 
   # ---------------------------------------------------------------------------
-  # ACTIVATED AT MILESTONE M0 (docs/roadmap.md) — uncomment then.
+  # Tier-1 (Windows) and Tier-2 (Linux) build + test. third_party is vendored
+  # in-tree (ADR 0021), so there is no dependency-fetch step: the checkout is
+  # the whole input.
   # ---------------------------------------------------------------------------
-  # build-test:
-  #   strategy:
-  #     matrix:
-  #       include:
-  #         - { os: windows-latest, preset: win-msvc-dev }
-  #         - { os: ubuntu-latest,  preset: linux-clang-dev }
-  #         - { os: macos-latest,   preset: macos-clang-dev }   # blocking from M4
-  #   runs-on: ${{ matrix.os }}
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Bootstrap
-  #       run: pwsh scripts/bootstrap.ps1
-  #       if: runner.os == 'Windows'
-  #     - name: Configure/Build/Test
-  #       run: |
-  #         cmake --preset ${{ matrix.preset }}
-  #         cmake --build --preset ${{ matrix.preset }}
-  #         ctest --preset ${{ matrix.preset }}
-  #
-  # luau-check:   # luau-analyze strict (new solver) + StyLua + i18n lint + layer check + apigen diff
-  # sanitize:     # linux-clang-asan
-  # determinism:  # replay-hash scenarios (blocking from M5)
+  build-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, preset: win-msvc-dev }
+          - { os: ubuntu-latest, preset: linux-clang-dev }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set out-of-tree build root (R14)
+        shell: bash
+        run: echo "LUAUG_BUILD_ROOT=${RUNNER_TEMP}/luaug-build" >> "$GITHUB_ENV"
+
+      - name: Install Ninja (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      # The presets use the Ninja generator with `strategy: external`, so the
+      # MSVC environment must be established first. vswhere avoids hardcoding
+      # an edition/year that changes with the runner image.
+      - name: Configure, build and test (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
+          cmake --preset ${{ matrix.preset }} || exit /b 1
+          cmake --build --preset ${{ matrix.preset }} || exit /b 1
+          ctest --preset ${{ matrix.preset }} || exit /b 1
+
+      - name: Configure, build and test (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset ${{ matrix.preset }}
+          cmake --build --preset ${{ matrix.preset }}
+          ctest --preset ${{ matrix.preset }}
+
+  # ---------------------------------------------------------------------------
+  # Luau-side static gates: strict analysis under the new solver (R2), StyLua
+  # formatting, the i18n key check (R3), and the module layering rule.
+  # ---------------------------------------------------------------------------
+  luau-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Installed by pinned URL rather than a third-party action: one fewer
+      # supply-chain surface, and the version is visible in this file.
+      - name: Install rokit
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/rokit.zip \
+            "https://github.com/rojo-rbx/rokit/releases/download/v${ROKIT_VERSION}/rokit-${ROKIT_VERSION}-linux-x86_64.zip"
+          unzip -q /tmp/rokit.zip -d /tmp/rokit
+          /tmp/rokit/rokit self-install
+          echo "$HOME/.rokit/bin" >> "$GITHUB_PATH"
+
+      - name: Install the pinned toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          # --no-trust-check: tools are pinned in the in-repo, ADR-gated
+          # rokit.toml (R5); the interactive trust prompt has no answer in CI.
+          rokit install --no-trust-check
+          lute --version
+          stylua --version
+          luau-lsp --version
+
+      # tools/.luaurc resolves @std / @lute through ~/.lute/typedefs/<version>/,
+      # so analysis cannot resolve a single tooling require without this.
+      - name: Generate Lute type definitions
+        run: lute setup
+
+      - name: StyLua formatting check
+        run: stylua --check tools examples
+
+      # --platform=standard: this engine is not Roblox, so no Roblox
+      # definitions are loaded (ADR 0020, api-design §4).
+      # --ignore: Lute 1.0.0's own shipped typedefs do not typecheck cleanly
+      # under the pinned luau-lsp; gating on them would fail for upstream
+      # reasons that have nothing to do with our code.
+      - name: luau-analyze (strict, new type solver)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find tools examples -name '*.luau' | sort)
+          printf 'analyzing %s file(s)\n' "${#files[@]}"
+          luau-lsp analyze --platform=standard --ignore="**/.lute/**" "${files[@]}"
+
+      - name: i18n key check (R3)
+        run: lute tools/repo/i18nlint.luau
+
+      - name: Module layering check (architecture.md §2)
+        run: lute tools/repo/checklayers.luau
