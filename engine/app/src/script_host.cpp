@@ -47,6 +47,47 @@ int scriptPrint(lua_State* L)
     return 0;
 }
 
+// api-design.md §1.1 removes these from the game VM outright -- no aliases,
+// ever. Most are simply absent from Luau already; `getfenv`, `setfenv` and
+// `newproxy` are not, and Luau's base library additionally points `_G` at the
+// real globals table.
+//
+// This is not tidiness. `getfenv`/`setfenv` disable the `safeenv` optimization,
+// which is simultaneously the sandbox guarantee (R4) and the import fastpath;
+// native codegen also gives up on any function that touches them
+// (docs/research/luau-2026.md §3). Leaving them reachable would quietly
+// invalidate every performance number measured from here on.
+//
+// Must run before luaL_sandbox, which makes the globals table readonly.
+void removeForbiddenGlobals(lua_State* L)
+{
+    static constexpr const char* kRemoved[] = {
+        "wait",
+        "spawn",
+        "delay",
+        "tick",
+        "elapsedTime",
+        "loadstring",
+        "getfenv",
+        "setfenv",
+        "newproxy",
+        "shared",
+        "io",
+    };
+
+    for (const char* name : kRemoved)
+    {
+        lua_pushnil(L);
+        lua_setglobal(L, name);
+    }
+
+    // `_G` stays defined so that referencing it is not a surprise, but it is an
+    // empty table rather than the environment itself. luaL_sandbox freezes it
+    // along with every other global table.
+    lua_newtable(L);
+    lua_setglobal(L, "_G");
+}
+
 std::string popErrorMessage(lua_State* thread)
 {
     std::size_t length = 0;
@@ -67,6 +108,8 @@ ScriptHost::ScriptHost()
     // the globals table readonly, so anything registered afterwards would fail.
     lua_pushcfunction(state_, scriptPrint, "print");
     lua_setglobal(state_, "print");
+
+    removeForbiddenGlobals(state_);
 
     // Mandatory, and never disabled to make something work (rule R4). This is
     // also a performance feature: it is what enables the safeenv import

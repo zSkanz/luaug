@@ -68,6 +68,65 @@ TEST_CASE("the VM boots sandboxed")
     }
 }
 
+TEST_CASE("the game VM does not expose the globals api-design removes")
+{
+    seedRealCatalog();
+    ScriptHost host;
+
+    SUBCASE("every global on the removed list is absent")
+    {
+        // api-design.md §1.1, checked by name rather than through _G, because
+        // _G is deliberately empty and would make the assertion vacuous.
+        const std::optional<EngineError> error = host.run(
+            "assert(wait == nil, 'wait')\n"
+            "assert(spawn == nil, 'spawn')\n"
+            "assert(delay == nil, 'delay')\n"
+            "assert(tick == nil, 'tick')\n"
+            "assert(elapsedTime == nil, 'elapsedTime')\n"
+            "assert(loadstring == nil, 'loadstring')\n"
+            "assert(getfenv == nil, 'getfenv')\n"
+            "assert(setfenv == nil, 'setfenv')\n"
+            "assert(newproxy == nil, 'newproxy')\n"
+            "assert(shared == nil, 'shared')\n"
+            "assert(io == nil, 'io')\n",
+            "globals.luau");
+
+        REQUIRE_MESSAGE(!error.has_value(), (error ? error->message : std::string{}));
+    }
+
+    SUBCASE("_G exists but is empty and frozen")
+    {
+        // Luau's base library points _G at the real globals table; handing a
+        // script the whole environment defeats the point of the sandbox.
+        const std::optional<EngineError> error = host.run(
+            "assert(_G ~= nil, '_G should exist')\n"
+            "local count = 0\n"
+            "for _ in pairs(_G) do count += 1 end\n"
+            "assert(count == 0, `_G should be empty, has {count}`)\n"
+            "assert(not pcall(function() _G.leak = 1 end), '_G should be frozen')\n",
+            "globals.luau");
+
+        REQUIRE_MESSAGE(!error.has_value(), (error ? error->message : std::string{}));
+    }
+
+    SUBCASE("the language and its libraries are untouched")
+    {
+        // The removals must not have collaterally damaged the stdlib the
+        // engine actually builds on -- vector especially (ADR 0013).
+        const std::optional<EngineError> error = host.run(
+            "assert(typeof(vector.create(1, 2, 3)) == 'vector', 'vector')\n"
+            "assert(buffer.len(buffer.create(8)) == 8, 'buffer')\n"
+            "assert(string.rep('a', 3) == 'aaa', 'string')\n"
+            "assert(math.floor(1.5) == 1, 'math')\n"
+            "assert(table.concat({'a', 'b'}, ',') == 'a,b', 'table')\n"
+            "assert(select('#', 1, 2) == 2, 'select')\n"
+            "assert(type(pcall) == 'function', 'pcall')\n",
+            "stdlib.luau");
+
+        REQUIRE_MESSAGE(!error.has_value(), (error ? error->message : std::string{}));
+    }
+}
+
 TEST_CASE("script failures surface as structured engine errors")
 {
     seedRealCatalog();

@@ -150,6 +150,21 @@ Recorded because each one cost real time and will cost it again otherwise.
 9. **Luau builds `Luau.Analysis` unconditionally** even with CLI and tests off.
    We never link it; it is roughly a third of a clean build. Worth trimming in
    a later milestone, not worth a vendored patch now (ADR 0021).
+10. **`luaL_openlibs` leaves `getfenv`, `setfenv` and `newproxy` in the global
+    table, and points `_G` at the real environment** — all four contradict
+    `api-design.md` §1.1. Found by running the built host and probing, not by
+    reading code. This is not cosmetic: `getfenv`/`setfenv` disable the
+    `safeenv` optimization, which is simultaneously the sandbox guarantee (R4)
+    and the import fastpath, and native codegen gives up on any function that
+    touches them (`docs/research/luau-2026.md` §3). Left in place it would have
+    quietly invalidated every performance number measured afterwards. Fixed in
+    `ScriptHost` before `luaL_sandbox`, with tests.
+
+    *Scope note:* global curation nominally belongs to M2 (`architecture.md`
+    §5 installs `game`/`workspace` in the same place). It was pulled forward
+    deliberately because it is a sandbox-correctness issue against a spec that
+    already exists, not new feature work — and because every measurement taken
+    before the fix would have been misleading.
 
 ## Attempted / abandoned
 
