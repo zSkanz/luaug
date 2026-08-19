@@ -21,9 +21,17 @@ things stand.
 ```
 scripts/localgate.ps1                # EVERYTHING that can run here: docs + Luau gates
                                      #   + Windows build/tests + the Linux tier in Docker
-scripts/localgate.ps1 -SkipLinux     # skip the container (no Docker, or iterating fast)
-scripts/localgate.ps1 -Only windows  # one stage: docs | luau | windows | linux
+scripts/localgate.ps1 -Only windows  # one stage while iterating: docs | luau | windows | linux
 ```
+
+**Run the Linux stage.** It is ~12 s warm, and it is not redundant with the
+Windows one: Clang diagnoses things MSVC does not, warnings are errors, and this
+has already caught a real defect that would otherwise have gone to CI. Use
+`-Only` when iterating on one thing; the full gate before you push.
+
+`-SkipLinux` exists for one situation — Docker is genuinely unavailable — and
+using it means accepting that a Clang-only diagnostic reaches `main` instead of
+you.
 
 Roughly 20 seconds warm, both tiers, 15 tests each. The same run costs ~35
 charged minutes on GitHub, and this repository is **private**, so Actions

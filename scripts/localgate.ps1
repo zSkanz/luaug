@@ -15,9 +15,14 @@
 # milestone gate.
 #
 # Usage:
-#   scripts/localgate.ps1              # everything
-#   scripts/localgate.ps1 -SkipLinux   # Windows and the static gates only
-#   scripts/localgate.ps1 -Only docs   # one stage: docs | luau | windows | linux
+#   scripts/localgate.ps1              # everything -- what you run before a push
+#   scripts/localgate.ps1 -Only docs   # one stage while iterating: docs | luau | windows | linux
+#   scripts/localgate.ps1 -SkipLinux   # ONLY when Docker is genuinely unavailable
+#
+# The Linux stage is about twelve seconds warm and is not redundant with the
+# Windows one: Clang diagnoses things MSVC does not, warnings are errors, and it
+# has already caught a defect that would otherwise have reached CI. Skipping it
+# to go faster is a false economy -- use -Only for that.
 
 [CmdletBinding()]
 param(
@@ -187,7 +192,11 @@ if ($script:failures.Count -gt 0) {
 }
 
 Write-Host ""
-if ($SkipLinux -or $Only) {
+if ($SkipLinux) {
+    # Named rather than folded into a generic "partial", because this is the one
+    # skip that hides a whole compiler's diagnostics.
+    Write-Host "green, but the Linux tier did not run -- Clang has not seen this change" -ForegroundColor Yellow
+} elseif ($Only) {
     Write-Host "green (partial run -- macOS is Tier-3 and only CI can build it)" -ForegroundColor Yellow
 } else {
     Write-Host "green (macOS is Tier-3 and only CI can build it)" -ForegroundColor Green
