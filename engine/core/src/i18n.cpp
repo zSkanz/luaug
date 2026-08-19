@@ -1,315 +1,24 @@
 #include "luaug/core/i18n.h"
 
-#include <charconv>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
 #include <utility>
+
+#include "luaug/core/json.h"
 
 namespace luaug::core
 {
 namespace
 {
 
-// A deliberately small JSON reader, private to the catalog.
-//
-// Catalogs are a closed, flat grammar -- object of string -> (string | object
-// of string) -- so accepting arrays, numbers or booleans would only widen the
-// surface without serving a caller. Rejecting them produces a precise
-// diagnostic instead of a silently mis-parsed catalog. When the engine needs
-// general JSON it will be a deliberate, separate decision (and a dependency
-// ADR), not an accident of this file growing.
-class CatalogReader
+// Catalog diagnostics name the offending key rather than a byte offset: the
+// grammar is already checked by the reader, so what is left to report is a
+// schema violation, and "entry X" is what the person fixing it searches for.
+std::string entryDiagnostic(std::string_view sourceName, std::string_view key, std::string_view what)
 {
-public:
-    explicit CatalogReader(std::string_view text) noexcept : text_(text) {}
-
-    [[nodiscard]] const std::string& error() const noexcept { return error_; }
-
-    template<typename OnEntry>
-    bool parse(OnEntry&& onEntry)
-    {
-        skipSpace();
-        if (!expect('{'))
-            return false;
-
-        skipSpace();
-        if (peek() == '}')
-        {
-            advance();
-            return atEndAfterTrailingSpace();
-        }
-
-        for (;;)
-        {
-            skipSpace();
-            std::string key;
-            if (!readString(key))
-                return false;
-
-            skipSpace();
-            if (!expect(':'))
-                return false;
-
-            skipSpace();
-            const char next = peek();
-            if (next == '"')
-            {
-                std::string value;
-                if (!readString(value))
-                    return false;
-                if (!key.empty() && key.front() != '$')
-                    onEntry(key, std::move(value), std::vector<std::pair<std::string, std::string>>{});
-            }
-            else if (next == '{')
-            {
-                std::vector<std::pair<std::string, std::string>> plurals;
-                if (!readPluralObject(plurals))
-                    return false;
-                if (!key.empty() && key.front() != '$')
-                    onEntry(key, std::string{}, std::move(plurals));
-            }
-            else
-            {
-                return fail("catalog values must be a string or a plural object");
-            }
-
-            skipSpace();
-            const char delim = peek();
-            if (delim == ',')
-            {
-                advance();
-                continue;
-            }
-            if (delim == '}')
-            {
-                advance();
-                return atEndAfterTrailingSpace();
-            }
-            return fail("expected ',' or '}' after a catalog entry");
-        }
-    }
-
-private:
-    [[nodiscard]] char peek() const noexcept { return pos_ < text_.size() ? text_[pos_] : '\0'; }
-
-    void advance() noexcept
-    {
-        if (pos_ < text_.size())
-            ++pos_;
-    }
-
-    void skipSpace() noexcept
-    {
-        while (pos_ < text_.size())
-        {
-            const char c = text_[pos_];
-            if (c == ' ' || c == '\t' || c == '\n' || c == '\r')
-                ++pos_;
-            else
-                break;
-        }
-    }
-
-    bool expect(char c)
-    {
-        if (peek() != c)
-        {
-            char message[64];
-            std::snprintf(message, sizeof(message), "expected '%c'", c);
-            return fail(message);
-        }
-        advance();
-        return true;
-    }
-
-    bool atEndAfterTrailingSpace()
-    {
-        skipSpace();
-        if (pos_ != text_.size())
-            return fail("trailing content after the catalog object");
-        return true;
-    }
-
-    bool fail(std::string_view what)
-    {
-        if (error_.empty())
-        {
-            std::ostringstream out;
-            out << what << " at byte " << pos_;
-            error_ = out.str();
-        }
-        return false;
-    }
-
-    static void appendUtf8(std::string& out, u32 codepoint)
-    {
-        if (codepoint < 0x80u)
-        {
-            out.push_back(static_cast<char>(codepoint));
-        }
-        else if (codepoint < 0x800u)
-        {
-            out.push_back(static_cast<char>(0xC0u | (codepoint >> 6)));
-            out.push_back(static_cast<char>(0x80u | (codepoint & 0x3Fu)));
-        }
-        else if (codepoint < 0x10000u)
-        {
-            out.push_back(static_cast<char>(0xE0u | (codepoint >> 12)));
-            out.push_back(static_cast<char>(0x80u | ((codepoint >> 6) & 0x3Fu)));
-            out.push_back(static_cast<char>(0x80u | (codepoint & 0x3Fu)));
-        }
-        else
-        {
-            out.push_back(static_cast<char>(0xF0u | (codepoint >> 18)));
-            out.push_back(static_cast<char>(0x80u | ((codepoint >> 12) & 0x3Fu)));
-            out.push_back(static_cast<char>(0x80u | ((codepoint >> 6) & 0x3Fu)));
-            out.push_back(static_cast<char>(0x80u | (codepoint & 0x3Fu)));
-        }
-    }
-
-    bool readHex4(u32& out)
-    {
-        if (pos_ + 4 > text_.size())
-            return fail("truncated \\u escape");
-
-        u32 value = 0;
-        for (usize i = 0; i < 4; ++i)
-        {
-            const char c = text_[pos_ + i];
-            u32 digit = 0;
-            if (c >= '0' && c <= '9')
-                digit = static_cast<u32>(c - '0');
-            else if (c >= 'a' && c <= 'f')
-                digit = static_cast<u32>(c - 'a') + 10u;
-            else if (c >= 'A' && c <= 'F')
-                digit = static_cast<u32>(c - 'A') + 10u;
-            else
-                return fail("invalid hex digit in \\u escape");
-            value = (value << 4) | digit;
-        }
-        pos_ += 4;
-        out = value;
-        return true;
-    }
-
-    bool readString(std::string& out)
-    {
-        if (!expect('"'))
-            return false;
-
-        out.clear();
-        for (;;)
-        {
-            if (pos_ >= text_.size())
-                return fail("unterminated string");
-
-            const char c = text_[pos_];
-            if (c == '"')
-            {
-                advance();
-                return true;
-            }
-
-            if (c != '\\')
-            {
-                out.push_back(c);
-                advance();
-                continue;
-            }
-
-            advance();
-            if (pos_ >= text_.size())
-                return fail("unterminated escape");
-
-            const char esc = text_[pos_];
-            advance();
-            switch (esc)
-            {
-            case '"': out.push_back('"'); break;
-            case '\\': out.push_back('\\'); break;
-            case '/': out.push_back('/'); break;
-            case 'b': out.push_back('\b'); break;
-            case 'f': out.push_back('\f'); break;
-            case 'n': out.push_back('\n'); break;
-            case 'r': out.push_back('\r'); break;
-            case 't': out.push_back('\t'); break;
-            case 'u':
-            {
-                u32 codepoint = 0;
-                if (!readHex4(codepoint))
-                    return false;
-                // Surrogate pair: catalogs are UTF-8, so re-combine before encoding.
-                if (codepoint >= 0xD800u && codepoint <= 0xDBFFu && pos_ + 1 < text_.size() && text_[pos_] == '\\'
-                    && text_[pos_ + 1] == 'u')
-                {
-                    pos_ += 2;
-                    u32 low = 0;
-                    if (!readHex4(low))
-                        return false;
-                    if (low < 0xDC00u || low > 0xDFFFu)
-                        return fail("invalid low surrogate in \\u escape");
-                    codepoint = 0x10000u + ((codepoint - 0xD800u) << 10) + (low - 0xDC00u);
-                }
-                appendUtf8(out, codepoint);
-                break;
-            }
-            default:
-                return fail("unsupported escape sequence");
-            }
-        }
-    }
-
-    bool readPluralObject(std::vector<std::pair<std::string, std::string>>& out)
-    {
-        if (!expect('{'))
-            return false;
-
-        skipSpace();
-        if (peek() == '}')
-        {
-            advance();
-            return fail("plural entry has no categories");
-        }
-
-        for (;;)
-        {
-            skipSpace();
-            std::string category;
-            if (!readString(category))
-                return false;
-
-            skipSpace();
-            if (!expect(':'))
-                return false;
-
-            skipSpace();
-            std::string value;
-            if (!readString(value))
-                return false;
-
-            out.emplace_back(std::move(category), std::move(value));
-
-            skipSpace();
-            const char delim = peek();
-            if (delim == ',')
-            {
-                advance();
-                continue;
-            }
-            if (delim == '}')
-            {
-                advance();
-                return true;
-            }
-            return fail("expected ',' or '}' in a plural entry");
-        }
-    }
-
-    std::string_view text_;
-    usize pos_ = 0;
-    std::string error_;
-};
+    return std::string{sourceName} + ": entry \"" + std::string{key} + "\" " + std::string{what};
+}
 
 // English CLDR rules, the only locale shipped at launch (ADR 0019). A locale
 // with richer rules gets them when its catalog lands; the selection point is
@@ -345,32 +54,71 @@ I18nArg::I18nArg(std::string_view name, f64 value) : name_(name)
 
 Catalog::LoadResult Catalog::loadFromJson(std::string_view json, std::string_view sourceName)
 {
-    decltype(entries_) parsed;
-    std::string collision;
+    JsonDocument document;
+    const JsonDocument::ParseResult parsed = document.parse(json, sourceName);
+    if (!parsed.ok)
+        return LoadResult{false, parsed.diagnostic};
 
-    CatalogReader reader(json);
-    const bool ok = reader.parse(
-        [&](const std::string& name, std::string&& single, std::vector<std::pair<std::string, std::string>>&& plurals)
+    const JsonValue root = document.root();
+    if (root.type() != JsonType::Object)
+        return LoadResult{false, std::string{sourceName} + ": a catalog must be a JSON object"};
+
+    // The grammar the reader accepts is wider than the schema a catalog may use
+    // (ADR 0033): a value is a message or a table of plural categories, and
+    // anything else -- a number, an array, a deeper table -- is a mistake worth
+    // a diagnostic rather than a translation that silently goes missing.
+    decltype(entries_) loaded;
+
+    for (usize index = 0; index < root.size(); ++index)
+    {
+        const std::string_view name = root.keyAt(index);
+        const JsonValue value = root.at(index);
+
+        std::string single;
+        std::vector<std::pair<std::string, std::string>> plurals;
+
+        if (value.type() == JsonType::String)
         {
-            const u32 hash = hashTextKey(name);
-            const auto existing = parsed.find(hash);
-            if (existing != parsed.end() && collision.empty())
+            single = std::string{value.asString()};
+        }
+        else if (value.type() == JsonType::Object)
+        {
+            if (value.size() == 0)
+                return LoadResult{false, entryDiagnostic(sourceName, name, "has no plural categories")};
+
+            for (usize category = 0; category < value.size(); ++category)
             {
-                // Two keys sharing a hash would make one of them unreachable.
-                // Fail loudly at load rather than mistranslate at runtime.
-                collision = existing->second.name + "\" and \"" + name;
-                return;
+                const JsonValue text = value.at(category);
+                if (text.type() != JsonType::String)
+                    return LoadResult{false,
+                                      entryDiagnostic(sourceName, name, "maps a plural category to a non-string")};
+                plurals.emplace_back(std::string{value.keyAt(category)}, std::string{text.asString()});
             }
-            parsed.emplace(hash, Entry{name, std::move(single), std::move(plurals)});
-        });
+        }
+        else
+        {
+            return LoadResult{false, entryDiagnostic(sourceName, name, "must be a string or a plural object")};
+        }
 
-    if (!ok)
-        return LoadResult{false, std::string{sourceName} + ": " + reader.error()};
+        // `$`-prefixed keys are file metadata, not messages -- validated like
+        // any other entry, then dropped.
+        if (name.empty() || name.front() == '$')
+            continue;
 
-    if (!collision.empty())
-        return LoadResult{false, std::string{sourceName} + ": key hash collision between \"" + collision + "\""};
+        const u32 hash = hashTextKey(name);
+        const auto existing = loaded.find(hash);
+        if (existing != loaded.end())
+        {
+            // Two keys sharing a hash would make one of them unreachable. Fail
+            // loudly at load rather than mistranslate at runtime.
+            return LoadResult{false,
+                              std::string{sourceName} + ": key hash collision between \"" + existing->second.name
+                                  + "\" and \"" + std::string{name} + "\""};
+        }
+        loaded.emplace(hash, Entry{std::string{name}, std::move(single), std::move(plurals)});
+    }
 
-    entries_ = std::move(parsed);
+    entries_ = std::move(loaded);
     return LoadResult{true, {}};
 }
 

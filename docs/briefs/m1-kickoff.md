@@ -291,6 +291,49 @@ compile-only — no runtime verification, which stays post-v1.
    mind: the screenshot gate only grows teeth once there is geometry with edges
    in the frame, and a golden image is never sufficient evidence on its own.
 
+10. **Linux compiles DXIL it will never load, and that is the mitigation.** The
+    shader toolchain was flagged as risky on Linux because `libdxcompiler.so`
+    loads `libdxil.so` dynamically to sign its output, and D3D12 rejects
+    unsigned DXIL outside Developer Mode — but the Linux loader does not search
+    beside the executable the way Windows does. CI shows the DXIL steps running
+    and succeeding there; whether the blobs are *signed* is still unverified.
+
+    It does not currently matter, and the reason is worth writing down rather
+    than rediscovering: DXIL is consumed only by D3D12, which is Windows-only,
+    so a Linux build's DXIL output is never loaded by anything. The risk
+    materialises the day a Linux job produces a shipping shader pack for
+    Windows — i.e. at packaging (`luaug build`, M8), not before. Verify it
+    then, or drop DXIL from non-Windows hosts.
+
+11. **A property test that has never failed is decoration.** The debug-draw
+    tests were mutation-tested: the implementation was broken four ways to check
+    each assertion actually fires. Three caught it; one did not. Comparing
+    `vertices().data()` only after a full refill does not detect a
+    `shrink_to_fit()` in `clear()`, because the allocator hands the same address
+    back. Worth doing to every test suite whose value is in what it rejects —
+    which is most of the interesting ones.
+
+12. **`std::from_chars` for `double` is not portable enough to use.** Apple's
+    libc++ lacks the floating-point overloads on the Xcode versions
+    `macos-latest` ships, and `build-macos` compiles the test executables — so
+    using it would have been a macOS-only compile failure discoverable *only*
+    in CI, on the one tier nobody here can reproduce. `core::json` uses
+    `strtod`, which is correctly rounded everywhere but reads the **locale's**
+    decimal separator; the parser substitutes it from `std::localeconv()`.
+    Nothing in the engine calls `setlocale`, but a dependency that does must not
+    be able to turn `1.5` into `1`.
+
+13. **`architecture.md` §9 lists a clang-format check among the static gates,
+    and there is none.** `ci.yml` has no C++ formatting job. Discovered when
+    clang-format 20 reported violations in `error.cpp`, `math.cpp` and
+    `log.cpp` — files written before this milestone, so it is version drift
+    from whatever produced `.clang-format`, not a deviation introduced here.
+
+    Not fixed in M1, deliberately: turning the gate on means reformatting the
+    tree and pinning a clang-format version, and version pinning for the
+    C++ toolchain is M3's `luaug check` work. Recorded so the gap is a decision
+    rather than an oversight.
+
 ## Attempted / abandoned
 
 - **Vendoring DXC from source (option B).** Rejected with the human: four
