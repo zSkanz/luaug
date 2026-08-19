@@ -16,6 +16,30 @@ things stand.
 
 ## Commands
 
+**Run the gates locally. Do not use CI as your test runner.**
+
+```
+scripts/localgate.ps1                # EVERYTHING that can run here: docs + Luau gates
+                                     #   + Windows build/tests + the Linux tier in Docker
+scripts/localgate.ps1 -SkipLinux     # skip the container (no Docker, or iterating fast)
+scripts/localgate.ps1 -Only windows  # one stage: docs | luau | windows | linux
+```
+
+Roughly 20 seconds warm, both tiers, 15 tests each. The same run costs ~35
+charged minutes on GitHub, and this repository is **private**, so Actions
+minutes carry platform multipliers (Linux 1×, Windows 2×, macOS 10×) against a
+quota that has been close to exhausted. CI is there to prove `main` is green
+after a push and to build macOS — it is not where you find out whether your
+change compiles.
+
+The gate logic lives in `scripts/gates/*.sh`, and `ci.yml` runs the same files.
+If you add a check, add it there, not in the workflow.
+
+**Only macOS cannot run locally.** It builds on a `milestone/*` tag or a manual
+`workflow_dispatch`, not on every push.
+
+Underneath, when you need a single step:
+
 ```
 scripts/bootstrap.ps1                # Windows: toolchain check, LUAUG_BUILD_ROOT, rokit install, lute setup
 ./scripts/bootstrap.sh               # Linux/macOS: same
@@ -23,11 +47,6 @@ lute tools/repo/vendor.luau status   # what is vendored vs what the manifest pin
 cmake --preset win-msvc-dev          # configure (build dir OUTSIDE the repo tree)
 cmake --build --preset win-msvc-dev  # build
 ctest --preset win-msvc-dev          # C++ unit + integration tests
-```
-
-Luau-side gates, all runnable locally and all mirrored in `ci.yml`:
-
-```
 stylua --check .                     # formatting (third_party via .styluaignore)
 luau-lsp analyze --platform=standard --ignore="**/.lute/**" <files>
 lute tools/repo/i18nlint.luau        # every LUAUG_TR key exists in i18n/en.json
@@ -53,8 +72,19 @@ lint) · `luaug new <template>` · `luaug fmt`.
   require under `tools/` (see `tools/.luaurc`). `bootstrap` does it.
 - **CI uses `cancel-in-progress: true`.** Pushing cancels any run still in
   flight — do not push while waiting on a result you care about.
-- **A cold CI build is ~8 minutes per tier**, nearly all of it compiling Luau.
-  There is no cache yet; `sccache` is planned (architecture.md §9).
+- **Docker Desktop must be running** for `scripts/localgate.ps1`'s Linux stage.
+  Without it, pass `-SkipLinux` — but then a Clang-only diagnostic reaches CI
+  instead of you, and `-Werror` means that is a red `main`.
+- **Windows PowerShell reports native commands' success backwards.** `$?` is set
+  from whether the command wrote to stderr, not from its exit code, and
+  `$ErrorActionPreference='Stop'` turns any stderr line into an exception —
+  Docker's buildkit writes ordinary progress there. Check `$LASTEXITCODE`, and
+  never pipe a build through `tail`/`head`: the pager's exit code replaces the
+  build's, which has already once reported a broken build as green.
+- **`--dirty` on a `git describe` in this repo is slow**, and catastrophically so
+  through a Docker mount (0.7 s native, 37 s in the container) because it stats
+  every vendored file. `third_party/CMakeLists.txt` sets a git ceiling so
+  vendored projects cannot reach our repository at all.
 
 ## Invariants (digest — full text in MASTER_PROMPT.md §3)
 

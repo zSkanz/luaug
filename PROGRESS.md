@@ -24,9 +24,17 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   clears a texture and reads it back as exactly the colour it was cleared to,
   with no window and no shaders — the screenshot harness the later gates depend
   on already works.
+- **Run `scripts/localgate.ps1` before every push. Do not use CI as a test
+  runner.** It runs the documentation gate, the Luau gates, the Windows build
+  and tests, and the Linux tier in a container — ~20 seconds warm, 15 tests per
+  tier. The repository is private, so Actions minutes carry platform
+  multipliers, and the quota has been close to exhausted. CI proves `main` is
+  green and builds macOS, which is the one tier nothing local can build.
 - Also done since: the fixed-tick frame loop and headless mode with a synthetic
-  clock, the ADR 0023 backend factory, the Tier-3 macOS compile job, and the
-  nightly Android NDK cross-compile.
+  clock, the ADR 0023 backend factory, the Tier-3 macOS compile job (now on
+  milestone tags only), the nightly Android NDK cross-compile, the shader
+  toolchain, `core::json`, `render::DebugDraw`, and the screenshot and capture
+  gates.
 - **Next: the shader pipeline (step 6).** The §10 escalation it carried is
   **resolved — the human chose the prebuilt-DXC path on 2026-08-19.** The
   literal first action is to write the ADR that amends ADR 0021, which today

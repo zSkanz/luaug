@@ -32,29 +32,34 @@ place that knows which one exists.
 
 ## Scope checklist (from roadmap)
 
-- [ ] SDL3 init / window / event pump — the `platform` module (L1), the only
+- [x] SDL3 init / window / event pump — the `platform` module (L1), the only
       module besides `rhi_sdlgpu` and `app` glue that may touch SDL (ADR 0004)
-- [ ] RHI v1: the `IRenderer`/`RenderWorld` contract per architecture.md
-      (ADR 0027) and the ~40-call `rhi_api` (L2, header-only)
-- [ ] `rhi_sdlgpu` backend (v1 default, ADR 0005)
-- [ ] `rhi_capture` and `rhi_null` backends compile
-- [ ] HLSL shaders via SDL_shadercross with an on-disk shader cache (ADR 0006,
+- [~] RHI v1: the ~40-call `rhi_api` (L2, header-only) is **done**, with three
+      backends. The `IRenderer`/`RenderWorld` contract (ADR 0027) is **not** —
+      `engine/render` currently holds only `DebugDraw`. `RenderWorld` is defined
+      as the POD snapshot extracted from `scene`, and `scene` is M2, so the
+      honest shape here is a debug-draw renderer behind the interface rather
+      than an empty `RenderWorld` invented ahead of the thing it snapshots.
+      Decide at the gate whether that satisfies the item or defers it.
+- [x] `rhi_sdlgpu` backend (v1 default, ADR 0005)
+- [x] `rhi_capture` and `rhi_null` backends compile
+- [x] HLSL shaders via SDL_shadercross with an on-disk shader cache (ADR 0006,
       `cmake/luaug_shaders.cmake`)
 - [ ] Immediate-mode debug draw: lines, wire/solid cubes, text — deliberately
       early, because M2/M3/M5 visualize through it before a real renderer exists
 - [ ] ImGui docking overlay bound to F3 (ADR 0011, dev builds only)
-- [ ] Frame loop with the fixed-tick accumulator (architecture.md §3); tick
+- [x] Frame loop with the fixed-tick accumulator (architecture.md §3); tick
       logic itself stays stubbed — the kernel is M2
-- [ ] Headless mode: `--headless --frames N --screenshot path --exit` via an
+- [x] Headless mode: `--headless --frames N --screenshot path --exit` via an
       offscreen surface + readback, exercised in CI (WARP/software fallback on
       the Windows runner; if no CI GPU path works, a scripted local gate on the
       dev machine — recorded in the gate log either way)
-- [ ] Nightly Android NDK cross-compile job (non-blocking) covering
+- [x] Nightly Android NDK cross-compile job (non-blocking) covering
       `platform` + `rhi_api` + `rhi_sdlgpu` + the triangle sample
 - [ ] `examples/00-clear`: clear colour pulses, three debug cubes orbit, driven
       from a Luau script through a **temporary minimal binding that M2 replaces**
-- [ ] `tools/imgcmp` — the screenshot tolerance comparator (named by the gate)
-- [ ] First golden capture-stream checked in, plus a reference screenshot
+- [x] `tools/imgcmp` — the screenshot tolerance comparator (named by the gate)
+- [x] First golden capture-stream checked in, plus a reference screenshot
 
 ## NOT in scope
 
