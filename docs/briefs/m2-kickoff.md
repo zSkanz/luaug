@@ -146,6 +146,13 @@ scripts. The service was already specified; only the list was stale.
 M2 declares `CFrame`, `Position`, `Orientation`, `Size`, `Color`,
 `Transparency`, and `Part.Shape`.
 
+**Amended after the conformance authors ran (gap G58):** `PhysicsService` *is*
+in scope, carrying `FixedTimestep` and nothing else, read-only for now. The
+original text excluded the whole service, which was wrong — `FixedTimestep` is
+the sim tick grid every timing guarantee in §3.2 rests on, and it is scheduler
+state that happens to be spelled on a physics service. It becomes writable in
+M5 with the rest.
+
 M2 does **not** declare `Anchored`, `CanCollide`, `CanQuery`, `Material`,
 `CollisionGroup`, `Friction`, `Restitution`, `Density`, `LinearVelocity`,
 `AngularVelocity`, `ApplyImpulse`, `Touched`, or `TouchEnded`. Every one of those
@@ -222,6 +229,36 @@ luau-lsp plumbing in the project template.
 
 This is a pull-forward forced by M2's own gate, not scope creep — M2 cannot pass
 without it.
+
+### 13. One `TAG_INSTANCE`, with the class resolved from the id
+
+Forced by grounding finding U-17: architecture §5 asks for one instance tag
+*and* per-class metatables, and Luau allows exactly one metatable per tag,
+refusing reassignment outright. One of the two has to go.
+
+**One shared tag wins**, and the class is resolved at dispatch time from the
+`InstanceId` through the `ClassRegistry`. Three reasons, in ascending order of
+how hard they are to argue with:
+
+1. There are 128 host tags in total, shared with every datatype — `CFrame`,
+   `Color3`, `Random`, `Signal`, `Connection`, `Vector2`, `UDim2`, `EnumItem`
+   and the rest. Spending one per Instance class caps the class count somewhere
+   around a hundred, which is not a budget an engine can live inside.
+2. Identity already depends on it: the per-VM weak-valued cache that guarantees
+   `a == b` for the same instance is keyed by `InstanceId`, not by class.
+3. **The VM's own dispatch cache requires it.** `cachedslot` lives in the
+   bytecode instruction, so it is per *callsite* and shared by every tag that
+   flows through that callsite — upstream's header says so in capitals. A slot
+   number that is a pure function of the atom is safe; a per-class numbering
+   mis-dispatches the moment a callsite sees two classes. One tag with one
+   global atom→slot table is not a compromise here, it is the shape the cache
+   was designed for.
+
+The cost is one indirection per property access — id → `ClassId` → descriptor —
+before the atom switch, on a path that already touches the component store.
+
+`architecture.md` §5 is corrected to match, and this is what the generated C++
+targets.
 
 ## NOT in scope
 
@@ -327,8 +364,93 @@ merge, and every gate run.
 
 ## Findings
 
-(append during the milestone — the things the docs assumed that reality
-corrected)
+*(the things the docs assumed that reality corrected)*
+
+**1. The gate's word "documented" was doing more work than anyone had done.**
+"Deferred-only signal implementation with documented ordering semantics" looked
+satisfied by ADR 0015 plus architecture §3. It was not: nothing answered one
+queue or many, whether a connection made after a fire runs for it, whether
+`Disconnect` is reliable mid-drain, what `:Once` does when a signal fires twice
+before a drain, or what `Destroy` does to fires already queued. Those are the
+first five questions a conformance spec asks. Writing api-design §3.1 had to
+come before any code, and it blocked the spec authors until it existed.
+
+**2. Five authors writing from the document alone found 125 holes in it.**
+That is the mechanism working exactly as MASTER_PROMPT §7 intends — they were
+forbidden from reading `engine/`, so every ambiguity became a question instead
+of a silent copy of whatever the implementation would have done. Two were
+outright contradictions between documents:
+
+- **The precision claim was arithmetically false.** api-design said f32 is
+  "exact to ~±131 km" and ADR 0013 said "millimeter-exact within ±131 km". An
+  f32 ULP at 131072 m is 1/64 m ≈ 15.6 mm; millimetre exactness ends around
+  8 km. Corrected in both, with a dated addendum on the ADR.
+- **`Enum.RunContext` was declared in two directions**, present in §2.3's v1
+  enum list and absent from §2.1's reserved-names list.
+
+**3. Two independent authors guessed opposite answers to the same question**,
+which is the clearest possible signal that the document was silent: does writing
+a property the value it already holds enqueue a change? Ruled equality-filtered
+— `GetPropertyChangedSignal` is a past-tense fact about a *change*, and an
+unconditional enqueue makes the 10k-parts benchmark pathological for no semantic
+gain.
+
+**4. The re-entrancy cap has to cover `task.defer`, or it is not a cap.** The
+task author read §3.1 as applying the depth rule to fires only and wrote a spec
+asserting a twelve-generation defer chain completes. If that reading were right,
+a self-deferring callback would be an unbounded drain — a hang, not a wrong
+number. The cap covers everything on the queue.
+
+**5. The R8 removals cannot be tested from inside Luau.** Naming an undeclared
+global is a strict-mode analyzer error, so a spec cannot legally reference
+`wait` to prove it is absent, and casting through `:: any` to get around that
+tests the cast rather than the VM. Absence is a VM-level property and belongs in
+the C++ test that already inspects the sandboxed global table — which M0 wrote
+for `getfenv`/`setfenv`/`newproxy` and which now covers the whole §1.1 list.
+
+**6. Reading the vendored Luau contradicted the architecture in ways that
+change how M2 gets built.** Recorded in full as `docs/research/luau-c-api-2026.md`
+with file and line for every claim, and as rows U-17…U-50 in the UNCONFIRMED
+registry. The load-bearing ones:
+
+- **The Instance binding shape as written is impossible.** architecture §5 wants
+  one `TAG_INSTANCE` *and* per-class metatables through
+  `lua_newuserdatataggedwithmetatable`. Luau has exactly one metatable per
+  *tag*, and reassignment is refused outright. It is one tag per class — capped
+  at ~126, shared with every value type — or one shared tag with the class
+  resolved from the `InstanceId`. Not both.
+- **Binding registration has a hard boot deadline.** The fast dispatch opcodes
+  are chosen once per `Proto` at `luau_load`, deopt is permanent and one-way,
+  and `lua_registeruserdatadirectaccess` *snapshots* the metamethods. Everything
+  must be registered before the first script loads.
+- **Cyclic `require` does not exist at this pin.** api-design §3 promises
+  "cyclic requires per spec"; the vendored implementation needs two default-off
+  FastFlags, the `export` keyword, and an embedder-supplied placeholder hook,
+  and plain `return {}` cycles are unsupported under any flag combination —
+  with no guard, so a cycle recurses until the C stack dies.
+- **`require` failures are never cached**, where api-design says they are.
+- **The 1-second runaway-script kill cannot work as specified**: the interrupt
+  fires at only a few opcodes, a long builtin is unpreemptible, and the error it
+  raises is catchable by the script's own `pcall`. There is no uncatchable error
+  in this VM.
+- **`luaL_sandbox` removes nothing.** It freezes one level deep and freezes only
+  the string metatable, despite its own comment. Every library curation R4
+  implies is ours to do — M0 found half of this the hard way.
+- **A registered module is matched before `is_require_allowed` runs**, so a
+  chunk denied require access can still reach `@luaug/…`.
+- **The GC pacing formula has a 1024× unit bug waiting**: `LUA_GCSTEP` takes
+  kilobytes, `lua_allocationrate` returns bytes per second — and reads the wall
+  clock, which R10 forbids in sim-visible code.
+- **256 memory categories is an ABI ceiling**, so the "32–255 per Script"
+  scheme in architecture §5 caps at 224 concurrent scripts.
+- **ADR 0013 is wrong about `vectorType`**: it reaches one line and only tags a
+  type annotation. Constant folding and fastcalls come from `vectorLib` plus
+  `vectorCtor` alone.
+
+**7. A comment of mine broke R7 within an hour of the rule being re-read.** The
+legal sweep caught "Roblox" in `engine/core/include/luaug/core/phase.h` — in a
+sentence explaining a divergence, which is exactly the well-intentioned use the
+rule exists to stop from spreading outside the docs set.
 
 ## Gate Record
 
