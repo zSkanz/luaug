@@ -400,11 +400,16 @@ Frame:
 ```
 
 **Resumption points (RP):** each RP = run the engine phase systems, then
-**drain the deferred signal queue**: every queued signal fires each connected
-handler on its own coroutine; handlers that fire further signals re-enqueue
-into the same drain; nested drain depth is capped at 10 (re-entrancy limit;
-overflow logs `script.err.reentrancy_limit` and drops). There is no Immediate
-mode and no legacy `wait`/`spawn`/`delay` anywhere (ADR 0015).
+**drain the deferred queue**: every queued fire invokes each eligible handler
+on its own coroutine; handlers that defer further work re-enqueue into the same
+drain, which runs to fixpoint. There is one queue, shared by engine-raised
+fires, script `Signal:Fire`, and `task.defer`, and re-entrancy is capped at a
+per-fire generation depth of 10 (overflow logs `script.err.reentrancy_limit`
+and drops). There is no Immediate mode and no legacy `wait`/`spawn`/`delay`
+anywhere (ADR 0015). **The full ordering contract — what a fire captures,
+connection order, `:Once`, `:Wait`, `Destroy` against queued fires — is
+[`api-design.md`](api-design.md) §3.1**, which is what the conformance specs
+are written against; this section only places the drains in the frame.
 
 **Rate mapping (documented loudly — the one deliberate divergence from a naive
 Roblox mental model):** `PreRender` fires per render frame with variable dt;

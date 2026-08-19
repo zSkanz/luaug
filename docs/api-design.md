@@ -66,7 +66,7 @@ once created. The `workspace` global is the canonical handle for the
 
 ## 2. v1 API surface
 
-### 2.1 Services (the complete v1 list — 14 + 1 dev-only)
+### 2.1 Services (the complete v1 list — 15 + 1 dev-only)
 
 **`Workspace`** (global `workspace`) — 3D scene root.
 - Props: `Gravity: vector` (SI, default `(0, -9.81, 0)`), `CurrentCamera: Camera`
@@ -145,6 +145,11 @@ builds with the overlay off unless enabled).
 - Stats: `GetStat(name) → number` ("FPS", "FrameTimeMs", "PhysicsBodies",
   "InstanceCount", "DrawCalls", "LuaMemoryKB", …), `SetCustomStat(name, value)`
 - Log capture: `MessageOut: Signal<string, Enum.LogLevel>`
+
+**`ScriptService`** — the mount point for entry scripts (§3): every
+`src/scripts/**/*.luau` file becomes a `Script` child of it, with
+subdirectories as `Folder`s. No properties or methods of its own in v1; the
+tree *is* the API.
 
 **`HotReloadService`** — dev builds only (§3).
 
@@ -293,6 +298,7 @@ order — ADR 0026).
 | 22 | Optional typing | 100% `--!strict`, fully typed defs, new solver | Non-negotiable quality bar |
 | 23 | TextXAlignment/TextYAlignment | `HorizontalAlignment`/`VerticalAlignment` (shared enums w/ layout) | One alignment vocabulary |
 | 24 | RemoteEvent/RemoteFunction | v1: none; `@std/net` primitives; replication reserved | Honest scope; portable backends (ADR 0012) |
+| 25 | A destroyed instance stays readable forever | Handles stop resolving at the end of the drain in which `Destroying` fired; using one raises `script.err.instance_dead` | The ECS reclaims the slot (architecture §4). Use-after-destroy becomes a keyed error instead of a silent read of a corpse |
 
 This rename list is **frozen**: no further renames without a new row here, and
 no runtime aliases, ever.
@@ -369,6 +375,90 @@ modules**, no client/server folders yet.
   the @std convergence story keeping process boundaries honest from day one.
   `src/client`/`src/server` folder names and `Enum.RunContext` are reserved;
   the CLI warns if they exist in v1.
+
+### 3.1 Deferred execution: one queue, one order
+
+Signals are deferred-only (ADR 0015). This section is the contract that makes
+"deferred" mean something specific enough to test — conformance specs are
+written against it, and the engine's world hash depends on every rule here.
+
+**One queue.** There is a single deferred queue. Everything that defers enters
+it in the order it was raised, with no priority and no per-signal queues:
+engine-raised signal fires (`ChildAdded`, `GetPropertyChangedSignal`, …),
+script-raised fires (`Signal.new()` + `:Fire(...)`), and `task.defer`
+callbacks all share it. This is what makes the relative order of a script's own
+`:Fire()` and the `ChildAdded` caused by its `part.Parent = x` well defined.
+
+**Resumption points.** The queue drains at the resumption points of the frame
+pipeline (architecture §3): `PreRender` at render rate, then per sim tick
+`PreAnimation`, `PreSimulation`, `PostSimulation`, and `Heartbeat`. Each
+resumption point runs its engine phase, then drains. `task` timers resume in
+their own phase between `PostSimulation` and `Heartbeat`; anything they defer
+drains at `Heartbeat`.
+
+**A drain runs to fixpoint.** Handlers that fire further signals append to the
+same queue and the drain continues until the queue is empty — a drain does not
+snapshot the queue and stop at its original end.
+
+**What a fire captures.** Enqueuing a fire records its arguments and the
+identity of the connection list at that moment. Two consequences, and they are
+the two people actually rely on:
+
+- A connection made **after** the fire does not run for it. It was not
+  listening when the thing happened.
+- A connection disconnected **before it is invoked** does not run — including a
+  disconnect performed by an earlier handler in the same drain. `:Disconnect()`
+  is reliable, not advisory.
+
+**Connection order is guaranteed**: handlers of one fire run in the order they
+were connected. (Relying on order *between different signals* is still wrong —
+that is queue order, above.) `:Once` disconnects on invocation, so a signal
+fired twice before a drain invokes a `:Once` handler exactly once.
+
+**`:Wait()`** parks the calling coroutine as a one-shot registration made at the
+moment of the call, resumed by the next fire it is eligible for, at that fire's
+position in the drain, returning that fire's arguments.
+
+**Re-entrancy is capped at 10.** Every fire carries a depth: fires raised
+outside any handler have depth 0, and a fire raised by a handler running at
+depth *d* has depth *d*+1. A fire that would exceed depth 10 is **dropped** and
+logs `script.err.reentrancy_limit`. This bounds signal loops (A fires B fires A)
+deterministically; it is a generation depth, not a call-stack depth, so it does
+not fire spuriously on a wide fan-out.
+
+**Errors are contained.** Each handler runs on its own coroutine; an error in
+one handler does not stop the other handlers of that fire, does not stop the
+drain, and does not stop the script that fired. It goes to the console and
+`DebugService.MessageOut` with its traceback.
+
+**`Destroy` and queued fires.** `Destroy` enqueues `Destroying`, then closes the
+instance's other signals — queued fires for them find no live connections and
+invoke nothing. `Parent` locks to nil, children are destroyed recursively, and
+the instance handle stops resolving at the end of the drain in which
+`Destroying` fired (divergence #25). `GetChildren` and `GetDescendants` return
+fresh arrays, so destroying during iteration over one is safe; the array may
+simply contain instances that are gone by the time you reach them.
+
+**Arguments are captured, not copied.** Tables and instances are passed by
+reference: mutating a table between `:Fire(t)` and the drain is visible to the
+handlers. Pass values you do not intend to change.
+
+### 3.2 `task`
+
+The whole scheduling surface; there are no legacy globals (divergence #2).
+
+| Call | Semantics |
+|---|---|
+| `task.spawn(fn, ...)` | Resumes `fn` on a new coroutine **immediately**, synchronously, before returning. The one non-deferred call, and deliberately so. |
+| `task.defer(fn, ...)` | Enqueues `fn` on the deferred queue (§3.1) — it runs at the next resumption point, ordered against signal fires by when it was raised. |
+| `task.delay(duration, fn, ...)` | Resumes `fn` at the first task-resume phase at or after `duration` seconds of **SimClock** time. |
+| `task.wait(duration?)` | Yields; resumes at the first task-resume phase at or after `duration` seconds of SimClock time (default: the next tick). Returns the elapsed sim time, which is a whole number of ticks and therefore ≥ `duration`. |
+| `task.cancel(thread)` | Cancels a pending resumption. Cancelling a thread that is not scheduled is an error. |
+
+Timers run on the SimClock, not the wall clock: `task.wait(1)` is exactly 60
+ticks at the default 1/60 timestep, on every machine and every run. That is
+what makes recorded replays reproduce (ADR 0025), and it is why there is no
+`tick()`.
 
 **Hot reload (`luaug dev` — ADR 0024):**
 - **Code change → fast world restart:** tear down the game VM, rebuild the
