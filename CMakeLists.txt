@@ -18,6 +18,21 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# C++20 modules are not used anywhere in this repository or in anything it
+# vendors, but CMake 3.28+ scans every C++20 translation unit for module
+# dependencies regardless -- an extra pass per file, on both tiers, to discover
+# nothing.
+#
+# Turning it off also removes a toolchain requirement that is not uniformly met:
+# the scan needs `clang-scan-deps`, and Ubuntu ships it only under a versioned
+# name, so a plain `apt-get install clang` produces a compiler that cannot
+# build C++20 targets under CMake's default. Found by running the Linux tier in
+# a container on the dev machine rather than on a hosted runner.
+#
+# Reversible in one line if the engine ever adopts modules -- at which point the
+# scanner becomes a real requirement rather than a tax.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
 # Profiles: debug | dev | profile | shipping (docs/architecture.md §8)
 set(LUAUG_PROFILE "dev" CACHE STRING "LuauG build profile")
 

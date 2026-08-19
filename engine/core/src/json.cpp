@@ -131,7 +131,12 @@ struct JsonDocument::Impl
         Impl& document;
         std::string_view source;
         usize pos = 0;
-        std::string error;
+        // The initializer is not decoration. This struct is aggregate-
+        // initialised with two members named, and Clang's
+        // -Wmissing-field-initializers -- an error here -- fires on any trailing
+        // member that has neither an explicit initialiser nor a default one.
+        // MSVC says nothing, so the Linux tier is what catches it.
+        std::string error{};
 
         bool run()
         {
