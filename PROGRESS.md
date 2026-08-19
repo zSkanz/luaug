@@ -5,8 +5,12 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- Current milestone: **M1 — Window, RHI, Frame Loop, Agent Eyes — COMPLETE,
-  awaiting human sign-off** (brief: `docs/briefs/m1-kickoff.md`).
+- Current milestone: **M1 — Window, RHI, Frame Loop, Agent Eyes — COMPLETE and
+  SIGNED OFF by the human on 2026-08-19**, tagged `milestone/m1`
+  (brief: `docs/briefs/m1-kickoff.md`).
+- **M2 has NOT been started, and that is deliberate**: MASTER_PROMPT.md §6
+  forbids opening a milestone in the session that closed one. The human's
+  sign-off approved M1; it was not an instruction to begin M2.
 - Gate status: **all four gate items pass**. Evidence in the brief's Gate
   Record. Tier-1 runs windowed (600 frames / 357 sim ticks) and headless, the
   GPU validation layer is clean, both goldens are checked in and confirmed to
@@ -19,10 +23,10 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## Now / Next
 
-- **Next: stop. This is the M1 milestone gate — a human checkpoint
-  (MASTER_PROMPT.md §6).** Do not begin M2 in this session, and not at all until
-  the human has reviewed the gate record and said go.
-- When M2 does start, the literal first action is: write
+- **Next: write `docs/briefs/m2-kickoff.md`.** M1 is signed off, so the gate is
+  cleared — but §6 keeps M2 out of the session that closed M1, so this is the
+  first action of the NEXT session, not this one.
+- The literal first action is: write
   `docs/briefs/m2-kickoff.md` from the template in `docs/briefs/README.md`.
   M2 is the largest milestone in the project (ECS, the Instance facade,
   deferred signals, `task`, the scheduler) — read `docs/architecture.md` §3–§5
