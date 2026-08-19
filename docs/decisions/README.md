@@ -72,3 +72,6 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0029](0029-input-action-system-only.md) | Input Action System is the only input model |
 | [0030](0030-std-convergence.md) | Implement Lute's `@std` surface in the game runtime |
 | [0031](0031-build-provenance-header.md) | Build provenance header; M0 grounding gate amended |
+| [0032](0032-binary-toolchain-artifacts-fetched-not-vendored.md) | Binary toolchain artifacts are fetched and hash-pinned, never vendored |
+| [0033](0033-hand-written-json-reader-in-core.md) | One hand-written JSON reader in `core`, not a dependency |
+| [0034](0034-luau-casing-objects-modules-files.md) | Luau casing: objects vs modules, and the file-level rule |

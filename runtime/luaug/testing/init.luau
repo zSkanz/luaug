@@ -11,6 +11,9 @@
 --- `task.wait` yields the runner along with it, which is the only way a spec
 --- can observe a deferred signal actually arriving at the next resumption
 --- point. Nothing here starts a coroutine of its own.
+---
+--- Casing follows ADR 0034: this is a module, so its exports are camelCase,
+--- while `Matcher` is an object and its methods are PascalCase.
 
 local Testing = {}
 
@@ -24,7 +27,7 @@ export type Matcher = {
     ToBeFalsy: (self: Matcher) -> (),
     --- Absolute tolerance, because the values under test are engine floats.
     ToBeCloseTo: (self: Matcher, expected: number, tolerance: number?) -> (),
-    --- `Expect(v):ToBeA("string")`, matching `typeof` so engine datatypes work.
+    --- `expect(v):ToBeA("string")`, matching `typeof` so engine datatypes work.
     ToBeA: (self: Matcher, typeName: string) -> (),
     --- Array membership, by `==`.
     ToContain: (self: Matcher, item: any) -> (),
@@ -32,7 +35,7 @@ export type Matcher = {
     --- error with `string.find(..., pattern, 1, true)` -- a plain substring, so
     --- an i18n key like `[scene.err.parent_cycle]` needs no escaping.
     ToThrow: (self: Matcher, pattern: string?) -> (),
-    --- Negates every matcher above: `Expect(x).Never:ToBe(y)`.
+    --- Negates every matcher above: `expect(x).Never:ToBe(y)`.
     Never: Matcher,
 }
 
@@ -64,7 +67,7 @@ type Suite = {
     AfterEach: { () -> () },
 }
 
-local function NewSuite(name: string, parent: Suite?): Suite
+local function newSuite(name: string, parent: Suite?): Suite
     return {
         Name = name,
         Cases = {},
@@ -75,10 +78,10 @@ local function NewSuite(name: string, parent: Suite?): Suite
     }
 end
 
-local Root: Suite = NewSuite("")
+local Root: Suite = newSuite("")
 local Current: Suite = Root
 
-local function DescribeValue(value: any): string
+local function describeValue(value: any): string
     local kind = typeof(value)
     if kind == "string" then
         return string.format("%q", value :: string)
@@ -90,7 +93,7 @@ local function DescribeValue(value: any): string
     return tostring(value)
 end
 
-local function DeepEqual(a: any, b: any, seen: { [any]: any }): boolean
+local function deepEqual(a: any, b: any, seen: { [any]: any }): boolean
     if a == b then
         return true
     end
@@ -106,7 +109,7 @@ local function DeepEqual(a: any, b: any, seen: { [any]: any }): boolean
     local left = a :: { [any]: any }
     local right = b :: { [any]: any }
     for key, value in left do
-        if not DeepEqual(value, right[key], seen) then
+        if not deepEqual(value, right[key], seen) then
             return false
         end
     end
@@ -118,11 +121,11 @@ local function DeepEqual(a: any, b: any, seen: { [any]: any }): boolean
     return true
 end
 
---- Raised by a failing matcher. `Run` catches these and records them; anything
+--- Raised by a failing matcher. `run` catches these and records them; anything
 --- else that escapes a case body is recorded as an error with its traceback.
 local FailurePrefix = "luaug.testing.failure: "
 
-local function Fail(message: string): ()
+local function fail(message: string): ()
     error(FailurePrefix .. message, 3)
 end
 
@@ -131,29 +134,29 @@ end
 --- strict-mode error -- and `pcall` itself cannot be cast to a narrower shape,
 --- being generic over both A... and R.... The wrapper gives the call a return
 --- type, once, instead of five casts at the call sites.
-local function ProtectedCall(fn: () -> ()): (boolean, any)
+local function protectedCall(fn: () -> ()): (boolean, any)
     return pcall(function(): any
         fn()
         return nil
     end)
 end
 
-local function NewMatcher(value: any, negated: boolean): Matcher
+local function newMatcher(value: any, negated: boolean): Matcher
     local function check(ok: boolean, describeExpectation: string): ()
         if ok == negated then
             local prefix = if negated then "expected not " else "expected "
-            Fail(prefix .. describeExpectation .. ", got " .. DescribeValue(value))
+            fail(prefix .. describeExpectation .. ", got " .. describeValue(value))
         end
     end
 
     local matcher = {} :: any
 
     function matcher.ToBe(_self: Matcher, expected: any): ()
-        check(value == expected, DescribeValue(expected))
+        check(value == expected, describeValue(expected))
     end
 
     function matcher.ToEqual(_self: Matcher, expected: any): ()
-        check(DeepEqual(value, expected, {}), "to deep-equal " .. DescribeValue(expected))
+        check(deepEqual(value, expected, {}), "to deep-equal " .. describeValue(expected))
     end
 
     function matcher.ToBeNil(_self: Matcher): ()
@@ -188,14 +191,14 @@ local function NewMatcher(value: any, negated: boolean): Matcher
                 end
             end
         end
-        check(found, "to contain " .. DescribeValue(item))
+        check(found, "to contain " .. describeValue(item))
     end
 
     function matcher.ToThrow(_self: Matcher, pattern: string?): ()
         if typeof(value) ~= "function" then
-            Fail("ToThrow expects a function, got " .. typeof(value))
+            fail("ToThrow expects a function, got " .. typeof(value))
         end
-        local ok, err = ProtectedCall(value :: () -> ())
+        local ok, err = protectedCall(value :: () -> ())
         if ok then
             check(false, "the call to throw")
             return
@@ -207,26 +210,26 @@ local function NewMatcher(value: any, negated: boolean): Matcher
         end
         check(
             string.find(text, pattern, 1, true) ~= nil,
-            "the error to contain " .. DescribeValue(pattern) .. ", got " .. DescribeValue(text)
+            "the error to contain " .. describeValue(pattern) .. ", got " .. describeValue(text)
         )
     end
 
     if not negated then
-        matcher.Never = NewMatcher(value, true)
+        matcher.Never = newMatcher(value, true)
     end
 
     return matcher :: Matcher
 end
 
-function Testing.Expect(value: any): Matcher
-    return NewMatcher(value, false)
+function Testing.expect(value: any): Matcher
+    return newMatcher(value, false)
 end
 
---- Groups cases. Nesting is allowed; `BeforeEach`/`AfterEach` apply to every
---- case in the suite and its descendants, outermost first for `BeforeEach` and
---- innermost first for `AfterEach`.
-function Testing.Describe(name: string, body: () -> ()): ()
-    local suite = NewSuite(name, Current)
+--- Groups cases. Nesting is allowed; `beforeEach`/`afterEach` apply to every
+--- case in the suite and its descendants, outermost first for `beforeEach` and
+--- innermost first for `afterEach`.
+function Testing.describe(name: string, body: () -> ()): ()
+    local suite = newSuite(name, Current)
     table.insert(Current.Children, suite)
 
     local previous = Current
@@ -234,26 +237,26 @@ function Testing.Describe(name: string, body: () -> ()): ()
     -- Registration must not be able to swallow a case: if the body errors here
     -- the suite is simply empty, and an empty suite is a visible zero rather
     -- than a silently missing file.
-    local ok, err = ProtectedCall(body)
+    local ok, err = protectedCall(body)
     Current = previous
     if not ok then
         error(err, 0)
     end
 end
 
-function Testing.It(name: string, body: () -> ()): ()
+function Testing.it(name: string, body: () -> ()): ()
     table.insert(Current.Cases, { Name = name, Body = body })
 end
 
-function Testing.BeforeEach(fn: () -> ()): ()
+function Testing.beforeEach(fn: () -> ()): ()
     table.insert(Current.BeforeEach, fn)
 end
 
-function Testing.AfterEach(fn: () -> ()): ()
+function Testing.afterEach(fn: () -> ()): ()
     table.insert(Current.AfterEach, fn)
 end
 
-local function HooksFor(suite: Suite): ({ () -> () }, { () -> () })
+local function hooksFor(suite: Suite): ({ () -> () }, { () -> () })
     local befores: { () -> () } = {}
     local afters: { () -> () } = {}
 
@@ -277,33 +280,33 @@ local function HooksFor(suite: Suite): ({ () -> () }, { () -> () })
     return befores, afters
 end
 
-local function CleanMessage(err: any): string
+local function cleanMessage(err: any): string
     local text = tostring(err)
     local stripped = string.gsub(text, "^" .. FailurePrefix, "", 1)
     return stripped
 end
 
-local function RunSuite(suite: Suite, path: { string }, report: Report): ()
+local function runSuite(suite: Suite, path: { string }, report: Report): ()
     for _, case in suite.Cases do
         local casePath = table.clone(path)
         table.insert(casePath, case.Name)
         report.Total += 1
 
-        local befores, afters = HooksFor(suite)
+        local befores, afters = hooksFor(suite)
         local failure: Failure? = nil
 
         local function record(err: any): ()
             if failure == nil then
                 failure = {
                     Path = casePath,
-                    Message = CleanMessage(err),
+                    Message = cleanMessage(err),
                     Traceback = debug.traceback(nil, 2),
                 }
             end
         end
 
         for _, hook in befores do
-            local ok, err = ProtectedCall(hook)
+            local ok, err = protectedCall(hook)
             if not ok then
                 record(err)
                 break
@@ -311,17 +314,17 @@ local function RunSuite(suite: Suite, path: { string }, report: Report): ()
         end
 
         if failure == nil then
-            local ok, err = ProtectedCall(case.Body)
+            local ok, err = protectedCall(case.Body)
             if not ok then
                 record(err)
             end
         end
 
-        -- AfterEach runs even when the case failed: a spec that creates
+        -- afterEach runs even when the case failed: a spec that creates
         -- instances must be able to destroy them, or one failure cascades into
         -- every case that follows it.
         for _, hook in afters do
-            local ok, err = ProtectedCall(hook)
+            local ok, err = protectedCall(hook)
             if not ok then
                 record(err)
             end
@@ -338,23 +341,23 @@ local function RunSuite(suite: Suite, path: { string }, report: Report): ()
     for _, child in suite.Children do
         local childPath = table.clone(path)
         table.insert(childPath, child.Name)
-        RunSuite(child, childPath, report)
+        runSuite(child, childPath, report)
     end
 end
 
 --- Runs everything registered so far and clears the registry, so a runner that
 --- loads spec files one at a time gets one report per file.
-function Testing.Run(): Report
+function Testing.run(): Report
     local report: Report = { Total = 0, Passed = 0, Failed = 0, Failures = {} }
-    RunSuite(Root, {}, report)
-    Root = NewSuite("")
+    runSuite(Root, {}, report)
+    Root = newSuite("")
     Current = Root
     return report
 end
 
 --- Formats a report as human-readable lines. The engine runner prints these;
 --- the machine-readable TAP/JUnit output is `luaug test` in M3.
-function Testing.Format(report: Report): string
+function Testing.format(report: Report): string
     local lines: { string } = {}
     for _, failure in report.Failures do
         table.insert(lines, "FAIL " .. table.concat(failure.Path, " > "))

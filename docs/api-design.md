@@ -16,7 +16,7 @@ during implementation goes through an ADR + an edit here in the same commit.
 |---|---|---|
 | **Globals** | The world model: `game`, `workspace`, `script`, `Instance`, datatypes (`Vector2`, `Vector3`, `CFrame`, `Color3`, `UDim`, `UDim2`, `Rect`, `TweenInfo`, `RaycastParams`, `Random`, `Signal`), `Enum`, plus Luau builtins (`task`, `vector`, `buffer`, `math`, `table`, `string`, `coroutine`, `utf8`, `os` limited to clock/time/date, `print`, `warn`, `error`, `assert`, `pcall`/`xpcall`, `require`, `typeof`, `tostring`, …) | Roblox muscle memory: you never require Vector3 |
 | **`@std/…`** | The cross-runtime stdlib (Lute-compatible surface, §7): `@std/json`, `@std/net`, `@std/fs`, `@std/path`, `@std/task`, `@std/stringext`, `@std/tableext`, … | The convergence bet (ADR 0030): utility code runs unchanged on Roblox/Lute/LuauG |
-| **`@luaug/…`** | Engine-provided optional Luau libraries (not core world), PascalCase like everything else LuauG defines: `@luaug/camera` (third-person/orbit rigs), `@luaug/signal` (pure-Luau Signal for shared code), `@luaug/imgui` (dev-only custom debug panels), `@luaug/testing` (engine-aware test helpers) | Keeps the global surface small; optional things are opt-in |
+| **`@luaug/…`** | Engine-provided optional Luau libraries (not core world): `@luaug/camera` (third-person/orbit rigs), `@luaug/signal` (pure-Luau Signal for shared code), `@luaug/imgui` (dev-only custom debug panels), `@luaug/testing` (engine-aware test helpers) | Keeps the global surface small; optional things are opt-in |
 
 **Removed globals (deliberate, no aliases):** `wait`, `spawn`, `delay`,
 `tick`, `elapsedTime`, `loadstring`, `getfenv`/`setfenv`, `newproxy`,
@@ -241,16 +241,16 @@ order — ADR 0026).
 
 | Type | Shape |
 |---|---|
-| `Vector3` | IS the native `vector` primitive (ADR 0013). Canonical fields **`x` `y` `z` (lowercase)** — they belong to the VM primitive, not to us (§9). The `Vector3` global is LuauG's and is therefore fully PascalCase: `Vector3.New` (constant-folded via the vectorCtor/vectorLib compile options), `Vector3.Create`, `Vector3.Magnitude`, `Vector3.Normalize`, `Vector3.Dot`, `Vector3.Cross`, `Vector3.Angle`, `Vector3.Lerp`, `Vector3.Floor`, `Vector3.Ceil`, `Vector3.Abs`, `Vector3.Sign`, `Vector3.Clamp`, `Vector3.Min`, `Vector3.Max`, `Vector3.Zero`, `Vector3.One`. Convenience metatable methods `:Dot`, `:Cross`, `:Lerp`, `:Angle` and `.Magnitude`/`.Unit` via `__index` (documented as slower; prefer the library form). The official lowercase `vector` stdlib remains available beside it, unchanged, for code that must also run under Lute. Precision: f32 — exact to ~±131 km; `CFrame` is the f64 source of truth (below). |
-| `Vector2` | Engine userdata: `X`, `Y`, `Magnitude`, `Unit`, `:Dot`, `:Lerp`; `Vector2.New(x, y)`, `.Zero`, `.One`. |
-| `CFrame` | Carries the **f64 translation** (the world-precision source of truth; ADR 0014). `CFrame.New(x?, y?, z?)`, `CFrame.LookAt(pos, target, up?)`, `CFrame.FromEuler(rx, ry, rz, order: Enum.RotationOrder? = YXZ)` (the ONE euler constructor), `CFrame.FromAxisAngle(axis, angle)`, `CFrame.FromQuaternion(pos, qx, qy, qz, qw)`, `CFrame.FromMatrix(pos, r, u, b)`, `CFrame.Identity`. Props: `Position` (Vector3, f32 convenience), `Rotation`, `RightVector`, `UpVector`, `LookVector` (−Z). Methods: `Inverse`, `Lerp`, `Orthonormalize`, `ToWorldSpace`, `ToObjectSpace`, `PointToWorldSpace`, `PointToObjectSpace`, `VectorToWorldSpace`, `VectorToObjectSpace`, `ToEuler(order?)`, `ToAxisAngle`, `ToQuaternion`. Operators: `CFrame * CFrame`, `CFrame * vector`. Guideline: gameplay math beyond ±131 km must go through CFrame (f64-preserving), not Position. |
-| `Color3` | `Color3.New(r, g, b)` 0–1, `FromRGB`, `FromHSV`, `FromHex("#rrggbb")`; `R G B`; `:Lerp`, `:ToHSV`, `:ToHex`. No BrickColor. |
-| `UDim` / `UDim2` | `UDim.New(scale, offset)`; `UDim2.New(xs, xo, ys, yo)`, `UDim2.FromScale`, `UDim2.FromOffset`; `X: UDim`, `Y: UDim`. |
-| `Rect` | `Rect.New(min: Vector2, max: Vector2)`; `Min`, `Max`, `Width`, `Height`. |
-| `TweenInfo` | `TweenInfo.New(time, easingStyle?, easingDirection?, repeatCount?, reverses?, delayTime?)` — enum params also accept string literals ("Quad") via typed unions. |
-| `Signal<T...>` / `Connection` | THE signal types (never "RBXScriptSignal"). `Signal:Connect(fn) → Connection`, `:Once(fn)`, `:Wait() → T...`; `Connection:Disconnect()`, `.Connected`. Deferred-only (ADR 0015), ordering per §3.1. User-creatable: `Signal.New()` with `:Fire(...)`, `:Destroy()` — replaces BindableEvent/BindableFunction. `ConnectParallel` reserved, not in v1. |
-| `RaycastParams` / `RaycastResult` | `RaycastParams.New { Filter = {Instance}, FilterType = Enum.RaycastFilterType.Exclude, CollisionGroup = "Default" }` (table constructor); result: `Instance`, `Position`, `Normal`, `Distance`, `Material`. |
-| `Random` | `Random.New(seed?)`: `NextNumber(min?, max?)`, `NextInteger(min, max)`, `NextUnitVector()`, `Clone()`. Deterministic streams (R10). |
+| `Vector3` | IS the native `vector` primitive (ADR 0013). Canonical fields **`x` `y` `z` (lowercase)**; the full official `vector` stdlib (`vector.create/magnitude/normalize/dot/cross/angle/lerp/floor/ceil/abs/sign/clamp/min/max`, `vector.zero/one`). The `Vector3` global = the vector library + `new` (constant-folded via vectorCtor/vectorLib compile options). Convenience metatable methods: `:Dot`, `:Cross`, `:Lerp`, `:Angle`; `.Magnitude`/`.Unit` via `__index` (documented as slower; prefer `vector.magnitude`). Precision: f32 — exact to ~±131 km; `CFrame` is the f64 source of truth (below). |
+| `Vector2` | Engine userdata: `X`, `Y`, `Magnitude`, `Unit`, `:Dot`, `:Lerp`; `Vector2.new(x, y)`, `.zero`, `.one`. |
+| `CFrame` | Carries the **f64 translation** (the world-precision source of truth; ADR 0014). `CFrame.new(x?, y?, z?)`, `CFrame.lookAt(pos, target, up?)`, `CFrame.fromEuler(rx, ry, rz, order: Enum.RotationOrder? = YXZ)` (the ONE euler constructor), `CFrame.fromAxisAngle(axis, angle)`, `CFrame.fromQuaternion(pos, qx, qy, qz, qw)`, `CFrame.fromMatrix(pos, r, u, b)`, `CFrame.identity`. Props: `Position` (Vector3, f32 convenience), `Rotation`, `RightVector`, `UpVector`, `LookVector` (−Z). Methods: `Inverse`, `Lerp`, `Orthonormalize`, `ToWorldSpace`, `ToObjectSpace`, `PointToWorldSpace`, `PointToObjectSpace`, `VectorToWorldSpace`, `VectorToObjectSpace`, `ToEuler(order?)`, `ToAxisAngle`, `ToQuaternion`. Operators: `CFrame * CFrame`, `CFrame * vector`. Guideline: gameplay math beyond ±131 km must go through CFrame (f64-preserving), not Position. |
+| `Color3` | `new(r, g, b)` 0–1, `fromRGB`, `fromHSV`, `fromHex("#rrggbb")`; `R G B`; `:Lerp`, `:ToHSV`, `:ToHex`. No BrickColor. |
+| `UDim` / `UDim2` | `UDim.new(scale, offset)`; `UDim2.new(xs, xo, ys, yo)`, `UDim2.fromScale`, `UDim2.fromOffset`; `X: UDim`, `Y: UDim`. |
+| `Rect` | `Rect.new(min: Vector2, max: Vector2)`; `Min`, `Max`, `Width`, `Height`. |
+| `TweenInfo` | `TweenInfo.new(time, easingStyle?, easingDirection?, repeatCount?, reverses?, delayTime?)` — enum params also accept string literals ("Quad") via typed unions. |
+| `Signal<T...>` / `Connection` | THE signal types (never "RBXScriptSignal"). `Signal:Connect(fn) → Connection`, `:Once(fn)`, `:Wait() → T...`; `Connection:Disconnect()`, `.Connected`. Deferred-only (ADR 0015), ordering per §3.1. User-creatable: `Signal.new()` with `:Fire(...)`, `:Destroy()` — replaces BindableEvent/BindableFunction. `ConnectParallel` reserved, not in v1. |
+| `RaycastParams` / `RaycastResult` | `RaycastParams.new { Filter = {Instance}, FilterType = Enum.RaycastFilterType.Exclude, CollisionGroup = "Default" }` (table constructor); result: `Instance`, `Position`, `Normal`, `Distance`, `Material`. |
+| `Random` | `Random.new(seed?)`: `NextNumber(min?, max?)`, `NextInteger(min, max)`, `NextUnitVector()`, `Clone()`. Deterministic streams (R10). |
 | `Content` | A type alias of `string` in v1 (`asset://…`, `save://…` URIs); reserved to become opaque later. |
 | `Enum` | Global `Enum` namespace; `EnumItem` = `Name`, `Value`, `EnumType`; `Enum.X:GetEnumItems()`. v1 enums: `EasingStyle` (Linear, Sine, Quad, Cubic, Quart, Quint, Exponential, Circular, Back, Bounce, Elastic), `EasingDirection`, `KeyCode` (keys + mouse + gamepad buttons), `InputActionType` (Bool, Direction1D, Direction2D, Direction3D, ViewportPosition), `InputDeviceType` (KeyboardMouse, Gamepad, Touch), `PartShape`, `Material` (small v1 set), `CollisionFidelity` (Default, Hull, Box, Precise), `RotationOrder`, `RaycastFilterType` (Include, Exclude), `StreamingMode` (Default, Atomic, Persistent), `PlaybackState`, `CharacterState` (Grounded, Airborne), `AutomaticSize`, `FillDirection`, `HorizontalAlignment`, `VerticalAlignment`, `SortOrder`, `ScaleType` (Stretch, Slice, Tile), `WindowMode`, `LogLevel`, `RunContext` (reserved values Client, Server). |
 
@@ -299,7 +299,6 @@ order — ADR 0026).
 | 23 | TextXAlignment/TextYAlignment | `HorizontalAlignment`/`VerticalAlignment` (shared enums w/ layout) | One alignment vocabulary |
 | 24 | RemoteEvent/RemoteFunction | v1: none; `@std/net` primitives; replication reserved | Honest scope; portable backends (ADR 0012) |
 | 25 | A destroyed instance stays readable forever | Handles stop resolving at the end of the drain in which `Destroying` fired; using one raises `script.err.instance_dead` | The ECS reclaims the slot (architecture §4). Use-after-destroy becomes a keyed error instead of a silent read of a corpse |
-| 26 | `Instance.new`, `CFrame.new`, `Color3.fromRGB`, `CFrame.identity` | `Instance.New`, `CFrame.New`, `Color3.FromRGB`, `CFrame.Identity` | One casing rule for everything LuauG defines, constructors and constants included (§9, ADR 0034). Roblox's lowercase `new` is a Lua-era inheritance, not a design |
 
 This rename list is **frozen**: no further renames without a new row here, and
 no runtime aliases, ever.
@@ -645,43 +644,42 @@ the api-dump) · **"Coming from Roblox"** — the keystone doc
 
 ## 9. Naming & style conventions
 
-**The rule, in one sentence: everything LuauG defines is PascalCase; the Luau
-language's own libraries and the `@std` convergence surface keep the spelling
-their ecosystem gave them.** (ADR 0034.)
+**The rule, in one sentence: if you index it off an object, it is PascalCase; if
+you index it off a module or namespace, it is camelCase.** That is the Roblox
+convention, and LuauG keeps it (ADR 0034).
 
-- **Everything LuauG defines — Instances, services, datatypes, and the
-  `@luaug/*` libraries — is PascalCase.** Classes, properties, methods, events,
-  constructors, static factories, and constants alike: `Instance.New`,
-  `CFrame.FromEuler`, `Color3.FromRGB`, `CFrame.Identity`, `Vector3.Zero`,
-  `require("@luaug/testing").Describe`. Methods are called with `:`.
-  Services end in `Service` except `Workspace` and `Lighting`. Yielding methods
-  end in `Async`. Events are past-tense facts (`Landed`, `Ended`, `ChildAdded`)
-  or `Pre*/Post*` phases. Boolean properties have no `Is` prefix (`Anchored`,
-  `Enabled`); boolean methods do (`IsA`, `IsPaused`). No abbreviations except
-  UI. There are no camelCase aliases and never will be.
-- **Two surfaces keep their ecosystem spelling, because they are not ours to
-  rename.** The Luau language's own libraries — `task`, `vector`, `buffer`,
-  `string`, `table`, `math`, `coroutine`, `utf8`, `os` — are the language, and
-  `@std/*` exists precisely so that utility code runs unchanged on Lute and
-  Roblox (ADR 0030); PascalCasing either would break the thing it is for.
-  `task` sits in both camps and stays lowercase because `@std/task` *is* the
-  global `task` (§7).
-- **Consequently the native `vector` fields stay `x`/`y`/`z`** (divergence #9):
-  they are fields of a VM primitive, like `string`. `Vector3` — LuauG's global —
-  is fully PascalCase (`Vector3.New`, `Vector3.Magnitude`, `Vector3.Zero`), and
-  the lowercase `vector` library remains available beside it, unchanged, for
-  code that must also run under Lute.
-- **Identifier casing inside Luau files**, engine runtime, tooling, examples,
-  templates and specs alike:
-  - **PascalCase** for anything declared **outside** a function scope — module
-    locals, module-level functions, exported members, and types.
-  - **camelCase** for locals and inner functions **inside** a function scope.
-  - **Constants are PascalCase too, with no underscores.** There is no
-    `SCREAMING_SNAKE_CASE` in this codebase; a constant is not a different kind
-    of name, only a different kind of value.
-
-  The rule reads off the page: indentation and casing agree, so a
-  PascalCase identifier at a glance is file-scope and a camelCase one is local.
+- **Object members are PascalCase** — properties, methods and events reached
+  through an instance or a value: `part.Name`, `part:Destroy()`,
+  `cf:Inverse()`, `v.Magnitude`, `signal:Connect(fn)`. Methods are called with
+  `:`. Services end in `Service` except `Workspace` and `Lighting`. Yielding
+  methods end in `Async`. Events are past-tense facts (`Landed`, `Ended`,
+  `ChildAdded`) or `Pre*/Post*` phases. Boolean properties have no `Is` prefix
+  (`Anchored`, `Enabled`); boolean methods do (`IsA`, `IsPaused`). No
+  abbreviations except UI.
+- **Module and namespace functions are camelCase**, constructors and factories
+  included: `Instance.new(className)`, `CFrame.new`, `CFrame.fromEuler`,
+  `Color3.fromRGB`, `Signal.new`, `task.spawn`, `vector.create`, and whatever a
+  `@std/*` or `@luaug/*` module exports. Namespace constants are lowercase too:
+  `CFrame.identity`, `vector.zero`. A namespace is not an object, and the
+  casing says so at the call site.
+- **Type, class and namespace names themselves are PascalCase**: `Instance`,
+  `CFrame`, `Color3`, `Vector3`, `Signal`.
+- **There are no camelCase aliases for object members** (`:connect` never
+  existed — divergence #21), and no PascalCase aliases for module functions.
+  One spelling each, always.
+- The single documented exception is that the native `vector` fields are
+  `x`/`y`/`z` (divergence #9): they are fields of a VM primitive, like
+  `string`, not members of an object we define.
+- **Identifier casing inside our own Luau files** — engine runtime, tooling,
+  examples, templates and specs alike. The public rules above govern what a
+  *user* types; these govern what a file looks like:
+  - **Module-level variables and constants are PascalCase, with no
+    underscores.** There is no `SCREAMING_SNAKE_CASE` in this codebase: a
+    constant is not a different kind of name, only a different kind of value.
+  - **Locals and inner functions inside a function body are camelCase.**
+  - Module-level *functions* — helpers and exported alike — follow the public
+    rule and stay camelCase, because a module is not an object.
+  - Types are PascalCase.
 - **User code:** `--!strict` everywhere (also `.luaurc` languageMode strict),
   StyLua formatting, luau-lsp lints on.
 - **Enforcement:** the generator's schema validator encodes every rule above

@@ -111,16 +111,16 @@ types in the public API.
 
 - C++20 per `.clang-format` (4-space, 120 cols); warnings-as-errors on
   `engine/`; namespaces `luaug::<module>`; files `snake_case`.
-- Luau per `stylua.toml` + `.luaurc` (strict). **Naming: everything LuauG
-  defines is PascalCase** — Instances, services, datatypes, constructors
-  (`Instance.New`, `CFrame.FromEuler`), constants (`CFrame.Identity`) and the
-  `@luaug/*` libraries. The only exclusions are surfaces that are not ours:
-  Luau's own libraries (`task`, `vector`, `string`, …) and `@std/*`, which
-  exists to run unchanged on Lute (ADR 0034, api-design §9).
-- Luau identifier casing: **PascalCase outside a function scope** (module
-  locals, module-level functions, exported members, types), **camelCase inside
-  one**, and constants PascalCase with no underscores — no
-  `SCREAMING_SNAKE_CASE`.
+- Luau per `stylua.toml` + `.luaurc` (strict). **Naming (ADR 0034): index it
+  off an *object* and it is PascalCase** (`part.Name`, `part:Destroy()`,
+  `v.Magnitude`); **index it off a *module or namespace* and it is camelCase**,
+  constructors included (`Instance.new`, `CFrame.fromEuler`, `Color3.fromRGB`,
+  `CFrame.identity`, `task.spawn`, and whatever `@std/*` and `@luaug/*`
+  export). Type and class names are PascalCase.
+- Inside our own Luau files: **module-level variables and constants are
+  PascalCase with no underscores** (no `SCREAMING_SNAKE_CASE` anywhere),
+  locals and inner functions are camelCase, and module-level functions stay
+  camelCase because a module is not an object.
 - Comments explain *why* and contracts, never narrate code.
 
 ## Do-not list

@@ -14,8 +14,8 @@ local fs = require("@std/fs")
 local path = require("@std/path")
 local process = require("@std/process")
 
-local ENGINE_ROOT = "engine"
-local SCAN_SUFFIXES = { ".cpp", ".h" }
+local EngineRoot = "engine"
+local ScanSuffixes = { ".cpp", ".h" }
 
 -- The layer matrix, keyed by the names that actually appear in include paths --
 -- `#include "luaug/rhi/device.h"` -- which are the directories in
@@ -27,7 +27,7 @@ local SCAN_SUFFIXES = { ".cpp", ".h" }
 -- layers. What keeps "everything above sees only the interface" true is not
 -- this table: it is that a backend has no public headers at all. Its headers
 -- live under src/, so no other module can reach them whatever the layer says.
-local LAYERS: { [string]: number } = {
+local Layers: { [string]: number } = {
     core = 0,
 
     jobs = 1,
@@ -54,7 +54,7 @@ local LAYERS: { [string]: number } = {
 -- architecture.md §2 gives `script` a dependency on `ui`, which sits at the
 -- same layer. It is the one documented same-layer edge; anything else at equal
 -- layer is a cycle waiting to happen.
-local SAME_LAYER_ALLOWED: { [string]: { [string]: boolean } } = {
+local SameLayerAllowed: { [string]: { [string]: boolean } } = {
     script = { ui = true },
 }
 
@@ -74,7 +74,7 @@ type Violation = {
 }
 
 local function scanModule(moduleName: string, moduleDir: string, violations: { Violation })
-    local fromLayer = LAYERS[moduleName]
+    local fromLayer = Layers[moduleName]
 
     local pending: { string } = { moduleDir }
     while #pending > 0 do
@@ -92,7 +92,7 @@ local function scanModule(moduleName: string, moduleDir: string, violations: { V
             end
 
             local matched = false
-            for _, suffix in SCAN_SUFFIXES do
+            for _, suffix in ScanSuffixes do
                 if hasSuffix(childPath, suffix) then
                     matched = true
                     break
@@ -108,7 +108,7 @@ local function scanModule(moduleName: string, moduleDir: string, violations: { V
                     continue
                 end
 
-                local toLayer = LAYERS[included]
+                local toLayer = Layers[included]
                 if not toLayer then
                     table.insert(violations, { file = childPath, from = moduleName, to = included })
                     continue
@@ -116,7 +116,7 @@ local function scanModule(moduleName: string, moduleDir: string, violations: { V
 
                 local allowed = toLayer < fromLayer
                 if not allowed and toLayer == fromLayer then
-                    local exceptions = SAME_LAYER_ALLOWED[moduleName]
+                    local exceptions = SameLayerAllowed[moduleName]
                     allowed = exceptions ~= nil and exceptions[included] == true
                 end
 
@@ -129,32 +129,32 @@ local function scanModule(moduleName: string, moduleDir: string, violations: { V
 end
 
 local function main()
-    if not fs.exists(ENGINE_ROOT) then
-        fail(`{ENGINE_ROOT}/ not found — run this from the repository root`)
+    if not fs.exists(EngineRoot) then
+        fail(`{EngineRoot}/ not found — run this from the repository root`)
     end
 
     local violations: { Violation } = {}
     local checked = 0
 
-    for _, entry in fs.listDirectory(ENGINE_ROOT) do
+    for _, entry in fs.listDirectory(EngineRoot) do
         if entry.type ~= "dir" then
             continue
         end
 
         local moduleName = entry.name
-        if not LAYERS[moduleName] then
-            fail(`engine/{moduleName}/ has no layer in architecture.md §2 — add it to LAYERS or to the docs`)
+        if not Layers[moduleName] then
+            fail(`engine/{moduleName}/ has no layer in architecture.md §2 — add it to Layers or to the docs`)
         end
 
         checked += 1
-        scanModule(moduleName, path.format(path.join(ENGINE_ROOT, moduleName)), violations)
+        scanModule(moduleName, path.format(path.join(EngineRoot, moduleName)), violations)
     end
 
     for _, violation in violations do
-        local toLayer = LAYERS[violation.to]
+        local toLayer = Layers[violation.to]
         if toLayer then
             print(
-                `checklayers: {violation.file}: {violation.from} (L{LAYERS[violation.from]}) includes {violation.to} (L{toLayer})`
+                `checklayers: {violation.file}: {violation.from} (L{Layers[violation.from]}) includes {violation.to} (L{toLayer})`
             )
         else
             print(`checklayers: {violation.file}: {violation.from} includes unknown module "{violation.to}"`)

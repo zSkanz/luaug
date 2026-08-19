@@ -30,14 +30,14 @@ local fs = require("@std/fs")
 local json = require("@std/json")
 local process = require("@std/process")
 
-local MANIFEST_PATH = "third_party/manifest.json"
-local NOTICES_PATH = "THIRD_PARTY_NOTICES.md"
-local PATCH_ROOT = "third_party/patches"
+local ManifestPath = "third_party/manifest.json"
+local NoticesPath = "THIRD_PARTY_NOTICES.md"
+local PatchRoot = "third_party/patches"
 
 -- Rows carrying this placeholder are declared but not yet pinned. The roadmap
 -- allows dependencies needed by later milestones to be vendored lazily, so an
 -- unpinned row is a skip, not an error.
-local UNPINNED = "TBD-AT-M0"
+local Unpinned = "TBD-AT-M0"
 
 type Dependency = {
     name: string,
@@ -97,29 +97,29 @@ local function expectString(row: json.Object, key: string, context: string): str
 end
 
 local function readManifest(): { Dependency }
-    if not fs.exists(MANIFEST_PATH) then
-        fail(`{MANIFEST_PATH} not found — run this from the repository root`)
+    if not fs.exists(ManifestPath) then
+        fail(`{ManifestPath} not found — run this from the repository root`)
     end
 
-    local decoded = json.deserialize(fs.readFileToString(MANIFEST_PATH))
+    local decoded = json.deserialize(fs.readFileToString(ManifestPath))
     local root = json.asObject(decoded)
     if not root then
-        fail(`{MANIFEST_PATH} is not a JSON object`)
+        fail(`{ManifestPath} is not a JSON object`)
     end
 
     local rows = json.asArray((root :: json.Object).dependencies)
     if not rows then
-        fail(`{MANIFEST_PATH}: "dependencies" must be an array`)
+        fail(`{ManifestPath}: "dependencies" must be an array`)
     end
 
     local result: { Dependency } = {}
     for index, entry in rows :: json.Array do
         local row = json.asObject(entry)
         if not row then
-            fail(`{MANIFEST_PATH}: dependency #{index} is not an object`)
+            fail(`{ManifestPath}: dependency #{index} is not an object`)
         end
 
-        local context = `{MANIFEST_PATH} dependency #{index}`
+        local context = `{ManifestPath} dependency #{index}`
         local patches: { string } = {}
         local declaredPatches = json.asArray((row :: json.Object).patches)
         if declaredPatches then
@@ -148,10 +148,10 @@ end
 -- Absent is fine: the array only exists once something needs it, and a manifest
 -- with no binary rows is the normal case.
 local function readBinaries(): { Binary }
-    local decoded = json.deserialize(fs.readFileToString(MANIFEST_PATH))
+    local decoded = json.deserialize(fs.readFileToString(ManifestPath))
     local root = json.asObject(decoded)
     if not root then
-        fail(`{MANIFEST_PATH} is not a JSON object`)
+        fail(`{ManifestPath} is not a JSON object`)
     end
 
     local rows = json.asArray((root :: json.Object).binaries)
@@ -163,10 +163,10 @@ local function readBinaries(): { Binary }
     for index, entry in rows :: json.Array do
         local row = json.asObject(entry)
         if not row then
-            fail(`{MANIFEST_PATH}: binary #{index} is not an object`)
+            fail(`{ManifestPath}: binary #{index} is not an object`)
         end
 
-        local context = `{MANIFEST_PATH} binary #{index}`
+        local context = `{ManifestPath} binary #{index}`
         local artifacts: { BinaryArtifact } = {}
         local declared = json.asArray((row :: json.Object).artifacts)
         if not declared then
@@ -208,7 +208,7 @@ local function readBinaries(): { Binary }
 end
 
 local function isPinned(dependency: Dependency): boolean
-    return dependency.commit ~= UNPINNED and #dependency.commit == 40
+    return dependency.commit ~= Unpinned and #dependency.commit == 40
 end
 
 -- Vendor scratch (a bare-ish git dir) is build output and must never live in
@@ -223,7 +223,7 @@ local function scratchRoot(): string
 end
 
 local function applyPatches(dependency: Dependency)
-    local dir = `{PATCH_ROOT}/{dependency.name}`
+    local dir = `{PatchRoot}/{dependency.name}`
     if #dependency.patches == 0 then
         return
     end
@@ -313,10 +313,10 @@ local function commandSync(names: { string })
                 end
             end
             if not found then
-                fail(`no dependency named "{name}" in {MANIFEST_PATH}`)
+                fail(`no dependency named "{name}" in {ManifestPath}`)
             end
             if not isPinned(found :: Dependency) then
-                fail(`{name}: not pinned — set a real commit SHA in {MANIFEST_PATH} first (R5)`)
+                fail(`{name}: not pinned — set a real commit SHA in {ManifestPath} first (R5)`)
             end
             table.insert(selected, found :: Dependency)
         end
@@ -435,8 +435,8 @@ local function commandNotices()
     table.insert(lines, "shipped games).")
     table.insert(lines, "")
 
-    fs.writeStringToFile(NOTICES_PATH, table.concat(lines, "\n"))
-    info(`wrote {NOTICES_PATH} from {#dependencies} manifest rows`)
+    fs.writeStringToFile(NoticesPath, table.concat(lines, "\n"))
+    info(`wrote {NoticesPath} from {#dependencies} manifest rows`)
 end
 
 local function commandResolve(name: string, ref: string)
@@ -465,7 +465,7 @@ local function commandResolve(name: string, ref: string)
             return
         end
     end
-    fail(`no dependency named "{name}" in {MANIFEST_PATH}`)
+    fail(`no dependency named "{name}" in {ManifestPath}`)
 end
 
 local function main()

@@ -13,14 +13,14 @@
 -- exists so that "a Luau script drives the frame" is true in M1 rather than
 -- promised.
 
-local ORBIT_RADIUS = 2.5
-local HALF_EXTENT = 0.4
-local THIRD_TURN = 2 * math.pi / 3
+local OrbitRadius = 2.5
+local HalfExtent = 0.4
+local ThirdTurn = 2 * math.pi / 3
 
 -- Fixed and saturated rather than derived from the animation. A colour that
 -- follows the same wave as the background eventually matches it, and a debug
 -- cube you cannot see is worse than no cube at all.
-local CUBE_COLORS = {
+local CubeColors = {
     { 1.0, 0.15, 0.15 },
     { 0.15, 0.4, 1.0 },
     { 1.0, 1.0, 1.0 },
@@ -36,15 +36,15 @@ luaug.OnFrame(function(tick: number, elapsed: number)
         0.5 + 0.5 * math.sin(elapsed + 4.1888)
     )
 
-    for index, color in CUBE_COLORS do
-        local phase = elapsed + (index - 1) * THIRD_TURN
+    for index, color in CubeColors do
+        local phase = elapsed + (index - 1) * ThirdTurn
         luaug.WireBox(
-            ORBIT_RADIUS * math.cos(phase),
+            OrbitRadius * math.cos(phase),
             0,
-            ORBIT_RADIUS * math.sin(phase),
-            HALF_EXTENT,
-            HALF_EXTENT,
-            HALF_EXTENT,
+            OrbitRadius * math.sin(phase),
+            HalfExtent,
+            HalfExtent,
+            HalfExtent,
             color[1],
             color[2],
             color[3]

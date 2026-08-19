@@ -24,16 +24,16 @@ local json = require("@std/json")
 local path = require("@std/path")
 local process = require("@std/process")
 
-local CATALOG_PATH = "i18n/en.json"
-local SCAN_ROOTS = { "engine" }
-local SCAN_SUFFIXES = { ".cpp", ".h" }
+local CatalogPath = "i18n/en.json"
+local ScanRoots = { "engine" }
+local ScanSuffixes = { ".cpp", ".h" }
 
 -- Test sources are skipped on purpose. They exercise the catalog machinery
 -- against local fixture catalogs using deliberately synthetic keys ("greeting",
 -- "nope.not.here"); those are not engine messages and must not be shipped in
 -- en.json. Tests that assert on REAL keys load the real catalog and check the
 -- resolved message, which is the stronger check anyway.
-local SKIP_DIRECTORIES = { tests = true }
+local SkipDirectories = { tests = true }
 
 local function fail(message: string): never
     print(`i18nlint: ERROR: {message}`)
@@ -45,14 +45,14 @@ local function hasSuffix(text: string, suffix: string): boolean
 end
 
 local function catalogKeys(): { [string]: boolean }
-    if not fs.exists(CATALOG_PATH) then
-        fail(`{CATALOG_PATH} not found — run this from the repository root`)
+    if not fs.exists(CatalogPath) then
+        fail(`{CatalogPath} not found — run this from the repository root`)
     end
 
-    local decoded = json.deserialize(fs.readFileToString(CATALOG_PATH))
+    local decoded = json.deserialize(fs.readFileToString(CatalogPath))
     local root = json.asObject(decoded)
     if not root then
-        fail(`{CATALOG_PATH} is not a JSON object`)
+        fail(`{CatalogPath} is not a JSON object`)
     end
 
     local keys: { [string]: boolean } = {}
@@ -80,7 +80,7 @@ local function collectUsages(): { Usage }
     -- yield across metamethod/C-call boundary" on Lute 1.0.0. listDirectory
     -- returns a plain array, so an explicit traversal has no such boundary.
     local pending: { string } = {}
-    for _, root in SCAN_ROOTS do
+    for _, root in ScanRoots do
         if fs.exists(root) then
             table.insert(pending, root)
         end
@@ -93,7 +93,7 @@ local function collectUsages(): { Usage }
             local childPath = path.format(path.join(dir, entry.name))
 
             if entry.type == "dir" then
-                if not SKIP_DIRECTORIES[entry.name] then
+                if not SkipDirectories[entry.name] then
                     table.insert(pending, childPath)
                 end
                 continue
@@ -103,7 +103,7 @@ local function collectUsages(): { Usage }
             end
 
             local matched = false
-            for _, suffix in SCAN_SUFFIXES do
+            for _, suffix in ScanSuffixes do
                 if hasSuffix(childPath, suffix) then
                     matched = true
                     break
@@ -140,7 +140,7 @@ local function main()
     end
 
     for _, usage in missing do
-        print(`i18nlint: {usage.file}: key "{usage.key}" is not in {CATALOG_PATH}`)
+        print(`i18nlint: {usage.file}: key "{usage.key}" is not in {CatalogPath}`)
     end
 
     -- Unused catalog entries are reported but do not fail: a key may be
@@ -160,7 +160,7 @@ local function main()
     print(`i18nlint: {#usages} references, {total} catalog keys, {unused} unreferenced`)
 
     if #missing > 0 then
-        fail(`{#missing} key(s) referenced but missing from {CATALOG_PATH}`)
+        fail(`{#missing} key(s) referenced but missing from {CatalogPath}`)
     end
 end
 
