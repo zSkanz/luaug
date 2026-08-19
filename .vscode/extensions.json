@@ -1,0 +1,9 @@
+{
+    "recommendations": [
+        "JohnnyMorganz.luau-lsp",
+        "JohnnyMorganz.stylua",
+        "ms-vscode.cpptools",
+        "ms-vscode.cmake-tools"
+    ],
+    "unwantedRecommendations": []
+}

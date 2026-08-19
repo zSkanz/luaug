@@ -1,0 +1,50 @@
+{
+    "$comment": [
+        "Editor settings that make luau-lsp in the editor agree with luau-lsp in CI.",
+        "Without this file the extension runs on its own defaults, and the two disagree --",
+        "which shows up as type errors on files that pass the gate, or the reverse, which is",
+        "worse. The CI invocation these mirror is in .github/workflows/ci.yml, job luau-check.",
+        "If you change one, change the other."
+    ],
+
+    "luau-lsp.platform.type": "standard",
+
+    "$comment.platform": [
+        "CI passes --platform=standard. The extension's default is roblox, which makes it",
+        "download and load Roblox's API dump. That is both a source of divergence and",
+        "something ADR 0020 (clean room, rule R7) has us stay away from: this engine is",
+        "written from docs/api-design.md, never from probing Roblox."
+    ],
+
+    "luau-lsp.sourcemap.enabled": false,
+
+    "luau-lsp.fflags.enableByDefault": true,
+    "luau-lsp.fflags.sync": false,
+
+    "$comment.fflags": [
+        "`luau-lsp analyze` enables every Luau FFlag unless told otherwise (--no-flags-enabled),",
+        "and that is what turns the new type solver on -- which rule R2 requires. Syncing flag",
+        "values from Roblox's production endpoint instead would make the editor's solver depend",
+        "on what Roblox shipped this week, so it is off."
+    ],
+
+    "luau-lsp.ignoreGlobs": [
+        "**/.lute/**",
+        "**/third_party/**"
+    ],
+
+    "$comment.ignore": [
+        "Lute 1.0.0's own generated typedefs do not typecheck under the pinned luau-lsp 1.69.0",
+        "(M0 finding 2), so CI ignores them and so must the editor. third_party is vendored",
+        "upstream code governed by ADR 0021 and is never ours to fix."
+    ],
+
+    "[luau]": {
+        "editor.defaultFormatter": "JohnnyMorganz.stylua",
+        "editor.formatOnSave": true
+    },
+
+    "files.encoding": "utf8",
+    "files.insertFinalNewline": true,
+    "files.trimTrailingWhitespace": true
+}
