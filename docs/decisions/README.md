@@ -71,3 +71,4 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0028](0028-instance-facade-over-ecs.md) | Instance facade over a hand-rolled deterministic ECS |
 | [0029](0029-input-action-system-only.md) | Input Action System is the only input model |
 | [0030](0030-std-convergence.md) | Implement Lute's `@std` surface in the game runtime |
+| [0031](0031-build-provenance-header.md) | Build provenance header; M0 grounding gate amended |

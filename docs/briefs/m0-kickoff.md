@@ -78,8 +78,17 @@ orchestrator against the rule list (R1–R17) as part of the gate run.
       fails)
 - [ ] `ctest` includes at least: script error surfaces as a structured engine
       error with an i18n key
-- [ ] `--version` prints the pinned Luau version **read from the vendored
-      header** (grounding proof)
+- [ ] `--version` prints the engine version, the pinned Luau version **and
+      commit SHA** (generated at configure time from
+      `third_party/manifest.json`, never typed into source), and the Luau ABI
+      constants **read from the vendored headers** (`LBC_VERSION_TARGET`,
+      `LBC_TYPE_VERSION_TARGET`, `LUA_VECTOR_SIZE`, `LUA_VECTOR_DOUBLE`), with
+      a test asserting the latter match ADR 0013 — the grounding proof
+
+> Gate item 4 was amended by [ADR 0031](../decisions/0031-build-provenance-header.md)
+> after the original wording proved unsatisfiable: Luau 0.734 ships no version
+> constant in any header. Escalated and approved by the human per
+> `MASTER_PROMPT.md` §10 before any code was written against it.
 
 ## Environment findings (dev machine, 2026-08-19)
 

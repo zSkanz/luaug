@@ -89,8 +89,13 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   exits 0 on Windows and Linux.
 - **Gate:** CI green on Tier-1/Tier-2; `ctest` includes at least: VM boots
   sandboxed (env mutation from script fails), script error surfaces as a
-  structured engine error with an i18n key; `--version` prints the pinned Luau
-  version **read from the vendored header** (grounding proof).
+  structured engine error with an i18n key; `--version` prints the engine
+  version, the pinned Luau version **and commit SHA** (generated at configure
+  time from `third_party/manifest.json`, never typed into source), and the
+  Luau ABI constants **read from the vendored headers**
+  (`LBC_VERSION_TARGET`, `LBC_TYPE_VERSION_TARGET`, `LUA_VECTOR_SIZE`,
+  `LUA_VECTOR_DOUBLE`), with a test asserting the latter match ADR 0013 —
+  the grounding proof (amended by ADR 0031: Luau ships no version constant).
 
 ### M1 — Window, RHI, Frame Loop, Agent Eyes (M)
 
