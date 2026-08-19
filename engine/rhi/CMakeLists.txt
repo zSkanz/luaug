@@ -22,12 +22,6 @@ target_compile_definitions(luaug_rhi_api INTERFACE
     LUAUG_RHI_CAPTURE=$<BOOL:${LUAUG_RHI_CAPTURE}>
 )
 
-if(LUAUG_RHI_SDLGPU AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/sdlgpu")
-    message(FATAL_ERROR "LUAUG_RHI_SDLGPU is ON but the backend has not been written yet")
-endif()
-if(LUAUG_RHI_CAPTURE AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/capture")
-    message(FATAL_ERROR "LUAUG_RHI_CAPTURE is ON but the backend has not been written yet")
-endif()
 
 # Accumulated rather than written out, so the test target links exactly the
 # backends this configuration built. Naming one unconditionally would turn
@@ -60,6 +54,25 @@ if(LUAUG_RHI_CAPTURE)
     list(APPEND luaug_rhi_test_modules rhi_capture)
 endif()
 
+# The one backend that talks to a driver. It reaches SDL through platform's
+# sdl_interop.h -- the access ADR 0004 grants it by name -- and links SDL3
+# itself, which is the price that header charges for being included.
+if(LUAUG_RHI_SDLGPU)
+    luaug_add_module(rhi_sdlgpu
+        LAYER 2
+        SOURCES
+            src/sdlgpu/sdlgpu_device.cpp
+        DEPS
+            core
+            platform
+        API_DEPS
+            rhi_api
+        PRIVATE_DEPS
+            SDL3::SDL3-static
+    )
+    list(APPEND luaug_rhi_test_modules rhi_sdlgpu)
+endif()
+
 # rhi_api_tests links no backend at all -- if it ever needs one, the seam has
 # grown an implementation dependency and the neutrality claim is gone. The
 # others come with theirs.
@@ -69,6 +82,9 @@ if(LUAUG_RHI_NULL)
 endif()
 if(LUAUG_RHI_CAPTURE AND LUAUG_RHI_NULL)
     list(APPEND luaug_rhi_test_sources tests/rhi_capture_tests.cpp)
+endif()
+if(LUAUG_RHI_SDLGPU)
+    list(APPEND luaug_rhi_test_sources tests/rhi_sdlgpu_tests.cpp)
 endif()
 
 luaug_add_module_tests(rhi

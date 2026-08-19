@@ -228,6 +228,20 @@ compile-only — no runtime verification, which stays post-v1.
    trip per missing package (X11 found → XTEST missing → …). The list is in
    `third_party/sdl3/docs/README-linux.md`; take it from there.
 
+6. **A clear is a complete frame, and that is enough to prove the harness.**
+   The screenshot path — create a target, open a render pass, submit, read the
+   pixels back — needs no shaders, no pipeline and no window. Getting it
+   working before the shader pipeline (step 6) means every later rendering
+   change is verifiable from the moment it exists, rather than at the end of
+   the milestone. Recorded because the obvious order (shaders → triangle →
+   screenshot) would have deferred the milestone's actual product to last.
+
+   The test clears to `(1.0, 0.5, 0.0, 1.0)` on purpose: 0.5 is neither 0 nor
+   255, so a dropped, swizzled or constant-written channel shows up instead of
+   matching by luck. Unorm8 rounding of 0.5 lands on 127 or 128 depending on
+   backend convention, so green is asserted as a range and the other three
+   exactly.
+
 ## Attempted / abandoned
 
 (append during the milestone; §12)

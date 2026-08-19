@@ -16,6 +16,9 @@
   "platform.err.window_failed": "Could not create the game window.",
   "platform.window.title": "LuauG {version}",
 
+  "rhi.err.device_create_failed": "Could not create a graphics device.",
+  "rhi.err.upload_inside_pass": "Cannot upload while a render pass is open; upload before beginRenderPass.",
+
   "scene.err.parent_cycle": "Cannot set Parent: this would create a cycle ({instance}).",
   "scene.err.invalid_size": "Invalid Size for {instance}: components must be positive.",
   "scene.warn.wait_for_child": "Infinite yield possible on WaitForChild(\"{name}\") — parent: {parent}.",
