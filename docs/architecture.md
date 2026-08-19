@@ -495,9 +495,12 @@ the prefab workhorse), `Destroy` (locks Parent, disconnects, fires
 `Destroying`, generation bump deferred to end of drain),
 `FindFirstChild/FindFirstChildOfClass/FindFirstAncestor`,
 `WaitForChild(name, timeout?)` (parks the coroutine on a waiter record keyed
-by `(parent, NameAtom)`; resumed by ChildAdded integration at RP drains; logs
-the familiar "infinite yield possible" warning via `scene.warn.wait_for_child`
-after 5 s), `GetDescendants`, `IsA` (ClassId ancestor table),
+by `(parent, NameAtom)`, woken at RP drains as soon as a matching child
+*exists* under that parent — so the wake hangs off the child-name index above,
+which a rename updates exactly as a reparent does, not off `ChildAdded` alone;
+the full contract, timeout and warning included, is
+[`api-design.md`](api-design.md) §2.2), `GetDescendants`, `IsA` (ClassId
+ancestor table),
 `ChildAdded/ChildRemoved/DescendantAdded/DescendantRemoving/AncestryChanged/
 Destroying`, Attributes (`GetAttribute/SetAttribute/GetAttributeChangedSignal`)
 and Tags (`AddTag/HasTag/GetTags` + `TagService:GetTagged/

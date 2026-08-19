@@ -27,6 +27,7 @@ in the source report).
 | U-14 | luau-lsp custom-platform mode types the builtin `vector` with lowercase `x/y/z` correctly for our defs | api-design risk #1 | 2026-08-19 | unverified | — | Week-one spike in M3; affects Vector3 DX polish, not architecture |
 | U-15 | "luauengine.org" claims to be an official Roblox Studio fork — no engine source found, no Roblox mention | ecosystem-2026.md §A.1 | 2026-08-19 | unverified (treat as false) | — | Ignore; never base anything on it |
 | U-16 | meshoptimizer / assimp / Recast current exact versions (minor source conflicts) | ecosystem-2026.md §B | 2026-08-19 | unverified | — | Pin actual tags at vendor time (M0) |
+| U-51 | A pure-Luau `@luaug/signal` can honour §3.1's deferred contract off-engine (under Lute or Roblox), so shared code keeps one signal semantics on every runtime | api-design.md §1.1 (@luaug tier); M2 spec-gap G41 | 2026-08-19 | unverified | — | If it cannot, the module is immediate off-engine and shared code silently changes ordering across runtimes — the convergence bet's one correctness hole. `@luaug/signal` is not M2 scope; answer before it ships, either with a portable definition in §3.1 or by scoping the module to the engine |
 
 Full per-report lists live in each report's final section. When the M0 vendor
 step captures real tags/SHAs, update U-07/U-08/U-16 and

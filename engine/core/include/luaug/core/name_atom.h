@@ -14,10 +14,10 @@
 // comparison key and nothing else.
 #pragma once
 
+#include <deque>
 #include <string>
 #include <string_view>
 #include <unordered_map>
-#include <vector>
 
 #include "luaug/core/types.h"
 
@@ -34,10 +34,20 @@ struct NameAtom
     [[nodiscard]] constexpr bool operator==(const NameAtom&) const noexcept = default;
 };
 
-// Append-only: an interned string is never removed, and the storage never
-// reallocates its character data out from under a `text()` result. That is what
-// lets callers hold a `string_view` for the lifetime of the table, and it is
-// why the table is only ever engine-wide and long-lived rather than per-object.
+// Append-only: an interned string is never removed, and appending never moves
+// an existing one. That is what lets callers hold a `string_view` for the
+// lifetime of the table, and it is why the table is only ever engine-wide and
+// long-lived rather than per-object.
+//
+// The storage is a `deque`, and that is load-bearing rather than a preference.
+// A `vector<string>` moves every element when it grows, and a short string
+// (SSO) carries its characters *inside* the string object -- so every view into
+// one dangles after a reallocation. The failure mode is not a crash: it is a
+// lookup miss, which makes `intern` mint a second atom for a name that already
+// had one, destroying the exact equality the child-name index and property
+// dispatch are built on. Instance and property names are overwhelmingly short,
+// so this would have been the common case rather than the rare one.
+// `deque::push_back` does not invalidate references to existing elements.
 class AtomTable
 {
 public:
@@ -60,10 +70,9 @@ public:
 private:
     // Indexed by atom id; slot 0 holds the empty string so no branch is needed
     // on the common path.
-    std::vector<std::string> m_texts;
-    // Keys are views into `m_texts`, which is safe precisely because the table
-    // is append-only and `std::string` storage does not move when a *different*
-    // element is appended.
+    std::deque<std::string> m_texts;
+    // Keys are views into `m_texts`, which is safe precisely because appending
+    // to a deque leaves every existing element where it is.
     std::unordered_map<std::string_view, u32> m_byText;
 };
 

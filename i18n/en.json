@@ -71,6 +71,7 @@
 
   "script.err.syntax": "Could not compile {source}: {message}",
   "script.err.runtime": "Error while running {source}: {message}",
+  "script.err.unknown_member": "{typeName} has no member named \"{member}\".",
   "script.err.instance_dead": "This Instance has been destroyed and can no longer be used.",
   "script.err.reentrancy_limit": "Deferred signal re-entrancy limit (10) reached; handler dropped.",
   "script.err.task_not_scheduled": "task.cancel: this thread has no pending resumption (status: {status}). A finished, already cancelled, or currently running thread has nothing to cancel.",

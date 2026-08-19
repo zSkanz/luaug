@@ -26,3 +26,26 @@ Zero-allocation vector math in scripts; SSE/NEON-aligned interop.
 lossy beyond; `CFrame` carries the f64 translation as the source of truth
 (Model A — see `docs/api-design.md`). Risk logged: luau-lsp typing of the
 builtin vector under a custom platform — week-one spike in M3.
+
+## Addendum — 2026-08-19: the precision figure above is wrong
+
+The Consequences paragraph claims `part.Position` is "millimeter-exact within
+±131 km". It is not, and the number it borrows is the bound for a different
+claim.
+
+f32 carries a 24-bit significand, so the ULP at a magnitude in
+[2^e, 2^(e+1)) is 2^(e−23). At 131072 m = 2^17 that is 2^17 / 2^23 = 1/64 m ≈
+**15.6 mm** — sixteen times coarser than a millimetre. Millimetre exactness
+means ULP ≤ 0.001 m, i.e. 2^(e−23) ≤ 2^−10, i.e. e ≤ 13, so it survives only
+to 2^13 = **8192 m**. ±131 km is where the *useful exponent range* ends, at
+roughly 16 mm resolution; it was never where millimetre precision ends.
+
+**Corrected statement**, and the one `docs/api-design.md` §2.3 now carries:
+`part.Position` is millimetre-exact to roughly ±8 km, degrading to ~16 mm
+resolution at ±131 km, where the exponent range ends.
+
+The decision is unaffected. If anything the corrected figure strengthens it:
+f32 positions run out an order of magnitude sooner than the original text
+implied, which is exactly why the f64 translation lives on `CFrame`
+(ADR 0014) and why open-world math is routed through it rather than through
+`Position`.

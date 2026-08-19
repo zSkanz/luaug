@@ -10,6 +10,9 @@ luaug_add_module(core
         src/log.cpp
         src/error.cpp
         src/math.cpp
+        src/phase.cpp
+        src/name_atom.cpp
+        src/random.cpp
 )
 
 luaug_add_module_tests(core
@@ -19,4 +22,8 @@ luaug_add_module_tests(core
         tests/json_tests.cpp
         tests/error_tests.cpp
         tests/math_tests.cpp
+        tests/phase_tests.cpp
+        tests/slotmap_tests.cpp
+        tests/name_atom_tests.cpp
+        tests/random_tests.cpp
 )
