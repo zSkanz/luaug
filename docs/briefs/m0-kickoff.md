@@ -21,17 +21,18 @@ single test is what makes "pinned" mean something.
 
 ## Scope checklist (from roadmap)
 
-- [ ] Vendor third-party dependencies into `third_party/` at manifest-target
+- [x] Vendor third-party dependencies into `third_party/` at manifest-target
       versions, recording **real commit SHAs** (Luau, SDL3, doctest first;
       later deps may be vendored lazily but manifest rows must exist)
-- [ ] Activate `CMakePresets.json` (build dirs under `$env{LUAUG_BUILD_ROOT}`,
+- [x] Activate `CMakePresets.json` (build dirs under `$env{LUAUG_BUILD_ROOT}`,
       never in-tree)
-- [ ] `luaug-host` executable: create Luau VM, `luaL_sandbox`, register a
+- [x] `luaug-host` executable: create Luau VM, `luaL_sandbox`, register a
       minimal `print`/log bridge routed through the key+catalog i18n system
       (one English catalog proves the seam)
-- [ ] rokit-pinned toolchain (Lute 1.0.0, StyLua 2.5.2, luau-lsp 1.69.0)
-- [ ] Activate CI: Windows + Linux build, ctest, `luau-analyze` strict on all
-      `.luau`, StyLua check, i18n lint stub, docs-lint
+- [x] rokit-pinned toolchain (Lute 1.0.0, StyLua 2.5.2, luau-lsp 1.69.0)
+- [x] Activate CI: Windows + Linux build, ctest, `luau-analyze` strict on all
+      `.luau`, StyLua check, i18n lint stub, docs-lint — *written and green
+      locally; never executed, because the repo has no remote (see Gate Record)*
 
 **Deliverable:** `luaug-host boot.luau` prints a catalog-resolved greeting and
 exits 0 on Windows and Linux.
@@ -121,10 +122,96 @@ between 3.4.8 and 3.4.14; upstream `releases/latest` says 3.4.14, published
 2026-08-03). `docs/research/UNCONFIRMED.md` is updated in the same commit as
 the manifest.
 
+## Findings (things the docs assumed that reality corrected)
+
+Recorded because each one cost real time and will cost it again otherwise.
+
+1. **Luau 0.734 ships no version constant.** No `LUAU_VERSION`/`LUA_VERSION`
+   macro, no `project(... VERSION ...)`, no `VERSION` file; the string `0.734`
+   appears nowhere in the tree. Version exists only as a git tag. → ADR 0031.
+2. **Lute 1.0.0's own generated typedefs do not typecheck** under the pinned
+   luau-lsp 1.69.0 (`@std/path`, `@lute/time`, `@std/fs`, `@std/json` all emit
+   errors). CI must pass `--ignore="**/.lute/**"` or it fails for upstream
+   reasons. Also `--platform=standard`, or luau-lsp tries to load Roblox defs.
+3. **`fs.walk` cannot be driven by a generic `for`** on Lute 1.0.0: its
+   iterator makes a yielding libuv call, giving "attempt to yield across
+   metamethod/C-call boundary". Use `fs.listDirectory` and walk explicitly.
+   (`fs.watch` documents the same constraint — it is a general Lute pattern.)
+4. **`@std/json` tags decoded objects with a `newproxy()` sentinel key**, so
+   iterating a decoded object yields a userdata among the string keys.
+5. **Lute passes the script path as `process.args[1]`**; user arguments start
+   at index 2.
+6. **`rokit install` aborts on an interactive trust prompt.** `--no-trust-check`
+   is required for CI and for any non-interactive session.
+7. **Visual Studio bundles CMake and Ninja**; the presets' real requirement is
+   the Developer Shell (`strategy: external`), not a separate CMake install.
+8. **CMake's regex engine has no bounded repetition** — `{40}` silently fails
+   to match, so a SHA length check must be a separate `string(LENGTH ...)`.
+9. **Luau builds `Luau.Analysis` unconditionally** even with CLI and tests off.
+   We never link it; it is roughly a third of a clean build. Worth trimming in
+   a later milestone, not worth a vendored patch now (ADR 0021).
+
 ## Attempted / abandoned
 
-_(append during the milestone — §12)_
+- **Patching Luau to add a version header** — considered to satisfy the
+  original gate wording literally, rejected in ADR 0031: a permanent rebase
+  burden in the fastest-moving dependency, against ADR 0021's near-empty patch
+  set. The gate was amended instead, with human approval.
+- **`json.serialize` to write back `manifest.json`** — rejected. `@std/json`
+  emits keys in `pairs` order and renders an empty table as `[]`, so a
+  round-trip would scramble a hand-authored, human-reviewed file. `vendor.luau`
+  therefore never writes the manifest at all, which is also the right
+  authority split (R5).
 
 ## Gate Record
 
-_(filled at milestone end, before human review)_
+Run 2026-08-19 on the dev machine (Windows 11, MSVC 19.50.35723 / VS 18
+Community, CMake 4.1.1, Ninja 1.12.1, out-of-tree at
+`%LOCALAPPDATA%\LuauG\build\win-msvc-dev`).
+
+| Gate item | Result |
+|---|---|
+| CI green on Tier-1 | **Locally green, not executed in CI** — see blocker below |
+| CI green on Tier-2 | **Unverified** — no Linux machine available to this session |
+| `ctest`: VM boots sandboxed (env mutation from script fails) | **Pass** |
+| `ctest`: script error → structured engine error with an i18n key | **Pass** |
+| `--version` grounding proof (as amended by ADR 0031) | **Pass** |
+
+```
+$ cmake --preset win-msvc-dev && cmake --build --preset win-msvc-dev
+231/231 targets, 0 warnings, 0 errors (/W4 /WX on engine code)
+
+$ ctest --preset win-msvc-dev
+100% tests passed, 0 tests failed out of 6
+  core · app · host_version · host_version_abi · host_boot · host_usage_without_script
+
+$ luaug-host --version
+LuauG 0.0.1 (dev)
+Luau 0.734 (3fc82b1071ab387531175869afc4fb528464afa4)
+Luau ABI: bytecode 9, types 3, vector 3-wide f32
+
+$ luaug-host examples/boot/boot.luau        # the M0 deliverable
+LuauG 0.0.1 — engine initialized.           # resolved from i18n/en.json
+boot.luau: hello from Luau
+boot.luau: sandbox verified
+exit 0
+
+$ stylua --check tools examples                              # clean
+$ luau-lsp analyze --platform=standard --ignore=**/.lute/**   # clean
+$ lute tools/repo/i18nlint.luau        # 10 references, 22 keys, 0 missing
+$ lute tools/repo/checklayers.luau     # 2 modules, 0 violations
+```
+
+**M0 is NOT closed.** Two gate items are unmet and neither is closeable by
+this session:
+
+- The repository has **no git remote**, so no CI run has ever happened. Every
+  job is written and each one passes locally, but "CI green on Tier-1/Tier-2"
+  is a statement about CI, and asserting it from a local run would be a lie.
+  Creating/pushing to a remote needs an account — an escalation item under
+  `MASTER_PROMPT.md` §10.
+- **Tier-2 (Linux) has never been compiled.** The engine builds warning-free
+  under MSVC, but the Linux profile adds `-Wconversion -Wsign-conversion
+  -Wold-style-cast -Wshadow -Wpedantic` with `-Werror`. First-run failures
+  there are likely and are ordinary work to fix — they simply cannot be found
+  from this machine.
