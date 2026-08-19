@@ -4,9 +4,12 @@
   "engine.boot.hello": "LuauG {version} — engine initialized.",
   "engine.boot.shutdown": "Shutting down (reason: {reason}).",
 
-  "engine.cli.usage": "Usage: luaug-host <script.luau> | --version | --help",
+  "engine.cli.usage": "Usage: luaug-host [script.luau] [--headless --frames=N --exit] [--rhi=NAME] | --version | --help",
   "engine.cli.err.no_script": "No script given. Usage: luaug-host <script.luau>",
   "engine.cli.err.unknown_option": "Unknown option: {option}.",
+  "engine.cli.err.bad_value": "Not a valid value: {option}.",
+  "engine.cli.err.unknown_backend": "Unknown render backend \"{name}\". This build has: {available}.",
+  "engine.cli.err.headless_needs_frames": "--headless needs --frames=N; with no window to close it would never stop.",
   "engine.cli.err.script_missing": "Script not found: {path}.",
   "engine.cli.version.engine": "LuauG {version} ({profile})",
   "engine.cli.version.luau": "Luau {version} ({commit})",
@@ -16,7 +19,13 @@
   "platform.err.window_failed": "Could not create the game window.",
   "platform.window.title": "LuauG {version}",
 
+  "engine.frame.warn.catch_up_clamped": "Frame took {ms} ms; dropped simulated time after {ticks} catch-up ticks.",
+  "engine.frame.info.summary": "Ran {frames} frames, {ticks} simulation ticks.",
+
   "rhi.err.device_create_failed": "Could not create a graphics device.",
+  "rhi.err.backend_not_compiled": "That render backend was not compiled into this build.",
+  "rhi.err.window_claim_failed": "The graphics device could not take ownership of the window.",
+  "rhi.err.target_create_failed": "Could not create the offscreen render target.",
   "rhi.err.upload_inside_pass": "Cannot upload while a render pass is open; upload before beginRenderPass.",
 
   "scene.err.parent_cycle": "Cannot set Parent: this would create a cycle ({instance}).",

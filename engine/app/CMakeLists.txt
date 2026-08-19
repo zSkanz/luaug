@@ -6,13 +6,30 @@ luaug_add_module(app
     LAYER 6
     SOURCES
         src/script_host.cpp
+        src/frame_scheduler.cpp
+        src/backends.cpp
+        src/engine.cpp
     DEPS
         core
         platform
+        rhi_api
     PUBLIC_DEPS
         luaug::luau
         luaug::build_info
 )
+
+# The backends themselves are linked ONLY here (ADR 0023): every other module
+# sees the seam. Which ones exist is a build decision, so the link list is
+# assembled from the same options backends.cpp switches on.
+if(LUAUG_RHI_SDLGPU)
+    target_link_libraries(luaug_app PRIVATE luaug::rhi_sdlgpu)
+endif()
+if(LUAUG_RHI_CAPTURE)
+    target_link_libraries(luaug_app PRIVATE luaug::rhi_capture)
+endif()
+if(LUAUG_RHI_NULL)
+    target_link_libraries(luaug_app PRIVATE luaug::rhi_null)
+endif()
 
 add_executable(luaug_host src/main.cpp)
 set_target_properties(luaug_host PROPERTIES OUTPUT_NAME luaug-host)

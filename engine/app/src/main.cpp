@@ -2,9 +2,11 @@
 // report failures as structured, key-identified engine errors.
 
 #include <array>
+#include <charconv>
 #include <cstdio>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -12,7 +14,8 @@
 #include <Luau/Bytecode.h>
 #include <lua.h>
 
-#include "luaug/app/script_host.h"
+#include "luaug/app/backends.h"
+#include "luaug/app/engine.h"
 #include "luaug/core/build_info.h"
 #include "luaug/core/error.h"
 #include "luaug/core/i18n.h"
@@ -80,6 +83,80 @@ void printVersion()
     luaug::core::log(LogLevel::Info, LUAUG_TR("engine.cli.version.abi"), abiArgs);
 }
 
+// Fills `options` from the command line. Returns kExitOk when the caller should
+// proceed, or the exit code to return.
+//
+// Deliberately hand-rolled and small: a getopt-style dependency for six flags
+// would be a dependency (R5) bought for nothing, and the engine's real CLI is
+// `luaug` (M3), which lives in Lute and is the thing users will actually type.
+// This is the host's own switchboard.
+int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptions& options)
+{
+    const auto numericValue = [](std::string_view text, luaug::core::u64& out)
+    {
+        const auto result = std::from_chars(text.data(), text.data() + text.size(), out);
+        return result.ec == std::errc{} && result.ptr == text.data() + text.size();
+    };
+
+    for (const std::string_view arg : args)
+    {
+        if (!arg.empty() && arg.front() != '-')
+        {
+            options.scriptPath = std::filesystem::path(arg);
+            continue;
+        }
+
+        if (arg == "--headless")
+        {
+            options.headless = true;
+            continue;
+        }
+        if (arg == "--exit")
+        {
+            options.exitAfterFrames = true;
+            continue;
+        }
+        if (arg.starts_with("--frames="))
+        {
+            if (!numericValue(arg.substr(9), options.frames))
+            {
+                const std::array<I18nArg, 1> badValue{I18nArg{"option", arg}};
+                luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.bad_value"), badValue);
+                return kExitUsage;
+            }
+            continue;
+        }
+        if (arg.starts_with("--rhi="))
+        {
+            const std::optional<luaug::rhi::BackendId> backend = luaug::app::parseBackendId(arg.substr(6));
+            if (!backend.has_value())
+            {
+                const std::array<I18nArg, 2> unknownBackend{
+                    I18nArg{"name", arg.substr(6)}, I18nArg{"available", luaug::app::availableBackendNames()}};
+                luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.unknown_backend"), unknownBackend);
+                return kExitUsage;
+            }
+            options.backend = *backend;
+            continue;
+        }
+
+        const std::array<I18nArg, 1> unknownArgs{I18nArg{"option", arg}};
+        luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.unknown_option"), unknownArgs);
+        return kExitUsage;
+    }
+
+    // A headless run with no frame budget would never terminate and nothing
+    // could tell you why, since there is no window to close. Saying so beats
+    // hanging a CI job until its timeout.
+    if (options.headless && options.frames == 0)
+    {
+        luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.headless_needs_frames"));
+        return kExitUsage;
+    }
+
+    return kExitOk;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -117,18 +194,14 @@ int main(int argc, char** argv)
         return kExitOk;
     }
 
-    if (!args[0].empty() && args[0].front() == '-')
-    {
-        const std::array<I18nArg, 1> unknownArgs{I18nArg{"option", args[0]}};
-        luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.unknown_option"), unknownArgs);
-        return kExitUsage;
-    }
+    luaug::app::EngineOptions options;
+    if (const int usageExit = parseOptions(args, options); usageExit != kExitOk)
+        return usageExit;
 
     const std::array<I18nArg, 1> bootArgs{I18nArg{"version", LUAUG_VERSION_STRING}};
     luaug::core::log(LogLevel::Info, LUAUG_TR("engine.boot.hello"), bootArgs);
 
-    luaug::app::ScriptHost host;
-    if (const std::optional<luaug::core::EngineError> error = host.runFile(std::filesystem::path(args[0])))
+    if (const std::optional<luaug::core::EngineError> error = luaug::app::run(options))
     {
         luaug::core::logText(LogLevel::Error, error->message);
         if (!error->detail.empty())
