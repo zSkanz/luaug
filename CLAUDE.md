@@ -9,23 +9,52 @@ digest for any agent touching this repo.**
 LuauG — an open-source (Apache-2.0) standalone game engine: C++ core embedding
 Luau 0.734 directly, Roblox-familiar Instance/Service API over a data-oriented
 ECS, deterministic fixed-tick simulation, SDL3 + custom RHI (SDL3 GPU default),
-Jolt physics, code-first DX with hot reload. Currently **docs-first pre-alpha**:
-the engine is built milestone by milestone per `docs/roadmap.md`.
+Jolt physics, code-first DX with hot reload. **Pre-alpha, M0 complete**: the
+host boots a sandboxed VM and runs Luau; nothing renders yet. The engine is
+built milestone by milestone per `docs/roadmap.md`; `PROGRESS.md` says where
+things stand.
 
 ## Commands
 
-Active from M0 (see roadmap; before that, only docs-lint runs):
+```
+scripts/bootstrap.ps1                # Windows: toolchain check, LUAUG_BUILD_ROOT, rokit install, lute setup
+./scripts/bootstrap.sh               # Linux/macOS: same
+lute tools/repo/vendor.luau status   # what is vendored vs what the manifest pins
+cmake --preset win-msvc-dev          # configure (build dir OUTSIDE the repo tree)
+cmake --build --preset win-msvc-dev  # build
+ctest --preset win-msvc-dev          # C++ unit + integration tests
+```
+
+Luau-side gates, all runnable locally and all mirrored in `ci.yml`:
 
 ```
-pwsh scripts/bootstrap.ps1          # toolchain check + LUAUG_BUILD_ROOT + rokit install
-cmake --preset win-msvc-dev         # configure (build dir OUTSIDE the repo tree)
-cmake --build --preset win-msvc-dev # build
-ctest --preset win-msvc-dev         # C++ unit + integration tests
+stylua --check .                     # formatting (third_party via .styluaignore)
+luau-lsp analyze --platform=standard --ignore="**/.lute/**" <files>
+lute tools/repo/i18nlint.luau        # every LUAUG_TR key exists in i18n/en.json
+lute tools/repo/checklayers.luau     # module layering from real #include edges
 ```
 
 Active from M3: `luaug dev` (hot-reload dev server) · `luaug test` (conformance
 specs, headless engine) · `luaug check` (luau-analyze strict + StyLua + i18n
 lint) · `luaug new <template>` · `luaug fmt`.
+
+### Things that will waste an hour if you do not know them
+
+- **Windows: the presets need a Developer Shell.** They use the Ninja generator
+  with `strategy: external`, so `cl`, `cmake` and `ninja` must already be on
+  PATH. Visual Studio bundles CMake and Ninja — the fix is almost never "install
+  CMake", it is to run `VC\Auxiliary\Build\vcvars64.bat` first. `bootstrap.ps1`
+  detects this and prints the exact command.
+- **`pwsh` (PowerShell 7) may not be installed**; Windows PowerShell 5.1 runs
+  the bootstrap fine. Invoke the script directly rather than assuming a shell.
+- **rokit needs `--no-trust-check`** in any non-interactive session, or
+  `rokit install` blocks on a trust prompt. `bootstrap` already passes it.
+- **`lute setup` must have run** or luau-lsp cannot resolve a single `@std`
+  require under `tools/` (see `tools/.luaurc`). `bootstrap` does it.
+- **CI uses `cancel-in-progress: true`.** Pushing cancels any run still in
+  flight — do not push while waiting on a result you care about.
+- **A cold CI build is ~8 minutes per tier**, nearly all of it compiling Luau.
+  There is no cache yet; `sccache` is planned (architecture.md §9).
 
 ## Invariants (digest — full text in MASTER_PROMPT.md §3)
 
@@ -61,6 +90,10 @@ types in the public API.
 ## Map
 
 `docs/architecture.md` (native core) · `docs/api-design.md` (Luau API/DX) ·
-`docs/roadmap.md` (M0–M8 + gates) · `docs/decisions/` (ADRs 0001–0030) ·
+`docs/roadmap.md` (M0–M8 + gates) · `docs/decisions/` (ADRs 0001–0031) ·
 `docs/research/` (frozen reports + UNCONFIRMED registry) · `PROGRESS.md`
 (ledger) · `docs/briefs/` (per-milestone kickoffs).
+
+Each closed milestone's brief carries a **Findings** section — the things the
+docs assumed that reality corrected. Read the current and previous milestone's
+before starting work; they exist so the same discovery is not paid for twice.
