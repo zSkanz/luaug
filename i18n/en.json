@@ -11,6 +11,12 @@
   "engine.cli.err.unknown_backend": "Unknown render backend \"{name}\". This build has: {available}.",
   "engine.cli.err.headless_needs_frames": "--headless needs --frames=N; with no window to close it would never stop.",
   "engine.cli.err.screenshot_needs_headless": "--screenshot needs --headless; a presented swapchain image cannot be read back.",
+  "engine.cli.err.capture_needs_backend": "--capture-out needs --rhi=capture; no other backend records a command stream.",
+
+  "engine.capture.info.written": "Wrote the render command stream to {path}.",
+  "engine.capture.err.empty": "Nothing was recorded; --capture-out needs --rhi=capture.",
+  "engine.capture.err.open_failed": "Could not open {path} for writing.",
+  "engine.capture.err.write_failed": "Could not finish writing {path}.",
 
   "engine.screenshot.info.written": "Wrote {path}.",
   "engine.screenshot.err.readback_failed": "Could not read the rendered image back from the GPU.",

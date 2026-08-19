@@ -269,6 +269,28 @@ compile-only — no runtime verification, which stays post-v1.
    `vkd3d` (LGPL) is reachable only under `SDLSHADERCROSS_INSTALL_RUNTIME`,
    which defaults off (`CMakeLists.txt:52`) and stays off.
 
+8. **The headless clock's synthetic step must round up, not truncate.** One
+   sixtieth of a second is 16,666,666.67 ns; truncating leaves every frame a
+   fraction short of the accumulator's threshold, so ticks fire on some frames
+   and not others — deterministically, but not the "exactly one step per frame"
+   the code claimed. Three frames produced two identical colours and one
+   different. `std::ceil` costs 0.3 ns of drift per frame and makes the claim
+   true.
+
+9. **The screenshot gate did not catch finding 8; the capture gate did — by
+   design, and worth understanding before trusting either.** Fixing the tick
+   step changed frame 30's colour by a max channel delta of exactly 2, which
+   the tolerance-2 comparison passes. The tolerance is right: GPUs round the
+   last bit of a unorm conversion differently and a gate that fires on that gets
+   switched off. But on a smoothly varying flat colour, a one-tick shift lives
+   inside that tolerance.
+
+   The command stream showed it instantly (`"r":0.5000` against `"r":0.5083`),
+   which is exactly why architecture.md §9 makes the capture stream the
+   *blocking* gate and images the secondary one. Two consequences to keep in
+   mind: the screenshot gate only grows teeth once there is geometry with edges
+   in the frame, and a golden image is never sufficient evidence on its own.
+
 ## Attempted / abandoned
 
 - **Vendoring DXC from source (option B).** Rejected with the human: four

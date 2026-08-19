@@ -2,6 +2,8 @@
 
 #include <array>
 #include <cmath>
+#include <fstream>
+#include <string>
 #include <vector>
 
 #include "luaug/app/backends.h"
@@ -15,6 +17,10 @@
 #include "luaug/platform/platform.h"
 #include "luaug/platform/window.h"
 #include "luaug/rhi/device.h"
+
+#if LUAUG_RHI_CAPTURE
+#include "luaug/rhi/capture.h"
+#endif
 
 namespace luaug::app
 {
@@ -41,6 +47,52 @@ constexpr f64 kNanosPerSecond = 1'000'000'000.0;
     // Thirds of a turn apart, so the three channels never move together and a
     // channel that is stuck shows up.
     return {.r = wave(0.0), .g = wave(2.0944), .b = wave(4.1888), .a = 1.0f};
+}
+
+// Writing the recorded stream is the app's job, not the backend's: the backend
+// records into memory and knows nothing about files, which is what lets a test
+// read a capture without touching a disk.
+[[nodiscard]] std::optional<core::EngineError> writeCapture(
+    const std::filesystem::path& path, const rhi::IDevice& device)
+{
+#if LUAUG_RHI_CAPTURE
+    const std::string& stream = rhi::captureStream(device);
+    if (stream.empty())
+    {
+        // An empty golden would match forever. Better to fail here than to
+        // check in a file that can never catch anything.
+        return core::makeError(LUAUG_TR("engine.capture.err.empty"));
+    }
+
+    std::error_code ec;
+    if (path.has_parent_path())
+        std::filesystem::create_directories(path.parent_path(), ec);
+
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file)
+    {
+        const std::array<I18nArg, 1> args{I18nArg{"path", path.string()}};
+        return core::makeError(LUAUG_TR("engine.capture.err.open_failed"), args);
+    }
+
+    // Binary mode on purpose: the stream is newline-terminated JSON lines, and
+    // letting Windows translate them would make a golden recorded on one
+    // platform differ from the same frame recorded on another.
+    file.write(stream.data(), static_cast<std::streamsize>(stream.size()));
+    file.close();
+
+    if (!file)
+    {
+        const std::array<I18nArg, 1> args{I18nArg{"path", path.string()}};
+        return core::makeError(LUAUG_TR("engine.capture.err.write_failed"), args);
+    }
+
+    return std::nullopt;
+#else
+    static_cast<void>(path);
+    static_cast<void>(device);
+    return core::makeError(LUAUG_TR("engine.capture.err.empty"));
+#endif
 }
 
 } // namespace
@@ -111,6 +163,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     }
 
     FrameScheduler scheduler;
+    const auto headlessStepNs
+        = static_cast<u64>(std::ceil(scheduler.timing().fixedDt * kNanosPerSecond));
     bool quit = false;
 
     while (!quit)
@@ -122,10 +176,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // frame, as fast as the machine goes. Real time would make the tick
         // count -- and therefore the pixels -- depend on how busy the runner
         // was, which is the whole failure mode a golden gate must not have.
-        const u64 nowNs = options.headless
-            ? static_cast<u64>(static_cast<f64>(scheduler.totalFrames()) * scheduler.timing().fixedDt
-                * kNanosPerSecond)
-            : platform::nowNs();
+        //
+        // The ceil is load-bearing. 1/60 s is 16666666.67 ns, and truncating it
+        // leaves each frame a fraction short of the accumulator's threshold, so
+        // ticks fire on some frames and not others -- deterministically, but
+        // not the one-per-frame this comment claims. Rounding up costs 0.3 ns
+        // of drift per frame and makes the claim true.
+        const u64 nowNs = options.headless ? scheduler.totalFrames() * headlessStepNs
+                                           : platform::nowNs();
 
         const Frame frame = scheduler.beginFrame(nowNs);
 
@@ -188,6 +246,15 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
         const std::array<I18nArg, 1> shotArgs{I18nArg{"path", options.screenshotPath.string()}};
         core::log(LogLevel::Info, LUAUG_TR("engine.screenshot.info.written"), shotArgs);
+    }
+
+    if (!options.capturePath.empty())
+    {
+        if (auto captureError = writeCapture(options.capturePath, *device); captureError.has_value())
+            return captureError;
+
+        const std::array<I18nArg, 1> captureArgs{I18nArg{"path", options.capturePath.string()}};
+        core::log(LogLevel::Info, LUAUG_TR("engine.capture.info.written"), captureArgs);
     }
 
     const std::array<I18nArg, 2> summary{

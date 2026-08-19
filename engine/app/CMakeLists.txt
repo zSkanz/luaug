@@ -110,6 +110,21 @@ if(LUAUG_BUILD_TESTS)
     add_test(NAME host_usage_without_script COMMAND luaug_host)
     set_tests_properties(host_usage_without_script PROPERTIES WILL_FAIL TRUE TIMEOUT 60)
 
+    # The blocking render-regression gate (architecture.md §9): record the
+    # command stream and diff it byte-for-byte against a golden. No GPU, no
+    # driver, no tolerance -- so a graphics vendor's update cannot turn the
+    # merge queue red, and it runs on every tier including CI.
+    if(LUAUG_RHI_CAPTURE)
+        add_test(NAME capture_gate
+            COMMAND ${CMAKE_COMMAND}
+                -DHOST=$<TARGET_FILE:luaug_host>
+                -DGOLDEN=${CMAKE_SOURCE_DIR}/tests/rendercapture/clear-3frames.jsonl
+                -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/capture-gate.jsonl
+                -DFRAMES=3
+                -P ${CMAKE_SOURCE_DIR}/tests/rendercapture/run_capture_gate.cmake)
+        set_tests_properties(capture_gate PROPERTIES TIMEOUT 60)
+    endif()
+
     # The M1 gate's reference screenshot: render a frame on a real GPU, read it
     # back, and compare against a checked-in golden with tools/imgcmp.
     #

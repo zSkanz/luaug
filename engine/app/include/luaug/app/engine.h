@@ -37,6 +37,11 @@ struct EngineOptions
     // time anyone could read it.
     std::filesystem::path screenshotPath;
 
+    // Where to write the recorded command stream. Only the capture backend
+    // records one; asking any other backend for it is a usage error rather
+    // than an empty file, because an empty golden would pass forever.
+    std::filesystem::path capturePath;
+
     rhi::BackendId backend = rhi::BackendId::SdlGpu;
 
     i32 width = 1280;

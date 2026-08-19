@@ -136,6 +136,11 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
             options.screenshotPath = std::filesystem::path(arg.substr(13));
             continue;
         }
+        if (arg.starts_with("--capture-out="))
+        {
+            options.capturePath = std::filesystem::path(arg.substr(14));
+            continue;
+        }
         if (arg.starts_with("--rhi="))
         {
             const std::optional<luaug::rhi::BackendId> backend = luaug::app::parseBackendId(arg.substr(6));
@@ -170,6 +175,14 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
     if (!options.screenshotPath.empty() && !options.headless)
     {
         luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.screenshot_needs_headless"));
+        return kExitUsage;
+    }
+
+    // Only the capture backend records a stream. Asking any other one for it
+    // would produce an empty file, and an empty golden matches forever.
+    if (!options.capturePath.empty() && options.backend != luaug::rhi::BackendId::Capture)
+    {
+        luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.capture_needs_backend"));
         return kExitUsage;
     }
 
