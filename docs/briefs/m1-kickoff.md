@@ -365,6 +365,30 @@ compile-only — no runtime verification, which stays post-v1.
     documented only in a comment gets violated by the next caller; put it in the
     signature.
 
+16. **A pixel golden is tied to the GPU that recorded it, and geometry is where
+    that stops being survivable.** The screenshot gate passed on Windows CI
+    while the frame was a flat colour — tolerance 2 covers a unorm rounding
+    difference between devices. It went red the moment the frame contained
+    edges: line rasterization rules differ between this machine's GPU and the
+    runner's software rasterizer.
+
+    The tempting fix is to widen the tolerance until both pass, which leaves a
+    gate that cannot see a real change either. architecture.md §9 already had
+    the answer — the command stream is the blocking gate precisely because it
+    needs no GPU, and it passed on that same Windows run. The screenshot gate is
+    now labelled `gpu-golden` and excluded from CI with `ctest -LE gpu-golden`,
+    running instead on every local gate, which is the arrangement the roadmap
+    explicitly sanctions.
+
+17. **Extracting shared logic and not switching the caller leaves two copies,
+    which is worse than one.** `scripts/gates/*.sh` were written so the local
+    gate and CI would run the same files — and then `ci.yml` kept its inline
+    steps. Within an hour they had diverged: the scripts learned to exclude
+    `.d.luau` from analysis and to allow `scripts/gates/` in the R7 sweep, CI
+    did not, and a change that was green locally went red on CI for reasons
+    unrelated to it. The extraction was only finished when the workflow called
+    the scripts.
+
 ## Attempted / abandoned
 
 - **Vendoring DXC from source (option B).** Rejected with the human: four

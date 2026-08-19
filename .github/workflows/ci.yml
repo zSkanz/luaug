@@ -154,70 +154,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check relative links in markdown
-        shell: bash
-        run: |
-          set -euo pipefail
-          fail=0
-          while IFS=: read -r file link; do
-            target="${link%%#*}"
-            [[ -z "$target" ]] && continue
-            base="$(dirname "$file")"
-            if [[ ! -e "$base/$target" && ! -e "$target" ]]; then
-              echo "::error file=$file::broken relative link: $link"
-              fail=1
-            fi
-          done < <(grep -RnoE '\]\(([^)#h][^):]*)\)' --include='*.md' \
-                   --exclude-dir=third_party . \
-                   | sed -E 's/^([^:]+):[0-9]+:\]\(([^)]*)\)/\1:\2/' )
-          exit $fail
-
-      - name: Version-consistency grep (pinned versions named identically everywhere)
-        shell: bash
-        run: |
-          set -euo pipefail
-          check() { # pattern, forbidden-conflicting-pattern, label
-            if grep -RnE "$2" --include='*.md' --include='*.toml' --include='*.json' \
-                 --exclude-dir=.git --exclude-dir=third_party . ; then
-              echo "::error::version inconsistency for $3 (found '$2'; expected only '$1')"
-              exit 1
-            fi
-          }
-          # Luau pin is 0.734 — flag any other 0.7xx presented as "the pin"
-          check "0.734" "pinned to 0\.7(0|1|2)[0-9]" "Luau"
-          # Lute pin is 1.0.0
-          check "lute@1.0.0" "lute@0\." "Lute"
-          # luau-lsp pin is 1.69.0
-          check "luau-lsp@1.69.0" "luau-lsp@1\.6[0-8]\." "luau-lsp"
-          echo "version consistency ok"
-
-      # `.vscode/settings.json` is on the allowed list for the reason the rule
-      # exists: it is the file that points luau-lsp AWAY from Roblox's platform
-      # mode, and the comment explaining why cites ADR 0020. A rule that forbade
-      # naming the thing being avoided would push that reasoning out of the file
-      # where the next person will need it.
-      - name: Legal sweep (R7) — 'Roblox' only in allowed files
-        shell: bash
-        run: |
-          set -euo pipefail
-          allowed='^(\./)?(README\.md|CONTRIBUTING\.md|NOTICE|MASTER_PROMPT\.md|CLAUDE\.md|PROGRESS\.md|docs/|templates/README\.md|examples/README\.md|tests/README\.md|runtime/README\.md|api/README\.md|engine/README\.md|tools/README\.md|third_party/README\.md|\.vscode/settings\.json)'
-          bad=0
-          while IFS= read -r f; do
-            if ! [[ "$f" =~ $allowed ]]; then
-              echo "::error file=$f::'Roblox' referenced outside the allowed docs set (rule R7)"
-              bad=1
-            fi
-          done < <(grep -RliE 'roblox' --exclude-dir=.git --exclude-dir=.github \
-                     --exclude-dir=third_party . || true)
-          exit $bad
-
-      - name: Ledger format sanity
-        shell: bash
-        run: |
-          for h in "## State" "## Now / Next" "## Blocked" "## Session Log"; do
-            grep -q "$h" PROGRESS.md || { echo "::error::PROGRESS.md missing section '$h'"; exit 1; }
-          done
-          echo "ledger ok"
+      - name: Documentation gate
+        run: scripts/gates/docs-lint.sh
 
   # ---------------------------------------------------------------------------
   # Tier-1 (Windows) and Tier-2 (Linux) build + test. third_party is vendored
@@ -445,7 +383,7 @@ jobs:
           call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
           cmake --preset ${{ matrix.preset }} -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded || exit /b 1
           cmake --build --preset ${{ matrix.preset }} || exit /b 1
-          ctest --preset ${{ matrix.preset }} || exit /b 1
+          ctest --preset ${{ matrix.preset }} -LE gpu-golden || exit /b 1
 
       - name: Configure, build and test (Linux)
         if: runner.os == 'Linux'
@@ -456,7 +394,7 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=sccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           cmake --build --preset ${{ matrix.preset }}
-          ctest --preset ${{ matrix.preset }}
+          ctest --preset ${{ matrix.preset }} -LE gpu-golden
 
       # A compiler cache that never hits is indistinguishable, from the outside,
       # from one that works: the build is green either way and the only symptom
@@ -649,33 +587,10 @@ jobs:
       - name: Generate Lute type definitions
         run: lute setup
 
-      # Repo-wide rather than a list of directories: naming the directories
-      # meant a .luau file created anywhere else would silently escape both
-      # this and the analyzer below. third_party is excluded by .styluaignore
-      # (vendored source is never reformatted -- R13).
-      - name: StyLua formatting check
-        run: stylua --check .
-
-      # --platform=standard: this engine is not Roblox, so no Roblox
-      # definitions are loaded (ADR 0020, api-design §4).
-      # --ignore: Lute 1.0.0's own shipped typedefs do not typecheck cleanly
-      # under the pinned luau-lsp; gating on them would fail for upstream
-      # reasons that have nothing to do with our code.
-      - name: luau-analyze (strict, new type solver)
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t files < <(find . -name '*.luau' -not -path './third_party/*' | sort)
-          if [[ ${#files[@]} -eq 0 ]]; then
-            echo "::error::no .luau files found — the analysis gate would pass vacuously"
-            exit 1
-          fi
-          printf 'analyzing %s file(s)\n' "${#files[@]}"
-          printf '  %s\n' "${files[@]}"
-          luau-lsp analyze --platform=standard --ignore="**/.lute/**" "${files[@]}"
-
-      - name: i18n key check (R3)
-        run: lute tools/repo/i18nlint.luau
-
-      - name: Module layering check (architecture.md §2)
-        run: lute tools/repo/checklayers.luau
+      # One step, running the same file scripts/localgate.ps1 runs. The steps
+      # used to be spelled out here, and the two copies drifted: the local gate
+      # learned to exclude `.d.luau` from analysis and to allow scripts/gates/
+      # in the R7 sweep, and CI did not -- so a change that was green locally
+      # went red here for reasons that had nothing to do with it.
+      - name: Luau gates
+        run: scripts/gates/luau-check.sh

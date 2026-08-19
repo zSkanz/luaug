@@ -165,7 +165,26 @@ if(LUAUG_BUILD_TESTS)
             -DSCRIPT=${CMAKE_SOURCE_DIR}/examples/00-clear/init.luau
             -DFRAMES=30
             -P ${CMAKE_SOURCE_DIR}/tests/screenshots/run_screenshot_gate.cmake)
+    # Labelled `gpu-golden` and EXCLUDED from CI (`ctest -LE gpu-golden`).
+    #
+    # A pixel golden is tied to the GPU that recorded it. Flat colour survived
+    # the move -- tolerance 2 covers a unorm rounding difference -- but geometry
+    # does not: line rasterization rules differ between a discrete GPU and the
+    # runner's software rasterizer, and the gate went red on Windows CI the
+    # moment the frame contained edges.
+    #
+    # The tempting fix is to widen the tolerance until it passes on both, which
+    # would leave a gate that cannot see a real change either. architecture.md
+    # §9 already says the other thing: the command stream is the BLOCKING gate
+    # because it needs no GPU, and real-image comparison is the agent's own
+    # verification tool -- run where the golden was recorded, which the roadmap
+    # explicitly sanctions ("a scripted local gate on the dev machine, recorded
+    # in the gate log either way").
+    #
+    # It runs on every `scripts/localgate.ps1`, and this label is what keeps it
+    # from becoming a gate nobody trusts.
     set_tests_properties(screenshot_gate PROPERTIES
+        LABELS "gpu-golden"
         SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
         TIMEOUT 120)
 endif()
