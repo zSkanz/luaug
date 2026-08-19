@@ -21,17 +21,25 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## Now / Next
 
-- **Next: specify the deferred-signal ordering semantics in
-  `docs/api-design.md`** (brief Decision 10). The gate requires *documented*
-  ordering and the documents currently stop at "deferred-only, drained at
-  resumption points, depth cap 10" — they do not answer FIFO-across-signals vs
-  per-signal, connection order, where a fire raised during a drain lands, or
-  what `Destroy` during iteration does to a queued fire. The conformance spec
-  authors are blocked on those answers, so this is written before any code.
-- Then: freeze the C++ descriptor structs, and fan out `core` primitives
-  (`SlotMap`, `NameAtom`, `Pcg32`, xxh3) and the API IDL + `gen_cpp`/`gen_dts`
-  generators. Kernel work (ECS, facade, signals, `task`, bindings) stays
-  single-threaded per MASTER_PROMPT §7.
+- **Next: write `api/defs/*.api.luau` for the M2 surface**, against
+  `api/schema.luau` (which exists and type-checks). The rulings that fill in
+  every previously-unanswered semantic are now in `docs/api-design.md`, so the
+  def files have something to be faithful to. Then `api/generator/gen_dts.luau`
+  — it unblocks the conformance suite, which cannot pass `luau-analyze` until
+  engine declarations exist.
+- 932 conformance cases in 47 files are **staged outside the repo** at
+  `…/scratchpad/conformance/` and are NOT yet integrated: they cannot pass the
+  analyzer until `gen_dts` emits `runtime/types/engine.d.luau`. Several need
+  correcting first against rulings that overrode their author's guess — the
+  equality-filtered property write, the re-entrancy cap covering `task.defer`,
+  and the removed-globals files, which move to C++ entirely.
+- Kernel work (ECS, Instance facade, signal queue, `task`, bindings) stays
+  single-threaded per MASTER_PROMPT §7. `core` primitives, spec authoring, the
+  IDL and the doc passes are what fanned out.
+- **Read `docs/research/luau-c-api-2026.md` before writing any binding code.**
+  It is the frozen, file-and-line-verified account of the Luau C API at the pin,
+  and rows U-17…U-51 in `docs/research/UNCONFIRMED.md` record where it
+  contradicts the architecture. Brief Decision 13 settles the biggest one.
 - **Run `scripts/localgate.ps1` before every push. Do not use CI as a test
   runner.** Both tiers, ~20 seconds warm. The repository is private, so Actions
   minutes carry platform multipliers and the quota has been close to exhausted.
@@ -160,6 +168,27 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   scheduled for M3 — so `gen_dts` is pulled forward, forced by the gate rather
   than by preference.
   Next: write the ordering semantics into `docs/api-design.md`.
+
+- **2026-08-19 (session 4 continued):** Wrote api-design §3.1/§3.2 (the deferred
+  ordering contract), settled the casing rule with the human (ADR 0034), and
+  fanned out: five vendored-source verifiers, five conformance authors, a
+  restyle pass, a research writer, an i18n pass, a doc-rulings pass and the
+  `core` primitives. Landed `@luaug/testing`, `api/schema.luau` with the §9
+  naming lints, `core`'s `SlotMap`/`AtomTable`/`Pcg32`/`Phase` (71 cases, six
+  mutation tests, all caught), 14 error keys, and 125 rulings written into the
+  documents.
+  Learned: the conformance authors found two contradictions between our own
+  documents and two places where independent authors guessed opposite answers —
+  and the R8 removals turn out to be untestable from inside Luau, so they move
+  to C++. Reading the vendored VM contradicted the architecture in eight
+  load-bearing ways (`docs/research/luau-c-api-2026.md`, U-17…U-51): one
+  metatable per tag makes the Instance binding shape as written impossible,
+  cyclic require does not exist at this pin, `luaL_sandbox` removes nothing, and
+  the 1 s runaway kill raises an error the script can catch. Two headers I had
+  frozen had real defects, both found by the implementer: `AtomTable`'s
+  `string_view` keys dangled on vector growth (SSO), and `SlotMap::erase` was
+  `noexcept` while allocating.
+  Next: write `api/defs/*.api.luau`, then `gen_dts`.
 
 <!-- Format for future entries:
 - **YYYY-MM-DD (session N):** did X; learned Y; Next: <literal first action>.
