@@ -24,19 +24,21 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   clears a texture and reads it back as exactly the colour it was cleared to,
   with no window and no shaders — the screenshot harness the later gates depend
   on already works.
-- **Next: the shader pipeline (step 6 of the brief).** The literal first action
-  is to vendor `sdl_shadercross` with `lute tools/repo/vendor.luau resolve
-  sdl_shadercross <tag>` and **inspect what it pulls in before wiring
-  anything**: it is expected to need SPIRV-Cross and DirectXShaderCompiler, and
-  neither has a manifest row. If it does, that is R5/R6 and stops for the human
-  (§10) — do not add rows unilaterally. The fallback that keeps M1 moving
-  meanwhile is in the brief under risk 2.
-- Remaining after that: frame loop + debug draw (7), headless/screenshot +
-  `tools/imgcmp` (8), ImGui overlay (9), `examples/00-clear` (10), the nightly
-  Android job, the macOS compile job and the first golden capture (11).
-- **The macOS job is M1 work**, not a discrepancy: the M1 gate says
-  "Tier-2/Tier-3 compile" while the roadmap's tier table says macOS compiles
-  from M4. The gate is the narrower contract and wins. Compile-only.
+- Also done since: the fixed-tick frame loop and headless mode with a synthetic
+  clock, the ADR 0023 backend factory, the Tier-3 macOS compile job, and the
+  nightly Android NDK cross-compile.
+- **Next: the shader pipeline (step 6).** The §10 escalation it carried is
+  **resolved — the human chose the prebuilt-DXC path on 2026-08-19.** The
+  literal first action is to write the ADR that amends ADR 0021, which today
+  models a dependency only as "upstream source tree at a commit SHA" and has no
+  row type for a binary artifact pinned by SHA256. Then two manifest rows
+  (`spirv_cross` from source, `dxc` prebuilt), then vendor and wire
+  `sdl_shadercross` — which has **no release tags at all**, so it pins to a
+  `main` commit with a dated version string the way `stb` does.
+- Remaining after that: debug draw (7), screenshot + `tools/imgcmp` (8), ImGui
+  overlay (9), `examples/00-clear` (10), the first golden capture (11).
+- `--screenshot` is deliberately absent from the host until the PNG encoder
+  exists; the readback it needs already works.
 - Carried forward from M0 (none blocked the M0 gate):
   - **CI has no cache.** Every run pays a full cold build: ~8 min per tier,
     almost all of it compiling Luau. `sccache` + a `third_party` cache keyed on
@@ -58,7 +60,11 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## Decisions pending ADR
 
-- (none — ADR 0031 was written and human-approved during M0)
+- **Binary artifacts as vendored dependencies.** ADR 0021 models a dependency
+  as "upstream source tree at a commit SHA"; the prebuilt-DXC path the human
+  chose needs a row type for "release artifact pinned by SHA256". The decision
+  is made — the ADR that records it is not written yet, and it must land in the
+  same commit as the manifest rows (§5: docs follow reality).
 
 ## Session Log
 

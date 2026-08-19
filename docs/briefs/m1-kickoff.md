@@ -164,14 +164,11 @@ compile-only — no runtime verification, which stays post-v1.
    cold build is essentially all Luau, so the lever that matters is the
    carried-forward `Luau.Analysis` trim, not anything M1 adds. Re-measure when
    SDL_shadercross and ImGui land.
-2. **SDL_shadercross's own dependencies.** Its manifest row is still
-   `TBD-AT-M0` / `latest-tag`. Upstream is expected to require SPIRV-Cross and
-   DirectXShaderCompiler; neither has a manifest row. If vendoring it pulls in
-   dependencies that are not in `manifest.json`, that is R5/R6 territory and a
-   §10 escalation — **not** something to resolve by adding rows unilaterally.
-   Fallback if it escalates: commit pre-compiled shader blobs for the debug
-   pipelines and defer the build-time pipeline, which keeps M1 moving while the
-   human decides.
+2. **SDL_shadercross's own dependencies.** ~~Expected~~ **Confirmed, escalated,
+   and decided** — see Finding 7. The guess in this row was wrong in the way
+   that mattered: DXC is not needed "for DXIL", it is the only HLSL front-end
+   for every output format, so there is no DXC-free configuration that keeps
+   ADR 0006. The human chose the prebuilt-DXC path on 2026-08-19.
 3. **Headless GPU on CI runners.** The roadmap already anticipates this and
    permits a scripted local gate on the dev machine. `rhi_capture` is
    deliberately GPU-less so the *blocking* gate never depends on the answer.
@@ -242,7 +239,48 @@ compile-only — no runtime verification, which stays post-v1.
    backend convention, so green is asserted as a range and the other three
    exactly.
 
+7. **DXC is SDL_shadercross's only HLSL front-end, not its DXIL back-end.**
+   This brief's risk 2 assumed DXC could be dropped at the cost of DXIL. It
+   cannot. `SDL_ShaderCross_CompileSPIRVFromHLSL` delegates straight to
+   `SDL_ShaderCross_INTERNAL_CompileUsingDXC`
+   (`src/SDL_shadercross.c:629-642`), and with `SDL_SHADERCROSS_DXC` off that
+   function is a stub that sets an error (`:568-571`). MSL is derived from
+   SPIR-V, so no DXC means no SPIR-V *and* no MSL. SPIRV-Cross is equally
+   unavoidable: `find_package(spirv_cross_c_shared REQUIRED)` with no guarding
+   option (`CMakeLists.txt:145-158`).
+
+   Three more facts that changed the shape of the decision:
+
+   - **SDL_shadercross has never cut a release.** `"version": "latest-tag"` in
+     the manifest is unsatisfiable; there are no tags at all. It must be pinned
+     to a `main` commit with a dated version string, the way `stb` is.
+   - **DXC from source is a fork of LLVM 3.7** — `project(LLVM)` in
+     `dxc/CMakeLists.txt:26` — at 120 MB and 17,648 files, needing Python 3 and
+     TableGen. Against a cold build already near nine minutes per tier, that is
+     not a dependency, it is a second project.
+   - **Upstream pins official Microsoft prebuilt DXC by SHA256**
+     (`build-scripts/download-prebuilt-DirectXShaderCompiler.cmake:1-4`), which
+     is the path chosen. It has no macOS binary — irrelevant here, because
+     architecture.md §8 already builds shadercross as a host tool used when
+     cross-compiling, and macOS Tier-3 is compile-only.
+
+   Licence notes for the record: SPIRV-Cross is Apache-2.0; DXC is NCSA, which
+   is BSD-equivalent but **not literally on R6's list**, so it was a human call.
+   `vkd3d` (LGPL) is reachable only under `SDLSHADERCROSS_INSTALL_RUNTIME`,
+   which defaults off (`CMakeLists.txt:52`) and stays off.
+
 ## Attempted / abandoned
+
+- **Vendoring DXC from source (option B).** Rejected with the human: four
+  manifest rows, ~170 MB, 17k files, a Python 3 toolchain requirement, and an
+  LLVM build on every cold CI tier. It is the only option that gives a macOS
+  *host* path, which is why it was considered at all — but macOS is a
+  compile-only tier and shaders cross-compile from a Tier-1/2 host.
+- **Dropping DXC (option C).** Rejected: it violates ADR 0006 and yields DXBC
+  on Windows only. D3D12 does accept DXBC alone
+  (`third_party/sdl3/src/gpu/d3d12/SDL_gpu_d3d12.c:8688-8689` warns rather than
+  fails), so it would have worked — until M4, at the cost of Vulkan, lavapipe
+  goldens, macOS and Android.
 
 (append during the milestone; §12)
 
