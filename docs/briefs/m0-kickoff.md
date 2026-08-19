@@ -31,8 +31,7 @@ single test is what makes "pinned" mean something.
       (one English catalog proves the seam)
 - [x] rokit-pinned toolchain (Lute 1.0.0, StyLua 2.5.2, luau-lsp 1.69.0)
 - [x] Activate CI: Windows + Linux build, ctest, `luau-analyze` strict on all
-      `.luau`, StyLua check, i18n lint stub, docs-lint — *written and green
-      locally; never executed, because the repo has no remote (see Gate Record)*
+      `.luau`, StyLua check, i18n lint stub, docs-lint
 
 **Deliverable:** `luaug-host boot.luau` prints a catalog-resolved greeting and
 exits 0 on Windows and Linux.
@@ -74,12 +73,12 @@ orchestrator against the rule list (R1–R17) as part of the gate run.
 
 ## Gate checklist (verbatim from roadmap)
 
-- [ ] CI green on Tier-1/Tier-2
-- [ ] `ctest` includes at least: VM boots sandboxed (env mutation from script
+- [x] CI green on Tier-1/Tier-2
+- [x] `ctest` includes at least: VM boots sandboxed (env mutation from script
       fails)
-- [ ] `ctest` includes at least: script error surfaces as a structured engine
+- [x] `ctest` includes at least: script error surfaces as a structured engine
       error with an i18n key
-- [ ] `--version` prints the engine version, the pinned Luau version **and
+- [x] `--version` prints the engine version, the pinned Luau version **and
       commit SHA** (generated at configure time from
       `third_party/manifest.json`, never typed into source), and the Luau ABI
       constants **read from the vendored headers** (`LBC_VERSION_TARGET`,
@@ -183,11 +182,18 @@ Recorded because each one cost real time and will cost it again otherwise.
     `SetConsoleOutputCP(CP_UTF8)` that restores the previous codepage on exit,
     since the codepage belongs to the console rather than the process.
 
-    *Verification gap, stated honestly:* this cannot be confirmed from the
-    agent's environment, which has no interactive console — `GetConsoleOutputCP`
-    returns 0 there and the guard correctly no-ops. Confirmed instead by the
-    human in a real console. A fully robust fix (`WriteConsoleW` with wide
+    *Verification:* this cannot be confirmed from the agent's environment,
+    which has no interactive console — `GetConsoleOutputCP` returns 0 there and
+    the guard correctly no-ops (proven by temporarily disabling the restore and
+    observing the codepage never change). **Confirmed fixed by the human in a
+    real console, 2026-08-19.** A fully robust fix (`WriteConsoleW` with wide
     strings when stdout is a console) belongs to `platform` in M1.
+
+    The general lesson, worth more than the bug: this class of defect is
+    invisible through a pipe, so no CI job and no agent-run check can catch it.
+    Only running the thing for real does. It is the observation rule
+    (`MASTER_PROMPT.md` §8) arriving early, before there is any rendering to
+    screenshot.
 
 ## Measured: how analysis scales with .luau count
 
@@ -226,14 +232,14 @@ to provoke.
 
 ## Gate Record
 
-Run 2026-08-19 on the dev machine (Windows 11, MSVC 19.50.35723 / VS 18
+Local run 2026-08-19 on the dev machine (Windows 11, MSVC 19.50.35723 / VS 18
 Community, CMake 4.1.1, Ninja 1.12.1, out-of-tree at
 `%LOCALAPPDATA%\LuauG\build\win-msvc-dev`).
 
 | Gate item | Result |
 |---|---|
-| CI green on Tier-1 | **Locally green, not executed in CI** — see blocker below |
-| CI green on Tier-2 | **Unverified** — no Linux machine available to this session |
+| CI green on Tier-1 (Windows) | **Pass** |
+| CI green on Tier-2 (Linux) | **Pass** |
 | `ctest`: VM boots sandboxed (env mutation from script fails) | **Pass** |
 | `ctest`: script error → structured engine error with an i18n key | **Pass** |
 | `--version` grounding proof (as amended by ADR 0031) | **Pass** |
@@ -263,16 +269,41 @@ $ lute tools/repo/i18nlint.luau        # 10 references, 22 keys, 0 missing
 $ lute tools/repo/checklayers.luau     # 2 modules, 0 violations
 ```
 
-**M0 is NOT closed.** Two gate items are unmet and neither is closeable by
-this session:
+### CI, both tiers
 
-- The repository has **no git remote**, so no CI run has ever happened. Every
-  job is written and each one passes locally, but "CI green on Tier-1/Tier-2"
-  is a statement about CI, and asserting it from a local run would be a lie.
-  Creating/pushing to a remote needs an account — an escalation item under
-  `MASTER_PROMPT.md` §10.
-- **Tier-2 (Linux) has never been compiled.** The engine builds warning-free
-  under MSVC, but the Linux profile adds `-Wconversion -Wsign-conversion
-  -Wold-style-cast -Wshadow -Wpedantic` with `-Werror`. First-run failures
-  there are likely and are ordinary work to fix — they simply cannot be found
-  from this machine.
+Remote created by the human at `github.com/zSkanz/luaug` (private) during the
+session; the two blockers recorded earlier in this brief are therefore closed.
+
+Run `32235932775` (and re-confirmed on every subsequent push):
+
+| Job | Result |
+|---|---|
+| `docs-lint` | success |
+| `luau-check` | success |
+| `build-test (windows-latest, win-msvc-dev)` | success |
+| `build-test (ubuntu-latest, linux-clang-dev)` | success |
+
+Tier-2 detail, since it had never been compiled before today and was expected
+to fail — the Linux profile adds `-Wconversion -Wsign-conversion
+-Wold-style-cast -Wshadow -Wpedantic` under `-Werror`:
+
+```
+ninja already present: 1.13.2
+-- LuauG: Luau 0.734 @ 3fc82b1071ab387531175869afc4fb528464afa4
+-- Configuring done (5.0s)
+[231/231] Linking CXX executable engine/app/luaug_app_tests
+100% tests passed, 0 tests failed out of 6
+```
+
+It compiled clean on the first real attempt, with no warnings.
+
+Timings (cold, no cache — `sccache` per architecture.md §9 is not built yet):
+Windows `build-test` 8 min 26 s end to end, of which 7 min 59 s is compiling
+(231 targets, mostly Luau itself) and 0.17 s is the tests. `docs-lint` 8 s,
+`luau-check` 10 s.
+
+### Gate result
+
+**All five gate items met.** M0 is complete and awaiting human sign-off, which
+is the milestone checkpoint (`MASTER_PROMPT.md` §6) and the one thing this
+session cannot do for itself.
