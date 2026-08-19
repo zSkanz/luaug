@@ -34,6 +34,11 @@ constexpr int kExitUsage = 2;
 constexpr int kExitScriptError = 1;
 constexpr int kExitNoCatalog = 3;
 
+// Distinct because "this machine has no usable GPU" is not a failure of
+// anything under test. CTest maps it to SKIP, so a runner without a driver
+// reports a skipped render test instead of a red build nobody can act on.
+constexpr int kExitNoGraphicsDevice = 4;
+
 // Catalogs are UTF-8 (ADR 0019); a Windows console decodes raw byte writes with
 // its own codepage and mangles anything non-ASCII, which would quietly reduce
 // "adding a locale is adding a file" to "adding a locale nobody on Windows can
@@ -126,6 +131,11 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
             }
             continue;
         }
+        if (arg.starts_with("--screenshot="))
+        {
+            options.screenshotPath = std::filesystem::path(arg.substr(13));
+            continue;
+        }
         if (arg.starts_with("--rhi="))
         {
             const std::optional<luaug::rhi::BackendId> backend = luaug::app::parseBackendId(arg.substr(6));
@@ -151,6 +161,15 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
     if (options.headless && options.frames == 0)
     {
         luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.headless_needs_frames"));
+        return kExitUsage;
+    }
+
+    // A windowed frame renders into the swapchain, which has been presented and
+    // is gone before anything could read it back. Headless renders into a
+    // target the engine owns, which is why the harness uses it.
+    if (!options.screenshotPath.empty() && !options.headless)
+    {
+        luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.screenshot_needs_headless"));
         return kExitUsage;
     }
 
@@ -206,6 +225,13 @@ int main(int argc, char** argv)
         luaug::core::logText(LogLevel::Error, error->message);
         if (!error->detail.empty())
             luaug::core::logText(LogLevel::Error, error->detail);
+
+        // The key IS the identity of an engine error (ADR 0019), so matching on
+        // it is the intended way to tell one failure from another -- no second
+        // channel, no parsing of prose that translation would break.
+        if (error->key.hash == LUAUG_TR("rhi.err.device_create_failed").hash)
+            return kExitNoGraphicsDevice;
+
         return kExitScriptError;
     }
 

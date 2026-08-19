@@ -9,6 +9,7 @@ luaug_add_module(app
         src/frame_scheduler.cpp
         src/backends.cpp
         src/engine.cpp
+        src/screenshot.cpp
     DEPS
         core
         platform
@@ -30,6 +31,10 @@ endif()
 if(LUAUG_RHI_NULL)
     target_link_libraries(luaug_app PRIVATE luaug::rhi_null)
 endif()
+
+# stb_image_write, for --screenshot. Header-only and SYSTEM, so its warnings are
+# not ours. Moves to `asset` when image IO becomes a subsystem (M4).
+target_include_directories(luaug_app SYSTEM PRIVATE "${LUAUG_THIRD_PARTY_DIR}/stb")
 
 add_executable(luaug_host src/main.cpp)
 set_target_properties(luaug_host PROPERTIES OUTPUT_NAME luaug-host)
@@ -104,4 +109,23 @@ if(LUAUG_BUILD_TESTS)
 
     add_test(NAME host_usage_without_script COMMAND luaug_host)
     set_tests_properties(host_usage_without_script PROPERTIES WILL_FAIL TRUE TIMEOUT 60)
+
+    # The M1 gate's reference screenshot: render a frame on a real GPU, read it
+    # back, and compare against a checked-in golden with tools/imgcmp.
+    #
+    # This is the milestone's actual product -- from here on, any change with
+    # visible output is verifiable by a machine rather than by looking at it
+    # (MASTER_PROMPT.md §8, the observation rule). It skips rather than fails
+    # where there is no GPU; see the driver script for why.
+    add_test(NAME screenshot_gate
+        COMMAND ${CMAKE_COMMAND}
+            -DHOST=$<TARGET_FILE:luaug_host>
+            -DIMGCMP=$<TARGET_FILE:imgcmp>
+            -DGOLDEN=${CMAKE_SOURCE_DIR}/tests/screenshots/pulse-frame30.png
+            -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/screenshot-gate.png
+            -DFRAMES=30
+            -P ${CMAKE_SOURCE_DIR}/tests/screenshots/run_screenshot_gate.cmake)
+    set_tests_properties(screenshot_gate PROPERTIES
+        SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
+        TIMEOUT 120)
 endif()

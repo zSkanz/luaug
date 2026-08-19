@@ -2,9 +2,11 @@
 
 #include <array>
 #include <cmath>
+#include <vector>
 
 #include "luaug/app/backends.h"
 #include "luaug/app/frame_scheduler.h"
+#include "luaug/app/screenshot.h"
 #include "luaug/app/script_host.h"
 #include "luaug/core/build_info.h"
 #include "luaug/core/log.h"
@@ -170,6 +172,23 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     }
 
     device->waitIdle();
+
+    if (!options.screenshotPath.empty() && offscreen.valid())
+    {
+        const auto pixelCount = static_cast<core::usize>(options.width) * static_cast<core::usize>(options.height);
+        std::vector<std::byte> pixels(pixelCount * 4u);
+
+        if (!device->readTexture(offscreen, pixels))
+            return core::makeError(LUAUG_TR("engine.screenshot.err.readback_failed"));
+
+        if (auto writeError = writePng(options.screenshotPath, pixels, static_cast<core::u32>(options.width),
+                static_cast<core::u32>(options.height));
+            writeError.has_value())
+            return writeError;
+
+        const std::array<I18nArg, 1> shotArgs{I18nArg{"path", options.screenshotPath.string()}};
+        core::log(LogLevel::Info, LUAUG_TR("engine.screenshot.info.written"), shotArgs);
+    }
 
     const std::array<I18nArg, 2> summary{
         I18nArg{"frames", static_cast<core::i64>(scheduler.totalFrames())},

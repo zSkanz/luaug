@@ -32,9 +32,10 @@ struct EngineOptions
     // Exit when the frame budget is spent instead of continuing to run.
     bool exitAfterFrames = false;
 
-    // `--screenshot` is deliberately absent until the PNG encoder exists.
-    // The readback it needs already works (rhi::IDevice::readTexture), but an
-    // option the loop silently ignores is a worse lie than a missing feature.
+    // Empty means take no screenshot. Requires `headless`: a windowed frame
+    // renders into the swapchain, which has been presented and is gone by the
+    // time anyone could read it.
+    std::filesystem::path screenshotPath;
 
     rhi::BackendId backend = rhi::BackendId::SdlGpu;
 
