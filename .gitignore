@@ -1,0 +1,44 @@
+# Build output — builds are ALWAYS out-of-tree via $env:LUAUG_BUILD_ROOT (rule R14).
+# These patterns are defensive only; nothing should ever create them in-tree.
+build/
+build-*/
+out/
+cmake-build-*/
+.cache/
+
+# Local tooling installed by scripts/bootstrap (Lute binary etc.)
+.tooling/
+
+# Generated per-project state of example/user projects
+.luaug/
+
+# Bytecode / shader / asset caches
+*.luauc
+shaders/compiled/
+content/cache/
+
+# IDE / editor cruft
+.vs/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.user
+*.suo
+*.swp
+*~
+
+# OS / sync artifacts
+desktop.ini
+Thumbs.db
+.DS_Store
+~$*
+
+# Logs, dumps, profiling traces
+*.log
+*.dmp
+*.perfetto-trace
+
+# Packaging output
+dist/
+*.lpack

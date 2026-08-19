@@ -1,0 +1,33 @@
+# Normalize line endings: LF in the repository, LF on checkout by default.
+* text=auto eol=lf
+
+# Windows-native script formats keep CRLF.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.sln text eol=crlf
+
+# Binary content — never diff, never normalize.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ktx2 binary
+*.basis binary
+*.glb binary
+*.bin binary
+*.pak binary
+*.lpack binary
+*.wav binary
+*.ogg binary
+*.mp3 binary
+*.ttf binary
+*.otf binary
+
+# Golden images: binary and excluded from textual diffs.
+tests/**/golden/** binary -diff
+
+# Vendored third-party source: mark as vendored for tooling/linguist.
+third_party/** linguist-vendored
+
+# Note: adoption of git-LFS for large assets is decided via ADR at milestone M4
+# (when real art assets first land). Until then keep binary assets tiny.

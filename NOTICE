@@ -1,0 +1,15 @@
+LuauG
+Copyright 2026 LuauG Contributors
+
+This product includes software developed by the LuauG project
+(https://github.com/luaug).
+
+Licensed under the Apache License, Version 2.0.
+
+Redistributions of this software must retain this NOTICE file.
+Third-party components vendored under third_party/ are licensed under their
+own terms; see THIRD_PARTY_NOTICES.md for the aggregated list.
+
+LuauG is not affiliated with, endorsed by, or sponsored by Roblox Corporation.
+Luau is copyright Roblox Corporation and Lua.org, PUC-Rio, used under the MIT
+license.
