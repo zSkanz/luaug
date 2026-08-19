@@ -4,10 +4,20 @@
   "engine.boot.hello": "LuauG {version} — engine initialized.",
   "engine.boot.shutdown": "Shutting down (reason: {reason}).",
 
+  "engine.cli.usage": "Usage: luaug-host <script.luau> | --version | --help",
+  "engine.cli.err.no_script": "No script given. Usage: luaug-host <script.luau>",
+  "engine.cli.err.unknown_option": "Unknown option: {option}.",
+  "engine.cli.err.script_missing": "Script not found: {path}.",
+  "engine.cli.version.engine": "LuauG {version} ({profile})",
+  "engine.cli.version.luau": "Luau {version} ({commit})",
+  "engine.cli.version.abi": "Luau ABI: bytecode {bytecode}, types {types}, vector {vectorSize}-wide {vectorPrecision}",
+
   "scene.err.parent_cycle": "Cannot set Parent: this would create a cycle ({instance}).",
   "scene.err.invalid_size": "Invalid Size for {instance}: components must be positive.",
   "scene.warn.wait_for_child": "Infinite yield possible on WaitForChild(\"{name}\") — parent: {parent}.",
 
+  "script.err.syntax": "Could not compile {source}: {message}",
+  "script.err.runtime": "Error while running {source}: {message}",
   "script.err.instance_dead": "This Instance has been destroyed and can no longer be used.",
   "script.err.reentrancy_limit": "Deferred signal re-entrancy limit (10) reached; handler dropped.",
   "script.err.heap_limit": "Script memory limit reached ({limitMb} MB).",

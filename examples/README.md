@@ -5,6 +5,7 @@ automated headless gate script (screenshot/capture + asserted behavior):
 
 | Example | Born in | Proves |
 |---|---|---|
+| `boot` | M0 | the host boots a sandboxed VM, runs Luau, and routes output through the i18n'd log (unnumbered: numbering starts at the first milestone with a window) |
 | `00-clear` | M1 | window, RHI clear, debug draw, Luau-driven visuals, screenshot harness |
 | `01-instances` | M2 | Instance tree over ECS, deferred signals, task, 500 scripted cubes |
 | `02-meshes` | M4 | glTF loading, PBR, shadows, camera, day/night slider |

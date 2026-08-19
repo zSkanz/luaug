@@ -1,6 +1,4 @@
 # LuauG superbuild root.
-# STATUS: stub — activated in milestone M0 (docs/roadmap.md). The presets in
-# CMakePresets.json are final; module wiring lands with M0.
 #
 # Builds are ALWAYS out-of-tree: binaryDir = $env{LUAUG_BUILD_ROOT}/<preset>
 # (rule R14). scripts/bootstrap.* sets LUAUG_BUILD_ROOT if unset.
@@ -23,23 +21,31 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Profiles: debug | dev | profile | shipping (docs/architecture.md §8)
 set(LUAUG_PROFILE "dev" CACHE STRING "LuauG build profile")
 
-# --- Activated in M0 -------------------------------------------------------
-# include(cmake/luaug_options.cmake)     # LUAUG_RHI_SDLGPU, LUAUG_PHYSICS_JOLT, ... (ADR 0023)
-# include(cmake/luaug_warnings.cmake)
-# include(cmake/luaug_sanitizers.cmake)
-# include(cmake/luaug_luau.cmake)        # vendored Luau: LUA_VECTOR_SIZE=3 (ADR 0013)
-# include(cmake/luaug_module.cmake)      # luaug_add_module() with layer enforcement
-# include(cmake/luaug_shaders.cmake)
-#
-# add_subdirectory(third_party)
-# add_subdirectory(engine/core)
-# add_subdirectory(engine/jobs)
-# add_subdirectory(engine/platform)
-# ... (layer order per docs/architecture.md §2)
-# add_subdirectory(engine/app)
-# add_subdirectory(tools/importer)
-# add_subdirectory(examples)
-# enable_testing()
-# ---------------------------------------------------------------------------
+set(LUAUG_CMAKE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+set(LUAUG_THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
+set(LUAUG_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
 
-message(STATUS "LuauG: docs-first phase — engine targets activate in M0 (docs/roadmap.md).")
+# ABI-defining and repo-wide BEFORE any subdirectory (ADR 0013). These are
+# already Luau's defaults; stating them makes the decision explicit and, more
+# importantly, guarantees that if they are ever changed they change for the VM
+# and for our code together. A per-target definition here would be an ABI
+# landmine: LUA_VECTOR_DOUBLE alone moves LUA_TVECTOR's ordinal in `lua_Type`.
+add_compile_definitions(LUA_VECTOR_SIZE=3 LUA_VECTOR_DOUBLE=0)
+
+include(${LUAUG_CMAKE_DIR}/luaug_options.cmake)
+include(${LUAUG_CMAKE_DIR}/luaug_warnings.cmake)
+include(${LUAUG_CMAKE_DIR}/luaug_sanitizers.cmake)
+include(${LUAUG_CMAKE_DIR}/luaug_provenance.cmake)
+include(${LUAUG_CMAKE_DIR}/luaug_module.cmake)
+
+if(LUAUG_BUILD_TESTS)
+    enable_testing()
+endif()
+
+add_subdirectory(third_party)
+
+# Modules are added in layer order; luaug_add_module() refuses a dependency it
+# has not seen yet, which makes an out-of-order edit a configure error rather
+# than a subtle cycle (architecture.md §2).
+add_subdirectory(engine/core)
+add_subdirectory(engine/app)
