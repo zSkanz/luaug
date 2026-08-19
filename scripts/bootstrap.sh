@@ -45,10 +45,14 @@ if [[ "$(uname -s)" == "Linux" ]]; then
     echo "  ok  SDL video headers (X11 and/or Wayland)"
   else
     echo "  --  no X11 or Wayland development headers; SDL cannot configure"
-    echo "      Debian/Ubuntu: sudo apt-get install libx11-dev libxext-dev libxrandr-dev \\"
-    echo "        libxcursor-dev libxi-dev libxfixes-dev libxss-dev libxkbcommon-dev \\"
-    echo "        libwayland-dev wayland-protocols libdecor-0-dev"
-    echo "      Full list: https://wiki.libsdl.org/SDL3/README-linux#build-dependencies"
+    echo "      Debian/Ubuntu (the video half of SDL's own list; .github/workflows/ci.yml"
+    echo "      installs exactly this set):"
+    echo "        sudo apt-get install libx11-dev libxext-dev libxrandr-dev libxcursor-dev \\"
+    echo "          libxfixes-dev libxi-dev libxss-dev libxtst-dev libxkbcommon-dev \\"
+    echo "          libthai-dev libfribidi-dev libdrm-dev libgbm-dev libgl1-mesa-dev \\"
+    echo "          libgles2-mesa-dev libegl1-mesa-dev libdbus-1-dev libibus-1.0-dev \\"
+    echo "          libudev-dev libwayland-dev wayland-protocols libdecor-0-dev"
+    echo "      Full list: third_party/sdl3/docs/README-linux.md"
     problems+=("sdl-video-headers")
   fi
 fi

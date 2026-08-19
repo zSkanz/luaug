@@ -143,6 +143,13 @@ jobs:
       # build we would ship. The list is the X11 and Wayland halves of SDL's
       # own README-linux build dependencies, minus the parts belonging to
       # subsystems we disable (audio, camera, joystick/hidapi).
+      #
+      # Taken from third_party/sdl3/docs/README-linux.md rather than assembled
+      # by hand: SDL's X11 check is all-or-nothing per feature, so a list built
+      # from what the last failure named costs one CI round trip per missing
+      # package. Everything video, input-method or DRM related is here; only the
+      # audio and joystick packages are dropped, and those match subsystems this
+      # repo turns off by decision (ADR 0009 for audio, ADR 0029 for input).
       - name: Install SDL video dependencies (Linux)
         if: runner.os == 'Linux'
         timeout-minutes: 10
@@ -151,8 +158,11 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
-            libxfixes-dev libxss-dev libxkbcommon-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
+            libxi-dev libxss-dev libxtst-dev libxkbcommon-dev \
+            libthai-dev libfribidi-dev \
+            libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
+            libdbus-1-dev libibus-1.0-dev libudev-dev \
             libwayland-dev wayland-protocols libdecor-0-dev
 
       # The presets use the Ninja generator with `strategy: external`, so the
