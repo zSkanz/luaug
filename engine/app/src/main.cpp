@@ -9,12 +9,6 @@
 #include <string_view>
 #include <vector>
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <windows.h>
-#endif
-
 #include <Luau/Bytecode.h>
 #include <lua.h>
 
@@ -23,6 +17,8 @@
 #include "luaug/core/error.h"
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
+#include "luaug/platform/console.h"
+#include "luaug/platform/platform.h"
 
 namespace
 {
@@ -35,59 +31,23 @@ constexpr int kExitUsage = 2;
 constexpr int kExitScriptError = 1;
 constexpr int kExitNoCatalog = 3;
 
-// Catalogs are UTF-8 (ADR 0019) and the log writes their bytes straight to the
-// console. A Windows console left on a legacy OEM codepage decodes those bytes
-// as its own charset -- an em dash comes out as "ÔÇö" under CP-850 -- so any
-// catalog with non-ASCII text is unreadable. That would quietly reduce "adding
-// a locale is adding a file" to "adding a locale nobody on Windows can read".
-//
-// The console codepage belongs to the console, not the process, so it is
-// restored on exit rather than left changed under whatever shell invoked us.
-class ConsoleEncodingGuard
+// Catalogs are UTF-8 (ADR 0019); a Windows console decodes raw byte writes with
+// its own codepage and mangles anything non-ASCII, which would quietly reduce
+// "adding a locale is adding a file" to "adding a locale nobody on Windows can
+// read". `platform::writeConsole` is the fix, and routing the log through it is
+// how every engine message gets it.
+void installConsoleLogSink()
 {
-public:
-    ConsoleEncodingGuard()
-    {
-#ifdef _WIN32
-        previous_ = GetConsoleOutputCP();
-        if (previous_ != 0 && previous_ != CP_UTF8)
-            SetConsoleOutputCP(CP_UTF8);
-#endif
-    }
-
-    ~ConsoleEncodingGuard()
-    {
-#ifdef _WIN32
-        if (previous_ != 0 && previous_ != CP_UTF8)
-            SetConsoleOutputCP(previous_);
-#endif
-    }
-
-    ConsoleEncodingGuard(const ConsoleEncodingGuard&) = delete;
-    ConsoleEncodingGuard& operator=(const ConsoleEncodingGuard&) = delete;
-
-private:
-#ifdef _WIN32
-    // Zero means there is no console attached (output is a pipe or a file), in
-    // which case the bytes pass through untouched and there is nothing to fix.
-    UINT previous_ = 0;
-#endif
-};
-
-// Locating content is `platform::paths()` from M1 onward; until that module
-// exists the host derives it from argv[0], which is what CTest and a shell
-// both provide.
-std::filesystem::path contentRoot(const char* argv0)
-{
-    std::error_code ec;
-    const std::filesystem::path self(argv0 != nullptr ? argv0 : "");
-    if (self.has_parent_path())
-    {
-        std::filesystem::path dir = std::filesystem::absolute(self, ec).parent_path();
-        if (!ec)
-            return dir / "content";
-    }
-    return std::filesystem::current_path(ec) / "content";
+    luaug::core::setLogSink(
+        [](LogLevel level, std::string_view text)
+        {
+            // Warnings and errors go to stderr so a headless CI run can
+            // separate them from ordinary output without parsing.
+            const auto stream = (level == LogLevel::Warn || level == LogLevel::Error)
+                ? luaug::platform::ConsoleStream::Err
+                : luaug::platform::ConsoleStream::Out;
+            luaug::platform::writeConsole(stream, luaug::core::formatLogLine(level, text));
+        });
 }
 
 // The one place a user-facing string may be hardcoded: if the catalog itself
@@ -124,10 +84,10 @@ void printVersion()
 
 int main(int argc, char** argv)
 {
-    const ConsoleEncodingGuard consoleEncoding;
+    installConsoleLogSink();
 
-    const std::filesystem::path content = contentRoot(argc > 0 ? argv[0] : nullptr);
-    const auto catalogLoad = luaug::core::engineCatalog().loadFromFile(content / "i18n" / "en.json");
+    const auto& paths = luaug::platform::paths();
+    const auto catalogLoad = luaug::core::engineCatalog().loadFromFile(paths.contentDir / "i18n" / "en.json");
     if (!catalogLoad)
     {
         reportCatalogFailure(catalogLoad.diagnostic);

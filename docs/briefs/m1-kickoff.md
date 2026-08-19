@@ -205,6 +205,15 @@ compile-only — no runtime verification, which stays post-v1.
    link time. Useful to know before assuming a subsystem toggle is what makes
    a call unavailable: it is not, and `platform` must not rely on it for that.
 
+3. **`SDL_GetTicksNS` reads 0 before `SDL_Init`.** Its epoch is SDL library
+   initialization, not the process. A frame loop or a profiler built on it
+   silently measures startup as zero and then reports one impossibly long first
+   frame. Caught by a test that passed standalone and failed under CTest
+   depending on which case ran first — the kind of order dependence that is
+   painful to find later. `platform::nowNs()` uses `std::chrono::steady_clock`
+   instead: monotonic by standard guarantee, no bring-up, same resolution on
+   every target.
+
 ## Attempted / abandoned
 
 (append during the milestone; §12)

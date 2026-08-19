@@ -48,4 +48,5 @@ add_subdirectory(third_party)
 # has not seen yet, which makes an out-of-order edit a configure error rather
 # than a subtle cycle (architecture.md §2).
 add_subdirectory(engine/core)
+add_subdirectory(engine/platform)
 add_subdirectory(engine/app)

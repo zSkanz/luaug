@@ -8,6 +8,7 @@ luaug_add_module(app
         src/script_host.cpp
     DEPS
         core
+        platform
     PUBLIC_DEPS
         luaug::luau
         luaug::build_info

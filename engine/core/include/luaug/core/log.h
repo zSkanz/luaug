@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <span>
+#include <string>
 #include <string_view>
 
 #include "luaug/core/i18n.h"
@@ -28,6 +29,11 @@ enum class LogLevel : u8
 // Receives already-formatted text. Installed by the host so tests and the
 // future DebugShell can capture output.
 using LogSink = std::function<void(LogLevel, std::string_view)>;
+
+// The `[level] text\n` line the built-in writer emits. Exposed so a sink that
+// replaces where output goes -- not what it looks like -- does not have to
+// re-derive the format and drift from it.
+[[nodiscard]] std::string formatLogLine(LogLevel level, std::string_view text);
 
 void setLogSink(LogSink sink);
 void resetLogSink();

@@ -1,6 +1,7 @@
 #include "luaug/core/log.h"
 
 #include <cstdio>
+#include <string>
 #include <utility>
 
 namespace luaug::core
@@ -19,8 +20,8 @@ void writeDefault(LogLevel level, std::string_view text)
     // Warnings and errors go to stderr so a headless CI run can separate them
     // from ordinary output without parsing.
     std::FILE* stream = (level == LogLevel::Warn || level == LogLevel::Error) ? stderr : stdout;
-    std::fprintf(stream, "[%.*s] %.*s\n", static_cast<int>(logLevelName(level).size()), logLevelName(level).data(),
-        static_cast<int>(text.size()), text.data());
+    const std::string line = formatLogLine(level, text);
+    std::fwrite(line.data(), 1, line.size(), stream);
     std::fflush(stream);
 }
 
@@ -37,6 +38,20 @@ std::string_view logLevelName(LogLevel level) noexcept
     case LogLevel::Error: return "error";
     }
     return "info";
+}
+
+std::string formatLogLine(LogLevel level, std::string_view text)
+{
+    const std::string_view name = logLevelName(level);
+
+    std::string line;
+    line.reserve(name.size() + text.size() + 4);
+    line += '[';
+    line += name;
+    line += "] ";
+    line += text;
+    line += '\n';
+    return line;
 }
 
 void setLogSink(LogSink sink)

@@ -12,6 +12,10 @@
   "engine.cli.version.luau": "Luau {version} ({commit})",
   "engine.cli.version.abi": "Luau ABI: bytecode {bytecode}, types {types}, vector {vectorSize}-wide {vectorPrecision}",
 
+  "platform.err.init_failed": "Could not start the platform layer.",
+  "platform.err.window_failed": "Could not create the game window.",
+  "platform.window.title": "LuauG {version}",
+
   "scene.err.parent_cycle": "Cannot set Parent: this would create a cycle ({instance}).",
   "scene.err.invalid_size": "Invalid Size for {instance}: components must be positive.",
   "scene.warn.wait_for_child": "Infinite yield possible on WaitForChild(\"{name}\") — parent: {parent}.",
