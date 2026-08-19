@@ -8,6 +8,7 @@ luaug_add_module(core
         src/i18n.cpp
         src/log.cpp
         src/error.cpp
+        src/math.cpp
 )
 
 luaug_add_module_tests(core
@@ -15,4 +16,5 @@ luaug_add_module_tests(core
         tests/text_key_tests.cpp
         tests/i18n_tests.cpp
         tests/error_tests.cpp
+        tests/math_tests.cpp
 )
