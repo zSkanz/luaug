@@ -49,4 +49,5 @@ add_subdirectory(third_party)
 # than a subtle cycle (architecture.md §2).
 add_subdirectory(engine/core)
 add_subdirectory(engine/platform)
+add_subdirectory(engine/rhi)
 add_subdirectory(engine/app)

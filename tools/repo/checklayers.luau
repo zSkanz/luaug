@@ -17,25 +17,25 @@ local process = require("@std/process")
 local ENGINE_ROOT = "engine"
 local SCAN_SUFFIXES = { ".cpp", ".h" }
 
--- The layer matrix, transcribed from architecture.md §2. Backends sit at their
--- interface's layer; only `app` may link them (ADR 0023).
+-- The layer matrix, keyed by the names that actually appear in include paths --
+-- `#include "luaug/rhi/device.h"` -- which are the directories in
+-- architecture.md §1's tree, not the CMake target names.
+--
+-- The distinction matters for seams. A seam and its backends share one
+-- directory and one include root (`rhi/` holds rhi_api, rhi_sdlgpu,
+-- rhi_capture, rhi_null; ADR 0023) and are separate targets, not separate
+-- layers. What keeps "everything above sees only the interface" true is not
+-- this table: it is that a backend has no public headers at all. Its headers
+-- live under src/, so no other module can reach them whatever the layer says.
 local LAYERS: { [string]: number } = {
     core = 0,
 
     jobs = 1,
     platform = 1,
 
-    rhi_api = 2,
-    rhi_sdlgpu = 2,
-    rhi_capture = 2,
-    rhi_null = 2,
-    rhi_bgfx = 2,
-    physics_api = 2,
-    physics_jolt = 2,
-    physics_box2d = 2,
-    net_api = 2,
-    net_gns = 2,
-    net_enet = 2,
+    rhi = 2,
+    physics = 2,
+    net = 2,
     audio = 2,
     asset = 2,
 
