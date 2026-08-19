@@ -10,8 +10,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Builds are always out-of-tree (rule R14). runner.temp is outside the
-  # checkout, so an in-tree build would fail the root CMakeLists guard.
+  # Pinned here so the version is visible in this file rather than buried in a
+  # third-party action (R5).
   ROKIT_VERSION: "1.2.0"
 
 jobs:
@@ -29,6 +29,7 @@ jobs:
   # ---------------------------------------------------------------------------
   docs-lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -105,6 +106,7 @@ jobs:
           - { os: windows-latest, preset: win-msvc-dev }
           - { os: ubuntu-latest, preset: linux-clang-dev }
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -112,9 +114,23 @@ jobs:
         shell: bash
         run: echo "LUAUG_BUILD_ROOT=${RUNNER_TEMP}/luaug-build" >> "$GITHUB_ENV"
 
-      - name: Install Ninja (Linux)
+      # The runner images already ship Ninja, so this is a fallback rather than
+      # an install step. The first CI run hung here for 10+ minutes on
+      # `apt-get update` (a known runner failure mode: a mirror stall or a lock
+      # held by unattended-upgrades), which is pure waste when the tool is
+      # already present. Checking first skips apt entirely in the normal case.
+      - name: Ensure Ninja (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v ninja >/dev/null 2>&1; then
+            echo "ninja already present: $(ninja --version)"
+          else
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends ninja-build
+          fi
 
       # The presets use the Ninja generator with `strategy: external`, so the
       # MSVC environment must be established first. vswhere avoids hardcoding
@@ -144,6 +160,7 @@ jobs:
   # ---------------------------------------------------------------------------
   luau-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
