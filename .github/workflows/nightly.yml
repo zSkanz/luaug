@@ -1,0 +1,178 @@
+name: Nightly
+
+# Nothing in this file gates a merge, and that is structural rather than a
+# promise: there is no `pull_request` and no `push` trigger, so these jobs never
+# appear as checks on a pull request and branch protection cannot select them as
+# required. Failure is therefore left to fail honestly -- a red run in the
+# Actions tab plus the scheduled-run notification -- instead of being swallowed
+# with `continue-on-error`, which would keep the tab green and make the job
+# worth exactly nothing.
+on:
+  # Deliberately not on the hour: GitHub queues everybody's `0 * * * *` crons at
+  # once and delays scheduled runs under that load. Also worth knowing when the
+  # nightly appears to have stopped for no reason -- GitHub disables scheduled
+  # workflows in a repository after 60 days without commits.
+  schedule:
+    - cron: "37 4 * * *"
+  # An edit to this file is otherwise only testable by waiting a day.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # The opposite of ci.yml's choice on purpose: CI cancels superseded runs
+  # because a newer commit answers the same question, while a nightly gets one
+  # run per day and cancelling it loses the answer entirely.
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Android NDK cross-compile (roadmap: "Early Android portability check").
+  #
+  # Compile-only, and there is no device anywhere in this project -- the point is
+  # to catch API and toolchain breaks in the platform/RHI layers early, while
+  # they are one commit old, rather than at the human device checkpoint before
+  # the RHI freeze at the end of M4. Mobile itself stays post-v1 (R15).
+  # ---------------------------------------------------------------------------
+  android-ndk:
+    name: Android NDK cross-compile (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set out-of-tree build root (R14)
+        shell: bash
+        run: echo "LUAUG_BUILD_ROOT=${RUNNER_TEMP}/luaug-build" >> "$GITHUB_ENV"
+
+      # Same reasoning as ci.yml's copy of this step: the runner image already
+      # ships Ninja, so this is a fallback, and checking first avoids an
+      # `apt-get update` that has been observed to stall for ten minutes.
+      - name: Ensure Ninja
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v ninja >/dev/null 2>&1; then
+            echo "ninja already present: $(ninja --version)"
+          else
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends ninja-build
+          fi
+
+      # The pin lives in cmake/toolchains/android.cmake so that a local
+      # cross-build uses the same NDK as CI. Reading it back here rather than
+      # repeating the number keeps one version literal in the repo; the
+      # toolchain additionally asserts that the NDK it resolves reports this
+      # revision, so a mismatch is a configure error rather than a quiet build
+      # against a different compiler.
+      - name: Resolve the pinned NDK version (R5)
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^set(LUAUG_ANDROID_NDK_VERSION "\([^"]*\)".*/\1/p' \
+                     cmake/toolchains/android.cmake | head -n 1)"
+          if [[ -z "$version" ]]; then
+            echo "::error file=cmake/toolchains/android.cmake::LUAUG_ANDROID_NDK_VERSION not found -- the pin moved or changed shape"
+            exit 1
+          fi
+          echo "ANDROID_NDK_VERSION=$version" >> "$GITHUB_ENV"
+          echo "pinned NDK: $version"
+
+      # Installed by exact package revision rather than taken from
+      # ANDROID_NDK_LATEST_HOME: "latest" is precisely what R5 forbids, and the
+      # runner image's preinstalled set changes without notice. Skipped when the
+      # image already carries the pinned revision, which costs one directory
+      # test instead of a ~1 GB download.
+      - name: Install the pinned Android NDK
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          if [[ -z "$sdk_root" ]]; then
+            echo "::error::no Android SDK on this runner (ANDROID_SDK_ROOT and ANDROID_HOME are both unset)"
+            exit 1
+          fi
+          ndk_root="$sdk_root/ndk/$ANDROID_NDK_VERSION"
+          if [[ -d "$ndk_root" ]]; then
+            echo "NDK $ANDROID_NDK_VERSION already installed at $ndk_root"
+          else
+            sdkmanager="$(command -v sdkmanager || echo "$sdk_root/cmdline-tools/latest/bin/sdkmanager")"
+            if [[ ! -x "$sdkmanager" ]]; then
+              echo "::error::sdkmanager not found (looked for it on PATH and under $sdk_root/cmdline-tools/latest/bin)"
+              exit 1
+            fi
+            # `yes` answers the licence prompt. The hosted images pre-accept the
+            # SDK licences, so this only matters on a fresh or self-hosted
+            # runner -- where the alternative is a job that hangs until timeout.
+            #
+            # pipefail is off for exactly this pipeline: `yes` is killed by
+            # SIGPIPE the instant sdkmanager stops reading, so it exits 141, and
+            # under pipefail that turns every *successful* install into a failed
+            # step. With pipefail off and `set -e` still on, the pipeline's
+            # status is sdkmanager's, which is the status that means anything.
+            set +o pipefail
+            yes | "$sdkmanager" --install "ndk;$ANDROID_NDK_VERSION" > /dev/null
+            set -o pipefail
+          fi
+          echo "ANDROID_NDK_ROOT=$ndk_root" >> "$GITHUB_ENV"
+
+      # No preset: CMakePresets.json has no android-clang entry yet
+      # (architecture.md §8 lists it as "later"). The flags therefore spell out
+      # what the dev presets spell out -- same profile, same config -- so that
+      # what compiles here is compiled the way Tier-1 compiles it, optimizer
+      # warnings included. Tests are off because nothing here can run one, and
+      # building doctest would buy only wall time.
+      - name: Configure (Android arm64, compile-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B "$LUAUG_BUILD_ROOT/android-arm64" -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/cmake/toolchains/android.cmake" \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DLUAUG_PROFILE=dev \
+            -DLUAUG_BUILD_TESTS=OFF
+
+      # Named targets, not the default target. `engine/app` links the Luau VM
+      # and produces the host executable; cross-compiling that would answer a
+      # much larger question than "does the render seam still build for arm64",
+      # take several times as long, and fail for reasons that have nothing to do
+      # with Android graphics. The roadmap's list for this job is `platform` +
+      # `rhi_api` + `rhi_sdlgpu`; SDL3 comes along as rhi_sdlgpu's dependency,
+      # which is most of the value -- it proves the vendored subsystem set
+      # configures and compiles against the NDK.
+      #
+      # rhi_api is absent from the list because it is an INTERFACE library: it
+      # has no translation unit of its own and the Ninja generator emits no rule
+      # for it. It is covered all the same, since rhi_sdlgpu's source includes
+      # its headers (engine/rhi/src/sdlgpu/sdlgpu_device.cpp).
+      - name: Build platform + rhi_sdlgpu (and SDL3)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build "$LUAUG_BUILD_ROOT/android-arm64" \
+            --target luaug_platform luaug_rhi_sdlgpu
+
+      # A nightly nobody reads is a nightly that does not exist. Written on
+      # failure too, so the run page states what was attempted instead of
+      # leaving it to be reconstructed from log scrollback.
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Android NDK cross-compile"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| NDK | \`${ANDROID_NDK_VERSION:-unresolved}\` |"
+            echo "| ABI / API | \`arm64-v8a\` / 21 |"
+            echo "| targets | \`luaug_platform\`, \`luaug_rhi_sdlgpu\`, SDL3 |"
+            echo "| result | **${{ job.status }}** |"
+            echo
+            echo "Compile-only: no device, no tests, no runtime claim."
+            echo "Non-blocking by construction -- this workflow has no pull-request trigger."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -188,6 +188,56 @@ jobs:
           ctest --preset ${{ matrix.preset }}
 
   # ---------------------------------------------------------------------------
+  # Tier-3 (macOS). Compile only, by decision rather than by omission.
+  #
+  # The roadmap's tier table makes macOS a "must compile" tier and puts runtime
+  # verification post-v1; the M1 gate says "Tier-2/Tier-3 compile". Nobody on
+  # this project has a Mac to reproduce a runtime failure on, so a red macOS
+  # test would be a check that cannot be acted on -- worse than no check, since
+  # the only available responses are to disable it or to guess. Compiling is a
+  # claim this job can actually stand behind.
+  #
+  # Everything is built, including the test executables: compiling them is free
+  # coverage over the headers they exercise. Nothing is run, so the absence of a
+  # `ctest` step below is the point of the job, not an oversight.
+  # ---------------------------------------------------------------------------
+  build-macos:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set out-of-tree build root (R14)
+        shell: bash
+        run: echo "LUAUG_BUILD_ROOT=${RUNNER_TEMP}/luaug-build" >> "$GITHUB_ENV"
+
+      # Same shape as the Linux fallback above: the image ships Ninja, so brew
+      # is the unlucky path rather than the expected one.
+      - name: Ensure Ninja (macOS)
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v ninja >/dev/null 2>&1; then
+            echo "ninja already present: $(ninja --version)"
+          else
+            brew install ninja
+          fi
+
+      # There is no macOS equivalent of the Linux SDL dependency step, and that
+      # is not an omission either: Cocoa, Metal and QuartzCore are SDK
+      # frameworks that arrive with Xcode. SDL's Objective-C sources compile
+      # through the C compiler with `-x objective-c` forced per source file
+      # (third_party/sdl3/CMakeLists.txt), so the root project's
+      # `LANGUAGES CXX C` needs no OBJC addition for this tier.
+      - name: Configure and build (compile only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset macos-clang-dev
+          cmake --build --preset macos-clang-dev
+
+  # ---------------------------------------------------------------------------
   # Luau-side static gates: strict analysis under the new solver (R2), StyLua
   # formatting, the i18n key check (R3), and the module layering rule.
   # ---------------------------------------------------------------------------
