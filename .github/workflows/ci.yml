@@ -15,6 +15,12 @@ jobs:
   # verifiable — every relative link resolves, pinned versions are consistent,
   # no stray Roblox references outside the allowed files (rule R7 sweep).
   # ---------------------------------------------------------------------------
+  # NOTE ON `--exclude-dir=third_party` BELOW: every step in this job checks
+  # documentation *we* authored. Vendored upstream trees are governed by
+  # ADR 0021 (pinned + never edited in place, R13), carry their own licenses,
+  # and legitimately contain both broken relative links and the word "Roblox"
+  # (Luau is a Roblox project). Linting them would be meaningless and a
+  # permanent source of false failures.
   docs-lint:
     runs-on: ubuntu-latest
     steps:
@@ -33,7 +39,8 @@ jobs:
               echo "::error file=$file::broken relative link: $link"
               fail=1
             fi
-          done < <(grep -RnoE '\]\(([^)#h][^):]*)\)' --include='*.md' . \
+          done < <(grep -RnoE '\]\(([^)#h][^):]*)\)' --include='*.md' \
+                   --exclude-dir=third_party . \
                    | sed -E 's/^([^:]+):[0-9]+:\]\(([^)]*)\)/\1:\2/' )
           exit $fail
 
@@ -43,7 +50,7 @@ jobs:
           set -euo pipefail
           check() { # pattern, forbidden-conflicting-pattern, label
             if grep -RnE "$2" --include='*.md' --include='*.toml' --include='*.json' \
-                 --exclude-dir=.git . ; then
+                 --exclude-dir=.git --exclude-dir=third_party . ; then
               echo "::error::version inconsistency for $3 (found '$2'; expected only '$1')"
               exit 1
             fi
@@ -67,7 +74,8 @@ jobs:
               echo "::error file=$f::'Roblox' referenced outside the allowed docs set (rule R7)"
               bad=1
             fi
-          done < <(grep -RliE 'roblox' --exclude-dir=.git --exclude-dir=.github . || true)
+          done < <(grep -RliE 'roblox' --exclude-dir=.git --exclude-dir=.github \
+                     --exclude-dir=third_party . || true)
           exit $bad
 
       - name: Ledger format sanity

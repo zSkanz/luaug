@@ -17,7 +17,7 @@ in the source report).
 | U-04 | Android NCG scope (ABIs, W^X handling, version floor) beyond "production-tested" | luau-2026.md §3 | 2026-08-19 | unverified | — | Mobile phase planning |
 | U-05 | iOS prohibits JIT ⇒ Luau NCG unavailable in App Store builds (well-established policy; no explicit 2026 Luau statement found) | ecosystem-2026.md notes | 2026-08-19 | unverified | — | Mobile perf budget = interpreter (already assumed; rule R16) |
 | U-06 | SDL3 GPU Android support still "limited" as of Aug 2026 (FAQ wording may be stale) | ecosystem-2026.md §B.2 | 2026-08-19 | unverified | — | RHI backend strategy; mitigated by NDK compile job + device checkpoint + bgfx hedge (ADR 0005) |
-| U-07 | SDL 3.4.x exact latest patch version (sources conflicted: 3.4.8 vs 3.4.14) | ecosystem-2026.md | 2026-08-19 | unverified | — | Pin the actual tag at vendor time (M0) |
+| U-07 | SDL 3.4.x exact latest patch version (sources conflicted: 3.4.8 vs 3.4.14) | ecosystem-2026.md | 2026-08-19 | confirmed | M0 vendor step: upstream `releases/latest` is `release-3.4.14` (published 2026-08-03); pinned at `147a8ee32dbf` in `third_party/manifest.json` | Pin the actual tag at vendor time (M0) |
 | U-08 | Jolt 5.6.0 release date year (2026-07-11 inferred) | ecosystem-2026.md §B.3 | 2026-08-19 | unverified | — | None; pin actual tag at vendor time |
 | U-09 | `lute compile` does not support cross-compilation (docs silent) | lute-2026.md §7 | 2026-08-19 | unverified | — | CLI distribution plan (build per-OS in CI if true) |
 | U-10 | `@lute/vm` child runtimes are OS-threaded (inferred from `runContinuously()` comment) | lute-2026.md §3 | 2026-08-19 | unverified | — | Tooling-only concern |

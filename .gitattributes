@@ -27,7 +27,10 @@
 tests/**/golden/** binary -diff
 
 # Vendored third-party source: mark as vendored for tooling/linguist.
-third_party/** linguist-vendored
+# `-text` disables the `text=auto eol=lf` normalization above: a vendored tree
+# must be byte-identical to the upstream commit the manifest pins (R13), and
+# rewriting line endings would silently edit it in place.
+third_party/** linguist-vendored -text
 
 # Note: adoption of git-LFS for large assets is decided via ADR at milestone M4
 # (when real art assets first land). Until then keep binary assets tiny.
