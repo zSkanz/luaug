@@ -159,12 +159,11 @@ compile-only — no runtime verification, which stays post-v1.
 
 ## Risks entering this milestone
 
-1. **Build time.** SDL3 is ~2200 files and M0's cold build is already ~8 min per
-   CI tier with no cache. M1 adds SDL3, SDL_shadercross, ImGui and four RHI
-   targets. If nothing changes, CI approaches the point where the feedback loop
-   stops being usable. The carried-forward `sccache` + `third_party` cache work
-   (architecture.md §9) may have to be pulled into M1 rather than waiting.
-   Measure first, decide from the number.
+1. ~~**Build time.**~~ **Retired for SDL3, still open for Luau** — see Finding 1.
+   Measured rather than assumed: SDL3 costs **5.6 s**, not minutes. M0's ~8-min
+   cold build is essentially all Luau, so the lever that matters is the
+   carried-forward `Luau.Analysis` trim, not anything M1 adds. Re-measure when
+   SDL_shadercross and ImGui land.
 2. **SDL_shadercross's own dependencies.** Its manifest row is still
    `TBD-AT-M0` / `latest-tag`. Upstream is expected to require SPIRV-Cross and
    DirectXShaderCompiler; neither has a manifest row. If vendoring it pulls in
@@ -180,6 +179,31 @@ compile-only — no runtime verification, which stays post-v1.
    likely six by the end of M1. The generated provenance header currently
    special-cases Luau; it should generalize rather than grow a branch per
    dependency.
+
+## Findings (things the docs assumed that reality corrected)
+
+1. **SDL3 is cheap to build; the ~8-minute cold build is entirely Luau.**
+   Measured on the dev machine, `win-msvc-dev`, after `ninja -t clean
+   SDL3-static`:
+
+   | what | compilation units | wall time |
+   |---|---|---|
+   | SDL3 static, M1 subsystem set | 228 | **5.6 s** |
+   | full cold build at M0 close | — | 8 min 26 s (7 min 59 s compiling) |
+
+   The "~2200 files" figure that made build cost risk 1 counts SDL's entire
+   source tree across every platform and subsystem; a single-platform build
+   with audio, render, joystick, haptic, hidapi and sensor off compiles 228
+   units. So the only build-time lever worth pulling is the carried-forward
+   one: `Luau.Analysis` is compiled and never linked (M0 Finding 9). Do not
+   spend M1 time on `sccache` on the strength of a guess about SDL.
+
+2. **Disabling an SDL subsystem does not remove it from the build**, it swaps
+   the real drivers for dummy ones — `SDL_dummyaudio.c`, `SDL_dummysensor.c`,
+   the dummy joystick/haptic/camera/tray/dialog backends all still compile.
+   The API symbols stay present and fail at runtime instead of vanishing at
+   link time. Useful to know before assuming a subsystem toggle is what makes
+   a call unavailable: it is not, and `platform` must not rely on it for that.
 
 ## Attempted / abandoned
 
