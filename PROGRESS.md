@@ -18,18 +18,25 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## Now / Next
 
-- **Next: wire `third_party/sdl3` into the build** (vendored and pinned at
-  3.4.14 since M0, deliberately not compiled — see
-  `third_party/CMakeLists.txt`), enabling only the subsystems M1 needs, and
-  **measure cold-build time before and after** — build cost is risk 1 in the
-  brief. Then build the `platform` module (L1) per architecture.md §2.
-- Order of work and the split points for a multi-session milestone are in the
-  brief under "Planned order of work". Steps 1–5 (SDL3 → platform → rhi_api +
-  rhi_null → rhi_capture → rhi_sdlgpu) are the spine.
-- **Escalation likely this milestone:** SDL_shadercross is expected to require
-  SPIRV-Cross and DirectXShaderCompiler, neither of which has a manifest row.
-  If so, that is R5/R6 and stops for the human (§10) — do not add rows
-  unilaterally. Fallback is in the brief.
+- **Steps 1–5 of the brief are done** — the milestone's spine. SDL3 is wired
+  into the build, `platform` (L1) exists, and the RHI seam (L2) has three
+  backends: `rhi_null`, `rhi_capture` and `rhi_sdlgpu`. A real GPU device
+  clears a texture and reads it back as exactly the colour it was cleared to,
+  with no window and no shaders — the screenshot harness the later gates depend
+  on already works.
+- **Next: the shader pipeline (step 6 of the brief).** The literal first action
+  is to vendor `sdl_shadercross` with `lute tools/repo/vendor.luau resolve
+  sdl_shadercross <tag>` and **inspect what it pulls in before wiring
+  anything**: it is expected to need SPIRV-Cross and DirectXShaderCompiler, and
+  neither has a manifest row. If it does, that is R5/R6 and stops for the human
+  (§10) — do not add rows unilaterally. The fallback that keeps M1 moving
+  meanwhile is in the brief under risk 2.
+- Remaining after that: frame loop + debug draw (7), headless/screenshot +
+  `tools/imgcmp` (8), ImGui overlay (9), `examples/00-clear` (10), the nightly
+  Android job, the macOS compile job and the first golden capture (11).
+- **The macOS job is M1 work**, not a discrepancy: the M1 gate says
+  "Tier-2/Tier-3 compile" while the roadmap's tier table says macOS compiles
+  from M4. The gate is the narrower contract and wins. Compile-only.
 - Carried forward from M0 (none blocked the M0 gate):
   - **CI has no cache.** Every run pays a full cold build: ~8 min per tier,
     almost all of it compiling Luau. `sccache` + a `third_party` cache keyed on
@@ -96,6 +103,24 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   machine, not 2022 — always locate it with vswhere, as `bootstrap.ps1` does.
   Next: wire `third_party/sdl3` into the build with only the M1 subsystems
   enabled, measuring cold-build time before and after.
+
+- **2026-08-19 (session 3 continued):** Built the M1 spine — steps 1–5 of the
+  brief. SDL3 wired in with subsystems chosen by architecture rather than by
+  size; `platform` (L1) with window, event pump, clock, paths and the console
+  fix carried over from M0; the `rhi_api` seam (header-only, no SDL type) with
+  `rhi_null`, `rhi_capture` and `rhi_sdlgpu`. **First light: a real GPU device
+  clears a texture and reads it back exactly, with no window and no shaders.**
+  Learned, all recorded in the brief's Findings: SDL3 costs 5.6 s, not minutes,
+  so the build-time risk was retired by measurement and the real lever stays
+  the `Luau.Analysis` trim; `SDL_GetTicksNS` reads 0 before `SDL_Init`, which
+  is why `nowNs` uses `steady_clock`; changing an `option()` default does not
+  reach an existing build directory; SDL's Linux dependency check is
+  all-or-nothing per feature, so take the package list from its own docs.
+  Two CI rounds went red on Linux and were fixed rather than worked around —
+  SDL has a flag to skip the X11/Wayland check, and taking it would have bought
+  a green run at the price of a Linux port that cannot open a window.
+  Next: vendor `sdl_shadercross` and inspect its dependencies before wiring
+  anything (§10 escalation is likely — see Now / Next).
 
 <!-- Format for future entries:
 - **YYYY-MM-DD (session N):** did X; learned Y; Next: <literal first action>.
