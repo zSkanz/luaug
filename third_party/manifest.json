@@ -1,9 +1,37 @@
 {
   "$comment": "Vendored dependency manifest (ADR 0021). tools/repo/vendor.luau imports each dependency at the pinned commit and re-applies patches/. Rows below carry the TARGET versions from docs/research/ecosystem-2026.md; the 'commit' fields are filled with real SHAs at vendor time (milestone M0) and THIRD_PARTY_NOTICES.md is regenerated in the same commit. Adding/upgrading a dependency requires a human-approved ADR (rule R5).",
+
+  "$comment_binaries": "ADR 0032 amends ADR 0021 with a second row kind. A row with \"kind\": \"binary\" is NOT a source tree: it is a build-time release artifact, fetched at configure time into a cache under $LUAUG_BUILD_ROOT and pinned by SHA256 per platform, never committed. The hash IS the pin -- a mismatch is a hard configure error, and changing one is a human edit here, exactly as changing a commit SHA is. This exists for artifacts whose source form is disproportionate to their role (DXC's source is a fork of LLVM); anything the engine links is still vendored as source.",
+
+  "binaries": [
+    {
+      "name": "dxc",
+      "version": "v1.9.2602",
+      "license": "NCSA AND MIT",
+      "upstream": "https://github.com/microsoft/DirectXShaderCompiler",
+      "note": "The HLSL front-end SDL_shadercross needs (ADR 0006). Not vendored and not committed: see ADR 0032 -- the archives carry an unassigned Microsoft EULA alongside the NCSA licence their own ReleaseNotes.md names, and 50 MiB of opaque binaries would land in history per version. Hashes below are the ones SDL_shadercross itself pins, verified byte-for-byte against the published release. No macOS artifact exists; Microsoft publishes none.",
+      "artifacts": [
+        {
+          "platform": "windows-x64",
+          "url": "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2602/dxc_2026_02_20.zip",
+          "sha256": "a1e89031421cf3c1fca6627766ab3020ca4f962ac7e2caa7fab2b33a8436151e",
+          "bytes": 27061312
+        },
+        {
+          "platform": "linux-x64",
+          "url": "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2602/linux_dxc_2026_02_20.x86_64.tar.gz",
+          "sha256": "a1d3e3b5e1c5685b3eb27d5e8890e41d87df45def05112a2d6f1a63a931f7d60",
+          "bytes": 12986764
+        }
+      ]
+    }
+  ],
+
   "dependencies": [
     { "name": "luau",                 "version": "0.734",   "commit": "3fc82b1071ab387531175869afc4fb528464afa4", "license": "MIT",                 "upstream": "https://github.com/luau-lang/luau",                      "path": "third_party/luau",                 "patches": [] },
     { "name": "sdl3",                 "version": "3.4.14",  "commit": "147a8ee32dbf9ac02f3794964490687b6bbda1bc", "license": "zlib",                "upstream": "https://github.com/libsdl-org/SDL",                      "path": "third_party/sdl3",                 "patches": [] },
-    { "name": "sdl_shadercross",      "version": "latest-tag", "commit": "TBD-AT-M0", "license": "zlib",             "upstream": "https://github.com/libsdl-org/SDL_shadercross",          "path": "third_party/sdl_shadercross",      "patches": [] },
+    { "name": "sdl_shadercross",      "version": "main-2026-06-26", "commit": "e55cf5e31ced6f3d1be5cc6d0c50e99384f9f4ba", "license": "zlib", "upstream": "https://github.com/libsdl-org/SDL_shadercross", "path": "third_party/sdl_shadercross", "patches": [], "note": "Has never cut a release: no tags exist at all, so the version is the pinned commit's date (same treatment as stb)." },
+    { "name": "spirv_cross",          "version": "sdl-shadercross-pin", "commit": "1a6169566c73d3da552748fc372fe2bbb856e46e", "license": "Apache-2.0", "upstream": "https://github.com/KhronosGroup/SPIRV-Cross", "path": "third_party/spirv_cross", "patches": [], "note": "Pinned at the revision SDL_shadercross's own submodule points to, which is what upstream CI tests against. Required unconditionally by its CMakeLists.txt:145-158; there is no build without it." },
     { "name": "jolt",                 "version": "5.6.0",   "commit": "TBD-AT-M0", "license": "MIT",                 "upstream": "https://github.com/jrouwe/JoltPhysics",                  "path": "third_party/jolt",                 "patches": [] },
     { "name": "box2d",                "version": "3.1.1",   "commit": "TBD-AT-M0", "license": "MIT",                 "upstream": "https://github.com/erincatto/box2d",                     "path": "third_party/box2d",                "patches": [] },
     { "name": "miniaudio",            "version": "0.11.25", "commit": "TBD-AT-M0", "license": "MIT-0 OR Unlicense",  "upstream": "https://github.com/mackron/miniaudio",                   "path": "third_party/miniaudio",            "patches": [] },
