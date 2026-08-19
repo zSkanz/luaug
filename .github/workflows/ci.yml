@@ -132,6 +132,29 @@ jobs:
             sudo apt-get install -y --no-install-recommends ninja-build
           fi
 
+      # SDL refuses to configure on Linux with neither X11 nor Wayland present,
+      # and it is right to: without them it cannot open a window on a normal
+      # desktop. SDL offers a flag to skip that check, and taking it would have
+      # been the fast way to a green run -- at the price of a Linux port that
+      # silently cannot display anything, discovered at M4 when the golden-image
+      # job needs a surface.
+      #
+      # So the packages go in instead, and the Linux build CI tests is the Linux
+      # build we would ship. The list is the X11 and Wayland halves of SDL's
+      # own README-linux build dependencies, minus the parts belonging to
+      # subsystems we disable (audio, camera, joystick/hidapi).
+      - name: Install SDL video dependencies (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libxfixes-dev libxss-dev libxkbcommon-dev \
+            libwayland-dev wayland-protocols libdecor-0-dev
+
       # The presets use the Ninja generator with `strategy: external`, so the
       # MSVC environment must be established first. vswhere avoids hardcoding
       # an edition/year that changes with the runner image.

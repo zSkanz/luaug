@@ -36,6 +36,23 @@ check cmake  "CMake >= 3.28 required"
 check ninja  "Ninja generator used by the presets"
 check clang  "Clang 17+ is the primary Linux compiler"
 
+# --- SDL video dependencies (Linux) -----------------------------------------
+# SDL refuses to configure with neither X11 nor Wayland development headers
+# present, and the message it prints is long and generic. Saying so here, with
+# the actual command, turns a confusing configure failure into one line.
+if [[ "$(uname -s)" == "Linux" ]]; then
+  if [[ -e /usr/include/X11/Xlib.h ]] || [[ -e /usr/include/wayland-client.h ]]; then
+    echo "  ok  SDL video headers (X11 and/or Wayland)"
+  else
+    echo "  --  no X11 or Wayland development headers; SDL cannot configure"
+    echo "      Debian/Ubuntu: sudo apt-get install libx11-dev libxext-dev libxrandr-dev \\"
+    echo "        libxcursor-dev libxi-dev libxfixes-dev libxss-dev libxkbcommon-dev \\"
+    echo "        libwayland-dev wayland-protocols libdecor-0-dev"
+    echo "      Full list: https://wiki.libsdl.org/SDL3/README-linux#build-dependencies"
+    problems+=("sdl-video-headers")
+  fi
+fi
+
 # --- Pinned Luau toolchain via rokit ---------------------------------------
 if command -v rokit >/dev/null 2>&1; then
   # --no-trust-check: tools are pinned in the in-repo, ADR-gated rokit.toml
