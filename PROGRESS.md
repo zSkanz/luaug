@@ -5,16 +5,14 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- Current milestone: **M1 — Window, RHI, Frame Loop, Agent Eyes — COMPLETE and
-  SIGNED OFF by the human on 2026-08-19**, tagged `milestone/m1`
-  (brief: `docs/briefs/m1-kickoff.md`).
-- **M2 has NOT been started, and that is deliberate**: MASTER_PROMPT.md §6
-  forbids opening a milestone in the session that closed one. The human's
-  sign-off approved M1; it was not an instruction to begin M2.
-- Gate status: **all four gate items pass**. Evidence in the brief's Gate
-  Record. Tier-1 runs windowed (600 frames / 357 sim ticks) and headless, the
-  GPU validation layer is clean, both goldens are checked in and confirmed to
-  fail when they should, and Tier-2 builds *and tests* while Tier-3 compiles.
+- Current milestone: **M2 — Kernel: Instances over ECS, Scheduler, Signals,
+  task — IN PROGRESS** (brief: `docs/briefs/m2-kickoff.md`). The largest
+  milestone in the project (18%), expected to span several sessions; the split
+  points are recorded in the brief's Entering Risks §5.
+- **M1 — Window, RHI, Frame Loop, Agent Eyes — COMPLETE and SIGNED OFF by the
+  human on 2026-08-19**, tagged `milestone/m1` (brief:
+  `docs/briefs/m1-kickoff.md`). Its gate was re-run green on both tiers at M2
+  kickoff (`scripts/localgate.ps1`, 25.8 s, 15/15 tests).
 - **M0 was signed off on 2026-08-19**, tagged `milestone/m0`.
 - The engine renders: three wire cubes orbiting a world triad over a pulsing
   clear colour, driven from `examples/00-clear/init.luau` through a temporary
@@ -23,14 +21,17 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## Now / Next
 
-- **Next: write `docs/briefs/m2-kickoff.md`.** M1 is signed off, so the gate is
-  cleared — but §6 keeps M2 out of the session that closed M1, so this is the
-  first action of the NEXT session, not this one.
-- The literal first action is: write
-  `docs/briefs/m2-kickoff.md` from the template in `docs/briefs/README.md`.
-  M2 is the largest milestone in the project (ECS, the Instance facade,
-  deferred signals, `task`, the scheduler) — read `docs/architecture.md` §3–§5
-  and ADRs 0015, 0016, 0025, 0026, 0028 at kickoff.
+- **Next: specify the deferred-signal ordering semantics in
+  `docs/api-design.md`** (brief Decision 10). The gate requires *documented*
+  ordering and the documents currently stop at "deferred-only, drained at
+  resumption points, depth cap 10" — they do not answer FIFO-across-signals vs
+  per-signal, connection order, where a fire raised during a drain lands, or
+  what `Destroy` during iteration does to a queued fire. The conformance spec
+  authors are blocked on those answers, so this is written before any code.
+- Then: freeze the C++ descriptor structs, and fan out `core` primitives
+  (`SlotMap`, `NameAtom`, `Pcg32`, xxh3) and the API IDL + `gen_cpp`/`gen_dts`
+  generators. Kernel work (ECS, facade, signals, `task`, bindings) stays
+  single-threaded per MASTER_PROMPT §7.
 - **Run `scripts/localgate.ps1` before every push. Do not use CI as a test
   runner.** Both tiers, ~20 seconds warm. The repository is private, so Actions
   minutes carry platform multipliers and the quota has been close to exhausted.
@@ -142,6 +143,23 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   and C++20 module scanning was running on every translation unit to discover
   that nothing uses modules.
   Next: **stop for M1 human review** (§6). Do not start M2 this session.
+
+- **2026-08-19 (session 4, Claude Opus):** M1 signed off; **opened M2**. Ran the
+  §2 boot sequence — ledger and repo agreed, and the M1 gate re-ran green on
+  both tiers locally (15/15, 25.8 s). Wrote `docs/briefs/m2-kickoff.md`: the
+  scope checklist, an explicit NOT-in-scope list, the subagent split, the gate
+  verbatim, five entering risks, and twelve numbered decisions each naming the
+  alternative it rejects.
+  Learned at planning time, before any code: the gate's phrase "*documented*
+  ordering semantics" is not satisfied by anything currently written down, so
+  the spec must precede the implementation; `api-design.md` §2.1 omits
+  `ScriptService` even though §3 requires it; the roadmap's "RNG service" and
+  api-design's `Random` datatype are the same thing under two names, and
+  api-design wins per §4; and M2's own gate ("zero luau-analyze errors across
+  all spec code") cannot be met without the `.d.luau` generator the roadmap
+  scheduled for M3 — so `gen_dts` is pulled forward, forced by the gate rather
+  than by preference.
+  Next: write the ordering semantics into `docs/api-design.md`.
 
 <!-- Format for future entries:
 - **YYYY-MM-DD (session N):** did X; learned Y; Next: <literal first action>.
