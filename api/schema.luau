@@ -19,7 +19,11 @@ local Schema = {}
 --- Where a member may be touched from, once actor VMs exist (architecture §3).
 --- v1 runs everything serially on the game VM, but the annotation is carried
 --- from the first definition so that code written today survives the change.
-export type ThreadSafety = "Safe" | "ReadSafe" | "Unsafe"
+--- The four levels are architecture.md §3's, not a paraphrase of them: an
+--- earlier draft of this schema declared three (`Safe | ReadSafe | Unsafe`) and
+--- the mismatch was caught the first time someone tried to annotate a member
+--- and found the two documents using different alphabets.
+export type ThreadSafety = "Unsafe" | "ReadParallel" | "LocalSafe" | "Safe"
 
 --- `Service` is a singleton reached through `game:GetService`; `Abstract` has no
 --- instances of its own; `NotCreatable` refuses `Instance.new`; `DevOnly` is
@@ -136,6 +140,13 @@ local EventPrefixes = { "Pre", "Post" }
 --- differently is a lint failure rather than a judgement call.
 local ServiceNameExceptions = { Workspace = true, Lighting = true }
 
+--- Events whose names are neither past-tense facts nor `Pre*`/`Post*` phases.
+--- Both are frozen public surface in §2.1, so the rule grows a named exception
+--- rather than the names growing a suffix -- which is the same trade the
+--- service list above makes. A new name landing here is a decision someone has
+--- to make in this file, which is the point.
+local EventNameExceptions = { Heartbeat = true, MessageOut = true }
+
 local function isPascalCase(name: string): boolean
     return string.match(name, PascalCase) ~= nil
 end
@@ -162,9 +173,20 @@ local function isBoolean(typeName: TypeName): boolean
     return typeName == "boolean" or typeName == "boolean?"
 end
 
+--- The one documented casing exception (§9, divergence #9): `Vector3` IS the
+--- Luau `vector` primitive, and `x`/`y`/`z` are the primitive's own fields --
+--- fields of the language, like `string`, not members of a type we define.
+--- Spelled as an explicit set rather than as "lowercase on Vector3 is fine", so
+--- that a fourth lowercase field would still have to be argued for.
+local PrimitiveFields: { [string]: boolean } = {
+    ["Vector3.x"] = true,
+    ["Vector3.y"] = true,
+    ["Vector3.z"] = true,
+}
+
 local function checkProperty(errors: { string }, owner: string, property: Property)
     local where = `{owner}.{property.Name}`
-    if not isPascalCase(property.Name) then
+    if not isPascalCase(property.Name) and not PrimitiveFields[where] then
         table.insert(errors, `{where}: property names are PascalCase (§9)`)
     end
     -- A property that reads as a call is a property somebody will call.
@@ -193,7 +215,12 @@ local function checkMethod(errors: { string }, owner: string, method: Method, na
 
     local named = endsWithAny(method.Name, { "Async" })
     local yields = method.Yields == true
-    if yields and not named then
+    -- `Wait*` is the documented exception (§9). The `Async` suffix exists to
+    -- warn that a call parks when its name does not say so; `WaitForChild`
+    -- already says so, and appending `Async` to a name built around the word
+    -- "wait" would be noise rather than a warning.
+    local saysSoAlready = string.sub(method.Name, 1, 4) == "Wait"
+    if yields and not (named or saysSoAlready) then
         table.insert(errors, `{where}: a yielding method's name ends in Async (§9)`)
     elseif named and not yields then
         table.insert(errors, `{where}: named Async but does not yield -- the suffix is a promise (§9)`)
@@ -223,7 +250,10 @@ local function checkEvent(errors: { string }, owner: string, event: Event)
     if not isPascalCase(event.Name) then
         table.insert(errors, `{where}: event names are PascalCase (§9)`)
     end
-    if not (endsWithAny(event.Name, EventSuffixes) or startsWithAny(event.Name, EventPrefixes)) then
+    local wellFormed = endsWithAny(event.Name, EventSuffixes)
+        or startsWithAny(event.Name, EventPrefixes)
+        or EventNameExceptions[event.Name] == true
+    if not wellFormed then
         table.insert(errors, `{where}: events are past-tense facts or Pre*/Post* phases (§9)`)
     end
     if event.Doc == "" then
@@ -331,6 +361,13 @@ function Schema.validate(definition: Definition): { string }
             -- `CFrame.identity`, `vector.zero` (ADR 0034).
             if string.match(constant.Name, CamelCase) == nil then
                 table.insert(errors, `{datatype.Name}.{constant.Name}: namespace constants are camelCase (ADR 0034)`)
+            end
+            -- They carry doc text like every other member. Reached through the
+            -- casing branch above rather than through `checkProperty`, which
+            -- would re-impose PascalCase -- and skipping the doc check with it
+            -- was how `CFrame.identity` could have shipped undocumented.
+            if constant.Doc == "" then
+                table.insert(errors, `{datatype.Name}.{constant.Name}: every member carries doc text (§5)`)
             end
         end
         for _, property in valueProperties do

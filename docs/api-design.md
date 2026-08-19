@@ -1058,6 +1058,14 @@ convention, and LuauG keeps it (ADR 0034).
   casing says so at the call site.
 - **Type, class and namespace names themselves are PascalCase**: `Instance`,
   `CFrame`, `Color3`, `Vector3`, `Signal`.
+- **Two rules carry named exception lists**, and the generator's lints hold both
+  (`api/schema.luau`). A yielding method's name ends in `Async` *unless it
+  begins with `Wait`*: the suffix exists to warn that a call parks when the name
+  does not say so, and `WaitForChild` already says so. Events are past-tense
+  facts or `Pre*`/`Post*` phases *except* `Heartbeat` and `MessageOut`, whose
+  names are frozen here. Adding to either list is an edit someone makes in the
+  schema, deliberately — which is the difference between an exception and a
+  loophole.
 - **There are no camelCase aliases for object members** (`:connect` never
   existed — divergence #21), and no PascalCase aliases for module functions.
   One spelling each, always.

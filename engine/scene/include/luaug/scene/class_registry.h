@@ -1,0 +1,182 @@
+// Class reflection (architecture.md §4, ADR 0028).
+//
+// Every descriptor in here is GENERATED from `api/defs/*.api.luau` by
+// `api/generator/gen_cpp.luau`. Hand-writing one is not a shortcut, it is a
+// second source of truth: the same definition files also produce the type
+// definitions the analyzer reads and the documentation users read, and the
+// three only agree because none of them is written twice.
+//
+// What is hand-written is the small set of native functions the descriptors
+// point at, and the tree operations on `World` that the bindings call directly.
+#pragma once
+
+#include <span>
+#include <unordered_map>
+#include <vector>
+
+#include "luaug/core/id.h"
+#include "luaug/core/name_atom.h"
+#include "luaug/core/text_key.h"
+#include "luaug/core/types.h"
+#include "luaug/scene/value.h"
+
+namespace luaug::scene
+{
+
+class World;
+
+// 0 is "no class", so a zero-initialised `ClassComp` is detectably empty rather
+// than accidentally an Instance -- the same convention `InstanceId` and
+// `NameAtom` use.
+using ClassId = u16;
+inline constexpr ClassId InvalidClass = 0;
+
+enum class ClassFlags : u8
+{
+    None = 0,
+    // Reached through `game:GetService`, one per world.
+    Service = 1 << 0,
+    // Has no instances of its own; only its descendants do.
+    Abstract = 1 << 1,
+    // `Instance.new` refuses it (`scene.err.not_creatable`).
+    NotCreatable = 1 << 2,
+    // Compiled out of shipping builds.
+    DevOnly = 1 << 3,
+};
+
+[[nodiscard]] constexpr ClassFlags operator|(ClassFlags a, ClassFlags b) noexcept
+{
+    return static_cast<ClassFlags>(static_cast<u8>(a) | static_cast<u8>(b));
+}
+
+[[nodiscard]] constexpr bool hasFlag(ClassFlags flags, ClassFlags flag) noexcept
+{
+    return (static_cast<u8>(flags) & static_cast<u8>(flag)) != 0;
+}
+
+// Carried from the IDL from the first definition, even though v1 runs every
+// handler serially on the game VM (architecture.md §3). The checker enforces it
+// as if the parallel windows were real, which is the only way code written now
+// survives them arriving.
+enum class ThreadSafety : u8
+{
+    Unsafe,
+    ReadParallel,
+    LocalSafe,
+    Safe,
+};
+
+// Accessors are plain function pointers rather than std::function: there is one
+// per property per class, they are generated, and a descriptor table that fits
+// in cache is the difference between the Instance facade being free and being
+// architecture risk #1.
+struct PropertyDesc
+{
+    core::NameAtom name;
+    ValueType type = ValueType::Nil;
+    ThreadSafety threadSafety = ThreadSafety::Unsafe;
+    bool readOnly = false;
+
+    // The doc text from the IDL, resolved through the catalog (ADR 0019).
+    core::TextKey docKey;
+    // Raised when `set` rejects the value. Generated from the property's type,
+    // so every rejection names something specific rather than "invalid value".
+    core::TextKey errKeyOnInvalidSet;
+
+    Value (*get)(const World&, core::InstanceId) = nullptr;
+
+    // Returns false and leaves the instance untouched when the value is out of
+    // domain; the caller raises `errKeyOnInvalidSet`. Returning a bool rather
+    // than raising keeps `scene` free of the error-formatting path, which lives
+    // above it.
+    bool (*set)(World&, core::InstanceId, const Value&) = nullptr;
+};
+
+// Methods are declared here and implemented in `script`. `scene` cannot call
+// one: a method takes and returns Luau values, and L3 has no VM. What this
+// entry buys is a **cross-check at boot** -- every method the IDL declares must
+// have a binding registered for it, and every registered binding must be
+// declared. A method that exists in one and not the other is a mismatch found
+// at startup rather than the first time a script calls it.
+struct MethodDesc
+{
+    core::NameAtom name;
+    bool yields = false;
+    ThreadSafety threadSafety = ThreadSafety::Unsafe;
+    core::TextKey docKey;
+};
+
+struct EventDesc
+{
+    core::NameAtom name;
+    // Index into the instance's signal slots, assigned by the generator so that
+    // a fire is an array offset rather than a name lookup.
+    u16 slot = 0;
+    core::TextKey docKey;
+};
+
+struct ClassDescriptor
+{
+    core::NameAtom name;
+    // `InvalidClass` only for `Instance` itself.
+    ClassId super = InvalidClass;
+    ClassFlags flags = ClassFlags::None;
+    // The `Name` a fresh instance carries; the class name unless the IDL says
+    // otherwise.
+    core::NameAtom defaultName;
+    core::TextKey docKey;
+
+    // Views into generated static storage, which outlives the registry. The
+    // arrays hold only what the class *declares*; inherited members are found
+    // by walking `super`, and the registry caches that walk.
+    std::span<const PropertyDesc> properties;
+    std::span<const MethodDesc> methods;
+    std::span<const EventDesc> events;
+};
+
+class ClassRegistry
+{
+public:
+    ClassRegistry(core::AtomTable& atoms);
+
+    // Registration order must place a class after its superclass, which the
+    // generator guarantees by emitting parents first. Returns `InvalidClass` if
+    // the super is unknown or the name is already taken.
+    ClassId registerClass(const ClassDescriptor& descriptor);
+
+    [[nodiscard]] const ClassDescriptor* find(ClassId id) const noexcept;
+    [[nodiscard]] ClassId findId(core::NameAtom name) const noexcept;
+
+    // `derived` is `base`, or descends from it. This is `Instance:IsA`, and it
+    // is a flat lookup rather than a walk: the ancestor set is materialised at
+    // registration because it is read far more often than it is built.
+    [[nodiscard]] bool isA(ClassId derived, ClassId base) const noexcept;
+
+    // Resolved through the hierarchy and memoised, so a property inherited from
+    // `Instance` costs the same as one declared on the class. Returns nullptr
+    // for a name the class does not have, which is what raises
+    // `scene.err.unknown_member` above.
+    [[nodiscard]] const PropertyDesc* findProperty(ClassId id, core::NameAtom name) const noexcept;
+    [[nodiscard]] const MethodDesc* findMethod(ClassId id, core::NameAtom name) const noexcept;
+    [[nodiscard]] const EventDesc* findEvent(ClassId id, core::NameAtom name) const noexcept;
+
+    [[nodiscard]] usize classCount() const noexcept { return m_classes.size(); }
+
+private:
+    struct Entry
+    {
+        ClassDescriptor descriptor;
+        // Every ancestor including itself, so `isA` is one hash probe.
+        std::vector<ClassId> ancestry;
+        std::unordered_map<u32, const PropertyDesc*> properties;
+        std::unordered_map<u32, const MethodDesc*> methods;
+        std::unordered_map<u32, const EventDesc*> events;
+    };
+
+    core::AtomTable& m_atoms;
+    // Index 0 is unused so that `ClassId` 0 stays invalid.
+    std::vector<Entry> m_classes;
+    std::unordered_map<u32, ClassId> m_byName;
+};
+
+} // namespace luaug::scene

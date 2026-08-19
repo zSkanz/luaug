@@ -60,6 +60,25 @@ done < <(find . -name '*.d.luau' -not -path './third_party/*' | sort)
 echo "analyzing ${#files[@]} file(s) with ${definition_count} definition file(s)"
 luau-lsp analyze --platform=standard --ignore="**/.lute/**" "${definitions[@]}" "${files[@]}"
 
+# The IDL's own lints: casing, the Async biconditional, event tense, enum
+# singularity (api-design.md §9). These are the rules a type cannot express, and
+# they gate rather than report -- §2.5's rename list is frozen, so a bad name
+# that reaches a release is a name the engine keeps forever.
+echo "== api definition lints (api-design §9) =="
+lute api/generator/check.luau
+
+# The generated definitions are checked in, so drift has to be a build failure
+# rather than a discovery. Regenerate and compare: if this fails, someone either
+# hand-edited a generated file or changed the IDL without regenerating, and both
+# are the same fix.
+echo "== generated type definitions are fresh =="
+lute api/generator/gen_dts.luau >/dev/null
+if ! git diff --quiet -- runtime/types/; then
+    echo "luau-check: runtime/types/ is stale — run 'lute api/generator/gen_dts.luau' and commit the result" >&2
+    git --no-pager diff --stat -- runtime/types/ >&2
+    exit 1
+fi
+
 echo "== i18n keys (R3) =="
 lute tools/repo/i18nlint.luau
 

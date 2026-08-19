@@ -1,9 +1,8 @@
 // Engine math (architecture.md §2, ADR 0013).
 //
-// Only `Vec3` and `Mat4` live here so far. The full list in architecture.md --
-// Vec2, Quat, Mat3, DVec3, CFrameD, AABB, Frustum, Color3 -- arrives with its
-// first consumer; a vector type nobody constructs is a vector type nobody has
-// checked the sign conventions of.
+// The list grows with its consumers: a vector type nobody constructs is a
+// vector type nobody has checked the sign conventions of. `Vec2`, `AABB` and
+// `Frustum` are still absent for that reason.
 //
 // **Conventions, stated once because getting them wrong is silent.** Matrices
 // are column-major in storage and column-vector in use: a transform applies as
@@ -121,5 +120,124 @@ static_assert(sizeof(Mat4) == 16 * sizeof(f32), "Mat4 must upload as 16 tightly 
 // Right-handed view matrix. `up` need not be perpendicular to the view
 // direction; it is only used to establish the roll.
 [[nodiscard]] Mat4 lookAt(Vec3 eye, Vec3 target, Vec3 up) noexcept;
+
+// --- World transforms (ADR 0014) -------------------------------------------
+//
+// The script-facing `CFrame` is the engine's f64 source of truth for position.
+// `Vector3` is f32 and stays that way (ADR 0013): millimetre-exact to roughly
+// ±8 km and ~16 mm at ±131 km, which is fine for a direction or an extent and
+// not fine for a world position in an open world. Splitting the two here, from
+// the first commit that has a transform at all, is what keeps the widening
+// from being a migration later.
+
+// f64 position. Deliberately not a template over Vec3: the whole point is that
+// the two are different types and cannot be assigned to each other by accident.
+struct DVec3
+{
+    f64 x = 0.0;
+    f64 y = 0.0;
+    f64 z = 0.0;
+
+    [[nodiscard]] constexpr bool operator==(const DVec3&) const noexcept = default;
+};
+
+[[nodiscard]] constexpr DVec3 operator+(DVec3 a, DVec3 b) noexcept
+{
+    return {a.x + b.x, a.y + b.y, a.z + b.z};
+}
+
+[[nodiscard]] constexpr DVec3 operator-(DVec3 a, DVec3 b) noexcept
+{
+    return {a.x - b.x, a.y - b.y, a.z - b.z};
+}
+
+// Narrowing is explicit at every call site, so "where did the precision go" has
+// a grep-able answer.
+[[nodiscard]] constexpr Vec3 toVec3(DVec3 v) noexcept
+{
+    return {static_cast<f32>(v.x), static_cast<f32>(v.y), static_cast<f32>(v.z)};
+}
+
+[[nodiscard]] constexpr DVec3 toDVec3(Vec3 v) noexcept
+{
+    return {static_cast<f64>(v.x), static_cast<f64>(v.y), static_cast<f64>(v.z)};
+}
+
+// Rotation only, f32, column-major and column-vector like `Mat4`: `m[c][r]`,
+// so `m[0]` is the right axis, `m[1]` up, and `m[2]` **back** -- the look
+// direction is `-m[2]`, matching LookVector in api-design.md §2.3.
+struct Mat3
+{
+    f32 m[3][3]{
+        {1.0f, 0.0f, 0.0f},
+        {0.0f, 1.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f},
+    };
+};
+
+[[nodiscard]] Mat3 operator*(const Mat3& a, const Mat3& b) noexcept;
+[[nodiscard]] Vec3 operator*(const Mat3& m, Vec3 v) noexcept;
+[[nodiscard]] Mat3 transpose(const Mat3& m) noexcept;
+
+// Re-establishes an orthonormal basis from a possibly-skewed one. The look axis
+// is authoritative and up is the hint, which is why a `lookAt` built from a
+// nearly-parallel up still produces something usable instead of NaN.
+[[nodiscard]] Mat3 orthonormalize(const Mat3& m) noexcept;
+
+// Right-hand-rule rotations about each axis, in radians.
+[[nodiscard]] Mat3 rotationX(f32 radians) noexcept;
+[[nodiscard]] Mat3 rotationY(f32 radians) noexcept;
+[[nodiscard]] Mat3 rotationZ(f32 radians) noexcept;
+
+// The canonical world transform: f64 translation, f32 rotation. Rotation stays
+// f32 because a rotation has no magnitude to lose precision in -- the error is
+// bounded by the angle, not by the distance from the origin.
+struct CFrameD
+{
+    DVec3 position;
+    Mat3 rotation;
+};
+
+// "First `b`, then `a`", the column-vector convention -- so this reads
+// backwards relative to the order the transforms happen in.
+[[nodiscard]] CFrameD operator*(const CFrameD& a, const CFrameD& b) noexcept;
+
+// Treats `v` as a point: rotates, then translates.
+[[nodiscard]] DVec3 transformPoint(const CFrameD& cf, DVec3 v) noexcept;
+
+// Treats `v` as a direction: rotates only.
+[[nodiscard]] Vec3 transformDirection(const CFrameD& cf, Vec3 v) noexcept;
+
+[[nodiscard]] CFrameD inverse(const CFrameD& cf) noexcept;
+
+// A degenerate direction or an up hint parallel to it yields the identity
+// rotation at `eye` rather than NaN (api-design.md §2.3): a camera that stops
+// turning is recoverable, a camera full of NaN is not.
+[[nodiscard]] CFrameD lookAtCFrame(DVec3 eye, DVec3 target, Vec3 up) noexcept;
+
+// Renders `cf` relative to `origin` for the f32 world the renderer and physics
+// operate in (architecture.md §10). Floating origin itself is M7; this is the
+// one operation it will be built out of.
+[[nodiscard]] Mat4 toRenderMatrix(const CFrameD& cf, DVec3 origin) noexcept;
+
+// --- Colour ------------------------------------------------------------------
+
+// Linear, not sRGB-encoded, and not clamped: api-design.md §2.3 leaves the
+// range open so an HDR value survives a round trip through a property.
+struct Color3
+{
+    f32 r = 0.0f;
+    f32 g = 0.0f;
+    f32 b = 0.0f;
+
+    [[nodiscard]] constexpr bool operator==(const Color3&) const noexcept = default;
+};
+
+[[nodiscard]] Color3 lerp(Color3 a, Color3 b, f32 alpha) noexcept;
+
+// Hue, saturation and value all in [0, 1] -- hue is a turn, not degrees
+// (api-design.md §2.3).
+[[nodiscard]] Color3 fromHsv(f32 hue, f32 saturation, f32 value) noexcept;
+void toHsv(Color3 color, f32& hue, f32& saturation, f32& value) noexcept;
 
 } // namespace luaug::core
