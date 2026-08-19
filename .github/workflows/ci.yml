@@ -3,7 +3,13 @@ name: CI
 on:
   push:
     branches: [main]
+    # Milestone tags are what now triggers the Tier-3 macOS job; see build-macos
+    # for why it left the every-push set.
+    tags: ["milestone/*"]
   pull_request:
+  # The "run everything, macOS included" button, for when a change needs the
+  # full matrix without inventing a tag for it.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -13,12 +19,127 @@ env:
   # Pinned here so the version is visible in this file rather than buried in a
   # third-party action (R5).
   ROKIT_VERSION: "1.2.0"
+  SCCACHE_VERSION: "0.17.0"
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Whether this push is worth building at all.
+  #
+  # This repository is private, so Actions minutes carry the platform
+  # multipliers (Linux 1x, Windows 2x, macOS 10x) and a full run cost about 68
+  # charged minutes once GitHub's per-job round-up to whole minutes is applied.
+  # 13 of this repository's first 41 commits -- just under a third -- changed
+  # nothing but `docs/`, `PROGRESS.md` and other `*.md`, work that cannot change
+  # a single object file, and every one of them paid that bill in full.
+  #
+  # GitHub has no per-job path filter, and this repo takes no third-party
+  # actions, so the decision is made once here with `git` and consumed by the
+  # build jobs through `needs:`.
+  #
+  # The bias is one-directional and deliberate: ONLY an explicit documentation
+  # allowlist counts as "do not build". Everything else builds -- an unrecognised
+  # path, a base commit that no longer resolves after a force-push, the first
+  # push on a branch, an event with no base at all, or this job failing outright
+  # (the build jobs' `if:` treats anything other than a literal `false` as
+  # "build"). A build wrongly skipped is a red `main` nobody noticed (R11); a
+  # build wrongly run costs a few minutes.
+  # ---------------------------------------------------------------------------
+  changes:
+    name: Decide whether the build jobs run
+    # A tag push is a milestone gate, not a change: the commit it points at was
+    # already built by the run that landed it (see build-test).
+    #
+    # Tested against `github.ref` rather than `github.ref_type`, because a
+    # pull_request run's ref is `refs/pull/<n>/merge`, which is neither a branch
+    # nor a tag -- and a `ref_type` that came back as anything but `branch`
+    # there would silently skip the build on every pull request.
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.decide.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Both endpoints of the diff have to be present, so the shallow
+          # default will not do. `blob:none` is what keeps that affordable:
+          # `git diff --name-only` compares tree entries and never reads file
+          # contents, and this repo vendors whole upstream source trees
+          # (ADR 0021) -- a full-content clone to answer "which paths changed"
+          # would cost more than the build it is trying to skip.
+          fetch-depth: 0
+          filter: blob:none
+
+      # The two SHAs arrive through `env:` rather than being interpolated into
+      # the script body. They are GitHub-supplied and safe today, but the shape
+      # of the step is what stops the next person from adding a branch name --
+      # which is attacker-controlled text -- the same way.
+      - name: Diff against the base commit
+        id: decide
+        shell: bash
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -uo pipefail
+
+          decide() { # code, markdown reason
+            echo "code=$1" >> "$GITHUB_OUTPUT"
+            if [[ "$1" == "true" ]]; then
+              headline="### Build jobs: **running**"
+            else
+              headline="### Build jobs: **skipped** — documentation-only push"
+            fi
+            { echo "$headline"; echo; echo "$2"; } >> "$GITHUB_STEP_SUMMARY"
+            printf '%s\n%s\n' "$headline" "$2"
+            exit 0
+          }
+          build() { decide true "$1"; }
+
+          [[ -n "$BASE" ]] \
+            || build "This event carries no base commit, so there is nothing to diff against."
+          [[ "$BASE" != "0000000000000000000000000000000000000000" ]] \
+            || build "Branch created in this push — there is no previous state to compare against."
+          git cat-file -e "${BASE}^{commit}" 2>/dev/null \
+            || build "Base commit \`$BASE\` is not in this clone (force-push or rewritten history)."
+          git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null \
+            || build "Head commit \`$HEAD_SHA\` is not in this clone."
+
+          files="$(git diff --name-only "$BASE" "$HEAD_SHA" --)" \
+            || build "\`git diff\` failed; the change set is unknown."
+          [[ -n "$files" ]] \
+            || build "Empty diff — treated as unknown rather than as nothing to do."
+
+          # The allowlist is short on purpose: an entry belongs here only if the
+          # path provably cannot reach a compiler. `.github/workflows/**` is
+          # deliberately absent, so an edit to this file is always proved by a
+          # real build rather than by reading it.
+          relevant=""
+          while IFS= read -r f; do
+            case "$f" in
+              docs/*|*.md|.vscode/*|LICENSE|NOTICE) ;;
+              *) relevant="${relevant}${f}"$'\n' ;;
+            esac
+          done <<< "$files"
+
+          # Truncated because a vendoring commit changes tens of thousands of
+          # paths and the step summary has a size limit; the decision is already
+          # made by this point, so the list is evidence, not input.
+          listing() { printf '```\n%s\n```\n' "$(head -n 20 <<< "$1")"; }
+
+          if [[ -n "$relevant" ]]; then
+            build "$(printf 'Changed outside the documentation allowlist:\n\n%s' "$(listing "$relevant")")"
+          fi
+
+          decide false "$(printf 'Every changed path is documentation:\n\n%s' "$(listing "$files")")"
+
   # ---------------------------------------------------------------------------
   # Keeps the documentation package itself verifiable: every relative link
   # resolves, pinned versions are named consistently, no stray Roblox
   # references outside the allowed files (rule R7 sweep).
+  #
+  # Runs on every event, including a milestone tag: it costs one charged minute
+  # and it is the check a documentation-only push most needs.
   #
   # NOTE ON `--exclude-dir=third_party` BELOW: every step in this job checks
   # documentation *we* authored. Vendored upstream trees are governed by
@@ -100,10 +221,29 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Tier-1 (Windows) and Tier-2 (Linux) build + test. third_party is vendored
-  # in-tree (ADR 0021), so there is no dependency-fetch step: the checkout is
-  # the whole input.
+  # in-tree (ADR 0021), so there is no dependency-fetch step: the checkout plus
+  # the one hash-pinned DirectXShaderCompiler archive (ADR 0032) is the whole
+  # input.
+  #
+  # Linux stays on every push, unlike macOS below: it is the cheapest tier at
+  # 1x, and it has already caught a real bug this milestone (SDL refusing to
+  # configure with neither X11 nor Wayland). If the local Docker-based Linux
+  # gate lands and takes that duty over, the change is to lift the
+  # `ubuntu-latest` row out of the matrix into its own job with its own `if:` --
+  # a matrix leg cannot carry a condition of its own, and building the machinery
+  # that would let it (a matrix computed in `changes` and passed through
+  # `fromJSON`) before there is a second trigger to justify it would cost more
+  # in legibility than it saves in that future edit.
   # ---------------------------------------------------------------------------
   build-test:
+    needs: changes
+    # Reads as "build unless something said not to". `!cancelled()` is what
+    # keeps a failed or errored `changes` job from silently skipping the build:
+    # only a literal `false` -- which that job writes on one path and one path
+    # only -- stops it. Tag pushes are excluded because a milestone tag points
+    # at a commit this job already built when it landed on `main`, and are
+    # matched on `github.ref` for the reason given on the `changes` job.
+    if: ${{ !cancelled() && !startsWith(github.ref, 'refs/tags/') && needs.changes.outputs.code != 'false' }}
     strategy:
       fail-fast: false
       matrix:
@@ -111,13 +251,68 @@ jobs:
           - { os: windows-latest, preset: win-msvc-dev }
           - { os: ubuntu-latest, preset: linux-clang-dev }
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    # Was 45. The last cold run before this change measured 708 s (Windows) /
+    # 688 s (Linux), so 45 was never a schedule -- it is the hang guard, and on
+    # a private repo a hung Windows job burns 2x its wall time. 30 keeps around
+    # 1.7x headroom over the worst case this job now has, which is the very
+    # first run: every cache cold, plus the upload of both.
+    timeout-minutes: 30
+    env:
+      # Bounded well under the 10 GiB default: this directory is uploaded to and
+      # downloaded from actions/cache on every run, and GitHub evicts the whole
+      # repository's caches past 10 GB. A complete Windows build measured 90 MiB
+      # of cache locally, so this is roughly 10x headroom rather than a guess.
+      SCCACHE_CACHE_SIZE: "1G"
+      # sccache's statistics live in the server process and die with it, and the
+      # server exits after 600 s idle by default -- which a long configure can
+      # reach. The stats step below stops it explicitly instead.
+      SCCACHE_IDLE_TIMEOUT: "0"
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set out-of-tree build root (R14)
+      - name: Set the out-of-tree build root (R14) and the compiler-cache location
         shell: bash
-        run: echo "LUAUG_BUILD_ROOT=${RUNNER_TEMP}/luaug-build" >> "$GITHUB_ENV"
+        run: |
+          set -euo pipefail
+          echo "LUAUG_BUILD_ROOT=${RUNNER_TEMP}/luaug-build" >> "$GITHUB_ENV"
+          # Set rather than left to sccache's per-platform default, so that the
+          # actions/cache step below has one path it can name on every OS.
+          echo "SCCACHE_DIR=${RUNNER_TEMP}/sccache" >> "$GITHUB_ENV"
+
+      # Installed by pinned URL rather than a third-party action, for the same
+      # two reasons as the rokit step in `luau-check` below: one fewer
+      # supply-chain surface, and the version is visible in this file (R5).
+      - name: Install sccache
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${RUNNER_OS}" in
+            Windows) triple="x86_64-pc-windows-msvc";     ext="zip";    exe="sccache.exe" ;;
+            Linux)   triple="x86_64-unknown-linux-musl";  ext="tar.gz"; exe="sccache" ;;
+            *) echo "::error::no pinned sccache artifact for ${RUNNER_OS}"; exit 1 ;;
+          esac
+          # The release names its assets with the leading "v" twice: once in the
+          # tag, once in the file name.
+          name="sccache-v${SCCACHE_VERSION}-${triple}"
+          archive="${RUNNER_TEMP}/${name}.${ext}"
+          curl -fsSL -o "$archive" \
+            "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/${name}.${ext}"
+          mkdir -p "${RUNNER_TEMP}/sccache-bin"
+          if [[ "$ext" == "zip" ]]; then
+            unzip -q "$archive" -d "${RUNNER_TEMP}/sccache-bin"
+          else
+            tar -xzf "$archive" -C "${RUNNER_TEMP}/sccache-bin"
+          fi
+          # The archive holds one top-level directory named after the asset.
+          #
+          # Proved by absolute path rather than by prepending to PATH and
+          # running `sccache`: on Windows $RUNNER_TEMP is `D:\a\_temp`, and a
+          # drive letter inside bash's colon-separated PATH splits into two
+          # useless entries at the colon. $GITHUB_PATH does not have that
+          # problem -- the runner appends it with the platform's own separator,
+          # which is also what the `cmd` build step below needs.
+          "${RUNNER_TEMP}/sccache-bin/${name}/${exe}" --version
+          echo "${RUNNER_TEMP}/sccache-bin/${name}" >> "$GITHUB_PATH"
 
       # The runner images already ship Ninja, so this is a fallback rather than
       # an install step. The first CI run hung here for 10+ minutes on
@@ -155,6 +350,10 @@ jobs:
       # package. Everything video, input-method or DRM related is here; only the
       # audio and joystick packages are dropped, and those match subsystems this
       # repo turns off by decision (ADR 0009 for audio, ADR 0029 for input).
+      #
+      # This apt step is a fixed ~40 s that the caches below do not touch, and
+      # caching /var/cache/apt across runs is its own can of worms (partial
+      # dependency closures, mirror drift). Left alone deliberately.
       - name: Install SDL video dependencies (Linux)
         if: runner.os == 'Linux'
         timeout-minutes: 10
@@ -170,16 +369,81 @@ jobs:
             libdbus-1-dev libibus-1.0-dev libudev-dev \
             libwayland-dev wayland-protocols libdecor-0-dev
 
+      # DirectXShaderCompiler is a 27 MB (Windows) / 13 MB (Linux) release
+      # archive that cmake/luaug_dxc.cmake downloaded on every single configure.
+      # `third_party/manifest.json` is the sole pin authority (ADR 0032, R5) --
+      # the URL, the SHA256 and the version all live there and nowhere else --
+      # so hashing that one file is the honest key: any change to the pin
+      # changes the key, and a pin change is exactly the case that must miss.
+      #
+      # Only the archive is cached, not the tree the module extracts from it.
+      # luaug_dxc.cmake re-hashes the archive against the manifest on every
+      # configure and treats a mismatch as a supply-chain event, so a restored
+      # archive is verified rather than trusted. Nothing verifies the extracted
+      # tree, and caching unverified bytes on the path to the compiler we run is
+      # not worth the few seconds re-extraction costs.
+      #
+      # No restore-keys: a near-miss here is not a partial win, it is the wrong
+      # archive for the pin. Missing and re-downloading is the correct outcome.
+      - name: Cache the pinned DirectXShaderCompiler archive
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/luaug-build/toolchains/dxc/**/*.zip
+            ${{ runner.temp }}/luaug-build/toolchains/dxc/**/*.tar.gz
+          key: dxc-${{ runner.os }}-${{ hashFiles('third_party/manifest.json') }}
+
+      # The compiler cache. Unlike the DXC archive above, nothing in here is
+      # trusted as an artifact: sccache addresses every entry by a digest of the
+      # preprocessed source, the full command line and the compiler binary
+      # itself, so a stale or foreign entry cannot be served for a different
+      # input -- it can only fail to be found. That is why this key is a
+      # hit-rate heuristic with deliberately loose restore-keys, where the DXC
+      # key is exact and has none.
+      #
+      # The prefix names what invalidates the whole cache at once: the
+      # dependency pins, the preset flags, and the CMake modules that assemble
+      # the command lines. `engine/**` is deliberately absent -- sccache already
+      # works per translation unit, and keying on our own sources would throw
+      # the cache away on precisely the commits it exists to speed up.
+      #
+      # The run id makes every key unique because actions/cache never overwrites
+      # an existing entry: without it, the first run after a pin change would be
+      # the only one that ever saved.
+      - name: Cache the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/sccache
+          key: sccache-${{ runner.os }}-${{ matrix.preset }}-${{ hashFiles('third_party/manifest.json', 'CMakePresets.json', 'cmake/**') }}-${{ github.run_id }}
+          restore-keys: |
+            sccache-${{ runner.os }}-${{ matrix.preset }}-${{ hashFiles('third_party/manifest.json', 'CMakePresets.json', 'cmake/**') }}-
+            sccache-${{ runner.os }}-${{ matrix.preset }}-
+
       # The presets use the Ninja generator with `strategy: external`, so the
       # MSVC environment must be established first. vswhere avoids hardcoding
       # an edition/year that changes with the runner image.
+      #
+      # `-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded` is not a tuning knob,
+      # it is what makes the compiler cache above do anything at all on this
+      # tier. sccache refuses any MSVC compilation whose PDB is shared with
+      # another compilation (src/compiler/msvc.rs, "shared pdb"), and CMake
+      # hands every object in a target the same `/Fd<target>.pdb`, so under the
+      # default `/Zi` the Windows hit rate is exactly zero -- silently, since
+      # those land in `Non-cacheable compilations` with no reason recorded.
+      # `Embedded` is `/Z7`: the same debug information, carried in the object
+      # files, with the executable's PDB still produced by the linker.
+      #
+      # Passed here rather than written into CMakePresets.json on purpose. It is
+      # a property of *this* environment, not of the dev profile: locally, `/Zi`
+      # is the better default (smaller objects, faster incremental links) and
+      # nobody is sharing a compiler cache.
       - name: Configure, build and test (Windows)
         if: runner.os == 'Windows'
         shell: cmd
         run: |
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set VSPATH=%%i
           call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
-          cmake --preset ${{ matrix.preset }} || exit /b 1
+          cmake --preset ${{ matrix.preset }} -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded || exit /b 1
           cmake --build --preset ${{ matrix.preset }} || exit /b 1
           ctest --preset ${{ matrix.preset }} || exit /b 1
 
@@ -188,9 +452,88 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cmake --preset ${{ matrix.preset }}
+          cmake --preset ${{ matrix.preset }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           cmake --build --preset ${{ matrix.preset }}
           ctest --preset ${{ matrix.preset }}
+
+      # A compiler cache that never hits is indistinguishable, from the outside,
+      # from one that works: the build is green either way and the only symptom
+      # is a bill. So the numbers go on the run's summary page, where they can be
+      # read without opening a log.
+      #
+      # sccache declines work in two different places and they mean opposite
+      # things here, so the summary keeps them apart:
+      #
+      #   Non-cacheable calls        -- refused while parsing the arguments, and
+      #                                 the reason is recorded. Expected to sit
+      #                                 at 226 of 466 on Windows, reported as
+      #                                 `/Fp` and `/Yc`: SDL3 builds with
+      #                                 precompiled headers, `/Fp` is
+      #                                 `TooHardPath` in sccache's MSVC argument
+      #                                 table, and each of those is handed
+      #                                 straight back to cl.exe with its argv
+      #                                 untouched. A fact about upstream SDL,
+      #                                 not a fault to chase -- and a cheap one,
+      #                                 since those are small C files while the
+      #                                 240 that DO cache are Luau's C++.
+      #   Non-cacheable compilations -- refused after parsing, with NO reason
+      #                                 recorded. This is where a `/Zi`
+      #                                 regression would land, silently, so it
+      #                                 is the number worth an annotation.
+      #
+      # The headline rate is therefore taken over hits + misses -- what sccache
+      # was ever allowed to cache -- because counting the PCH units as misses
+      # would report a permanently broken-looking cache and train everyone to
+      # ignore it.
+      #
+      # Warns rather than fails: this step reports on the build, it does not
+      # judge it, and a cache that got worse is not a reason to reject a commit.
+      - name: sccache statistics
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          command -v sccache >/dev/null 2>&1 || exit 0
+
+          stats="$(sccache --show-stats 2>&1)"
+          # Matched on the label as a line prefix and read as the last field, so
+          # that sccache's runtime-computed column widths cannot break this.
+          field() { awk -v k="$1" 'index($0, k) == 1 { print $NF; exit }' <<< "$stats"; }
+
+          hits="$(field 'Cache hits')"
+          misses="$(field 'Cache misses')"
+          declined_calls="$(field 'Non-cacheable calls')"
+          declined_compilations="$(field 'Non-cacheable compilations')"
+
+          headline="$(awk -v h="$hits" -v m="$misses" 'BEGIN {
+            n = h + m
+            if (n > 0) printf "**%d of %d cacheable compilations hit (%d%%)**", h, n, 100 * h / n
+            else printf "**no cacheable compilations recorded**"
+          }')"
+
+          {
+            echo "### sccache — ${{ matrix.preset }}"
+            echo
+            echo "$headline"
+            echo
+            echo "\`${declined_calls:-?}\` calls declined before compiling (expected — SDL3's precompiled headers) · \`${declined_compilations:-?}\` compilations declined (expected 0)"
+            echo
+            echo '```'
+            printf '%s\n' "$stats"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          printf '%s\n' "$stats"
+
+          if [[ "$declined_compilations" =~ ^[0-9]+$ ]] && (( declined_compilations > 0 )); then
+            echo "::warning::sccache declined ${declined_compilations} compilation(s) on ${{ matrix.preset }} with no reason recorded — the usual cause is MSVC debug information reverting to a shared PDB, which makes this cache do nothing"
+          fi
+
+          # Stopped explicitly because SCCACHE_IDLE_TIMEOUT=0 means it never
+          # stops on its own, and actions/cache's save runs after this step.
+          sccache --stop-server > /dev/null 2>&1 || true
 
   # ---------------------------------------------------------------------------
   # Tier-3 (macOS). Compile only, by decision rather than by omission.
@@ -205,10 +548,29 @@ jobs:
   # Everything is built, including the test executables: compiling them is free
   # coverage over the headers they exercise. Nothing is run, so the absence of a
   # `ctest` step below is the point of the job, not an oversight.
+  #
+  # NO LONGER ON EVERY PUSH, and that is a cost decision rather than a technical
+  # one. macOS minutes bill at 10x on a private repository, which made this the
+  # most expensive job in the file -- roughly 30 charged minutes -- despite
+  # being the fastest to finish. It now runs at the milestone tag that the gate
+  # is recorded against (`milestone/*`), which is what "Tier-3 compile" asks for
+  # literally, and on demand.
+  #
+  # What that gives up, stated plainly: a macOS-only break is now discovered at
+  # the milestone gate rather than at the commit that caused it, so somebody
+  # will have to bisect for it. If that happens twice, this decision was wrong.
+  #
+  # There is no compiler cache here either. A cache last written a milestone ago
+  # would mostly miss, and saving one costs 10x minutes for a build that already
+  # finishes in under three.
   # ---------------------------------------------------------------------------
   build-macos:
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/milestone/') }}
     runs-on: macos-latest
-    timeout-minutes: 45
+    # Was 45, which at 10x is 450 charged minutes for a job whose observed wall
+    # time is 168 s. This is the largest single tail risk in the file; 20 still
+    # leaves 7x headroom.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -235,6 +597,10 @@ jobs:
       # through the C compiler with `-x objective-c` forced per source file
       # (third_party/sdl3/CMakeLists.txt), so the root project's
       # `LANGUAGES CXX C` needs no OBJC addition for this tier.
+      #
+      # Nor is there a DXC cache step: LUAUG_SHADER_TOOLCHAIN defaults OFF on
+      # Apple platforms (cmake/luaug_options.cmake) because Microsoft publishes
+      # no macOS DirectXShaderCompiler, so this configure fetches nothing.
       - name: Configure and build (compile only)
         shell: bash
         run: |
@@ -245,6 +611,9 @@ jobs:
   # ---------------------------------------------------------------------------
   # Luau-side static gates: strict analysis under the new solver (R2), StyLua
   # formatting, the i18n key check (R3), and the module layering rule.
+  #
+  # Unconditional, like docs-lint: eight seconds on the cheapest runner, and
+  # gating it on a path filter would risk more than it could ever save.
   # ---------------------------------------------------------------------------
   luau-check:
     runs-on: ubuntu-latest

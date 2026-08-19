@@ -748,15 +748,39 @@ self-registration.**
   Luau, `luau-analyze --mode=strict` (new solver) over `runtime/`, `api/`,
   `tools/`, `templates/`, examples; the layer checker; API-gen freshness
   diff; the i18n key inventory vs `en.json`.
-- **CI (GitHub Actions):** `ci.yml` on PR/main — jobs: `lint`; `build-test`
-  matrix {windows MSVC, ubuntu Clang, macos arm64} × {debug, dev};
-  `sanitize` (ubuntu ASan/UBSan); `determinism` (win+linux); conformance
-  bundled into build-test. `nightly.yml`: GCC build, TSan, image goldens,
-  the Android NDK cross-compile job (non-blocking, from M1–M2), the
-  openworld perf smoke (headless tick-time budget + capture-backend draw
-  counts), packaging artifacts. **Cache:** sccache backed by `actions/cache`;
-  third_party static libs cached keyed on `hash(manifest.json) + toolchain +
-  preset` — deterministic thanks to vendoring.
+- **The gates run locally first.** `scripts/localgate.ps1` runs everything the
+  dev machine can run: the documentation gate, the Luau gates, the Windows
+  build and tests, and the Linux tier inside the container
+  `scripts/docker/tier2.Dockerfile` builds. Both callers execute the same
+  `scripts/gates/*.sh` rather than a transcription, because a transcription
+  drifts until "it passes locally" means nothing. Only macOS cannot run here.
+  This is the "scripted local gate" the roadmap already allows, generalised:
+  the repository is private, so hosted minutes carry platform multipliers, and
+  a portability break found in seconds on the machine that caused it is worth
+  more than the same break found later on a meter.
+- **CI (GitHub Actions):** `ci.yml` on PR/main — jobs: `changes` (decides
+  whether a push can affect a build at all; a documentation-only push skips the
+  build jobs, and anything it cannot classify builds); `docs-lint`;
+  `luau-check`; `build-test` matrix {windows MSVC, ubuntu Clang}. `build-macos`
+  is compile-only and runs on `workflow_dispatch` or a `milestone/*` tag rather
+  than every push — a deliberate cost decision, since macOS minutes are charged
+  at 10× and Tier-3 runtime verification is post-v1. It gives up finding a
+  macOS-only break at the commit that caused it. Planned and not yet present:
+  `sanitize` (ubuntu ASan/UBSan), `determinism` (win+linux), conformance
+  bundled into build-test. `nightly.yml`: the Android NDK cross-compile job
+  (non-blocking, from M1–M2); planned there too are the GCC build, TSan, image
+  goldens, the openworld perf smoke and packaging artifacts.
+  **Cache:** sccache backed by `actions/cache`, plus the hash-pinned DXC archive
+  (ADR 0032) keyed on `hash(manifest.json)`. Two caches with opposite rules, on
+  purpose: the DXC key is exact with no restore-keys because it holds a real
+  artifact, and it is re-verified against its SHA256 on every configure; the
+  sccache key is a loose heuristic because sccache addresses entries by a digest
+  of preprocessed source plus command line, so a stale entry can only fail to be
+  found, never be served wrongly.
+  **`CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded` is load-bearing on Windows:**
+  CMake gives every object in a target the same `/Fd<target>.pdb`, and sccache
+  declines any compilation whose PDB already exists — silently, recording no
+  reason. With the default `/Zi` the measured hit rate is exactly zero.
 
 ---
 

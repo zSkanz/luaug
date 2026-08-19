@@ -29,17 +29,24 @@ option(LUAUG_RHI_NULL "Build the no-op render backend" ON)
 option(LUAUG_RHI_CAPTURE "Build the command-stream recording render backend" ON)
 
 # --- Shader toolchain (ADR 0006, ADR 0032) ----------------------------------
-# Off by default on macOS, and that default encodes a decision rather than
-# discovering it at build time: Microsoft publishes no macOS DirectXShaderCompiler
-# binary, so a macOS host has no way to compile HLSL and its shaders are produced
-# on a Tier-1/Tier-2 host instead (architecture.md §8 already builds shadercross
-# as a host tool used when cross-compiling). Forcing it ON there is allowed and
-# fails with that explanation.
+# The defaults encode decisions rather than discovering them at build time.
 #
-# It is an option rather than a hard platform rule because turning it off is also
-# how a build that only consumes precompiled shader blobs skips the whole
-# toolchain.
-if(APPLE)
+# Off when cross-compiling, because shadercross is a HOST tool -- it runs during
+# the build to produce blobs, and architecture.md §8 says so explicitly ("builds
+# once as a host tool, also used when cross-compiling"). A cross build has no
+# business compiling a compiler for its target, and DirectXShaderCompiler
+# publishes no artifact for one either, so the nightly Android job would fail at
+# configure trying to fetch something that does not exist. Shaders for a
+# cross-compiled target come from a host build.
+#
+# Off on macOS, because Microsoft publishes no macOS DirectXShaderCompiler
+# binary at all (ADR 0032 states this consequence). Forcing it ON there is
+# allowed and fails with that explanation rather than a confusing not-found.
+#
+# It stays an option rather than becoming a hard platform rule because turning
+# it off is also how a build that only consumes precompiled shader blobs skips
+# the whole toolchain.
+if(APPLE OR CMAKE_CROSSCOMPILING)
     set(LUAUG_SHADER_TOOLCHAIN_DEFAULT OFF)
 else()
     set(LUAUG_SHADER_TOOLCHAIN_DEFAULT ON)
