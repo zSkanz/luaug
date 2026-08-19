@@ -9,7 +9,7 @@ cmake_minimum_required(VERSION 3.28)
 
 project(LuauG
     VERSION 0.0.1
-    DESCRIPTION "Standalone game engine scripted in Luau, familiar to Roblox developers"
+    DESCRIPTION "Standalone game engine scripted in Luau with a familiar Instance/Service developer experience"
     LANGUAGES CXX C)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
