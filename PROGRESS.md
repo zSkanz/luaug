@@ -5,28 +5,32 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- Current milestone: **M0 — Bootstrap and First Light — COMPLETE, awaiting
-  human sign-off**
-- Gate status: **all five gate items pass**, verified in CI on Tier-1 (Windows)
-  and Tier-2 (Linux). Full evidence in `docs/briefs/m0-kickoff.md` § Gate
-  Record.
-- Remote: `github.com/zSkanz/luaug` (private), created by the human this
-  session. CI runs on every push.
-- Tag: `milestone/m0`.
+- Current milestone: **M1 — Window, RHI, Frame Loop, Agent Eyes — in progress**
+  (brief: `docs/briefs/m1-kickoff.md`).
+- **M0 signed off by the human on 2026-08-19**, tagged `milestone/m0`. All five
+  gate items passed on Tier-1 (Windows) and Tier-2 (Linux); evidence in
+  `docs/briefs/m0-kickoff.md` § Gate Record. Re-verified green at M1 kickoff:
+  `cmake --build` up to date, `ctest` 6/6, `--version` reports Luau 0.734
+  (3fc82b1) and bytecode 9 / types 3 / vector 3-wide f32.
+- Remote: `github.com/zSkanz/luaug` (private). CI runs on every push.
 - The engine builds and runs on both tiers: `luaug-host examples/boot/boot.luau`
-  prints a catalog-resolved greeting and exits 0.
+  prints a catalog-resolved greeting and exits 0. Nothing renders yet.
 
 ## Now / Next
 
-- **Next: stop. This is the M0 milestone gate — a human checkpoint
-  (MASTER_PROMPT.md §6).** Do not begin M1 in this session, and do not begin it
-  at all until the human has reviewed the M0 gate record and said go.
-- When M1 does start, the literal first action is: write
-  `docs/briefs/m1-kickoff.md` from the template in `docs/briefs/README.md`,
-  then wire `third_party/sdl3` into the build (it is already vendored and
-  pinned at 3.4.14 but deliberately not compiled — see
-  `third_party/CMakeLists.txt`).
-- Carried forward, deliberately not done in M0 (none block the gate):
+- **Next: wire `third_party/sdl3` into the build** (vendored and pinned at
+  3.4.14 since M0, deliberately not compiled — see
+  `third_party/CMakeLists.txt`), enabling only the subsystems M1 needs, and
+  **measure cold-build time before and after** — build cost is risk 1 in the
+  brief. Then build the `platform` module (L1) per architecture.md §2.
+- Order of work and the split points for a multi-session milestone are in the
+  brief under "Planned order of work". Steps 1–5 (SDL3 → platform → rhi_api +
+  rhi_null → rhi_capture → rhi_sdlgpu) are the spine.
+- **Escalation likely this milestone:** SDL_shadercross is expected to require
+  SPIRV-Cross and DirectXShaderCompiler, neither of which has a manifest row.
+  If so, that is R5/R6 and stops for the human (§10) — do not add rows
+  unilaterally. Fallback is in the brief.
+- Carried forward from M0 (none blocked the M0 gate):
   - **CI has no cache.** Every run pays a full cold build: ~8 min per tier,
     almost all of it compiling Luau. `sccache` + a `third_party` cache keyed on
     `hash(manifest.json) + toolchain + preset` is the plan in architecture.md §9.
@@ -37,15 +41,13 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
     runners. Cosmetic today.
   - **Console text on Windows is fixed by codepage, not by wide writes.** A
     fully robust fix (`WriteConsoleW` when stdout is a console) belongs to the
-    `platform` module in M1.
+    `platform` module in M1 — folded into step 2 of the M1 brief.
   - **`luaug check` must not pass file lists on Windows** — a few hundred paths
     overflow the 32,767-character command line. Pass directories (M3).
 
 ## Blocked — needs human
 
-- **M0 sign-off.** The gate is green; milestone boundaries are the human
-  checkpoint and this ledger records that batching reviews was never
-  pre-authorized. Nothing proceeds until the human reviews and approves.
+- (none — M0 sign-off was given on 2026-08-19)
 
 ## Decisions pending ADR
 
@@ -80,6 +82,20 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   console mangled UTF-8 catalog text — both invisible to CI, the second
   reported by the human. Full list in the brief's Findings section.
   Next: **stop for M0 human review** (§6). Do not start M1 this session.
+
+- **2026-08-19 (session 3, Claude Opus):** M0 signed off by the human; **opened
+  M1**. Ran the §2 boot sequence against a cleared context — the ledger and the
+  repo agreed, and the M0 gate re-ran green locally (ctest 6/6). Wrote
+  `docs/briefs/m1-kickoff.md`: goal, scope, an explicit NOT-in-scope list, the
+  step order with its multi-session split points, the subagent plan, and four
+  entering risks.
+  Learned: the M1 gate says "Tier-2/Tier-3 compile" but `ci.yml` has no macOS
+  job and the roadmap's tier table says macOS compiles "from M4" — the gate is
+  the narrower contract, so a compile-only macOS job is M1 work (recorded in
+  the brief). Also: `vcvars64.bat` lives under Visual Studio **18** on this
+  machine, not 2022 — always locate it with vswhere, as `bootstrap.ps1` does.
+  Next: wire `third_party/sdl3` into the build with only the M1 subsystems
+  enabled, measuring cold-build time before and after.
 
 <!-- Format for future entries:
 - **YYYY-MM-DD (session N):** did X; learned Y; Next: <literal first action>.
