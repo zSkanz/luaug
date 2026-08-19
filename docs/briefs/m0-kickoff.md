@@ -173,6 +173,22 @@ Recorded because each one cost real time and will cost it again otherwise.
     and `luau-lsp analyze` does recurse — verified with a planted error in file
     7 of 400.
 
+12. **A Windows console on a legacy OEM codepage mangles the catalogs.** The
+    engine emits UTF-8 (ADR 0019); a `cmd` window on CP-850 decodes the em dash
+    in `engine.boot.hello` as `ÔÇö`. Reported by the human running the binary in
+    a real console — it is invisible through a pipe, which is why neither CI nor
+    any tooling here caught it. Left unfixed it would have made
+    "adding a locale is adding a file" false on Windows for any language with
+    accents, which is most of them. Fixed with a scoped
+    `SetConsoleOutputCP(CP_UTF8)` that restores the previous codepage on exit,
+    since the codepage belongs to the console rather than the process.
+
+    *Verification gap, stated honestly:* this cannot be confirmed from the
+    agent's environment, which has no interactive console — `GetConsoleOutputCP`
+    returns 0 there and the guard correctly no-ops. Confirmed instead by the
+    human in a real console. A fully robust fix (`WriteConsoleW` with wide
+    strings when stdout is a console) belongs to `platform` in M1.
+
 ## Measured: how analysis scales with .luau count
 
 Taken on the dev machine so M3's `luaug check` has a baseline to start from.
