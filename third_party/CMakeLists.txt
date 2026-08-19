@@ -8,6 +8,29 @@
 # wired here only once a module actually links them. Adding an add_subdirectory
 # for something nothing uses would slow every build for no benefit.
 
+# ---------------------------------------------------------------------------
+# A vendored tree must not discover THIS repository's git metadata.
+#
+# Several upstream projects run `git describe` during configure to stamp their
+# own version. A vendored tree has no `.git` of its own (the vendor tool checks
+# out a work tree and leaves the git dir behind on purpose), so git walks up and
+# finds ours -- and SPIRV-Cross was baking `milestone/m0-26-g41f57c7` into its
+# gitversion.h as though that were a SPIRV-Cross version. That is simply wrong
+# information compiled into a binary.
+#
+# It is also expensive, because `--dirty` forces a full `git status` over the
+# whole repository -- and this one carries thousands of vendored files. Measured
+# on the same command: 0.71 s natively, and **37 seconds** inside the Linux
+# container, where every stat crosses Docker's filesystem bridge. That was about
+# 70% of a 53-second configure.
+#
+# The ceiling stops git before it can ascend out of third_party/, so a vendored
+# project correctly concludes it is not in a repository. Set here rather than
+# patched into each upstream (R13, ADR 0021): it is one line, it applies to
+# every vendored tree present and future, and it survives a pin bump.
+set(LUAUG_SAVED_GIT_CEILING "$ENV{GIT_CEILING_DIRECTORIES}")
+set(ENV{GIT_CEILING_DIRECTORIES} "${CMAKE_CURRENT_SOURCE_DIR}")
+
 include(${LUAUG_CMAKE_DIR}/luaug_luau.cmake)
 
 if(LUAUG_BUILD_TESTS)
@@ -195,3 +218,8 @@ if(LUAUG_SHADER_TOOLCHAIN)
         add_dependencies(shadercross luaug_dxc_runtime)
     endif()
 endif()
+
+# Restored so nothing above this directory inherits the ceiling. Our own build
+# does not shell out to git during configure today, and this is what keeps that
+# from becoming a silent dependency if it ever does.
+set(ENV{GIT_CEILING_DIRECTORIES} "${LUAUG_SAVED_GIT_CEILING}")
