@@ -111,9 +111,16 @@ types in the public API.
 
 - C++20 per `.clang-format` (4-space, 120 cols); warnings-as-errors on
   `engine/`; namespaces `luaug::<module>`; files `snake_case`.
-- Luau per `stylua.toml` + `.luaurc` (strict). Public API naming: PascalCase
-  for the world (Instances/services/datatypes), lowercase for required
-  libraries — see `docs/api-design.md` conventions.
+- Luau per `stylua.toml` + `.luaurc` (strict). **Naming: everything LuauG
+  defines is PascalCase** — Instances, services, datatypes, constructors
+  (`Instance.New`, `CFrame.FromEuler`), constants (`CFrame.Identity`) and the
+  `@luaug/*` libraries. The only exclusions are surfaces that are not ours:
+  Luau's own libraries (`task`, `vector`, `string`, …) and `@std/*`, which
+  exists to run unchanged on Lute (ADR 0034, api-design §9).
+- Luau identifier casing: **PascalCase outside a function scope** (module
+  locals, module-level functions, exported members, types), **camelCase inside
+  one**, and constants PascalCase with no underscores — no
+  `SCREAMING_SNAKE_CASE`.
 - Comments explain *why* and contracts, never narrate code.
 
 ## Do-not list
