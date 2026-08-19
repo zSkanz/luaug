@@ -70,11 +70,16 @@ jobs:
           check "luau-lsp@1.69.0" "luau-lsp@1\.6[0-8]\." "luau-lsp"
           echo "version consistency ok"
 
+      # `.vscode/settings.json` is on the allowed list for the reason the rule
+      # exists: it is the file that points luau-lsp AWAY from Roblox's platform
+      # mode, and the comment explaining why cites ADR 0020. A rule that forbade
+      # naming the thing being avoided would push that reasoning out of the file
+      # where the next person will need it.
       - name: Legal sweep (R7) — 'Roblox' only in allowed files
         shell: bash
         run: |
           set -euo pipefail
-          allowed='^(\./)?(README\.md|CONTRIBUTING\.md|NOTICE|MASTER_PROMPT\.md|CLAUDE\.md|PROGRESS\.md|docs/|templates/README\.md|examples/README\.md|tests/README\.md|runtime/README\.md|api/README\.md|engine/README\.md|tools/README\.md|third_party/README\.md)'
+          allowed='^(\./)?(README\.md|CONTRIBUTING\.md|NOTICE|MASTER_PROMPT\.md|CLAUDE\.md|PROGRESS\.md|docs/|templates/README\.md|examples/README\.md|tests/README\.md|runtime/README\.md|api/README\.md|engine/README\.md|tools/README\.md|third_party/README\.md|\.vscode/settings\.json)'
           bad=0
           while IFS= read -r f; do
             if ! [[ "$f" =~ $allowed ]]; then
