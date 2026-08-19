@@ -10,6 +10,8 @@ luaug_add_module(app
         src/backends.cpp
         src/engine.cpp
         src/screenshot.cpp
+        src/preview_api.cpp
+        src/debug_overlay.cpp
     DEPS
         core
         platform
@@ -33,6 +35,25 @@ if(LUAUG_RHI_NULL)
     target_link_libraries(luaug_app PRIVATE luaug::rhi_null)
 endif()
 
+# The debug overlay (ADR 0011). Dev builds only: the option lives beside the
+# dependency in third_party/CMakeLists.txt, and a shipping build declares no
+# ImGui target at all -- so what is linked here IS the whole feature.
+#
+# SDL3 is named explicitly, for the same reason `platform` makes every consumer
+# of sdl_interop.h name it. The overlay reaches the real SDL_Window and the real
+# SDL_GPUDevice through two interop headers whose whole point is that crossing
+# that line should be an edit to a CMakeLists, not something an #include can do
+# on its own.
+if(LUAUG_DEBUG_UI)
+    target_link_libraries(luaug_app PRIVATE luaug::imgui SDL3::SDL3-static)
+endif()
+
+# PUBLIC rather than PRIVATE: debug_overlay.h describes a class that is inert in
+# shipping, and a test asserting that has to be able to tell which build it is
+# in. The header itself never reads this -- the class has the same shape in
+# every profile, which is what keeps the frame loop free of #ifdefs.
+target_compile_definitions(luaug_app PUBLIC LUAUG_DEBUG_UI=$<BOOL:${LUAUG_DEBUG_UI}>)
+
 # stb_image_write, for --screenshot. Header-only and SYSTEM, so its warnings are
 # not ours. Moves to `asset` when image IO becomes a subsystem (M4).
 target_include_directories(luaug_app SYSTEM PRIVATE "${LUAUG_THIRD_PARTY_DIR}/stb")
@@ -53,6 +74,7 @@ add_custom_command(TARGET luaug_host POST_BUILD
 luaug_add_module_tests(app
     SOURCES
         tests/script_host_tests.cpp
+        tests/debug_overlay_tests.cpp
 )
 
 if(LUAUG_BUILD_TESTS)
@@ -121,6 +143,7 @@ if(LUAUG_BUILD_TESTS)
                 -DHOST=$<TARGET_FILE:luaug_host>
                 -DGOLDEN=${CMAKE_SOURCE_DIR}/tests/rendercapture/clear-3frames.jsonl
                 -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/capture-gate.jsonl
+                -DSCRIPT=${CMAKE_SOURCE_DIR}/examples/00-clear/init.luau
                 -DFRAMES=3
                 -P ${CMAKE_SOURCE_DIR}/tests/rendercapture/run_capture_gate.cmake)
         set_tests_properties(capture_gate PROPERTIES TIMEOUT 60)
@@ -139,6 +162,7 @@ if(LUAUG_BUILD_TESTS)
             -DIMGCMP=$<TARGET_FILE:imgcmp>
             -DGOLDEN=${CMAKE_SOURCE_DIR}/tests/screenshots/pulse-frame30.png
             -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/screenshot-gate.png
+            -DSCRIPT=${CMAKE_SOURCE_DIR}/examples/00-clear/init.luau
             -DFRAMES=30
             -P ${CMAKE_SOURCE_DIR}/tests/screenshots/run_screenshot_gate.cmake)
     set_tests_properties(screenshot_gate PROPERTIES

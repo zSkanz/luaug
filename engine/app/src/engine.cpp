@@ -8,6 +8,7 @@
 
 #include "luaug/app/backends.h"
 #include "luaug/app/frame_scheduler.h"
+#include "luaug/app/preview_api.h"
 #include "luaug/app/screenshot.h"
 #include "luaug/app/script_host.h"
 #include "luaug/core/build_info.h"
@@ -57,44 +58,17 @@ constexpr rhi::TextureFormat kOffscreenFormat = rhi::TextureFormat::Rgba8Unorm;
     return projection * view;
 }
 
-// Three cubes orbiting the origin -- the M1 deliverable, and the thing that
-// gives the screenshot gate something with edges in it to be right or wrong
-// about (finding 9: a flat colour hides a one-tick shift inside the tolerance).
+// What the engine draws when nothing is driving it: a world triad, and nothing
+// else.
 //
-// Driven by the tick count for the same reason the clear colour is: a headless
-// capture must produce the same pixels on any machine at any speed.
-void submitOrbitingCubes(render::DebugDraw& draw, u64 tick, f64 fixedDt)
+// Deliberately NOT the same scene as examples/00-clear. An earlier version drew
+// the orbiting cubes here too, which made the golden gates useless for what
+// they most needed to cover -- a broken script binding falls back to this
+// scene, so if the two looked alike the gate would pass on a frame the script
+// never touched. They are different, so the goldens (recorded from the example)
+// fail loudly the moment the binding stops working.
+void submitIdleScene(render::DebugDraw& draw)
 {
-    constexpr int kCubeCount = 3;
-    constexpr f32 kOrbitRadius = 2.5f;
-    constexpr f32 kHalfExtent = 0.4f;
-
-    // Fixed and saturated, NOT derived from the animation. A first version drove
-    // the cube colours from the same sine the clear colour uses, and a cube
-    // whose phase happened to land near the background's became invisible
-    // against it -- geometry that can vanish is useless for debugging and worse
-    // than useless in a golden image.
-    constexpr std::array<render::DebugColor, kCubeCount> kCubeColors{
-        render::DebugColor::fromLinear(1.0f, 0.15f, 0.15f),
-        render::DebugColor::fromLinear(0.15f, 0.4f, 1.0f),
-        render::DebugColor::fromLinear(1.0f, 1.0f, 1.0f),
-    };
-
-    const auto t = static_cast<f32>(static_cast<f64>(tick) * fixedDt);
-
-    for (int i = 0; i < kCubeCount; ++i)
-    {
-        // A third of a turn apart, so all three are on screen from a fixed
-        // camera at every point in the orbit rather than eclipsing each other.
-        const f32 phase = t + static_cast<f32>(i) * (6.2832f / static_cast<f32>(kCubeCount));
-        const core::Vec3 center{kOrbitRadius * std::cos(phase), 0.0f, kOrbitRadius * std::sin(phase)};
-
-        draw.wireBox(center, {kHalfExtent, kHalfExtent, kHalfExtent},
-            kCubeColors[static_cast<std::size_t>(i)]);
-    }
-
-    // A world triad at the origin, so a wrong view or projection matrix is
-    // obvious rather than merely suspicious.
     draw.axes(core::Mat4{}, 1.0f);
 }
 
@@ -218,9 +192,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             return core::makeError(LUAUG_TR("rhi.err.target_create_failed"));
     }
 
+    // The VM outlives the script's first run, because the script registers a
+    // frame callback the loop calls every frame. M2 replaces all of this with
+    // the real scheduler; see preview_api.h for why it is as small as it is.
+    PreviewState preview;
+    ScriptHost host{[&preview](lua_State* L) { installPreviewApi(L, preview); }};
+
     if (!options.scriptPath.empty())
     {
-        ScriptHost host;
         if (std::optional<core::EngineError> scriptError = host.runFile(options.scriptPath);
             scriptError.has_value())
             return scriptError;
@@ -262,6 +241,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     };
 
     FrameScheduler scheduler;
+    bool scriptHookAlive = true;
     const auto headlessStepNs
         = static_cast<u64>(std::ceil(scheduler.timing().fixedDt * kNanosPerSecond));
     bool quit = false;
@@ -322,7 +302,30 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             ensureDebugPass(targetFormat);
 
             debugDraw.clear();
-            submitOrbitingCubes(debugDraw, scheduler.totalTicks(), scheduler.timing().fixedDt);
+            preview.draw = &debugDraw;
+            preview.clearColor = pulseColor(scheduler.totalTicks(), scheduler.timing().fixedDt);
+
+            // The script owns the frame when it asked to. Otherwise the engine
+            // draws its own scene, so `luaug-host` shows something whether or
+            // not a script cares about rendering -- and so that the difference
+            // between the two is visible rather than a blank window.
+            if (preview.hasFrameHook && scriptHookAlive)
+            {
+                if (auto hookError = callFrameHook(host, scheduler.totalTicks(),
+                        static_cast<f64>(scheduler.totalTicks()) * scheduler.timing().fixedDt);
+                    hookError.has_value())
+                {
+                    // Reported once, then never called again. A script that
+                    // throws every frame would otherwise produce one error per
+                    // frame forever, burying the first and only useful one.
+                    core::logText(LogLevel::Error, hookError->message);
+                    scriptHookAlive = false;
+                }
+            }
+            else
+            {
+                submitIdleScene(debugDraw);
+            }
 
             // Uploaded before the render pass opens, because a copy cannot run
             // inside one -- the seam says so and the backend enforces it.
@@ -333,7 +336,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 .texture = target,
                 .loadOp = rhi::LoadOp::Clear,
                 .storeOp = rhi::StoreOp::Store,
-                .clearColor = pulseColor(scheduler.totalTicks(), scheduler.timing().fixedDt),
+                .clearColor = preview.clearColor,
             }};
 
             cmd->pushDebugGroup("frame");

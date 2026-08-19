@@ -37,13 +37,28 @@ stylua --check .
 # pinned luau-lsp, and gating on them would fail for upstream reasons that have
 # nothing to do with our code (M0 finding 2).
 echo "== luau-analyze (strict, new solver) =="
-mapfile -t files < <(find . -name '*.luau' -not -path './third_party/*' | sort)
+# `.d.luau` files declare; they are not sources and analysing them as such
+# fails. They are fed in with --definitions instead.
+mapfile -t files < <(find . -name '*.luau' -not -name '*.d.luau' -not -path './third_party/*' | sort)
 if [[ ${#files[@]} -eq 0 ]]; then
     echo "luau-check: no .luau files found — the analysis gate would pass vacuously" >&2
     exit 1
 fi
-echo "analyzing ${#files[@]} file(s)"
-luau-lsp analyze --platform=standard --ignore="**/.lute/**" "${files[@]}"
+
+# The engine's own globals. From M3 these are generated from the IDL into
+# runtime/types/ and diff-checked for freshness; until then the M1 preview
+# binding carries a hand-written one. Loading it is what lets the example be
+# `--!strict` and gated (R2) rather than exempted -- and an exemption is the
+# thing that spreads.
+definitions=()
+definition_count=0
+while IFS= read -r defs; do
+    definitions+=(--definitions "$defs")
+    definition_count=$((definition_count + 1))
+done < <(find . -name '*.d.luau' -not -path './third_party/*' | sort)
+
+echo "analyzing ${#files[@]} file(s) with ${definition_count} definition file(s)"
+luau-lsp analyze --platform=standard --ignore="**/.lute/**" "${definitions[@]}" "${files[@]}"
 
 echo "== i18n keys (R3) =="
 lute tools/repo/i18nlint.luau

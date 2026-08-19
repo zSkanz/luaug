@@ -9,6 +9,7 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -23,7 +24,16 @@ namespace luaug::app
 class ScriptHost
 {
 public:
-    ScriptHost();
+    // Called once, after the standard libraries are open and before
+    // `luaL_sandbox` runs. That window is the ONLY place a global can be
+    // installed: the sandbox marks the globals table read-only, and a
+    // `lua_setglobal` afterwards fails inside the VM rather than returning an
+    // error anyone can see. Taking the installer as a constructor argument is
+    // what makes the ordering impossible to get wrong from the outside --
+    // it was got wrong from the outside once, which is why it exists.
+    using GlobalInstaller = std::function<void(lua_State*)>;
+
+    explicit ScriptHost(GlobalInstaller installGlobals = {});
     ~ScriptHost();
 
     ScriptHost(const ScriptHost&) = delete;

@@ -28,6 +28,19 @@
         "on what Roblox shipped this week, so it is off."
     ],
 
+    "luau-lsp.types.definitionFiles": [
+        "examples/00-clear/preview.d.luau"
+    ],
+
+    "$comment.definitions": [
+        "Declaration files describe globals; they are not sources. Without this the",
+        "extension analyses `declare luaug: { ... }` as ordinary Luau and reports a",
+        "syntax error on a file that is perfectly valid -- while the scripts that",
+        "depend on it report unknown-global errors. scripts/gates/luau-check.sh",
+        "passes the same files with --definitions. From M3 these are generated from",
+        "the IDL into runtime/types/ and this list becomes a glob."
+    ],
+
     "luau-lsp.ignoreGlobs": [
         "**/.lute/**",
         "**/third_party/**"

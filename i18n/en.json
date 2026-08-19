@@ -24,6 +24,10 @@
   "engine.screenshot.err.encode_failed": "Could not encode the image as PNG.",
   "engine.screenshot.err.open_failed": "Could not open {path} for writing.",
   "engine.screenshot.err.write_failed": "Could not finish writing {path}.",
+  "engine.overlay.warn.init_failed": "The debug overlay could not start; F3 will do nothing.",
+  "engine.overlay.warn.window_not_claimed": "The debug overlay needs a window the graphics device has already claimed.",
+  "engine.overlay.warn.already_running": "A debug overlay is already running; only one can exist at a time.",
+
   "engine.cli.err.script_missing": "Script not found: {path}.",
   "engine.cli.version.engine": "LuauG {version} ({profile})",
   "engine.cli.version.luau": "Luau {version} ({commit})",

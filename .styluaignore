@@ -1,2 +1,8 @@
 # Vendored upstream source is never formatted or edited in place (R13, ADR 0021).
 third_party/
+
+# Declaration files. `declare` is a luau-lsp extension, not Luau syntax, so
+# StyLua cannot parse one -- and it has no business formatting a file that is
+# consumed with --definitions rather than compiled. From M3 these are generated
+# into runtime/types/ and their shape is CI's to check, not a formatter's.
+*.d.luau

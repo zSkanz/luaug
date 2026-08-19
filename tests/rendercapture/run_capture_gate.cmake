@@ -7,10 +7,10 @@
 # the agent's own verification tool and, from M4, a nightly non-blocking job.
 #
 # Invoked as:
-#   cmake -DHOST=<luaug-host> -DGOLDEN=<jsonl> -DOUTPUT=<jsonl> -DFRAMES=<n>
-#         -P run_capture_gate.cmake
+#   cmake -DHOST=<luaug-host> -DSCRIPT=<luau> -DGOLDEN=<jsonl> -DOUTPUT=<jsonl>
+#         -DFRAMES=<n> -P run_capture_gate.cmake
 
-foreach(required HOST GOLDEN OUTPUT FRAMES)
+foreach(required SCRIPT HOST GOLDEN OUTPUT FRAMES)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "run_capture_gate.cmake: -D${required}=... is required")
     endif()
@@ -19,7 +19,7 @@ endforeach()
 file(REMOVE "${OUTPUT}")
 
 execute_process(
-    COMMAND "${HOST}" --headless "--frames=${FRAMES}" --exit --rhi=capture "--capture-out=${OUTPUT}"
+    COMMAND "${HOST}" "${SCRIPT}" --headless "--frames=${FRAMES}" --exit --rhi=capture "--capture-out=${OUTPUT}"
     RESULT_VARIABLE host_result
     OUTPUT_VARIABLE host_output
     ERROR_VARIABLE host_output)

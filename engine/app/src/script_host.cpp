@@ -99,7 +99,7 @@ std::string popErrorMessage(lua_State* thread)
 
 } // namespace
 
-ScriptHost::ScriptHost()
+ScriptHost::ScriptHost(GlobalInstaller installGlobals)
 {
     state_ = luaL_newstate();
     luaL_openlibs(state_);
@@ -108,6 +108,13 @@ ScriptHost::ScriptHost()
     // the globals table readonly, so anything registered afterwards would fail.
     lua_pushcfunction(state_, scriptPrint, "print");
     lua_setglobal(state_, "print");
+
+    // The caller's globals go in the same window, for the same reason. This is
+    // architecture.md §5's boot order -- open the stdlib, register engine
+    // libraries, install globals, then sandbox -- with the third step finally
+    // reachable from outside this file.
+    if (installGlobals)
+        installGlobals(state_);
 
     removeForbiddenGlobals(state_);
 

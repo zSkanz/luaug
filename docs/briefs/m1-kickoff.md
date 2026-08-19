@@ -45,7 +45,7 @@ place that knows which one exists.
 - [x] `rhi_capture` and `rhi_null` backends compile
 - [x] HLSL shaders via SDL_shadercross with an on-disk shader cache (ADR 0006,
       `cmake/luaug_shaders.cmake`)
-- [ ] Immediate-mode debug draw: lines, wire/solid cubes, text — deliberately
+- [x] Immediate-mode debug draw: lines, wire/solid cubes, text — deliberately
       early, because M2/M3/M5 visualize through it before a real renderer exists
 - [ ] ImGui docking overlay bound to F3 (ADR 0011, dev builds only)
 - [x] Frame loop with the fixed-tick accumulator (architecture.md §3); tick
@@ -56,7 +56,7 @@ place that knows which one exists.
       dev machine — recorded in the gate log either way)
 - [x] Nightly Android NDK cross-compile job (non-blocking) covering
       `platform` + `rhi_api` + `rhi_sdlgpu` + the triangle sample
-- [ ] `examples/00-clear`: clear colour pulses, three debug cubes orbit, driven
+- [x] `examples/00-clear`: clear colour pulses, three debug cubes orbit, driven
       from a Luau script through a **temporary minimal binding that M2 replaces**
 - [x] `tools/imgcmp` — the screenshot tolerance comparator (named by the gate)
 - [x] First golden capture-stream checked in, plus a reference screenshot
@@ -338,6 +338,32 @@ compile-only — no runtime verification, which stays post-v1.
     tree and pinning a clang-format version, and version pinning for the
     C++ toolchain is M3's `luaug check` work. Recorded so the gap is a decision
     rather than an oversight.
+
+14. **A golden gate whose fallback looks like its subject tests nothing.** The
+    engine draws its own scene when no script registers a frame callback, and
+    the first version of that scene was the same three orbiting cubes
+    `examples/00-clear` draws. So a broken Luau binding would silently fall back
+    to a frame that matched the golden, and both gates would pass on a frame the
+    script never touched.
+
+    The engine's idle scene is now a bare triad — visibly *not* the example.
+    Verified by breaking the binding on purpose: 1465 differing pixels, gate
+    red. Before the change, green.
+
+    The general shape is worth carrying: a gate is only as strong as the
+    difference between "working" and "fallen back".
+
+15. **`luaL_sandbox` freezes the globals table, and M0's own comment said so.**
+    Installing the preview API after constructing `ScriptHost` failed inside the
+    VM with no error anyone could see — the process printed its boot line and
+    vanished. The M0 constructor carries the warning verbatim ("Engine globals
+    must be installed BEFORE luaL_sandbox"), and it was still walked into from
+    the outside, because nothing in the *interface* made the ordering visible.
+
+    `ScriptHost` now takes a `GlobalInstaller` invoked in exactly that window.
+    The fix worth generalising is not the callback, it is that a constraint
+    documented only in a comment gets violated by the next caller; put it in the
+    signature.
 
 ## Attempted / abandoned
 

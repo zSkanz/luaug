@@ -5,13 +5,13 @@
 # comparison pass on a stale file from a previous run.
 #
 # Invoked as:
-#   cmake -DHOST=<luaug-host> -DIMGCMP=<imgcmp> -DGOLDEN=<png> -DOUTPUT=<png>
-#         -DFRAMES=<n> -P run_screenshot_gate.cmake
+#   cmake -DHOST=<luaug-host> -DSCRIPT=<luau> -DIMGCMP=<imgcmp> -DGOLDEN=<png>
+#         -DOUTPUT=<png> -DFRAMES=<n> -P run_screenshot_gate.cmake
 
 # The host's exit code for "this machine has no usable GPU".
 set(LUAUG_NO_DEVICE_EXIT_CODE 4)
 
-foreach(required HOST IMGCMP GOLDEN OUTPUT FRAMES)
+foreach(required SCRIPT HOST IMGCMP GOLDEN OUTPUT FRAMES)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "run_screenshot_gate.cmake: -D${required}=... is required")
     endif()
@@ -20,7 +20,7 @@ endforeach()
 file(REMOVE "${OUTPUT}")
 
 execute_process(
-    COMMAND "${HOST}" --headless "--frames=${FRAMES}" --exit "--screenshot=${OUTPUT}"
+    COMMAND "${HOST}" "${SCRIPT}" --headless "--frames=${FRAMES}" --exit "--screenshot=${OUTPUT}"
     RESULT_VARIABLE host_result
     OUTPUT_VARIABLE host_output
     ERROR_VARIABLE host_output)
