@@ -56,6 +56,21 @@ option(LUAUG_SHADER_TOOLCHAIN
     "Build the HLSL shader toolchain (SDL_shadercross + fetched DirectXShaderCompiler)"
     ${LUAUG_SHADER_TOOLCHAIN_DEFAULT})
 
+# --- Debug UI (ADR 0011) -----------------------------------------------------
+# Dear ImGui, dev-facing only and compiled out of shipping builds. Gating the
+# TARGET rather than the call sites is what makes "a shipping binary contains no
+# ImGui" a checkable claim: there is no object file to find, because none was
+# compiled. `app`'s overlay degrades to a class whose methods do nothing, not to
+# an #ifdef at every call site.
+#
+# The second condition is not defensive. The only ImGui renderer backend this
+# repository compiles is the SDL_GPU one, so a build without that RHI backend
+# has nothing for the overlay to draw with -- and an overlay target that cannot
+# render is a link error waiting for whoever switches the option on.
+cmake_dependent_option(LUAUG_DEBUG_UI
+    "Build the Dear ImGui debug overlay (ADR 0011: dev builds only)" ON
+    "NOT LUAUG_PROFILE STREQUAL \"shipping\";LUAUG_RHI_SDLGPU" OFF)
+
 set(LUAUG_SANITIZE "" CACHE STRING
     "Comma-separated sanitizer list passed to -fsanitize (e.g. address,undefined)")
 

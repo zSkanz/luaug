@@ -57,9 +57,18 @@ endif()
 # The one backend that talks to a driver. It reaches SDL through platform's
 # sdl_interop.h -- the access ADR 0004 grants it by name -- and links SDL3
 # itself, which is the price that header charges for being included.
+#
+# Its include root is `interop/`, NOT `include/`. `include/` belongs to the
+# seam, so anything that links rhi_api can reach every header in it -- and
+# sdlgpu_interop.h, which hands out SDL_GPU handles, must not be reachable that
+# way. Its own root means those handles are on the include path only for a
+# target that links this backend by name (`app`'s ImGui glue, ADR 0011), while
+# rhi_capture and rhi_null go on compiling with no SDL in sight. The seam's own
+# headers still arrive here through API_DEPS.
 if(LUAUG_RHI_SDLGPU)
     luaug_add_module(rhi_sdlgpu
         LAYER 2
+        INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/interop
         SOURCES
             src/sdlgpu/sdlgpu_device.cpp
         DEPS

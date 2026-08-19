@@ -5,62 +5,47 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- Current milestone: **M1 — Window, RHI, Frame Loop, Agent Eyes — in progress**
-  (brief: `docs/briefs/m1-kickoff.md`).
-- **M0 signed off by the human on 2026-08-19**, tagged `milestone/m0`. All five
-  gate items passed on Tier-1 (Windows) and Tier-2 (Linux); evidence in
-  `docs/briefs/m0-kickoff.md` § Gate Record. Re-verified green at M1 kickoff:
-  `cmake --build` up to date, `ctest` 6/6, `--version` reports Luau 0.734
-  (3fc82b1) and bytecode 9 / types 3 / vector 3-wide f32.
-- Remote: `github.com/zSkanz/luaug` (private). CI runs on every push.
-- The engine builds and runs on both tiers: `luaug-host examples/boot/boot.luau`
-  prints a catalog-resolved greeting and exits 0. Nothing renders yet.
+- Current milestone: **M1 — Window, RHI, Frame Loop, Agent Eyes — COMPLETE,
+  awaiting human sign-off** (brief: `docs/briefs/m1-kickoff.md`).
+- Gate status: **all four gate items pass**. Evidence in the brief's Gate
+  Record. Tier-1 runs windowed (600 frames / 357 sim ticks) and headless, the
+  GPU validation layer is clean, both goldens are checked in and confirmed to
+  fail when they should, and Tier-2 builds *and tests* while Tier-3 compiles.
+- **M0 was signed off on 2026-08-19**, tagged `milestone/m0`.
+- The engine renders: three wire cubes orbiting a world triad over a pulsing
+  clear colour, driven from `examples/00-clear/init.luau` through a temporary
+  Luau binding that M2 replaces. F3 toggles an ImGui overlay in dev builds.
+- 15 CTest entries, green on Windows and Linux.
 
 ## Now / Next
 
-- **Steps 1–5 of the brief are done** — the milestone's spine. SDL3 is wired
-  into the build, `platform` (L1) exists, and the RHI seam (L2) has three
-  backends: `rhi_null`, `rhi_capture` and `rhi_sdlgpu`. A real GPU device
-  clears a texture and reads it back as exactly the colour it was cleared to,
-  with no window and no shaders — the screenshot harness the later gates depend
-  on already works.
+- **Next: stop. This is the M1 milestone gate — a human checkpoint
+  (MASTER_PROMPT.md §6).** Do not begin M2 in this session, and not at all until
+  the human has reviewed the gate record and said go.
+- When M2 does start, the literal first action is: write
+  `docs/briefs/m2-kickoff.md` from the template in `docs/briefs/README.md`.
+  M2 is the largest milestone in the project (ECS, the Instance facade,
+  deferred signals, `task`, the scheduler) — read `docs/architecture.md` §3–§5
+  and ADRs 0015, 0016, 0025, 0026, 0028 at kickoff.
 - **Run `scripts/localgate.ps1` before every push. Do not use CI as a test
-  runner.** It runs the documentation gate, the Luau gates, the Windows build
-  and tests, and the Linux tier in a container — ~20 seconds warm, 15 tests per
-  tier. The repository is private, so Actions minutes carry platform
-  multipliers, and the quota has been close to exhausted. CI proves `main` is
-  green and builds macOS, which is the one tier nothing local can build.
-- Also done since: the fixed-tick frame loop and headless mode with a synthetic
-  clock, the ADR 0023 backend factory, the Tier-3 macOS compile job (now on
-  milestone tags only), the nightly Android NDK cross-compile, the shader
-  toolchain, `core::json`, `render::DebugDraw`, and the screenshot and capture
-  gates.
-- **Next: the shader pipeline (step 6).** The §10 escalation it carried is
-  **resolved — the human chose the prebuilt-DXC path on 2026-08-19.** The
-  literal first action is to write the ADR that amends ADR 0021, which today
-  models a dependency only as "upstream source tree at a commit SHA" and has no
-  row type for a binary artifact pinned by SHA256. Then two manifest rows
-  (`spirv_cross` from source, `dxc` prebuilt), then vendor and wire
-  `sdl_shadercross` — which has **no release tags at all**, so it pins to a
-  `main` commit with a dated version string the way `stb` does.
-- Remaining after that: debug draw (7), screenshot + `tools/imgcmp` (8), ImGui
-  overlay (9), `examples/00-clear` (10), the first golden capture (11).
-- `--screenshot` is deliberately absent from the host until the PNG encoder
-  exists; the readback it needs already works.
-- Carried forward from M0 (none blocked the M0 gate):
-  - **CI has no cache.** Every run pays a full cold build: ~8 min per tier,
-    almost all of it compiling Luau. `sccache` + a `third_party` cache keyed on
-    `hash(manifest.json) + toolchain + preset` is the plan in architecture.md §9.
-  - **`Luau.Analysis` is compiled but never linked** — roughly a third of a
-    clean build. Trimming it means touching the vendored CMake, so it wants a
-    patch under `third_party/patches/` and an entry in the manifest (ADR 0021).
-  - **`actions/checkout@v4` warns that Node.js 20 is deprecated** on the
-    runners. Cosmetic today.
-  - **Console text on Windows is fixed by codepage, not by wide writes.** A
-    fully robust fix (`WriteConsoleW` when stdout is a console) belongs to the
-    `platform` module in M1 — folded into step 2 of the M1 brief.
-  - **`luaug check` must not pass file lists on Windows** — a few hundred paths
-    overflow the 32,767-character command line. Pass directories (M3).
+  runner.** Both tiers, ~20 seconds warm. The repository is private, so Actions
+  minutes carry platform multipliers and the quota has been close to exhausted.
+  CI proves `main` is green and builds macOS, which nothing local can.
+- Carried forward from M1 (none blocked the gate):
+  - **The shipping profile does not configure.** `script_host.cpp` includes
+    `<Luau/Compiler.h>` unconditionally while `LUAUG_LUAU_COMPILER` is forced
+    off in shipping (ADR 0002). The guard is one line, but a shipping host also
+    needs the bytecode-loading path, which is M3 at the earliest.
+  - **`architecture.md` §9 lists a clang-format gate that does not exist.**
+    Turning it on means reformatting the tree and pinning a version; version
+    pinning for the C++ toolchain is M3's `luaug check` work.
+  - **`Luau.Analysis` is still compiled and never linked** — carried from M0.
+    sccache now makes this cheap on a warm CI cache, so it is less urgent.
+  - **The example's `luaug` global and its hand-written `.d.luau`** are M1
+    scaffolding with a demolition date; M2 replaces both.
+  - **DXIL produced on Linux is never verified as signed.** It is also never
+    loaded there — D3D12 is Windows-only — so this only matters if a Linux job
+    ever produces a shipping shader pack for Windows (M8).
 
 ## Blocked — needs human
 
@@ -68,11 +53,7 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## Decisions pending ADR
 
-- **Binary artifacts as vendored dependencies.** ADR 0021 models a dependency
-  as "upstream source tree at a commit SHA"; the prebuilt-DXC path the human
-  chose needs a row type for "release artifact pinned by SHA256". The decision
-  is made — the ADR that records it is not written yet, and it must land in the
-  same commit as the manifest rows (§5: docs follow reality).
+- (none — ADR 0032 and ADR 0033 were written during M1)
 
 ## Session Log
 
@@ -135,6 +116,28 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   a green run at the price of a Linux port that cannot open a window.
   Next: vendor `sdl_shadercross` and inspect its dependencies before wiring
   anything (§10 escalation is likely — see Now / Next).
+
+- **2026-08-19 (session 3, final stretch):** **Completed M1.** Shaders (one HLSL
+  source to SPIR-V, DXIL and MSL, with DirectXShaderCompiler fetched and
+  hash-pinned rather than vendored — ADR 0032, a §10 escalation the human
+  resolved); `core::json` replacing the restricted catalog reader so there is
+  one parser (ADR 0033); `render::DebugDraw` and the debug pass; the screenshot
+  and capture gates; `examples/00-clear` driven from Luau; the ImGui F3 overlay.
+  Also, off the critical path but not off the books: `scripts/localgate.ps1`
+  runs both tiers locally in ~20 s, because the repository is private and the
+  human's Actions quota was nearly spent. CI dropped from ~68 to ~23 charged
+  minutes per push.
+  Learned, all in the brief's Findings: the capture backend was blind to the
+  debug pass because the gate asked "will pixels come out" instead of "can this
+  device take shaders"; the engine's idle scene looked like the example, so a
+  broken script binding would have fallen back to a frame matching the golden;
+  `luaL_sandbox` freezes globals and M0's own comment said so, which is why
+  `ScriptHost` now takes the installer in its signature rather than documenting
+  the ordering; a vendored tree reads THIS repo's git metadata unless stopped,
+  which was both wrong information and 37 seconds of every container configure;
+  and C++20 module scanning was running on every translation unit to discover
+  that nothing uses modules.
+  Next: **stop for M1 human review** (§6). Do not start M2 this session.
 
 <!-- Format for future entries:
 - **YYYY-MM-DD (session N):** did X; learned Y; Next: <literal first action>.

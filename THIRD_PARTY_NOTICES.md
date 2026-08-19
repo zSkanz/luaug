@@ -27,7 +27,7 @@ vendored yet; the roadmap allows lazy vendoring so long as the row exists.
 | basis_universal | 2.5x | _not vendored yet_ | Apache-2.0 | https://github.com/BinomialLLC/basis_universal | `third_party/basis_universal/` |
 | ktx | latest-tag | _not vendored yet_ | Apache-2.0 | https://github.com/KhronosGroup/KTX-Software | `third_party/ktx/` |
 | stb | master-2026-08-01 | `2c980bb59875` | MIT OR Public Domain | https://github.com/nothings/stb | `third_party/stb/` |
-| imgui | 1.92.x-docking | _not vendored yet_ | MIT | https://github.com/ocornut/imgui | `third_party/imgui/` |
+| imgui | 1.92.9b-docking | `b48d1afbe8ee` | MIT | https://github.com/ocornut/imgui | `third_party/imgui/` |
 | clay | pinned-commit | _not vendored yet_ | zlib | https://github.com/nicbarker/clay | `third_party/clay/` |
 | recastnavigation | main | _not vendored yet_ | zlib | https://github.com/recastnavigation/recastnavigation | `third_party/recastnavigation/` |
 | gamenetworkingsockets | 1.6.x | _not vendored yet_ | BSD-3-Clause | https://github.com/ValveSoftware/GameNetworkingSockets | `third_party/gamenetworkingsockets/` |

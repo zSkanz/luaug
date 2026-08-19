@@ -219,6 +219,66 @@ if(LUAUG_SHADER_TOOLCHAIN)
     endif()
 endif()
 
+# ---------------------------------------------------------------------------
+# Dear ImGui (ADR 0011): the debug overlay now, the editor later. The in-game
+# UI is a different problem with a different answer -- a retained tree of
+# Roblox-shaped Instances compiled to Clay -- and ImGui is never part of it.
+#
+# Dev-facing only, and ADR 0011 states that as a property of the BUILD rather
+# than of the code. Gating the target instead of the call sites is what makes
+# "a shipping binary contains no ImGui" a checkable claim: there is no ImGui
+# object file to find because none was compiled. `app`'s overlay is written so
+# that it degrades to a class whose methods do nothing, not to an #ifdef at
+# every call site.
+#
+# LUAUG_DEBUG_UI is declared in cmake/luaug_options.cmake, beside the other
+# build-time toggles, and consumed here.
+
+if(LUAUG_DEBUG_UI)
+    # ImGui ships no build system of its own -- upstream's position is that you
+    # compile the sources you need -- so the target is written here. The list is
+    # an architecture statement, the same way SDL3's option list above is:
+    #
+    #   imgui, imgui_draw, imgui_tables, imgui_widgets
+    #            -- the library. Not four features: one library that happens to
+    #               be split across four files.
+    #   imgui_demo
+    #            -- absent. Its ten thousand lines exist to be read next to
+    #               ShowDemoWindow(), and nothing in this engine calls it.
+    #   imgui_impl_sdl3
+    #            -- the platform half. It consumes raw SDL_Events, which is
+    #               precisely why platform::rawEvents() exists (ADR 0004's
+    #               sdl_interop.h): the engine models the handful of events it
+    #               reacts to, and hands the full stream to this.
+    #   imgui_impl_sdlgpu3
+    #            -- the renderer half, matching the default RHI backend
+    #               (ADR 0005). The twenty other backends upstream ships are for
+    #               other people's engines. Its shaders are embedded in
+    #               imgui_impl_sdlgpu3_shaders.h, so it asks nothing of our own
+    #               shader toolchain.
+    add_library(luaug_imgui STATIC
+        imgui/imgui.cpp
+        imgui/imgui_draw.cpp
+        imgui/imgui_tables.cpp
+        imgui/imgui_widgets.cpp
+        imgui/backends/imgui_impl_sdl3.cpp
+        imgui/backends/imgui_impl_sdlgpu3.cpp)
+    add_library(luaug::imgui ALIAS luaug_imgui)
+
+    # SYSTEM, so imgui.h is exempt from our warnings-as-errors bar in the files
+    # that include it; the sources above are exempt by the same rule every other
+    # vendored tree is, which is that nothing here links luaug::warnings.
+    target_include_directories(luaug_imgui SYSTEM PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/imgui"
+        "${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends")
+
+    # PRIVATE, exactly as `platform` links it. The two backend headers take
+    # SDL_Window and SDL_GPUDevice in their signatures, so a consumer needs SDL
+    # on its own include path anyway -- and making it say so in its CMakeLists
+    # is the same deliberate crossing sdl_interop.h charges for.
+    target_link_libraries(luaug_imgui PRIVATE SDL3::SDL3-static)
+endif()
+
 # Restored so nothing above this directory inherits the ceiling. Our own build
 # does not shell out to git during configure today, and this is what keeps that
 # from becoming a silent dependency if it ever does.

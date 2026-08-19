@@ -47,7 +47,7 @@ place that knows which one exists.
       `cmake/luaug_shaders.cmake`)
 - [x] Immediate-mode debug draw: lines, wire/solid cubes, text — deliberately
       early, because M2/M3/M5 visualize through it before a real renderer exists
-- [ ] ImGui docking overlay bound to F3 (ADR 0011, dev builds only)
+- [x] ImGui docking overlay bound to F3 (ADR 0011, dev builds only)
 - [x] Frame loop with the fixed-tick accumulator (architecture.md §3); tick
       logic itself stays stubbed — the kernel is M2
 - [x] Headless mode: `--headless --frames N --screenshot path --exit` via an
@@ -150,11 +150,11 @@ compiling, and never for seams.
 
 ## Gate checklist (verbatim from roadmap)
 
-- [ ] Tier-1 runs windowed and headless
-- [ ] first golden capture-stream checked in (plus a reference screenshot with
+- [x] Tier-1 runs windowed and headless
+- [x] first golden capture-stream checked in (plus a reference screenshot with
       the tolerance comparator `tools/imgcmp`)
-- [ ] GPU validation layer clean
-- [ ] Tier-2/Tier-3 compile
+- [x] GPU validation layer clean
+- [x] Tier-2/Tier-3 compile
 
 Note on Tier-3: macOS is not in `ci.yml` today — M0 shipped Windows + Linux.
 The gate says Tier-3 must **compile**, and the roadmap's tier table says macOS
@@ -382,4 +382,75 @@ compile-only — no runtime verification, which stays post-v1.
 
 ## Gate Record
 
-(filled at milestone end, before human review)
+Recorded 2026-08-19. Every command below was run on the dev machine (Windows
+x64, Tier-1) or in the Tier-2 container, through `scripts/localgate.ps1`.
+
+### The four gate items
+
+**Tier-1 runs windowed and headless.** Both, with the same code path.
+
+```
+luaug-host examples/00-clear/init.luau --frames=600 --exit
+  [info] Ran 600 frames, 357 simulation ticks.      exit 0
+```
+
+That pair of numbers is the two-clock design working rather than a coincidence:
+600 render frames against 357 fixed simulation steps, decoupled by the
+accumulator exactly as architecture.md §3 specifies.
+
+Headless is exercised by every gate run and by four CTest entries.
+
+**First golden capture-stream, plus a reference screenshot with `tools/imgcmp`.**
+`tests/rendercapture/clear-3frames.jsonl` and
+`tests/screenshots/pulse-frame30.png`, both recorded from
+`examples/00-clear/init.luau` and both compared by CTest entries that run on
+every tier. The capture gate is byte-for-byte with no tolerance and needs no
+GPU, so it also runs in CI; the screenshot gate uses tolerance 2 with zero
+differing pixels allowed and skips where there is no device.
+
+Both were confirmed to *fail* when they should — a golden swapped for a
+neighbouring frame, and a deliberately broken script binding (1465 differing
+pixels). A gate that has never failed has never been tested.
+
+**GPU validation layer clean.** The device is created with `debug = true` on
+every run, including the 600-frame windowed one above and the real-device rhi
+tests. No validation output was produced.
+
+**Tier-2/Tier-3 compile.** Tier-2 builds *and tests* — 15/15 in the container,
+with `screenshot_gate` correctly skipped for want of a driver — and again on
+CI. Tier-3 macOS compiles on CI, with `LUAUG_SHADER_TOOLCHAIN=OFF` because
+Microsoft publishes no macOS DirectXShaderCompiler (ADR 0032).
+
+### Tests
+
+15 CTest entries, green on both tiers:
+
+```
+core  platform  rhi  render  app
+host_version  host_version_abi  host_boot  host_headless_frames
+host_headless_needs_frames  host_unknown_backend  host_usage_without_script
+capture_gate  screenshot_gate  imgcmp
+```
+
+### Deliberately not claimed
+
+The `IRenderer`/`RenderWorld` contract (ADR 0027) is **not** built; see the
+scope checklist. `RenderWorld` is defined as the POD snapshot extracted from
+`scene`, and `scene` is M2. What exists is a debug-draw renderer with the same
+shape; inventing an empty `RenderWorld` ahead of the thing it snapshots would
+have been a worse answer than saying so.
+
+**The shipping profile does not configure.** `engine/app/src/script_host.cpp`
+includes `<Luau/Compiler.h>` unconditionally, and `LUAUG_LUAU_COMPILER` is
+forced off in shipping (ADR 0002), so the include path lacks it. Found while
+proving ImGui is excluded from shipping builds, which it is. Not fixed here on
+purpose: the guard is one line, but a shipping host with no compiler also needs
+the bytecode-loading path that does not exist until M3, and a profile that
+configures while being unable to run anything is a worse lie than one that
+refuses. Carried forward.
+
+### Result
+
+**All four gate items pass.** M1 is complete, pending human sign-off — the
+milestone boundary is the human checkpoint (MASTER_PROMPT.md §6).
+

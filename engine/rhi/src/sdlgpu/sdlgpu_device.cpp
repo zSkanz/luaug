@@ -24,6 +24,7 @@
 #include "luaug/core/text_key.h"
 #include "luaug/platform/sdl_interop.h"
 #include "luaug/rhi/backends.h"
+#include "luaug/rhi/sdlgpu_interop.h"
 #include "sdlgpu_enums.h"
 
 namespace luaug::rhi
@@ -75,6 +76,7 @@ public:
 
     void begin(SDL_GPUCommandBuffer* buffer) noexcept { buffer_ = buffer; }
     [[nodiscard]] SDL_GPUCommandBuffer* buffer() const noexcept { return buffer_; }
+    [[nodiscard]] SDL_GPURenderPass* renderPass() const noexcept { return renderPass_; }
 
     // Closes whatever pass is open. Called before a pass of a different kind
     // starts and before submit, so no caller has to track pass state.
@@ -351,8 +353,11 @@ public:
 
     [[nodiscard]] bool readTexture(TextureHandle texture, std::span<std::byte> out) override;
 
-    // Used by the command list, which lives inside this file.
+    // Used by the command list, which lives inside this file, and by the
+    // interop accessors at the bottom of it.
     [[nodiscard]] SDL_GPUDevice* handle() const noexcept { return device_; }
+    [[nodiscard]] SDL_GPUCommandBuffer* commandBuffer() const noexcept { return cmdList_.buffer(); }
+    [[nodiscard]] SDL_GPURenderPass* renderPass() const noexcept { return cmdList_.renderPass(); }
     [[nodiscard]] SDL_GPUBuffer* buffer(BufferHandle handle) noexcept
     {
         SDL_GPUBuffer** entry = slot(buffers_, handle.id);
@@ -870,7 +875,39 @@ void SdlGpuCmdList::popDebugGroup()
         SDL_PopGPUDebugGroup(buffer_);
 }
 
+// The one downcast in this file, and the only one that cannot be wrong:
+// `backend()` is the question every IDevice answers about itself, so a device
+// from another backend leaves here as null instead of as a bad cast.
+[[nodiscard]] const SdlGpuDevice* asSdlGpu(const IDevice& device) noexcept
+{
+    return device.backend() == BackendId::SdlGpu ? static_cast<const SdlGpuDevice*>(&device) : nullptr;
+}
+
 } // namespace
+
+// --- interop (luaug/rhi/sdlgpu_interop.h) -----------------------------------
+//
+// Defined here rather than in a file of their own because the type they reach
+// into is this one, and it is deliberately unnameable outside this translation
+// unit.
+
+SDL_GPUDevice* nativeDevice(const IDevice& device) noexcept
+{
+    const SdlGpuDevice* self = asSdlGpu(device);
+    return self != nullptr ? self->handle() : nullptr;
+}
+
+SDL_GPUCommandBuffer* nativeCommandBuffer(const IDevice& device) noexcept
+{
+    const SdlGpuDevice* self = asSdlGpu(device);
+    return self != nullptr ? self->commandBuffer() : nullptr;
+}
+
+SDL_GPURenderPass* nativeRenderPass(const IDevice& device) noexcept
+{
+    const SdlGpuDevice* self = asSdlGpu(device);
+    return self != nullptr ? self->renderPass() : nullptr;
+}
 
 DeviceResult createSdlGpuDevice(const DeviceDesc& desc, core::EngineError* outError)
 {

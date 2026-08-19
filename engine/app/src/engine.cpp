@@ -3,10 +3,13 @@
 #include <array>
 #include <cmath>
 #include <fstream>
+#include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
 #include "luaug/app/backends.h"
+#include "luaug/app/debug_overlay.h"
 #include "luaug/app/frame_scheduler.h"
 #include "luaug/app/preview_api.h"
 #include "luaug/app/screenshot.h"
@@ -195,6 +198,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // The VM outlives the script's first run, because the script registers a
     // frame callback the loop calls every frame. M2 replaces all of this with
     // the real scheduler; see preview_api.h for why it is as small as it is.
+    // Dev builds only, windowed only, and after the claim: the overlay's
+    // pipeline is built against the swapchain's colour format, which does not
+    // exist until the device owns the window. Compiled out entirely in shipping
+    // (ADR 0011), where the constructor is a no-op and active() is false.
+    std::optional<DebugOverlay> overlay;
+    if (window != nullptr)
+        overlay.emplace(*window, *device);
+
     PreviewState preview;
     ScriptHost host{[&preview](lua_State* L) { installPreviewApi(L, preview); }};
 
@@ -268,12 +279,19 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
         if (!options.headless)
         {
-            for (const platform::Event& event : platform::pumpEvents())
+            const std::span<const platform::Event> events = platform::pumpEvents();
+            for (const platform::Event& event : events)
             {
                 if (event.type == platform::EventType::Quit
                     || event.type == platform::EventType::WindowCloseRequested)
                     quit = true;
             }
+
+            // After the pump and with the span it returned: the overlay reads
+            // the untranslated stream behind these, which is only valid until
+            // the next pump.
+            if (overlay.has_value())
+                overlay->handleEvents(events);
         }
 
         rhi::ICmdList* cmd = device->beginFrame();
@@ -353,6 +371,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
             cmd->endRenderPass();
             cmd->popDebugGroup();
+
+            // Its own pass, on top of the finished frame, after ours closed and
+            // before submit -- the ordering the overlay's contract asks for.
+            if (overlay.has_value())
+                overlay->render(*cmd, target, frame);
         }
 
         device->submitAndPresent();
