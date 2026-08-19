@@ -76,8 +76,13 @@ while IFS= read -r f; do
         err "'Roblox' referenced outside the allowed docs set (rule R7)" "$f"
         status=1
     fi
-done < <(grep -RliE 'roblox' --exclude-dir=.git --exclude-dir=.github \
-    --exclude-dir=third_party . || true)
+    # Tracked files only. R7 is about what this repository publishes, and a
+    # working tree also holds things it does not: a developer's local editor
+    # state, a scratch file, an ignored tool config. Sweeping those made the
+    # gate depend on whose machine it ran on -- `.claude/settings.local.json`,
+    # which is globally gitignored, turned it red on this one.
+done < <(git ls-files -z -- . ':(exclude)third_party' ':(exclude).github' \
+    | xargs -0 grep -liE 'roblox' 2>/dev/null || true)
 
 # --- Ledger shape (MASTER_PROMPT.md §11) ------------------------------------
 echo "== ledger format =="

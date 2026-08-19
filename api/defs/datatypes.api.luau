@@ -74,7 +74,8 @@ local Datatypes: { Schema.Datatype } = {
                 Returns = { "vector" },
                 ThreadSafety = "Safe",
                 Doc = "The official vector stdlib's spelling of the constructor, carried so that code written "
-                    .. "against Lute or Roblox ports unchanged. Unlike `new` it requires `x` and `y`, because "
+                    .. "against another Luau runtime ports unchanged. Unlike `new` it requires `x` and `y`, "
+                    .. "because "
                     .. "the stdlib checks argument count rather than accepting `nil` as zero.",
             },
             {

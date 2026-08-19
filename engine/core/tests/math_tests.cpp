@@ -405,28 +405,42 @@ TEST_CASE("a CFrameD point takes the translation, a direction does not")
 TEST_CASE("CFrameD inverse round-trips a point")
 {
     CFrameD cf;
-    cf.position = {1.0e7, -3.0, 7.5};
+    cf.position = {12.0, -3.0, 7.5};
     cf.rotation = rotationY(0.7f) * rotationX(-0.3f);
 
-    // The translation cancels in f64 whatever its magnitude, so the residual is
-    // only the rotation's own f32 orthonormality error scaled by |p|, not by the
-    // world coordinate. That is the property being checked at 1e7.
     const DVec3 p{2.0, 5.0, -1.0};
     CHECK(nearD(transformPoint(inverse(cf), transformPoint(cf, p)), p));
     CHECK(nearD(transformPoint(cf, transformPoint(inverse(cf), p)), p));
 
-    // Composing with the inverse is the identity frame. Kept near the origin:
-    // here the position DOES go through the rotation twice, so an f32 basis's
-    // ~1e-7 orthonormality error would show up multiplied by the coordinate.
-    CFrameD nearby = cf;
-    nearby.position = {12.0, -3.0, 7.5};
-    const CFrameD roundTrip = nearby * inverse(nearby);
-    CHECK(nearD(roundTrip.position, DVec3{}));
-    CHECK(near(roundTrip.rotation, Mat3{}));
+    // Composing with the inverse is the identity frame, in either order.
+    CHECK(nearD((cf * inverse(cf)).position, DVec3{}));
+    CHECK(near((cf * inverse(cf)).rotation, Mat3{}));
+    CHECK(nearD((inverse(cf) * cf).position, DVec3{}));
+    CHECK(near((inverse(cf) * cf).rotation, Mat3{}));
 
     // The rotation half is the transpose, not a general inverse -- stated in the
     // implementation and pinned here.
     CHECK(near(inverse(cf).rotation, transpose(cf.rotation)));
+
+    // World -> object still round-trips to f64 precision ten million units out,
+    // because the frame's translation is applied and removed by the SAME
+    // rotation: the two 1e7-sized terms cancel in f64 before the f32 basis's
+    // error can scale with them. This is the direction that matters -- bringing
+    // world positions into a distant object's space -- and it is what an f32
+    // CFrame could not do.
+    CFrameD distant = cf;
+    distant.position = {1.0e7, -3.0, 7.5};
+    CHECK(nearD(transformPoint(inverse(distant), transformPoint(distant, p)), p));
+
+    // The opposite direction is deliberately NOT asserted at this magnitude, and
+    // the asymmetry is a property of the type rather than a defect: it puts the
+    // translation through R^T and then through R, and an f32 R * R^T is the
+    // identity only to about 1e-7 -- a metre of residual at 1e7. The answer is
+    // not a looser epsilon, it is not composing inverses at world scale, which
+    // is what the floating origin (ADR 0014, M7) exists to make unnecessary.
+    const DVec3 wrongWay = transformPoint(distant, transformPoint(inverse(distant), p));
+    CHECK_FALSE(anyNan(wrongWay));
+    CHECK(nearD(wrongWay, p, 10.0));
 }
 
 TEST_CASE("lookAtCFrame aims -m[2] at the target")

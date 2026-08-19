@@ -25,19 +25,19 @@ bool near(Vec3 a, Vec3 b) noexcept
     return near(a.x, b.x) && near(a.y, b.y) && near(a.z, b.z);
 }
 
-// Column-major, column-vector: column 0 is where X lands, column 1 where Y
-// lands (math.h). core has no rotation constructor yet, and a debug-draw test
-// is not the place to introduce one.
-Mat4 rotationZ(f32 radians) noexcept
+// Widens core's Mat3 rotation into the Mat4 the debug-draw API takes. This used
+// to spell the rotation out here because core had none; core::rotationZ now
+// exists, and a second copy of the sign convention is exactly how the two drift
+// apart. The name differs deliberately: `using namespace luaug::core` above
+// makes an identically named local overload ambiguous rather than shadowing it.
+Mat4 rotationZ4(f32 radians) noexcept
 {
-    const f32 c = std::cos(radians);
-    const f32 s = std::sin(radians);
+    const Mat3 rotation = rotationZ(radians);
 
     Mat4 result;
-    result.m[0][0] = c;
-    result.m[0][1] = s;
-    result.m[1][0] = -s;
-    result.m[1][1] = c;
+    for (int column = 0; column < 3; ++column)
+        for (int row = 0; row < 3; ++row)
+            result.m[column][row] = rotation.m[column][row];
     return result;
 }
 
@@ -194,7 +194,7 @@ TEST_CASE("wire box edges run along the axes and none is drawn twice")
 TEST_CASE("an oriented wire box is the axis-aligned one pushed through the transform")
 {
     constexpr Vec3 halfExtents{1.0f, 2.0f, 0.5f};
-    const Mat4 transform = translation({4.0f, -1.0f, 2.0f}) * rotationZ(kPi * 0.25f);
+    const Mat4 transform = translation({4.0f, -1.0f, 2.0f}) * rotationZ4(kPi * 0.25f);
 
     DebugDraw axisAligned;
     axisAligned.wireBox(Vec3{}, halfExtents, DebugColor{});
@@ -311,7 +311,7 @@ TEST_CASE("rotating the transform rotates the axes it draws")
     // local Y axis along world -X. Hardcoded world axes would pass every other
     // assertion in this file and fail this one.
     DebugDraw draw;
-    draw.axes(rotationZ(kPi * 0.5f), 1.0f);
+    draw.axes(rotationZ4(kPi * 0.5f), 1.0f);
 
     REQUIRE(draw.lineCount() == 3u);
 
