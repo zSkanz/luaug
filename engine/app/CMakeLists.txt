@@ -14,6 +14,7 @@ luaug_add_module(app
         core
         platform
         rhi_api
+        render
     PUBLIC_DEPS
         luaug::luau
         luaug::build_info

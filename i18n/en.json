@@ -36,6 +36,15 @@
   "engine.frame.warn.catch_up_clamped": "Frame took {ms} ms; dropped simulated time after {ticks} catch-up ticks.",
   "engine.frame.info.summary": "Ran {frames} frames, {ticks} simulation ticks.",
 
+  "render.err.shader_format_unknown": "The graphics device reports no shader format, so no shaders can be loaded.",
+  "render.err.shader_manifest_missing": "No shader manifest at {path}. Build the shaders, or check that content shipped beside the executable.",
+  "render.err.shader_manifest_invalid": "The shader manifest is not valid JSON.",
+  "render.err.shader_reflect_missing": "No shader reflection data at {path}.",
+  "render.err.shader_none_for_format": "No shaders were compiled for the {format} backend.",
+  "render.err.shader_not_found": "No shader named \"{name}\" for this stage.",
+  "render.err.shader_blob_missing": "Could not read the compiled shader at {path}.",
+  "render.err.debug_pipeline_failed": "Could not create the debug-draw pipeline.",
+
   "rhi.err.device_create_failed": "Could not create a graphics device.",
   "rhi.err.backend_not_compiled": "That render backend was not compiled into this build.",
   "rhi.err.window_claim_failed": "The graphics device could not take ownership of the window.",

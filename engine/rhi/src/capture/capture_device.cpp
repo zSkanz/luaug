@@ -386,8 +386,22 @@ public:
     [[nodiscard]] Capabilities caps() const noexcept override
     {
         Capabilities caps;
-        caps.shaderFormat = ShaderFormat::Unknown;
+        // A shader format is reported even though nothing is compiled here, and
+        // that is the difference between a useful recording and a decorative
+        // one: a caller that skips loading shaders because the device "has no
+        // format" also skips creating pipelines and issuing draws, and the
+        // capture ends up recording a frame nobody would ever render. This
+        // backend exists to record what a real backend would be asked to do, so
+        // it has to be askable.
+        //
+        // SPIR-V because the build always emits it, making the choice arbitrary
+        // but fixed -- and a golden must not depend on which formats happened to
+        // compile on the machine that recorded it.
+        caps.shaderFormat = ShaderFormat::SpirV;
         caps.maxTextureSize = 16384;
+        // Still false: no pixels exist, so a readback would be meaningless.
+        // That is a separate question from whether shaders can be created, and
+        // conflating the two is what made this backend blind to the debug pass.
         caps.rendersPixels = false;
         return caps;
     }

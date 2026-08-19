@@ -16,6 +16,9 @@
 #include "luaug/platform/event.h"
 #include "luaug/platform/platform.h"
 #include "luaug/platform/window.h"
+#include "luaug/render/debug_draw.h"
+#include "luaug/render/debug_renderer.h"
+#include "luaug/render/shader_library.h"
 #include "luaug/rhi/device.h"
 
 #if LUAUG_RHI_CAPTURE
@@ -33,6 +36,67 @@ using core::I18nArg;
 using core::LogLevel;
 
 constexpr f64 kNanosPerSecond = 1'000'000'000.0;
+
+// The format the headless target is created with, named once so the pipeline
+// and the texture cannot disagree.
+constexpr rhi::TextureFormat kOffscreenFormat = rhi::TextureFormat::Rgba8Unorm;
+
+// A fixed camera looking at the origin from slightly above. Fixed on purpose:
+// M1 has no camera Instance -- that is M4 -- and a moving camera would put a
+// second source of change into a golden image whose whole value is that only
+// one thing moves.
+[[nodiscard]] core::Mat4 orbitCamera(core::u32 width, core::u32 height)
+{
+    const f32 aspect = static_cast<f32>(width) / static_cast<f32>(height);
+    // Far enough back and high enough that all three orbiting cubes are on
+    // screen at every phase, rather than one of them being behind another for
+    // part of the orbit. A deliverable that says "three cubes orbit" should
+    // show three cubes.
+    const core::Mat4 view = core::lookAt({0.0f, 5.5f, 8.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
+    const core::Mat4 projection = core::perspective(1.0472f, aspect, 0.1f, 100.0f);
+    return projection * view;
+}
+
+// Three cubes orbiting the origin -- the M1 deliverable, and the thing that
+// gives the screenshot gate something with edges in it to be right or wrong
+// about (finding 9: a flat colour hides a one-tick shift inside the tolerance).
+//
+// Driven by the tick count for the same reason the clear colour is: a headless
+// capture must produce the same pixels on any machine at any speed.
+void submitOrbitingCubes(render::DebugDraw& draw, u64 tick, f64 fixedDt)
+{
+    constexpr int kCubeCount = 3;
+    constexpr f32 kOrbitRadius = 2.5f;
+    constexpr f32 kHalfExtent = 0.4f;
+
+    // Fixed and saturated, NOT derived from the animation. A first version drove
+    // the cube colours from the same sine the clear colour uses, and a cube
+    // whose phase happened to land near the background's became invisible
+    // against it -- geometry that can vanish is useless for debugging and worse
+    // than useless in a golden image.
+    constexpr std::array<render::DebugColor, kCubeCount> kCubeColors{
+        render::DebugColor::fromLinear(1.0f, 0.15f, 0.15f),
+        render::DebugColor::fromLinear(0.15f, 0.4f, 1.0f),
+        render::DebugColor::fromLinear(1.0f, 1.0f, 1.0f),
+    };
+
+    const auto t = static_cast<f32>(static_cast<f64>(tick) * fixedDt);
+
+    for (int i = 0; i < kCubeCount; ++i)
+    {
+        // A third of a turn apart, so all three are on screen from a fixed
+        // camera at every point in the orbit rather than eclipsing each other.
+        const f32 phase = t + static_cast<f32>(i) * (6.2832f / static_cast<f32>(kCubeCount));
+        const core::Vec3 center{kOrbitRadius * std::cos(phase), 0.0f, kOrbitRadius * std::sin(phase)};
+
+        draw.wireBox(center, {kHalfExtent, kHalfExtent, kHalfExtent},
+            kCubeColors[static_cast<std::size_t>(i)]);
+    }
+
+    // A world triad at the origin, so a wrong view or projection matrix is
+    // obvious rather than merely suspicious.
+    draw.axes(core::Mat4{}, 1.0f);
+}
 
 // M1's stand-in for a renderer: a colour that moves, so a static frame and a
 // running one are distinguishable in a screenshot. Derived from the tick count
@@ -144,7 +208,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     if (options.headless)
     {
         offscreen = device->createTexture({
-            .format = rhi::TextureFormat::Rgba8Unorm,
+            .format = kOffscreenFormat,
             .usage = rhi::TextureUsage::ColorTarget,
             .width = static_cast<core::u32>(options.width),
             .height = static_cast<core::u32>(options.height),
@@ -161,6 +225,41 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             scriptError.has_value())
             return scriptError;
     }
+
+    // The debug pass is built on the first frame that has a target, not here,
+    // because a graphics pipeline is compiled against one colour format and the
+    // swapchain's is not known until it has been acquired. Headless knows its
+    // own, but running both paths through the same lazy construction keeps them
+    // from drifting.
+    //
+    // It is also optional by design rather than by accident: a device that
+    // renders nothing -- capture, null -- has no pipeline to build, and a
+    // machine whose content directory is missing its shaders should boot and
+    // say why rather than refuse to start.
+    render::ShaderLibrary shaders;
+    render::DebugRenderer debugRenderer;
+    render::DebugDraw debugDraw;
+    bool debugPassAttempted = false;
+
+    const auto ensureDebugPass = [&](rhi::TextureFormat colorFormat)
+    {
+        // Gated on "can this device take shaders", not on "will pixels come
+        // out". They are different questions, and conflating them made the
+        // capture backend -- the blocking render gate -- record a frame with no
+        // draws in it at all, which is precisely the thing it exists to notice.
+        if (debugPassAttempted || device->caps().shaderFormat == rhi::ShaderFormat::Unknown)
+            return;
+        debugPassAttempted = true;
+
+        if (auto error = shaders.load(platform::paths().contentDir, device->caps().shaderFormat);
+            error.has_value())
+        {
+            core::logText(LogLevel::Warn, error->message);
+            return;
+        }
+        if (auto error = debugRenderer.create(*device, shaders, colorFormat); error.has_value())
+            core::logText(LogLevel::Warn, error->message);
+    };
 
     FrameScheduler scheduler;
     const auto headlessStepNs
@@ -205,11 +304,31 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // backbuffer this frame. Submitting the empty command buffer keeps the
         // loop pumping instead of stalling on a window nobody can see.
         rhi::TextureHandle target = offscreen;
+        rhi::TextureFormat targetFormat = kOffscreenFormat;
+        core::u32 targetWidth = static_cast<core::u32>(options.width);
+        core::u32 targetHeight = static_cast<core::u32>(options.height);
+
         if (!options.headless)
-            target = device->acquireSwapchain(*window).texture;
+        {
+            const rhi::Swapchain swapchain = device->acquireSwapchain(*window);
+            target = swapchain.texture;
+            targetFormat = swapchain.format;
+            targetWidth = swapchain.width;
+            targetHeight = swapchain.height;
+        }
 
         if (target.valid())
         {
+            ensureDebugPass(targetFormat);
+
+            debugDraw.clear();
+            submitOrbitingCubes(debugDraw, scheduler.totalTicks(), scheduler.timing().fixedDt);
+
+            // Uploaded before the render pass opens, because a copy cannot run
+            // inside one -- the seam says so and the backend enforces it.
+            if (debugRenderer.valid())
+                debugRenderer.upload(*device, *cmd, debugDraw);
+
             const std::array<rhi::ColorAttachment, 1> colors{rhi::ColorAttachment{
                 .texture = target,
                 .loadOp = rhi::LoadOp::Clear,
@@ -219,6 +338,16 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
             cmd->pushDebugGroup("frame");
             cmd->beginRenderPass({.colorAttachments = colors, .debugName = "clear"});
+
+            if (debugRenderer.valid() && targetWidth > 0 && targetHeight > 0)
+            {
+                cmd->setViewport({
+                    .width = static_cast<f32>(targetWidth),
+                    .height = static_cast<f32>(targetHeight),
+                });
+                debugRenderer.render(*cmd, orbitCamera(targetWidth, targetHeight));
+            }
+
             cmd->endRenderPass();
             cmd->popDebugGroup();
         }
@@ -262,6 +391,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         I18nArg{"ticks", static_cast<core::i64>(scheduler.totalTicks())}};
     core::log(LogLevel::Info, LUAUG_TR("engine.frame.info.summary"), summary);
 
+    debugRenderer.destroy(*device);
     if (offscreen.valid())
         device->destroy(offscreen);
     if (window != nullptr)
