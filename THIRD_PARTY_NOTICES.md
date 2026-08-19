@@ -17,7 +17,8 @@ vendored yet; the roadmap allows lazy vendoring so long as the row exists.
 |---|---|---|---|---|---|
 | luau | 0.734 | `3fc82b1071ab` | MIT | https://github.com/luau-lang/luau | `third_party/luau/` |
 | sdl3 | 3.4.14 | `147a8ee32dbf` | zlib | https://github.com/libsdl-org/SDL | `third_party/sdl3/` |
-| sdl_shadercross | latest-tag | _not vendored yet_ | zlib | https://github.com/libsdl-org/SDL_shadercross | `third_party/sdl_shadercross/` |
+| sdl_shadercross | main-2026-06-26 | `e55cf5e31ced` | zlib | https://github.com/libsdl-org/SDL_shadercross | `third_party/sdl_shadercross/` |
+| spirv_cross | sdl-shadercross-pin | `1a6169566c73` | Apache-2.0 | https://github.com/KhronosGroup/SPIRV-Cross | `third_party/spirv_cross/` |
 | jolt | 5.6.0 | _not vendored yet_ | MIT | https://github.com/jrouwe/JoltPhysics | `third_party/jolt/` |
 | box2d | 3.1.1 | _not vendored yet_ | MIT | https://github.com/erincatto/box2d | `third_party/box2d/` |
 | miniaudio | 0.11.25 | _not vendored yet_ | MIT-0 OR Unlicense | https://github.com/mackron/miniaudio | `third_party/miniaudio/` |
@@ -35,6 +36,17 @@ vendored yet; the roadmap allows lazy vendoring so long as the row exists.
 | doctest | 2.5.3 | `2d0a9359a60c` | MIT | https://github.com/doctest/doctest | `third_party/doctest/` |
 | blake3 | latest-tag | _not vendored yet_ | CC0-1.0 OR Apache-2.0 | https://github.com/BLAKE3-team/BLAKE3 | `third_party/blake3/` |
 | xxhash | latest-tag | _not vendored yet_ | BSD-2-Clause | https://github.com/Cyan4973/xxHash | `third_party/xxhash/` |
+
+## Fetched binary artifacts
+
+Build-time tools that are **not** vendored and never committed: they are
+downloaded at configure time into a cache under `$LUAUG_BUILD_ROOT` and pinned
+by SHA256 (ADR 0032). They do not ship inside the engine or a packaged game.
+
+| Artifact | Version | License | Platform | SHA256 | Source |
+|---|---|---|---|---|---|
+| dxc | v1.9.2602 | NCSA AND MIT | windows-x64 | `a1e89031421cf3c1…` | https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2602/dxc_2026_02_20.zip |
+| dxc | v1.9.2602 | NCSA AND MIT | linux-x64 | `a1d3e3b5e1c5685b…` | https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2602/linux_dxc_2026_02_20.x86_64.tar.gz |
 
 Policy: permissive licenses only (MIT / BSD / zlib / Apache-2.0 / public domain).
 No GPL, no LGPL, and no commercial dependency in the default build path. Adding

@@ -694,10 +694,18 @@ self-registration.**
   pack time with the §5 options.
 - **Shaders in the build:** `luaug_add_shaders(target GLOB shaders/src/*.hlsl)`
   → custom commands invoking SDL_shadercross →
-  `${binaryDir}/content/shaders/{spirv,dxil,msl}/…` + a shader manifest;
-  the runtime loads per active backend; `luaug dev` re-runs the same command
-  for shader hot reload. shadercross builds once as a host tool (also used
-  when cross-compiling).
+  `content/shaders/{spirv,dxil,msl}/…` **beside the target's executable** +
+  a shader manifest (and a `reflect/` sidecar per stage, carrying the resource
+  counts SDL_GPU needs at shader-creation time and the input locations it needs
+  at pipeline creation — without it the runtime would hardcode numbers only the
+  shader source knows). Beside the executable rather than at the binary-dir
+  root because `platform::paths()` derives the content directory from the
+  running binary, which is the shape a packaged build has; the message catalog
+  is staged the same way. The runtime loads per active backend; `luaug dev`
+  re-runs the same command for shader hot reload. shadercross builds once as a
+  host tool (also used when cross-compiling) — and **DirectXShaderCompiler is
+  fetched and hash-pinned rather than vendored** (ADR 0032), which is also why
+  a macOS host has no shader toolchain: Microsoft publishes no macOS build.
 - **Packaging:** `luaug build` (CLI) produces: the platform `luaug-host`
   (shipping preset) + `game.lpack` (content-addressed assets, chunk
   manifests, bytecode, shader packs, `en.json` catalog) + launcher config.

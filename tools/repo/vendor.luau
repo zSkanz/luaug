@@ -49,6 +49,25 @@ type Dependency = {
     patches: { string },
 }
 
+-- The second kind of row (ADR 0032): a build-time release artifact fetched and
+-- hash-pinned at configure time rather than vendored as source. This tool never
+-- fetches one -- `cmake/luaug_dxc.cmake` does, because the fetch has to happen
+-- during configure -- but the row still has a license, and ADR 0032 rule 4 says
+-- notices come from the manifest for every row kind.
+type BinaryArtifact = {
+    platform: string,
+    url: string,
+    sha256: string,
+}
+
+type Binary = {
+    name: string,
+    version: string,
+    license: string,
+    upstream: string,
+    artifacts: { BinaryArtifact },
+}
+
 local function fail(message: string): never
     print(`vendor: ERROR: {message}`)
     return process.exit(1)
@@ -120,6 +139,68 @@ local function readManifest(): { Dependency }
             upstream = expectString(row :: json.Object, "upstream", context),
             path = expectString(row :: json.Object, "path", context),
             patches = patches,
+        })
+    end
+
+    return result
+end
+
+-- Absent is fine: the array only exists once something needs it, and a manifest
+-- with no binary rows is the normal case.
+local function readBinaries(): { Binary }
+    local decoded = json.deserialize(fs.readFileToString(MANIFEST_PATH))
+    local root = json.asObject(decoded)
+    if not root then
+        fail(`{MANIFEST_PATH} is not a JSON object`)
+    end
+
+    local rows = json.asArray((root :: json.Object).binaries)
+    if not rows then
+        return {}
+    end
+
+    local result: { Binary } = {}
+    for index, entry in rows :: json.Array do
+        local row = json.asObject(entry)
+        if not row then
+            fail(`{MANIFEST_PATH}: binary #{index} is not an object`)
+        end
+
+        local context = `{MANIFEST_PATH} binary #{index}`
+        local artifacts: { BinaryArtifact } = {}
+        local declared = json.asArray((row :: json.Object).artifacts)
+        if not declared then
+            fail(`{context}: "artifacts" must be an array`)
+        end
+
+        for artifactIndex, artifactEntry in declared :: json.Array do
+            local artifact = json.asObject(artifactEntry)
+            if not artifact then
+                fail(`{context}: artifact #{artifactIndex} is not an object`)
+            end
+
+            local artifactContext = `{context} artifact #{artifactIndex}`
+            local sha256 = expectString(artifact :: json.Object, "sha256", artifactContext)
+            -- The hash IS the pin (ADR 0032). A malformed one would otherwise
+            -- reach CMake and fail there, where the message is about a download
+            -- rather than about the manifest being wrong.
+            if #sha256 ~= 64 or not string.match(sha256, "^%x+$") then
+                fail(`{artifactContext}: "sha256" must be 64 hex characters`)
+            end
+
+            table.insert(artifacts, {
+                platform = expectString(artifact :: json.Object, "platform", artifactContext),
+                url = expectString(artifact :: json.Object, "url", artifactContext),
+                sha256 = sha256,
+            })
+        end
+
+        table.insert(result, {
+            name = expectString(row :: json.Object, "name", context),
+            version = expectString(row :: json.Object, "version", context),
+            license = expectString(row :: json.Object, "license", context),
+            upstream = expectString(row :: json.Object, "upstream", context),
+            artifacts = artifacts,
         })
     end
 
@@ -315,6 +396,32 @@ local function commandNotices()
             lines,
             `| {dependency.name} | {dependency.version} | {commit} | {dependency.license} | {dependency.upstream} | \`{dependency.path}/\` |`
         )
+    end
+
+    local binaries = readBinaries()
+    if #binaries > 0 then
+        table.insert(lines, "")
+        table.insert(lines, "## Fetched binary artifacts")
+        table.insert(lines, "")
+        table.insert(lines, "Build-time tools that are **not** vendored and never committed: they are")
+        table.insert(lines, "downloaded at configure time into a cache under `$LUAUG_BUILD_ROOT` and pinned")
+        table.insert(lines, "by SHA256 (ADR 0032). They do not ship inside the engine or a packaged game.")
+        table.insert(lines, "")
+        table.insert(lines, "| Artifact | Version | License | Platform | SHA256 | Source |")
+        table.insert(lines, "|---|---|---|---|---|---|")
+
+        for _, binary in binaries do
+            for _, artifact in binary.artifacts do
+                table.insert(
+                    lines,
+                    `| {binary.name} | {binary.version} | {binary.license} | {artifact.platform} | \`{string.sub(
+                        artifact.sha256,
+                        1,
+                        16
+                    )}…\` | {artifact.url} |`
+                )
+            end
+        end
     end
 
     table.insert(lines, "")

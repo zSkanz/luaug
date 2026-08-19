@@ -1,10 +1,17 @@
 # Build output — builds are ALWAYS out-of-tree via $env:LUAUG_BUILD_ROOT (rule R14).
 # These patterns are defensive only; nothing should ever create them in-tree.
-build/
-build-*/
-out/
-cmake-build-*/
-.cache/
+#
+# ROOT-ANCHORED, and that leading slash is load-bearing. Unanchored, `build-*/`
+# matches at any depth, which silently swallowed
+# third_party/sdl_shadercross/build-scripts/ — upstream source, including the
+# very file ADR 0032 cites — on the way into the repo. A vendored tree is
+# upstream's tracked files by construction (ADR 0021); our own ignore rules have
+# no business deciding which of them survive.
+/build/
+/build-*/
+/out/
+/cmake-build-*/
+/.cache/
 
 # Local tooling installed by scripts/bootstrap (Lute binary etc.)
 .tooling/

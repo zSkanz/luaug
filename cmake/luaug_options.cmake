@@ -28,6 +28,27 @@ option(LUAUG_RHI_SDLGPU "Build the SDL3 GPU render backend (the v1 default)" ON)
 option(LUAUG_RHI_NULL "Build the no-op render backend" ON)
 option(LUAUG_RHI_CAPTURE "Build the command-stream recording render backend" ON)
 
+# --- Shader toolchain (ADR 0006, ADR 0032) ----------------------------------
+# Off by default on macOS, and that default encodes a decision rather than
+# discovering it at build time: Microsoft publishes no macOS DirectXShaderCompiler
+# binary, so a macOS host has no way to compile HLSL and its shaders are produced
+# on a Tier-1/Tier-2 host instead (architecture.md §8 already builds shadercross
+# as a host tool used when cross-compiling). Forcing it ON there is allowed and
+# fails with that explanation.
+#
+# It is an option rather than a hard platform rule because turning it off is also
+# how a build that only consumes precompiled shader blobs skips the whole
+# toolchain.
+if(APPLE)
+    set(LUAUG_SHADER_TOOLCHAIN_DEFAULT OFF)
+else()
+    set(LUAUG_SHADER_TOOLCHAIN_DEFAULT ON)
+endif()
+
+option(LUAUG_SHADER_TOOLCHAIN
+    "Build the HLSL shader toolchain (SDL_shadercross + fetched DirectXShaderCompiler)"
+    ${LUAUG_SHADER_TOOLCHAIN_DEFAULT})
+
 set(LUAUG_SANITIZE "" CACHE STRING
     "Comma-separated sanitizer list passed to -fsanitize (e.g. address,undefined)")
 

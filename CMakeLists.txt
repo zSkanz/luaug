@@ -38,6 +38,12 @@ include(${LUAUG_CMAKE_DIR}/luaug_sanitizers.cmake)
 include(${LUAUG_CMAKE_DIR}/luaug_provenance.cmake)
 include(${LUAUG_CMAKE_DIR}/luaug_module.cmake)
 
+# The shader toolchain, before third_party/: luaug_dxc.cmake fetches and
+# verifies DirectXShaderCompiler (ADR 0032) and seeds the find results that
+# SDL_shadercross resolves during add_subdirectory.
+include(${LUAUG_CMAKE_DIR}/luaug_dxc.cmake)
+include(${LUAUG_CMAKE_DIR}/luaug_shaders.cmake)
+
 if(LUAUG_BUILD_TESTS)
     enable_testing()
 endif()
@@ -54,3 +60,9 @@ add_subdirectory(engine/app)
 
 # Repo tooling, after third_party so it can link what it vendors.
 add_subdirectory(tools/imgcmp)
+
+# Engine shaders (ADR 0006). Attached here rather than in engine/app because the
+# shader build belongs to the content pipeline, not to the host module's source
+# list -- `luaug_host` is simply the target that must not be considered built
+# until its shaders exist.
+luaug_add_shaders(luaug_host GLOB "${CMAKE_CURRENT_SOURCE_DIR}/shaders/src/*.hlsl")
