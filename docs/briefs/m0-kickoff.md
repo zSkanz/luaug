@@ -165,6 +165,36 @@ Recorded because each one cost real time and will cost it again otherwise.
     deliberately because it is a sandbox-correctness issue against a spec that
     already exists, not new feature work — and because every measurement taken
     before the fix would have been misleading.
+11. **Passing analyzer inputs as an expanded file list does not scale on
+    Windows.** Measured: ~400 paths overflow the 32,767-character command-line
+    limit and `luau-lsp` fails to launch. Harmless in CI (the `luau-check` job
+    runs on Linux, where `ARG_MAX` is ~2 MB) but it will bite `luaug check` in
+    M3, which must work on Windows. Passing a **directory** avoids it entirely,
+    and `luau-lsp analyze` does recurse — verified with a planted error in file
+    7 of 400.
+
+## Measured: how analysis scales with .luau count
+
+Taken on the dev machine so M3's `luaug check` has a baseline to start from.
+Synthetic `--!strict` modules with generics, unions and refinements, analyzed
+via the directory form, second run of two:
+
+| files | wall time | ms per file |
+|---|---|---|
+| 25 | 73 ms | 2.92 |
+| 100 | 105 ms | 1.05 |
+| 400 | 236 ms | 0.59 |
+
+Sublinear: roughly 60 ms fixed startup plus ~0.45 ms marginal per file.
+Extrapolated, 10,000 files is still only a few seconds — analysis is nowhere
+near being the bottleneck next to an ~8-minute cold C++ build.
+
+Two caveats this measurement does **not** cover: the modules are independent,
+with no `require` between them, so cross-module generic inference (the
+expensive case) is untested; and the known new-solver failure mode is **memory
+on large script counts**, not wall time (`docs/research/luau-2026.md` §2,
+ADR 0018) — that is what to watch, and it needs a realistic dependency graph
+to provoke.
 
 ## Attempted / abandoned
 
