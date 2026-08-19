@@ -25,7 +25,7 @@ vendored yet; the roadmap allows lazy vendoring so long as the row exists.
 | meshoptimizer | 1.x | _not vendored yet_ | MIT | https://github.com/zeux/meshoptimizer | `third_party/meshoptimizer/` |
 | basis_universal | 2.5x | _not vendored yet_ | Apache-2.0 | https://github.com/BinomialLLC/basis_universal | `third_party/basis_universal/` |
 | ktx | latest-tag | _not vendored yet_ | Apache-2.0 | https://github.com/KhronosGroup/KTX-Software | `third_party/ktx/` |
-| stb | pinned-commit | _not vendored yet_ | MIT OR Public Domain | https://github.com/nothings/stb | `third_party/stb/` |
+| stb | master-2026-08-01 | `2c980bb59875` | MIT OR Public Domain | https://github.com/nothings/stb | `third_party/stb/` |
 | imgui | 1.92.x-docking | _not vendored yet_ | MIT | https://github.com/ocornut/imgui | `third_party/imgui/` |
 | clay | pinned-commit | _not vendored yet_ | zlib | https://github.com/nicbarker/clay | `third_party/clay/` |
 | recastnavigation | main | _not vendored yet_ | zlib | https://github.com/recastnavigation/recastnavigation | `third_party/recastnavigation/` |

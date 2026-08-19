@@ -51,3 +51,6 @@ add_subdirectory(engine/core)
 add_subdirectory(engine/platform)
 add_subdirectory(engine/rhi)
 add_subdirectory(engine/app)
+
+# Repo tooling, after third_party so it can link what it vendors.
+add_subdirectory(tools/imgcmp)
