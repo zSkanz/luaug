@@ -1,0 +1,2 @@
+# Vendored upstream source is never formatted or edited in place (R13, ADR 0021).
+third_party/

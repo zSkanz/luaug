@@ -192,8 +192,12 @@ jobs:
       - name: Generate Lute type definitions
         run: lute setup
 
+      # Repo-wide rather than a list of directories: naming the directories
+      # meant a .luau file created anywhere else would silently escape both
+      # this and the analyzer below. third_party is excluded by .styluaignore
+      # (vendored source is never reformatted -- R13).
       - name: StyLua formatting check
-        run: stylua --check tools examples
+        run: stylua --check .
 
       # --platform=standard: this engine is not Roblox, so no Roblox
       # definitions are loaded (ADR 0020, api-design §4).
@@ -204,8 +208,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t files < <(find tools examples -name '*.luau' | sort)
+          mapfile -t files < <(find . -name '*.luau' -not -path './third_party/*' | sort)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "::error::no .luau files found — the analysis gate would pass vacuously"
+            exit 1
+          fi
           printf 'analyzing %s file(s)\n' "${#files[@]}"
+          printf '  %s\n' "${files[@]}"
           luau-lsp analyze --platform=standard --ignore="**/.lute/**" "${files[@]}"
 
       - name: i18n key check (R3)
