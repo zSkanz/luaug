@@ -66,12 +66,42 @@ if(LUAUG_BUILD_TESTS)
     set_tests_properties(host_version_abi PROPERTIES
         PASS_REGULAR_EXPRESSION "vector 3-wide f32")
 
-    # Deliverable: `luaug-host boot.luau` prints a catalog-resolved greeting
-    # and exits 0.
-    add_test(NAME host_boot COMMAND luaug_host "${CMAKE_SOURCE_DIR}/examples/boot/boot.luau")
+    # M0's deliverable, still asserted: the host runs a script and prints a
+    # catalog-resolved greeting.
+    #
+    # `--headless --frames=3 --exit` is not decoration. Since M1 the host runs a
+    # frame loop, and without a budget it runs until its window is closed --
+    # which under CTest means forever. This test hung for 140 seconds locally
+    # before the flags went on, and would have burned the CI job's timeout.
+    #
+    # `--rhi=null` for the same reason: these tests are about the host, and a
+    # Linux CI runner has no Vulkan driver. Making them depend on a GPU would
+    # turn "this runner has no graphics" into a red build, which is a check
+    # nobody can act on. The real device is covered by the rhi tests, which skip
+    # when there is none, and by the Tier-1 gate run on the dev machine.
+    add_test(NAME host_boot
+        COMMAND luaug_host "${CMAKE_SOURCE_DIR}/examples/boot/boot.luau" --headless --frames=3 --exit --rhi=null)
     set_tests_properties(host_boot PROPERTIES
-        PASS_REGULAR_EXPRESSION "engine initialized")
+        PASS_REGULAR_EXPRESSION "engine initialized"
+        TIMEOUT 60)
+
+    # The frame loop terminates on its budget and says what it ran. Separate
+    # from host_boot because "the script ran" and "the loop stopped" are
+    # different claims, and a hang should name which one broke.
+    add_test(NAME host_headless_frames COMMAND luaug_host --headless --frames=5 --exit --rhi=null)
+    set_tests_properties(host_headless_frames PROPERTIES
+        PASS_REGULAR_EXPRESSION "Ran 5 frames"
+        TIMEOUT 60)
+
+    # A headless run with no budget has no window to close, so it would never
+    # stop. Rejected up front rather than left to a CI timeout to discover.
+    add_test(NAME host_headless_needs_frames COMMAND luaug_host --headless)
+    set_tests_properties(host_headless_needs_frames PROPERTIES WILL_FAIL TRUE TIMEOUT 60)
+
+    # Selecting a backend this build does not contain names what it does have.
+    add_test(NAME host_unknown_backend COMMAND luaug_host --rhi=nonesuch)
+    set_tests_properties(host_unknown_backend PROPERTIES WILL_FAIL TRUE TIMEOUT 60)
 
     add_test(NAME host_usage_without_script COMMAND luaug_host)
-    set_tests_properties(host_usage_without_script PROPERTIES WILL_FAIL TRUE)
+    set_tests_properties(host_usage_without_script PROPERTIES WILL_FAIL TRUE TIMEOUT 60)
 endif()
