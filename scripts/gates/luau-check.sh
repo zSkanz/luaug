@@ -68,14 +68,23 @@ echo "== api definition lints (api-design §9) =="
 lute api/generator/check.luau
 
 # The generated definitions are checked in, so drift has to be a build failure
-# rather than a discovery. Regenerate and compare: if this fails, someone either
-# hand-edited a generated file or changed the IDL without regenerating, and both
-# are the same fix.
+# rather than a discovery.
+#
+# The comparison is against the file as it was BEFORE regenerating, not against
+# git. Regenerating first and then diffing the working tree looks equivalent and
+# is not: it overwrites a hand edit and then reports that nothing is wrong, so
+# the one failure mode a generated file actually has -- somebody editing it --
+# is the one it cannot see. Verified by trying it.
 echo "== generated type definitions are fresh =="
+defs_before="$(mktemp)"
+trap 'rm -f "$defs_before"' EXIT
+cp runtime/types/engine.d.luau "$defs_before"
 lute api/generator/gen_dts.luau >/dev/null
-if ! git diff --quiet -- runtime/types/; then
-    echo "luau-check: runtime/types/ is stale — run 'lute api/generator/gen_dts.luau' and commit the result" >&2
-    git --no-pager diff --stat -- runtime/types/ >&2
+if ! diff -q "$defs_before" runtime/types/engine.d.luau >/dev/null; then
+    echo "luau-check: runtime/types/engine.d.luau does not match the IDL." >&2
+    echo "  Either the definitions were hand-edited, or api/defs changed without" >&2
+    echo "  regenerating. Both are the same fix: commit the regenerated file." >&2
+    diff -u "$defs_before" runtime/types/engine.d.luau | head -40 >&2
     exit 1
 fi
 

@@ -102,11 +102,21 @@ local function functionType(method: Schema.Method): string
     return rendered
 end
 
+--- `game:GetService("RunService")` has to come back as a `RunService` and not
+--- as an `Instance`, or every call site needs an `:IsA` narrowing to reach the
+--- members it just asked for. The overload set is *generative* -- one per
+--- Service-tagged class -- so it is emitted from the class table rather than
+--- listed in a definition file that would drift every time a service ships.
+--- The specific overloads precede the general one, because resolution takes
+--- the first that matches.
+local SingletonMethod = "GetService"
+
 local function emitMembers(
     lines: { string },
     properties: { Schema.Property }?,
     methods: { Schema.Method }?,
-    events: { Schema.Event }?
+    events: { Schema.Event }?,
+    singletonNames: { string }?
 )
     for _, property in orEmpty(properties) do
         local access = if property.ReadOnly then "read " else ""
@@ -125,6 +135,11 @@ local function emitMembers(
         table.insert(lines, `    read {event.Name}: Signal<{pack}>`)
     end
     for _, method in orEmpty(methods) do
+        if method.Name == SingletonMethod and singletonNames ~= nil then
+            for _, serviceName in singletonNames do
+                table.insert(lines, `    function {method.Name}(self, name: "{serviceName}"): {serviceName}`)
+            end
+        end
         local parameters = parameterList(method.Parameters)
         local separator = if parameters == "" then "" else ", "
         table.insert(lines, `    function {method.Name}(self{separator}{parameters}): {returnList(method.Returns)}`)
@@ -231,12 +246,21 @@ for _, datatype in Datatypes do
     end
 end
 
+local ServiceNames: { string } = {}
+for _, class in Classes do
+    for _, tag in orEmpty(class.Tags) do
+        if tag == "Service" then
+            table.insert(ServiceNames, class.Name)
+        end
+    end
+end
+
 for _, class in Classes do
     local header = if class.Extends ~= nil
         then `declare extern type {class.Name} extends {class.Extends} with`
         else `declare extern type {class.Name} with`
     table.insert(Lines, header)
-    emitMembers(Lines, class.Properties, class.Methods, class.Events)
+    emitMembers(Lines, class.Properties, class.Methods, class.Events, ServiceNames)
     table.insert(Lines, "end")
     table.insert(Lines, "")
 end

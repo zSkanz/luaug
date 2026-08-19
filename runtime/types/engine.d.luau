@@ -153,6 +153,12 @@ declare extern type DataModel extends Instance with
     read EngineVersion: string
     read LuauVersion: string
     read Loaded: Signal<()>
+    function GetService(self, name: "Workspace"): Workspace
+    function GetService(self, name: "RunService"): RunService
+    function GetService(self, name: "ScriptService"): ScriptService
+    function GetService(self, name: "TagService"): TagService
+    function GetService(self, name: "DebugService"): DebugService
+    function GetService(self, name: "PhysicsService"): PhysicsService
     function GetService(self, name: string): Instance
     function FindService(self, name: string): Instance?
     function BindToClose(self, callback: () -> ()): ()
