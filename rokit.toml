@@ -1,0 +1,8 @@
+# Pinned toolchain (install with: rokit install)
+# Versions match docs/research/* (captured 2026-08-19). Upgrades are ADR-gated
+# (rule R5) and go together with regenerated type definitions.
+
+[tools]
+lute = "luau-lang/lute@1.0.0"
+luau-lsp = "JohnnyMorganz/luau-lsp@1.69.0"
+stylua = "JohnnyMorganz/StyLua@2.5.2"

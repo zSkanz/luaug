@@ -1,0 +1,11 @@
+{
+    "languageMode": "strict",
+    "lint": { "*": true },
+    "lintErrors": true,
+    "typeErrors": true,
+    "aliases": {
+        "std": "runtime/std",
+        "luaug": "runtime/luaug",
+        "tools": "tools"
+    }
+}

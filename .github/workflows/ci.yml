@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # ACTIVE NOW (docs-first phase): keeps the documentation package itself
+  # verifiable — every relative link resolves, pinned versions are consistent,
+  # no stray Roblox references outside the allowed files (rule R7 sweep).
+  # ---------------------------------------------------------------------------
+  docs-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check relative links in markdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail=0
+          while IFS=: read -r file link; do
+            target="${link%%#*}"
+            [[ -z "$target" ]] && continue
+            base="$(dirname "$file")"
+            if [[ ! -e "$base/$target" && ! -e "$target" ]]; then
+              echo "::error file=$file::broken relative link: $link"
+              fail=1
+            fi
+          done < <(grep -RnoE '\]\(([^)#h][^):]*)\)' --include='*.md' . \
+                   | sed -E 's/^([^:]+):[0-9]+:\]\(([^)]*)\)/\1:\2/' )
+          exit $fail
+
+      - name: Version-consistency grep (pinned versions named identically everywhere)
+        shell: bash
+        run: |
+          set -euo pipefail
+          check() { # pattern, forbidden-conflicting-pattern, label
+            if grep -RnE "$2" --include='*.md' --include='*.toml' --include='*.json' \
+                 --exclude-dir=.git . ; then
+              echo "::error::version inconsistency for $3 (found '$2'; expected only '$1')"
+              exit 1
+            fi
+          }
+          # Luau pin is 0.734 — flag any other 0.7xx presented as "the pin"
+          check "0.734" "pinned to 0\.7(0|1|2)[0-9]" "Luau"
+          # Lute pin is 1.0.0
+          check "lute@1.0.0" "lute@0\." "Lute"
+          # luau-lsp pin is 1.69.0
+          check "luau-lsp@1.69.0" "luau-lsp@1\.6[0-8]\." "luau-lsp"
+          echo "version consistency ok"
+
+      - name: Legal sweep (R7) — 'Roblox' only in allowed files
+        shell: bash
+        run: |
+          set -euo pipefail
+          allowed='^(\./)?(README\.md|CONTRIBUTING\.md|NOTICE|MASTER_PROMPT\.md|CLAUDE\.md|PROGRESS\.md|docs/|templates/README\.md|examples/README\.md|tests/README\.md|runtime/README\.md|api/README\.md|engine/README\.md|tools/README\.md|third_party/README\.md)'
+          bad=0
+          while IFS= read -r f; do
+            if ! [[ "$f" =~ $allowed ]]; then
+              echo "::error file=$f::'Roblox' referenced outside the allowed docs set (rule R7)"
+              bad=1
+            fi
+          done < <(grep -RliE 'roblox' --exclude-dir=.git --exclude-dir=.github . || true)
+          exit $bad
+
+      - name: Ledger format sanity
+        shell: bash
+        run: |
+          for h in "## State" "## Now / Next" "## Blocked" "## Session Log"; do
+            grep -q "$h" PROGRESS.md || { echo "::error::PROGRESS.md missing section '$h'"; exit 1; }
+          done
+          echo "ledger ok"
+
+  # ---------------------------------------------------------------------------
+  # ACTIVATED AT MILESTONE M0 (docs/roadmap.md) — uncomment then.
+  # ---------------------------------------------------------------------------
+  # build-test:
+  #   strategy:
+  #     matrix:
+  #       include:
+  #         - { os: windows-latest, preset: win-msvc-dev }
+  #         - { os: ubuntu-latest,  preset: linux-clang-dev }
+  #         - { os: macos-latest,   preset: macos-clang-dev }   # blocking from M4
+  #   runs-on: ${{ matrix.os }}
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Bootstrap
+  #       run: pwsh scripts/bootstrap.ps1
+  #       if: runner.os == 'Windows'
+  #     - name: Configure/Build/Test
+  #       run: |
+  #         cmake --preset ${{ matrix.preset }}
+  #         cmake --build --preset ${{ matrix.preset }}
+  #         ctest --preset ${{ matrix.preset }}
+  #
+  # luau-check:   # luau-analyze strict (new solver) + StyLua + i18n lint + layer check + apigen diff
+  # sanitize:     # linux-clang-asan
+  # determinism:  # replay-hash scenarios (blocking from M5)

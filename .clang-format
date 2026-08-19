@@ -1,0 +1,35 @@
+# LuauG C++ style (pin the clang-format major used in CI; recorded at M0).
+BasedOnStyle: LLVM
+Standard: c++20
+ColumnLimit: 120
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+PointerAlignment: Left
+DerivePointerAlignment: false
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: InlineOnly
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLambdasOnASingleLine: All
+AlwaysBreakTemplateDeclarations: Yes
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterClass: true
+  AfterStruct: true
+  AfterFunction: true
+  AfterNamespace: false
+  AfterEnum: true
+  BeforeElse: true
+  SplitEmptyFunction: false
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^"luaug/'
+    Priority: 1
+  - Regex: '^<(lua|luau|luacode|luacodegen)'
+    Priority: 2
+  - Regex: '^<'
+    Priority: 3
+NamespaceIndentation: None
+FixNamespaceComments: true
+SortIncludes: CaseSensitive
+SpacesBeforeTrailingComments: 1
