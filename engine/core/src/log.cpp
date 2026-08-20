@@ -54,9 +54,11 @@ std::string formatLogLine(LogLevel level, std::string_view text)
     return line;
 }
 
-void setLogSink(LogSink sink)
+LogSink setLogSink(LogSink sink)
 {
+    LogSink previous = std::move(sinkSlot());
     sinkSlot() = std::move(sink);
+    return previous;
 }
 
 void resetLogSink()

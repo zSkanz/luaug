@@ -1,0 +1,230 @@
+--!strict
+--- Conformance: where the scheduler's work lands inside a frame
+--- (api-design.md §3.1 "Resumption points", §3.2, architecture.md §3).
+---
+--- The sentence under test is: "`task` timers resume in their own phase between
+--- `PostSimulation` and `Heartbeat`; anything they defer drains at `Heartbeat`."
+--- That is only observable by connecting to the phases either side of the timer
+--- phase and recording the interleaving from inside a spec that yields -- so
+--- these cases read as a description of the frame rather than of one function.
+
+local testing = require("@luaug/testing")
+
+local describe, it, expect = testing.describe, testing.it, testing.expect
+local beforeEach, afterEach = testing.beforeEach, testing.afterEach
+
+local connections: { Connection } = {}
+local sandbox: Folder? = nil
+
+local function track(connection: Connection): Connection
+    table.insert(connections, connection)
+    return connection
+end
+
+local function sandboxFolder(): Folder
+    return assert(sandbox, "the sandbox folder is created in beforeEach")
+end
+
+local function timestep(): number
+    return game:GetService("PhysicsService").FixedTimestep
+end
+
+local function runService(): RunService
+    return game:GetService("RunService")
+end
+
+describe("frame scheduling order", function()
+    beforeEach(function()
+        local folder = Instance.new("Folder")
+        folder.Name = "TaskSchedulingSpec"
+        folder.Parent = workspace
+        sandbox = folder
+        -- Start every case from a task-resume phase, so "the current tick" means
+        -- the same thing in each of them regardless of what the previous case did.
+        task.wait()
+    end)
+
+    afterEach(function()
+        for _, connection in connections do
+            connection:Disconnect()
+        end
+        table.clear(connections)
+        local folder = sandbox
+        sandbox = nil
+        if folder then
+            folder:Destroy()
+        end
+    end)
+
+    it("resumes a waiting thread after PostSimulation and before Heartbeat of the same tick", function()
+        local run = runService()
+        local order: { string } = {}
+        track(run.PostSimulation:Connect(function()
+            table.insert(order, "PostSimulation")
+        end))
+        track(run.Heartbeat:Connect(function()
+            table.insert(order, "Heartbeat")
+        end))
+        task.wait()
+        table.insert(order, "resumed")
+        task.wait()
+        table.insert(order, "resumed")
+        local expected = { "Heartbeat", "PostSimulation", "resumed", "Heartbeat", "PostSimulation", "resumed" }
+        expect(order):ToEqual(expected)
+    end)
+
+    it("drains work deferred from a task resumption at that tick's Heartbeat", function()
+        local run = runService()
+        local order: { string } = {}
+        track(run.PostSimulation:Connect(function()
+            table.insert(order, "PostSimulation")
+        end))
+        track(run.Heartbeat:Connect(function()
+            table.insert(order, "Heartbeat")
+        end))
+        task.defer(function()
+            table.insert(order, "deferred")
+        end)
+        task.wait()
+        expect(order):ToEqual({ "deferred", "Heartbeat", "PostSimulation" })
+    end)
+
+    it("fires each sim-rate RunService event exactly once per tick", function()
+        local run = runService()
+        local counts = { PreAnimation = 0, PreSimulation = 0, PostSimulation = 0, Heartbeat = 0 }
+        track(run.PreAnimation:Connect(function()
+            counts.PreAnimation += 1
+        end))
+        track(run.PreSimulation:Connect(function()
+            counts.PreSimulation += 1
+        end))
+        track(run.PostSimulation:Connect(function()
+            counts.PostSimulation += 1
+        end))
+        track(run.Heartbeat:Connect(function()
+            counts.Heartbeat += 1
+        end))
+        local ticks = task.wait(timestep() * 10) / timestep()
+        expect(counts.PreAnimation):ToBe(math.round(ticks))
+        expect(counts.PreSimulation):ToBe(math.round(ticks))
+        expect(counts.PostSimulation):ToBe(math.round(ticks))
+        expect(counts.Heartbeat):ToBe(math.round(ticks))
+    end)
+
+    it("gives the fixed timestep as dt to the sim-rate RunService events", function()
+        local run = runService()
+        local step = timestep()
+        local samples: { number } = {}
+        track(run.Heartbeat:Connect(function(dt: number)
+            table.insert(samples, dt)
+        end))
+        task.wait(step * 4)
+        expect(#samples >= 1):ToBe(true)
+        for _, dt in samples do
+            expect(dt):ToBeCloseTo(step, 1e-9)
+        end
+    end)
+
+    -- Recording starts inside a task-resume phase, so the first phase seen is the
+    -- current tick's Heartbeat; the next three are the following tick's, in the
+    -- order architecture.md §3 lays them out.
+    it("runs PreAnimation, then PreSimulation, then PostSimulation within a tick", function()
+        local run = runService()
+        local order: { string } = {}
+        local function recordOnce(name: string, signal: Signal<number>)
+            track(signal:Connect(function()
+                if #order < 4 then
+                    table.insert(order, name)
+                end
+            end))
+        end
+        recordOnce("PreAnimation", run.PreAnimation)
+        recordOnce("PreSimulation", run.PreSimulation)
+        recordOnce("PostSimulation", run.PostSimulation)
+        recordOnce("Heartbeat", run.Heartbeat)
+        task.wait(timestep() * 4)
+        expect(order):ToEqual({ "Heartbeat", "PreAnimation", "PreSimulation", "PostSimulation" })
+    end)
+
+    -- One queue, shared by `task.defer`, script fires and engine-raised property
+    -- changes, ordered purely by when each was raised (§3.1).
+    it("keeps one queue shared by task.defer, script fires and engine property changes", function()
+        local order: { string } = {}
+        local folder = sandboxFolder()
+        local signal = Signal.new()
+        track(signal:Connect(function()
+            table.insert(order, "fire")
+        end))
+        track(folder:GetPropertyChangedSignal("Name"):Connect(function()
+            table.insert(order, "nameChanged")
+        end))
+        task.defer(function()
+            table.insert(order, "first-defer")
+        end)
+        signal:Fire()
+        folder.Name = "TaskSchedulingSpecRenamed"
+        task.defer(function()
+            table.insert(order, "second-defer")
+        end)
+        task.wait()
+        expect(order):ToEqual({ "first-defer", "fire", "nameChanged", "second-defer" })
+        signal:Destroy()
+    end)
+
+    it("orders task.spawn ahead of the queue and task.defer within it", function()
+        local order: { string } = {}
+        task.defer(function()
+            table.insert(order, "defer-1")
+        end)
+        task.spawn(function()
+            table.insert(order, "spawn-1")
+        end)
+        task.defer(function()
+            table.insert(order, "defer-2")
+        end)
+        task.spawn(function()
+            table.insert(order, "spawn-2")
+        end)
+        expect(order):ToEqual({ "spawn-1", "spawn-2" })
+        task.wait()
+        expect(order):ToEqual({ "spawn-1", "spawn-2", "defer-1", "defer-2" })
+    end)
+
+    -- ADR 0025 level A: the same script sequence on the same build must produce
+    -- the same observable ordering, every time it runs.
+    it("produces the same interleaving every time the same sequence runs", function()
+        local function record(): { string }
+            local order: { string } = {}
+            task.defer(function()
+                table.insert(order, "a")
+            end)
+            task.spawn(function()
+                table.insert(order, "b")
+            end)
+            task.defer(function()
+                table.insert(order, "c")
+            end)
+            task.wait()
+            return order
+        end
+        local first = record()
+        local second = record()
+        expect(first):ToEqual({ "b", "a", "c" })
+        expect(second):ToEqual(first)
+    end)
+
+    it("takes the same number of ticks for the same wait on repeated runs", function()
+        local step = timestep()
+        local function elapsedTicks(): number
+            local total = 0
+            for _ = 1, 3 do
+                total += task.wait(step * 2)
+            end
+            return total / step
+        end
+        local first = elapsedTicks()
+        local second = elapsedTicks()
+        expect(first):ToBeCloseTo(6, 1e-6)
+        expect(second):ToBeCloseTo(first, 1e-9)
+    end)
+end)

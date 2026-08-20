@@ -58,6 +58,25 @@ struct StatTable
     std::vector<std::pair<core::NameAtom, f64>> entries;
 };
 
+// The engine's own per-frame instrumentation, published by the host once a
+// frame (architecture.md §9). Separate from `StatTable` because these are
+// engine facts with fixed names rather than whatever a game chose to publish,
+// and because a game must not be able to overwrite one -- `GetStat("FPS")`
+// reads the engine's number or nothing at all.
+//
+// **Wall-clock derived, and therefore never readable by simulation code.** R10
+// forbids the sim from seeing a clock; these exist for a human looking at an
+// overlay, and a script that fed one back into the world would make its replay
+// diverge. `luaug check` flags that in M3.
+struct FrameStats
+{
+    f64 fps = 0.0;
+    f64 frameTimeMs = 0.0;
+    f64 drawCalls = 0.0;
+    f64 physicsBodies = 0.0;
+    f64 luaMemoryKb = 0.0;
+};
+
 // A coroutine parked on `WaitForChild`. Kept apart from the timer list because
 // the contract is about a *state* -- "a child of that name exists" -- and not
 // about a deadline: a sibling renamed into the awaited name satisfies a waiter
@@ -88,6 +107,7 @@ public:
 
     GizmoSink gizmos;
     StatTable stats;
+    FrameStats frameStats;
 
     // The overlay panels a script has opened, in the order it opened them. The
     // host reads this when it draws; a name outside the documented set never
@@ -114,6 +134,10 @@ public:
 // `game` and `workspace` globals, and binds every service method. Runs during
 // boot, before the sandbox.
 void registerServices(lua_State* L);
+
+// What the host publishes each frame. Called between frames rather than inside
+// one, so a stat never changes halfway through a tick that might read it.
+void publishFrameStats(lua_State* L, const FrameStats& stats);
 
 // `DebugService.MessageOut`, which carries every console message with its level
 // (api-design.md §2.1). Called beside the log rather than from a log sink: the

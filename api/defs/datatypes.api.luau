@@ -545,6 +545,30 @@ local Datatypes: { Schema.Datatype } = {
                     .. "`fromQuaternion`'s tail, whose inverse this is.",
             },
         } :: { Schema.Method },
+        Operators = {
+            {
+                Name = "__mul",
+                Parameters = { { Name = "other", Type = "CFrame" } },
+                Returns = { "CFrame" },
+                Doc = 'Composes two transforms: `a * b` reads as "first `b`, then `a`", the column-vector '
+                    .. "convention every matrix in the engine follows.",
+            },
+            {
+                Name = "__mul",
+                Parameters = { { Name = "point", Type = "vector" } },
+                Returns = { "vector" },
+                Doc = "Transforms a **point** -- the translation is applied. `VectorToWorldSpace` is the "
+                    .. "direction form, and a surface normal put through this one comes out wrong by exactly "
+                    .. "the frame's position.",
+            },
+            {
+                Name = "__eq",
+                Parameters = { { Name = "other", Type = "CFrame" } },
+                Returns = { "boolean" },
+                Doc = "Exact and component-wise: an identity test, never a tolerance. Two frames built by "
+                    .. "different routes to the same place are equal only if every stored number matches.",
+            },
+        } :: { Schema.Operator },
     },
     {
         Name = "Color3",
@@ -653,6 +677,15 @@ local Datatypes: { Schema.Datatype } = {
                     .. "does not preserve an HDR value.",
             },
         } :: { Schema.Method },
+        Operators = {
+            {
+                Name = "__eq",
+                Parameters = { { Name = "other", Type = "Color3" } },
+                Returns = { "boolean" },
+                Doc = "Exact and component-wise. Channels are not clamped, so two colours that would render "
+                    .. "identically after clamping are still unequal if their stored values differ.",
+            },
+        } :: { Schema.Operator },
     },
     {
         Name = "Random",

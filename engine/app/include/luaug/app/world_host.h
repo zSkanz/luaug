@@ -23,6 +23,7 @@
 #include "luaug/scene/enum_registry.h"
 #include "luaug/scene/world.h"
 #include "luaug/script/modules.h"
+#include "luaug/script/services.h"
 #include "luaug/script/runtime.h"
 
 namespace luaug::render
@@ -48,6 +49,23 @@ struct WorldHostOptions
     core::u64 seed = 1;
 
     f64 fixedTimestep = 1.0 / 60.0;
+
+    // Every `*.spec.luau` under this directory is mounted as an entry `Script`
+    // alongside the project's own, and one more synthesized entry runs the
+    // suite once `game.Loaded` has fired (api-design.md §3). Empty means an
+    // ordinary run.
+    std::filesystem::path conformanceRoot;
+};
+
+// What the conformance run reported. Read after the loop, because the run ends
+// by calling `game:Shutdown()` and the host notices that the way it notices any
+// other shutdown.
+struct ConformanceReport
+{
+    bool ran = false;
+    core::i64 total = 0;
+    core::i64 passed = 0;
+    core::i64 failed = 0;
 };
 
 class WorldHost
@@ -71,6 +89,10 @@ public:
     // resumption order, and it is the only place it is written down as code.
     void tick();
 
+    // Publishes the engine's own instrumentation for this frame. Called between
+    // frames, so a stat never changes halfway through a tick that reads it.
+    void publishStats(const script::FrameStats& stats);
+
     // The render-rate phase. Never fires headless -- headless is the same
     // scheduler minus the render steps, and this is one of them.
     void preRender(f64 renderDt);
@@ -88,6 +110,12 @@ public:
     [[nodiscard]] script::ScriptRuntime& runtime() noexcept { return *m_runtime; }
     [[nodiscard]] bool shutdownRequested();
 
+    // Read off `game`'s attributes, which is where the runner script puts them.
+    // Attributes rather than a private channel, because the runner is an
+    // ordinary entry script and everything it does should be something a
+    // project could do.
+    [[nodiscard]] ConformanceReport conformanceReport() const;
+
     // Runs the `BindToClose` callbacks. The host calls it once, on the way out.
     void close();
 
@@ -98,6 +126,7 @@ private:
     [[nodiscard]] std::optional<core::EngineError> registerRuntimeModules();
 
     [[nodiscard]] std::optional<core::EngineError> mountProject(const std::filesystem::path& path);
+    [[nodiscard]] std::optional<core::EngineError> mountConformance(const std::filesystem::path& root);
 
     core::AtomTable m_atoms;
     scene::ClassRegistry m_classes;

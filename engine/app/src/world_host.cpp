@@ -26,6 +26,30 @@ using core::LogLevel;
 // of the API.
 constexpr std::string_view RuntimeModules[] = {"testing"};
 
+// The conformance runner, as an ordinary entry script.
+//
+// Luau in a C++ string is not a thing to do lightly, and there are two reasons
+// it is right here. It has to run FROM Luau: a case body may `task.wait`, and a
+// `lua_call` from a C function cannot be resumed across a yield (U-34) -- so a
+// C-side runner could only run suites that never wait, which is most of what
+// there is to test. And it has to be an entry script rather than host
+// machinery, because everything it does -- `game.Loaded`, attributes,
+// `Shutdown` -- is something a project could do, and a runner with a private
+// channel into the host would be testing a world no game will ever run in.
+constexpr std::string_view ConformanceRunnerSource = R"LUAU(
+local testing = require("@luaug/testing")
+
+game.Loaded:Connect(function()
+    local report = testing.run()
+    print(testing.format(report))
+
+    game:SetAttribute("ConformanceTotal", report.Total)
+    game:SetAttribute("ConformancePassed", report.Passed)
+    game:SetAttribute("ConformanceFailed", report.Failed)
+    game:Shutdown()
+end)
+)LUAU";
+
 [[nodiscard]] bool readFile(const std::filesystem::path& path, std::string& out)
 {
     std::ifstream file(path, std::ios::binary);
@@ -217,6 +241,12 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
             return error;
     }
 
+    if (!options.conformanceRoot.empty())
+    {
+        if (std::optional<core::EngineError> error = mountConformance(options.conformanceRoot); error.has_value())
+            return error;
+    }
+
     script::startScripts(m_runtime->state());
 
     // The boot drain. api-design.md §3's lifecycle reads "start each Script on
@@ -325,8 +355,81 @@ std::optional<core::EngineError> WorldHost::mountProject(const std::filesystem::
         });
     }
 
+    // A project that mounts nothing boots, runs its frames and reports success
+    // while doing absolutely nothing -- which is how `examples/01-instances`
+    // came to render an empty screen with no diagnostic at all. Naming the
+    // directory that was searched turns five minutes of confusion into none.
+    //
+    // A warning rather than an error: an empty project is a mistake, but it is
+    // the user's mistake to make, and refusing to boot would also refuse the
+    // legitimate act of starting an engine and building the tree from a console.
+    if (entries.empty() && isDirectory)
+    {
+        const std::array<I18nArg, 1> args{I18nArg{"path", (m_root / "src" / "scripts").string()}};
+        core::log(LogLevel::Warn, LUAUG_TR("engine.project.warn.no_scripts"), args);
+    }
+
     script::mountScripts(m_runtime->state(), entries);
     return std::nullopt;
+}
+
+std::optional<core::EngineError> WorldHost::mountConformance(const std::filesystem::path& root)
+{
+    std::error_code ec;
+    if (!std::filesystem::is_directory(root, ec))
+    {
+        const std::array<I18nArg, 1> args{I18nArg{"path", root.string()}};
+        return core::makeError(LUAUG_TR("engine.cli.err.script_missing"), args);
+    }
+
+    // The specs are mounted from their own root and the project's are not
+    // touched: a conformance run is a run of the engine's own suite, and a
+    // project's entry scripts have nothing to do with it.
+    m_root = root;
+    m_aliases.clear();
+
+    std::vector<script::MountedScript> entries;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(root, ec))
+    {
+        if (!entry.is_regular_file() || !entry.path().filename().string().ends_with(".spec.luau"))
+            continue;
+        std::string source;
+        if (!readFile(entry.path(), source))
+            continue;
+
+        const std::string relative = toProjectPath(std::filesystem::relative(entry.path(), root, ec));
+        entries.push_back(script::MountedScript{relative, relative, std::move(source)});
+    }
+
+    // The runner's own path sorts wherever it sorts, and it does not matter: it
+    // hangs off `game.Loaded`, which is raised after every entry script has had
+    // its first resumption whatever order they ran in.
+    entries.push_back(script::MountedScript{
+        "__conformance_runner.luau",
+        "__conformance_runner.luau",
+        std::string(ConformanceRunnerSource),
+    });
+
+    script::mountScripts(m_runtime->state(), entries);
+    return std::nullopt;
+}
+
+ConformanceReport WorldHost::conformanceReport() const
+{
+    const core::InstanceId root = m_runtime->dataModel();
+    const auto attribute = [&](const char* name) -> core::i64
+    {
+        const scene::Value value = m_world->getAttribute(root, m_world->atoms().lookup(name));
+        const auto* number = std::get_if<f64>(&value);
+        return number == nullptr ? -1 : static_cast<core::i64>(*number);
+    };
+
+    ConformanceReport report;
+    report.total = attribute("ConformanceTotal");
+    report.passed = attribute("ConformancePassed");
+    report.failed = attribute("ConformanceFailed");
+    report.ran = report.total >= 0;
+    return report;
 }
 
 void WorldHost::tick()
@@ -351,6 +454,11 @@ void WorldHost::tick()
     m_runtime->resumeTimers();
     m_runtime->firePhase(core::Phase::Heartbeat, state.fixedTimestep);
     m_runtime->drain(core::Phase::Heartbeat);
+}
+
+void WorldHost::publishStats(const script::FrameStats& stats)
+{
+    script::publishFrameStats(m_runtime->state(), stats);
 }
 
 void WorldHost::preRender(f64 renderDt)

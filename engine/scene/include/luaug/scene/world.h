@@ -268,12 +268,20 @@ private:
     void linkChild(InstanceRecord& parentRecord, core::InstanceId parentId, core::InstanceId childId);
     void unlinkChild(core::InstanceId childId);
     void indexName(core::InstanceId parentId, core::InstanceId childId);
+    // The same, for a rename: a renamed child may belong in the middle of a
+    // chain, which the append above cannot express.
+    void indexNameInChildOrder(core::InstanceId parentId, core::InstanceId childId);
     void unindexName(core::InstanceId parentId, core::InstanceId childId);
 
     ClassRegistry& m_classes;
     EnumRegistry& m_enums;
     core::AtomTable& m_atoms;
     core::Pcg32 m_rng;
+    // Interned once so that `clone` can skip the one property that is structure
+    // rather than a value, without a string compare per property per instance.
+    // Declared after `m_atoms` because it is initialised from it, and the
+    // initialiser list has to run in declaration order (-Wreorder-ctor).
+    core::NameAtom m_parentProperty;
 
     core::SlotMap<InstanceRecord> m_instances;
     ComponentPool<PartComponent> m_parts;

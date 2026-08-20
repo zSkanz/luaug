@@ -122,16 +122,25 @@ int taskDelay(lua_State* L)
     luaL_checktype(L, 2, LUA_TFUNCTION);
 
     const int count = lua_gettop(L) - 2;
-    const u32 argBase = captureDeferredArguments(L, 3, count);
 
     int threadRef = -1;
-    (void)newCallbackThread(L, 2, threadRef);
+    lua_State* co = newCallbackThread(L, 2, threadRef);
+
+    // Onto the callback's OWN stack, exactly as `task.spawn` does above, and
+    // NOT into the deferred arena. A timer outlives the drain it was created
+    // in -- that is what a timer is -- and the arena's top is reset at the end
+    // of every drain, so a `task.delay(0.7, fn, x)` came back with `x` as nil
+    // after forty-two ticks of someone else's arguments being written over it.
+    //
+    // Held alive by `threadRef`, so the arguments' lifetime is the timer's with
+    // nothing to keep in step.
+    for (int index = 0; index < count; ++index)
+        lua_xpush(L, co, 3 + index);
 
     const scene::EngineState& state = engineState(L);
     TimerEntry entry;
     entry.deadlineTick = state.tick + ticksFor(duration, state.fixedTimestep);
     entry.threadRef = threadRef;
-    entry.argBase = argBase;
     entry.argCount = static_cast<u32>(count < 0 ? 0 : count);
     entry.scheduledTick = state.tick;
     insertTimer(scheduler(L), entry);
@@ -183,7 +192,8 @@ int taskCancel(lua_State* L)
 
         const TimerEntry entry = tasks.timers[index];
         tasks.timers.erase(tasks.timers.begin() + static_cast<std::ptrdiff_t>(index));
-        dropDeferredArguments(L, entry.argBase, entry.argCount);
+        // No arguments to release: a timer's arguments sit on its own coroutine,
+        // and dropping the ref drops them with it.
         (void)lua_unref(L, entry.threadRef);
         return 0;
     }
@@ -256,7 +266,6 @@ void resumeDueTimers(lua_State* L, u64 tick)
         if (co == nullptr)
         {
             lua_pop(L, 1);
-            dropDeferredArguments(L, entry.argBase, entry.argCount);
             (void)lua_unref(L, entry.threadRef);
             continue;
         }
@@ -273,7 +282,7 @@ void resumeDueTimers(lua_State* L, u64 tick)
         }
         else if (entry.argCount > 0)
         {
-            releaseDeferredArguments(L, co, entry.argBase, entry.argCount);
+            // Already on `co`, pushed when the timer was created.
             resumeCount = static_cast<int>(entry.argCount);
         }
 

@@ -296,11 +296,12 @@ void ScriptRuntime::resumeTimers()
     // Between `PostSimulation` and `Heartbeat` (architecture.md §3). Anything
     // these resumptions defer drains at `Heartbeat`, which is the drain that
     // follows this call.
-    resumeDueTimers(m_impl->state, m_world.engineState().tick);
-    // A `WaitForChild` is a pending resumption too, but keyed on a tree state
-    // rather than on a deadline -- so it cannot live in the timer list and is
-    // woken beside it.
+    // Waiters BEFORE timers. A `WaitForChild` is satisfied by a tree state that
+    // was already true when the tick began, while a timer is due only now -- so
+    // a waiter resumed after the timer that observes it would make
+    // `task.wait()` see a stale world one tick out of every one.
     resumeChildWaiters(m_impl->state);
+    resumeDueTimers(m_impl->state, m_world.engineState().tick);
 }
 
 void ScriptRuntime::firePhase(core::Phase phase, f64 delta)

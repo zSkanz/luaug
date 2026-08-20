@@ -216,14 +216,18 @@ TEST_CASE("FindFirstChild returns the first duplicate in child order")
         CHECK(fixture.world.findFirstChild(root, tree) == second);
         CHECK(fixture.world.findFirstChild(root, fixture.atom("Bush")) == first);
     }
-    SUBCASE("renaming it back puts it last in the chain")
+    SUBCASE("renaming it back puts it where child order says, not at the end")
     {
         fixture.world.setName(first, fixture.atom("Bush"));
         fixture.world.setName(first, tree);
-        // Child order is unchanged by a rename, but the name chain is rebuilt,
-        // and the chain is what FindFirstChild answers from.
+        // This subcase asserted the opposite until 2026-08-20, and it was
+        // asserting the implementation rather than ADR 0026: the chain is in
+        // CHILD order, and `first` is still the first child. An append put it
+        // last, so `FindFirstChild` answered `second` for an instance that had
+        // never moved -- which the conformance suite caught, written from the
+        // document by an author who had not read this file.
         CHECK(fixture.childNames(root) == std::vector<std::string>{"Tree", "Tree", "Tree"});
-        CHECK(fixture.world.findFirstChild(root, tree) == second);
+        CHECK(fixture.world.findFirstChild(root, tree) == first);
     }
     SUBCASE("detaching the first promotes the second")
     {
@@ -305,9 +309,16 @@ TEST_CASE("destroy removes the subtree now and tells about it later")
     CHECK_FALSE(fixture.world.parentOf(victim).valid());
     CHECK_FALSE(fixture.world.hasTag(victim, fixture.atom("Climbable")));
 
+    // And the whole subtree is dismantled, not only its root: a destroyed child
+    // is a child whose Parent is nil (api-design.md §3.1), so `victim` has no
+    // children left either.
+    CHECK(fixture.world.childCount(victim) == 0);
+    CHECK_FALSE(fixture.world.parentOf(child).valid());
+
     const auto changes = drain(fixture.world);
     CHECK(countOf(changes, ChangeKind::Destroying) == 2);
-    CHECK(countOf(changes, ChangeKind::ChildRemoved) == 1);
+    // Two, not one: `victim` left `root` and `child` left `victim`.
+    CHECK(countOf(changes, ChangeKind::ChildRemoved) == 2);
     CHECK(countOf(changes, ChangeKind::TagRemoved) == 1);
 
     // The handle still resolves for the whole window in which a Destroying

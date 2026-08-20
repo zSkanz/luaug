@@ -288,6 +288,38 @@ int debugServiceGetStat(lua_State* L)
         return 1;
     }
 
+    // The engine's own counters, checked BEFORE the custom table so a game
+    // cannot shadow one: `GetStat("FPS")` reads the engine's number or nothing.
+    const FrameStats& frame = services(L).frameStats;
+    if (name == "FPS")
+    {
+        lua_pushnumber(L, frame.fps);
+        return 1;
+    }
+    if (name == "FrameTimeMs")
+    {
+        lua_pushnumber(L, frame.frameTimeMs);
+        return 1;
+    }
+    if (name == "DrawCalls")
+    {
+        lua_pushnumber(L, frame.drawCalls);
+        return 1;
+    }
+    if (name == "PhysicsBodies")
+    {
+        // Zero until M5, and zero is the truthful answer: there is no physics
+        // world, so nothing is in it. A raise would say the stat does not
+        // exist, which is a different and false claim.
+        lua_pushnumber(L, frame.physicsBodies);
+        return 1;
+    }
+    if (name == "LuaMemoryKB")
+    {
+        lua_pushnumber(L, frame.luaMemoryKb);
+        return 1;
+    }
+
     const core::NameAtom atom = world(L).atoms().lookup(name);
     for (const auto& [key, value] : services(L).stats.entries)
     {
@@ -488,6 +520,11 @@ void registerServices(lua_State* L)
     lua_setglobal(L, "workspace");
 }
 
+void publishFrameStats(lua_State* L, const FrameStats& stats)
+{
+    services(L).frameStats = stats;
+}
+
 void publishMessage(lua_State* L, core::LogLevel level, std::string_view text)
 {
     ServiceState& state = services(L);
@@ -505,7 +542,7 @@ void publishMessage(lua_State* L, core::LogLevel level, std::string_view text)
     const i32 logLevel = static_cast<i32>(level);
     lua_pushlstring(L, text.data(), text.size());
     pushEnumItem(L, scene::EnumValue{scene::generated::LogLevelEnumId, logLevel});
-    fireInstanceEvent(L, debug, descriptor->slot, lua_gettop(L) - 1, 2);
+    fireEngineMessage(L, debug, descriptor->slot, lua_gettop(L) - 1, 2);
     lua_pop(L, 2);
 }
 
@@ -566,7 +603,7 @@ void resumeChildWaiters(lua_State* L)
                     {"name", w.atoms().text(waiter.name)},
                     {"parent", w.atoms().text(w.name(waiter.parent))},
                 };
-                const std::string message = core::engineCatalog().format(LUAUG_TR("scene.warn.wait_for_child"), args);
+                const std::string message = core::formatKeyPrefixed(LUAUG_TR("scene.warn.wait_for_child"), args);
                 core::logText(core::LogLevel::Warn, message);
                 publishMessage(L, core::LogLevel::Warn, message);
             }

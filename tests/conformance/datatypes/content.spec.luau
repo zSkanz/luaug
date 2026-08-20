@@ -1,0 +1,85 @@
+--!strict
+--- Pins the `Content` row of `api-design.md` §2.3: "A type alias of `string` in
+--- v1 (`asset://...`, `save://...` URIs); reserved to become opaque later." The
+--- alias is half of the contract, so the annotations below are as load-bearing
+--- as the assertions -- a `Content` that stopped being a string alias would fail
+--- this file at analysis time, before it ever ran.
+
+local testing = require("@luaug/testing")
+
+local describe, it, expect = testing.describe, testing.it, testing.expect
+
+local MODEL: Content = "asset://models/tree.glb"
+local SAVE: Content = "save://profiles/player.json"
+
+describe("Content", function()
+    describe("the alias", function()
+        it("is a plain string at runtime", function()
+            expect(typeof(MODEL)):ToBe("string")
+        end)
+
+        it("is not an opaque value in v1", function()
+            expect(typeof(MODEL)).Never:ToBe("userdata")
+            expect(typeof(MODEL)).Never:ToBe("Content")
+        end)
+
+        it("accepts an asset URI", function()
+            expect(MODEL):ToBe("asset://models/tree.glb")
+        end)
+
+        it("accepts a save URI", function()
+            expect(SAVE):ToBe("save://profiles/player.json")
+        end)
+    end)
+
+    describe("string behaviour", function()
+        it("compares with a plain string by value", function()
+            local other: Content = "asset://models/tree.glb"
+            expect(MODEL):ToBe(other)
+        end)
+
+        it("supports the string library", function()
+            expect(string.sub(MODEL, 1, 8)):ToBe("asset://")
+            expect(#MODEL):ToBe(23)
+        end)
+
+        it("supports concatenation", function()
+            local built: Content = "asset://models/" .. "tree.glb"
+            expect(built):ToBe(MODEL)
+        end)
+
+        it("is usable wherever a string is expected", function()
+            local upper = string.upper(MODEL)
+            expect(upper):ToBe("ASSET://MODELS/TREE.GLB")
+        end)
+
+        it("carries its scheme in the value itself", function()
+            -- Parenthesised: `string.find` returns two values, and `expect` takes one.
+            expect((string.find(MODEL, "asset://", 1, true))):ToBe(1)
+            expect((string.find(SAVE, "save://", 1, true))):ToBe(1)
+        end)
+    end)
+
+    describe("assignability", function()
+        it("takes a string literal without a constructor", function()
+            -- There is no `Content.new`: the alias is the whole surface in v1.
+            local direct: Content = "asset://textures/grass.ktx2"
+            expect(direct):ToBeA("string")
+        end)
+
+        it("flows back out as a string", function()
+            local function describeContent(content: Content): string
+                return content
+            end
+            expect(describeContent(MODEL)):ToBe(MODEL)
+        end)
+
+        it("accepts a plain string from a function returning one", function()
+            local function makePath(): string
+                return "asset://audio/wind.ogg"
+            end
+            local content: Content = makePath()
+            expect(content):ToBe("asset://audio/wind.ogg")
+        end)
+    end)
+end)

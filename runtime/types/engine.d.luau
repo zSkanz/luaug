@@ -6,14 +6,14 @@
 -- StyLua cannot parse `declare`, which is a luau-lsp extension rather than
 -- Luau syntax; `.styluaignore` excludes `*.d.luau` for that reason.
 
-type Content = string
+export type Content = string
 
-type Connection = {
+export type Connection = {
     Connected: boolean,
     Disconnect: (self: Connection) -> (),
 }
 
-type Signal<T...> = {
+export type Signal<T...> = {
     Connect: (self: Signal<T...>, handler: (T...) -> ()) -> Connection,
     Once: (self: Signal<T...>, handler: (T...) -> ()) -> Connection,
     Wait: (self: Signal<T...>) -> (T...),
@@ -69,6 +69,9 @@ declare extern type CFrame with
     function ToEuler(self, order: EnumRotationOrder?): (number, number, number)
     function ToAxisAngle(self): (vector, number)
     function ToQuaternion(self): (number, number, number, number)
+    function __mul(self, other: CFrame): CFrame
+    function __mul(self, point: vector): vector
+    function __eq(self, other: CFrame): boolean
 end
 
 declare extern type Color3 with
@@ -78,6 +81,7 @@ declare extern type Color3 with
     function Lerp(self, goal: Color3, alpha: number): Color3
     function ToHSV(self): (number, number, number)
     function ToHex(self): string
+    function __eq(self, other: Color3): boolean
 end
 
 declare extern type Random with
@@ -283,6 +287,16 @@ declare Random: {
 declare Signal: {
     new: (<T...>() -> Signal<T...>),
 }
+
+declare task: {
+    spawn: (<T...>(fn: (T...) -> (), T...) -> thread),
+    defer: (<T...>(fn: (T...) -> (), T...) -> thread),
+    delay: (<T...>(duration: number, fn: (T...) -> (), T...) -> thread),
+    wait: ((duration: number?) -> number),
+    cancel: ((thread: thread) -> ()),
+}
+
+declare function warn(...: any): ()
 
 declare Instance: {
     new: (("Folder") -> Folder)

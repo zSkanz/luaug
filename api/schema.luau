@@ -134,6 +134,20 @@ export type Enum = {
     Doc: string,
 }
 
+--- An operator a value type supports: `CFrame * CFrame`, `Color3 == Color3`.
+---
+--- Spelled as the metamethod the VM actually dispatches on, so the name is
+--- `__mul` rather than `Multiply` -- the one place the §9 casing rules do not
+--- apply, because the name is not ours to choose. Several entries may share a
+--- name: `CFrame * CFrame` and `CFrame * vector` are two overloads of one
+--- operator, and the definition generator emits them as two declarations.
+export type Operator = {
+    Name: string,
+    Parameters: { Parameter },
+    Returns: { string },
+    Doc: string,
+}
+
 --- A value type rather than an Instance: `CFrame`, `Color3`, `Random`,
 --- `Signal`. Constructors are namespace functions and therefore camelCase
 --- (`new`, `fromEuler`), while members reached through a value are PascalCase
@@ -148,6 +162,22 @@ export type Datatype = {
     --- Members reached through a value of this type.
     Properties: { Property }?,
     Methods: { Method }?,
+    --- The metamethods the type declares. Without them the generated
+    --- definitions have no `CFrame * CFrame`, and every spec that composes two
+    --- transforms is a type error against an engine that supports it.
+    Operators: { Operator }?,
+    Doc: string,
+}
+
+--- A global library table: `task`, and in time whatever else §1.1 blesses.
+---
+--- Distinct from a `Datatype` because nothing constructs one and nothing has
+--- its type -- `task` is reached by name and never held in a variable, so it has
+--- functions and no members. Its functions are camelCase like every other
+--- namespace function (ADR 0034).
+export type Library = {
+    Name: string,
+    Functions: { Method },
     Doc: string,
 }
 
@@ -155,6 +185,34 @@ export type Definition = {
     Classes: { Class }?,
     Enums: { Enum }?,
     Datatypes: { Datatype }?,
+    Libraries: { Library }?,
+    --- Free functions the engine adds to the global table: `warn`. `print` is
+    --- Luau's own and is not ours to declare.
+    Globals: { Method }?,
+}
+
+--- The complete `TMS` set at the pin (`VM/src/ltm.h:12`), minus the ones a value
+--- type has no business declaring: `__index`/`__newindex`/`__namecall` are the
+--- binding's own dispatch, `__metatable` and `__mode` are not operators, and
+--- `__type` is what `typeof` reads. An operator outside this list is a
+--- declaration for a metamethod the VM will never call.
+local MetamethodNames: { [string]: boolean } = {
+    ["__add"] = true,
+    ["__sub"] = true,
+    ["__mul"] = true,
+    ["__div"] = true,
+    ["__idiv"] = true,
+    ["__mod"] = true,
+    ["__pow"] = true,
+    ["__unm"] = true,
+    ["__concat"] = true,
+    ["__len"] = true,
+    ["__eq"] = true,
+    ["__lt"] = true,
+    ["__le"] = true,
+    ["__call"] = true,
+    ["__iter"] = true,
+    ["__tostring"] = true,
 }
 
 local PascalCase = "^%u[%w]*$"
@@ -249,7 +307,12 @@ local function checkMethod(errors: { string }, owner: string, method: Method, na
     -- warn that a call parks when its name does not say so; `WaitForChild`
     -- already says so, and appending `Async` to a name built around the word
     -- "wait" would be noise rather than a warning.
-    local saysSoAlready = string.sub(method.Name, 1, 4) == "Wait"
+    -- Matched case-insensitively so that `task.wait` is covered by the same
+    -- exception `WaitForChild` is. A namespace function is camelCase and a
+    -- member is PascalCase (ADR 0034), so the two spellings of the same word
+    -- are the only difference between them -- and the exception is about the
+    -- word, not about where the capital falls.
+    local saysSoAlready = string.lower(string.sub(method.Name, 1, 4)) == "wait"
     if yields and not (named or saysSoAlready) then
         table.insert(errors, `{where}: a yielding method's name ends in Async (§9)`)
     elseif named and not yields then
@@ -375,6 +438,31 @@ function Schema.validate(definition: Definition): { string }
         end
     end
 
+    -- Hoisted into a typed local rather than iterated as `x or {}`: the new
+    -- solver types that expression as a union with the empty table and refuses
+    -- to iterate it. The same shape appears above for `valueProperties`.
+    local libraries: { Library } = definition.Libraries or {}
+    for _, library in libraries do
+        -- A library is reached by name, so its own name is camelCase like the
+        -- functions on it: `task.wait`, never `Task.Wait`.
+        if string.match(library.Name, CamelCase) == nil then
+            table.insert(errors, `{library.Name}: library names are camelCase (ADR 0034)`)
+        end
+        for _, fn in library.Functions do
+            checkMethod(errors, library.Name, fn, true)
+        end
+    end
+
+    local globals: { Method } = definition.Globals or {}
+    for _, global in globals do
+        if string.match(global.Name, CamelCase) == nil then
+            table.insert(errors, `{global.Name}: global functions are camelCase (ADR 0034)`)
+        end
+        if global.Doc == "" then
+            table.insert(errors, `{global.Name}: every member carries doc text (§5)`)
+        end
+    end
+
     for _, datatype in datatypes do
         if not isPascalCase(datatype.Name) then
             table.insert(errors, `{datatype.Name}: datatype names are PascalCase (§9)`)
@@ -405,6 +493,18 @@ function Schema.validate(definition: Definition): { string }
         end
         for _, method in valueMethods do
             checkMethod(errors, datatype.Name, method, false)
+        end
+        local operators: { Operator } = datatype.Operators or {}
+        for _, operator in operators do
+            -- Checked against the VM's metamethod set rather than against the
+            -- casing rules: the name is not ours to choose, and a typo here
+            -- would emit a declaration for a metamethod that never dispatches.
+            if not MetamethodNames[operator.Name] then
+                table.insert(errors, `{datatype.Name}.{operator.Name}: not a metamethod this VM dispatches on (§2.3)`)
+            end
+            if operator.Doc == "" then
+                table.insert(errors, `{datatype.Name}.{operator.Name}: every member carries doc text (§5)`)
+            end
         end
     end
 

@@ -50,6 +50,26 @@ struct EngineOptions
     // than an empty file, because an empty golden would pass forever.
     std::filesystem::path capturePath;
 
+    // Runs the conformance suite from this directory instead of a normal
+    // session: every `*.spec.luau` under it is mounted as an entry `Script` and
+    // the run ends by itself once the suite reports (api-design.md §3).
+    std::filesystem::path conformanceRoot;
+
+    // Runs the record/replay determinism gate over this directory instead of a
+    // session. A replay creates no device and no window (see `replay.h`), so it
+    // is a mode rather than a flag on a normal run.
+    std::filesystem::path replayRoot;
+
+    // Rewrites each scenario's `trace.txt` from this build instead of comparing
+    // against it. The only way a legitimate semantic change gets a new golden.
+    bool replayRecord = false;
+
+    // Runs the simulation benchmarks over this directory. Like a replay it
+    // opens no device: what it measures is the tick, and a tick that depended
+    // on a swapchain would be the finding rather than the measurement.
+    std::filesystem::path benchRoot;
+    u64 benchRepeats = 3;
+
     rhi::BackendId backend = rhi::BackendId::SdlGpu;
 
     i32 width = 1280;

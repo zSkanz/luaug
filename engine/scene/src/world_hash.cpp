@@ -14,6 +14,13 @@
 //   * **Never iterate an unordered container into the hash.** Instances are
 //     walked in slot order and children in sibling order; the tag map is
 //     reached per instance rather than swept.
+//   * **Never hash a struct's bytes.** Padding is not initialised by anything,
+//     and its contents are whatever the allocation held before -- which is
+//     stable within one process and different in the next. `CFrameD` carries
+//     four such bytes and `EnumValue` two, and hashing them made this gate fail
+//     across processes while passing twice in a row inside one. `pod()` below
+//     now refuses any type that could have padding, so the next struct to grow
+//     some fails to compile instead of failing at midnight.
 //
 // Instance ids ARE hashed, including their slot index. That is deliberate:
 // slot allocation is itself a pure function of the operation sequence (the
@@ -43,8 +50,48 @@ public:
     template <class T>
     void pod(const T& value) noexcept
     {
-        static_assert(std::is_trivially_copyable_v<T>, "only trivially copyable values are hashed by their bytes");
+        // `has_unique_object_representations` is exactly "every bit of this
+        // object participates in its value", which is the precondition for
+        // hashing bytes at all. It excludes anything with padding, and it
+        // excludes floating point -- which is why floats have their own path.
+        static_assert(std::has_unique_object_representations_v<T>,
+            "hashing a type with padding hashes uninitialised memory; hash its fields instead");
         bytes(&value, sizeof(T));
+    }
+
+    // Floats go in as their bit pattern, deliberately. -0.0 and 0.0 are the same
+    // number and NOT the same state -- they divide differently -- so a
+    // determinism hash that conflated them would call two worlds identical when
+    // the next tick will tell them apart.
+    void number(f32 value) noexcept { bytes(&value, sizeof(value)); }
+    void number(f64 value) noexcept { bytes(&value, sizeof(value)); }
+
+    void flag(bool value) noexcept { pod(static_cast<u8>(value ? 1 : 0)); }
+
+    void vec3(const core::Vec3& value) noexcept
+    {
+        number(value.x);
+        number(value.y);
+        number(value.z);
+    }
+
+    void color3(const core::Color3& value) noexcept
+    {
+        number(value.r);
+        number(value.g);
+        number(value.b);
+    }
+
+    void cframe(const core::CFrameD& value) noexcept
+    {
+        number(value.position.x);
+        number(value.position.y);
+        number(value.position.z);
+        for (const auto& row : value.rotation.m)
+        {
+            for (const f32 element : row)
+                number(element);
+        }
     }
 
     void text(std::string_view value) noexcept
@@ -63,7 +110,7 @@ private:
     XXH3_state_t m_state{};
 };
 
-void hashValue(Hasher& hasher, const Value& value, const core::AtomTable& atoms)
+void hashValue(Hasher& hasher, const Value& value)
 {
     const auto tag = static_cast<u8>(valueType(value));
     hasher.pod(tag);
@@ -73,31 +120,36 @@ void hashValue(Hasher& hasher, const Value& value, const core::AtomTable& atoms)
     case ValueType::Nil:
         break;
     case ValueType::Bool:
-        hasher.pod(std::get<bool>(value));
+        hasher.flag(std::get<bool>(value));
         break;
     case ValueType::Number:
-        hasher.pod(std::get<f64>(value));
+        hasher.number(std::get<f64>(value));
         break;
     case ValueType::String:
         hasher.text(std::get<std::string>(value));
         break;
     case ValueType::Vector3:
-        hasher.pod(std::get<core::Vec3>(value));
+        hasher.vec3(std::get<core::Vec3>(value));
         break;
     case ValueType::CFrame:
-        hasher.pod(std::get<core::CFrameD>(value));
+        hasher.cframe(std::get<core::CFrameD>(value));
         break;
     case ValueType::Color3:
-        hasher.pod(std::get<core::Color3>(value));
+        hasher.color3(std::get<core::Color3>(value));
         break;
     case ValueType::Instance:
         hasher.pod(std::get<core::InstanceId>(value));
         break;
     case ValueType::EnumItem:
-        hasher.pod(std::get<EnumValue>(value));
+    {
+        // Field by field: `EnumValue` is a u16 followed by an i32, and the two
+        // bytes between them belong to no one.
+        const EnumValue& item = std::get<EnumValue>(value);
+        hasher.pod(item.enumId);
+        hasher.pod(item.value);
         break;
     }
-    (void)atoms;
+    }
 }
 
 } // namespace
@@ -110,7 +162,7 @@ u64 World::worldHash() const
     // function of the operation sequence.
     m_instances.forEach([&](core::InstanceId id, const InstanceRecord& record) {
         hasher.pod(id);
-        hasher.pod(record.destroyed);
+        hasher.flag(record.destroyed);
 
         // The class is hashed by NAME, not by `ClassId`: an id depends on
         // registration order, and registration order is a property of the
@@ -137,7 +189,7 @@ u64 World::worldHash() const
             for (const auto& entry : *attributes)
             {
                 hasher.text(m_atoms.text(entry.first));
-                hashValue(hasher, entry.second, m_atoms);
+                hashValue(hasher, entry.second);
             }
         }
         else
@@ -169,7 +221,7 @@ u64 World::worldHash() const
                     if (property.get == nullptr)
                         continue;
                     hasher.text(m_atoms.text(property.name));
-                    hashValue(hasher, property.get(*this, id), m_atoms);
+                    hashValue(hasher, property.get(*this, id));
                 }
             }
         }

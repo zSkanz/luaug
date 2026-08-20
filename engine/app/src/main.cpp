@@ -15,7 +15,9 @@
 #include <lua.h>
 
 #include "luaug/app/backends.h"
+#include "luaug/app/bench.h"
 #include "luaug/app/engine.h"
+#include "luaug/app/replay.h"
 #include "luaug/core/build_info.h"
 #include "luaug/core/error.h"
 #include "luaug/core/i18n.h"
@@ -141,6 +143,41 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
             options.capturePath = std::filesystem::path(arg.substr(14));
             continue;
         }
+        if (arg.starts_with("--run-tests="))
+        {
+            options.conformanceRoot = std::filesystem::path(arg.substr(12));
+            // A conformance run has no window and ends when the suite does, so
+            // the two flags a headless run needs are implied rather than typed
+            // out at every call site.
+            options.headless = true;
+            options.exitAfterFrames = true;
+            continue;
+        }
+        if (arg.starts_with("--replay="))
+        {
+            options.replayRoot = std::filesystem::path(arg.substr(9));
+            continue;
+        }
+        if (arg == "--record-replay")
+        {
+            options.replayRecord = true;
+            continue;
+        }
+        if (arg.starts_with("--bench="))
+        {
+            options.benchRoot = std::filesystem::path(arg.substr(8));
+            continue;
+        }
+        if (arg.starts_with("--bench-repeats="))
+        {
+            if (!numericValue(arg.substr(16), options.benchRepeats))
+            {
+                const std::array<I18nArg, 1> badValue{I18nArg{"option", arg}};
+                luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.bad_value"), badValue);
+                return kExitUsage;
+            }
+            continue;
+        }
         if (arg.starts_with("--rhi="))
         {
             const std::optional<luaug::rhi::BackendId> backend = luaug::app::parseBackendId(arg.substr(6));
@@ -159,6 +196,19 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
         luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.unknown_option"), unknownArgs);
         return kExitUsage;
     }
+
+    // A replay answers to none of the checks below: it has no window, no frame
+    // budget and no backend, because it never opens a device at all. Validating
+    // it as though it were a session would demand `--headless --frames=N` for a
+    // mode in which neither means anything.
+    if (!options.replayRoot.empty() || !options.benchRoot.empty())
+        return kExitOk;
+
+    // A conformance run needs a ceiling for the same reason, and a generous one:
+    // it ends when the suite calls `Shutdown`, and the budget is only there so a
+    // suite that hangs fails rather than running until CI gives up.
+    if (!options.conformanceRoot.empty() && options.frames == 0)
+        options.frames = 100000;
 
     // A headless run with no frame budget would never terminate and nothing
     // could tell you why, since there is no window to close. Saying so beats
@@ -232,6 +282,29 @@ int main(int argc, char** argv)
 
     const std::array<I18nArg, 1> bootArgs{I18nArg{"version", LUAUG_VERSION_STRING}};
     luaug::core::log(LogLevel::Info, LUAUG_TR("engine.boot.hello"), bootArgs);
+
+    if (!options.benchRoot.empty())
+    {
+        std::vector<luaug::app::BenchResult> results;
+        if (const std::optional<luaug::core::EngineError> error
+            = luaug::app::runBenchmarks(options.benchRoot, options.benchRepeats, results))
+        {
+            luaug::core::logText(LogLevel::Error, error->message);
+            return kExitScriptError;
+        }
+        return kExitOk;
+    }
+
+    if (!options.replayRoot.empty())
+    {
+        if (const std::optional<luaug::core::EngineError> error
+            = luaug::app::runReplayGate(options.replayRoot, options.replayRecord))
+        {
+            luaug::core::logText(LogLevel::Error, error->message);
+            return kExitScriptError;
+        }
+        return kExitOk;
+    }
 
     if (const std::optional<luaug::core::EngineError> error = luaug::app::run(options))
     {

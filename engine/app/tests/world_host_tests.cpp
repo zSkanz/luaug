@@ -75,6 +75,21 @@ struct Captured
     }
 };
 
+// Every field named, because Clang's -Wmissing-field-initializers fires on a
+// designated initializer that omits a trailing field even when that field has a
+// default member initializer -- and warnings are errors here. One helper rather
+// than fourteen braces also means the next option `WorldHostOptions` grows is
+// one edit instead of fourteen.
+[[nodiscard]] luaug::app::WorldHostOptions bootOptions(const std::filesystem::path& path, core::u64 seed = 1)
+{
+    return luaug::app::WorldHostOptions{
+        .projectPath = path,
+        .seed = seed,
+        .fixedTimestep = 1.0 / 60.0,
+        .conformanceRoot = {},
+    };
+}
+
 } // namespace
 
 TEST_CASE("an empty world still boots, with game and its two services")
@@ -104,7 +119,7 @@ TEST_CASE("a single file mounts as one entry Script and runs at the first tick")
     )");
 
     app::WorldHost host;
-    REQUIRE_FALSE(host.boot({.projectPath = project.root / "main.luau"}).has_value());
+    REQUIRE_FALSE(host.boot(bootOptions(project.root / "main.luau")).has_value());
 
     // Deferred, then drained: an entry script's first resumption is a scheduled
     // event like any other, and the boot drain is where it happens --
@@ -131,7 +146,7 @@ TEST_CASE("a directory mounts src/scripts as a tree, with subdirectories as Fold
     project.write("src/shared/util.luau", "return {}");
 
     app::WorldHost host;
-    REQUIRE_FALSE(host.boot({.projectPath = project.root}).has_value());
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
 
     scene::World& world = host.world();
     const core::InstanceId scriptService =
@@ -167,7 +182,7 @@ TEST_CASE("entry scripts start in path-sorted order, whatever order the walk fou
     )");
 
     app::WorldHost host;
-    REQUIRE_FALSE(host.boot({.projectPath = project.root}).has_value());
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
 
     // Child order is parenting order, so the names read back in start order --
     // which R10 requires to be a property of the paths rather than of the
@@ -201,7 +216,7 @@ TEST_CASE("require resolves a module once and caches it")
     )");
 
     app::WorldHost host;
-    REQUIRE_FALSE(host.boot({.projectPath = project.root}).has_value());
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
     host.tick();
 
     CHECK(host.world().findFirstChild(host.workspace(), host.world().atoms().lookup("Required")).valid());
@@ -227,7 +242,7 @@ TEST_CASE("a relative require is relative to the requiring file")
     )");
 
     app::WorldHost host;
-    REQUIRE_FALSE(host.boot({.projectPath = project.root}).has_value());
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
     host.tick();
 
     CHECK(host.world().findFirstChild(host.workspace(), host.world().atoms().lookup("Relative")).valid());
@@ -252,7 +267,7 @@ TEST_CASE("a .luaurc alias resolves, and an unknown key does not break require")
     )");
 
     app::WorldHost host;
-    REQUIRE_FALSE(host.boot({.projectPath = project.root}).has_value());
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
     host.tick();
 
     CHECK(host.world().findFirstChild(host.workspace(), host.world().atoms().lookup("Aliased")).valid());
@@ -268,7 +283,7 @@ TEST_CASE("a cyclic require raises rather than exhausting the C stack")
     project.write("src/scripts/main.luau", "require('src/shared/a')");
 
     app::WorldHost host;
-    REQUIRE_FALSE(host.boot({.projectPath = project.root}).has_value());
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
     host.tick();
 
     // The vendored implementation has no guard at all and recurses until the C
@@ -293,7 +308,7 @@ TEST_CASE("a module that fails keeps failing, with the same error")
     )");
 
     app::WorldHost host;
-    REQUIRE_FALSE(host.boot({.projectPath = project.root}).has_value());
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
     host.tick();
 
     // The failure is cached and re-raised rather than the module being re-run
@@ -309,7 +324,7 @@ TEST_CASE("a module that does not exist says so")
     project.write("src/scripts/main.luau", "require('src/shared/nothing')");
 
     app::WorldHost host;
-    REQUIRE_FALSE(host.boot({.projectPath = project.root}).has_value());
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
     host.tick();
 
     CHECK(log.contains("[script.err.module_not_found]"));
@@ -330,7 +345,7 @@ TEST_CASE("@luaug/testing resolves, because it ships as content")
     )");
 
     app::WorldHost host;
-    REQUIRE_FALSE(host.boot({.projectPath = project.root}).has_value());
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
     host.tick();
 
     CHECK(host.world().findFirstChild(host.workspace(), host.world().atoms().lookup("Testing")).valid());
@@ -348,7 +363,7 @@ TEST_CASE("a Script whose Enabled is false at boot never starts")
     )");
 
     app::WorldHost host;
-    REQUIRE_FALSE(host.boot({.projectPath = project.root}).has_value());
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
 
     scene::World& world = host.world();
     const core::InstanceId scriptService =
@@ -381,7 +396,7 @@ TEST_CASE("game.Loaded reaches a handler connected at file scope")
     )");
 
     app::WorldHost host;
-    REQUIRE_FALSE(host.boot({.projectPath = project.root}).has_value());
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
     host.tick();
 
     // The fire has to be RAISED after every entry script's first resumption
@@ -408,7 +423,7 @@ TEST_CASE("the world ticks, and a Heartbeat handler sees the clock advance")
     )");
 
     app::WorldHost host;
-    REQUIRE_FALSE(host.boot({.projectPath = project.root}).has_value());
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
 
     for (int index = 0; index < 10; ++index)
         host.tick();
@@ -447,7 +462,7 @@ TEST_CASE("two runs of the same script and seed produce the same world hash")
 
     const auto runOnce = [&](core::u64 seed) {
         app::WorldHost host;
-        REQUIRE_FALSE(host.boot({.projectPath = project.root, .seed = seed}).has_value());
+        REQUIRE_FALSE(host.boot(bootOptions(project.root, seed)).has_value());
         for (int index = 0; index < 120; ++index)
             host.tick();
         return host.world().worldHash();

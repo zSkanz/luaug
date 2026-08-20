@@ -457,6 +457,16 @@ Reading a member a datatype does not have raises
 §2.5 are frozen, and this is what makes them enforceable — the old spelling does
 not quietly return nothing, it says so.
 
+**The convenience metatable members are runtime-only.** `.Magnitude`, `.Unit`,
+`:Dot`, `:Cross`, `:Lerp` and `:Angle` work, and the analyzer cannot see them:
+`vector` is a Luau *builtin* type, and a definitions file cannot augment one —
+`declare extern type vector with …` is accepted and then loses to the builtin
+(U-54). So `--!strict` code reaches them only through a cast, which makes the
+`vector.*` library form the one to write — and §2.3 already recommends it for
+speed. The members stay because they work and because code ported from another
+Luau runtime expects them; they are documented here as the slower *and*
+untypeable form rather than quietly dropped.
+
 **The one exception is a vector's own components, and it is not ours to make.**
 `v.X`, `v.Y` and `v.Z` return the same numbers as `v.x`, `v.y` and `v.z`,
 because the interpreter answers a single-character index on a vector *inside

@@ -113,8 +113,19 @@ int memberIndex(lua_State* L)
     if (key != nullptr)
     {
         const VmContext& ctx = context(L);
-        if (const MemberEntry* entry = findMember(ctx.getters[static_cast<usize>(tag)], ctx.resolve(atom)))
+        const core::NameAtom name = ctx.resolve(atom);
+        if (const MemberEntry* entry = findMember(ctx.getters[static_cast<usize>(tag)], name))
             return entry->fn(L);
+
+        // A method reached without calling it -- `signal.Fire`. It allocates a
+        // closure per access, which is why `__namecall` exists and why
+        // `signal:Fire()` never comes through here. The Instance binding does
+        // the same thing for the same reason.
+        if (const MemberEntry* entry = findMember(ctx.methods[static_cast<usize>(tag)], name))
+        {
+            lua_pushcfunction(L, entry->fn, typeName(tag));
+            return 1;
+        }
     }
 
     raiseUnknownMember(L, tag, key);

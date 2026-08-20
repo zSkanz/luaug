@@ -1,0 +1,7 @@
+{
+  "name": "example01",
+  "script": "../../../examples/01-instances",
+  "seed": 1,
+  "ticks": 900,
+  "checkpointEvery": 100
+}

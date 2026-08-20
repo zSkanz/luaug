@@ -15,12 +15,13 @@
 local Datatypes = require("@self/datatypes.api")
 local Enums = require("@self/enums.api")
 local Instances = require("@self/instances.api")
+local Libraries = require("@self/libraries.api")
 local Schema = require("./schema")
 local Services = require("@self/services.api")
 
 type Definition = Schema.Definition
 
-local Sources: { Definition } = { Instances, Services, Datatypes, Enums }
+local Sources: { Definition } = { Instances, Services, Datatypes, Enums, Libraries }
 
 local function appendAll<T>(target: { T }, source: { T }?): ()
     if source == nil then
@@ -34,17 +35,23 @@ end
 local Classes: { Schema.Class } = {}
 local Enumerations: { Schema.Enum } = {}
 local DatatypeList: { Schema.Datatype } = {}
+local LibraryList: { Schema.Library } = {}
+local GlobalList: { Schema.Method } = {}
 
 for _, source in Sources do
     appendAll(Classes, source.Classes)
     appendAll(Enumerations, source.Enums)
     appendAll(DatatypeList, source.Datatypes)
+    appendAll(LibraryList, source.Libraries)
+    appendAll(GlobalList, source.Globals)
 end
 
 local Definition: Definition = {
     Classes = Classes,
     Enums = Enumerations,
     Datatypes = DatatypeList,
+    Libraries = LibraryList,
+    Globals = GlobalList,
 }
 
 return Definition

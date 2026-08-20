@@ -168,11 +168,18 @@ int instanceNewIndex(lua_State* L)
         if (const auto* reference = std::get_if<core::InstanceId>(&value.value()))
             target = *reference;
 
+        const core::InstanceId previous = w.parentOf(id);
         if (const std::optional<core::TextKey> refusal = w.setParent(id, target))
         {
             const core::I18nArg args[] = {{"instance", w.atoms().text(w.name(id))}};
             raise(L, *refusal, args);
         }
+        // `Parent` is a property as well as structure, so a change to it is a
+        // change `GetPropertyChangedSignal("Parent")` reports. `setParent` deals
+        // in tree links and raises none of that, so the fact is pushed here --
+        // equality-filtered like every other property write (§3.1).
+        if (w.parentOf(id) != previous)
+            w.changes().push(scene::Change{scene::ChangeKind::PropertyChanged, id, {}, name});
         flushSceneChanges(L);
         return 0;
     }
@@ -422,6 +429,12 @@ int methodDestroy(lua_State* L)
 
 [[nodiscard]] core::NameAtom checkAttributeName(lua_State* L, int index)
 {
+    // `luaL_checklstring` accepts a number and coerces it, which would make
+    // `AddTag(1)` a tag called "1" rather than the error api-design.md §2.2
+    // says it is. The type test has to come first.
+    if (lua_type(L, index) != LUA_TSTRING)
+        luaL_typeerrorL(L, index, "string");
+
     size_t length = 0;
     const char* text = luaL_checklstring(L, index, &length);
     if (length == 0)

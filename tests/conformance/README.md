@@ -1,38 +1,18 @@
-# Conformance specs — staged, not yet integrated
+# Conformance specs
 
-932 cases in 47 files, written against [`docs/api-design.md`](../../docs/api-design.md)
+903 cases in 46 files, written against [`docs/api-design.md`](../../docs/api-design.md)
 alone by authors who were forbidden from reading `engine/` (MASTER_PROMPT §7).
 That is what makes them a contract rather than a transcript of the
-implementation, and it is why they exist before the implementation does.
+implementation, and it is why they were written before the implementation was.
 
-They carry a **`.spec.luau.staged`** extension so the analyzer's `*.luau` glob
-skips them. That is deliberate and temporary: they are checked in because 340 KB
-of specification work should not live in a scratch directory, and they are not
-`.luau` yet because they do not pass `luau-analyze` — which the M2 gate requires
-of every spec file.
+They are the M2 gate. Run by CTest as `conformance`, and by hand with:
 
-## What integrating them needs
+```
+luaug-host --run-tests=tests/conformance --rhi=null
+```
 
-1. **Rename the matchers.** They were written against `describe`/`it`/`expect`
-   with camelCase matchers; ADR 0034 landed afterwards and `@luaug/testing` now
-   exports `testing.expect(v):ToBe(x)` and `.Never`. Roughly 1,500 of the ~1,900
-   current diagnostics are this, and it is a mechanical rename.
-2. **Correct the specs that guessed wrong.** Three rulings in
-   [`docs/briefs/m2-kickoff.md`](../../docs/briefs/m2-kickoff.md) overrode their
-   author's assumption, so the specs assert the opposite of the settled
-   behaviour:
-   - **R-A**: a property write with an equal value enqueues *nothing*. One area
-     asserts an unconditional enqueue.
-   - **R-B**: the re-entrancy cap covers `task.defer`. `defer.spec` asserts a
-     twelve-generation chain completes, which under the ruling it must not.
-   - **R-D**: the removed globals are tested from C++, not from Luau. The
-     `removed_globals` and `globals` removal cases are **dropped**;
-     `engine/script/tests/sandbox_tests.cpp` covers that ground.
-3. **Fill the remaining gaps in the generated definitions.** Some diagnostics
-   are real: `CFrame * CFrame` has no operator in `runtime/types/engine.d.luau`
-   because the IDL has nowhere to declare one, and datatype metamethods are the
-   same gap. That is a schema question, not a spec bug.
-4. **Then rename to `.spec.luau`** and they join the gate.
+`--rhi=null` because the suite tests the kernel and not the renderer: a machine
+with no GPU should still be able to prove the engine's semantics.
 
 ## What they cover
 
@@ -40,3 +20,47 @@ of every spec file.
 api-design §3.1's ordering contract · `task/` §3.2 and the removed globals ·
 `world/` attributes, tags, services and the script environment · `datatypes/`
 Vector3, CFrame, Color3, Random and Enum.
+
+## What integrating them cost, and what it bought
+
+They were checked in with a `.spec.luau.staged` extension and roughly 1,900
+`luau-analyze` diagnostics, of which about 1,500 were one mechanical rename:
+they were written against camelCase matchers, and ADR 0034 landed afterwards, so
+`@luaug/testing` now exports `testing.expect(v):ToBe(x)` and `.Never`. The rest
+were real, and split three ways.
+
+**Twelve engine defects.** The specs were right and the code was wrong, and none
+of these were found by the C++ tests written alongside the code — which is the
+argument for the whole exercise. Among them: `clone` copied `Parent` as though it
+were a value; `destroy` left descendants parented to the victim; renaming a child
+back to a duplicated name put it *last* in the name chain instead of first, so
+`FindFirstChild` answered a different instance than ADR 0026 says; and
+`GetAttribute` coerced a non-string key through `luaL_checklstring` instead of
+rejecting it.
+
+**Five spec bugs**, corrected against the document, plus three the brief had
+already ruled on before the suite ran:
+
+- **R-A**: a property write with an equal value enqueues *nothing*.
+- **R-B**: the re-entrancy cap covers `task.defer`.
+- **R-D**: the removed globals are tested from C++, not from Luau. Those cases
+  were **dropped**; `engine/script/tests/sandbox_tests.cpp` covers that ground.
+
+**Two documentation defects**, where the specs asserted what the document said
+and the document was wrong about the VM it describes:
+
+- `v.X` cannot be made to raise. `LOP_GETTABLEKS` answers single-character
+  vector indices inline and case-insensitively, before any metatable
+  (`lvmexecute.cpp:619`). api-design §2.3 claimed otherwise; U-52 records it.
+- `typeof(Enum.PartShape)` cannot be `"Enum"` while `Enum` is a table
+  (`ltm.cpp:167` excludes tables from `__type`). The enum objects became tagged
+  userdata; U-53 records it.
+
+## Where they are still thin
+
+The suite is a contract, not a proof, and it has holes. One is worth naming
+because it was found the expensive way: every `task.delay` case waited a handful
+of ticks, so none of them noticed that a forty-tick delay lost its arguments
+entirely — the values were parked in storage the deferred drain recycles.
+`examples/01-instances` found it instead. A case that holds a claim across many
+ticks is worth more than three that hold it across one.

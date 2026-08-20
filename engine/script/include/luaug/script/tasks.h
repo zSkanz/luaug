@@ -39,9 +39,10 @@ struct TimerEntry
     // the only thing keeping either alive between now and the deadline.
     int threadRef = -1;
 
-    // `task.delay` arguments, in the same Luau-side arena the deferred queue
-    // uses.
-    u32 argBase = 0;
+    // How many `task.delay` arguments are already sitting on the callback's own
+    // coroutine, waiting to become its resume values. They live there rather
+    // than in the deferred arena because the arena is drain-scoped and a timer
+    // is not (see `taskDelay`).
     u32 argCount = 0;
 
     // `task.wait` resumes with the elapsed sim time and `task.delay` with the

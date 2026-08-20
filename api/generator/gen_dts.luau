@@ -59,10 +59,34 @@ local function parameterList(parameters: { Schema.Parameter }): string
             rendered ..= "?"
         end
         -- A variadic carries no name in a type: `...vector`, never
-        -- `rest: ...vector`. The IDL names it anyway, because the name is real
-        -- documentation and the docs generator wants it.
-        if string.sub(rendered, 1, 3) == "..." then
+        -- `rest: ...vector`; and neither does a generic type pack, `T...`. The
+        -- IDL names both anyway, because the name is real documentation and the
+        -- docs generator wants it -- but naming one here is a syntax error that
+        -- takes the whole definitions file down with it.
+        if string.sub(rendered, 1, 3) == "..." or string.sub(rendered, -3) == "..." then
             table.insert(parts, rendered)
+        else
+            table.insert(parts, `{parameter.Name}: {rendered}`)
+        end
+    end
+    return table.concat(parts, ", ")
+end
+
+--- The same list for a `declare function`, where the syntax is not the same.
+--- A declaration insists every parameter be annotated and spells a variadic
+--- `...: any`, while a function *type* spells the identical thing `...any`.
+--- One character, two productions in the grammar, and the definitions file
+--- fails to load entirely if the wrong one is emitted -- which is how this was
+--- found.
+local function declarationParameterList(parameters: { Schema.Parameter }): string
+    local parts: { string } = {}
+    for _, parameter in parameters do
+        local rendered = translateType(parameter.Type)
+        if parameter.Default ~= nil and string.sub(rendered, -1) ~= "?" then
+            rendered ..= "?"
+        end
+        if string.sub(rendered, 1, 3) == "..." then
+            table.insert(parts, `...: {string.sub(rendered, 4)}`)
         else
             table.insert(parts, `{parameter.Name}: {rendered}`)
         end
@@ -187,7 +211,7 @@ local Lines: { string } = {
     "-- StyLua cannot parse `declare`, which is a luau-lsp extension rather than",
     "-- Luau syntax; `.styluaignore` excludes `*.d.luau` for that reason.",
     "",
-    "type Content = string",
+    "export type Content = string",
     "",
     -- `Signal` and `Connection` are hand-shaped here rather than emitted from
     -- their IDL entries, for a reason the pin forces: an `extern type` cannot
@@ -196,7 +220,7 @@ local Lines: { string } = {
     -- keeps the payload types on every event -- which is the entire value of
     -- declaring events at all. Their `Constructors` still come from the IDL
     -- below, so `Signal.new` stays generated.
-    "type Connection = {",
+    "export type Connection = {",
     "    Connected: boolean,",
     "    Disconnect: (self: Connection) -> (),",
     "}",
@@ -206,7 +230,7 @@ local Lines: { string } = {
     -- `...any` for that reason, which loses the payload types on the *firing*
     -- side while keeping them on the *handling* side, where they are what
     -- anyone actually writes against.
-    "type Signal<T...> = {",
+    "export type Signal<T...> = {",
     "    Connect: (self: Signal<T...>, handler: (T...) -> ()) -> Connection,",
     "    Once: (self: Signal<T...>, handler: (T...) -> ()) -> Connection,",
     "    Wait: (self: Signal<T...>) -> (T...),",
@@ -222,6 +246,8 @@ local HandWritten: { [string]: boolean } = { Signal = true, Connection = true }
 local Classes: { Schema.Class } = sortedByHierarchy(orEmpty(Definition.Classes))
 local Datatypes: { Schema.Datatype } = orEmpty(Definition.Datatypes)
 local Enums: { Schema.Enum } = orEmpty(Definition.Enums)
+local Libraries: { Schema.Library } = orEmpty(Definition.Libraries)
+local Globals: { Schema.Method } = orEmpty(Definition.Globals)
 
 -- EnumItem first: every generated enum type extends it.
 table.insert(Lines, "declare extern type EnumItem with")
@@ -241,6 +267,19 @@ for _, datatype in Datatypes do
     if not HandWritten[datatype.Name] then
         table.insert(Lines, `declare extern type {datatype.Name} with`)
         emitMembers(Lines, datatype.Properties, datatype.Methods, nil)
+        -- Metamethods after the ordinary members, and by repeated declaration
+        -- for an overloaded one: an `extern type` takes several `function`
+        -- lines with the same name and reads them as an overload set, which is
+        -- the only way `CFrame * CFrame` and `CFrame * vector` can both be
+        -- declared.
+        for _, operator in orEmpty(datatype.Operators) do
+            local parameters = parameterList(operator.Parameters)
+            local separator = if parameters == "" then "" else ", "
+            table.insert(
+                Lines,
+                `    function {operator.Name}(self{separator}{parameters}): {returnList(operator.Returns)}`
+            )
+        end
         table.insert(Lines, "end")
         table.insert(Lines, "")
     end
@@ -322,6 +361,31 @@ for _, datatype in Datatypes do
     end
 end
 
+-- Global libraries. `task` is a table of functions reached by name and never
+-- held, so it is a `declare <name>: { … }` like a datatype namespace rather than
+-- an `extern type` -- nothing has its type.
+for _, library in Libraries do
+    table.insert(Lines, `declare {library.Name}: \{`)
+    for _, fn in library.Functions do
+        table.insert(Lines, `    {fn.Name}: ({functionType(fn)}),`)
+    end
+    table.insert(Lines, "}")
+    table.insert(Lines, "")
+end
+
+-- Free globals the engine adds. `print` is Luau's own and is deliberately not
+-- here: the analyzer already knows it, and declaring it again would make this
+-- file a second source of truth for something the pin fixes.
+for _, global in Globals do
+    table.insert(
+        Lines,
+        `declare function {global.Name}({declarationParameterList(global.Parameters)}): {returnList(global.Returns)}`
+    )
+end
+if #Globals > 0 then
+    table.insert(Lines, "")
+end
+
 --- `Instance.new` is typed by string singleton, so `Instance.new("Part")` is a
 --- `Part` and not an `Instance`. Overloads are an intersection of function
 --- types, which is how a declaration file spells them.
@@ -371,5 +435,6 @@ end
 fs.writeStringToFile(OutputPath, table.concat(Lines, "\n"))
 
 print(
-    `gen_dts: wrote {OutputPath} -- {#Classes} class(es), {#Datatypes} datatype(s), {#Enums} enum(s), {#Creatable} creatable`
+    `gen_dts: wrote {OutputPath} -- {#Classes} class(es), {#Datatypes} datatype(s), {#Enums} enum(s), `
+        .. `{#Libraries} librar(ies), {#Globals} global(s), {#Creatable} creatable`
 )

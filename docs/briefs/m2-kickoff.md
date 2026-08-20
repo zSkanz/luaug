@@ -36,14 +36,18 @@ M6. So this brief spends its length on the seams and on what is deliberately
 - [x] `task` library (`spawn`/`defer`/`delay`/`wait`/`cancel`) on the fixed-tick
       scheduler with documented resumption points — deadlines in integer ticks,
       one `(deadline, sequence)` FIFO
-- [ ] Script host: lifecycle, `require` resolution per `.luaurc`, per-script
+- [x] Script host: lifecycle, `require` resolution per `.luaurc`, per-script
       sandboxing
 - [x] Seeded deterministic RNG service — the `Random` datatype (Decision 4),
       with an omitted seed drawn from the world's own stream rather than a clock
-- [ ] World-state hash function + record/replay harness v1
-- [ ] Frame-budget instrumentation
-- [ ] The 10k-parts / 1k-listeners property-churn benchmark with a CI threshold
-- [ ] `examples/01-instances` — a Luau script builds 500 instances,
+- [x] World-state hash function + record/replay harness v1 — `--replay=DIR`,
+      per-platform traces, checkpointed every N ticks (`tests/determinism/`)
+- [x] Frame-budget instrumentation — `DebugService:GetStat` publishes fps,
+      frame time, draw calls and Lua memory per frame; `--bench=DIR` measures
+      the sim tick against a per-scenario budget
+- [x] The 10k-parts / 1k-listeners property-churn benchmark with a CI threshold
+      — `tests/bench/churn10k`, CTest entry `perf_budget`
+- [x] `examples/01-instances` — a Luau script builds 500 instances,
       parents/reparents, connects deferred signals, animates via Heartbeat, all
       visualized with debug draw
 
@@ -54,7 +58,7 @@ here — both are things M2's own gate or M1's ledger already demand:
       Decision 1 and Decision 12 below. Extended to emit the enum tables and
       their ids, because an item's numeric value is what a property write
       validates and what a snapshot stores.
-- [ ] **`render::extract` / `RenderWorld` (ADR 0027)** — carried forward from
+- [x] **`render::extract` / `RenderWorld` (ADR 0027)** — carried forward from
       M1, where it was marked `[~]` for exactly one reason: it is the POD
       snapshot extracted from `scene`, and `scene` did not exist. It does now.
 
@@ -332,13 +336,13 @@ merge, and every gate run.
 
 ## Gate checklist (verbatim from roadmap)
 
-- [ ] conformance suite (~100+ Luau specs) covering signal deferral ordering,
+- [x] conformance suite (~100+ Luau specs) covering signal deferral ordering,
       task semantics, tree mutation edge cases (destroy during iteration,
       reentrancy limit 10, duplicate-name FindFirstChild) — specs are written
       against `docs/api-design.md`, NOT against the implementation
-- [ ] determinism: same script+seed twice → identical hash after 10,000 ticks
-- [ ] 500-instance scene ticks under budget (baseline recorded)
-- [ ] zero `luau-analyze` errors under the new type solver across all
+- [x] determinism: same script+seed twice → identical hash after 10,000 ticks
+- [x] 500-instance scene ticks under budget (baseline recorded)
+- [x] zero `luau-analyze` errors under the new type solver across all
       example/spec code
 
 ## Entering risks
@@ -560,4 +564,137 @@ rule exists to stop from spreading outside the docs set.
 
 ## Gate Record
 
-(filled at milestone end, before human review)
+Filled 2026-08-20, at milestone end, before human review. Every number below was
+produced by `scripts/localgate.ps1` on the reference machine described in
+`docs/perf-baselines.md`, both tiers, from a clean `main`.
+
+### The four gate items
+
+| # | Gate (verbatim from the roadmap) | Result | Where it is proved |
+|---|---|---|---|
+| 1 | conformance suite (~100+ Luau specs) covering signal deferral ordering, task semantics, tree mutation edge cases; written against `docs/api-design.md`, NOT against the implementation | **903 cases, 903 passed, 0 failed** | CTest `conformance`; `tests/conformance/README.md` |
+| 2 | determinism: same script+seed twice → identical hash after 10,000 ticks | **Identical, twice in-process and against the recorded trace, on Windows and Linux** | CTest `determinism`; `tests/determinism/README.md` |
+| 3 | 500-instance scene ticks under budget (baseline recorded) | **0.134 ms/tick against a 4 ms budget** | CTest `perf_budget`; `docs/perf-baselines.md` |
+| 4 | zero `luau-analyze` errors under the new type solver across all example/spec code | **0 across 67 files** | `scripts/gates/luau-check.sh` |
+
+### The run
+
+```
+=== local gate ===
+  ok    docs (2.1 s)
+  ok    luau (1.8 s)
+  ok    windows (10.3 s)   20/20 tests
+  ok    linux (15.2 s)     20/20 tests
+```
+
+CTest grew from 15 entries at M1 to 20: `conformance`, `determinism` and
+`perf_budget` are new, alongside the M1 render gates which still pass — the M1
+screenshot golden survived a total rewrite of everything beneath it with a
+one-pixel difference, verified by looking at it (§8) before both goldens were
+re-recorded.
+
+### What the gates cost, and what they caught
+
+Each of the three new gates found a real defect the moment it first ran, which is
+the only evidence that any of them is worth its runtime:
+
+- **Determinism** found the world hash reading **four bytes of uninitialised
+  padding out of `CFrameD`** and two out of `EnumValue`. It reproduced perfectly
+  within one process and differed in the next, so only the cross-process leg
+  could see it. `Hasher::pod` now refuses any type without
+  `has_unique_object_representations`.
+- **The bench harness** found nothing broken and confirmed the design bet: 10,000
+  property writes and 1,000 subscribed signals cost 2.02 ms/tick, and they cost
+  that little because a write of an equal value raises nothing (Decision 6). A
+  third of the writes in that scene are no-ops by construction.
+- **`examples/01-instances`** found `task.delay` losing its arguments across a
+  tick boundary — see Finding 20.
+
+### Verified by looking
+
+`examples/01-instances` was rendered headless at frame 140 and inspected as an
+image, twice. The first version was correct and illegible: 500 cubes on one
+circle sit closer together than they are wide, and the picture read as a ribbon.
+Five concentric rings, one per `Model`, read as five rings of a hundred — and
+parking a `Model` now removes a whole ring, which makes the reparenting visible
+instead of inferable. The gate was never wrong about that; only the screenshot
+was, which is the argument for §8.
+
+## Findings
+
+What the docs assumed and reality corrected. Read this before M3.
+
+**17. The conformance suite is the highest-value thing M2 built, and the reason
+is the rule that produced it.** 903 cases written from `docs/api-design.md` by
+authors forbidden from reading `engine/` found **twelve engine defects**, none of
+which the C++ tests written beside the code had caught — because those tests were
+written by the same mind, at the same time, from the same misunderstanding.
+`clone` copied `Parent` as though it were a value. `destroy` left descendants
+parented to the victim. Renaming a child back to a duplicated name appended it to
+the name chain, so `FindFirstChild` answered a different instance than ADR 0026
+promises. Keep the rule.
+
+**18. Twice, the specs were right about the VM and the document was wrong.** Both
+times the document described behaviour Luau does not permit, and both times the
+spec author had faithfully written the document down:
+
+- `v.X` cannot be made to raise. `LOP_GETTABLEKS` answers single-character vector
+  indices inline and case-insensitively, before any metatable is consulted
+  (`lvmexecute.cpp:619`). Recorded as U-52.
+- `typeof(Enum.PartShape)` cannot be `"Enum"` while `Enum` is a table:
+  `ltm.cpp:167` excludes tables from `__type`. The enum objects became tagged
+  userdata. Recorded as U-53.
+
+A third, U-54, came out of the same pass: the `Vector3` convenience members
+(`.Magnitude`, `:Dot`, …) work at runtime and cannot be type-checked, because a
+definitions file cannot augment a Luau *builtin* type. `declare extern type
+vector with …` is accepted and then loses to the builtin.
+
+**19. A gate that can pass while doing nothing is not a gate, and this is easy to
+build by accident.** Three separate instances inside one session: the replay
+harness wrote a golden for a scenario whose script had died on its first tick (a
+deferred handler error is contained by design, so nothing propagated); a project
+directory that mounted zero entry scripts booted, ran 120 frames and reported
+success; and a determinism run with no trace for the current platform would have
+silently degraded to comparing the two in-process runs — the half that had just
+failed to catch the padding bug. All three now fail loudly, and the pattern is
+worth checking for by construction in M3's `luaug test` and `luaug dev`.
+
+**20. `task.delay` lost its arguments across a tick boundary, and 903 conformance
+cases did not notice.** The arguments were captured into the deferred-drain
+arena, whose top is reset at the end of every drain — correct for `task.defer`,
+which is consumed within the drain that raised it, and wrong for a timer, which
+by definition outlives one. Every existing spec waited a handful of ticks, so
+every one of them passed. `examples/01-instances` waited 42 and got nil.
+
+Two lessons, and the second is the bigger one. The arguments now live on the
+timer's own coroutine, which is held by a registry ref for exactly the timer's
+lifetime, so there are no two lifetimes to keep in step. And **a spec that holds
+a claim across many ticks is worth more than three that hold it across one** —
+the suite now has such a case, and M3's should be written with that in mind.
+
+**21. The cross-platform hash divergence is exactly the f64 state, and it is
+measurable.** `example01`'s traces are byte-for-byte identical on Windows and
+Linux; `churn`'s agree at tick 0 and differ from tick 500 on. The difference is
+not luck: `example01` stores its results in `Part.Position`, which is f32 (R9),
+and rounding to f32 discards a last-ULP disagreement between two `sin`
+implementations; `churn` accumulates into `CFrame`, whose position is f64
+engine-side, and f64 keeps it. Cross-platform determinism therefore costs exactly
+one thing — our own transcendental functions — and nothing else. That is a real
+decision for M5, when physics puts far more f64 state in the hash, and it should
+be made deliberately rather than discovered.
+
+**22. A "cosmetic" edit to a scenario script is a semantic edit.** Running
+`stylua` over `tests/determinism/churn/init.luau` reordered two `GetService`
+calls, which changed the order the services were created in, which changed every
+instance id after them, which changed the hash. The gate was right to go red. It
+is worth knowing that a formatter can do this before a re-record is dismissed as
+noise.
+
+**23. Clang caught two more things MSVC accepted, both in code that had already
+passed the Windows tier.** `-Wreorder-ctor` on a member initialised out of
+declaration order, and `-Wmissing-field-initializers` on fourteen designated
+initialisers that omitted a trailing field with a default member initialiser. The
+Linux tier has now paid for itself four times across two milestones. Do not skip
+it.
+

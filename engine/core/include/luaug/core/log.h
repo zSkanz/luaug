@@ -35,7 +35,11 @@ using LogSink = std::function<void(LogLevel, std::string_view)>;
 // re-derive the format and drift from it.
 [[nodiscard]] std::string formatLogLine(LogLevel level, std::string_view text);
 
-void setLogSink(LogSink sink);
+// Returns the sink being replaced, so a caller that needs to observe the stream
+// without owning it -- the replay harness counting errors, a test capturing
+// output -- can wrap what was there and put it back. Without this, "install a
+// sink temporarily" means "silence whatever the host installed".
+LogSink setLogSink(LogSink sink);
 void resetLogSink();
 
 void log(LogLevel level, TextKey key, std::span<const I18nArg> args = {});

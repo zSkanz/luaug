@@ -6,9 +6,9 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 ## State
 
 - Current milestone: **M2 — Kernel: Instances over ECS, Scheduler, Signals,
-  task — IN PROGRESS** (brief: `docs/briefs/m2-kickoff.md`). The largest
-  milestone in the project (18%), expected to span several sessions; the split
-  points are recorded in the brief's Entering Risks §5.
+  task — SCOPE AND GATE COMPLETE, awaiting human sign-off** (brief:
+  `docs/briefs/m2-kickoff.md`). The largest milestone in the project (18%); it
+  spanned five sessions, as the brief's Entering Risks §5 expected.
 - **M1 — Window, RHI, Frame Loop, Agent Eyes — COMPLETE and SIGNED OFF by the
   human on 2026-08-19**, tagged `milestone/m1` (brief:
   `docs/briefs/m1-kickoff.md`). Its gate was re-run green on both tiers at M2
@@ -17,7 +17,7 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 - The engine renders: three wire cubes orbiting a world triad over a pulsing
   clear colour, driven from `examples/00-clear/init.luau` through a temporary
   Luau binding that M2 replaces. F3 toggles an ImGui overlay in dev builds.
-- 17 CTest entries, green on Windows and Linux.
+- 20 CTest entries, green on Windows and Linux.
 
 ### M2: what exists
 
@@ -57,44 +57,70 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   services are created on demand and singleton thereafter, the five phase
   signals fire from the scheduler, and `WaitForChild` parks on a tree state.
 
+- **`app` (L6)** — `WorldHost` owns the world, the VM and the project;
+  `WorldHostOptions{projectPath, seed, fixedTimestep, conformanceRoot}`. A
+  directory mounts `src/scripts/**/*.luau` as entry `Script`s with `.luaurc`
+  aliases resolved, a file mounts as one. `WorldHost::tick` is the only place
+  architecture.md §3's resumption order exists as code, and the frame loop
+  drives it. `render::extract`/`RenderWorld` (ADR 0027) carried forward from M1
+  and closed.
+- **Record/replay v1 and the determinism gate** — `--replay=DIR` runs each
+  scenario twice in-process and against a per-platform recorded trace, sampling
+  the world hash every N ticks. `--bench=DIR` measures sim ticks against a
+  per-scenario budget. Neither opens a device.
+
+### M2: the gate
+
+**4 of 4.**
+
+1. **Conformance suite** — 903 cases in 46 files, written against
+   `docs/api-design.md` by authors forbidden from reading `engine/`. All pass.
+   They found **twelve engine defects, five spec bugs and two documentation
+   defects** (`tests/conformance/README.md`).
+2. **Determinism** — `tests/determinism/churn`, 10,000 ticks, identical hash
+   twice in-process and against the recorded trace, on Windows and Linux.
+   Traces are per-platform; the reason and the measurement are in
+   `tests/determinism/README.md`.
+3. **500-instance scene under budget** — 0.134 ms/tick against a 4 ms budget,
+   recorded in `docs/perf-baselines.md` along with the reference machine and the
+   10k-parts/1k-listeners churn number (2.02 ms/tick against 16 ms).
+4. **Zero `luau-analyze` errors** under the new solver across every example and
+   spec — `scripts/gates/luau-check.sh`, 67 files.
+
 ### M2: what does NOT exist yet
 
-No `require`, and no script lifecycle — nothing mounts `src/scripts/**`, so the
-`script` global does not exist and `ScriptService` is an empty mount point. The
-frame scheduler in `app` does not yet drive any of this: `script_fixture.h::tick`
-is the only thing that calls `firePhase`/`resumeTimers`/`drain` in the documented
-order. No `examples/01-instances`; no replay harness, frame-budget
-instrumentation or 10k/1k benchmark; the 932 staged conformance specs are still
-staged.
-
-**The M2 gate is 0 of 4.** Integrating the conformance suite is the lever on it,
-and what that needs is `require` plus the mounted-script lifecycle.
+Nothing from M2's own scope. The frame-budget instrumentation is
+`DebugService:GetStat` plus the bench harness, not a per-phase profiler; a
+profiler is M8's `luaug profile`. Physics, meshes, cameras, input and UI are M4
+and later, by the roadmap.
 
 ## Now / Next
 
-- **Next: `require` and the script lifecycle** — mount `src/scripts/**/*.luau`
-  as `Script` instances under `ScriptService`, bind the `script` global, start
-  each on its own coroutine in path-sorted order, and fire `game.Loaded` after
-  the first resumption. `docs/research/luau-c-api-2026.md` §3 is the grounding,
-  and it is unfriendly: `Luau.Require` has no filesystem knowledge, cyclic
-  requires do not exist at this pin, and failures are never cached (U-35…U-43).
-- **Then `app`'s `FrameScheduler`** drives what `script_fixture.h::tick` models:
-  `firePhase` + `drain` per resumption point, `resumeTimers` between
-  `PostSimulation` and `Heartbeat`, `retireDestroyed` after the drain. Moving
-  that sequence out of the test fixture is the point at which `examples/01-instances`
-  becomes possible.
+- **Next: stop for M2 human review** (MASTER_PROMPT §6). The scope is closed and
+  all four gate items are green on both tiers. **Do not start M3 this session.**
+- When M3 opens, its brief is written from `docs/roadmap.md` and from this
+  milestone's Findings; `luaug dev` hot reload is the headline and ADR 0024 is
+  the grounding.
 - **The scene->script conversion is synchronous, not batched.** A fire captures
   its connection list when it is *raised*, so every mutating binding calls
   `flushSceneChanges` immediately and `ScriptRuntime::drain` flushes again only
   to catch what the engine itself raised. Batching at the drain would let a
   connection made after a mutation run for it, which §3.1 forbids in two places
   and the conformance specs test in both.
-- **The 932 conformance cases now live in `tests/conformance/`** with a
-  `.spec.luau.staged` extension so the analyzer's glob skips them.
-  `tests/conformance/README.md` lists exactly what integrating them needs: a
-  mechanical matcher rename (ADR 0034 landed after they were written), three
-  specs corrected against rulings that overrode their author's guess, and the
-  datatype-operator gap in the generated definitions.
+- **The conformance suite is the single most valuable thing M2 built.** 903
+  cases written from the document by authors who could not read `engine/`, and
+  they found twelve defects the C++ tests written beside the code had all
+  missed. Where they contradicted the document, twice the document was wrong.
+  Keep the rule: specs are written against `docs/`, never against the
+  implementation.
+- **A gate that can pass while doing nothing is not a gate.** Three separate
+  instances of this were built and then fixed inside one session: the replay
+  harness recorded a golden for a scenario whose script had died; a project
+  directory that mounted no entry scripts booted, ran and reported success; and
+  a determinism run with no trace for the current platform would have degraded
+  to the weaker in-process half. Every harness now fails loudly on emptiness.
+  This is worth checking for by construction in M3's `luaug test` and
+  `luaug dev`.
 - Kernel work (ECS, Instance facade, signal queue, `task`, bindings) stays
   single-threaded per MASTER_PROMPT §7. **Delegating large C++ kernel blocks to
   subagents did not work**: three in a row stalled with no output (class
@@ -139,87 +165,9 @@ and what that needs is `require` plus the mounted-script lifecycle.
 
 ## Session Log
 
-- **2026-08-19 (planning session, Claude Fable):** Created the full mission
-  package: root files + Apache-2.0 licensing; docs/roadmap.md (M0–M8 with
-  gates); ADRs 0001–0030; three frozen research reports + UNCONFIRMED
-  registry; MASTER_PROMPT.md; CLAUDE.md; this ledger; architecture and
-  api-design docs; repo skeleton, configs, and docs-lint CI. Learned: see
-  research reports. Next: M0 per roadmap.
-
-- **2026-08-19 (session 2, Claude Opus):** **Completed M0.** Wrote the kickoff
-  brief; installed and pinned the toolchain, fixing four defects in
-  `scripts/bootstrap.*` found by running it; vendored Luau 0.734, SDL 3.4.14
-  and doctest 2.5.3 at verified SHAs through the new `tools/repo/vendor.luau`,
-  which never writes the manifest so pinning stays a human decision; activated
-  the CMake presets and module layer; built `luaug-host` (sandboxed VM, i18n'd
-  log, key-identified structured errors); added `i18nlint.luau` and
-  `checklayers.luau`; activated CI. The human created the remote mid-session,
-  which closed both recorded blockers: CI ran, and Tier-2 Linux — never
-  compiled before and expected to fail under `-Werror` with the full warning
-  set — compiled clean on the first attempt.
-  Learned: Luau ships no version constant (→ ADR 0031, gate amended with human
-  approval); Lute 1.0.0's own typedefs fail luau-lsp 1.69, so CI must
-  `--ignore` them; `fs.walk` cannot be driven by a generic `for`; `@std/json`
-  decoded objects carry a `newproxy()` sentinel key; SDL's real pin is 3.4.14
-  (settles U-07). Two defects were found only by *running* the thing: the VM
-  still exposed `getfenv`/`setfenv`/`newproxy` and a live `_G`, and the Windows
-  console mangled UTF-8 catalog text — both invisible to CI, the second
-  reported by the human. Full list in the brief's Findings section.
-  Next: **stop for M0 human review** (§6). Do not start M1 this session.
-
-- **2026-08-19 (session 3, Claude Opus):** M0 signed off by the human; **opened
-  M1**. Ran the §2 boot sequence against a cleared context — the ledger and the
-  repo agreed, and the M0 gate re-ran green locally (ctest 6/6). Wrote
-  `docs/briefs/m1-kickoff.md`: goal, scope, an explicit NOT-in-scope list, the
-  step order with its multi-session split points, the subagent plan, and four
-  entering risks.
-  Learned: the M1 gate says "Tier-2/Tier-3 compile" but `ci.yml` has no macOS
-  job and the roadmap's tier table says macOS compiles "from M4" — the gate is
-  the narrower contract, so a compile-only macOS job is M1 work (recorded in
-  the brief). Also: `vcvars64.bat` lives under Visual Studio **18** on this
-  machine, not 2022 — always locate it with vswhere, as `bootstrap.ps1` does.
-  Next: wire `third_party/sdl3` into the build with only the M1 subsystems
-  enabled, measuring cold-build time before and after.
-
-- **2026-08-19 (session 3 continued):** Built the M1 spine — steps 1–5 of the
-  brief. SDL3 wired in with subsystems chosen by architecture rather than by
-  size; `platform` (L1) with window, event pump, clock, paths and the console
-  fix carried over from M0; the `rhi_api` seam (header-only, no SDL type) with
-  `rhi_null`, `rhi_capture` and `rhi_sdlgpu`. **First light: a real GPU device
-  clears a texture and reads it back exactly, with no window and no shaders.**
-  Learned, all recorded in the brief's Findings: SDL3 costs 5.6 s, not minutes,
-  so the build-time risk was retired by measurement and the real lever stays
-  the `Luau.Analysis` trim; `SDL_GetTicksNS` reads 0 before `SDL_Init`, which
-  is why `nowNs` uses `steady_clock`; changing an `option()` default does not
-  reach an existing build directory; SDL's Linux dependency check is
-  all-or-nothing per feature, so take the package list from its own docs.
-  Two CI rounds went red on Linux and were fixed rather than worked around —
-  SDL has a flag to skip the X11/Wayland check, and taking it would have bought
-  a green run at the price of a Linux port that cannot open a window.
-  Next: vendor `sdl_shadercross` and inspect its dependencies before wiring
-  anything (§10 escalation is likely — see Now / Next).
-
-- **2026-08-19 (session 3, final stretch):** **Completed M1.** Shaders (one HLSL
-  source to SPIR-V, DXIL and MSL, with DirectXShaderCompiler fetched and
-  hash-pinned rather than vendored — ADR 0032, a §10 escalation the human
-  resolved); `core::json` replacing the restricted catalog reader so there is
-  one parser (ADR 0033); `render::DebugDraw` and the debug pass; the screenshot
-  and capture gates; `examples/00-clear` driven from Luau; the ImGui F3 overlay.
-  Also, off the critical path but not off the books: `scripts/localgate.ps1`
-  runs both tiers locally in ~20 s, because the repository is private and the
-  human's Actions quota was nearly spent. CI dropped from ~68 to ~23 charged
-  minutes per push.
-  Learned, all in the brief's Findings: the capture backend was blind to the
-  debug pass because the gate asked "will pixels come out" instead of "can this
-  device take shaders"; the engine's idle scene looked like the example, so a
-  broken script binding would have fallen back to a frame matching the golden;
-  `luaL_sandbox` freezes globals and M0's own comment said so, which is why
-  `ScriptHost` now takes the installer in its signature rather than documenting
-  the ordering; a vendored tree reads THIS repo's git metadata unless stopped,
-  which was both wrong information and 37 seconds of every container configure;
-  and C++20 module scanning was running on every translation unit to discover
-  that nothing uses modules.
-  Next: **stop for M1 human review** (§6). Do not start M2 this session.
+Entries for the planning session and for M0 and M1 are in
+[`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
+there when this file passed its ~300-line cap.
 
 - **2026-08-19 (session 4, Claude Opus):** M1 signed off; **opened M2**. Ran the
   §2 boot sequence — ledger and repo agreed, and the M1 gate re-ran green on
@@ -315,6 +263,41 @@ and what that needs is `require` plus the mounted-script lifecycle.
   with a demolition date, and `examples/00-clear` renders through the temporary
   `luaug` global those two provide. The M1 screenshot golden is what proves the
   migration kept the picture, so do it with the observation rule (§8) in hand.
+
+- **2026-08-20 (session 5, Claude Opus): M2 closed.** Integrated the conformance
+  suite and closed all four gate items. The suite went from 932 staged cases with
+  ~1,900 analyzer diagnostics to **903 cases, 0 diagnostics, all passing**, and
+  it earned its keep: **twelve engine defects** the C++ tests written beside the
+  code had all missed (`clone` copied `Parent` as a value; `destroy` left
+  descendants parented; renaming a child back to a duplicated name put it last in
+  the chain, so `FindFirstChild` answered the wrong instance against ADR 0026),
+  five spec bugs, and **two documentation defects** where the specs were right
+  about the VM and api-design was not (U-52 `v.X` cannot raise; U-53 `typeof` on
+  a table cannot be `"Enum"`). U-54 was added: the `Vector3` metatable members
+  work at runtime and are not type-checkable, because a definitions file cannot
+  augment a Luau builtin.
+  Then the three remaining gates. **Record/replay v1** (`--replay=DIR`) runs each
+  scenario twice in-process and against a per-platform recorded trace, sampling
+  the hash every N ticks -- and the cross-process leg immediately found the world
+  hash reading **four bytes of uninitialised padding out of `CFrameD`** and two
+  out of `EnumValue`, which reproduced perfectly inside one process and differed
+  in the next. `Hasher::pod` now static_asserts
+  `has_unique_object_representations`, so the next struct to grow padding fails
+  to compile. **The bench harness** (`--bench=DIR`) records 0.134 ms/tick for the
+  500-instance gate scene and 2.02 ms/tick for 10k parts / 1k listeners, both
+  well inside budget, in `docs/perf-baselines.md` with the reference machine.
+  **`examples/01-instances`** is a real project directory, and building it found
+  a genuine scheduler bug: `task.delay` parked its arguments in the deferred
+  arena, which is reset at the end of every drain, so a delay longer than a tick
+  lost them. They live on the timer's own coroutine now. Learned three times over
+  that **a gate which can pass while doing nothing is not a gate** -- the replay
+  recorded a golden for a dead script, an empty project booted and reported
+  success, and a missing platform trace would have degraded silently. All three
+  now fail loudly. Also learned that the cross-platform hash divergence is
+  exactly the f64 state: `example01`'s traces are byte-identical across Windows
+  and Linux because its results round through f32 `Part.Position`, while
+  `churn`'s diverge from tick 500 because `CFrame` accumulates in f64.
+  Next: **stop for M2 human review** (§6). Do not start M3 this session.
 
 <!-- Format for future entries:
 - **YYYY-MM-DD (session N):** did X; learned Y; Next: <literal first action>.

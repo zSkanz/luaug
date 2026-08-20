@@ -1,0 +1,369 @@
+--!strict
+--- Conformance: the tree signals of `Instance`.
+--- Written from api-design.md §2.2 (the `Instance` base members list:
+--- `ChildAdded`, `ChildRemoved`, `DescendantAdded`, `DescendantRemoving`,
+--- `AncestryChanged`, `Destroying`) with the delivery rules of §3.1.
+
+local testing = require("@luaug/testing")
+
+local describe = testing.describe
+local it = testing.it
+local expect = testing.expect
+local beforeEach = testing.beforeEach
+local afterEach = testing.afterEach
+
+describe("Instance tree signals", function()
+    local root: Folder
+
+    beforeEach(function()
+        root = Instance.new("Folder")
+        root.Name = "TreeSignalsSpec"
+        root.Parent = workspace
+    end)
+
+    afterEach(function()
+        root:Destroy()
+    end)
+
+    it("exposes the documented tree signals on every instance", function()
+        local instance = Instance.new("Folder") :: any
+        expect(typeof(instance.ChildAdded)):ToBe("Signal")
+        expect(typeof(instance.ChildRemoved)):ToBe("Signal")
+        expect(typeof(instance.DescendantAdded)):ToBe("Signal")
+        expect(typeof(instance.DescendantRemoving)):ToBe("Signal")
+        expect(typeof(instance.AncestryChanged)):ToBe("Signal")
+        expect(typeof(instance.Destroying)):ToBe("Signal")
+    end)
+
+    it("keeps the signals of two instances independent", function()
+        local left = Instance.new("Folder")
+        left.Parent = root
+        local right = Instance.new("Folder")
+        right.Parent = root
+        task.wait()
+
+        local leftCount = 0
+        local rightCount = 0
+        left.ChildAdded:Connect(function()
+            leftCount += 1
+        end)
+        right.ChildAdded:Connect(function()
+            rightCount += 1
+        end)
+
+        local child = Instance.new("Folder")
+        child.Parent = left
+
+        task.wait()
+        expect(leftCount):ToBe(1)
+        expect(rightCount):ToBe(0)
+    end)
+
+    describe("ChildAdded", function()
+        it("fires with the child that was parented", function()
+            local seen: Instance? = nil
+            root.ChildAdded:Connect(function(child: Instance)
+                seen = child
+            end)
+
+            local child = Instance.new("Folder")
+            child.Parent = root
+
+            task.wait()
+            expect(seen):ToBe(child)
+        end)
+
+        it("does not fire for a grandchild", function()
+            local branch = Instance.new("Folder")
+            branch.Parent = root
+            task.wait()
+
+            local count = 0
+            root.ChildAdded:Connect(function()
+                count += 1
+            end)
+
+            local leaf = Instance.new("Folder")
+            leaf.Parent = branch
+
+            task.wait()
+            expect(count):ToBe(0)
+        end)
+
+        it("fires once for an instance that is parented, unparented and parented again", function()
+            local count = 0
+            root.ChildAdded:Connect(function()
+                count += 1
+            end)
+
+            local child = Instance.new("Folder")
+            child.Parent = root
+            task.wait()
+            expect(count):ToBe(1)
+
+            child.Parent = nil
+            child.Parent = root
+            task.wait()
+            expect(count):ToBe(2)
+        end)
+    end)
+
+    describe("ChildRemoved", function()
+        it("fires with the child that was unparented", function()
+            local child = Instance.new("Folder")
+            child.Parent = root
+            task.wait()
+
+            local seen: Instance? = nil
+            root.ChildRemoved:Connect(function(removed: Instance)
+                seen = removed
+            end)
+
+            child.Parent = nil
+
+            task.wait()
+            expect(seen):ToBe(child)
+        end)
+
+        it("fires on the previous parent when a child is reparented", function()
+            local origin = Instance.new("Folder")
+            origin.Parent = root
+            local destination = Instance.new("Folder")
+            destination.Parent = root
+            local child = Instance.new("Folder")
+            child.Parent = origin
+            task.wait()
+
+            local removedFromOrigin = 0
+            local addedToDestination = 0
+            origin.ChildRemoved:Connect(function()
+                removedFromOrigin += 1
+            end)
+            destination.ChildAdded:Connect(function()
+                addedToDestination += 1
+            end)
+
+            child.Parent = destination
+
+            task.wait()
+            expect(removedFromOrigin):ToBe(1)
+            expect(addedToDestination):ToBe(1)
+        end)
+
+        it("does not fire for an instance that was never a child", function()
+            local count = 0
+            root.ChildRemoved:Connect(function()
+                count += 1
+            end)
+
+            local stranger = Instance.new("Folder")
+            stranger.Parent = nil
+
+            task.wait()
+            expect(count):ToBe(0)
+        end)
+    end)
+
+    describe("DescendantAdded", function()
+        it("fires for a grandchild", function()
+            local branch = Instance.new("Folder")
+            branch.Parent = root
+            task.wait()
+
+            local seen: Instance? = nil
+            root.DescendantAdded:Connect(function(descendant: Instance)
+                seen = descendant
+            end)
+
+            local leaf = Instance.new("Folder")
+            leaf.Parent = branch
+
+            task.wait()
+            expect(seen):ToBe(leaf)
+        end)
+
+        it("fires once per descendant when a subtree is parented in one operation", function()
+            local branch = Instance.new("Folder")
+            branch.Name = "Branch"
+            local leafA = Instance.new("Folder")
+            leafA.Name = "LeafA"
+            leafA.Parent = branch
+            local leafB = Instance.new("Folder")
+            leafB.Name = "LeafB"
+            leafB.Parent = branch
+
+            local seen: { string } = {}
+            root.DescendantAdded:Connect(function(descendant: Instance)
+                table.insert(seen, descendant.Name)
+            end)
+
+            branch.Parent = root
+
+            task.wait()
+            expect(#seen):ToBe(3)
+            expect(seen):ToContain("Branch")
+            expect(seen):ToContain("LeafA")
+            expect(seen):ToContain("LeafB")
+        end)
+
+        it("fires on every ancestor of the new descendant", function()
+            local branch = Instance.new("Folder")
+            branch.Parent = root
+            task.wait()
+
+            local onRoot = 0
+            local onBranch = 0
+            root.DescendantAdded:Connect(function()
+                onRoot += 1
+            end)
+            branch.DescendantAdded:Connect(function()
+                onBranch += 1
+            end)
+
+            local leaf = Instance.new("Folder")
+            leaf.Parent = branch
+
+            task.wait()
+            expect(onRoot):ToBe(1)
+            expect(onBranch):ToBe(1)
+        end)
+    end)
+
+    describe("DescendantRemoving", function()
+        it("fires with the descendant that is leaving", function()
+            local branch = Instance.new("Folder")
+            branch.Parent = root
+            local leaf = Instance.new("Folder")
+            leaf.Parent = branch
+            task.wait()
+
+            local seen: Instance? = nil
+            root.DescendantRemoving:Connect(function(descendant: Instance)
+                seen = descendant
+            end)
+
+            leaf.Parent = nil
+
+            task.wait()
+            expect(seen):ToBe(leaf)
+        end)
+
+        it("fires once per descendant when a subtree is unparented in one operation", function()
+            local branch = Instance.new("Folder")
+            branch.Name = "Branch"
+            branch.Parent = root
+            local leaf = Instance.new("Folder")
+            leaf.Name = "Leaf"
+            leaf.Parent = branch
+            task.wait()
+
+            local seen: { string } = {}
+            root.DescendantRemoving:Connect(function(descendant: Instance)
+                table.insert(seen, descendant.Name)
+            end)
+
+            branch.Parent = nil
+
+            task.wait()
+            expect(#seen):ToBe(2)
+            expect(seen):ToContain("Branch")
+            expect(seen):ToContain("Leaf")
+        end)
+    end)
+
+    describe("AncestryChanged", function()
+        it("fires on the instance whose parent changed, with the instance and its new parent", function()
+            local child = Instance.new("Folder")
+            child.Parent = root
+            task.wait()
+
+            local seenChild: Instance? = nil
+            local seenParent: Instance? = nil
+            local count = -1
+            child.AncestryChanged:Connect(function(...)
+                count = select("#", ...)
+                seenChild = select(1, ...)
+                seenParent = select(2, ...)
+            end)
+
+            local destination = Instance.new("Folder")
+            destination.Parent = root
+            child.Parent = destination
+
+            task.wait()
+            expect(count):ToBe(2)
+            expect(seenChild):ToBe(child)
+            expect(seenParent):ToBe(destination)
+        end)
+
+        it("fires with a nil parent when the instance is unparented", function()
+            local child = Instance.new("Folder")
+            child.Parent = root
+            task.wait()
+
+            local seenParent: Instance? = nil
+            local fired = false
+            child.AncestryChanged:Connect(function(_changed: Instance, parent: Instance?)
+                fired = true
+                seenParent = parent
+            end)
+
+            child.Parent = nil
+
+            task.wait()
+            expect(fired):ToBe(true)
+            expect(seenParent):ToBeNil()
+        end)
+
+        it("fires on the descendants of the instance whose parent changed", function()
+            local branch = Instance.new("Folder")
+            branch.Parent = root
+            local leaf = Instance.new("Folder")
+            leaf.Parent = branch
+            task.wait()
+
+            local onLeaf = 0
+            leaf.AncestryChanged:Connect(function()
+                onLeaf += 1
+            end)
+
+            branch.Parent = nil
+
+            task.wait()
+            expect(onLeaf):ToBe(1)
+        end)
+
+        it("does not fire when an unrelated instance is reparented", function()
+            local child = Instance.new("Folder")
+            child.Parent = root
+            task.wait()
+
+            local count = 0
+            child.AncestryChanged:Connect(function()
+                count += 1
+            end)
+
+            local stranger = Instance.new("Folder")
+            stranger.Parent = root
+
+            task.wait()
+            expect(count):ToBe(0)
+        end)
+    end)
+
+    describe("Destroying", function()
+        it("fires with no arguments", function()
+            local victim = Instance.new("Folder")
+            victim.Parent = root
+            local count = -1
+            victim.Destroying:Connect(function(...)
+                count = select("#", ...)
+            end)
+
+            victim:Destroy()
+
+            task.wait()
+            expect(count):ToBe(0)
+        end)
+    end)
+end)

@@ -1,5 +1,7 @@
 #include "luaug/app/engine.h"
 
+#include <lua.h>
+
 #include <array>
 #include <cmath>
 #include <fstream>
@@ -257,6 +259,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             .projectPath = options.scriptPath,
             .seed = options.worldSeed,
             .fixedTimestep = scheduler.timing().fixedDt,
+            .conformanceRoot = options.conformanceRoot,
         });
         bootError.has_value())
         return bootError;
@@ -293,6 +296,17 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // what happened the first time this was written the other way round.
         debugDraw.clear();
         host.setGizmoTarget(&debugDraw);
+
+        // Published between frames, before anything this frame can read one.
+        // Derived from the wall clock and therefore never legal in simulation
+        // code (R10) -- they exist for a human looking at an overlay.
+        host.publishStats({
+            .fps = frame.renderDt > 0.0 ? 1.0 / frame.renderDt : 0.0,
+            .frameTimeMs = frame.renderDt * 1000.0,
+            .drawCalls = static_cast<f64>(debugRenderer.valid() ? 1 : 0),
+            .physicsBodies = 0.0,
+            .luaMemoryKb = static_cast<f64>(lua_totalbytes(host.runtime().state(), 0)) / 1024.0,
+        });
 
         // The simulation, before anything is drawn: rendering shows the state a
         // tick settled on, never one being written.
@@ -423,6 +437,22 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
         const std::array<I18nArg, 1> captureArgs{I18nArg{"path", options.capturePath.string()}};
         core::log(LogLevel::Info, LUAUG_TR("engine.capture.info.written"), captureArgs);
+    }
+
+    if (!options.conformanceRoot.empty())
+    {
+        const ConformanceReport report = host.conformanceReport();
+        if (!report.ran)
+            return core::makeError(LUAUG_TR("engine.tests.err.never_ran"));
+
+        const std::array<I18nArg, 3> args{
+            I18nArg{"total", report.total},
+            I18nArg{"passed", report.passed},
+            I18nArg{"failed", report.failed}};
+        core::log(LogLevel::Info, LUAUG_TR("engine.tests.info.summary"), args);
+
+        if (report.failed != 0)
+            return core::makeError(LUAUG_TR("engine.tests.err.failed"), args);
     }
 
     const std::array<I18nArg, 2> summary{

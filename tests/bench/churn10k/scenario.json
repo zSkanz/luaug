@@ -1,0 +1,7 @@
+{
+  "name": "churn10k",
+  "script": "init.luau",
+  "seed": 10000,
+  "ticks": 300,
+  "budgetMs": 16.0
+}

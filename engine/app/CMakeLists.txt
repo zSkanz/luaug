@@ -10,6 +10,8 @@ luaug_add_module(app
         src/frame_scheduler.cpp
         src/backends.cpp
         src/engine.cpp
+        src/replay.cpp
+        src/bench.cpp
         src/screenshot.cpp
         src/debug_overlay.cpp
     DEPS
@@ -140,6 +142,42 @@ if(LUAUG_BUILD_TESTS)
 
     add_test(NAME host_usage_without_script COMMAND luaug_host)
     set_tests_properties(host_usage_without_script PROPERTIES WILL_FAIL TRUE TIMEOUT 60)
+
+    # The M2 gate: ~900 Luau specs written against docs/api-design.md by authors
+    # who were forbidden from reading `engine/` (MASTER_PROMPT §7). That is what
+    # makes them a contract rather than a transcript, and it is why they are run
+    # here rather than trusted.
+    #
+    # `--rhi=null` because the suite tests the kernel and not the renderer: a
+    # machine with no GPU should still be able to prove the engine's semantics.
+    add_test(NAME conformance
+        COMMAND luaug_host --run-tests=${CMAKE_SOURCE_DIR}/tests/conformance --rhi=null)
+    set_tests_properties(conformance PROPERTIES TIMEOUT 300)
+
+    # The other M2 gate: same script and same seed, twice, 10,000 ticks,
+    # identical world hash at every checkpoint (ADR 0025). No `--rhi` because a
+    # replay opens no device at all -- if rendering could change the hash, that
+    # is the defect, not a configuration.
+    #
+    # This process is fresh every time CTest starts it, so running it here is
+    # also architecture.md §9's cross-process leg; the in-process repeat that
+    # catches leaked global state happens inside the run.
+    add_test(NAME determinism
+        COMMAND luaug_host --replay=${CMAKE_SOURCE_DIR}/tests/determinism)
+    set_tests_properties(determinism PROPERTIES TIMEOUT 300)
+
+    # The perf threshold (roadmap M2: the 10k-parts / 1k-listeners churn
+    # benchmark "with a CI threshold", and the 500-instance gate scene). Both
+    # budgets are deliberately loose -- see `bench.h`: a CI runner's speed varies
+    # by more than the regression anyone would want to catch, so this fails on a
+    # catastrophe and `docs/perf-baselines.md` holds the real numbers.
+    #
+    # One repeat here rather than the default three. The gate asks whether the
+    # engine still works, and three runs of a 10,000-instance scene is thirty
+    # seconds of CI for a number nobody reads.
+    add_test(NAME perf_budget
+        COMMAND luaug_host --bench=${CMAKE_SOURCE_DIR}/tests/bench --bench-repeats=1)
+    set_tests_properties(perf_budget PROPERTIES TIMEOUT 600 LABELS perf)
 
     # The blocking render-regression gate (architecture.md §9): record the
     # command stream and diff it byte-for-byte against a golden. No GPU, no

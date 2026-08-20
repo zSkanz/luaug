@@ -1,0 +1,97 @@
+--!strict
+--- Pins the `CFrame` properties of `api-design.md` §2.3: `Position` (an f32
+--- Vector3 convenience over the f64 translation), `Rotation`, `RightVector`,
+--- `UpVector` and `LookVector` -- which the document fixes at -Z.
+
+local testing = require("@luaug/testing")
+
+local describe, it, expect = testing.describe, testing.it, testing.expect
+
+local function expectVectorClose(actual: vector, expected: vector, tolerance: number?): ()
+    local epsilon = tolerance or 1e-5
+    expect(actual.x):ToBeCloseTo(expected.x, epsilon)
+    expect(actual.y):ToBeCloseTo(expected.y, epsilon)
+    expect(actual.z):ToBeCloseTo(expected.z, epsilon)
+end
+
+local SAMPLE = CFrame.new(4, -5, 6) * CFrame.fromEuler(0.3, -0.7, 1.1)
+
+describe("CFrame properties", function()
+    describe("Position", function()
+        it("is a Vector3, the native vector primitive", function()
+            expect(typeof(SAMPLE.Position)):ToBe(typeof(vector.zero))
+        end)
+
+        it("is the translation the CFrame was built with", function()
+            expectVectorClose(CFrame.new(4, -5, 6).Position, vector.create(4, -5, 6))
+        end)
+
+        it("is unaffected by the rotation part", function()
+            expectVectorClose(SAMPLE.Position, vector.create(4, -5, 6), 1e-4)
+        end)
+    end)
+
+    describe("Rotation", function()
+        it("is a CFrame", function()
+            expect(typeof(SAMPLE.Rotation)):ToBe("CFrame")
+        end)
+
+        it("drops the translation", function()
+            expectVectorClose(SAMPLE.Rotation.Position, vector.zero)
+        end)
+
+        it("keeps the basis of the original", function()
+            expectVectorClose(SAMPLE.Rotation.RightVector, SAMPLE.RightVector)
+            expectVectorClose(SAMPLE.Rotation.UpVector, SAMPLE.UpVector)
+            expectVectorClose(SAMPLE.Rotation.LookVector, SAMPLE.LookVector)
+        end)
+
+        it("is the identity for a pure translation", function()
+            local rotation = CFrame.new(100, 200, 300).Rotation
+            expectVectorClose(rotation.RightVector, vector.create(1, 0, 0))
+            expectVectorClose(rotation.UpVector, vector.create(0, 1, 0))
+            expectVectorClose(rotation.LookVector, vector.create(0, 0, -1))
+        end)
+    end)
+
+    describe("basis vectors", function()
+        it("gives the identity transform the world axes", function()
+            expectVectorClose(CFrame.identity.RightVector, vector.create(1, 0, 0))
+            expectVectorClose(CFrame.identity.UpVector, vector.create(0, 1, 0))
+        end)
+
+        it("points LookVector down -Z for the identity transform", function()
+            -- §2.3 fixes `LookVector` at -Z; the sign is the classic silent error.
+            expectVectorClose(CFrame.identity.LookVector, vector.create(0, 0, -1))
+        end)
+
+        it("keeps LookVector the negation of the third basis axis", function()
+            local back =
+                CFrame.fromMatrix(vector.zero, vector.create(0, 0, -1), vector.create(0, 1, 0), vector.create(1, 0, 0))
+            expectVectorClose(back.LookVector, -vector.create(1, 0, 0))
+        end)
+
+        it("returns unit-length axes", function()
+            expect(vector.magnitude(SAMPLE.RightVector)):ToBeCloseTo(1, 1e-5)
+            expect(vector.magnitude(SAMPLE.UpVector)):ToBeCloseTo(1, 1e-5)
+            expect(vector.magnitude(SAMPLE.LookVector)):ToBeCloseTo(1, 1e-5)
+        end)
+
+        it("returns mutually perpendicular axes", function()
+            expect(vector.dot(SAMPLE.RightVector, SAMPLE.UpVector)):ToBeCloseTo(0, 1e-5)
+            expect(vector.dot(SAMPLE.UpVector, SAMPLE.LookVector)):ToBeCloseTo(0, 1e-5)
+            expect(vector.dot(SAMPLE.LookVector, SAMPLE.RightVector)):ToBeCloseTo(0, 1e-5)
+        end)
+
+        it("forms a right-handed frame, so right cross up is the back axis", function()
+            expectVectorClose(vector.cross(SAMPLE.RightVector, SAMPLE.UpVector), -SAMPLE.LookVector)
+        end)
+
+        it("leaves the basis untouched by translation", function()
+            local moved = CFrame.new(1000, -2000, 3000) * SAMPLE.Rotation
+            expectVectorClose(moved.RightVector, SAMPLE.RightVector)
+            expectVectorClose(moved.UpVector, SAMPLE.UpVector)
+            expectVectorClose(moved.LookVector, SAMPLE.LookVector)
+        end)
+    end)
+end)

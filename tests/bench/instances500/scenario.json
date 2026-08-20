@@ -1,0 +1,7 @@
+{
+  "name": "instances500",
+  "script": "init.luau",
+  "seed": 500,
+  "ticks": 600,
+  "budgetMs": 4.0
+}

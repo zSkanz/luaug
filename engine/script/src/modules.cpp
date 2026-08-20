@@ -393,7 +393,7 @@ void startScripts(lua_State* L)
                 {"source", std::string_view{entry.path}},
                 {"message", std::string_view{error}},
             };
-            core::logText(core::LogLevel::Error, core::engineCatalog().format(LUAUG_TR("script.err.syntax"), args));
+            core::logText(core::LogLevel::Error, core::formatKeyPrefixed(LUAUG_TR("script.err.syntax"), args));
             lua_remove(L, rooted);
             continue;
         }

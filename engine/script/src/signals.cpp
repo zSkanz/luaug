@@ -219,25 +219,53 @@ void dropArgumentsImpl(lua_State* L, u32 base, u32 count)
     return sys.draining ? sys.depth + 1 : 0;
 }
 
-void logDepthExceeded()
+// Publishes an engine message on `MessageOut` unless one is already being
+// published. See `SignalSystem::reporting` for the cycle this breaks.
+void report(lua_State* L, core::LogLevel level, const std::string& message)
 {
-    core::logText(core::LogLevel::Warn, core::engineCatalog().format(LUAUG_TR("script.err.reentrancy_limit")));
+    core::logText(level, message);
+
+    SignalSystem& sys = system(L);
+    if (sys.reporting)
+        return;
+    sys.reporting = true;
+    publishMessage(L, level, message);
+    sys.reporting = false;
+}
+
+void logDepthExceeded(lua_State* L)
+{
+    // §2.1: the re-entrancy cap's dropped-fire log comes through `MessageOut`
+    // like every other console message. A log line a script cannot observe is
+    // a log line that cannot be tested from a spec.
+    // Key-PREFIXED, like every engine message: §2.1 promises that a
+    // `MessageOut` handler matching on a key substring sees engine output while
+    // one matching prose sees script output, and `Catalog::format` alone drops
+    // the key that makes the first half of that true.
+    report(L, core::LogLevel::Warn, core::formatKeyPrefixed(LUAUG_TR("script.err.reentrancy_limit")));
 }
 
 // `first` addresses the first of `count` argument values on `L`'s stack.
-void enqueueFire(lua_State* L, SignalId id, int first, int count)
+//
+// `depthOverride` is for an engine message reporting on the handler it came
+// from: the report is *about* that handler rather than raised by it, so it
+// carries the handler's own depth. Without that, the re-entrancy cap's own log
+// is raised at depth 11, dropped by the very cap it is describing, and the
+// diagnostic disappears exactly when it matters -- which is what the first run
+// of the conformance suite caught.
+void enqueueFireAt(lua_State* L, SignalId id, int first, int count, const u32* depthOverride)
 {
     SignalSystem& sys = system(L);
     SignalRecord* record = sys.signals.find(id);
     if (record == nullptr || record->closed)
         return;
 
-    const u32 depth = raisedDepth(sys);
+    const u32 depth = depthOverride != nullptr ? *depthOverride : raisedDepth(sys);
     if (depth > MaxDeferredDepth)
     {
         // Dropped at enqueue rather than at invocation, so it never takes a
         // queue slot and the log lands while the raiser is still on the stack.
-        logDepthExceeded();
+        logDepthExceeded(L);
         return;
     }
 
@@ -253,6 +281,11 @@ void enqueueFire(lua_State* L, SignalId id, int first, int count)
     entry.argCount = static_cast<u32>(count < 0 ? 0 : count);
     entry.argBase = captureArgumentsImpl(L, first, count);
     sys.queue.push_back(entry);
+}
+
+void enqueueFire(lua_State* L, SignalId id, int first, int count)
+{
+    enqueueFireAt(L, id, first, count, nullptr);
 }
 
 // --- Signal methods ----------------------------------------------------------
@@ -468,7 +501,9 @@ void reportHandlerError(lua_State* L, lua_State* co, int status)
         {"source", std::string_view{"a deferred handler"}},
         {"message", std::string_view{text}},
     };
-    core::logText(core::LogLevel::Error, core::engineCatalog().format(LUAUG_TR("script.err.runtime"), args));
+    // §3.1: a contained handler error goes to the console AND to
+    // `DebugService.MessageOut`. Containment is not silence.
+    report(L, core::LogLevel::Error, core::formatKeyPrefixed(LUAUG_TR("script.err.runtime"), args));
 }
 
 // Resumes `co` and reports whatever went wrong. Returns true when the thread is
@@ -619,7 +654,7 @@ bool enqueueTaskCallback(lua_State* L, int threadRef, u32 argBase, u32 argCount)
         // The cap counts everything on the queue, `task.defer` included: a
         // fires-only cap makes a self-deferring callback an unbounded drain,
         // which is a hang rather than a wrong number (§3.1).
-        logDepthExceeded();
+        logDepthExceeded(L);
         dropArgumentsImpl(L, argBase, argCount);
         return false;
     }
@@ -729,6 +764,19 @@ void fireInstanceEvent(lua_State* L, core::InstanceId owner, u16 slot, int first
     // fire into. That is the whole cost of `Heartbeat` in an empty world.
     if (id.valid())
         enqueueFire(L, id, first, count);
+}
+
+void fireEngineMessage(lua_State* L, core::InstanceId owner, u16 slot, int first, int count)
+{
+    const SignalId id = findOwnedSignal(L, owner, SignalKind::Event, slot);
+    if (!id.valid())
+        return;
+
+    // At the reporting handler's own depth rather than one below it. See
+    // `enqueueFireAt`.
+    SignalSystem& sys = system(L);
+    const u32 depth = sys.draining ? sys.depth : 0;
+    enqueueFireAt(L, id, first, count, &depth);
 }
 
 void pushTagSignal(lua_State* L, core::InstanceId owner, SignalKind kind, core::NameAtom tag)
@@ -922,7 +970,12 @@ usize drainDeferred(lua_State* L)
         }
     }
 
-    // The only moment at which no window into either arena is live.
+    // The only moment at which no window into either arena is live -- which is
+    // true because both arenas are drain-scoped and nothing else may park a
+    // window in them. `task.delay` did, once, and its arguments were being
+    // overwritten by the next drain's; they live on the timer's own coroutine
+    // now (`tasks.cpp`). Anything that needs to hold values ACROSS a drain has
+    // to own them, not borrow a slot here.
     sys.snapshots.clear();
     sys.argArenaTop = 0;
     sys.draining = false;

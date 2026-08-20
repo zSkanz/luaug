@@ -1,0 +1,209 @@
+--!strict
+--- Pins the `Color3` row of `api-design.md` §2.3 -- `new(r, g, b)` in 0-1,
+--- `fromRGB`, `fromHSV`, `fromHex`, the `R G B` fields, `:Lerp`, `:ToHSV`,
+--- `:ToHex` -- and divergence #12, which removes BrickColor outright.
+
+local testing = require("@luaug/testing")
+
+local describe, it, expect = testing.describe, testing.it, testing.expect
+
+local function tryIndex(value: any, key: string): any
+    local ok, result = pcall(function(): any
+        return value[key]
+    end)
+    return if ok then result else nil
+end
+
+local function expectColorClose(actual: Color3, expected: Color3, tolerance: number?): ()
+    local epsilon = tolerance or 1e-4
+    expect(actual.R):ToBeCloseTo(expected.R, epsilon)
+    expect(actual.G):ToBeCloseTo(expected.G, epsilon)
+    expect(actual.B):ToBeCloseTo(expected.B, epsilon)
+end
+
+describe("Color3", function()
+    describe("the datatype itself", function()
+        it("reports typeof Color3", function()
+            expect(typeof(Color3.new(0, 0, 0))):ToBe("Color3")
+        end)
+
+        it("carries no 3 suffix on its channel fields", function()
+            -- Divergence #11 strips the historical "3" from property names; the
+            -- datatype keeps it, its channels do not.
+            local color = Color3.new(0.25, 0.5, 0.75)
+            expect(color.R):ToBe(0.25)
+            expect(color.G):ToBe(0.5)
+            expect(color.B):ToBe(0.75)
+        end)
+
+        it("spells its channels in PascalCase, not lowercase", function()
+            -- §9: the vector primitive is "the single documented exception" to
+            -- PascalCase world-API members. Color3 is not that exception.
+            local color = Color3.new(0.25, 0.5, 0.75)
+            expect(tryIndex(color, "r")):ToBeNil()
+            expect(tryIndex(color, "g")):ToBeNil()
+            expect(tryIndex(color, "b")):ToBeNil()
+        end)
+
+        it("exposes its channels as numbers", function()
+            expect(Color3.new(0, 0, 0).R):ToBeA("number")
+        end)
+    end)
+
+    describe("Color3.new", function()
+        it("takes the three channels in the 0 to 1 range", function()
+            expectColorClose(Color3.new(1, 0, 0), Color3.new(1, 0, 0))
+            expect(Color3.new(0.1, 0.2, 0.3).G):ToBeCloseTo(0.2, 1e-6)
+        end)
+
+        it("keeps the channels in red, green, blue argument order", function()
+            local color = Color3.new(0.1, 0.2, 0.3)
+            expect(color.R):ToBeCloseTo(0.1, 1e-6)
+            expect(color.G):ToBeCloseTo(0.2, 1e-6)
+            expect(color.B):ToBeCloseTo(0.3, 1e-6)
+        end)
+    end)
+
+    describe("Color3.fromRGB", function()
+        it("maps 0 to 255 onto 0 to 1", function()
+            local color = Color3.fromRGB(255, 128, 0)
+            expect(color.R):ToBeCloseTo(1, 1e-4)
+            expect(color.G):ToBeCloseTo(128 / 255, 1e-4)
+            expect(color.B):ToBeCloseTo(0, 1e-4)
+        end)
+
+        it("maps 255 on every channel onto white", function()
+            expectColorClose(Color3.fromRGB(255, 255, 255), Color3.new(1, 1, 1))
+        end)
+
+        it("maps 0 on every channel onto black", function()
+            expectColorClose(Color3.fromRGB(0, 0, 0), Color3.new(0, 0, 0))
+        end)
+    end)
+
+    describe("Color3.fromHSV", function()
+        it("maps hue zero at full saturation and value onto red", function()
+            expectColorClose(Color3.fromHSV(0, 1, 1), Color3.new(1, 0, 0), 1e-3)
+        end)
+
+        it("maps a third of the hue circle onto green", function()
+            expectColorClose(Color3.fromHSV(1 / 3, 1, 1), Color3.new(0, 1, 0), 1e-3)
+        end)
+
+        it("maps two thirds of the hue circle onto blue", function()
+            expectColorClose(Color3.fromHSV(2 / 3, 1, 1), Color3.new(0, 0, 1), 1e-3)
+        end)
+
+        it("maps zero saturation onto a grey of the given value", function()
+            expectColorClose(Color3.fromHSV(0.42, 0, 0.5), Color3.new(0.5, 0.5, 0.5), 1e-3)
+        end)
+
+        it("maps zero value onto black whatever the hue and saturation", function()
+            expectColorClose(Color3.fromHSV(0.42, 0.9, 0), Color3.new(0, 0, 0), 1e-3)
+        end)
+    end)
+
+    describe("Color3.fromHex", function()
+        it("reads a hash-prefixed six-digit string", function()
+            expectColorClose(Color3.fromHex("#ff0000"), Color3.new(1, 0, 0), 1e-3)
+        end)
+
+        it("reads each channel as a byte", function()
+            local color = Color3.fromHex("#ff8000")
+            expect(color.R):ToBeCloseTo(1, 1e-3)
+            expect(color.G):ToBeCloseTo(128 / 255, 1e-3)
+            expect(color.B):ToBeCloseTo(0, 1e-3)
+        end)
+
+        it("reads all-f as white and all-zero as black", function()
+            expectColorClose(Color3.fromHex("#ffffff"), Color3.new(1, 1, 1), 1e-3)
+            expectColorClose(Color3.fromHex("#000000"), Color3.new(0, 0, 0), 1e-3)
+        end)
+
+        it("is case-insensitive about its hex digits", function()
+            expectColorClose(Color3.fromHex("#AABBCC"), Color3.fromHex("#aabbcc"), 1e-6)
+        end)
+    end)
+
+    describe("ToHex", function()
+        it("returns a string", function()
+            expect(Color3.fromRGB(18, 52, 86):ToHex()):ToBeA("string")
+        end)
+
+        it("round-trips through fromHex", function()
+            local original = Color3.fromRGB(18, 52, 86)
+            expectColorClose(Color3.fromHex(original:ToHex()), original, 1e-3)
+        end)
+
+        it("round-trips white and black", function()
+            expectColorClose(Color3.fromHex(Color3.new(1, 1, 1):ToHex()), Color3.new(1, 1, 1), 1e-3)
+            expectColorClose(Color3.fromHex(Color3.new(0, 0, 0):ToHex()), Color3.new(0, 0, 0), 1e-3)
+        end)
+    end)
+
+    describe("ToHSV", function()
+        it("returns three numbers", function()
+            local h, s, v = Color3.new(1, 0, 0):ToHSV()
+            expect(h):ToBeA("number")
+            expect(s):ToBeA("number")
+            expect(v):ToBeA("number")
+        end)
+
+        it("decomposes pure red into hue zero, full saturation and full value", function()
+            local h, s, v = Color3.new(1, 0, 0):ToHSV()
+            expect(h):ToBeCloseTo(0, 1e-3)
+            expect(s):ToBeCloseTo(1, 1e-3)
+            expect(v):ToBeCloseTo(1, 1e-3)
+        end)
+
+        it("reports zero saturation for a grey", function()
+            local _h, s, v = Color3.new(0.5, 0.5, 0.5):ToHSV()
+            expect(s):ToBeCloseTo(0, 1e-3)
+            expect(v):ToBeCloseTo(0.5, 1e-3)
+        end)
+
+        it("round-trips through fromHSV", function()
+            local original = Color3.fromHSV(0.25, 0.6, 0.8)
+            local h, s, v = original:ToHSV()
+            expectColorClose(Color3.fromHSV(h, s, v), original, 1e-3)
+        end)
+    end)
+
+    describe("Lerp", function()
+        it("returns the receiver at alpha zero", function()
+            local black = Color3.new(0, 0, 0)
+            expectColorClose(black:Lerp(Color3.new(1, 1, 1), 0), black)
+        end)
+
+        it("returns the goal at alpha one", function()
+            local white = Color3.new(1, 1, 1)
+            expectColorClose(Color3.new(0, 0, 0):Lerp(white, 1), white)
+        end)
+
+        it("returns the channel-wise midpoint at alpha one half", function()
+            local mid = Color3.new(0, 0, 0):Lerp(Color3.new(1, 0.5, 0.25), 0.5)
+            expectColorClose(mid, Color3.new(0.5, 0.25, 0.125), 1e-3)
+        end)
+
+        it("interpolates each channel independently", function()
+            local mid = Color3.new(1, 0, 0):Lerp(Color3.new(0, 1, 0), 0.25)
+            expect(mid.R):ToBeCloseTo(0.75, 1e-3)
+            expect(mid.G):ToBeCloseTo(0.25, 1e-3)
+            expect(mid.B):ToBeCloseTo(0, 1e-3)
+        end)
+    end)
+
+    describe("BrickColor is absent", function()
+        it("offers no BrickColor bridge on the Color3 library", function()
+            -- Divergence #12 lists BrickColor as a legacy wart with no successor.
+            expect(tryIndex(Color3, "fromBrickColor")):ToBeNil()
+            expect(tryIndex(Color3, "toBrickColor")):ToBeNil()
+        end)
+
+        it("offers no BrickColor conversion on a colour value", function()
+            local color = Color3.new(1, 0, 0)
+            expect(tryIndex(color, "ToBrickColor")):ToBeNil()
+            expect(tryIndex(color, "Name")):ToBeNil()
+        end)
+    end)
+end)

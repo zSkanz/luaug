@@ -201,6 +201,13 @@ public:
     // Set while a drain is running, so an enqueue can tell "raised by a handler"
     // from "raised by a script" without inspecting the stack.
     bool draining = false;
+
+    // Set while an engine message is being published to `MessageOut`.
+    // Publishing enqueues a fire, and a fire that trips the depth cap logs --
+    // which would publish again, at a depth that trips the cap again. The first
+    // run of the conformance suite found it as a stack overflow, and this is the
+    // cycle breaker: a message raised while reporting goes to the console only.
+    bool reporting = false;
 };
 
 // Installs the `Signal` and `Connection` metatables and the `Signal` global.
@@ -236,6 +243,12 @@ void closeInstanceSignalsExceptDestroying(lua_State* L, core::InstanceId owner);
 // engine-raised event costs a hash probe on an unwatched instance, which is what
 // lets `Heartbeat` fire sixty times a second into an empty world for free.
 void fireInstanceEvent(lua_State* L, core::InstanceId owner, u16 slot, int first, int count);
+
+// The same, for an engine console message. It carries the reporting handler's
+// own depth rather than one below it, because the message is *about* that
+// handler rather than raised by it -- and a report raised one deeper than the
+// cap allows is a report the cap eats.
+void fireEngineMessage(lua_State* L, core::InstanceId owner, u16 slot, int first, int count);
 
 // Turns `scene`'s POD change facts into fires, in queue order. This is the whole
 // of the scene->script direction: `scene` holds no Luau value and never will

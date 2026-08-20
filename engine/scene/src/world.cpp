@@ -38,6 +38,7 @@ World::World(ClassRegistry& classes, EnumRegistry& enums, core::AtomTable& atoms
     , m_enums(enums)
     , m_atoms(atoms)
     , m_rng(seed)
+    , m_parentProperty(atoms.intern("Parent"))
 {
 }
 
@@ -115,6 +116,15 @@ bool World::destroy(core::InstanceId id)
                 removeTag(member, tag);
         }
 
+        // Detached before it is marked, so the whole subtree ends unparented
+        // rather than only its root: "its children have been destroyed
+        // recursively" (api-design.md §3.1), and a destroyed child is a child
+        // whose Parent is nil. Done before `destroyed` is set, because
+        // `setParent` refuses a destroyed instance.
+        if (member != id)
+            (void)setParent(member, core::InstanceId{});
+
+        memberRecord = m_instances.find(member);
         memberRecord->destroyed = true;
         m_changes.push({ChangeKind::Destroying, member, core::InstanceId{}, core::NameAtom{}});
         m_pendingRetire.push_back(member);
@@ -191,7 +201,7 @@ void World::setName(core::InstanceId id, core::NameAtom newName)
     record->name = newName;
 
     if (parent.valid())
-        indexName(parent, id);
+        indexNameInChildOrder(parent, id);
 }
 
 // --- Hierarchy --------------------------------------------------------------
@@ -432,6 +442,13 @@ core::InstanceId World::clone(core::InstanceId id)
             for (const PropertyDesc& property : current->properties)
             {
                 if (property.readOnly || property.get == nullptr || property.set == nullptr)
+                    continue;
+                // `Parent` is structure rather than a value, and the loop above
+                // has already set it. Copying it here would parent the clone
+                // where the original sits -- which is the opposite of
+                // api-design.md §2.6's "deep-copies this subtree unparented",
+                // and it is the property whose setter happens to accept it.
+                if (property.name == m_parentProperty)
                     continue;
                 Value value = property.get(*this, original);
                 // An Instance-valued property pointing inside the subtree is
@@ -725,6 +742,49 @@ void World::indexName(core::InstanceId parentId, core::InstanceId childId)
     while (m_instances.find(walk)->nextSameName.valid())
         walk = m_instances.find(walk)->nextSameName;
     m_instances.find(walk)->nextSameName = childId;
+}
+
+void World::indexNameInChildOrder(core::InstanceId parentId, core::InstanceId childId)
+{
+    const core::NameAtom childName = name(childId);
+    if (!childName.valid())
+        return;
+
+    NameIndex* index = m_nameIndices.find(parentId);
+    if (index == nullptr)
+        index = &m_nameIndices.add(parentId, NameIndex{});
+
+    // A rename can put a child back in the MIDDLE of a chain, which appending
+    // cannot express: rename the first of three "Tree"s away and back, and an
+    // append leaves it last while child order still puts it first. So this walks
+    // the parent's children and inserts after the last same-name sibling that
+    // precedes `childId`.
+    //
+    // Deliberately separate from `indexName` rather than replacing it. Parenting
+    // appends a child at the end, where an append IS child order, and parenting
+    // is the path the 10k-parts benchmark runs down -- making it O(children)
+    // would make building a world O(n squared).
+    core::InstanceId previous;
+    for (core::InstanceId cursor = firstChild(parentId); cursor.valid(); cursor = nextSibling(cursor))
+    {
+        if (cursor == childId)
+            break;
+        if (name(cursor) == childName)
+            previous = cursor;
+    }
+
+    InstanceRecord* record = m_instances.find(childId);
+    if (!previous.valid())
+    {
+        const auto head = index->firstByName.find(childName.id);
+        record->nextSameName = head == index->firstByName.end() ? core::InstanceId{} : head->second;
+        index->firstByName[childName.id] = childId;
+        return;
+    }
+
+    InstanceRecord* previousRecord = m_instances.find(previous);
+    record->nextSameName = previousRecord->nextSameName;
+    previousRecord->nextSameName = childId;
 }
 
 void World::unindexName(core::InstanceId parentId, core::InstanceId childId)

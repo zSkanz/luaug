@@ -1,0 +1,7 @@
+{
+  "name": "churn",
+  "script": "init.luau",
+  "seed": 20260820,
+  "ticks": 10000,
+  "checkpointEvery": 500
+}

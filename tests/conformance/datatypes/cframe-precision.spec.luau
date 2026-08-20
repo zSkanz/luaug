@@ -1,0 +1,100 @@
+--!strict
+--- Pins ADR 0014 and the §2.3 guideline "gameplay math beyond +-131 km must go
+--- through CFrame (f64-preserving), not Position". Every case here is a pair:
+--- what the f64 translation keeps, and what the f32 `Position` convenience
+--- throws away at the same coordinate.
+
+local testing = require("@luaug/testing")
+
+local describe, it, expect = testing.describe, testing.it, testing.expect
+
+--- Ten thousand kilometres: the coordinate ADR 0014 names for the precision
+--- gate. An f32 mantissa cannot resolve anything below a metre here.
+local FAR = 1e7
+local OFFSET = 0.25
+
+describe("CFrame precision", function()
+    describe("the f64 translation", function()
+        it("keeps a quarter-metre offset ten thousand kilometres from the origin", function()
+            local anchor = CFrame.new(FAR, 0, 0)
+            local offset = CFrame.new(FAR + OFFSET, 0, 0)
+            expect(anchor:ToObjectSpace(offset).Position.x):ToBeCloseTo(OFFSET, 1e-3)
+        end)
+
+        it("loses that offset when it is read back through the f32 Position", function()
+            local anchor = CFrame.new(FAR, 0, 0)
+            local offset = CFrame.new(FAR + OFFSET, 0, 0)
+            expect(offset.Position.x - anchor.Position.x).Never:ToBeCloseTo(OFFSET, 1e-3)
+        end)
+
+        it("keeps a sub-metre step taken by composition", function()
+            local anchor = CFrame.new(FAR, 0, 0)
+            local stepped = anchor * CFrame.new(OFFSET, 0, 0)
+            expect(anchor:ToObjectSpace(stepped).Position.x):ToBeCloseTo(OFFSET, 1e-3)
+        end)
+
+        it("accumulates repeated sub-metre steps without drifting into nothing", function()
+            local anchor = CFrame.new(FAR, 0, 0)
+            local walked = anchor
+            for _ = 1, 8 do
+                walked = walked * CFrame.new(OFFSET, 0, 0)
+            end
+            expect(anchor:ToObjectSpace(walked).Position.x):ToBeCloseTo(8 * OFFSET, 1e-3)
+        end)
+
+        it("keeps the offset through an Inverse round trip", function()
+            local far = CFrame.new(FAR + OFFSET, 0, 0)
+            local restored = far:Inverse():Inverse()
+            expect(CFrame.new(FAR, 0, 0):ToObjectSpace(restored).Position.x):ToBeCloseTo(OFFSET, 1e-3)
+        end)
+
+        it("resolves a sub-metre offset on every axis at once", function()
+            local anchor = CFrame.new(FAR, FAR, FAR)
+            local offset = CFrame.new(FAR + OFFSET, FAR - OFFSET, FAR + OFFSET)
+            local relative = anchor:ToObjectSpace(offset).Position
+            expect(relative.x):ToBeCloseTo(OFFSET, 1e-3)
+            expect(relative.y):ToBeCloseTo(-OFFSET, 1e-3)
+            expect(relative.z):ToBeCloseTo(OFFSET, 1e-3)
+        end)
+    end)
+
+    describe("the f32 Position convenience", function()
+        it("rounds the translation to the nearest representable f32", function()
+            expect(CFrame.new(FAR + OFFSET, 0, 0).Position.x):ToBeCloseTo(FAR, 1)
+        end)
+
+        it("agrees with the equivalent Vector3, both being f32", function()
+            expect(CFrame.new(FAR + OFFSET, 0, 0).Position):ToBe(Vector3.new(FAR + OFFSET, 0, 0))
+        end)
+
+        it("is exact near the origin", function()
+            expect(CFrame.new(1.5, -2.25, 3.75).Position):ToBe(Vector3.new(1.5, -2.25, 3.75))
+        end)
+    end)
+
+    describe("rotation far from the origin", function()
+        it("is unaffected by the magnitude of the translation", function()
+            local near = CFrame.new(0, 0, 0) * CFrame.fromEuler(0.3, -0.7, 1.1)
+            local far = CFrame.new(FAR, FAR, FAR) * CFrame.fromEuler(0.3, -0.7, 1.1)
+            expect(far.LookVector.x):ToBeCloseTo(near.LookVector.x, 1e-5)
+            expect(far.LookVector.y):ToBeCloseTo(near.LookVector.y, 1e-5)
+            expect(far.LookVector.z):ToBeCloseTo(near.LookVector.z, 1e-5)
+        end)
+
+        it("keeps the basis orthonormal ten thousand kilometres out", function()
+            local far = CFrame.new(FAR, FAR, FAR) * CFrame.fromEuler(0.3, -0.7, 1.1)
+            expect(vector.magnitude(far.LookVector)):ToBeCloseTo(1, 1e-5)
+            expect(vector.dot(far.RightVector, far.UpVector)):ToBeCloseTo(0, 1e-5)
+        end)
+
+        it("rotates a local direction the same way regardless of how far out it is", function()
+            local rotation = CFrame.fromEuler(0.3, -0.7, 1.1)
+            local direction = vector.create(0, 0, -1)
+            local nearResult = (CFrame.new(0, 0, 0) * rotation):VectorToWorldSpace(direction)
+            local farResult = (CFrame.new(FAR, FAR, FAR) * rotation):VectorToWorldSpace(direction)
+            expect(farResult.x):ToBeCloseTo(nearResult.x, 1e-5)
+            expect(farResult.y):ToBeCloseTo(nearResult.y, 1e-5)
+            expect(farResult.z):ToBeCloseTo(nearResult.z, 1e-5)
+        end)
+    end)
+end)
