@@ -177,6 +177,53 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   material handling per api-design.md; frustum culling; render pass list kept
   behind the `IRenderer` contract. **End of M4 = RHI interface freeze**; the
   human Android-device checkpoint must have happened by now.
+- **The `DebugShell` — explorer and properties.** Added to M4 by human decision
+  on 2026-08-20. `ADR 0017` ships v1 without a visual editor on the explicit
+  grounds that an in-game ImGui shell "stands in for inspection needs", and
+  `architecture.md` §app specifies it; no milestone had ever imported it, so the
+  compensating control the no-editor decision rests on did not exist. What lands
+  here is the tree explorer and a properties panel that reads **and writes**
+  through the generated descriptors, honouring `readOnly` and the same setters a
+  script goes through — never a second write path.
+  - **Why M4 rather than later.** The same argument the roadmap already made for
+    debug draw in M1: a tool built early is used by every milestone after it.
+    An inspector that arrives at M8 debugged nothing.
+  - **Why it is small.** `ClassRegistry` and the generated descriptor tables have
+    carried per-property type, `readOnly` and default since M2, so the panel is
+    one generic sweep rather than code per class. This is the "reflection layer
+    editor-ready by construction" ADR 0017 promises, spent for the first time.
+  - **Not here:** the log/REPL half — `eval` is deferred by M3's protocol
+    decision because running arbitrary source in a live world touches R4 and
+    needs its own design; the streaming map (M7) and the physics wireframe (M5)
+    arrive with the systems they show.
+- **Carried debt, scheduled here by human decision on 2026-08-20.** Five of these
+  have been reappearing in `PROGRESS.md` since M0 or M1. Three are paid in this
+  milestone; the other three get a named destination instead, because a debt
+  scheduled where it does harm is not scheduled, it is moved.
+  - [ ] **Trim `Luau.Analysis`** (carried from M0). Vendored Luau builds four
+        libraries; the engine links the VM and the compiler and throws the type
+        checker away, which is roughly a third of a cold build. It needs a patch
+        under `third_party/patches/` (R13) — impossible until M4, when
+        `applyPatches` was found to have never run and every tree was found to
+        be CRLF-mangled. Both are fixed, so this is now half an hour.
+  - [ ] **`api-dump.json`** (carried from M3). `api-design.md` §5 specifies it as
+        diff-checked in CI "to force changelog entries and catch accidental API
+        breaks" — it is the gate that notices the public surface changing, and
+        M4 is the milestone that grows that surface the most (Camera, MeshPart,
+        materials, lights). It is the one carried item that loses value by
+        waiting: shipped now it guards M5–M8, shipped at M8 it guarded nothing.
+  - [ ] **`luaug --version`.** Advertised by `luaug --help` and answered with
+        "Unknown command". One dispatch entry.
+  - **Not here, and where instead:** the **shipping profile** does not configure
+    and also needs a bytecode-loading path that does not exist — it belongs with
+    `luaug build` (M8). **DXIL signing on Linux** has no consumer until a Linux
+    job produces a Windows shader pack — also M8. The **clang-format gate**
+    requires reformatting the whole C++ tree and pinning a toolchain version;
+    doing that while the renderer is being written buys a milestone of diff
+    noise, so it lands at the **start of M5**, on a quiet tree.
+  - The remaining M3 artifacts — the `@std`/`@luaug` stubs and
+    `docs/reference/**` — stay carried: both are DX surface with no gate behind
+    them, and neither degrades by waiting the way the api-dump does.
 - **Design constraints (not scope).** Three seams must stay open. None is
   built here — M4 is glTF in, lit PBR out — but both are nearly free while the
   render module is being designed and cost a refactor to reopen afterwards.
@@ -312,6 +359,26 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   the defs pipeline, README with screenshots/GIF; license/NOTICE audit of
   every vendored dep; CHANGELOG; tag `v1.0.0`, GitHub release with Windows
   binaries + source instructions.
+- **Application identity.** Not "set the window icon" — the thing an engine owes
+  a game it ships. `branding/` carries the LuauG mark, and that mark is the
+  *fallback for the dev host only*: a game built with `luaug build` takes its
+  icon from `[project] icon` in `luaug.toml`, because an engine whose games all
+  wear the engine's face is a template, not an engine.
+  - **Embedded in the artifact, never a file beside it.** A PNG next to the
+    binary survives until the first install, move or pack. Windows takes a
+    multi-size `.ico` through an `.rc` resource; macOS an `.icns` named by the
+    bundle's `Info.plist`; Linux a `.desktop` entry plus the hicolor theme
+    directories. `SDL_SetWindowIcon` reads the same embedded bytes at window
+    creation, decoded with the already-vendored `stb_image`.
+  - **All sizes in one resource** (16 through 256): the OS picks per context,
+    and a single 256 downscaled by the shell is what makes an icon look cheap
+    in a title bar.
+  - **Windows taskbar identity.** `SetCurrentProcessExplicitAppUserModelID`, or
+    a pinned shortcut loses the icon and two games group under one button.
+  - **Verifiable, not eyeballed.** The clean-machine job reads the resource back
+    out of the built artifact — the PE resource table, the bundle's
+    `Info.plist` — and fails if it is absent or is still the engine's default.
+    An icon nobody can assert is an icon that silently regresses.
 - **Gate (definition of done):** 10-minute scripted soak (walk + fly path)
   with zero crashes and bounded memory delta; 60 fps at 1080p on the recorded
   reference machine; every example launches and its automated run passes;
