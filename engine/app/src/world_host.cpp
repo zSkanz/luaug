@@ -11,6 +11,7 @@
 #include "luaug/core/log.h"
 #include "luaug/platform/platform.h"
 #include "luaug/render/debug_draw.h"
+#include "luaug/render/scene_types.h"
 
 namespace luaug::app
 {
@@ -200,7 +201,19 @@ WorldHost::~WorldHost() = default;
 
 std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options)
 {
+    // The order is load-bearing, not incidental. `scene` owns the registry and
+    // the root of the hierarchy, and a class registered by a higher module
+    // names its parent's `ClassId` -- which exists only after the module that
+    // owns the parent has run. So the calls go in layer order, lowest first,
+    // the same order api/generator/gen_cpp.luau emits the files in
+    // (architecture.md §2, rule 3: higher modules register INTO scene's
+    // registries). `app` is the only place that sees every module, which is why
+    // it is the only place this sequence can be written down.
     scene::generated::registerClasses(m_classes, m_atoms);
+    render::registerSceneTypes(m_classes, m_atoms);
+
+    // Enums have one owner and no hierarchy, so they are independent of the
+    // above; they stay with `scene`, which holds the registry.
     scene::generated::registerEnums(m_enums, m_atoms);
 
     m_world.emplace(m_classes, m_enums, m_atoms, options.seed);

@@ -69,25 +69,48 @@ fi
 
 # The C++ reflection tables are checked in for the same reason, and compared the
 # same way round: against copies taken BEFORE the generator runs.
+#
+# gen_cpp.luau emits one pair per engine module that registers classes into
+# scene's registry (architecture.md §2, rule 3), so the set is DISCOVERED rather
+# than listed here: a gate that names the files it checks is a gate that stops
+# covering the next module, and stops silently. `sort` under LC_ALL=C so the
+# manifest is the same on every platform.
 echo "== generated class descriptors are fresh =="
-header_before="$(mktemp)"
-source_before="$(mktemp)"
-trap 'rm -f "$defs_before" "$header_before" "$source_before"' EXIT
-cp engine/scene/generated/class_descriptors.gen.h "$header_before"
-cp engine/scene/generated/class_descriptors.gen.cpp "$source_before"
+descriptors_before="$(mktemp -d)"
+trap 'rm -f "$defs_before"; rm -rf "$descriptors_before"' EXIT
+
+descriptor_files() {
+    find engine -type f -path 'engine/*/generated/class_descriptors.gen.*' | LC_ALL=C sort
+}
+
+descriptor_files >"$descriptors_before/manifest"
+while read -r file; do
+    mkdir -p "$descriptors_before/$(dirname "$file")"
+    cp "$file" "$descriptors_before/$file"
+done <"$descriptors_before/manifest"
+
 lute api/generator/gen_cpp.luau >/dev/null
-for pair in "$header_before:engine/scene/generated/class_descriptors.gen.h" \
-            "$source_before:engine/scene/generated/class_descriptors.gen.cpp"; do
-    before="${pair%%:*}"
-    after="${pair#*:}"
-    if ! diff -q "$before" "$after" >/dev/null; then
-        echo "luau-check: $after does not match the IDL." >&2
+
+# A file that appeared or vanished is drift too: a new module's output is not
+# checked in until this says so, and a stale one left behind after a module is
+# removed would otherwise sit in the tree being compiled.
+if ! descriptor_files | diff -q - "$descriptors_before/manifest" >/dev/null; then
+    echo "luau-check: the set of generated descriptor files changed." >&2
+    echo "  gen_cpp.luau emits one pair per module in its Modules list. Commit the" >&2
+    echo "  files it now writes, and delete the ones it no longer does." >&2
+    descriptor_files | diff -u "$descriptors_before/manifest" - >&2 || true
+    exit 1
+fi
+
+while read -r file; do
+    if ! diff -q "$descriptors_before/$file" "$file" >/dev/null; then
+        echo "luau-check: $file does not match the IDL." >&2
         echo "  Either the descriptors were hand-edited, or api/defs changed without" >&2
         echo "  regenerating. Both are the same fix: commit the regenerated file." >&2
-        diff -u "$before" "$after" | head -40 >&2
+        diff -u "$descriptors_before/$file" "$file" | head -40 >&2
         exit 1
     fi
-done
+done <"$descriptors_before/manifest"
 
 # The api-dump is the artifact api-design.md §5 keeps for a different reason
 # from the other two: not so a build can consume it, but so that a change to the
@@ -96,7 +119,7 @@ done
 # same way round, for the same reason.
 echo "== the api dump matches the IDL =="
 dump_before="$(mktemp)"
-trap 'rm -f "$defs_before" "$header_before" "$source_before" "$dump_before"' EXIT
+trap 'rm -f "$defs_before" "$dump_before"; rm -rf "$descriptors_before"' EXIT
 cp api/api-dump.json "$dump_before"
 lute api/generator/gen_dump.luau >/dev/null
 if ! diff -q "$dump_before" api/api-dump.json >/dev/null; then
