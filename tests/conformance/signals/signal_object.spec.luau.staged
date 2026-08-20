@@ -21,7 +21,7 @@ describe("Signal.new", function()
         expect(first).never:toBe(second)
     end)
 
-    -- Divergence #4: the type is named `Signal`, and the Roblox spelling must
+    -- Divergence #4: the type is named `Signal`, and the legacy spelling must
     -- not survive anywhere in the observable surface.
     it("reports its type as Signal, never as RBXScriptSignal", function()
         local sig = Signal.new()
@@ -125,7 +125,7 @@ describe("Signal:Destroy", function()
     end)
 end)
 
-describe("the replaced Roblox instances", function()
+describe("the instance classes Signal.new replaces", function()
     -- Divergence #5: `Signal.new()` replaces BindableEvent/BindableFunction, so
     -- neither class name may be creatable.
     it("does not provide a BindableEvent class", function()

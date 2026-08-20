@@ -9,10 +9,11 @@ namespace luaug::script
 // api-design.md §1.1's removal list, verbatim and in its order. The list lives
 // here and nowhere else so that the document and the code cannot drift.
 //
-// Most of these are Roblox globals that stock Luau never defines, so removing
-// them is a no-op today. They stay on the list anyway: a removal that does
-// nothing now is a guard against a future Luau -- or a future library linked
-// into the same VM -- defining one, and the cost is a nil assignment at boot.
+// Most of these are legacy scheduling globals that stock Luau never defines, so
+// removing them is a no-op today. They stay on the list anyway: a removal that
+// does nothing now is a guard against a future Luau -- or a future library
+// linked into the same VM -- defining one, and the cost is a nil assignment at
+// boot.
 //
 // Three are real. `getfenv`, `setfenv` and `newproxy` are in Luau's base
 // library (lbaselib.cpp), and the first two are not merely a sandbox hole:

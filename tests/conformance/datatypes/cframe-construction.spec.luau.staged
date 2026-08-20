@@ -1,6 +1,6 @@
 --!strict
 --- Pins the `CFrame` constructors of `api-design.md` §2.3 and divergence #10:
---- `fromEuler` is the ONE euler constructor, and the three Roblox spellings it
+--- `fromEuler` is the ONE euler constructor, and the three legacy spellings it
 --- replaces must not exist.
 
 local testing = require("@luaug/testing")

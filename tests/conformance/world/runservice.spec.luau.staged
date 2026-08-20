@@ -2,7 +2,7 @@
 --- Conformance: RunService frame events (docs/api-design.md 2.1, 3.1;
 --- architecture.md 3).
 ---
---- The rate split is the one deliberate divergence from a naive Roblox mental
+--- The rate split is the one deliberate divergence from a naive single-rate
 --- model and both documents call it out loudly, so it is pinned here rather
 --- than left to the scheduler: `PreAnimation`, `PreSimulation`,
 --- `PostSimulation` and `Heartbeat` are per sim tick with a fixed dt, and
