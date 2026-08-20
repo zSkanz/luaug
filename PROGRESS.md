@@ -10,10 +10,14 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   [`docs/briefs/m3-kickoff.md`](docs/briefs/m3-kickoff.md), which carries the
   Gate Record and seventeen Findings). All four gate items green on both tiers,
   plus ADR 0024's own <500 ms requirement.
-- Next milestone: **M4 — Seeing the World: Meshes, Materials, Camera,
-  Lighting**. Not opened: the human asked for M3 to close without M4 starting,
-  and MASTER_PROMPT §6 forbids opening a second milestone in the session that
-  closed one anyway.
+- **M4 — Seeing the World: Meshes, Materials, Camera, Lighting — OPEN** since
+  2026-08-20 (brief: [`docs/briefs/m4-kickoff.md`](docs/briefs/m4-kickoff.md) —
+  thirteen decisions, fifteen NOT-in-scope items, six entering risks, and a
+  nine-step build order). The M3 gate was re-run green on both tiers before it
+  opened. Two things in it need the human and are named there: the **Android
+  device checkpoint**, which blocks the RHI freeze at the end of the milestone,
+  and **which glTF sample asset the repository carries**, which would be its
+  first binary content.
 - **M2 — Kernel — signed off 2026-08-20**, tagged `milestone/m2`; **M1** signed
   off 2026-08-19 (`milestone/m1`); **M0** signed off 2026-08-19
   (`milestone/m0`).
@@ -66,12 +70,22 @@ it, and building it on speculation is what §5 rejects.
 
 ## Now / Next
 
-- **Next: open M4 by writing `docs/briefs/m4-kickoff.md`** from
-  `docs/roadmap.md` §M4 and from M3's Findings — in a NEW session, per §6. The
-  dogfooding claim starts binding there: M4's meshes are developed by editing a
-  `.luau` file and watching `luaug dev` rebuild the world, not by rebuilding the
-  engine. If that turns out not to be practical, that is a finding worth more
-  than the feature it blocks.
+- **Next: build-order step 1 of the M4 brief — vendor `fastgltf` and
+  `meshoptimizer`**, fill their manifest rows with real commit SHAs and resolved
+  versions, regenerate `THIRD_PARTY_NOTICES.md`, and wire both into the build as
+  SYSTEM includes, with the gate green before anything else is written. Both
+  rows already exist carrying `TBD-AT-M0`, so this is the lazy vendoring M0's
+  scope allows and not a new dependency (brief, Decision 3).
+- **Two M4 items need the human, neither blocking yet.** The **Android device
+  checkpoint** (roadmap: before the RHI freeze at the end of M4 — the agent does
+  not hold phones) and **which glTF sample asset the repository carries**, which
+  would be its first binary content. Both are written up in the brief; ask
+  before the freeze and before committing any binary, respectively.
+- **The dogfooding claim binds from here and is weaker than it sounds.** What
+  `luaug dev` reloads is the *scene* — mesh, camera, sun, materials — while the
+  renderer is C++ and needs a rebuild. The brief's Decision 13 commits to
+  recording the real reload-vs-rebuild count in the Gate Record, so the claim
+  ends the milestone either evidenced or as a finding.
 - **CI is green on `main` at `2794263`**, and the two `build-test` tiers ran the
   three steps this milestone added: the toolchain install, `luaug test`, and the
   hot-reload suite. Gate item 2 is therefore green *in CI* and not only locally,
