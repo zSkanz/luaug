@@ -81,6 +81,10 @@ add_subdirectory(engine/app)
 # Repo tooling, after third_party so it can link what it vendors.
 add_subdirectory(tools/imgcmp)
 
+# Standalone native samples, after every module they may link. They consume the
+# engine and nothing in the engine consumes them, so they come last.
+add_subdirectory(samples)
+
 # Engine shaders (ADR 0006). Attached here rather than in engine/app because the
 # shader build belongs to the content pipeline, not to the host module's source
 # list -- `luaug_host` is simply the target that must not be considered built

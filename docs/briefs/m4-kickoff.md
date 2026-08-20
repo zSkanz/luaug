@@ -474,14 +474,23 @@ Interfaces before implementations, and the freeze last:
    Tested against a checked-in `.gltf` fixture before any of it draws.
 4. `rhi_api` additions the passes need — exercised by `rhi_capture` in the same
    commit, or they are not shaped right.
-5. `render`: `MeshCache` (Decisions 4/5), `RenderWorld` v2, `extract` with
-   culling and sort keys (Decisions 7/8), `IRenderer` + `renderer_default` and
-   its pass list.
+5. `render`: `MeshCache` (Decisions 4/5). It takes `asset::Mesh` and produces
+   GPU buffers, so it depends on nothing above it and can be built now.
+   **`RenderWorld` v2 and `extract` move to after step 7**, because this brief
+   had them before it and that was wrong: `extract` cannot emit a camera or a
+   light until `Camera` and `Lighting` exist as classes, and defining their POD
+   snapshot structs ahead of anything that fills them is the speculative
+   abstraction §5 rejects. Then `IRenderer` + `renderer_default` and its pass
+   list.
 6. Shaders: `pbr.hlsl`, `shadow_depth.hlsl`, `tonemap.hlsl`, sky.
 7. `api/defs`: `Camera`, `MeshPart`, `PointLight`, `SpotLight`, `Sky`,
    `Lighting`, `Workspace.CurrentCamera` — IDL first, then the generated C++ and
    defs, then the scene components behind them. M3 Finding 4 says the lints will
-   have opinions about the names before any C++ exists; let them.
+   have opinions about the names before any C++ exists; let them. **Declared
+   with their `Native` backing, not ahead of it**: `instances.api.luau`'s own
+   header states the rule — a property that accepts a write and changes nothing
+   is worse than a missing one, because it type-checks. Then `RenderWorld` v2
+   and `extract` (Decisions 7/8), which this step is what unblocks.
 8. `examples/02-meshes` + the ImGui sun slider.
 9. `DebugShell`: the explorer, then the properties panel (Decisions 14–16).
    Deliberately after the new classes exist, so its first run is against a
@@ -786,6 +795,30 @@ writes its own.
 Nothing is ever installed from this build, so both are generate-time formalities
 — but they stop the whole configure, which is how a subagent building in an
 isolated tree found it before the orchestrator did.
+
+**9. A sample-only shader parked in the engine's shader directory rides into the
+engine's content.** `shaders/src/` is globbed wholesale into `luaug-host`'s
+content directory, so `triangle.hlsl` — which only the sample loads — was
+compiled and staged beside the host, and would have gone into a shipped pack at
+M8. Content nobody asked for, inherited rather than decided. The sample's shader
+lives under `samples/triangle/shaders/` now and the host's glob no longer sees
+it.
+
+Found by looking at the build output rather than at the CMake: the first check
+"is it still there?" answered **yes** against an incremental build directory
+that was simply holding yesterday's artifacts. Deleting them and rebuilding is
+what actually answers the question — the same trap as `Luau.Analysis.lib` in
+Finding 7, twice in one day, and the general form is that **a build directory is
+evidence of what was built once, never of what would be built now.**
+
+**10. The sample prints plain English on purpose, and that needed writing down.**
+R3 is absolute about user-facing strings, and a developer diagnostic in a sample
+that exists to be run on a phone by the person building the engine is not
+product text. The precedent is `debug_overlay.h`, which carries the same
+exemption in the same shape for the same reason. Engine errors that reach the
+sample — device creation, shader loading — arrive already catalog-formatted and
+are printed verbatim, so the exemption covers the sample's own three
+diagnostics and nothing else.
 
 ## Gate Record
 

@@ -62,7 +62,8 @@ LuauG/
 │  ├─ importer/                       # C++ offline importer exe (assimp lives ONLY here)
 │  ├─ imgcmp/                         # screenshot tolerance comparator
 │  └─ bootstrap/                      # toolchain setup helpers used by scripts/bootstrap.*
-├─ examples/                          # 00-clear … 10-open-world (roadmap numbering)
+├─ samples/                           # native C++ samples: triangle (the M4 Android checkpoint's artifact)
+├─ examples/                          # 00-clear … 10-open-world (roadmap numbering) -- Luau projects run by the host
 ├─ tests/
 │  ├─ integration/                    # C++ multi-module tests (headless host)
 │  ├─ conformance/                    # .spec.luau behavior specs run by the headless engine

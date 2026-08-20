@@ -12,14 +12,17 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   plus ADR 0024's own <500 ms requirement.
 - **M4 — Seeing the World: Meshes, Materials, Camera, Lighting — OPEN** since
   2026-08-20 (brief: [`docs/briefs/m4-kickoff.md`](docs/briefs/m4-kickoff.md) —
-  sixteen decisions, twenty-two NOT-in-scope items, seven entering risks, and
-  an eleven-step build order). The M3 gate was re-run green on both tiers before it
+  nineteen decisions, twenty-two NOT-in-scope items, seven entering risks, and
+  a twelve-step build order). The M3 gate was re-run green on both tiers before it
   opened. **Scope was extended by human decision the same day**: the
   `DebugShell`'s explorer and properties panel land here, because ADR 0017
   declines a visual editor on the grounds that an in-game shell stands in for
   inspection, and four milestones in that shell did not exist; and three carried
   debts got scheduled into it — `Luau.Analysis`, `api-dump.json` and
-  `luaug --version` — while three more got a named destination instead. Still needing the
+  `luaug --version`, all three now paid — while three more got a named
+  destination instead; and the **triangle sample and its Android package**
+  became scope once it turned out the checkpoint M4 must pass had no artifact
+  to pass it with. Still needing the
   human: the **Android device checkpoint**, which blocks the RHI freeze at the
   end of the milestone.
 - **M2 — Kernel — signed off 2026-08-20**, tagged `milestone/m2`; **M1** signed
@@ -74,25 +77,32 @@ it, and building it on speculation is what §5 rejects.
 
 ## Now / Next
 
-- **Next: build-order step 3 — `engine/asset` (L2)**: mount, `asset://` URN
-  resolution, `MeshData`/`MaterialDef`/`TextureData`, the load-state machine,
-  and the glTF importer behind it, tested against a checked-in `.gltf` fixture
-  before any of it draws. This is the commit that first wires fastgltf,
-  meshoptimizer and simdjson into the build.
-- **Step 2 is done.** `core::AABB` and `core::Frustum` exist with the sign
-  conventions pinned by tests rather than by comment: planes point **inward**,
-  the near plane is `row2` alone because depth is [0, 1], and culling is the
-  conservative positive-vertex test. Both tiers green.
-- **Step 1 is done.** fastgltf 0.9.0, meshoptimizer 1.2 and simdjson 3.12.3 are
-  vendored and pinned, the notices are regenerated, and fastgltf carries the
-  first patch this repository has ever applied (ADR 0036). Nothing is wired into
-  the build yet, on `third_party/CMakeLists.txt`'s own rule: a tree is added
-  when a module links it, which is step 3.
+- **Next: build-order step 7 — the IDL for M4's new classes**: `Camera`,
+  `MeshPart`, `PointLight`, `SpotLight`, `Sky`, `Lighting` and
+  `Workspace.CurrentCamera`, in `api/defs` first and the scene components
+  behind them second. M3's Finding 4 says the naming lints will have opinions
+  before a line of C++ exists; let them. **The api-dump must be regenerated in
+  the same commit** — that is the whole point of shipping it before this step
+  rather than after.
+- **Steps 1 through 6 and the sample are done**, four of them through
+  subagents. Vendoring and the ADR 0036 guard; `core::AABB`/`Frustum` with the
+  sign conventions pinned by tests; `engine/asset` with image IO moved in from
+  `app`; the frozen `model.h`/`gltf.h` interfaces; the build wiring; and
+  `samples/triangle`, which is the artifact the Android checkpoint is passed
+  with — verified by looking at the PNG, not at the code.
+- **The glTF importer is the one piece still in flight.** Its interface is
+  frozen and committed; the implementation and its `.gltf` fixture are being
+  written against it.
 - **The Android device checkpoint still needs the human**, before the RHI freeze
   at the end of M4 — the agent does not hold phones. The glTF sample-asset
   question is answered: a CC0 model under ~1 MB, recorded in
   `THIRD_PARTY_NOTICES.md`, beside a hand-authored fixture for the importer's
   unit tests.
+- **A build directory is evidence of what was built once, never of what would
+  be built now.** Caught twice in one day, both times as a check that answered
+  "yes, still there" against stale artifacts: `Luau.Analysis.lib` after it was
+  excluded from `all`, and the sample's shader after it left the engine's
+  shader directory. Delete and rebuild, or the check is decorative.
 - **Read the vendored `CMakeLists.txt`, not the library's documentation.** M4's
   first three findings all came from doing that at kickoff: fastgltf has an
   undocumented mandatory dependency that it downloads unpinned into our tree,
@@ -114,8 +124,6 @@ it, and building it on speculation is what §5 rejects.
   nobody uses, a `luaug test` that would have reported success on a stale report
   file, and a dev server that noticed saves and did nothing because the caller
   supplied no callback. All three now fail loudly.
-- **Run `scripts/localgate.ps1` before every push.** Both tiers, ~50 s warm now
-  that it carries the conformance suite and the hot-reload gate.
 - Carried forward, none blocking:
   - **Two of the five generated artifacts api-design.md §5 lists do not
     exist**, down from three: the typed `@std`/`@luaug` stubs and
