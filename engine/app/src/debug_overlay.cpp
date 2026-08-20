@@ -159,6 +159,23 @@ void drawEditor(scene::World& world, Inspector& inspector, core::InstanceId id, 
         return;
     }
 
+    // `editorFor` answers from the DECLARED type, and the variant holds what the
+    // property actually has right now. Those disagree whenever a value is absent
+    // -- `scene::Value`'s own comment names the two cases, an unset attribute and
+    // a nil Instance reference -- and every branch below reaches for its
+    // alternative with `std::get`, which throws rather than returning.
+    //
+    // Guarded here rather than in each branch: there are eight of them, they all
+    // have this shape, and an absent value has no editor whatever its type says.
+    // Found by a human clicking `go` on `RunService.Parent`, which selects the
+    // DataModel -- the one instance in the world whose own Parent is nil -- and
+    // took the host down with an uncaught `std::bad_variant_access`.
+    if (std::holds_alternative<std::monostate>(*current))
+    {
+        ImGui::TextUnformatted("nil");
+        return;
+    }
+
     const EditorKind kind = editorFor(descriptor.type);
     ImGui::PushID(static_cast<int>(descriptor.name.id));
     ImGui::SetNextItemWidth(-FLT_MIN);

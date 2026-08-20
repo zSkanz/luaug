@@ -60,6 +60,20 @@ inline std::unordered_map<core::u32, Bag> g_bags;
     return g_bags[id.index];
 }
 
+// Declared as an Instance reference and always absent, which is the pairing the
+// real surface has and this fixture did not: `Instance.Parent` is nil on exactly
+// one instance in a real world, the DataModel, and a human found it by clicking
+// `go` on `RunService.Parent`. `editorFor` answers from the DECLARED type, so
+// every editor branch reached for `InstanceId` and `std::get` threw.
+//
+// Kept as its own property rather than as a nil-able version of an existing one:
+// the panel must survive a type it cannot draw an editor for, and that is only
+// asserted if something in the surface is permanently in that state.
+inline scene::Value getNilReference(const scene::World&, core::InstanceId)
+{
+    return scene::Value{};
+}
+
 inline scene::Value getFlag(const scene::World&, core::InstanceId id)
 {
     return scene::Value{bagOf(id).flag};
@@ -240,6 +254,13 @@ struct Fixture
         });
 
         thingProperties = {
+            scene::PropertyDesc{
+                .name = atoms.intern("Owner"),
+                .type = scene::ValueType::Instance,
+                .readOnly = true,
+                .get = &getNilReference,
+                .set = nullptr,
+            },
             scene::PropertyDesc{
                 .name = atoms.intern("Flag"),
                 .type = scene::ValueType::Bool,

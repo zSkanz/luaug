@@ -68,7 +68,7 @@ TEST_CASE("the sweep visits every property of a class it has never seen")
     // `propertySlot`'s numbering. Written out rather than counted, because
     // "there are ten of them" would still pass with the wrong ten.
     const std::vector<std::string> expected{
-        "Flag", "Locked", "Sealed", "Count", "Label", "Offset", "Frame", "Tint", "Link", "Mood", "Nothing",
+        "Owner", "Flag", "Locked", "Sealed", "Count", "Label", "Offset", "Frame", "Tint", "Link", "Mood", "Nothing",
     };
     CHECK(propertyNames(fixture, fixture.widgetClass) == expected);
 
@@ -86,7 +86,7 @@ TEST_CASE("the sweep visits every property of a class it has never seen")
 
     // The base is not given its child's members, which is the other way the
     // ancestry walk can be wrong.
-    const std::vector<std::string> baseExpected{"Flag", "Locked", "Sealed"};
+    const std::vector<std::string> baseExpected{"Owner", "Flag", "Locked", "Sealed"};
     CHECK(propertyNames(fixture, fixture.thingClass) == baseExpected);
 }
 
