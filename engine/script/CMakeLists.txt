@@ -17,6 +17,7 @@ luaug_add_module(script
         src/binding.cpp
         src/datatypes.cpp
         src/instance_binding.cpp
+        src/modules.cpp
         src/services.cpp
         src/signals.cpp
         src/tasks.cpp

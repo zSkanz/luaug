@@ -4,7 +4,7 @@
 {"op":"createShader","shader":2,"stage":"Fragment","bytes":636,"samplers":0,"uniformBuffers":0,"name":"debug_line"}
 {"op":"createGraphicsPipeline","pipeline":1,"vertexShader":1,"fragmentShader":2,"primitive":"LineList","fill":"Solid","cull":"None","depthTest":false,"depthWrite":false,"colorTargets":1,"depthFormat":"Undefined","name":"debug-line"}
 {"op":"createBuffer","buffer":1,"usage":1,"size":65536,"name":"debug-line-vertices"}
-{"op":"upload","buffer":1,"bytes":1248,"offset":0}
+{"op":"upload","buffer":1,"bytes":1152,"offset":0}
 {"op":"pushDebugGroup","name":"frame"}
 {"op":"beginRenderPass","colorCount":1,"depth":0,"name":"clear"}
 {"op":"colorAttachment","texture":1,"load":"Clear","store":"Store","r":0.5000,"g":0.9330,"b":0.0670,"a":1.0000}
@@ -14,7 +14,7 @@
 {"op":"bindUniforms","stage":"Vertex","slot":0,"bytes":64}
 {"op":"bindVertexBuffers","firstSlot":0,"count":1}
 {"op":"vertexBuffer","buffer":1}
-{"op":"draw","vertices":78,"instances":1,"firstVertex":0,"firstInstance":0}
+{"op":"draw","vertices":72,"instances":1,"firstVertex":0,"firstInstance":0}
 {"op":"popDebugGroup"}
 {"op":"endRenderPass"}
 {"op":"popDebugGroup"}

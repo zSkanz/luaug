@@ -57,6 +57,7 @@ namespace luaug::script
 class SignalSystem;
 class TaskScheduler;
 class ServiceState;
+class ModuleRegistry;
 
 using core::f32;
 using core::f64;
@@ -164,6 +165,7 @@ struct VmContext
     SignalSystem* signals = nullptr;
     TaskScheduler* tasks = nullptr;
     ServiceState* services = nullptr;
+    ModuleRegistry* modules = nullptr;
 
     // Indexed by Luau atom; holds the engine `NameAtom` id for the same text.
     // Grown by `useratom` as the VM interns each name, and never shrunk: an

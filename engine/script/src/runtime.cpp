@@ -14,6 +14,7 @@
 #include "luaug/script/datatypes.h"
 #include "luaug/script/instance_binding.h"
 #include "luaug/script/sandbox.h"
+#include "luaug/script/modules.h"
 #include "luaug/script/services.h"
 #include "luaug/script/signals.h"
 #include "luaug/script/tasks.h"
@@ -112,6 +113,7 @@ struct ScriptRuntime::Impl
     SignalSystem signals;
     TaskScheduler tasks;
     ServiceState services;
+    ModuleRegistry modules;
 };
 
 ScriptRuntime::ScriptRuntime(scene::World& world) : m_world(world), m_impl(std::make_unique<Impl>())
@@ -120,6 +122,7 @@ ScriptRuntime::ScriptRuntime(scene::World& world) : m_world(world), m_impl(std::
     m_impl->context.signals = &m_impl->signals;
     m_impl->context.tasks = &m_impl->tasks;
     m_impl->context.services = &m_impl->services;
+    m_impl->context.modules = &m_impl->modules;
 }
 
 ScriptRuntime::~ScriptRuntime()
@@ -179,9 +182,20 @@ std::optional<core::EngineError> ScriptRuntime::boot()
     // boot services -- which needs `pushInstance`, and therefore the Instance
     // metatable, to already exist.
     registerServices(L);
+    registerRequire(L);
 
     sealGlobals(L);
     return std::nullopt;
+}
+
+void ScriptRuntime::setGizmoSink(const GizmoSink& sink)
+{
+    m_impl->services.gizmos = sink;
+}
+
+void ScriptRuntime::setModuleLoader(const ModuleLoader& loader)
+{
+    m_impl->modules.loader = loader;
 }
 
 MethodCoverage ScriptRuntime::methodCoverage() const noexcept
@@ -345,6 +359,11 @@ void ScriptRuntime::fireEvent(core::InstanceId instance, core::NameAtom event, f
 u32 ScriptRuntime::deferredDepth() const noexcept
 {
     return m_impl->state == nullptr ? 0u : currentDepth(m_impl->state);
+}
+
+core::InstanceId ScriptRuntime::dataModel() const noexcept
+{
+    return m_impl->services.dataModel;
 }
 
 lua_State* ScriptRuntime::state() const noexcept

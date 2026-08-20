@@ -110,10 +110,14 @@ and what that needs is `require` plus the mounted-script lifecycle.
   minutes carry platform multipliers and the quota has been close to exhausted.
   CI proves `main` is green and builds macOS, which nothing local can.
 - Carried forward from M1 (none blocked the gate):
-  - **The shipping profile does not configure.** `script_host.cpp` includes
-    `<Luau/Compiler.h>` unconditionally while `LUAUG_LUAU_COMPILER` is forced
-    off in shipping (ADR 0002). The guard is one line, but a shipping host also
-    needs the bytecode-loading path, which is M3 at the earliest.
+  - **The shipping profile does not configure.** `engine/script/src/modules.cpp`
+    and `runtime.cpp` include `<luacode.h>` unconditionally while
+    `LUAUG_LUAU_COMPILER` is forced off in shipping (ADR 0002) -- the same defect
+    `script_host.cpp` carried, moved with the code that had it. The guard is one
+    line, but a shipping host also needs the bytecode-loading path, which is M3
+    at the earliest. `require` is at least written rather than linked from
+    `Luau.Require`, which would have dragged the compiler in as a propagated
+    link requirement whatever the guard said (U-38).
   - **`architecture.md` §9 lists a clang-format gate that does not exist.**
     Turning it on means reformatting the tree and pinning a version; version
     pinning for the C++ toolchain is M3's `luaug check` work.

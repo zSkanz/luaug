@@ -1,6 +1,6 @@
 # L4 -- architecture.md §2 eventually gives render core, jobs, platform,
-# rhi_api, asset and scene. At M1 it has CPU-side geometry generation, the
-# shader library and the debug pass, so it needs core and the RHI seam; the rest
+# rhi_api, asset and scene. It now has scene as well, for `render::extract`: the
+# POD snapshot rendering reads instead of walking the ECS (ADR 0027). The rest
 # arrive with the code that uses them, because a dependency with no consumer is
 # speculative.
 #
@@ -14,13 +14,16 @@ luaug_add_module(render
         src/debug_draw.cpp
         src/shader_library.cpp
         src/debug_renderer.cpp
+        src/render_world.cpp
     DEPS
         core
         rhi_api
+        scene
 )
 
 luaug_add_module_tests(render
     SOURCES
         tests/debug_draw_tests.cpp
         tests/shader_library_tests.cpp
+        tests/render_world_tests.cpp
 )

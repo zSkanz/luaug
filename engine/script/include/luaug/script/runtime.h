@@ -21,6 +21,8 @@
 #include "luaug/scene/world.h"
 #include "luaug/script/binding.h"
 #include "luaug/script/instance_binding.h"
+#include "luaug/script/modules.h"
+#include "luaug/script/services.h"
 
 struct lua_State;
 
@@ -78,12 +80,24 @@ public:
     // re-entrancy cap, which is otherwise only observable through a log line.
     [[nodiscard]] u32 deferredDepth() const noexcept;
 
+    // Where `DebugService`'s gizmos go. Null in a headless run, which is why
+    // those calls are documented no-ops there rather than errors.
+    void setGizmoSink(const GizmoSink& sink);
+
+    // Where `require` gets file-backed module source. Unset means only the
+    // registered `@luaug/…` modules resolve, which is what a test wants.
+    void setModuleLoader(const ModuleLoader& loader);
+
     // What the boot-time method cross-check found. Zeroed until `boot` runs.
     // Exposed rather than logged so that a test can assert the two halves
     // rather than a human having to read a startup line.
     [[nodiscard]] MethodCoverage methodCoverage() const noexcept;
 
     [[nodiscard]] lua_State* state() const noexcept;
+
+    // The DataModel `game` names. Invalid until `boot` runs; the host needs it
+    // to find `Workspace`, which is the root `render::extract` reads from.
+    [[nodiscard]] core::InstanceId dataModel() const noexcept;
     [[nodiscard]] scene::World& world() noexcept { return m_world; }
 
 private:

@@ -16,9 +16,17 @@ using core::u64;
 
 struct EngineOptions
 {
-    // M1 still runs one script and then the frame loop; M2's kernel is what
-    // makes the script drive the loop instead of preceding it.
+    // A directory is a project root and gets the full mount; a file is mounted
+    // as a single entry `Script` (M2 brief, Decision 9). The scripts do not run
+    // before the loop any more -- they are deferred, and their first resumption
+    // is the first drain of the first tick.
     std::filesystem::path scriptPath;
+
+    // The world's deterministic stream. Fixed rather than drawn from a clock,
+    // because a replay stores the seed and nothing else (ADR 0025) -- and
+    // because two runs of the same script must produce the same world hash,
+    // which is the M2 gate.
+    u64 worldSeed = 1;
 
     // No window. The frame loop, the device and the render target all still
     // exist -- this is the CI harness and the shape a dedicated server would

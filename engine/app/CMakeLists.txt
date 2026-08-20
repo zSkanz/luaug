@@ -1,22 +1,24 @@
-# L6 -- the host. This is the one module allowed to see everything, and for M0
-# it also owns the Luau VM; M2 moves that into `engine/script` (see
-# include/luaug/app/script_host.h).
+# L6 -- the host. This is the one module allowed to see everything. The VM moved
+# into `engine/script` in M2, as planned: what is left here is the world it runs
+# in, the project it is mounted from, and the frame loop that drives it
+# (`world_host.h`).
 
 luaug_add_module(app
     LAYER 6
     SOURCES
-        src/script_host.cpp
+        src/world_host.cpp
         src/frame_scheduler.cpp
         src/backends.cpp
         src/engine.cpp
         src/screenshot.cpp
-        src/preview_api.cpp
         src/debug_overlay.cpp
     DEPS
         core
         platform
         rhi_api
         render
+        scene
+        script
     PUBLIC_DEPS
         luaug::luau
         luaug::build_info
@@ -69,11 +71,17 @@ add_custom_command(TARGET luaug_host POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/i18n/en.json"
         "$<TARGET_FILE_DIR:luaug_host>/content/i18n/en.json"
-    COMMENT "Staging the engine message catalog")
+    # `@luaug/…` ships as content for the same reason: a project reads the same
+    # file its editor type-checks against, rather than a copy compiled into the
+    # binary that nothing can inspect.
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/runtime/luaug"
+        "$<TARGET_FILE_DIR:luaug_host>/content/runtime/luaug"
+    COMMENT "Staging the engine message catalog and the @luaug modules")
 
 luaug_add_module_tests(app
     SOURCES
-        tests/script_host_tests.cpp
+        tests/world_host_tests.cpp
         tests/debug_overlay_tests.cpp
 )
 

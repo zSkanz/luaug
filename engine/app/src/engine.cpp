@@ -11,9 +11,8 @@
 #include "luaug/app/backends.h"
 #include "luaug/app/debug_overlay.h"
 #include "luaug/app/frame_scheduler.h"
-#include "luaug/app/preview_api.h"
 #include "luaug/app/screenshot.h"
-#include "luaug/app/script_host.h"
+#include "luaug/app/world_host.h"
 #include "luaug/core/build_info.h"
 #include "luaug/core/log.h"
 #include "luaug/core/text_key.h"
@@ -22,6 +21,7 @@
 #include "luaug/platform/window.h"
 #include "luaug/render/debug_draw.h"
 #include "luaug/render/debug_renderer.h"
+#include "luaug/render/render_world.h"
 #include "luaug/render/shader_library.h"
 #include "luaug/rhi/device.h"
 
@@ -61,18 +61,26 @@ constexpr rhi::TextureFormat kOffscreenFormat = rhi::TextureFormat::Rgba8Unorm;
     return projection * view;
 }
 
-// What the engine draws when nothing is driving it: a world triad, and nothing
-// else.
-//
-// Deliberately NOT the same scene as examples/00-clear. An earlier version drew
-// the orbiting cubes here too, which made the golden gates useless for what
-// they most needed to cover -- a broken script binding falls back to this
-// scene, so if the two looked alike the gate would pass on a frame the script
-// never touched. They are different, so the goldens (recorded from the example)
-// fail loudly the moment the binding stops working.
-void submitIdleScene(render::DebugDraw& draw)
+// What the engine draws for the world itself: one wire box per part that is
+// under `Workspace`, from the extracted snapshot rather than from the ECS
+// (ADR 0027). The real renderer is M4; until then this is how 500 scripted
+// instances are seen at all, and it is what `examples/01-instances` is
+// visualized with.
+void submitWorld(const render::RenderWorld& snapshot, render::DebugDraw& draw)
 {
-    draw.axes(core::Mat4{}, 1.0f);
+    for (const render::RenderPart& part : snapshot.parts)
+    {
+        // Fully transparent is not drawn. A debug wireframe has no blending, so
+        // the alternative is a box that a script asked to be invisible and that
+        // is nonetheless the most visible thing on screen.
+        if (part.transparency >= 1.0f)
+            continue;
+
+        draw.wireBox(
+            core::toRenderMatrix(part.cframe, {}),
+            core::Vec3{part.size.x * 0.5f, part.size.y * 0.5f, part.size.z * 0.5f},
+            render::DebugColor::fromLinear(part.color.r, part.color.g, part.color.b));
+    }
 }
 
 // M1's stand-in for a renderer: a colour that moves, so a static frame and a
@@ -195,9 +203,6 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             return core::makeError(LUAUG_TR("rhi.err.target_create_failed"));
     }
 
-    // The VM outlives the script's first run, because the script registers a
-    // frame callback the loop calls every frame. M2 replaces all of this with
-    // the real scheduler; see preview_api.h for why it is as small as it is.
     // Dev builds only, windowed only, and after the claim: the overlay's
     // pipeline is built against the swapchain's colour format, which does not
     // exist until the device owns the window. Compiled out entirely in shipping
@@ -205,16 +210,6 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     std::optional<DebugOverlay> overlay;
     if (window != nullptr)
         overlay.emplace(*window, *device);
-
-    PreviewState preview;
-    ScriptHost host{[&preview](lua_State* L) { installPreviewApi(L, preview); }};
-
-    if (!options.scriptPath.empty())
-    {
-        if (std::optional<core::EngineError> scriptError = host.runFile(options.scriptPath);
-            scriptError.has_value())
-            return scriptError;
-    }
 
     // The debug pass is built on the first frame that has a target, not here,
     // because a graphics pipeline is compiled against one colour format and the
@@ -252,7 +247,21 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     };
 
     FrameScheduler scheduler;
-    bool scriptHookAlive = true;
+
+    // The world and the VM. Booted before the loop because every entry script's
+    // first resumption is a deferred callback, and the first drain is inside the
+    // first tick -- so a script that fails to compile says so here rather than
+    // one frame later.
+    WorldHost host;
+    if (std::optional<core::EngineError> bootError = host.boot({
+            .projectPath = options.scriptPath,
+            .seed = options.worldSeed,
+            .fixedTimestep = scheduler.timing().fixedDt,
+        });
+        bootError.has_value())
+        return bootError;
+
+    render::RenderWorld snapshot;
     const auto headlessStepNs
         = static_cast<u64>(std::ceil(scheduler.timing().fixedDt * kNanosPerSecond));
     bool quit = false;
@@ -276,6 +285,22 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                                            : platform::nowNs();
 
         const Frame frame = scheduler.beginFrame(nowNs);
+
+        // The gizmo target is armed BEFORE the ticks, not with the rest of the
+        // rendering. `DebugService:DrawLine` is documented as drawing "for one
+        // frame", and the handler that calls it runs inside a tick -- so a
+        // target armed after the ticks would collect nothing, which is exactly
+        // what happened the first time this was written the other way round.
+        debugDraw.clear();
+        host.setGizmoTarget(&debugDraw);
+
+        // The simulation, before anything is drawn: rendering shows the state a
+        // tick settled on, never one being written.
+        for (u32 step = 0; step < frame.simTicks; ++step)
+            host.tick();
+
+        if (host.shutdownRequested())
+            quit = true;
 
         if (!options.headless)
         {
@@ -319,31 +344,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         {
             ensureDebugPass(targetFormat);
 
-            debugDraw.clear();
-            preview.draw = &debugDraw;
-            preview.clearColor = pulseColor(scheduler.totalTicks(), scheduler.timing().fixedDt);
+            if (!options.headless)
+                host.preRender(frame.renderDt);
 
-            // The script owns the frame when it asked to. Otherwise the engine
-            // draws its own scene, so `luaug-host` shows something whether or
-            // not a script cares about rendering -- and so that the difference
-            // between the two is visible rather than a blank window.
-            if (preview.hasFrameHook && scriptHookAlive)
-            {
-                if (auto hookError = callFrameHook(host, scheduler.totalTicks(),
-                        static_cast<f64>(scheduler.totalTicks()) * scheduler.timing().fixedDt);
-                    hookError.has_value())
-                {
-                    // Reported once, then never called again. A script that
-                    // throws every frame would otherwise produce one error per
-                    // frame forever, burying the first and only useful one.
-                    core::logText(LogLevel::Error, hookError->message);
-                    scriptHookAlive = false;
-                }
-            }
-            else
-            {
-                submitIdleScene(debugDraw);
-            }
+            // Extraction happens once, at a known moment, from a world that is
+            // between ticks (ADR 0027). Rendering never walks the ECS.
+            render::extract(host.world(), host.workspace(), snapshot);
+            submitWorld(snapshot, debugDraw);
 
             // Uploaded before the render pass opens, because a copy cannot run
             // inside one -- the seam says so and the backend enforces it.
@@ -354,7 +361,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 .texture = target,
                 .loadOp = rhi::LoadOp::Clear,
                 .storeOp = rhi::StoreOp::Store,
-                .clearColor = preview.clearColor,
+                .clearColor = pulseColor(scheduler.totalTicks(), scheduler.timing().fixedDt),
             }};
 
             cmd->pushDebugGroup("frame");
@@ -378,12 +385,18 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 overlay->render(*cmd, target, frame);
         }
 
+        // Cleared once the frame is over. A `DrawLine` from a task resumed
+        // outside a frame has nowhere to go and is the silent no-op the headless
+        // contract already describes.
+        host.setGizmoTarget(nullptr);
+
         device->submitAndPresent();
 
         if (options.frames != 0 && options.exitAfterFrames && frame.index + 1 >= options.frames)
             quit = true;
     }
 
+    host.close();
     device->waitIdle();
 
     if (!options.screenshotPath.empty() && offscreen.valid())
