@@ -8,8 +8,8 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 - Current milestone: **M3 — Tooling Loop: CLI, Hot Reload, Types, Tests**,
   opened 2026-08-20 (brief: [`docs/briefs/m3-kickoff.md`](docs/briefs/m3-kickoff.md)).
   Built so far: the brief with its fourteen decisions and the control protocol,
-  `engine/net` (the RFC 6455 client the engine dials the dev server with), and
-  the reload seam in `app`.
+  `engine/net` (the RFC 6455 client the engine dials the dev server with), the
+  reload seam in `app`, and `HotReloadService` with its state bag.
 - **M2 — Kernel: Instances over ECS, Scheduler, Signals, `task` — COMPLETE and
   SIGNED OFF by the human on 2026-08-20**, tagged `milestone/m2` (brief:
   [`docs/briefs/m2-kickoff.md`](docs/briefs/m2-kickoff.md), which carries the
@@ -57,17 +57,17 @@ watch. `engine/net` is done; the reload seam is next.
 
 ## Now / Next
 
-- **Next: `HotReloadService` and the state bag.** The reload mechanism is built
-  and proved; what it does not yet do is carry anything across. `SaveState` /
-  `LoadState` / `IsReload` / `BeforeReload` / `AfterReload` in
-  `api/defs/services.api.luau` with the `DevOnly` tag, an engine-side bag that
-  outlives the VM (Decision 4), and `PreserveOnReload` instances re-materialized
-  before the new entry scripts are deferred (Decision 5). Then the control loop,
-  then the Lute dev server.
-- **The reload seam is done.** `app::reloadWorld` rebuilds `WorldHost` and
-  nothing above it, build-before-destroy, and the test that matters asserts
-  **reload == cold boot by world hash**. A reload refuses on a compile failure or
-  on zero mounted scripts and leaves the running world alone.
+- **Next: `PreserveOnReload`** (Decision 5) — capture the tagged instances as
+  descriptions before the old world dies and re-materialize them into the fresh
+  one **before** the new entry scripts are deferred, so a script that looks for
+  what it left behind finds it. Then the control loop in `app`, then the Lute
+  dev server.
+- **The reload works and carries state.** `app::reloadWorld` rebuilds
+  `WorldHost` and nothing above it, build-before-destroy; the test that matters
+  asserts **reload == cold boot by world hash**. `HotReloadService` is in the IDL
+  (`SaveState` / `LoadState` / `IsReload()` / `PreReload` / `PostReload`), the
+  bag lives in C++ because the VM that held the value is what a reload destroys,
+  and a value that cannot cross raises rather than being dropped.
 - **The control protocol is written** into the brief (message set, envelope,
   token handshake, the three emptiness checks), and the transport under it is
   built: `engine/net` (L2) has the RFC 6455 client, 28 cases / 214 assertions,
@@ -199,8 +199,21 @@ there when this file passed its ~300-line cap.
   which the edit had never run. A reload is now stricter than a boot, because
   unlike a boot it has the world that was already running to fall back on, and
   the asymmetry is written into `reload.h`.
-  Next: **`HotReloadService` and the state bag** -- the reload carries nothing
-  across yet.
+  Then `HotReloadService` and the bag. It is in the IDL with the `DevOnly` tag,
+  the bag lives in C++ because `lua_close` takes a Luau table with it, and a
+  value that cannot cross -- a function, an Instance, a cyclic table, a table
+  that is half an array -- raises instead of being dropped, because a reload that
+  quietly loses state is discovered a save later and blamed on the reload.
+  Learned before any C++ existed: **`api-design.md` §3.2 named three members the
+  API definition's own §9 lints reject.** `BeforeReload`/`AfterReload` are
+  neither past-tense facts nor `Pre*`/`Post*` phases, and `IsReload: boolean` is
+  a boolean property carrying the prefix §9 reserves for boolean methods.
+  `apicheck` said so the moment the service was declared. The rules were right;
+  the surface is `PreReload` / `PostReload` / `IsReload()`, and making the third
+  a method deleted the service's only property and the component behind it -- the
+  implementation got *smaller* by obeying the naming rule.
+  Next: **`PreserveOnReload`** -- capture the tagged instances before the old
+  world dies and re-materialize them before the new entry scripts are deferred.
 
 <!-- Format for future entries:
 - **YYYY-MM-DD (session N):** did X; learned Y; Next: <literal first action>.
