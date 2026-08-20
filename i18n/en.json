@@ -74,6 +74,13 @@
   "rhi.err.target_create_failed": "Could not create the offscreen render target.",
   "rhi.err.upload_inside_pass": "Cannot upload while a render pass is open; upload before beginRenderPass.",
 
+  "net.err.handshake_failed": "The WebSocket handshake failed: {detail}.",
+  "net.err.connect_failed": "Could not connect to {host}:{port} — {detail}.",
+  "net.err.protocol_violation": "The peer broke the WebSocket protocol: {detail}.",
+  "net.err.send_failed": "Could not write to the connection: {detail}.",
+  "net.err.receive_failed": "Could not read from the connection: {detail}.",
+  "net.err.closed": "The connection was closed by the other end.",
+
   "scene.err.parent_cycle": "Cannot set Parent: this would create a cycle ({instance}).",
   "scene.err.parent_locked": "Cannot set Parent: {instance} has been destroyed; its Parent is locked to nil.",
   "scene.err.invalid_size": "Invalid Size for {instance}: components must be positive.",

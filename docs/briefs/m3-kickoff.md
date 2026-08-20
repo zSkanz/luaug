@@ -262,6 +262,84 @@ the worst kind. **That Linux behaviour is still unverified** (entering risk 2).
 Per api-design §6, and separate from the engine's `i18n/en.json` because they
 ship separately and are translated separately. Keys are `cli.*`.
 
+### 14. The new world is built **before** the old one is destroyed
+
+ADR 0024 writes the reload as a straight line: capture → janitor → destroy the
+VM → fresh VM → re-run → restore. Taken as an instruction order, a project that
+fails to mount — one syntax error in one entry script — leaves the process alive
+with no world at all, and the failure reply has nothing to say about what the
+developer is now looking at. In a loop whose whole purpose is that you save
+often and sometimes save something broken, that is the common case, not the edge
+one.
+
+So: capture the state bag and the preserved instances from the old world, **boot
+a second `WorldHost` alongside it**, and only when that boot succeeds restore
+into it, swap the frame loop's pointer, and destroy the old. A failed boot
+destroys the half-built new one and leaves the previous world running untouched;
+the reply carries the error key and the session survives.
+
+What ADR 0024 actually fixes is *what survives* a reload — window, GPU
+resources, imported assets, streamed chunks — and that is unchanged. The cost is
+that two VMs and two worlds coexist for the length of one safe point, which
+doubles peak script memory during a reload and is bounded by the same 500 ms.
+Recorded as a dated addendum on ADR 0024 rather than as a new ADR, following
+what ADR 0013 did when M2 corrected it.
+
+Rejected: destroy-first as literally written. It turns a typo into a dead
+session, and it makes `ok: false` mean "your world is gone" — a reply the
+protocol cannot act on.
+
+## The dev control protocol
+
+One JSON object per WebSocket **text** frame, no fragmentation on send. The
+engine is the client (Decision 1); the dev server is the only listener and
+relays between the engine and its other clients.
+
+**Envelope.** Every message carries `type: string`. Every *request* carries
+`id: number`, monotonic per sender, and every reply echoes it. An unrecognised
+`type` is answered — never ignored — with
+`{"type":"error", "id":N, "key":"dev.err.unknown_message"}`.
+
+**Handshake.** The engine's first frame is
+`{"type":"hello", "id":1, "protocol":1, "role":"engine", "token":"…",
+"engine":"0.1.0", "pid":N}`. The dev server generates the token, passes it to the
+engine on the command line, and **rejects a connection that does not carry it**
+— a listener on loopback is still reachable by every process on the machine, and
+the token is what keeps another one from driving your engine. It also tells the
+engine connection apart from observers, who connect without a token and receive
+a read-only relay. A `protocol` mismatch closes the connection with a stated
+reason; it never degrades to a subset.
+
+**Dev server → engine**
+
+| `type` | Meaning |
+|---|---|
+| `reload` | `paths: {string}` — the rescan's real changed-file list. Perform the fast world restart. |
+| `sample` | `afterTicks: number` — reply with the world hash once the sim has advanced that many ticks. This is what makes the gate's assertion race-free. |
+| `ping` | Liveness. |
+| `shutdown` | Exit cleanly, running `BindToClose`. The E2E test's teardown, and the answer to orphaned processes (entering risk 4). |
+| `asset-changed`, `eval` | **Reserved.** Answered with `dev.err.not_implemented`. Not M3 scope, and named here so the protocol does not have to change to gain them. |
+
+**Engine → dev server**
+
+| `type` | Meaning |
+|---|---|
+| `hello` | The handshake above. |
+| `reloaded` | `ok: boolean`. On success: `ms` (the span Decision 10 gates), `scripts` (how many entry scripts mounted), `tick`, `hash`. On failure: `key` and `detail`, and — per Decision 14 — the **previous world is still running**. |
+| `sample` | `tick`, `hash`. |
+| `pong`, `error` | As named. |
+| `log` | **Reserved** for the overlay console. Not sent in M3; relaying the engine's log would double the console output for no reader that exists yet. |
+
+**Emptiness, by construction** (M2 Finding 19 — three of these were built by
+accident in one session):
+
+- The dev server refuses to start if the project mounts **zero** entry scripts.
+- `reloaded` with `ok: true` and `scripts == 0` is treated by the dev server as a
+  failure, whatever the engine said.
+- The E2E test asserts the post-reload hash **differs** from the pre-edit hash
+  *and* **equals** a cold boot of the same edited source. Either half alone
+  passes against a reload that did nothing.
+
 ## NOT in scope
 
 Named so that a later session does not read the absence as an oversight.

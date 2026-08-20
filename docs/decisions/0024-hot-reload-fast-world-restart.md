@@ -28,3 +28,24 @@ if the restart budget proves insufficient.
 ## Consequences
 A reload model with zero stale-state classes of bugs, simple to implement and
 reason about. The <500 ms target is enforced as a perf gate from M3.
+
+## Addendum — 2026-08-20 (M3): build before destroy
+
+The Decision above reads as a straight line, and one step of that order is
+wrong. Taken literally — destroy the VM, then build the fresh one — a project
+that fails to mount leaves the process alive with **no world at all**, and the
+failure has nothing to say about what the developer is now looking at. One
+syntax error in one entry script is the common case in a loop whose whole point
+is that you save often.
+
+The order is therefore: capture the state bag and the `PreserveOnReload`
+instances from the old world, **boot the new `WorldHost` alongside it**, and only
+on a successful boot restore into it, swap the frame loop's pointer, and destroy
+the old. A failed boot destroys the half-built new one and leaves the previous
+world running untouched.
+
+Nothing about *what survives* changes — window, GPU resources, imported assets
+and streamed chunks are exactly as above, and so is the <500 ms budget, which now
+covers the build and the destroy together. The cost is that two VMs and two
+worlds coexist for the length of one FrameStart safe point.
+
