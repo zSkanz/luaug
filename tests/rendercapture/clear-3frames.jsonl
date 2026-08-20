@@ -31,7 +31,7 @@
 {"op":"setViewport","x":0.0000,"y":0.0000,"w":1280.0000,"h":720.0000,"minDepth":0.0000,"maxDepth":1.0000}
 {"op":"pushDebugGroup","name":"debug-draw"}
 {"op":"setPipeline","pipeline":1}
-{"op":"bindUniforms","stage":"Vertex","slot":0,"bytes":64}
+{"op":"bindUniforms","stage":"Vertex","slot":0,"bytes":64,"digest":"b2a4dc36cb11d10c"}
 {"op":"bindVertexBuffers","firstSlot":0,"count":1}
 {"op":"vertexBuffer","buffer":3}
 {"op":"draw","vertices":72,"instances":1,"firstVertex":0,"firstInstance":0}
@@ -47,7 +47,7 @@
 {"op":"setViewport","x":0.0000,"y":0.0000,"w":1280.0000,"h":720.0000,"minDepth":0.0000,"maxDepth":1.0000}
 {"op":"pushDebugGroup","name":"debug-draw"}
 {"op":"setPipeline","pipeline":1}
-{"op":"bindUniforms","stage":"Vertex","slot":0,"bytes":64}
+{"op":"bindUniforms","stage":"Vertex","slot":0,"bytes":64,"digest":"b2a4dc36cb11d10c"}
 {"op":"bindVertexBuffers","firstSlot":0,"count":1}
 {"op":"vertexBuffer","buffer":3}
 {"op":"draw","vertices":78,"instances":1,"firstVertex":0,"firstInstance":0}
@@ -63,7 +63,7 @@
 {"op":"setViewport","x":0.0000,"y":0.0000,"w":1280.0000,"h":720.0000,"minDepth":0.0000,"maxDepth":1.0000}
 {"op":"pushDebugGroup","name":"debug-draw"}
 {"op":"setPipeline","pipeline":1}
-{"op":"bindUniforms","stage":"Vertex","slot":0,"bytes":64}
+{"op":"bindUniforms","stage":"Vertex","slot":0,"bytes":64,"digest":"b2a4dc36cb11d10c"}
 {"op":"bindVertexBuffers","firstSlot":0,"count":1}
 {"op":"vertexBuffer","buffer":3}
 {"op":"draw","vertices":78,"instances":1,"firstVertex":0,"firstInstance":0}

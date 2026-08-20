@@ -558,12 +558,27 @@ void registerServices(lua_State* L)
 
     state.dataModel = w.create(w.classes().findId(atoms.intern("DataModel")));
 
-    // `Workspace` and `ScriptService` exist from boot; every other service is
-    // created by its first `GetService` (api-design.md §2.1). The two are here
-    // because a script reaches `workspace` through a global rather than through
-    // a call, and because the mount point has to exist before anything mounts.
+    // `Workspace`, `ScriptService` and `Lighting` exist from boot; every other
+    // service is created by its first `GetService` (api-design.md §1.2). The
+    // first two are here because a script reaches `workspace` through a global
+    // rather than through a call, and because the mount point has to exist
+    // before anything mounts.
     const core::InstanceId workspace = getServiceOfClass(L, w.classes().findId(atoms.intern("Workspace")));
     (void)getServiceOfClass(L, w.classes().findId(atoms.intern("ScriptService")));
+
+    // `Lighting` is here for a different reason, and it is the one M4.5 exists
+    // for: the renderer reads the environment every frame whether or not a
+    // script ever asks for the service, so "created on first `GetService`"
+    // cannot be true of it. It was, and the host cached the id of a service
+    // that did not exist yet -- so every frame M4 ever drew used the struct
+    // defaults and no scene's `Lighting` reached a pixel.
+    //
+    // Found by `getServiceOfClass` rather than named as an id, and guarded on
+    // the class existing: `Lighting` is registered by `render`, and an engine
+    // built without that module has no such class. This file is in `script` and
+    // must not acquire an opinion about which modules are compiled in.
+    if (const ClassId lightingClass = w.classes().findId(atoms.intern("Lighting")); lightingClass != scene::InvalidClass)
+        (void)getServiceOfClass(L, lightingClass);
 
     // Whatever the boot tree raised is consumed rather than queued: nothing can
     // have connected yet, and a fire nobody could have subscribed to is a fire

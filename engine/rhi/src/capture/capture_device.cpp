@@ -16,8 +16,17 @@
 //     last-bit difference in a matrix multiply does not fail the gate.
 //   - Enums are recorded by name. Renumbering an enum should not invalidate
 //     every golden, and a name is what a failing diff should show a human.
+//   - **Uniform blocks are recorded by content digest, not only by size.** They
+//     were recorded by size alone through M4, which is why the milestone's
+//     goldens were green while the renderer lit every scene with the struct
+//     defaults: every matrix, every light and every material colour a frame
+//     carries travels through `bindUniforms`, and the gate was looking at how
+//     many bytes went past. A gate that cannot see the values is a gate that
+//     can only report that the frame still has the same shape.
 
 #include <cmath>
+#include <cstring>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -46,6 +55,53 @@ std::string quantized(f32 value)
     const std::string fraction = std::to_string(magnitude % static_cast<u64>(kQuantizeScale));
     out.append(4 - fraction.size(), '0');
     out += fraction;
+    return out;
+}
+
+// The 64-bit FNV-1a of a uniform block's *quantized* contents.
+//
+// Quantized rather than hashed raw, and it is the whole reason this is usable in
+// a golden compared byte-for-byte on two tiers: the raw bytes of a matrix
+// product differ between MSVC and Clang in the last bit, and a hash turns one
+// bit into a completely different number. Rounding each float onto the same
+// four-decimal grid the rest of the stream uses gives the digest exactly the
+// tolerance `real` already has, and no more.
+//
+// Every uniform block this engine binds is an array of f32 rows -- the
+// `static_assert`s in `render/shader_types.h` are what say so -- so the block is
+// read as floats. A tail of fewer than four bytes is folded in raw, which cannot
+// happen today and must not silently vanish if it ever does.
+[[nodiscard]] std::string uniformDigest(std::span<const std::byte> data)
+{
+    u64 hash = 1469598103934665603ull;
+    const auto fold = [&hash](u64 value)
+    {
+        for (int shift = 0; shift < 64; shift += 8)
+        {
+            hash ^= (value >> shift) & 0xFFull;
+            hash *= 1099511628211ull;
+        }
+    };
+
+    usize offset = 0;
+    for (; offset + sizeof(f32) <= data.size(); offset += sizeof(f32))
+    {
+        f32 value = 0.0f;
+        std::memcpy(&value, data.data() + offset, sizeof(value));
+        // Through the same `llround` `quantized` uses, so a value that prints
+        // one way cannot hash another.
+        const auto scaled = static_cast<i64>(std::llround(static_cast<f64>(value) * static_cast<f64>(kQuantizeScale)));
+        // -0.0 and 0.0 quantize to the same integer here, which is what makes a
+        // sign that no arithmetic can observe unable to fail the gate either.
+        fold(static_cast<u64>(scaled));
+    }
+    for (; offset < data.size(); ++offset)
+        fold(static_cast<u64>(std::to_integer<unsigned char>(data[offset])));
+
+    std::string out;
+    out.reserve(16);
+    for (int shift = 60; shift >= 0; shift -= 4)
+        out += "0123456789abcdef"[(hash >> shift) & 0xFull];
     return out;
 }
 
@@ -305,6 +361,10 @@ public:
                        .str("stage", name(stage))
                        .num("slot", static_cast<u64>(slot))
                        .num("bytes", static_cast<u64>(data.size()))
+                       // What the frame is actually made of. See `uniformDigest`
+                       // for why it is a digest of quantized floats rather than
+                       // of the bytes.
+                       .str("digest", uniformDigest(data))
                        .finish();
     }
 

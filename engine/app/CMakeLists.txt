@@ -221,6 +221,18 @@ if(LUAUG_BUILD_TESTS)
                 -DFRAMES=6
                 -P ${CMAKE_SOURCE_DIR}/tests/rendercapture/run_capture_gate.cmake)
         set_tests_properties(capture_gate_meshes PROPERTIES TIMEOUT 120)
+
+        # M4.5's gate addition, and the one check in this file that is not a
+        # golden: one scene at two `ClockTime` values, and the two frames must
+        # differ. See the driver for why a golden could not make that claim --
+        # and did not, for the whole of M4.
+        add_test(NAME clock_differential
+            COMMAND ${CMAKE_COMMAND}
+                -DHOST=$<TARGET_FILE:luaug_host>
+                -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/clock-differential.jsonl
+                -DSCRIPT=${CMAKE_SOURCE_DIR}/tests/rendercapture/clockpair
+                -P ${CMAKE_SOURCE_DIR}/tests/rendercapture/run_clock_differential.cmake)
+        set_tests_properties(clock_differential PROPERTIES TIMEOUT 120)
     endif()
 
     # The M1 gate's reference screenshot: render a frame on a real GPU, read it

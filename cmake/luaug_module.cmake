@@ -137,6 +137,11 @@ function(luaug_add_module_tests name)
         doctest::doctest_with_main
         ${ARG_DEPS})
 
+    # Test-only helpers shared across modules. Headers only, and deliberately
+    # not a module: nothing in `engine/` may depend on it, and it must not be
+    # able to acquire a link-time half.
+    target_include_directories(${target} PRIVATE ${CMAKE_SOURCE_DIR}/tests/support)
+
     foreach(module IN LISTS ARG_MODULES)
         target_link_libraries(${target} PRIVATE luaug::${module})
     endforeach()

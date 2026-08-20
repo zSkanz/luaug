@@ -6,17 +6,21 @@
 #include <fstream>
 #include <string>
 
+#include "luaug_test_nearly.h"
 #include "project_fixture.h"
 
 #include "luaug/app/world_host.h"
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
+#include "luaug/render/lighting.h"
 #include "luaug/render/render_world.h"
+#include "luaug/scene/components.h"
 
 using namespace luaug;
 using luaug::app::testing::bootOptions;
 using luaug::app::testing::Captured;
 using luaug::app::testing::Project;
+using luaug::testing::nearly;
 
 
 TEST_CASE("an empty world still boots, with game and its two services")
@@ -27,9 +31,110 @@ TEST_CASE("an empty world still boots, with game and its two services")
 
     CHECK(host.workspace().valid());
     CHECK(host.world().alive(host.runtime().dataModel()));
-    // `Workspace` and `ScriptService` exist from boot; nothing else does until
-    // it is asked for.
-    CHECK(host.world().childCount(host.runtime().dataModel()) == 2);
+    // `Workspace`, `ScriptService` and `Lighting` exist from boot; nothing else
+    // does until it is asked for.
+    CHECK(host.world().childCount(host.runtime().dataModel()) == 3);
+}
+
+// --- The M4.5 gate addition: `Lighting` resolution, at the HOST --------------
+//
+// M4 tested the environment at the extractor, handing it a `Lighting` id the
+// test had made itself. Every assertion passed, and the step that was actually
+// broken -- the host resolving the service -- was the one step nothing covered.
+// These three test that step, and each of them fails against M4's code.
+
+TEST_CASE("the host resolves Lighting on a world no script ever touched")
+{
+    Captured log;
+    app::WorldHost host;
+    REQUIRE_FALSE(host.boot({}).has_value());
+
+    // The whole defect in one line: the id was cached before anything created
+    // the service, so it was invalid for the life of the world and `extract`
+    // answered with `RenderEnvironment`'s defaults every frame.
+    REQUIRE(host.lighting().valid());
+    CHECK(host.world().alive(host.lighting()));
+    CHECK(host.world().lighting().find(host.lighting()) != nullptr);
+    // A boot service, so it is an ordinary child of `game` and `GetService`
+    // returns the same instance rather than a second one.
+    CHECK(host.world().parentOf(host.lighting()) == host.runtime().dataModel());
+}
+
+TEST_CASE("the environment the renderer sees is the one the world holds")
+{
+    Captured log;
+    Project project;
+    project.write("src/scripts/main.luau", R"(
+        local lighting = game:GetService("Lighting")
+        lighting.ClockTime = 6.5
+        lighting.GeographicLatitude = 35
+        lighting.Ambient = Color3.new(0.25, 0.5, 0.75)
+        lighting.Brightness = 3.25
+        lighting.FogColor = Color3.new(0.1, 0.2, 0.3)
+        lighting.FogStart = 40
+        lighting.FogEnd = 220
+    )");
+
+    app::WorldHost host;
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
+    host.tick();
+
+    const scene::LightingComponent* held = host.world().lighting().find(host.lighting());
+    REQUIRE(held != nullptr);
+
+    render::RenderWorld snapshot;
+    render::extract(host.world(), host.workspace(), host.lighting(), render::MeshLibrary{}, 1.0f, 0.0f, snapshot);
+
+    // Field by field rather than "it is not the default": a defaults comparison
+    // passes the moment someone changes a default, and the point of this
+    // assertion is that the snapshot carries what the SCRIPT wrote.
+    CHECK(nearly(snapshot.environment.ambient.r, held->ambient.r));
+    CHECK(nearly(snapshot.environment.ambient.g, held->ambient.g));
+    CHECK(nearly(snapshot.environment.ambient.b, held->ambient.b));
+    CHECK(nearly(snapshot.environment.sunBrightness, held->brightness));
+    CHECK(nearly(snapshot.environment.fogColor.r, held->fogColor.r));
+    CHECK(nearly(snapshot.environment.fogStart, held->fogStart));
+    CHECK(nearly(snapshot.environment.fogEnd, held->fogEnd));
+
+    // The sun is derived rather than stored, so it is compared against the
+    // function of the two properties that define it -- which is also what makes
+    // it a pure function of the world and not of the frame (R10).
+    const core::Vec3 expected = render::sunDirection(held->clockTime, held->geographicLatitude);
+    CHECK(nearly(snapshot.environment.sunDirection.x, expected.x));
+    CHECK(nearly(snapshot.environment.sunDirection.y, expected.y));
+    CHECK(nearly(snapshot.environment.sunDirection.z, expected.z));
+    // And 6.5 is a morning sun: low and to the east. Written out because every
+    // check above would also pass if `sunDirection` returned straight up for
+    // everything, which is precisely the image M4 shipped.
+    CHECK(snapshot.environment.sunDirection.x > 0.5f);
+    CHECK(snapshot.environment.sunDirection.y < 0.5f);
+}
+
+TEST_CASE("two clock times give the renderer two different suns")
+{
+    const auto sunAt = [](const char* clock) {
+        Captured log;
+        Project project;
+        project.write("src/scripts/main.luau", std::string(R"(
+            local lighting = game:GetService("Lighting")
+            lighting.GeographicLatitude = 35
+            lighting.ClockTime = )") + clock);
+
+        app::WorldHost host;
+        REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
+        host.tick();
+
+        render::RenderWorld snapshot;
+        render::extract(host.world(), host.workspace(), host.lighting(), render::MeshLibrary{}, 1.0f, 0.0f, snapshot);
+        return snapshot.environment.sunDirection;
+    };
+
+    // The differential the goldens could not make. Two worlds differing in one
+    // property must reach the renderer differently; while `Lighting` was
+    // unreachable these were byte-identical, and so was every image.
+    const core::Vec3 morning = sunAt("7.5");
+    const core::Vec3 afternoon = sunAt("15.5");
+    CHECK(core::length(morning - afternoon) > 0.5f);
 }
 
 TEST_CASE("a single file mounts as one entry Script and runs at the first tick")

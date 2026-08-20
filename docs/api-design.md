@@ -56,9 +56,15 @@ string-singleton overloads so the return type is exact. A general
 case; it costs the exact type, which is the honest trade rather than a reason
 to forbid the call. An unknown name raises `scene.err.unknown_service`.
 `game:FindService(name)` returns `Instance?` and creates nothing. Services are
-children of `game` once created: `Workspace` and `ScriptService` exist from
-boot — the `workspace` global and the script mount point (§3) both need them —
-and every other service is created on its first `GetService`. The `workspace`
+children of `game` once created: `Workspace`, `ScriptService` and `Lighting`
+exist from boot — the `workspace` global and the script mount point (§3) need
+the first two, and the renderer reads the third every frame whether or not a
+script ever asks for it — and every other service is created on its first
+`GetService`. That third entry is a correction rather than a design: `Lighting`
+was lazy through M4, the host cached its id before anything created it, and the
+renderer spent the milestone lighting every scene with the struct defaults. A
+service the engine itself reads on a schedule cannot be one that exists only if
+someone asks. The `workspace`
 global is the canonical handle for the `Workspace` service; no other service
 gets a global. That is a fact about the generated definitions, so its
 observable form is simply that every other service is reached through `game`

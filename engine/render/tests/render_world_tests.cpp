@@ -1,5 +1,7 @@
 #include <doctest/doctest.h>
 
+#include "luaug_test_nearly.h"
+
 #include <ostream>
 
 #include "luaug/render/render_world.h"
@@ -18,16 +20,7 @@ namespace
 // camera. One shared empty library says that once rather than at every call.
 const render::MeshLibrary kNoMeshes;
 
-// `doctest::Approx` takes a `double`, so comparing an f32 against one promotes
-// -- and `-Wdouble-promotion -Werror` is on for Clang, which means every such
-// line is a Linux-only build failure. It has caught this twice in one milestone.
-// Comparing in f32 throughout also states "relative to what" in the expression
-// instead of in a comment.
-[[nodiscard]] bool nearly(core::f32 value, core::f32 expected, core::f32 tolerance = 1e-5f) noexcept
-{
-    const core::f32 difference = value > expected ? value - expected : expected - value;
-    return difference <= tolerance;
-}
+using luaug::testing::nearly;
 
 // A hierarchy with just enough in it to have a root and a part. Hand-built
 // rather than generated, because `render` must not depend on the API definition
