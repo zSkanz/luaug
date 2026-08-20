@@ -800,6 +800,27 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .set = native::setWorkspaceCurrentCamera,
         },
     }};
+    static std::array<MethodDesc, 3> workspaceMethods;
+    workspaceMethods = {{
+        MethodDesc{
+            .name = atoms.intern("Raycast"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .docKey = {},
+        },
+        MethodDesc{
+            .name = atoms.intern("Spherecast"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .docKey = {},
+        },
+        MethodDesc{
+            .name = atoms.intern("GetBodiesInBox"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .docKey = {},
+        },
+    }};
     ClassDescriptor workspaceDesc;
     workspaceDesc.name = atoms.intern("Workspace");
     workspaceDesc.super = instanceClass;
@@ -807,6 +828,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     workspaceDesc.defaultName = atoms.intern("Workspace");
     workspaceDesc.docKey = {};
     workspaceDesc.properties = workspaceProperties;
+    workspaceDesc.methods = workspaceMethods;
     workspaceDesc.attachComponents = native::attachWorkspaceComponents;
     workspaceDesc.detachComponents = native::detachWorkspaceComponents;
     classes.registerClass(workspaceDesc);

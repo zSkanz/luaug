@@ -17,6 +17,8 @@
 #include "luaug/script/binding.h"
 
 #include <optional>
+#include <span>
+#include <string_view>
 
 struct lua_State;
 
@@ -49,6 +51,25 @@ void pushVector3(lua_State* L, core::Vec3 value);
 // one -- `DebugService.MessageOut` hands its handler an `Enum.LogLevel` -- and
 // the registry lookup that turns it back into a name is this module's.
 void pushEnumItem(lua_State* L, scene::EnumValue value);
+
+// A `RaycastParams` as the query bindings need to read it, without exposing the
+// userdata payload: the filter is a view into the object's own storage and is
+// valid only while it is on the stack, which is the whole life of a query.
+struct RaycastQuery
+{
+    std::span<const core::InstanceId> filter;
+    // `Enum.RaycastFilterType`'s value: 0 Exclude, 1 Include.
+    core::i32 mode = 0;
+    // Empty means every group.
+    std::string_view collisionGroup;
+};
+
+[[nodiscard]] RaycastQuery checkRaycastParams(lua_State* L, int index);
+
+// Built here rather than in the caller so that `RaycastResult`'s payload stays
+// private to this file, the way every other datatype's does.
+void pushRaycastResult(lua_State* L, core::InstanceId instance, core::DVec3 position, core::Vec3 normal,
+                       core::f32 distance);
 
 // The bridge between a `scene::Value` and a Luau value. It lives here rather
 // than beside the Instance bindings because this file owns every userdata type

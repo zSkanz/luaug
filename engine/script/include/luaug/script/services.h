@@ -19,6 +19,7 @@
 #include "luaug/core/math.h"
 #include "luaug/core/name_atom.h"
 #include "luaug/scene/class_registry.h"
+#include "luaug/scene/physics_sync.h"
 #include "luaug/script/binding.h"
 #include "luaug/script/reload_state.h"
 
@@ -137,6 +138,15 @@ public:
     // own -- which outlives `WorldHost` -- when it intends the values to
     // survive a reload.
     ReloadState* reload = nullptr;
+
+    // The physics mirror, or null in a build with no physics backend. Set by
+    // the host, which owns it: `scene::PhysicsSync` is L3 and reachable from
+    // here, but the instance belongs to the world's lifetime.
+    //
+    // Null is a real state and not an error -- `Workspace:Raycast` answers nil,
+    // which is the same answer an empty world gives -- so every reader checks
+    // rather than assuming.
+    scene::PhysicsSync* physics = nullptr;
 };
 
 // Creates `game` and the two services that exist from boot, installs the

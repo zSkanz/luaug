@@ -179,6 +179,29 @@ declare extern type Random with
     function Clone(self): Random
 end
 
+declare extern type RaycastParams with
+    --- The instances the filter names, as a fresh array on every read. Descendants of a named instance
+    --- are covered too, so filtering a Model filters its parts.
+    read Filter: { Instance }
+    --- Whether Filter names what may be hit or what must be ignored.
+    read FilterType: EnumRaycastFilterType
+    --- The group a hit must be in, or the empty string for any group. A camera ray asking for "Terrain"
+    --- is cheaper than one that hits everything and filters afterwards.
+    read CollisionGroup: string
+end
+
+declare extern type RaycastResult with
+    --- The part that was hit.
+    read Instance: BasePart
+    --- Where on it, in world space.
+    read Position: vector
+    --- The surface normal there, pointing out of the surface.
+    read Normal: vector
+    --- How far along the cast the hit is, in metres. The direction passed to a cast is not normalised
+    --- -- its length is the range -- so this is a distance rather than a fraction.
+    read Distance: number
+end
+
 declare extern type Instance with
     --- This instance's name; siblings may share one, and renaming into an awaited name satisfies a
     --- WaitForChild waiter exactly as parenting a new child does.
@@ -504,6 +527,18 @@ declare extern type Workspace extends Instance with
     --- the engine invented, because a view nobody asked for is harder to debug than a black frame that
     --- says why.
     CurrentCamera: Camera?
+    --- The nearest thing a ray from `origin` hits, or nil. The direction is NOT normalised: its length
+    --- is how far the ray reaches, so `direction * 100` is a hundred-metre ray. A tie between two
+    --- surfaces at the same distance resolves the same way on every run, because a query whose answer
+    --- depends on traversal order is a replay divergence waiting for a body count to change (R10).
+    function Raycast(self, origin: vector, direction: vector, params: RaycastParams?): RaycastResult?
+    --- The same question with a sphere swept along the ray instead of a point. This is what a camera
+    --- boom or a character's ground check wants: a ray slips through a gap narrower than the thing it
+    --- is standing in for.
+    function Spherecast(self, origin: vector, radius: number, direction: vector, params: RaycastParams?): RaycastResult?
+    --- Every part overlapping an oriented box, as a fresh array in a stable order -- one entry per part
+    --- however many of its surfaces are inside. `size` is the full extent, matching `BasePart.Size`.
+    function GetBodiesInBox(self, cframe: CFrame, size: vector, params: RaycastParams?): {BasePart}
 end
 
 declare extern type Lighting extends Instance with
@@ -768,6 +803,10 @@ declare Color3: {
 
 declare Random: {
     new: ((seed: number?) -> Random),
+}
+
+declare RaycastParams: {
+    new: ((options: { Filter: { Instance }?, FilterType: Enum.RaycastFilterType?, CollisionGroup: string? }?) -> RaycastParams),
 }
 
 declare Signal: {

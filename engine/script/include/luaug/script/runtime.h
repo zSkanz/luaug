@@ -87,6 +87,11 @@ public:
     // outlives this runtime, which is the whole reason the bag is not a Luau
     // table. Until it is called the runtime's own bag is used, so `SaveState`
     // works and simply does not survive anything.
+    // The physics mirror the query bindings read (`Workspace:Raycast` and its
+    // siblings). Null in a build with no backend, which those bindings answer
+    // as an empty world rather than as an error.
+    void setPhysics(scene::PhysicsSync* physics);
+
     void setReloadState(ReloadState* state);
 
     // Enqueues `PreReload` on the way out or `PostReload` on the way in

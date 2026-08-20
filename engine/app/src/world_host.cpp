@@ -267,6 +267,9 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
         // how a renderer spent four milestones lighting scenes with defaults --
         // so `world_host_tests.cpp` asserts it on a world no script touched.
         m_physics->setWorkspace(m_workspace);
+        // And the bindings, so `Workspace:Raycast` reads the same world the
+        // tick steps rather than a second one.
+        m_runtime->setPhysics(&*m_physics);
     }
 #endif
 

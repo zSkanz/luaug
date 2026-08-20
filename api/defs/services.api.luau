@@ -140,6 +140,50 @@ local Classes: { Schema.Class } = {
                     .. "frame that says why.",
             },
         } :: { Schema.Property },
+        Methods = {
+            {
+                Name = "Raycast",
+                Parameters = {
+                    { Name = "origin", Type = "vector" },
+                    { Name = "direction", Type = "vector" },
+                    { Name = "params", Type = "RaycastParams?", Default = "nil" },
+                },
+                Returns = { "RaycastResult?" },
+                ThreadSafety = "Unsafe",
+                Doc = "The nearest thing a ray from `origin` hits, or nil. The direction is NOT normalised: its "
+                    .. "length is how far the ray reaches, so `direction * 100` is a hundred-metre ray. A tie "
+                    .. "between two surfaces at the same distance resolves the same way on every run, because a "
+                    .. "query whose answer depends on traversal order is a replay divergence waiting for a body "
+                    .. "count to change (R10).",
+            },
+            {
+                Name = "Spherecast",
+                Parameters = {
+                    { Name = "origin", Type = "vector" },
+                    { Name = "radius", Type = "number" },
+                    { Name = "direction", Type = "vector" },
+                    { Name = "params", Type = "RaycastParams?", Default = "nil" },
+                },
+                Returns = { "RaycastResult?" },
+                ThreadSafety = "Unsafe",
+                Doc = "The same question with a sphere swept along the ray instead of a point. This is what a "
+                    .. "camera boom or a character's ground check wants: a ray slips through a gap narrower than "
+                    .. "the thing it is standing in for.",
+            },
+            {
+                Name = "GetBodiesInBox",
+                Parameters = {
+                    { Name = "cframe", Type = "CFrame" },
+                    { Name = "size", Type = "vector" },
+                    { Name = "params", Type = "RaycastParams?", Default = "nil" },
+                },
+                Returns = { "{BasePart}" },
+                ThreadSafety = "Unsafe",
+                Doc = "Every part overlapping an oriented box, as a fresh array in a stable order -- one entry "
+                    .. "per part however many of its surfaces are inside. `size` is the full extent, matching "
+                    .. "`BasePart.Size`.",
+            },
+        } :: { Schema.Method },
     },
     {
         Name = "Lighting",

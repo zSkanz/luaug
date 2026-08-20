@@ -196,6 +196,11 @@ void ScriptRuntime::setGizmoSink(const GizmoSink& sink)
     m_impl->services.gizmos = sink;
 }
 
+void ScriptRuntime::setPhysics(scene::PhysicsSync* physics)
+{
+    m_impl->services.physics = physics;
+}
+
 void ScriptRuntime::setReloadState(ReloadState* state)
 {
     if (state != nullptr)

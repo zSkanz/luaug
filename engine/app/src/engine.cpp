@@ -777,6 +777,17 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
         if (report.failed != 0)
             return core::makeError(LUAUG_TR("engine.tests.err.failed"), args);
+
+        // A spec that does not compile is not a spec that passed. Before this,
+        // a syntax error in one file logged a line and the run reported "955
+        // passed, 0 failed" over a suite that had silently lost seventeen cases
+        // -- a gate that can pass while doing nothing, which is the twelfth
+        // instance of that shape in six milestones and the one that had to be
+        // found by noticing a number did not move.
+        if (const core::u64 failures = host->scriptLoadFailures(); failures != 0) {
+            const std::array<I18nArg, 1> loadArgs{I18nArg{"count", static_cast<core::i64>(failures)}};
+            return core::makeError(LUAUG_TR("engine.tests.err.load_failed"), loadArgs);
+        }
     }
 
     const std::array<I18nArg, 2> summary{I18nArg{"frames", static_cast<core::i64>(scheduler.totalFrames())},

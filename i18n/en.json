@@ -17,6 +17,7 @@
   "engine.cli.err.capture_needs_backend": "--capture-out needs --rhi=capture; no other backend records a command stream.",
 
   "engine.tests.info.summary": "Conformance: {total} cases, {passed} passed, {failed} failed.",
+  "engine.tests.err.load_failed": "{count} spec file(s) failed to load; a spec that does not compile is not a spec that passed.",
   "engine.tests.err.failed": "Conformance failed: {failed} of {total} cases.",
   "engine.tests.err.report_failed": "Could not write the test report to {path}.",
   "engine.tests.err.never_ran": "The conformance suite never reported. Either nothing was mounted, or game.Loaded never fired.",
@@ -161,6 +162,7 @@
   "scene.err.unknown_stat": "DebugService has no stat or panel named \"{name}\". The built-in panels are Stats, Scene, Log, Streaming and Physics; a custom stat exists once SetCustomStat has set it.",
   "scene.warn.wait_for_child": "Infinite yield possible on WaitForChild(\"{name}\") — parent: {parent}.",
 
+  "script.err.raycast_filter_type": "RaycastParams.FilterType takes an Enum.RaycastFilterType item.",
   "script.err.vm_create_failed": "Could not create the Luau virtual machine.",
   "script.err.vm_not_booted": "The script runtime has not been started.",
   "script.err.syntax": "Could not compile {source}: {message}",

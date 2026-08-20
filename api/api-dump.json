@@ -1143,7 +1143,72 @@
           "Default": "vector.create(0, -9.81, 0)"
         }
       ],
-      "Methods": [],
+      "Methods": [
+        {
+          "Name": "GetBodiesInBox",
+          "Parameters": [
+            {
+              "Name": "cframe",
+              "Type": "CFrame"
+            },
+            {
+              "Name": "size",
+              "Type": "vector"
+            },
+            {
+              "Name": "params",
+              "Type": "RaycastParams?",
+              "Default": "nil"
+            }
+          ],
+          "Returns": ["{BasePart}"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Raycast",
+          "Parameters": [
+            {
+              "Name": "origin",
+              "Type": "vector"
+            },
+            {
+              "Name": "direction",
+              "Type": "vector"
+            },
+            {
+              "Name": "params",
+              "Type": "RaycastParams?",
+              "Default": "nil"
+            }
+          ],
+          "Returns": ["RaycastResult?"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Spherecast",
+          "Parameters": [
+            {
+              "Name": "origin",
+              "Type": "vector"
+            },
+            {
+              "Name": "radius",
+              "Type": "number"
+            },
+            {
+              "Name": "direction",
+              "Type": "vector"
+            },
+            {
+              "Name": "params",
+              "Type": "RaycastParams?",
+              "Default": "nil"
+            }
+          ],
+          "Returns": ["RaycastResult?"],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
       "Events": []
     }
   ],
@@ -1711,6 +1776,72 @@
           "ThreadSafety": "Unsafe"
         }
       ],
+      "Operators": []
+    },
+    {
+      "Name": "RaycastParams",
+      "Constructors": [
+        {
+          "Name": "new",
+          "Parameters": [
+            {
+              "Name": "options",
+              "Type": "{ Filter: { Instance }?, FilterType: Enum.RaycastFilterType?, CollisionGroup: string? }?",
+              "Default": "nil"
+            }
+          ],
+          "Returns": ["RaycastParams"],
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Constants": [],
+      "Properties": [
+        {
+          "Name": "CollisionGroup",
+          "Type": "string",
+          "ReadOnly": true
+        },
+        {
+          "Name": "Filter",
+          "Type": "{ Instance }",
+          "ReadOnly": true
+        },
+        {
+          "Name": "FilterType",
+          "Type": "Enum.RaycastFilterType",
+          "ReadOnly": true
+        }
+      ],
+      "Methods": [],
+      "Operators": []
+    },
+    {
+      "Name": "RaycastResult",
+      "Constructors": [],
+      "Constants": [],
+      "Properties": [
+        {
+          "Name": "Distance",
+          "Type": "number",
+          "ReadOnly": true
+        },
+        {
+          "Name": "Instance",
+          "Type": "BasePart",
+          "ReadOnly": true
+        },
+        {
+          "Name": "Normal",
+          "Type": "vector",
+          "ReadOnly": true
+        },
+        {
+          "Name": "Position",
+          "Type": "vector",
+          "ReadOnly": true
+        }
+      ],
+      "Methods": [],
       "Operators": []
     },
     {

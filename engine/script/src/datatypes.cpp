@@ -12,6 +12,8 @@
 #include <new>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "class_descriptors.gen.h"
 
@@ -1006,6 +1008,161 @@ void registerRandom(lua_State* L, VmContext& ctx, core::AtomTable& atoms)
     lua_pop(L, 1);
 }
 
+// --- RaycastParams and RaycastResult (M5) ------------------------------------
+//
+// `RaycastParams` is the one tagged userdata in this file that owns heap
+// storage: its filter is a list, and a list is a vector. That is why it has a
+// per-tag destructor and why it is placement-constructed rather than copied
+// like `CFrame` and `Color3` are.
+//
+// Both are read-only once built. A cast is a question asked at one moment, and
+// a params object a script mutates between two casts is a question that means
+// something different depending on when the engine looked at it -- which is the
+// kind of thing that reads fine and replays differently.
+
+struct RaycastParamsData
+{
+    std::vector<core::InstanceId> filter;
+    // `Enum.RaycastFilterType`'s value.
+    core::i32 mode = 0;
+    // Empty means every group.
+    std::string collisionGroup;
+};
+
+struct RaycastResultData
+{
+    core::InstanceId instance;
+    core::DVec3 position;
+    Vec3 normal{0.0f, 1.0f, 0.0f};
+    float distance = 0.0f;
+};
+
+void raycastParamsDtor(lua_State*, void* userdata)
+{
+    static_cast<RaycastParamsData*>(userdata)->~RaycastParamsData();
+}
+
+int raycastParamsNew(lua_State* L)
+{
+    RaycastParamsData data;
+
+    if (!lua_isnoneornil(L, 1)) {
+        luaL_checktype(L, 1, LUA_TTABLE);
+
+        lua_getfield(L, 1, "Filter");
+        if (!lua_isnil(L, -1)) {
+            luaL_checktype(L, -1, LUA_TTABLE);
+            const int count = lua_objlen(L, -1);
+            data.filter.reserve(static_cast<usize>(count < 0 ? 0 : count));
+            for (int index = 1; index <= count; ++index) {
+                lua_rawgeti(L, -1, index);
+                data.filter.push_back(checkInstance(L, -1));
+                lua_pop(L, 1);
+            }
+        }
+        lua_pop(L, 1);
+
+        lua_getfield(L, 1, "FilterType");
+        if (!lua_isnil(L, -1)) {
+            const scene::EnumValue& item = checkTagged<scene::EnumValue>(L, -1, UserdataTag::EnumItem);
+            if (item.enumId != scene::generated::RaycastFilterTypeEnumId)
+                raise(L, LUAUG_TR("script.err.raycast_filter_type"));
+            data.mode = item.value;
+        }
+        lua_pop(L, 1);
+
+        lua_getfield(L, 1, "CollisionGroup");
+        if (!lua_isnil(L, -1)) {
+            size_t length = 0;
+            const char* text = luaL_checklstring(L, -1, &length);
+            data.collisionGroup.assign(text, length);
+        }
+        lua_pop(L, 1);
+    }
+
+    void* memory = lua_newuserdatataggedwithmetatable(L, sizeof(RaycastParamsData),
+                                                      static_cast<int>(UserdataTag::RaycastParams));
+    new (memory) RaycastParamsData(std::move(data));
+    return 1;
+}
+
+int raycastParamsGetFilter(lua_State* L)
+{
+    const RaycastParamsData& self = checkTagged<RaycastParamsData>(L, 1, UserdataTag::RaycastParams);
+
+    // A fresh array on every read, for the reason every other collection getter
+    // here returns one: a caller may sort or edit what it is handed, and a view
+    // into the object's own storage would make that a mutation of the params.
+    lua_createtable(L, static_cast<int>(self.filter.size()), 0);
+    for (usize index = 0; index < self.filter.size(); ++index) {
+        pushInstance(L, self.filter[index]);
+        lua_rawseti(L, -2, static_cast<int>(index) + 1);
+    }
+    return 1;
+}
+
+int raycastParamsGetFilterType(lua_State* L)
+{
+    const RaycastParamsData& self = checkTagged<RaycastParamsData>(L, 1, UserdataTag::RaycastParams);
+    pushEnumItemImpl(L, scene::EnumValue{scene::generated::RaycastFilterTypeEnumId, self.mode});
+    return 1;
+}
+
+int raycastParamsGetCollisionGroup(lua_State* L)
+{
+    const RaycastParamsData& self = checkTagged<RaycastParamsData>(L, 1, UserdataTag::RaycastParams);
+    lua_pushlstring(L, self.collisionGroup.data(), self.collisionGroup.size());
+    return 1;
+}
+
+int raycastResultGetInstance(lua_State* L)
+{
+    pushInstance(L, checkTagged<RaycastResultData>(L, 1, UserdataTag::RaycastResult).instance);
+    return 1;
+}
+
+int raycastResultGetPosition(lua_State* L)
+{
+    pushVec3(L, core::toVec3(checkTagged<RaycastResultData>(L, 1, UserdataTag::RaycastResult).position));
+    return 1;
+}
+
+int raycastResultGetNormal(lua_State* L)
+{
+    pushVec3(L, checkTagged<RaycastResultData>(L, 1, UserdataTag::RaycastResult).normal);
+    return 1;
+}
+
+int raycastResultGetDistance(lua_State* L)
+{
+    lua_pushnumber(L, static_cast<double>(checkTagged<RaycastResultData>(L, 1, UserdataTag::RaycastResult).distance));
+    return 1;
+}
+
+void registerQueryTypes(lua_State* L, VmContext& ctx, core::AtomTable& atoms)
+{
+    MemberTable& paramGetters = ctx.getters[static_cast<usize>(UserdataTag::RaycastParams)];
+    addMember(paramGetters, atoms, "Filter", raycastParamsGetFilter);
+    addMember(paramGetters, atoms, "FilterType", raycastParamsGetFilterType);
+    addMember(paramGetters, atoms, "CollisionGroup", raycastParamsGetCollisionGroup);
+    installTagMetatable(L, UserdataTag::RaycastParams, nullptr, nullptr);
+    // The one destructor in this file. Registered per tag, which is Luau's
+    // shape for it, and the reason the payload may own a vector at all.
+    lua_setuserdatadtor(L, static_cast<int>(UserdataTag::RaycastParams), raycastParamsDtor);
+
+    MemberTable& resultGetters = ctx.getters[static_cast<usize>(UserdataTag::RaycastResult)];
+    addMember(resultGetters, atoms, "Instance", raycastResultGetInstance);
+    addMember(resultGetters, atoms, "Position", raycastResultGetPosition);
+    addMember(resultGetters, atoms, "Normal", raycastResultGetNormal);
+    addMember(resultGetters, atoms, "Distance", raycastResultGetDistance);
+    installTagMetatable(L, UserdataTag::RaycastResult, nullptr, nullptr);
+
+    const luaL_Reg constructors[] = {{"new", raycastParamsNew}, {nullptr, nullptr}};
+    luaL_register(L, "RaycastParams", constructors);
+    lua_setreadonly(L, -1, true);
+    lua_pop(L, 1);
+}
+
 void registerEnumTypes(lua_State* L, VmContext& ctx, core::AtomTable& atoms)
 {
     MemberTable& itemGetters = ctx.getters[static_cast<usize>(UserdataTag::EnumItem)];
@@ -1086,6 +1243,19 @@ void registerVector(lua_State* L)
 
 } // namespace
 
+RaycastQuery checkRaycastParams(lua_State* L, int index)
+{
+    const RaycastParamsData& self = checkTagged<RaycastParamsData>(L, index, UserdataTag::RaycastParams);
+    return RaycastQuery{self.filter, self.mode, self.collisionGroup};
+}
+
+void pushRaycastResult(lua_State* L, core::InstanceId instance, core::DVec3 position, Vec3 normal, float distance)
+{
+    void* memory = lua_newuserdatataggedwithmetatable(L, sizeof(RaycastResultData),
+                                                      static_cast<int>(UserdataTag::RaycastResult));
+    new (memory) RaycastResultData{instance, position, normal, distance};
+}
+
 void registerDatatypes(lua_State* L)
 {
     VmContext& ctx = context(L);
@@ -1094,6 +1264,7 @@ void registerDatatypes(lua_State* L)
     registerCFrame(L, ctx, atoms);
     registerColor3(L, ctx, atoms);
     registerRandom(L, ctx, atoms);
+    registerQueryTypes(L, ctx, atoms);
     registerEnumTypes(L, ctx, atoms);
     registerVector(L);
 }

@@ -747,6 +747,81 @@ local Datatypes: { Schema.Datatype } = {
         } :: { Schema.Method },
     },
     {
+        Name = "RaycastParams",
+        Module = "script",
+        Doc = "What a cast is allowed to hit. Every query on `Workspace` takes one, and omitting it means "
+            .. "everything queryable. Constructed from a table so that a call site reads as the question it "
+            .. "is asking rather than as four positional arguments (§2.3).",
+        Constructors = {
+            {
+                Name = "new",
+                Parameters = { { Name = "options", Type = "{ Filter: { Instance }?, FilterType: Enum.RaycastFilterType?, CollisionGroup: string? }?", Default = "nil" } },
+                Returns = { "RaycastParams" },
+                ThreadSafety = "Safe",
+                Doc = "Filter defaults to empty, FilterType to Exclude and CollisionGroup to the empty string, "
+                    .. "which means every group. An empty Exclude filter therefore hits everything, and an "
+                    .. "empty Include filter hits nothing -- which is what each word means and is worth "
+                    .. "knowing before a query silently returns nil.",
+            },
+        } :: { Schema.Method },
+        Properties = {
+            {
+                Name = "Filter",
+                Type = "{ Instance }",
+                ReadOnly = true,
+                Doc = "The instances the filter names, as a fresh array on every read. Descendants of a named "
+                    .. "instance are covered too, so filtering a Model filters its parts.",
+            },
+            {
+                Name = "FilterType",
+                Type = "Enum.RaycastFilterType",
+                ReadOnly = true,
+                Doc = "Whether Filter names what may be hit or what must be ignored.",
+            },
+            {
+                Name = "CollisionGroup",
+                Type = "string",
+                ReadOnly = true,
+                Doc = "The group a hit must be in, or the empty string for any group. A camera ray asking for "
+                    .. "\"Terrain\" is cheaper than one that hits everything and filters afterwards.",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "RaycastResult",
+        Module = "script",
+        Doc = "What a cast hit. Returned by `Workspace:Raycast` and `:Spherecast`, and nil when nothing was "
+            .. "hit -- there is no \"empty result\" to check a field on, because a result that exists and "
+            .. "means nothing is the shape of every nil-check somebody forgets.",
+        Properties = {
+            {
+                Name = "Instance",
+                Type = "BasePart",
+                ReadOnly = true,
+                Doc = "The part that was hit.",
+            },
+            {
+                Name = "Position",
+                Type = "vector",
+                ReadOnly = true,
+                Doc = "Where on it, in world space.",
+            },
+            {
+                Name = "Normal",
+                Type = "vector",
+                ReadOnly = true,
+                Doc = "The surface normal there, pointing out of the surface.",
+            },
+            {
+                Name = "Distance",
+                Type = "number",
+                ReadOnly = true,
+                Doc = "How far along the cast the hit is, in metres. The direction passed to a cast is not "
+                    .. "normalised -- its length is the range -- so this is a distance rather than a fraction.",
+            },
+        } :: { Schema.Property },
+    },
+    {
         Name = "Signal",
         Module = "script",
         Doc = "THE signal type, spelled `Signal<T...>` where the pack is what handlers receive and `Wait` "

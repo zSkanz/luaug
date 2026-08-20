@@ -98,6 +98,18 @@ enum class UserdataTag : int
     Enum = 8,
     Enums = 9,
 
+    // The two query datatypes (M5), after the enum tags rather than before them
+    // -- an explicit value in the middle of a list that otherwise counts up
+    // leaves `Count` sitting on one of them, which is a duplicate `case` and was
+    // exactly the first error this file produced.
+    //
+    // `RaycastParams` is the one tagged userdata here that OWNS heap storage:
+    // its filter is a list, so it is the one with a per-tag destructor
+    // (`lua_setuserdatadtor`). Everything else in this enum is trivially
+    // copyable and collected without ceremony.
+    RaycastParams = 10,
+    RaycastResult = 11,
+
     // Not a tag. The count exists so a registration loop can assert it covered
     // everything, and so the budget remaining is a number someone can read.
     Count,

@@ -63,6 +63,10 @@ const char* typeName(UserdataTag tag) noexcept
         return "Connection";
     case UserdataTag::EnumItem:
         return "EnumItem";
+    case UserdataTag::RaycastParams:
+        return "RaycastParams";
+    case UserdataTag::RaycastResult:
+        return "RaycastResult";
     case UserdataTag::Enum:
         return "Enum";
     case UserdataTag::Enums:

@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstddef>
 #include <string>
+#include <vector>
 
 #include "class_descriptors.gen.h"
 
@@ -546,6 +547,142 @@ int physicsGetRegisteredCollisionGroups(lua_State* L)
     return 1;
 }
 
+// --- Workspace queries (M5) --------------------------------------------------
+//
+// Every one of them reads the same physics world the tick steps. A build with
+// no physics backend answers "nothing", which is the same answer an empty world
+// gives -- a query is a question about the world, and a world with no bodies in
+// it has an honest empty answer rather than an error.
+//
+// The filter crosses the seam as a list of opaque user-data values, because that
+// is the only identity `physics` has. Descendants are expanded here: filtering a
+// Model means filtering its parts, and the module below has no tree to walk.
+
+[[nodiscard]] physics::QueryFilter buildFilter(lua_State* L, int index, std::vector<u64>& storage)
+{
+    physics::QueryFilter filter;
+    if (lua_isnoneornil(L, index))
+        return filter;
+
+    const RaycastQuery params = checkRaycastParams(L, index);
+    filter.mode = params.mode == 1 ? physics::QueryFilter::Mode::Include : physics::QueryFilter::Mode::Exclude;
+
+    World& w = world(L);
+    const scene::PhysicsSync& sync = *services(L).physics;
+
+    std::vector<core::InstanceId> descendants;
+    for (const core::InstanceId id : params.filter) {
+        if (!w.alive(id))
+            continue;
+        storage.push_back(sync.userDataOf(id));
+        // "Descendants of a named instance are covered too, so filtering a Model
+        // filters its parts" -- the property's own Doc.
+        descendants.clear();
+        w.collectDescendants(id, descendants);
+        for (const core::InstanceId descendant : descendants)
+            storage.push_back(sync.userDataOf(descendant));
+    }
+    filter.userData = storage;
+
+    if (!params.collisionGroup.empty()) {
+        const u16 group = w.collisionGroups().find(w.atoms().lookup(params.collisionGroup));
+        if (group == scene::CollisionGroups::kInvalid)
+            raise(L, LUAUG_TR("scene.err.unknown_collision_group"));
+        filter.filterGroup = true;
+        filter.group = static_cast<physics::CollisionGroup>(group);
+    }
+    return filter;
+}
+
+int workspaceRaycast(lua_State* L)
+{
+    (void)checkInstance(L, 1);
+    const core::Vec3 origin = checkVector3(L, 2);
+    const core::Vec3 direction = checkVector3(L, 3);
+
+    scene::PhysicsSync* sync = services(L).physics;
+    if (sync == nullptr) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    std::vector<u64> storage;
+    const physics::QueryFilter filter = buildFilter(L, 4, storage);
+
+    physics::RayD ray;
+    ray.origin = core::toDVec3(origin);
+    ray.direction = direction;
+
+    physics::RayHit hit;
+    if (!sync->backend().raycast(sync->worldHandle(), ray, filter, hit)) {
+        lua_pushnil(L);
+        return 1;
+    }
+    pushRaycastResult(L, sync->instanceOf(hit.userData), hit.position, hit.normal, hit.distance);
+    return 1;
+}
+
+int workspaceSpherecast(lua_State* L)
+{
+    (void)checkInstance(L, 1);
+    const core::Vec3 origin = checkVector3(L, 2);
+    const auto radius = static_cast<f32>(luaL_checknumber(L, 3));
+    const core::Vec3 direction = checkVector3(L, 4);
+
+    scene::PhysicsSync* sync = services(L).physics;
+    if (sync == nullptr) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    std::vector<u64> storage;
+    const physics::QueryFilter filter = buildFilter(L, 5, storage);
+
+    physics::RayD ray;
+    ray.origin = core::toDVec3(origin);
+    ray.direction = direction;
+
+    physics::RayHit hit;
+    if (!sync->backend().spherecast(sync->worldHandle(), ray, radius, filter, hit)) {
+        lua_pushnil(L);
+        return 1;
+    }
+    pushRaycastResult(L, sync->instanceOf(hit.userData), hit.position, hit.normal, hit.distance);
+    return 1;
+}
+
+int workspaceGetBodiesInBox(lua_State* L)
+{
+    (void)checkInstance(L, 1);
+    const core::CFrameD& frame = checkCFrame(L, 2);
+    const core::Vec3 size = checkVector3(L, 3);
+
+    scene::PhysicsSync* sync = services(L).physics;
+    if (sync == nullptr) {
+        lua_createtable(L, 0, 0);
+        return 1;
+    }
+
+    std::vector<u64> storage;
+    const physics::QueryFilter filter = buildFilter(L, 4, storage);
+
+    std::vector<u64> hits;
+    sync->backend().overlapBox(sync->worldHandle(), frame, size, filter, hits);
+
+    // Built after the query rather than during it, because a hit that names an
+    // instance the world has since retired is a hit with nothing to hand back.
+    lua_createtable(L, static_cast<int>(hits.size()), 0);
+    int written = 0;
+    for (const u64 userData : hits) {
+        const core::InstanceId id = sync->instanceOf(userData);
+        if (!id.valid())
+            continue;
+        pushInstance(L, id);
+        lua_rawseti(L, -2, ++written);
+    }
+    return 1;
+}
+
 // `WaitForChild` is here rather than in `instance_binding.cpp` because it parks
 // on a tree state and only the resumption phase this file owns can wake it.
 constexpr InstanceMethodBinding ServiceMethods[] = {
@@ -575,6 +712,10 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"HotReloadService", "SaveState", hotReloadSaveState},
     {"HotReloadService", "LoadState", hotReloadLoadState},
     {"HotReloadService", "IsReload", hotReloadIsReload},
+
+    {"Workspace", "Raycast", workspaceRaycast},
+    {"Workspace", "Spherecast", workspaceSpherecast},
+    {"Workspace", "GetBodiesInBox", workspaceGetBodiesInBox},
 
     {"PhysicsService", "RegisterCollisionGroup", physicsRegisterCollisionGroup},
     {"PhysicsService", "CollisionGroupSetCollidable", physicsCollisionGroupSetCollidable},
