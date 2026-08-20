@@ -557,7 +557,26 @@ green (macOS is Tier-3 and only CI can build it)
   started; it reported 205 files green while a fourteen-hundred-line new module
   sat beside them unchecked.
 - **The defect register is reconciled**: D016 closed with the commit that fixed
-  it, D021 and D022 opened with milestones attached.
+  it, D021 and D022 opened with milestones attached, D023 and D024 opened and
+  closed by CI within the same session.
+
+**CI, run 32408288019, green on all three tiers:**
+
+```
+Decide whether the build jobs run: success
+clang-format: success
+luau-check: success
+docs-lint: success
+build-test (ubuntu-latest, linux-clang-dev): success
+build-test (windows-latest, win-msvc-dev): success
+build-macos: success
+```
+
+macOS is the one tier nothing local can build, and this is the first time it has
+compiled Jolt. It took two red runs to get here and both were worth having: an
+execute bit that only a runner would notice (D023), and a determinism trace that
+had been a cross-build check for four milestones without anybody having decided
+it should be (D024).
 
 ### 6. The picture, looked at against the scene it describes
 

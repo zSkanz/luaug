@@ -16,7 +16,9 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   (`milestone/m4`), its five gate items green against re-recorded artifacts.
   **M3** (`milestone/m3`), **M2** (`milestone/m2`), **M1**, **M0** — all signed
   off.
-- **CI is green on `main`.** macOS is blocking on every code push.
+- **CI is green on `main`**, run 32408288019, all three tiers — the first time
+  macOS has compiled Jolt. Two red runs preceded it and both found something a
+  local tier cannot see (D023, D024).
 
 ### M5: what the world can do that it could not
 
