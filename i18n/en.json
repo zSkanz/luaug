@@ -77,6 +77,8 @@
   "scene.err.unknown_stat": "DebugService has no stat or panel named \"{name}\". The built-in panels are Stats, Scene, Log, Streaming and Physics; a custom stat exists once SetCustomStat has set it.",
   "scene.warn.wait_for_child": "Infinite yield possible on WaitForChild(\"{name}\") — parent: {parent}.",
 
+  "script.err.vm_create_failed": "Could not create the Luau virtual machine.",
+  "script.err.vm_not_booted": "The script runtime has not been started.",
   "script.err.syntax": "Could not compile {source}: {message}",
   "script.err.runtime": "Error while running {source}: {message}",
   "script.err.unknown_member": "{typeName} has no member named \"{member}\".",

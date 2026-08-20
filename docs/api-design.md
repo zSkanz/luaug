@@ -24,8 +24,11 @@ globals or datatypes above, and is not removed below simply does not exist.
 Functions: `assert`, `error`, `print`, `warn`, `pcall`, `xpcall`, `select`,
 `next`, `pairs`, `ipairs`, `rawget`, `rawset`, `rawequal`, `rawlen`,
 `getmetatable`, `setmetatable`, `tonumber`, `tostring`, `type`, `typeof`,
-`unpack`, `require`, `gcinfo`, `collectgarbage` (`"count"` only, as in stock
-Luau), plus the `_VERSION` string. Libraries: `task` (§3.2), `vector`,
+`unpack`, `require`, `gcinfo`, plus the `_VERSION` string. (`collectgarbage`
+was listed here and is **not** a Luau global — `lbaselib.cpp` defines neither it
+nor `warn`. `gcinfo` covers the same ground, and GC pacing is the engine's job
+per architecture §3, not a script's. `warn` stays on the list because the engine
+installs it; `collectgarbage` came off because nothing does.) Libraries: `task` (§3.2), `vector`,
 `buffer`, `bit32`, `math`, `table`, `string`, `coroutine`, `utf8`, `debug`,
 and `os` — which carries `os.clock`, `os.time` and `os.date` and nothing else,
 so `os.difftime`, `os.getenv`, `os.remove` and the rest of the process-facing

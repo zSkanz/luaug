@@ -73,6 +73,7 @@ add_subdirectory(engine/platform)
 add_subdirectory(engine/rhi)
 add_subdirectory(engine/scene)
 add_subdirectory(engine/render)
+add_subdirectory(engine/script)
 add_subdirectory(engine/app)
 
 # Repo tooling, after third_party so it can link what it vendors.
