@@ -110,6 +110,22 @@ enum class EditorKind : core::u8
 // the world then refuses is a UI making a claim it cannot keep.
 [[nodiscard]] bool editable(const scene::PropertyDesc& descriptor) noexcept;
 
+// What a property's row says about itself beyond its value: `nullptr` for the
+// ordinary case, "(ro)" for read-only, "(stored)" for a property the engine
+// keeps faithfully and nothing acts on.
+//
+// The third one is why this function exists. Every unbacked-behaviour defect
+// this project has found was found the same way -- a human changed a value in
+// this panel and watched nothing happen -- and in each case the engine was
+// behaving exactly as designed while the panel implied otherwise. A widget that
+// accepts a value, stores it, reads it back, and changes nothing is
+// indistinguishable from a broken one unless it says so.
+//
+// Read-only wins when a property is somehow both: "you cannot change this" is
+// the more useful thing to say, and a read-only property nothing consumes is a
+// declaration problem rather than a panel one.
+[[nodiscard]] const char* propertyTag(const scene::PropertyDesc& descriptor) noexcept;
+
 // Every property the class has, inherited members first and in slot order --
 // the same numbering `ClassRegistry::propertySlot` assigns, so what the panel
 // lists and what a subscription addresses are one order.

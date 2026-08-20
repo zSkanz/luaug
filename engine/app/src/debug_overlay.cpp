@@ -418,10 +418,17 @@ void drawProperties(scene::World& world, Inspector& inspector)
 
             const std::string_view propertyName = world.atoms().text(descriptor->name);
             ImGui::Text("%.*s", static_cast<int>(propertyName.size()), propertyName.data());
-            if (descriptor->readOnly)
+            if (const char* tag = propertyTag(*descriptor); tag != nullptr)
             {
                 ImGui::SameLine();
-                ImGui::TextDisabled("(ro)");
+                ImGui::TextDisabled("%s", tag);
+                // The tooltip carries the part a three-character tag cannot: an
+                // inert property is not broken and not read-only, it is waiting
+                // for the milestone that renders it.
+                if (descriptor->inert && ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("stored and read back faithfully; nothing in this build acts on it yet");
+                }
             }
 
             ImGui::TableSetColumnIndex(1);

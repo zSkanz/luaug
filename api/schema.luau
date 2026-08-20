@@ -60,14 +60,37 @@ export type Property = {
     --- generator stays ignorant of components, and moving a property's storage
     --- is a change in one C++ file rather than in the API definition.
     ---
-    --- Absent means the property is declared but not yet backed. It appears in
-    --- the type definitions and the documentation, and reading it yields
-    --- nothing -- which is honest for a surface that ships ahead of its
-    --- implementation, and visible, because the generator counts them.
+    --- Absent means the accessor pair is named by the default rule --
+    --- `<class><Property>` in lower camel -- and the property IS backed. The
+    --- override exists for the cases where that name would be wrong.
+    ---
+    --- **`Native = ""` is how the IDL says "declared, not yet backed"**: it
+    --- produces null accessors, reading yields nothing, and the generator counts
+    --- them, so a surface shipping ahead of its implementation is a number in
+    --- the generator's output rather than a discovery made by reading `nil` off
+    --- a property. This paragraph said the opposite until M4.5 -- that *absent*
+    --- meant unbacked -- which would have made every property in these files
+    --- unbacked, including the ones a conformance suite exercises.
     Native: string?,
     --- Whether the property survives serialization; the default is that it
     --- does, so only the exceptions are marked.
     Transient: boolean?,
+    --- **Backed, stored, read back faithfully -- and nothing acts on it yet.**
+    ---
+    --- Distinct from an absent `Native`, which means the property is not backed
+    --- at all and reads as nothing. An inert property round-trips perfectly and
+    --- changes nothing about the running engine, which is the harder case to
+    --- notice: every way of checking it from a script agrees with what was
+    --- written.
+    ---
+    --- It exists because all three of M4's unbacked-behaviour defects were found
+    --- the same way -- a human changing a value in the inspector and watching
+    --- nothing happen. The marker reaches `PropertyDesc` and the inspector shows
+    --- it, so the panel can say "stored" where it would otherwise imply "done".
+    ---
+    --- A marker is not permission. Every entry here is a debt with a milestone
+    --- attached, named in the property's own `Doc`.
+    Inert: boolean?,
     Doc: string,
 }
 
@@ -274,6 +297,13 @@ local PrimitiveFields: { [string]: boolean } = {
 
 local function checkProperty(errors: { string }, owner: string, property: Property)
     local where = `{owner}.{property.Name}`
+    -- `Inert` says "backed, stored, and nothing reads it". `Native = ""` says
+    -- "not backed at all", which the generator already counts separately. Two
+    -- markers on one property would leave a reader unable to tell which of the
+    -- two claims it is making.
+    if property.Inert == true and property.Native == "" then
+        table.insert(errors, `{where}: Inert and Native="" are different claims -- an unbacked property stores nothing`)
+    end
     if not isPascalCase(property.Name) and not PrimitiveFields[where] then
         table.insert(errors, `{where}: property names are PascalCase (§9)`)
     end

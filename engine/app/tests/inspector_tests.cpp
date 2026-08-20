@@ -13,6 +13,7 @@
 // shown to be generic, which is the brief's own wording of the risk.
 #include <doctest/doctest.h>
 
+#include <ostream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -32,6 +33,7 @@ using luaug::app::editable;
 using luaug::app::editorFor;
 using luaug::app::EditorKind;
 using luaug::app::formatValue;
+using luaug::app::propertyTag;
 using luaug::app::Inspector;
 using luaug::app::setResultLabel;
 using luaug::app::TreeRow;
@@ -343,4 +345,35 @@ TEST_CASE("the outcome history is bounded")
     CHECK(world.getProperty(subject, fixture.atom("Count"))
           == scene::Value{static_cast<core::f64>(Inspector::OutcomeHistory * 3)});
     CHECK(inspector.outcomes().back().result == SetResult::Changed);
+}
+
+TEST_CASE("a property that is stored and unread says so")
+{
+    // The mechanism M4.5 adds, and the reason it exists: all three of this
+    // project's unbacked-behaviour defects were found by a human changing a
+    // value here and watching nothing happen, while the engine behaved exactly
+    // as designed and the panel implied otherwise.
+    scene::PropertyDesc plain;
+    CHECK(propertyTag(plain) == nullptr);
+
+    scene::PropertyDesc readOnly;
+    readOnly.readOnly = true;
+    CHECK(std::string_view(propertyTag(readOnly)) == "(ro)");
+
+    scene::PropertyDesc inert;
+    inert.inert = true;
+    CHECK(std::string_view(propertyTag(inert)) == "(stored)");
+
+    // Still editable: it accepts the write, keeps it, and reads it back. What it
+    // does not do is act on it, and that is the whole distinction from readOnly.
+    inert.type = scene::ValueType::Bool;
+    inert.set = [](scene::World&, core::InstanceId, const scene::Value&) { return true; };
+    CHECK(editable(inert));
+
+    // Read-only wins when a property is somehow both: "you cannot change this"
+    // is the more useful thing to say.
+    scene::PropertyDesc both;
+    both.readOnly = true;
+    both.inert = true;
+    CHECK(std::string_view(propertyTag(both)) == "(ro)");
 }

@@ -428,6 +428,7 @@ local Classes: { Schema.Class } = {
             },
             {
                 Name = "Shadows",
+                Inert = true,
                 Type = "boolean",
                 Doc = "Whether this light should cast shadows. Stored and reported faithfully, and not yet acted "
                     .. "on: this release casts shadows from the sun alone.",
@@ -464,6 +465,7 @@ local Classes: { Schema.Class } = {
             },
             {
                 Name = "Shadows",
+                Inert = true,
                 Type = "boolean",
                 Doc = "Whether this light should cast shadows. Stored and not yet acted on, as on PointLight.",
             },

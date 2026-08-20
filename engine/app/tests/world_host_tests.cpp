@@ -504,3 +504,34 @@ TEST_CASE("two runs of the same script and seed produce the same world hash")
     // platform, same seed, same script -- same hash (ADR 0025).
     CHECK(runOnce(1234u) == runOnce(1234u));
 }
+
+TEST_CASE("the two lights' Shadows properties are the ones marked")
+{
+    // Named rather than counted, because the point of the marker is that a
+    // specific property tells the truth about itself. A count would pass while
+    // the wrong one was marked.
+    Captured log;
+    app::WorldHost host;
+    REQUIRE_FALSE(host.boot({}).has_value());
+    const scene::ClassRegistry& classes = host.world().classes();
+    const core::AtomTable& atoms = host.world().atoms();
+
+    for (const char* className : {"PointLight", "SpotLight"})
+    {
+        const scene::ClassId id = classes.findId(atoms.lookup(className));
+        REQUIRE(id != scene::InvalidClass);
+        const scene::PropertyDesc* shadows = classes.findProperty(id, atoms.lookup("Shadows"));
+        REQUIRE(shadows != nullptr);
+        CHECK(shadows->inert);
+        // Backed, which is the difference the marker is making: it stores and
+        // returns what was written.
+        CHECK(shadows->get != nullptr);
+        CHECK(shadows->set != nullptr);
+
+        // And its neighbours are not marked, so "inert" is a statement about
+        // this property rather than about the class.
+        const scene::PropertyDesc* brightness = classes.findProperty(id, atoms.lookup("Brightness"));
+        REQUIRE(brightness != nullptr);
+        CHECK_FALSE(brightness->inert);
+    }
+}

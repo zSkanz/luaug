@@ -304,6 +304,10 @@ local function propertyNode(property: Schema.Property): Node
     appendOptional(fields, "Default", property.Default)
     appendOptional(fields, "ThreadSafety", property.ThreadSafety)
     appendFlag(fields, "Transient", property.Transient)
+    -- In the dump because it is a fact about the public surface: a tool reading
+    -- this to generate documentation should be able to say "stored, not yet
+    -- acted on" without anyone having to remember it.
+    appendFlag(fields, "Inert", property.Inert)
     return objectNode(fields)
 end
 

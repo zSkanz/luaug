@@ -91,14 +91,10 @@ TEST_CASE("a redeclared member shadows the inherited one")
     // the derived class must return this descriptor and not the base's.
     static std::vector<luaug::scene::PropertyDesc> shadowing;
     shadowing = {luaug::scene::PropertyDesc{
-        schema.nameProperty,
-        luaug::scene::ValueType::String,
-        luaug::scene::ThreadSafety::Safe,
-        true,
-        {},
-        {},
-        nullptr,
-        nullptr}};
+        .name = schema.nameProperty,
+        .type = luaug::scene::ValueType::String,
+        .threadSafety = luaug::scene::ThreadSafety::Safe,
+        .readOnly = true}};
 
     ClassDescriptor shadowed;
     shadowed.name = schema.atoms.intern("Shadowed");

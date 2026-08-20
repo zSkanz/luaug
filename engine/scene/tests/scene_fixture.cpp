@@ -120,34 +120,32 @@ Hierarchy::Hierarchy()
 
     // Owned by this `Hierarchy`; the registry holds spans into them, which is
     // why the type is non-movable.
+    //
+    // Designated rather than positional. These were positional until M4.5 added
+    // a field to `PropertyDesc`, at which point six fixtures stopped compiling
+    // and one of them would have silently kept compiling with the new flag
+    // reading an accessor pointer if the types had happened to line up.
     m_instanceProperties = {
-        PropertyDesc{nameProperty, ValueType::String, ThreadSafety::Unsafe, false, {}, {}, getName, setName},
+        PropertyDesc{
+            .name = nameProperty, .type = ValueType::String, .get = getName, .set = setName},
     };
     m_basePartProperties = {
         PropertyDesc{
-            transparencyProperty,
-            ValueType::Number,
-            ThreadSafety::Unsafe,
-            false,
-            {},
-            {},
-            getTransparency,
-            setTransparency},
-        PropertyDesc{sizeProperty, ValueType::Vector3, ThreadSafety::Unsafe, false, {}, {}, getSize, setSize},
+            .name = transparencyProperty,
+            .type = ValueType::Number,
+            .get = getTransparency,
+            .set = setTransparency},
+        PropertyDesc{.name = sizeProperty, .type = ValueType::Vector3, .get = getSize, .set = setSize},
     };
     m_partProperties = {
-        PropertyDesc{shapeProperty, ValueType::Number, ThreadSafety::Unsafe, false, {}, {}, getShape, setShape},
+        PropertyDesc{.name = shapeProperty, .type = ValueType::Number, .get = getShape, .set = setShape},
     };
     m_modelProperties = {
         PropertyDesc{
-            primaryPartProperty,
-            ValueType::Instance,
-            ThreadSafety::Unsafe,
-            false,
-            {},
-            {},
-            getPrimaryPart,
-            setPrimaryPart},
+            .name = primaryPartProperty,
+            .type = ValueType::Instance,
+            .get = getPrimaryPart,
+            .set = setPrimaryPart},
     };
 
     ClassDescriptor instanceClassDesc;

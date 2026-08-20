@@ -154,6 +154,15 @@ bool editable(const scene::PropertyDesc& descriptor) noexcept
     return kind != EditorKind::ReadOnlyText && kind != EditorKind::InstanceRef;
 }
 
+const char* propertyTag(const scene::PropertyDesc& descriptor) noexcept
+{
+    if (descriptor.readOnly)
+        return "(ro)";
+    if (descriptor.inert)
+        return "(stored)";
+    return nullptr;
+}
+
 void collectProperties(const scene::ClassRegistry& classes, scene::ClassId classId,
                        std::vector<const scene::PropertyDesc*>& out)
 {

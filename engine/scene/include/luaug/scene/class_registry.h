@@ -77,6 +77,13 @@ struct PropertyDesc
     ValueType type = ValueType::Nil;
     ThreadSafety threadSafety = ThreadSafety::Unsafe;
     bool readOnly = false;
+    // Backed, stored, read back faithfully -- and nothing acts on it yet. Not
+    // the same as unbacked: an inert property round-trips perfectly, so every
+    // way of checking it from a script agrees with what was written, which is
+    // exactly what makes it hard to notice. The inspector shows it, because all
+    // three of M4's cases were found by a human changing a value and watching
+    // nothing happen.
+    bool inert = false;
 
     // The doc text from the IDL, resolved through the catalog (ADR 0019).
     core::TextKey docKey{};
