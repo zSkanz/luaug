@@ -14,6 +14,7 @@ local json = require("@std/json")
 local process = require("@std/process")
 
 local catalog = require("../catalog")
+local output = require("../output")
 local projectlib = require("../project")
 
 local tr = catalog.tr
@@ -130,19 +131,22 @@ local function run(options: Options): number
     end
 
     -- TAP version 13, which is what every consumer of the format understands.
-    print("TAP version 13")
-    print(`1..{#cases}`)
+    -- Through `output.emit` rather than `print`, because this is a protocol
+    -- for another program and has no business being translated -- and because
+    -- the i18n lint tells the two apart by which function they went through.
+    output.emit("TAP version 13")
+    output.emit(`1..{#cases}`)
     local failed = 0
     for index, case in cases do
         if case.ok then
-            print(`ok {index} - {tapEscape(case.name)}`)
+            output.emit(`ok {index} - {tapEscape(case.name)}`)
         else
             failed += 1
-            print(`not ok {index} - {tapEscape(case.name)}`)
+            output.emit(`not ok {index} - {tapEscape(case.name)}`)
             if case.message ~= nil then
-                print(`  ---`)
-                print(`  message: {tapEscape(case.message :: string)}`)
-                print(`  ...`)
+                output.emit("  ---")
+                output.emit(`  message: {tapEscape(case.message :: string)}`)
+                output.emit("  ...")
             end
         end
     end

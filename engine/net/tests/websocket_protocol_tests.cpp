@@ -285,15 +285,18 @@ TEST_CASE("header names and the two token values are matched case-insensitively"
     CHECK_FALSE(validateServerHandshake(response, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=").has_value());
 }
 
-TEST_CASE("every way a handshake can fail reports the same key and says which one it was")
+TEST_CASE("every way a handshake can fail names itself")
 {
     seedRealCatalog();
 
-    const auto failsWith = [](std::string_view response, std::string_view expected)
+    // One key per cause rather than one message with the reason interpolated
+    // in: these are different problems with different fixes, and a whole
+    // sentence inside a translated frame is what R3 exists to prevent.
+    const auto failsWith = [](std::string_view response, std::string_view expected, luaug::core::TextKey key)
     {
         const auto error = validateServerHandshake(response, expected);
         REQUIRE(error.has_value());
-        CHECK(error->key.hash == LUAUG_TR("net.err.handshake_failed").hash);
+        CHECK(error->key.hash == key.hash);
         return error->message;
     };
 
@@ -302,25 +305,25 @@ TEST_CASE("every way a handshake can fail reports the same key and says which on
         const std::string response =
             "HTTP/1.1 400 Bad Request\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
             "Sec-WebSocket-Accept: x\r\n\r\n";
-        CHECK(failsWith(response, "x").find("400") != std::string::npos);
+        CHECK(failsWith(response, "x", LUAUG_TR("net.err.handshake_bad_status")).find("400") != std::string::npos);
     }
     SUBCASE("the upgrade header is absent")
     {
         const std::string response =
             "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: x\r\n\r\n";
-        CHECK_FALSE(failsWith(response, "x").empty());
+        CHECK_FALSE(failsWith(response, "x", LUAUG_TR("net.err.handshake_no_upgrade")).empty());
     }
     SUBCASE("the accept value is for a different key")
     {
         const std::string response =
             "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
             "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n";
-        CHECK_FALSE(failsWith(response, "AAAAAAAAAAAAAAAAAAAAAAAAAAA=").empty());
+        CHECK_FALSE(failsWith(response, "AAAAAAAAAAAAAAAAAAAAAAAAAAA=", LUAUG_TR("net.err.handshake_accept_mismatch")).empty());
     }
     SUBCASE("there is no accept header at all")
     {
         const std::string response =
             "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n";
-        CHECK_FALSE(failsWith(response, "x").empty());
+        CHECK_FALSE(failsWith(response, "x", LUAUG_TR("net.err.handshake_no_accept")).empty());
     }
 }

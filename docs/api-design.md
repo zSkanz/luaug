@@ -997,9 +997,15 @@ thread-safety assertions.
 **Generated artifacts per engine release** (all diff-checked in CI):
 1. `.luaug/types/engine.d.luau` — `declare extern type` for every
    class/datatype + global declarations (`game`, `workspace`, `script`,
-   `Instance.new` string-singleton overloads). Never `declare class`.
-2. `.luaug/types/engine-docs.json` — the luau-lsp documentation file
-   (hover/completion docs).
+   `Instance.new` string-singleton overloads). Never `declare class`. **The doc
+   text rides in this file** as `---` comments above each declaration, from the
+   same IDL string that produces the declaration.
+2. ~~`.luaug/types/engine-docs.json` — the luau-lsp documentation file.~~
+   **Dropped in M3.** It is an LSP-only setting with no `luau-lsp analyze`
+   flag, so nothing in the gate can prove a generated one is even shaped right,
+   and MASTER_PROMPT §9 forbids shipping a format we cannot verify. The `---`
+   comments in (1) carry the same text with one artifact instead of two and the
+   existing freshness gate already covering it.
 3. `.luaug/types/std/**` and `.luaug/types/luaug/**` — typed stub modules for
    `@std`/`@luaug` (editor resolution via `require.directoryAliases`).
 4. `api-dump.json` — versioned, machine-readable; CI diffs it to force

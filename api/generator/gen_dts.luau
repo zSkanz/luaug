@@ -135,6 +135,38 @@ end
 --- the first that matches.
 local SingletonMethod = "GetService"
 
+--- The IDL's doc text, wrapped as `---` comment lines above the declaration.
+---
+--- Carried in the definitions file itself rather than in the separate
+--- documentation JSON api-design.md §5 also lists. That format is an LSP-only
+--- setting -- `luau-lsp analyze` has no flag for it, so nothing in the gate can
+--- prove a generated one is even shaped right, and MASTER_PROMPT §9 forbids
+--- shipping a guess. A `---` comment is plain Luau, the freshness gate already
+--- covers this file, and there is no second artifact to keep in step.
+local function emitDoc(lines: { string }, indent: string, doc: string?)
+    if doc == nil or doc == "" then
+        return
+    end
+
+    -- Wrapped at a width that keeps the generated file inside stylua's column
+    -- budget once the indent is added.
+    local width = 100 - #indent
+    local line = ""
+    for word in string.gmatch(doc, "%S+") do
+        if line == "" then
+            line = word
+        elseif #line + #word + 1 <= width then
+            line ..= ` {word}`
+        else
+            table.insert(lines, `{indent}--- {line}`)
+            line = word
+        end
+    end
+    if line ~= "" then
+        table.insert(lines, `{indent}--- {line}`)
+    end
+end
+
 local function emitMembers(
     lines: { string },
     properties: { Schema.Property }?,
@@ -144,6 +176,7 @@ local function emitMembers(
 )
     for _, property in orEmpty(properties) do
         local access = if property.ReadOnly then "read " else ""
+        emitDoc(lines, "    ", property.Doc)
         table.insert(lines, `    {access}{property.Name}: {translateType(property.Type)}`)
     end
     for _, event in orEmpty(events) do
@@ -156,6 +189,7 @@ local function emitMembers(
         -- `Signal<>` -- an empty type pack has a spelling, and the analyzer
         -- rejects the other one.
         local pack = if #parts == 0 then "()" else table.concat(parts, ", ")
+        emitDoc(lines, "    ", event.Doc)
         table.insert(lines, `    read {event.Name}: Signal<{pack}>`)
     end
     for _, method in orEmpty(methods) do
@@ -166,6 +200,7 @@ local function emitMembers(
         end
         local parameters = parameterList(method.Parameters)
         local separator = if parameters == "" then "" else ", "
+        emitDoc(lines, "    ", method.Doc)
         table.insert(lines, `    function {method.Name}(self{separator}{parameters}): {returnList(method.Returns)}`)
     end
 end

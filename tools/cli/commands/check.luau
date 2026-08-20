@@ -50,7 +50,12 @@ local function collectLuau(root: string, ignore: { string }): { string }
             if entry.type == "dir" then
                 table.insert(pending, child)
             elseif entry.type == "file" and string.sub(entry.name, -5) == ".luau" then
-                table.insert(files, child)
+                -- A `.d.luau` declares; it is not a source, and analysing it as
+                -- one is a page of syntax errors on a perfectly valid file.
+                -- They go in through `--definitions` instead.
+                if string.sub(entry.name, -7) ~= ".d.luau" then
+                    table.insert(files, child)
+                end
             end
         end
     end

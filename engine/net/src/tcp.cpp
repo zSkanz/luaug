@@ -128,10 +128,21 @@ constexpr int kSendFlags = 0;
     return std::to_string(error);
 }
 
-[[nodiscard]] core::EngineError connectError(std::string_view host, u16 port, std::string_view detail)
+// One key per cause rather than one message with the reason interpolated in: a
+// whole sentence inside a translated frame is the mixed case R3 exists to
+// prevent. The OS error number is data and stays a parameter.
+[[nodiscard]] core::EngineError connectError(std::string_view host, u16 port, core::TextKey key)
+{
+    const std::array<I18nArg, 2> args{I18nArg{"host", host}, I18nArg{"port", static_cast<core::i64>(port)}};
+    return core::makeError(key, args);
+}
+
+[[nodiscard]] core::EngineError connectErrorCode(std::string_view host, u16 port, int code)
 {
     const std::array<I18nArg, 3> args{
-        I18nArg{"host", host}, I18nArg{"port", static_cast<core::i64>(port)}, I18nArg{"detail", detail}};
+        I18nArg{"host", host},
+        I18nArg{"port", static_cast<core::i64>(port)},
+        I18nArg{"code", static_cast<core::i64>(code)}};
     return core::makeError(LUAUG_TR("net.err.connect_failed"), args);
 }
 
@@ -198,7 +209,7 @@ std::optional<core::EngineError> TcpStream::connect(std::string_view host, u16 p
 
     addrinfo* resolved = nullptr;
     if (::getaddrinfo(hostText.c_str(), portText.c_str(), &hints, &resolved) != 0 || resolved == nullptr)
-        return connectError(host, port, "the address could not be resolved");
+        return connectError(host, port, LUAUG_TR("net.err.connect_unresolved"));
 
     std::optional<core::EngineError> lastError;
 
@@ -208,14 +219,14 @@ std::optional<core::EngineError> TcpStream::connect(std::string_view host, u16 p
             = ::socket(candidate->ai_family, candidate->ai_socktype, candidate->ai_protocol);
         if (handle == kInvalidSocket)
         {
-            lastError = connectError(host, port, describeSocketError(lastSocketError()));
+            lastError = connectErrorCode(host, port, lastSocketError());
             continue;
         }
 
         if (!setNonBlocking(handle, true))
         {
             closeSocket(handle);
-            lastError = connectError(host, port, "the socket could not be made non-blocking");
+            lastError = connectError(host, port, LUAUG_TR("net.err.connect_socket_setup"));
             continue;
         }
 
@@ -242,16 +253,16 @@ std::optional<core::EngineError> TcpStream::connect(std::string_view host, u16 p
 #endif
                 connected = probe == 0 && soError == 0;
                 if (!connected && soError != 0)
-                    lastError = connectError(host, port, describeSocketError(soError));
+                    lastError = connectErrorCode(host, port, soError);
             }
             else
             {
-                lastError = connectError(host, port, "the connection attempt timed out");
+                lastError = connectError(host, port, LUAUG_TR("net.err.connect_timeout"));
             }
         }
         else
         {
-            lastError = connectError(host, port, describeSocketError(lastSocketError()));
+            lastError = connectErrorCode(host, port, lastSocketError());
         }
 
         if (!connected)
@@ -263,7 +274,7 @@ std::optional<core::EngineError> TcpStream::connect(std::string_view host, u16 p
         if (!setNonBlocking(handle, false))
         {
             closeSocket(handle);
-            lastError = connectError(host, port, "the socket could not be returned to blocking mode");
+            lastError = connectError(host, port, LUAUG_TR("net.err.connect_socket_setup"));
             continue;
         }
 
@@ -282,7 +293,7 @@ std::optional<core::EngineError> TcpStream::connect(std::string_view host, u16 p
     }
 
     ::freeaddrinfo(resolved);
-    return lastError.value_or(connectError(host, port, "no address accepted a connection"));
+    return lastError.value_or(connectError(host, port, LUAUG_TR("net.err.connect_exhausted")));
 }
 
 std::optional<core::EngineError> TcpStream::send(std::span<const u8> data)

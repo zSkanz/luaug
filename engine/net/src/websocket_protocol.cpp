@@ -90,13 +90,6 @@ constexpr bool isKnownOpcode(u8 opcode)
     }
     return std::nullopt;
 }
-
-[[nodiscard]] core::EngineError handshakeError(std::string_view detail)
-{
-    const std::array<I18nArg, 1> args{I18nArg{"detail", detail}};
-    return core::makeError(LUAUG_TR("net.err.handshake_failed"), args);
-}
-
 } // namespace
 
 void encodeFrame(std::vector<u8>& out, Opcode opcode, bool fin, std::span<const u8> payload, u32 maskKey)
@@ -280,29 +273,36 @@ std::optional<usize> findHeaderEnd(std::string_view buffer)
     return at + 4;
 }
 
+// Each failure carries a key of its own rather than one message with the reason
+// interpolated in. A whole English sentence inside a translated frame is the
+// mixed case R3 exists to prevent, and these are six different problems with
+// six different fixes.
 std::optional<core::EngineError> validateServerHandshake(std::string_view response, std::string_view expectedAccept)
 {
     const usize statusEnd = response.find("\r\n");
     if (statusEnd == std::string_view::npos)
-        return handshakeError("the response has no status line");
+        return core::makeError(LUAUG_TR("net.err.handshake_no_status"));
 
     const std::string_view status = response.substr(0, statusEnd);
     if (!status.starts_with("HTTP/1.1 101") && !status.starts_with("HTTP/1.0 101"))
-        return handshakeError(std::string("expected a 101 status, got: ").append(status));
+    {
+        const std::array<I18nArg, 1> args{I18nArg{"status", status}};
+        return core::makeError(LUAUG_TR("net.err.handshake_bad_status"), args);
+    }
 
     const std::optional<std::string_view> upgrade = headerValue(response, "Upgrade");
     if (!upgrade.has_value() || !equalsIgnoreCase(*upgrade, "websocket"))
-        return handshakeError("the Upgrade header is missing or is not websocket");
+        return core::makeError(LUAUG_TR("net.err.handshake_no_upgrade"));
 
     const std::optional<std::string_view> connection = headerValue(response, "Connection");
     if (!connection.has_value() || !containsIgnoreCase(*connection, "upgrade"))
-        return handshakeError("the Connection header does not name an upgrade");
+        return core::makeError(LUAUG_TR("net.err.handshake_no_connection"));
 
     const std::optional<std::string_view> accept = headerValue(response, "Sec-WebSocket-Accept");
     if (!accept.has_value())
-        return handshakeError("the response carries no Sec-WebSocket-Accept");
+        return core::makeError(LUAUG_TR("net.err.handshake_no_accept"));
     if (*accept != expectedAccept)
-        return handshakeError("Sec-WebSocket-Accept does not match the key we sent");
+        return core::makeError(LUAUG_TR("net.err.handshake_accept_mismatch"));
 
     return std::nullopt;
 }

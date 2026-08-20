@@ -84,12 +84,10 @@ local function run(options: Options): number
     -- to the template.
     local types = projectlib.joined(target, ".luaug", "types")
     fs.createDirectory(types, { recursiveCreate = true })
+    -- One file, and the hover documentation is inside it: the IDL's doc text is
+    -- emitted as `---` comments above each declaration, so there is no second
+    -- artifact to copy and none to keep in step.
     fs.copy(projectlib.joined(root, "runtime", "types", "engine.d.luau"), projectlib.joined(types, "engine.d.luau"))
-
-    local docs = projectlib.joined(root, "runtime", "types", "engine-docs.json")
-    if fs.exists(docs) then
-        fs.copy(docs, projectlib.joined(types, "engine-docs.json"))
-    end
 
     print(tr("cli.new.created", { path = target, name = options.name }))
     return 0

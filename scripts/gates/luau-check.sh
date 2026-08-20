@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 # The Luau-side static gates: formatting, strict analysis under the new type
-# solver (R2), the i18n key check (R3), and module layering (architecture.md §2).
+# solver (R2), the i18n lint (R3), the IDL's own naming lints, generated-file
+# freshness, and module layering (architecture.md §2).
 #
 # This file is the gate. `.github/workflows/ci.yml` runs it and so does
 # `scripts/localgate.ps1` -- the same script, not a transcription, because a
 # transcription drifts until "it passes locally" stops meaning anything.
+#
+# The first two checks are `luaug check` (M3 brief, Decision 7): the CLI is the
+# implementation and this calls it, so a developer typing `luaug check` in a
+# scaffolded project runs what the gate runs. Everything after it is
+# repository-specific -- the IDL, its generated outputs, the module layering --
+# and has no meaning inside a user's game.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
@@ -24,41 +31,8 @@ for tool in stylua luau-lsp lute; do
     }
 done
 
-# Repo-wide rather than a list of directories: naming directories meant a .luau
-# file created anywhere else would silently escape both this and the analyzer.
-# third_party is excluded by .styluaignore (vendored source is never
-# reformatted -- R13).
-echo "== stylua =="
-stylua --check .
-
-# --platform=standard: this engine is not Roblox, so no Roblox definitions are
-# loaded (ADR 0020, api-design §4).
-# --ignore: Lute 1.0.0's own shipped typedefs do not typecheck cleanly under the
-# pinned luau-lsp, and gating on them would fail for upstream reasons that have
-# nothing to do with our code (M0 finding 2).
-echo "== luau-analyze (strict, new solver) =="
-# `.d.luau` files declare; they are not sources and analysing them as such
-# fails. They are fed in with --definitions instead.
-mapfile -t files < <(find . -name '*.luau' -not -name '*.d.luau' -not -path './third_party/*' | sort)
-if [[ ${#files[@]} -eq 0 ]]; then
-    echo "luau-check: no .luau files found — the analysis gate would pass vacuously" >&2
-    exit 1
-fi
-
-# The engine's own globals. From M3 these are generated from the IDL into
-# runtime/types/ and diff-checked for freshness; until then the M1 preview
-# binding carries a hand-written one. Loading it is what lets the example be
-# `--!strict` and gated (R2) rather than exempted -- and an exemption is the
-# thing that spreads.
-definitions=()
-definition_count=0
-while IFS= read -r defs; do
-    definitions+=(--definitions "$defs")
-    definition_count=$((definition_count + 1))
-done < <(find . -name '*.d.luau' -not -path './third_party/*' | sort)
-
-echo "analyzing ${#files[@]} file(s) with ${definition_count} definition file(s)"
-luau-lsp analyze --platform=standard --ignore="**/.lute/**" "${definitions[@]}" "${files[@]}"
+echo "== luaug check (analysis + formatting) =="
+scripts/luaug.sh check . --definitions=runtime/types/engine.d.luau
 
 # The IDL's own lints: casing, the Async biconditional, event tense, enum
 # singularity (api-design.md §9). These are the rules a type cannot express, and
@@ -89,9 +63,7 @@ if ! diff -q "$defs_before" runtime/types/engine.d.luau >/dev/null; then
 fi
 
 # The C++ reflection tables are checked in for the same reason, and compared the
-# same way round: against copies taken BEFORE the generator runs. Regenerating
-# first and diffing the working tree would overwrite a hand edit and then report
-# that nothing is wrong.
+# same way round: against copies taken BEFORE the generator runs.
 echo "== generated class descriptors are fresh =="
 header_before="$(mktemp)"
 source_before="$(mktemp)"
@@ -112,10 +84,13 @@ for pair in "$header_before:engine/scene/generated/class_descriptors.gen.h" \
     fi
 done
 
-echo "== i18n keys (R3) =="
+echo "== i18n keys and hardcoded strings (R3) =="
 lute tools/repo/i18nlint.luau
 
 echo "== module layering =="
 lute tools/repo/checklayers.luau
+
+echo "== the CLI's own tests =="
+lute test tools/cli/tests
 
 echo "luau-check: ok"

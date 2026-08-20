@@ -18,12 +18,6 @@ using core::u64;
 
 constexpr usize kReadChunk = 4096;
 
-[[nodiscard]] core::EngineError violation(std::string_view detail)
-{
-    const std::array<I18nArg, 1> args{I18nArg{"detail", detail}};
-    return core::makeError(LUAUG_TR("net.err.protocol_violation"), args);
-}
-
 // The masking key must be unpredictable (RFC 6455 §5.3), so it is not drawn
 // from the world's seeded stream. R10 governs simulation state, and none of
 // this reaches it: a mask never enters the world hash and never decides
@@ -129,8 +123,7 @@ std::optional<core::EngineError> WebSocketClient::connect(const WebSocketClientO
         if (left == 0)
         {
             m_impl->stream.close();
-            const std::array<I18nArg, 1> args{I18nArg{"detail", "the server did not answer in time"}};
-            return core::makeError(LUAUG_TR("net.err.handshake_failed"), args);
+            return core::makeError(LUAUG_TR("net.err.handshake_timeout"));
         }
 
         std::array<u8, kReadChunk> chunk{};
@@ -147,8 +140,7 @@ std::optional<core::EngineError> WebSocketClient::connect(const WebSocketClientO
         if (response.size() > m_impl->maxMessageBytes)
         {
             m_impl->stream.close();
-            const std::array<I18nArg, 1> args{I18nArg{"detail", "the response headers never ended"}};
-            return core::makeError(LUAUG_TR("net.err.handshake_failed"), args);
+            return core::makeError(LUAUG_TR("net.err.handshake_headers_unbounded"));
         }
     }
 }
@@ -187,7 +179,7 @@ std::optional<core::EngineError> WebSocketClient::receiveText(std::string& out, 
         if (decoded.status == ws::DecodeStatus::Malformed)
         {
             close();
-            return violation("a frame could not be decoded");
+            return core::makeError(LUAUG_TR("net.err.frame_malformed"));
         }
 
         if (decoded.status == ws::DecodeStatus::Ok)
@@ -200,7 +192,7 @@ std::optional<core::EngineError> WebSocketClient::receiveText(std::string& out, 
             if (decoded.frame.masked)
             {
                 close();
-                return violation("the server masked a frame");
+                return core::makeError(LUAUG_TR("net.err.server_masked"));
             }
 
             const ws::Frame& frame = decoded.frame;
@@ -230,7 +222,7 @@ std::optional<core::EngineError> WebSocketClient::receiveText(std::string& out, 
                 if (m_impl->assembling)
                 {
                     close();
-                    return violation("a new message began before the previous one finished");
+                    return core::makeError(LUAUG_TR("net.err.message_interleaved"));
                 }
                 m_impl->pendingIsText = frame.opcode == ws::Opcode::Text;
                 m_impl->pending = frame.payload;
@@ -242,12 +234,12 @@ std::optional<core::EngineError> WebSocketClient::receiveText(std::string& out, 
                 if (!m_impl->assembling)
                 {
                     close();
-                    return violation("a continuation arrived with no message in progress");
+                    return core::makeError(LUAUG_TR("net.err.continuation_orphan"));
                 }
                 if (m_impl->pending.size() + frame.payload.size() > m_impl->maxMessageBytes)
                 {
                     close();
-                    return violation("the reassembled message is larger than this connection accepts");
+                    return core::makeError(LUAUG_TR("net.err.message_too_large"));
                 }
                 m_impl->pending.insert(m_impl->pending.end(), frame.payload.begin(), frame.payload.end());
                 break;
@@ -265,7 +257,7 @@ std::optional<core::EngineError> WebSocketClient::receiveText(std::string& out, 
                 // means the peer is talking about something else, and guessing
                 // which is worse than saying so.
                 close();
-                return violation("a binary message arrived on a text-only channel");
+                return core::makeError(LUAUG_TR("net.err.binary_on_text_channel"));
             }
 
             out.assign(m_impl->pending.begin(), m_impl->pending.end());

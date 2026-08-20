@@ -40,34 +40,91 @@ declare extern type EnumRunContext extends EnumItem with
 end
 
 declare extern type Vector3 with
+    --- The X component. Lowercase because it is a field of the VM primitive itself, like a string's
+    --- length, and not a member of a type this project defines -- the one documented exception to the
+    --- PascalCase rule (§9, divergence #9). `v.X` reads the same component rather than raising,
+    --- because the interpreter answers a single-character index on a vector case-insensitively before
+    --- any metatable is consulted; lowercase is still the only spelling declared, so the uppercase one
+    --- is a type error.
     read x: number
+    --- The Y component, up in the engine's Y-up world. Lowercase for the same reason as `x`.
     read y: number
+    --- The Z component. Forward is -Z, so a forward-facing direction has a negative `z`. Lowercase for
+    --- the same reason as `x`.
     read z: number
+    --- The vector's length, reached through the primitive's metatable. It is a convenience for
+    --- readability at the cost of speed: `vector.magnitude(v)` is a fastcall and this is not.
     read Magnitude: number
+    --- The vector scaled to length 1, reached through the metatable. Prefer `vector.normalize(v)` in
+    --- hot code for the same reason as `Magnitude`.
     read Unit: vector
+    --- The dot product with `other`; the method form of `vector.dot`.
     function Dot(self, other: vector): number
+    --- The cross product with `other`, in that order; the method form of `vector.cross`. The operation
+    --- does not commute, so `a:Cross(b) == -b:Cross(a)`.
     function Cross(self, other: vector): vector
+    --- Linear interpolation toward `goal`; the method form of `vector.lerp`. `alpha` is not clamped.
     function Lerp(self, goal: vector, alpha: number): vector
+    --- The angle to `other` in radians; the method form of `vector.angle`, `axis` included, so the
+    --- signed form is available without switching spelling.
     function Angle(self, other: vector, axis: vector?): number
 end
 
 declare extern type CFrame with
+    --- The translation, rounded from f64 to f32 at every magnitude -- reading it is lossy far from the
+    --- origin and reading it twice is not (the rounding is a function, not a drift). The f64 value
+    --- never leaves the CFrame, which is what makes composing transforms exact where composing
+    --- positions is not.
     read Position: vector
+    --- The same rotation basis with a zero translation, so a pure translation's `Rotation` is the
+    --- identity. This is what the `VectorTo*Space` pair is defined in terms of.
     read Rotation: CFrame
+    --- The basis's +X column.
     read RightVector: vector
+    --- The basis's +Y column.
     read UpVector: vector
+    --- The basis's **-Z** column -- forward is -Z in a right-handed Y-up world, which is why
+    --- `RightVector:Cross(UpVector) == -LookVector` rather than `LookVector`.
     read LookVector: vector
+    --- The transform that undoes this one: `cf * cf:Inverse() == CFrame.identity` up to floating-point
+    --- rounding.
     function Inverse(self): CFrame
+    --- Interpolates the translation linearly and **slerps** the rotation, so the halfway frame sits at
+    --- an equal angle from each end rather than cutting the corner. `alpha` is not clamped and values
+    --- outside [0, 1] extrapolate.
     function Lerp(self, goal: CFrame, alpha: number): CFrame
+    --- Repairs a drifted or hand-built basis, preserving the translation and treating `LookVector` as
+    --- authoritative: the look direction is normalized, `UpVector` is made perpendicular to it and
+    --- normalized, and `RightVector` is whatever their cross product requires. This is the explicit
+    --- counterpart to `fromMatrix` storing what it is given.
     function Orthonormalize(self): CFrame
+    --- Reads `cf` as being expressed relative to this frame and returns it in world space. Defined as
+    --- `self * cf`.
     function ToWorldSpace(self, cf: CFrame): CFrame
+    --- Expresses the world-space frame `cf` relative to this one. Defined as `self:Inverse() * cf`.
     function ToObjectSpace(self, cf: CFrame): CFrame
+    --- Moves a **position** out of this frame into world space, translation included. Defined as `self
+    --- * point`.
     function PointToWorldSpace(self, point: vector): vector
+    --- Moves a world-space **position** into this frame, translation included. Defined as
+    --- `self:Inverse() * point`.
     function PointToObjectSpace(self, point: vector): vector
+    --- Moves a **direction** out of this frame into world space, rotation only. Defined as
+    --- `self.Rotation * direction`. A surface normal run through `PointToWorldSpace` instead comes out
+    --- wrong by exactly the frame's position.
     function VectorToWorldSpace(self, direction: vector): vector
+    --- Moves a world-space **direction** into this frame, rotation only. Defined as
+    --- `self.Rotation:Inverse() * direction`.
     function VectorToObjectSpace(self, direction: vector): vector
+    --- Decomposes the rotation into `(rx, ry, rz)` radians in `fromEuler`'s parameter order, and is its
+    --- inverse for the same `order`. Euler angles are not unique, so a round trip returns an equivalent
+    --- rotation rather than necessarily the same three numbers.
     function ToEuler(self, order: EnumRotationOrder?): (number, number, number)
+    --- Decomposes the rotation into `(axis, angle)` with a unit axis and the angle in radians; the
+    --- inverse of `fromAxisAngle`.
     function ToAxisAngle(self): (vector, number)
+    --- Decomposes the rotation into `(qx, qy, qz, qw)` -- w last, matching `fromQuaternion`'s tail,
+    --- whose inverse this is.
     function ToQuaternion(self): (number, number, number, number)
     function __mul(self, other: CFrame): CFrame
     function __mul(self, point: vector): vector
@@ -75,54 +132,135 @@ declare extern type CFrame with
 end
 
 declare extern type Color3 with
+    --- The red channel, nominally 0-1 and not clamped. `c.r` raises `script.err.unknown_member`: there
+    --- is one spelling.
     read R: number
+    --- The green channel, nominally 0-1 and not clamped.
     read G: number
+    --- The blue channel, nominally 0-1 and not clamped.
     read B: number
+    --- Channel-wise linear interpolation toward `goal` in RGB, which is the cheap blend and not the
+    --- perceptually even one. `alpha` is not clamped.
     function Lerp(self, goal: Color3, alpha: number): Color3
+    --- Decomposes the colour into `(h, s, v)`, all three 0-1; the inverse of `fromHSV`. Hue is
+    --- undefined for a grey and reported as 0.
     function ToHSV(self): (number, number, number)
+    --- Six lowercase hex digits with no leading `#` (`"ff8800"`). The channels are clamped into 0-255
+    --- on the way out because eight bits cannot represent anything else -- this is the one place a
+    --- Color3 is narrowed, and it is why the round trip through `fromHex` does not preserve an HDR
+    --- value.
     function ToHex(self): string
     function __eq(self, other: Color3): boolean
 end
 
 declare extern type Random with
+    --- The next number in [min, max), defaulting to [0, 1) -- half-open, like every other range in the
+    --- engine. `min > max` raises `script.err.random_range`.
     function NextNumber(self, min: number?, max: number?): number
+    --- The next integer in [min, max], inclusive at **both** ends. This is the one place the engine is
+    --- not half-open, which is why it is spelled out rather than inferred from `NextNumber`. `min >
+    --- max`, or a non-integer bound, raises `script.err.random_range`.
     function NextInteger(self, min: number, max: number): number
+    --- A direction drawn **uniformly over the sphere**, not merely one of unit length -- normalizing
+    --- three independent draws clusters at the cube's corners, and this does not.
     function NextUnitVector(self): vector
+    --- A copy positioned at the same point in the stream, continuing the same sequence independently of
+    --- the original. This is how a subsystem takes a deterministic branch without consuming draws the
+    --- rest of the frame is counting on.
     function Clone(self): Random
 end
 
 declare extern type Instance with
+    --- This instance's name; siblings may share one, and renaming into an awaited name satisfies a
+    --- WaitForChild waiter exactly as parenting a new child does.
     Name: string
+    --- The instance this one hangs under, nil when unparented; assigning it appends this instance last
+    --- among its new siblings, assigning the current parent again changes nothing, and assigning after
+    --- Destroy raises.
     Parent: Instance?
+    --- The name of this instance's class; typeof answers Instance whatever the class, so this is what
+    --- tells two classes apart.
     read ClassName: string
+    --- Fired after an instance is parented to this one, carrying that child.
     read ChildAdded: Signal<Instance>
+    --- Fired after an instance stops being parented to this one, carrying that child.
     read ChildRemoved: Signal<Instance>
+    --- Fired after an instance is added anywhere below this one, carrying that descendant.
     read DescendantAdded: Signal<Instance>
+    --- Fired as an instance leaves the subtree below this one, carrying that descendant; leaving is
+    --- fully observed before arriving.
     read DescendantRemoving: Signal<Instance>
+    --- Fired on a moved instance and then on each of its descendants in document order, carrying the
+    --- instance whose ancestry changed and its new parent, nil when it was unparented.
     read AncestryChanged: Signal<Instance, Instance?>
+    --- Fired when any attribute of this instance changes, carrying the attribute name.
     read AttributeChanged: Signal<string>
+    --- Fired once when Destroy is called, carrying nothing; the tree mutation has already happened and
+    --- only the signal is deferred.
     read Destroying: Signal<()>
+    --- The first direct child with that name in document order, or nil; there is no recursive form in
+    --- v1, so depth is a GetDescendants loop.
     function FindFirstChild(self, name: string): Instance?
+    --- The first direct child whose ClassName is exactly className, or nil; asking for BasePart
+    --- therefore never finds a Part.
     function FindFirstChildOfClass(self, className: string): Instance?
+    --- The first direct child that IsA className, or nil; matching runs through the class hierarchy, so
+    --- abstract base names are accepted.
     function FindFirstChildWhichIsA(self, className: string): Instance?
+    --- The nearest ancestor with that name, searching upward from Parent; the instance itself is never
+    --- a candidate.
     function FindFirstAncestor(self, name: string): Instance?
+    --- The nearest ancestor whose ClassName is exactly className, searching upward from Parent; the
+    --- instance itself is never a candidate.
     function FindFirstAncestorOfClass(self, className: string): Instance?
+    --- A fresh array of the direct children in child order, which is the order they were parented; the
+    --- caller owns it, so destroying while iterating is safe.
     function GetChildren(self): {Instance}
+    --- A fresh array of every descendant in document order -- child order taken depth-first, preorder
+    --- -- which is the order the Find family tie-breaks on.
     function GetDescendants(self): {Instance}
+    --- Parks the caller until a child of that name exists here and returns it, returning immediately
+    --- when one already does; with a timeout, expiry returns nil, and without one the wait is unbounded
+    --- and warns after five sim-seconds.
     function WaitForChild(self, name: string, timeout: number?): Instance?
+    --- Whether this instance is of that class or descends from it; a string naming no class answers
+    --- false rather than raising, because the point is to test names you do not trust.
     function IsA(self, className: string): boolean
+    --- Whether descendant sits anywhere below this instance; read strictly, so an instance is not its
+    --- own ancestor.
     function IsAncestorOf(self, descendant: Instance): boolean
+    --- Whether this instance sits anywhere below ancestor; read strictly, so an instance is not its own
+    --- descendant.
     function IsDescendantOf(self, ancestor: Instance): boolean
+    --- Deep-copies this subtree unparented -- children, properties, attributes and tags at every depth
+    --- -- rewiring object references that point inside the copy and leaving those that point outside it
+    --- on the originals.
     function Clone(self): Instance
+    --- Removes this instance and its children from the tree synchronously, clears its tags, locks
+    --- Parent to nil and defers Destroying; the handle stops resolving at the end of that drain.
     function Destroy(self): ()
+    --- The value of that attribute, or nil when it has never been set; attribute names are
+    --- case-sensitive.
     function GetAttribute(self, name: string): (string | number | boolean | vector | CFrame | Color3)?
+    --- Sets that attribute, or removes it when value is nil; a table, an Instance or a function raises
+    --- and leaves any previous value in place, and an empty name raises.
     function SetAttribute(self, name: string, value: (string | number | boolean | vector | CFrame | Color3)?): ()
+    --- A fresh table of this instance's attributes, which the caller owns.
     function GetAttributes(self): { [string]: string | number | boolean | vector | CFrame | Color3 }
+    --- The signal fired when that attribute changes; any name is accepted, because an attribute that
+    --- has never been set is a reasonable thing to wait for.
     function GetAttributeChangedSignal(self, name: string): Signal<()>
+    --- The signal fired when that property changes -- the same object on every call, carrying no value
+    --- so its type stays independent of the property's; a name the class does not have raises.
     function GetPropertyChangedSignal(self, name: string): Signal<()>
+    --- Adds a tag to this instance, a no-op when it is already present; tags are pure instance state,
+    --- so a nil-parented instance still carries and is found by them.
     function AddTag(self, tag: string): ()
+    --- Removes a tag from this instance, a no-op when it is absent.
     function RemoveTag(self, tag: string): ()
+    --- Whether this instance currently carries that tag.
     function HasTag(self, tag: string): boolean
+    --- A fresh array of this instance's tags, which the caller owns.
     function GetTags(self): {string}
 end
 
@@ -130,32 +268,59 @@ declare extern type Folder extends Instance with
 end
 
 declare extern type Model extends Instance with
+    --- The part this model's pivot follows; Clone rewires it to the copy, since it is the reference
+    --- into a cloned subtree that catches people.
     PrimaryPart: BasePart?
+    --- This model's pivot in world space.
     function GetPivot(self): CFrame
+    --- Moves the model so that its pivot lands on targetCFrame, carrying every descendant part along by
+    --- the same transform.
     function PivotTo(self, targetCFrame: CFrame): ()
+    --- The size in metres of the smallest box enclosing every part in this model.
     function GetExtentsSize(self): vector
 end
 
 declare extern type Script extends Instance with
+    --- Whether this script starts at boot; writing it afterwards has no effect in v1, neither stopping
+    --- a running script nor starting one that did not run, because what sets it acts before the boot it
+    --- applies to.
     Enabled: boolean
 end
 
 declare extern type BasePart extends Instance with
+    --- This part's transform in world space, and the f64 source of truth Position and Orientation are
+    --- read back from.
     CFrame: CFrame
+    --- This part's world position, the f32 rounding of the CFrame translation; gameplay math past a few
+    --- kilometres from the origin belongs on CFrame instead.
     Position: vector
+    --- This part's world rotation as intrinsic YXZ euler angles in degrees.
     Orientation: vector
+    --- This part's dimensions in metres along its own axes.
     Size: vector
+    --- This part's color; channels are not clamped to 0-1, so a value above one is a legal tint rather
+    --- than an error.
     Color: Color3
+    --- How see-through this part is, 0 fully opaque and 1 fully invisible.
     Transparency: number
 end
 
 declare extern type Part extends BasePart with
+    --- Which primitive solid this part is.
     Shape: EnumPartShape
 end
 
 declare extern type DataModel extends Instance with
+    --- The version of the engine runtime executing this VM, as `luaug.toml` pins it. Read-only: the
+    --- runtime is chosen before the VM exists, so nothing a script does can change it.
     read EngineVersion: string
+    --- The version of the Luau language runtime this engine build embeds. Read-only, and fixed per
+    --- engine release: a language upgrade is an engine release rather than a silent change underneath a
+    --- running project.
     read LuauVersion: string
+    --- Fires once, after every entry script has had its first resumption. Connecting at file scope
+    --- inside an entry script still works: the fire is deferred like every other, so a handler
+    --- registered while the world is still being built is registered in time. It carries no arguments.
     read Loaded: Signal<()>
     function GetService(self, name: "Workspace"): Workspace
     function GetService(self, name: "RunService"): RunService
@@ -164,9 +329,22 @@ declare extern type DataModel extends Instance with
     function GetService(self, name: "DebugService"): DebugService
     function GetService(self, name: "HotReloadService"): HotReloadService
     function GetService(self, name: "PhysicsService"): PhysicsService
+    --- Returns the service of this name, creating it on the first request. Services are singletons:
+    --- every later call returns the same instance, and it is an ordinary child of `game` once created.
+    --- A string literal gives an exactly typed result; a name computed at runtime gives the general
+    --- `Instance`, which is the honest cost of not knowing the name at analysis time. An unknown name
+    --- raises `scene.err.unknown_service`.
     function GetService(self, name: string): Instance
+    --- Returns the service of this name if it already exists, and `nil` otherwise. It creates nothing,
+    --- so it answers whether a service is in use rather than forcing it into existence -- which is the
+    --- whole difference from `GetService`.
     function FindService(self, name: string): Instance?
+    --- Registers a function to run while the game is shutting down, for work that has to happen before
+    --- the process ends. The callbacks run against a capped timeout and the shutdown proceeds when it
+    --- expires, finished or not: a close handler is a chance to finish, never a veto.
     function BindToClose(self, callback: () -> ()): ()
+    --- Ends the run. The registered `BindToClose` callbacks are given their timeout and the process
+    --- then exits. This is how a game closes itself deliberately.
     function Shutdown(self): ()
 end
 
@@ -174,14 +352,39 @@ declare extern type Workspace extends Instance with
 end
 
 declare extern type RunService extends Instance with
+    --- The simulation clock, in seconds, at the current tick. It is constant for the whole tick --
+    --- deferred drains included -- and advances by `PhysicsService.FixedTimestep` between ticks. This
+    --- is the clock simulation code reads: the wall clock is forbidden to it, there is no `tick()`, and
+    --- `os.clock` is for profiling and never for gameplay. It stops advancing while the world is
+    --- paused.
     read SimTime: number
+    --- Fires at render rate, before the frame is drawn, carrying the variable time in seconds since the
+    --- previous render. It never fires in a headless run: headless is the same scheduler minus the
+    --- render steps, and this is one of them. It stays connectable so that shared code need not branch
+    --- on it -- but a handler connected to it in a headless process is a handler that will not run.
     read PreRender: Signal<number>
+    --- The first phase of a sim tick, before animation is evaluated, carrying the fixed tick duration
+    --- in seconds.
     read PreAnimation: Signal<number>
+    --- Fires each sim tick after animation and before the simulation step, carrying the fixed tick
+    --- duration in seconds.
     read PreSimulation: Signal<number>
+    --- Fires each sim tick immediately after the simulation step, carrying the fixed tick duration in
+    --- seconds.
     read PostSimulation: Signal<number>
+    --- The last phase of a sim tick, carrying the fixed tick duration in seconds. It fires at the sim
+    --- tick rate like the three phases before it, and it is the usual place for per-tick gameplay work
+    --- that wants to see the state the tick settled on.
     read Heartbeat: Signal<number>
+    --- Pauses the world. The simulation clock stops, so `SimTime` stops advancing and no `task.wait` or
+    --- `task.delay` timer comes due; rendering and the debug overlay keep running. Idempotent: pausing
+    --- a paused world is a no-op, not an error.
     function Pause(self): ()
+    --- Restarts a paused world, and its clock with it. Idempotent: resuming a running world is a no-op,
+    --- not an error.
     function Resume(self): ()
+    --- Whether the world is currently paused. Since `Pause` and `Resume` are both idempotent, this is
+    --- how code tells the two states apart rather than by watching a call fail.
     function IsPaused(self): boolean
 end
 
@@ -189,33 +392,96 @@ declare extern type ScriptService extends Instance with
 end
 
 declare extern type TagService extends Instance with
+    --- Returns every instance currently carrying this tag, as a fresh array the caller owns. Tags are
+    --- pure instance state with no relationship to the tree, so an instance parented to `nil` is
+    --- returned like any other.
     function GetTagged(self, tag: string): {Instance}
+    --- Returns the signal that fires with each instance that gains this tag. It is deferred like every
+    --- signal, so a handler sees the instance at the next resumption point rather than inside the
+    --- `AddTag` call that added it.
     function GetInstanceAddedSignal(self, tag: string): Signal<Instance>
+    --- Returns the signal that fires with each instance that loses this tag, whether through
+    --- `RemoveTag` or through `Destroy`, which strips every tag the instance carried. The fire is
+    --- deferred, and a destroyed handle still resolves for the drain in which it arrives, so a handler
+    --- can still read what it lost before the instance goes.
     function GetInstanceRemovedSignal(self, tag: string): Signal<Instance>
+    --- Returns the set of tags currently carried by at least one instance, as a fresh array -- not
+    --- every name ever seen. It updates synchronously with `AddTag` and `RemoveTag`, so a tag leaves it
+    --- the moment its last carrier drops it, even though the signal reporting that drop is deferred
+    --- like everything else.
     function GetAllTags(self): {string}
 end
 
 declare extern type DebugService extends Instance with
+    --- Whether the debug overlay is drawn. It starts off, shipped builds included, so a game can offer
+    --- the overlay deliberately instead of needing a different build to get it.
     OverlayVisible: boolean
+    --- Fires for every console message, carrying the text and its level. `print` and `warn` each
+    --- produce exactly one deferred fire with their text verbatim, at `Info` and `Warning`. Engine
+    --- messages arrive pre-formatted with their key in front, as in `[scene.err.parent_cycle] ...`, so
+    --- a handler matching on a key substring sees engine output while one matching prose sees script
+    --- output. Contained handler errors and the re-entrancy cap's dropped-fire log come through here
+    --- too.
     read MessageOut: Signal<string, EnumLogLevel>
+    --- Draws a line between two world positions for one frame. Headless there is no renderer and the
+    --- call is a silent no-op rather than an error, so debug drawing left in shared code cannot fail a
+    --- headless test.
     function DrawLine(self, a: vector, b: vector, color: Color3?): ()
+    --- Draws the wireframe of a box at this frame, with these dimensions in metres, for one frame. A
+    --- silent no-op in a headless run, like every gizmo.
     function DrawBox(self, cframe: CFrame, size: vector, color: Color3?): ()
+    --- Draws the wireframe of a sphere at this world position, with this radius in metres, for one
+    --- frame. A silent no-op in a headless run, like every gizmo.
     function DrawSphere(self, position: vector, radius: number, color: Color3?): ()
+    --- Reads a named instrumentation counter -- `FPS`, `FrameTimeMs`, `PhysicsBodies`, `InstanceCount`,
+    --- `DrawCalls`, `LuaMemoryKB` and the rest, plus whatever `SetCustomStat` has published. An
+    --- unregistered name raises `scene.err.unknown_stat` instead of returning zero: a misspelt stat is
+    --- a bug in the caller, and a debug surface that answers zero hides that bug in the one place
+    --- people are already confused.
     function GetStat(self, name: string): number
+    --- Publishes a game-defined number under this name, readable afterwards through `GetStat` and shown
+    --- on the stats panel. A value that is not a number raises like any other typed-argument mismatch.
     function SetCustomStat(self, name: string, value: number): ()
+    --- Opens one panel of the overlay by name. The built-ins are `Stats`, `Scene`, `Log`, `Streaming`
+    --- and `Physics`; an unknown panel raises `scene.err.unknown_stat`.
     function ShowPanel(self, name: string): ()
+    --- Closes one panel of the overlay by name, taking the same names as `ShowPanel`. An unknown panel
+    --- raises `scene.err.unknown_stat`.
     function HidePanel(self, name: string): ()
 end
 
 declare extern type HotReloadService extends Instance with
+    --- Fires on the outgoing world when a reload has been requested and before anything is torn down,
+    --- which is the last moment `SaveState` can be called and have the value survive. Its handlers are
+    --- drained before the new world is built, so the reload waits for them.
     read PreReload: Signal<()>
+    --- Fires on the world a reload just built, after every entry script has had its first resumption
+    --- and the preserved state is already in place. A handler connected at file scope therefore sees a
+    --- world that is finished rather than one still being assembled.
     read PostReload: Signal<()>
+    --- Stores a value under `key` so the world built by the next reload can read it back. The value is
+    --- converted to an engine-side copy at the moment of the call, because the VM holding the original
+    --- is what a reload destroys -- so nil, booleans, numbers, strings, buffers, and tables of those
+    --- are accepted, while a function, a thread, an Instance or a cyclic table raises
+    --- `script.err.unsavable_state`. Raising beats dropping: a reload that quietly loses state is worse
+    --- than one that says what it could not keep.
     function SaveState(self, key: string, value: any): ()
+    --- Reads back what `SaveState` stored under `key` before the reload, or nil if nothing did. The
+    --- value is a fresh copy built in this VM; mutating it changes nothing that a later reload will
+    --- see, and only another `SaveState` does.
     function LoadState(self, key: string): any
+    --- Whether this world was built by a hot reload rather than by starting the engine. It is how a
+    --- script knows to look for what it left behind instead of building it again -- the instances
+    --- tagged `PreserveOnReload` are already in the tree by the time any entry script runs.
     function IsReload(self): boolean
 end
 
 declare extern type PhysicsService extends Instance with
+    --- The duration of one simulation tick, in seconds, and therefore the grid every timing guarantee
+    --- is expressed against: `task.wait(1)` is exactly 60 ticks at the default 1/60, on every machine
+    --- and every run. Express durations as multiples of it and the same code stays correct at 30 Hz or
+    --- at 240 Hz. Read-only until the physics module ships, when a write will take effect at the next
+    --- frame start rather than mid-tick.
     read FixedTimestep: number
 end
 

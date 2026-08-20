@@ -8,9 +8,9 @@
     "luau-lsp.platform.type": "standard",
 
     "$comment.platform": [
-        "This engine is not Roblox. The extension's default platform downloads Roblox's",
-        "API dump, which would both disagree with the definitions below and pull in a",
-        "surface this engine does not have."
+        "LuauG is not the platform luau-lsp defaults to. `standard` is what keeps the",
+        "extension from downloading that platform's API dump, which would both disagree",
+        "with the definitions below and offer a surface this engine does not have."
     ],
 
     "luau-lsp.sourcemap.enabled": false,
@@ -24,7 +24,13 @@
     ],
 
     "luau-lsp.types.definitionFiles": [".luaug/types/engine.d.luau"],
-    "luau-lsp.types.documentationFiles": [".luaug/types/engine-docs.json"],
+
+    "$comment.docs": [
+        "Hover documentation travels inside the definitions file as `---` comments, generated",
+        "from the same IDL text that produces the declarations. There is no separate",
+        "documentation JSON: that format is an LSP-only setting with no analyze flag, so",
+        "nothing in the engine's gate could prove a generated one was even shaped right."
+    ],
 
     "luau-lsp.require.directoryAliases": {
         "@shared/": "src/shared/",
