@@ -9,7 +9,8 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   opened 2026-08-20 (brief: [`docs/briefs/m3-kickoff.md`](docs/briefs/m3-kickoff.md)).
   Built so far: the brief with its fourteen decisions and the control protocol,
   `engine/net` (the RFC 6455 client the engine dials the dev server with), the
-  reload seam in `app`, and `HotReloadService` with its state bag.
+  reload seam in `app`, `HotReloadService` with its state bag, and
+  `PreserveOnReload`.
 - **M2 — Kernel: Instances over ECS, Scheduler, Signals, `task` — COMPLETE and
   SIGNED OFF by the human on 2026-08-20**, tagged `milestone/m2` (brief:
   [`docs/briefs/m2-kickoff.md`](docs/briefs/m2-kickoff.md), which carries the
@@ -57,11 +58,10 @@ watch. `engine/net` is done; the reload seam is next.
 
 ## Now / Next
 
-- **Next: `PreserveOnReload`** (Decision 5) — capture the tagged instances as
-  descriptions before the old world dies and re-materialize them into the fresh
-  one **before** the new entry scripts are deferred, so a script that looks for
-  what it left behind finds it. Then the control loop in `app`, then the Lute
-  dev server.
+- **Next: the control loop in `app`** — a `--dev-control=ws://…` flag, the
+  WebSocket client on its own thread, and the reload applied at the FrameStart
+  safe point rather than wherever the message arrived. Then the Lute dev server
+  (`luaug dev`), and the CLI around it.
 - **The reload works and carries state.** `app::reloadWorld` rebuilds
   `WorldHost` and nothing above it, build-before-destroy; the test that matters
   asserts **reload == cold boot by world hash**. `HotReloadService` is in the IDL
@@ -212,8 +212,21 @@ there when this file passed its ~300-line cap.
   the surface is `PreReload` / `PostReload` / `IsReload()`, and making the third
   a method deleted the service's only property and the component behind it -- the
   implementation got *smaller* by obeying the naming rule.
-  Next: **`PreserveOnReload`** -- capture the tagged instances before the old
-  world dies and re-materialize them before the new entry scripts are deferred.
+  Then `PreserveOnReload`: tagged instances are captured as descriptions --
+  class, name, ancestry, writable properties, attributes, tags, subtree -- and
+  re-created before the new entry scripts are deferred, with an ancestor the new
+  world lacks *replayed* with the class it had rather than invented as a Folder.
+  Skips are counted, never silent, and child order is pinned by a case because
+  it is observable through the world hash.
+  Learned, and it was about the test rather than the feature: the first version
+  set `Anchored` on a `Part`, which no class declares -- BasePart's physics half
+  lands with Jolt in M5 -- so the entry script died before setting `Parent` and
+  the failure surfaced three assertions later as a missing child. **M2's Finding
+  14 arriving in a new file.** The `Captured` fixture now keeps error lines apart
+  and the session requires there were none, so the next version of that mistake
+  fails on the line that caused it.
+  Next: **the control loop in `app`** -- the `--dev-control` flag, the WebSocket
+  client on its own thread, and the reload applied at the FrameStart safe point.
 
 <!-- Format for future entries:
 - **YYYY-MM-DD (session N):** did X; learned Y; Next: <literal first action>.

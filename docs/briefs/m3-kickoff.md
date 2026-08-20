@@ -526,19 +526,31 @@ implementation got smaller by obeying the naming rule. The alternative was to
 grow the two exception lists for names nobody had argued for, and those lists
 carry a comment saying not to.
 
-**5. A digest test failed and the code was right.** The 55-byte SHA-1 vector had
+**5. A fixture that cannot see a contained script error lets a broken test
+script masquerade as a broken feature.** The first `PreserveOnReload` test set
+`Anchored` on a `Part` — a property no class declares, because BasePart's
+physics half lands with Jolt in M5. The entry script died on that line before it
+ever set `Parent`, the error was contained by design (§3.1), and the failure
+surfaced three assertions later as a missing child.
+
+M2's Finding 14 said this in the signal suite and it arrived again in a new file,
+which is the argument for making it structural rather than remembered: the
+`Captured` fixture keeps error lines apart from the rest of the log now, and the
+session `REQUIRE`s there were none.
+
+**6. A digest test failed and the code was right.** The 55-byte SHA-1 vector had
 been written from memory; FIPS publishes none at that length. The expectation now
 carries what Windows CNG computes and says so in the comment. MASTER_PROMPT §9
 says never guess an API signature; this is the same rule one level down — never
 guess a *value* either, and if no published one exists, cross-check against an
 implementation you did not write.
 
-**6. A test that waited for bytes the client had no reason to send hung the whole
+**7. A test that waited for bytes the client had no reason to send hung the whole
 suite instead of failing it.** The loopback helper takes a read deadline now. A
 hang costs a CI runner its entire timeout to say nothing, which is strictly worse
 than a red test with a message — and the mistake is easy enough to make twice.
 
-**7. Clang caught a `socklen_t` MSVC did not.** The address length is `int` on
+**8. Clang caught a `socklen_t` MSVC did not.** The address length is `int` on
 Winsock and unsigned on POSIX, so one cast was a `-Wsign-conversion` error on
 exactly one tier. That is now the third time in this project's life that the
 Linux stage was the only thing between an implicit conversion and `main`, which
