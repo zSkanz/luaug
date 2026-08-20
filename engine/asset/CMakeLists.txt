@@ -13,6 +13,7 @@ luaug_add_module(asset
     LAYER 2
     SOURCES
         src/image.cpp
+        src/gltf.cpp
     DEPS
         core
 )
@@ -33,9 +34,16 @@ luaug_add_module_tests(asset
         asset
     SOURCES
         tests/image_tests.cpp
+        tests/gltf_tests.cpp
 )
 
 if(LUAUG_BUILD_TESTS)
+    # The glTF fixtures are read from the source tree rather than copied beside
+    # the binary: `importGltf` resolves a relative URI against the directory it
+    # is handed, and `textured.gltf` names a `.png` sibling -- a copy step would
+    # have to keep the pair together, and getting that wrong would show up as a
+    # missing texture rather than as a build failure.
     target_compile_definitions(luaug_asset_tests PRIVATE
-        LUAUG_TEST_CATALOG="${CMAKE_SOURCE_DIR}/i18n/en.json")
+        LUAUG_TEST_CATALOG="${CMAKE_SOURCE_DIR}/i18n/en.json"
+        LUAUG_ASSET_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
 endif()

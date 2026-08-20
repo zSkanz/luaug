@@ -820,6 +820,47 @@ sample — device creation, shader loading — arrive already catalog-formatted 
 are printed verbatim, so the exemption covers the sample's own three
 diagnostics and nothing else.
 
+**11. `fastgltf::validate` is stricter than real exporters, and that is a choice
+with a cost.** It rejects a POSITION accessor without `min`/`max`, and
+`extensionsRequired` that is not a subset of `extensionsUsed` — both spec-correct
+and both things exporters get wrong in the wild. Accepted deliberately, because
+without validation an out-of-range index reaches fastgltf's
+`DefaultBufferDataAdapter`, which `subspan`s with no bounds check: undefined
+behaviour instead of an error.
+
+So entering risk 2 has a sharper shape than it was written with. The first
+exporter-produced asset is likelier to be refused by fastgltf's validator than by
+anything we wrote, and the error will name which check fired. That is the right
+failure, but it means "import a real asset" is a step that will need a look
+rather than a tick.
+
+What fastgltf's validator does **not** check, and the importer therefore does:
+that a buffer view fits its buffer, that an accessor fits its view, that indices
+are below the vertex count, that an index accessor is Scalar, and that the node
+graph is acyclic.
+
+**12. Twenty-two deliberate defects, twenty caught, and the two survivors were
+the useful ones.** The importer's tests were mutation-tested rather than
+declared correct: patch one thing, rebuild, run, revert. Two mutations survived
+and both were real gaps.
+
+Deleting the reset on the failure path survived because the only failure fixture
+failed during *parse*, before anything had been built — so a second fixture now
+fails on its second primitive, with a submesh, a material and a vertex buffer
+already in hand. And removing the per-submesh loop from the optimizer survived
+because a three-triangle fixture is beneath meshoptimizer's notice; a first
+attempt at a bigger one used two *disjoint* grids and still missed it, because
+the cache optimizer walks one connected component at a time and kept them apart
+by accident. One connected 16×16 grid split across two primitives catches it.
+
+Two survive knowingly and are recorded rather than faked: skipping the overdraw
+pass changes no observable output on these fixtures, and removing only the
+POSITION bounds check is masked by the sibling NORMAL check.
+
+This is M1 Finding 11 — "a property test that has never failed is decoration" —
+applied to a whole module instead of one suite, and it found more than the code
+review that preceded it.
+
 ## Gate Record
 
 *Filled at milestone end, before human review.*
