@@ -157,6 +157,42 @@ struct CharacterBodyComponent
     f32 verticalVelocity = 0.0f;
 };
 
+// `Weld` and `WeldConstraint` (M5, added to the milestone by human decision).
+//
+// One component for both, because the two differ in where the offset comes from
+// and in nothing else: a `Weld` is told it and a `WeldConstraint` reads it off
+// the world when it becomes active. Sharing the storage is what keeps the
+// resolver from having to walk two pools in a defined order relative to each
+// other, which is a source of non-determinism that would exist for no reason.
+//
+// **A transform weld, and the roadmap says why it has to be one:** a
+// `CharacterVirtual` is not a body in the physics system, a solver constraint
+// joins bodies, so a constraint could never reach a character. The driven part
+// stops being independently simulated and follows its anchor; the solver is not
+// involved.
+struct WeldComponent
+{
+    // The anchor and the driven part. Either may be invalid while a script is
+    // still assigning them, which is not an error -- it is what every script
+    // that sets two properties on two lines briefly produces.
+    core::InstanceId part0;
+    core::InstanceId part1;
+
+    // `Part0.CFrame * c0 == Part1.CFrame * c1`, which is the one sentence that
+    // says where both offsets go.
+    core::CFrameD c0;
+    core::CFrameD c1;
+
+    bool enabled = true;
+
+    // A `WeldConstraint` captures `c1` when it becomes active and a `Weld` never
+    // does. One flag rather than two components.
+    bool captures = false;
+    // Whether the capture has happened, so that enabling a constraint twice
+    // does not re-capture a transform the weld itself produced.
+    bool captured = false;
+};
+
 // `Camera`. Everything here is what a projection matrix needs and nothing more:
 // the viewport is the renderer's, not the camera's.
 struct CameraComponent

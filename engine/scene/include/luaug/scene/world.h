@@ -288,6 +288,8 @@ public:
     [[nodiscard]] const ComponentPool<PartComponent>& parts() const noexcept { return m_parts; }
     [[nodiscard]] ComponentPool<RigidBodyComponent>& rigidBodies() noexcept { return m_rigidBodies; }
     [[nodiscard]] const ComponentPool<RigidBodyComponent>& rigidBodies() const noexcept { return m_rigidBodies; }
+    [[nodiscard]] ComponentPool<WeldComponent>& welds() noexcept { return m_welds; }
+    [[nodiscard]] const ComponentPool<WeldComponent>& welds() const noexcept { return m_welds; }
     [[nodiscard]] ComponentPool<CharacterBodyComponent>& characterBodies() noexcept { return m_characterBodies; }
     [[nodiscard]] const ComponentPool<CharacterBodyComponent>& characterBodies() const noexcept
     {
@@ -344,6 +346,7 @@ private:
     ComponentPool<PartComponent> m_parts;
     ComponentPool<RigidBodyComponent> m_rigidBodies;
     ComponentPool<CharacterBodyComponent> m_characterBodies;
+    ComponentPool<WeldComponent> m_welds;
     ComponentPool<WorkspaceComponent> m_workspaces;
     ComponentPool<ModelComponent> m_models;
     ComponentPool<ScriptComponent> m_scripts;

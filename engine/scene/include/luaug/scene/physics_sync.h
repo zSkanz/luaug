@@ -127,11 +127,19 @@ private:
     void applyCharacter(core::InstanceId id, PartComponent& part, RigidBodyComponent& body,
                         CharacterBodyComponent& character, f32 fixedDt);
     void retireUnseen();
+    void resolveWelds();
+    // One weld, and everything it hangs from, resolved once. Returns the
+    // driven part's new transform.
+    void resolveWeld(core::InstanceId weldId, WeldComponent& weld);
     void writeBack();
     void writeCharacters();
     void publishContacts();
 
     [[nodiscard]] bool inWorld(core::InstanceId id) const;
+    // Whether a part is the driven end of an active weld, which is what makes
+    // it kinematic rather than dynamic: it is moved by the weld and by nothing
+    // else, so the solver may not integrate it.
+    [[nodiscard]] bool isDriven(core::InstanceId id) const;
     [[nodiscard]] physics::ShapeDesc shapeOf(core::InstanceId id, const PartComponent& part) const;
     [[nodiscard]] physics::BodyDesc descOf(core::InstanceId id, const PartComponent& part,
                                            const RigidBodyComponent& body) const;
@@ -150,6 +158,15 @@ private:
     // nothing per frame.
     std::vector<physics::ActiveBody> m_active;
     std::vector<core::InstanceId> m_scratch;
+
+    // The welds resolved so far this tick, so a chain -- A welded to B, B welded
+    // to C -- resolves each link once and in dependency order rather than in
+    // whatever order the pool happens to hold them (R10).
+    std::vector<core::InstanceId> m_resolvedWelds;
+    // The parts an active weld drives, rebuilt each tick before the bodies are
+    // applied. A driven part is kinematic; a released one goes back to being
+    // whatever `Anchored` says.
+    std::vector<core::InstanceId> m_drivenParts;
 
     u32 m_groupRevision = 0xffffffffu;
     core::InstanceId m_workspace;

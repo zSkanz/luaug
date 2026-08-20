@@ -1129,6 +1129,63 @@
       "Events": []
     },
     {
+      "Name": "Weld",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "C0",
+          "Type": "CFrame"
+        },
+        {
+          "Name": "C1",
+          "Type": "CFrame"
+        },
+        {
+          "Name": "Enabled",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
+          "Name": "Part0",
+          "Type": "BasePart?"
+        },
+        {
+          "Name": "Part1",
+          "Type": "BasePart?"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "WeldConstraint",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Active",
+          "Type": "boolean",
+          "ReadOnly": true
+        },
+        {
+          "Name": "Enabled",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
+          "Name": "Part0",
+          "Type": "BasePart?"
+        },
+        {
+          "Name": "Part1",
+          "Type": "BasePart?"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "Workspace",
       "Extends": "Instance",
       "Tags": ["NotCreatable", "Service"],

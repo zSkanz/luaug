@@ -120,6 +120,31 @@ void detachPartComponents(World& world, core::InstanceId id);
 Value getPartShape(const World& world, core::InstanceId id);
 bool setPartShape(World& world, core::InstanceId id, const Value& value);
 
+// Weld
+Value getWeldPart0(const World& world, core::InstanceId id);
+bool setWeldPart0(World& world, core::InstanceId id, const Value& value);
+Value getWeldPart1(const World& world, core::InstanceId id);
+bool setWeldPart1(World& world, core::InstanceId id, const Value& value);
+Value getWeldC0(const World& world, core::InstanceId id);
+bool setWeldC0(World& world, core::InstanceId id, const Value& value);
+Value getWeldC1(const World& world, core::InstanceId id);
+bool setWeldC1(World& world, core::InstanceId id, const Value& value);
+Value getWeldEnabled(const World& world, core::InstanceId id);
+bool setWeldEnabled(World& world, core::InstanceId id, const Value& value);
+void attachWeldComponents(World& world, core::InstanceId id);
+void detachWeldComponents(World& world, core::InstanceId id);
+
+// WeldConstraint
+Value getWeldConstraintPart0(const World& world, core::InstanceId id);
+bool setWeldConstraintPart0(World& world, core::InstanceId id, const Value& value);
+Value getWeldConstraintPart1(const World& world, core::InstanceId id);
+bool setWeldConstraintPart1(World& world, core::InstanceId id, const Value& value);
+Value getWeldConstraintEnabled(const World& world, core::InstanceId id);
+bool setWeldConstraintEnabled(World& world, core::InstanceId id, const Value& value);
+Value getWeldConstraintActive(const World& world, core::InstanceId id);
+void attachWeldConstraintComponents(World& world, core::InstanceId id);
+void detachWeldConstraintComponents(World& world, core::InstanceId id);
+
 // CharacterBody
 Value getCharacterBodyWalkSpeed(const World& world, core::InstanceId id);
 bool setCharacterBodyWalkSpeed(World& world, core::InstanceId id, const Value& value);

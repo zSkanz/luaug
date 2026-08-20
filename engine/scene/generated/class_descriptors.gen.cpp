@@ -596,6 +596,135 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     partDesc.properties = partProperties;
     classes.registerClass(partDesc);
 
+    // --- Weld ---
+    static std::array<PropertyDesc, 5> weldProperties;
+    weldProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("Part0"),
+            .type = ValueType::Instance,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
+            .get = native::getWeldPart0,
+            .set = native::setWeldPart0,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Part1"),
+            .type = ValueType::Instance,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
+            .get = native::getWeldPart1,
+            .set = native::setWeldPart1,
+        },
+        PropertyDesc{
+            .name = atoms.intern("C0"),
+            .type = ValueType::CFrame,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_cframe"),
+            .get = native::getWeldC0,
+            .set = native::setWeldC0,
+        },
+        PropertyDesc{
+            .name = atoms.intern("C1"),
+            .type = ValueType::CFrame,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_cframe"),
+            .get = native::getWeldC1,
+            .set = native::setWeldC1,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Enabled"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getWeldEnabled,
+            .set = native::setWeldEnabled,
+        },
+    }};
+    ClassDescriptor weldDesc;
+    weldDesc.name = atoms.intern("Weld");
+    weldDesc.super = instanceClass;
+    weldDesc.flags = ClassFlags::None;
+    weldDesc.defaultName = atoms.intern("Weld");
+    weldDesc.docKey = {};
+    weldDesc.properties = weldProperties;
+    weldDesc.attachComponents = native::attachWeldComponents;
+    weldDesc.detachComponents = native::detachWeldComponents;
+    classes.registerClass(weldDesc);
+
+    // --- WeldConstraint ---
+    static std::array<PropertyDesc, 4> weldConstraintProperties;
+    weldConstraintProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("Part0"),
+            .type = ValueType::Instance,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
+            .get = native::getWeldConstraintPart0,
+            .set = native::setWeldConstraintPart0,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Part1"),
+            .type = ValueType::Instance,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
+            .get = native::getWeldConstraintPart1,
+            .set = native::setWeldConstraintPart1,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Enabled"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getWeldConstraintEnabled,
+            .set = native::setWeldConstraintEnabled,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Active"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = true,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getWeldConstraintActive,
+            .set = nullptr,
+        },
+    }};
+    ClassDescriptor weldConstraintDesc;
+    weldConstraintDesc.name = atoms.intern("WeldConstraint");
+    weldConstraintDesc.super = instanceClass;
+    weldConstraintDesc.flags = ClassFlags::None;
+    weldConstraintDesc.defaultName = atoms.intern("WeldConstraint");
+    weldConstraintDesc.docKey = {};
+    weldConstraintDesc.properties = weldConstraintProperties;
+    weldConstraintDesc.attachComponents = native::attachWeldConstraintComponents;
+    weldConstraintDesc.detachComponents = native::detachWeldConstraintComponents;
+    classes.registerClass(weldConstraintDesc);
+
     // --- CharacterBody ---
     static std::array<PropertyDesc, 6> characterBodyProperties;
     characterBodyProperties = {{

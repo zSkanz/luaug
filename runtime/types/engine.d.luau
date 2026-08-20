@@ -405,6 +405,38 @@ declare extern type MeshPart extends BasePart with
     CollisionFidelity: EnumCollisionFidelity
 end
 
+declare extern type Weld extends Instance with
+    --- The anchor: the part the other one follows. It may itself be simulated, anchored, or a
+    --- CharacterBody -- whatever moves it, Part1 goes with it.
+    Part0: BasePart?
+    --- The driven part. While the weld is active it is moved by the weld and by nothing else: gravity
+    --- does not reach it, and writing its CFrame is overwritten at the next tick.
+    Part1: BasePart?
+    --- The attachment on Part0. The weld holds `Part0.CFrame * C0` equal to `Part1.CFrame * C1`, which
+    --- is the one sentence that says where both offsets go.
+    C0: CFrame
+    --- The attachment on Part1, in the same relationship.
+    C1: CFrame
+    --- Whether the weld holds. Disabling it hands Part1 back to the simulation where it stands, with no
+    --- velocity -- it is released rather than thrown.
+    Enabled: boolean
+end
+
+declare extern type WeldConstraint extends Instance with
+    --- The anchor, as on Weld.
+    Part0: BasePart?
+    --- The driven part, as on Weld.
+    Part1: BasePart?
+    --- Whether the joint holds. Going from false to true captures the relative transform afresh, which
+    --- is how a part is re-welded somewhere else: move it, then enable.
+    Enabled: boolean
+    --- Whether it is currently holding: Enabled, with both parts set and both in the world. The
+    --- distinction matters because a constraint with one part missing is not an error -- it is
+    --- half-built, which is what every script that assigns the two properties on separate lines briefly
+    --- produces.
+    read Active: boolean
+end
+
 declare extern type CharacterBody extends BasePart with
     --- How fast Move drives the character along the ground, in metres per second. The direction passed
     --- to Move is scaled by this, so a half-length direction walks at half speed.
@@ -828,6 +860,8 @@ declare Instance: {
         & (("Model") -> Model)
         & (("Part") -> Part)
         & (("MeshPart") -> MeshPart)
+        & (("Weld") -> Weld)
+        & (("WeldConstraint") -> WeldConstraint)
         & (("CharacterBody") -> CharacterBody)
         & (("Camera") -> Camera)
         & (("PointLight") -> PointLight)

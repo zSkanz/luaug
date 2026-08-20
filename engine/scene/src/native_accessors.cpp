@@ -657,6 +657,231 @@ Value getCharacterBodyState(const World& world, core::InstanceId id)
     return Value{EnumValue{generated::CharacterStateEnumId, character->state}};
 }
 
+// --- Weld and WeldConstraint (M5) --------------------------------------------
+//
+// Both classes share `WeldComponent`; `captures` is the whole difference.
+//
+// The cycle check lives in the two part setters rather than in the resolver,
+// and that is the same choice `Parent` makes: a graph that cannot contain a
+// cycle needs no cycle handling at the point where order matters, and the write
+// that would create one is the only place a caller can be told which write it
+// was.
+
+[[nodiscard]] const WeldComponent* readWeld(const World& world, core::InstanceId id) noexcept
+{
+    return world.welds().find(id);
+}
+
+[[nodiscard]] WeldComponent* writeWeld(World& world, core::InstanceId id) noexcept
+{
+    return world.welds().find(id);
+}
+
+// Walks the anchor chain up from `part`, following every weld whose driven part
+// it is. True when `target` is reachable, which is what makes the proposed weld
+// a cycle.
+//
+// Linear in the number of welds and bounded by it, because a chain that
+// revisited an instance would already be a cycle -- and no cycle can exist,
+// because this check refuses the write that would make one.
+[[nodiscard]] bool weldReaches(const World& world, core::InstanceId part, core::InstanceId target,
+                               core::InstanceId ignoreWeld)
+{
+    core::InstanceId current = part;
+    for (usize guard = 0; guard <= world.welds().size(); ++guard) {
+        if (!current.valid())
+            return false;
+        if (current == target)
+            return true;
+
+        core::InstanceId next;
+        world.welds().forEach([&](core::InstanceId weldId, const WeldComponent& weld) {
+            if (weldId == ignoreWeld || !weld.enabled)
+                return;
+            if (weld.part1 == current)
+                next = weld.part0;
+        });
+        current = next;
+    }
+    return true;
+}
+
+[[nodiscard]] bool setWeldPart(World& world, core::InstanceId id, const Value& value, bool isPart0)
+{
+    WeldComponent* weld = writeWeld(world, id);
+    if (weld == nullptr)
+        return false;
+
+    core::InstanceId part;
+    if (const auto* reference = std::get_if<core::InstanceId>(&value); reference != nullptr) {
+        if (!world.alive(*reference))
+            return false;
+        part = *reference;
+    }
+    else if (valueType(value) != ValueType::Nil) {
+        return false;
+    }
+
+    const core::InstanceId part0 = isPart0 ? part : weld->part0;
+    const core::InstanceId part1 = isPart0 ? weld->part1 : part;
+
+    // A part welded to itself is the shortest cycle there is, and the one a
+    // script writes by assigning the same variable twice.
+    if (part0.valid() && part0 == part1)
+        return false;
+    if (part0.valid() && part1.valid() && weldReaches(world, part0, part1, id))
+        return false;
+
+    if (isPart0)
+        weld->part0 = part;
+    else
+        weld->part1 = part;
+
+    // A constraint captures afresh whenever its pair changes: the transform it
+    // was holding described two parts, and one of them is no longer one of
+    // these two.
+    if (weld->captures)
+        weld->captured = false;
+    return true;
+}
+
+Value getWeldPart0(const World& world, core::InstanceId id)
+{
+    const WeldComponent* weld = readWeld(world, id);
+    return weld == nullptr ? Value{} : Value{weld->part0};
+}
+
+bool setWeldPart0(World& world, core::InstanceId id, const Value& value)
+{
+    return setWeldPart(world, id, value, true);
+}
+
+Value getWeldPart1(const World& world, core::InstanceId id)
+{
+    const WeldComponent* weld = readWeld(world, id);
+    return weld == nullptr ? Value{} : Value{weld->part1};
+}
+
+bool setWeldPart1(World& world, core::InstanceId id, const Value& value)
+{
+    return setWeldPart(world, id, value, false);
+}
+
+Value getWeldC0(const World& world, core::InstanceId id)
+{
+    const WeldComponent* weld = readWeld(world, id);
+    return weld == nullptr ? Value{} : Value{weld->c0};
+}
+
+bool setWeldC0(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* cframe = std::get_if<core::CFrameD>(&value);
+    WeldComponent* weld = writeWeld(world, id);
+    if (cframe == nullptr || weld == nullptr)
+        return false;
+    weld->c0 = *cframe;
+    return true;
+}
+
+Value getWeldC1(const World& world, core::InstanceId id)
+{
+    const WeldComponent* weld = readWeld(world, id);
+    return weld == nullptr ? Value{} : Value{weld->c1};
+}
+
+bool setWeldC1(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* cframe = std::get_if<core::CFrameD>(&value);
+    WeldComponent* weld = writeWeld(world, id);
+    if (cframe == nullptr || weld == nullptr)
+        return false;
+    weld->c1 = *cframe;
+    return true;
+}
+
+Value getWeldEnabled(const World& world, core::InstanceId id)
+{
+    const WeldComponent* weld = readWeld(world, id);
+    return weld == nullptr ? Value{} : Value{weld->enabled};
+}
+
+bool setWeldEnabled(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* flag = std::get_if<bool>(&value);
+    WeldComponent* weld = writeWeld(world, id);
+    if (flag == nullptr || weld == nullptr)
+        return false;
+    // Off to on re-captures, which is how a part is re-welded somewhere else:
+    // move it, then enable.
+    if (*flag && !weld->enabled && weld->captures)
+        weld->captured = false;
+    weld->enabled = *flag;
+    return true;
+}
+
+void attachWeldComponents(World& world, core::InstanceId id)
+{
+    world.welds().add(id, WeldComponent{});
+}
+
+void detachWeldComponents(World& world, core::InstanceId id)
+{
+    world.welds().remove(id);
+}
+
+void attachWeldConstraintComponents(World& world, core::InstanceId id)
+{
+    WeldComponent weld;
+    weld.captures = true;
+    world.welds().add(id, weld);
+}
+
+void detachWeldConstraintComponents(World& world, core::InstanceId id)
+{
+    world.welds().remove(id);
+}
+
+Value getWeldConstraintPart0(const World& world, core::InstanceId id)
+{
+    return getWeldPart0(world, id);
+}
+
+bool setWeldConstraintPart0(World& world, core::InstanceId id, const Value& value)
+{
+    return setWeldPart0(world, id, value);
+}
+
+Value getWeldConstraintPart1(const World& world, core::InstanceId id)
+{
+    return getWeldPart1(world, id);
+}
+
+bool setWeldConstraintPart1(World& world, core::InstanceId id, const Value& value)
+{
+    return setWeldPart1(world, id, value);
+}
+
+Value getWeldConstraintEnabled(const World& world, core::InstanceId id)
+{
+    return getWeldEnabled(world, id);
+}
+
+bool setWeldConstraintEnabled(World& world, core::InstanceId id, const Value& value)
+{
+    return setWeldEnabled(world, id, value);
+}
+
+Value getWeldConstraintActive(const World& world, core::InstanceId id)
+{
+    const WeldComponent* weld = readWeld(world, id);
+    if (weld == nullptr)
+        return Value{};
+    // "Enabled, with both parts set and both in the world." Whether they are in
+    // the world is the tree's answer and the mirror's to act on; what this
+    // reports is everything a script can check for itself.
+    return Value{weld->enabled && world.alive(weld->part0) && world.alive(weld->part1)};
+}
+
 // --- Services ---------------------------------------------------------------
 
 Value getDataModelEngineVersion(const World& world, core::InstanceId)

@@ -493,6 +493,91 @@ local Classes: { Schema.Class } = {
         },
     },
     {
+        Name = "Weld",
+        Extends = "Instance",
+        Module = "scene",
+        Storage = "Weld",
+        Doc = "Holds one part at a fixed offset from another. **A transform weld, not a solver constraint**: "
+            .. "Part1 stops being independently simulated and is driven from Part0 every tick, so welding a "
+            .. "MeshPart to a CharacterBody keeps the two together without anything asking the solver's "
+            .. "permission. Welding two dynamic parts so the SOLVER treats them as one rigid assembly is a "
+            .. "different feature and is not this one. A weld whose two parts are already joined by another "
+            .. "weld, directly or through a chain, is refused: welds form a graph and a cycle has no "
+            .. "resolution order.",
+        Properties = {
+            {
+                Name = "Part0",
+                Type = "BasePart?",
+                Doc = "The anchor: the part the other one follows. It may itself be simulated, anchored, or a "
+                    .. "CharacterBody -- whatever moves it, Part1 goes with it.",
+            },
+            {
+                Name = "Part1",
+                Type = "BasePart?",
+                Doc = "The driven part. While the weld is active it is moved by the weld and by nothing else: "
+                    .. "gravity does not reach it, and writing its CFrame is overwritten at the next tick.",
+            },
+            {
+                Name = "C0",
+                Type = "CFrame",
+                Doc = "The attachment on Part0. The weld holds `Part0.CFrame * C0` equal to `Part1.CFrame * C1`, "
+                    .. "which is the one sentence that says where both offsets go.",
+            },
+            {
+                Name = "C1",
+                Type = "CFrame",
+                Doc = "The attachment on Part1, in the same relationship.",
+            },
+            {
+                Name = "Enabled",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether the weld holds. Disabling it hands Part1 back to the simulation where it stands, "
+                    .. "with no velocity -- it is released rather than thrown.",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "WeldConstraint",
+        Extends = "Instance",
+        Module = "scene",
+        Storage = "WeldConstraint",
+        Doc = "The same joint, with the offset CAPTURED rather than authored. When it becomes active it "
+            .. "records where the two parts are relative to each other and holds that; a Weld is told the "
+            .. "relationship and a WeldConstraint reads it off the world. That difference is the whole reason "
+            .. "both names exist: authoring an offset by hand for two parts already in the right place is "
+            .. "arithmetic nobody should have to do, and capturing one when you meant to specify it is a "
+            .. "joint that silently depends on where things happened to be.",
+        Properties = {
+            {
+                Name = "Part0",
+                Type = "BasePart?",
+                Doc = "The anchor, as on Weld.",
+            },
+            {
+                Name = "Part1",
+                Type = "BasePart?",
+                Doc = "The driven part, as on Weld.",
+            },
+            {
+                Name = "Enabled",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether the joint holds. Going from false to true captures the relative transform afresh, "
+                    .. "which is how a part is re-welded somewhere else: move it, then enable.",
+            },
+            {
+                Name = "Active",
+                Type = "boolean",
+                ReadOnly = true,
+                Doc = "Whether it is currently holding: Enabled, with both parts set and both in the world. The "
+                    .. "distinction matters because a constraint with one part missing is not an error -- it is "
+                    .. "half-built, which is what every script that assigns the two properties on separate lines "
+                    .. "briefly produces.",
+            },
+        } :: { Schema.Property },
+    },
+    {
         -- Module `scene` rather than `physics`, and that is layering rather
         -- than taste: `physics` is L2 and `scene` is L3, so the physics module
         -- cannot register a class into the scene registry at all. The class is

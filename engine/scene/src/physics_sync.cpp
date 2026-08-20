@@ -103,7 +103,12 @@ physics::BodyDesc PhysicsSync::descOf(core::InstanceId id, const PartComponent& 
     physics::BodyDesc desc;
     desc.shape = shapeOf(id, part);
     desc.transform = part.cframe;
-    desc.motion = body.anchored ? physics::MotionType::Static : physics::MotionType::Dynamic;
+    // A part an active weld drives is Kinematic: it still collides and still
+    // pushes what it runs into, and the solver does not move it -- which is what
+    // "driven, not simulated" means (roadmap M5).
+    desc.motion = isDriven(id)   ? physics::MotionType::Kinematic
+                  : body.anchored ? physics::MotionType::Static
+                                  : physics::MotionType::Dynamic;
     desc.friction = body.friction;
     desc.restitution = body.restitution;
     desc.density = body.density;
@@ -330,6 +335,65 @@ void PhysicsSync::applyScene()
     retireUnseen();
 }
 
+bool PhysicsSync::isDriven(core::InstanceId id) const
+{
+    return std::find(m_drivenParts.begin(), m_drivenParts.end(), id) != m_drivenParts.end();
+}
+
+// Welds resolve AFTER the step and the writeback, which is the defined point in
+// the tick the roadmap asks for. Before it, a driven part would follow where its
+// anchor was last tick and lag by a frame; after it, it follows where the anchor
+// ended up this one.
+//
+// The order within the pass is dependency order, not pool order: `resolveWeld`
+// resolves whatever its anchor hangs from before it resolves itself, so a chain
+// lands correctly however the pool holds it. Cycles cannot occur -- the property
+// setters refuse the write that would create one -- and the recursion is bounded
+// by the weld count regardless.
+void PhysicsSync::resolveWelds()
+{
+    m_resolvedWelds.clear();
+    m_drivenParts.clear();
+
+    // Slot order, which is a pure function of the operation sequence. It decides
+    // nothing about the result, because dependency order does -- what it decides
+    // is that two runs walk the same list.
+    m_scene.welds().forEach([&](core::InstanceId weldId, WeldComponent& weld) { resolveWeld(weldId, weld); });
+}
+
+void PhysicsSync::resolveWeld(core::InstanceId weldId, WeldComponent& weld)
+{
+    if (std::find(m_resolvedWelds.begin(), m_resolvedWelds.end(), weldId) != m_resolvedWelds.end())
+        return;
+    m_resolvedWelds.push_back(weldId);
+
+    if (!weld.enabled || !m_scene.alive(weld.part0) || !m_scene.alive(weld.part1))
+        return;
+
+    PartComponent* anchor = m_scene.parts().find(weld.part0);
+    PartComponent* driven = m_scene.parts().find(weld.part1);
+    if (anchor == nullptr || driven == nullptr)
+        return;
+
+    // The anchor may itself be driven by another weld. Resolve that one first,
+    // so a chain settles in one pass instead of lagging one link per tick.
+    m_scene.welds().forEach([&](core::InstanceId otherId, WeldComponent& other) {
+        if (otherId != weldId && other.enabled && other.part1 == weld.part0)
+            resolveWeld(otherId, other);
+    });
+
+    // A constraint reads the relationship off the world the first time it holds;
+    // a weld was told it. `C1` is what carries it either way, so the resolver
+    // has one formula.
+    if (weld.captures && !weld.captured) {
+        weld.c1 = core::inverse(driven->cframe) * (anchor->cframe * weld.c0);
+        weld.captured = true;
+    }
+
+    driven->cframe = (anchor->cframe * weld.c0) * core::inverse(weld.c1);
+    m_drivenParts.push_back(weld.part1);
+}
+
 void PhysicsSync::retireUnseen()
 {
     for (auto it = m_bodies.begin(); it != m_bodies.end();) {
@@ -491,6 +555,9 @@ void PhysicsSync::step(f64 fixedDt)
     const auto stepped = std::chrono::steady_clock::now();
 
     writeBack();
+    // After the writeback, so a driven part follows where its anchor ENDED UP
+    // this tick rather than where it was at the start of it.
+    resolveWelds();
     publishContacts();
     const auto end = std::chrono::steady_clock::now();
 
