@@ -265,6 +265,32 @@ on it, and the harness it needs is the service wiring.
   `noexcept` while allocating.
   Next: write `api/defs/*.api.luau`, then `gen_dts`.
 
+- **2026-08-20 (session 5, Claude Opus):** **A script reaches the engine.** The
+  Instance binding, every datatype, signals and `task` — three commits, each
+  green on both tiers, 233 C++ cases in total. `Instance.new("Part")` builds a
+  real instance whose properties round-trip through their components; two handles
+  to one instance are the same value; signals deliver deferred in one queue with
+  every ordering rule §3.1 states; `task` runs on the SimClock in integer ticks.
+  Also: `core::math` gained all six euler orders, axis-angle, quaternions and
+  slerp; the IDL generator gained the enum tables and their ids, which retired
+  `native_accessors.cpp`'s placeholder constant.
+  Learned — three of these are things the VM refused and two are things the
+  conformance authors caught before the code did: **`v.X` cannot raise**
+  (`LOP_GETTABLEKS` answers a single-character index on a vector inline and
+  case-insensitively, so no metatable is reachable for it — api-design §2.3
+  corrected, U-52); **`typeof` never reads a table's `__type`**, so `Enum` and
+  every enum object are tagged userdata rather than the frozen tables they read
+  as (U-53); the `useratom` process-globals were never necessary, because the
+  callback receives the `lua_State`; **the scene→script conversion cannot be
+  batched at the drain**, because a fire captures its connection list when it is
+  raised; and `lua_unref` before `lua_getref` reads the registry's free list
+  rather than the value, which made the first `:Once` handler "attempt to call a
+  number value". Clang caught nineteen `-Wdouble-promotion` errors MSVC did not.
+  Next: build the DataModel and its services in the world and bind
+  `game`/`workspace`/`script`, then drive `drain`/`resumeTimers`/
+  `retireDestroyed` from `app`'s `FrameScheduler` in the order
+  `engine/script/tests/script_fixture.h::tick` already models.
+
 <!-- Format for future entries:
 - **YYYY-MM-DD (session N):** did X; learned Y; Next: <literal first action>.
 -->
