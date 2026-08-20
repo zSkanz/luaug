@@ -92,8 +92,9 @@ and is an ordinary child of it.
   exactly that runtime and `luaug setup` regenerates `.luaug/types/` to match.
 - At runtime: `game.EngineVersion: string` and `game.LuauVersion: string`
   (read-only).
-- Type defs, docs JSON, and the api-dump are versioned artifacts of each
-  engine release; a mismatch produces a CLI warning.
+- Type defs and the api-dump are versioned artifacts of each engine release; a
+  mismatch produces a CLI warning. (The docs JSON this line also named was
+  dropped in M3 — see §5's generated-artifact list.)
 
 ---
 
@@ -1011,6 +1012,11 @@ thread-safety assertions.
 4. `api-dump.json` — versioned, machine-readable; CI diffs it to force
    changelog entries and catch accidental API breaks.
 5. `docs/reference/**` — markdown reference pages.
+
+**Built so far:** (1) since M2, freshness-gated, carrying the doc comments since
+M3. (2) is dropped. **(3), (4) and (5) are declared here and not generated yet**
+— they are recorded as carried work in `PROGRESS.md` rather than left to read as
+though they exist.
 
 Naming-rule lints run inside the generator (§9) as a CI gate.
 
