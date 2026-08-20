@@ -49,18 +49,90 @@ namespace
 platform::Window* g_window = nullptr;
 const rhi::IDevice* g_device = nullptr;
 
-// Four facts the host already knows. Nothing here is sampled or estimated:
-// `core` has no counters yet, and a profiler panel reporting numbers the engine
-// cannot actually measure is worse than no panel.
+// Frame time, sampled and held; everything else read directly.
+//
+// The rule this panel started with -- "nothing here is sampled or estimated" --
+// is right for the three static facts below and was wrong for the one value
+// that changes every frame. Printed raw at 60 Hz it cannot be read at all: the
+// human reported it twice, and could only read the panel by pausing a frame.
+//
+// A held mean is also MORE honest about what the engine costs than a number
+// that trembles, because windowed frames present through the swapchain and the
+// last digits are VSync and the compositor rather than engine work. The worst
+// frame in the window is printed beside it, since a hitch is what a developer
+// is actually looking for and a mean is precisely the statistic that hides one.
+//
+// `frame.index` is gone. A bare counter at 60 Hz is unreadable by construction
+// and answers nothing the frame time does not -- a stalled engine stops drawing
+// this panel at all. The number still exists where it is used: the capture
+// stream names its frames, and the baseline collector counts them.
+struct FrameTimeMeter
+{
+    // Four hertz, the slow end of a readable range rather than the fast one: a
+    // four-digit number that changes faster than this is legible only in
+    // principle, which is the defect being fixed.
+    static constexpr double kWindowSeconds = 0.25;
+
+    double elapsed = 0.0;
+    double sum = 0.0;
+    double worst = 0.0;
+    unsigned frames = 0;
+
+    // What is displayed, replaced only when a window closes.
+    double meanMs = 0.0;
+    double worstMs = 0.0;
+    double perSecond = 0.0;
+    bool primed = false;
+
+    void accumulate(double renderDt) noexcept
+    {
+        // The first frame has no previous one to measure against. Its zero is
+        // kept out of the mean rather than divided by, which is the same guard
+        // the raw print needed and for the same reason.
+        if (renderDt > 0.0)
+        {
+            sum += renderDt;
+            worst = renderDt > worst ? renderDt : worst;
+            ++frames;
+        }
+
+        elapsed += renderDt;
+        if (elapsed < kWindowSeconds || frames == 0)
+            return;
+
+        const double mean = sum / static_cast<double>(frames);
+        meanMs = mean * 1000.0;
+        worstMs = worst * 1000.0;
+        perSecond = 1.0 / mean;
+        primed = true;
+
+        elapsed = 0.0;
+        sum = 0.0;
+        worst = 0.0;
+        frames = 0;
+    }
+};
+
+// Accumulates only while the panel is drawing, which is what makes the window
+// it reports the window it displayed.
+FrameTimeMeter g_frameTime;
+
+// Three facts the host already knows, plus the sampled frame time above.
 void drawStats(const Frame& frame)
 {
-    ImGui::Text("frame %llu", static_cast<unsigned long long>(frame.index));
+    g_frameTime.accumulate(frame.renderDt);
 
-    // Guarded because the first frame has no previous one to measure against,
-    // and dividing by its zero would print inf on every start.
-    const double milliseconds = frame.renderDt * 1000.0;
-    const double perSecond = frame.renderDt > 0.0 ? 1.0 / frame.renderDt : 0.0;
-    ImGui::Text("%.2f ms (%.0f fps)", milliseconds, perSecond);
+    // Dashes rather than a made-up 0.00 before the first window closes: a
+    // quarter second of "no measurement yet" is honest and 0.00 ms is not.
+    if (g_frameTime.primed)
+    {
+        ImGui::Text(
+            "%.2f ms (%.0f fps)  worst %.2f ms", g_frameTime.meanMs, g_frameTime.perSecond, g_frameTime.worstMs);
+    }
+    else
+    {
+        ImGui::TextUnformatted("-- ms (-- fps)");
+    }
 
     const std::string_view backend = backendName(g_device->backend());
     ImGui::Text("backend %.*s", static_cast<int>(backend.size()), backend.data());
