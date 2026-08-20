@@ -65,8 +65,7 @@ local function run(options: Options): number
     local token = devserver.mintToken()
     local port = options.port or projectlib.devPort(project)
 
-    local server: devserver.Handle
-    server = devserver.start({
+    local server = devserver.start({
         root = project.root,
         port = port,
         token = token,
@@ -85,8 +84,6 @@ local function run(options: Options): number
                 table.insert(shown, file)
             end
             print(tr("cli.dev.reloading", { files = table.concat(shown, ", ") }))
-
-            server:sendToEngine({ type = "reload", id = server:nextRequestId(), paths = changed })
         end,
 
         onEngineMessage = function(message)

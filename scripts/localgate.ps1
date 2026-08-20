@@ -144,6 +144,21 @@ ctest --preset win-msvc-dev --output-on-failure || exit /b 1
     } finally {
         Remove-Item $temp -ErrorAction SilentlyContinue
     }
+
+    # The CLI's own path to the same suite. The M3 gate wants `luaug test` green
+    # on both tiers, and it is a different path from ctest's: it launches the
+    # engine, reads the per-case report and emits TAP. ctest proves the engine;
+    # this proves the tool a developer types.
+    $tap = Join-Path $env:TEMP "luaug-test-$PID.tap"
+    & (Get-BashPath) 'scripts/luaug.sh' test tests/conformance | Set-Content -Path $tap -Encoding utf8
+    if ($LASTEXITCODE -ne 0) { throw "luaug test failed" }
+    Get-Content $tap -Tail 1
+    Remove-Item $tap -ErrorAction SilentlyContinue
+
+    # The M3 gate's first item: a dev server, this build headless against it, a
+    # file mutated by the test, and the reload confirmed over the WebSocket.
+    & lute test tests/hotreload
+    if ($LASTEXITCODE -ne 0) { throw "the hot-reload gate failed" }
 }
 
 Invoke-Stage 'linux' {

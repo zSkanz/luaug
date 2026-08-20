@@ -34,7 +34,7 @@ local function cliRoot(): string
 end
 
 local function copyTree(from: string, to: string, substitutions: { [string]: string })
-    fs.createDirectory(to, { recursiveCreate = true })
+    fs.createDirectory(to, { makeParents = true })
 
     for _, entry in fs.listDirectory(from) do
         local source = projectlib.joined(from, entry.name)
@@ -83,7 +83,7 @@ local function run(options: Options): number
     -- rather than kept in the template: it belongs to the engine version, not
     -- to the template.
     local types = projectlib.joined(target, ".luaug", "types")
-    fs.createDirectory(types, { recursiveCreate = true })
+    fs.createDirectory(types, { makeParents = true })
     -- One file, and the hover documentation is inside it: the IDL's doc text is
     -- emitted as `---` comments above each declaration, so there is no second
     -- artifact to copy and none to keep in step.

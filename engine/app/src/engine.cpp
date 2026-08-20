@@ -341,8 +341,15 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // ticks fire on some frames and not others -- deterministically, but
         // not the one-per-frame this comment claims. Rounding up costs 0.3 ns
         // of drift per frame and makes the claim true.
-        const u64 nowNs = options.headless ? scheduler.totalFrames() * headlessStepNs
-                                           : platform::nowNs();
+        // A headless run drives the synthetic clock; a headless DEV SESSION does
+        // not. The synthetic clock exists so a golden capture does not depend on
+        // how busy the runner was, and a dev session has no golden -- what it
+        // has is a developer, or a test, watching a world advance. Left
+        // synthetic it runs tens of thousands of ticks per second, so "the hash
+        // at tick 40" is a tick the world blew past before the request for it
+        // finished crossing the socket.
+        const bool syntheticClock = options.headless && options.devControlUrl.empty();
+        const u64 nowNs = syntheticClock ? scheduler.totalFrames() * headlessStepNs : platform::nowNs();
 
         const Frame frame = scheduler.beginFrame(nowNs);
 
@@ -397,8 +404,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     break;
                 }
                 case DevCommand::Kind::Sample:
-                    pendingSamples.push_back(
-                        PendingSample{command.id, host->world().engineState().tick + command.afterTicks});
+                    // A tick already past is answered at once rather than never:
+                    // the reply carries the tick it was actually taken at, so a
+                    // caller can tell the difference.
+                    pendingSamples.push_back(PendingSample{command.id, command.atTick});
                     break;
                 case DevCommand::Kind::Ping:
                     replyOk("pong", command.id, [](core::JsonWriter&) {});
@@ -451,6 +460,15 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         }
 
         if (host->shutdownRequested())
+            quit = true;
+
+        // A dev session that has lost its dev server has nobody left to tell it
+        // to stop -- and headless it has no window to close either, so it would
+        // run until something else killed it. That is the orphaned-process
+        // failure the M3 brief lists as entering risk 4, and this is the whole
+        // of the fix. A WINDOWED session keeps running on purpose: closing
+        // `luaug dev` should not take the window with it.
+        if (!options.devControlUrl.empty() && options.headless && !control.connected())
             quit = true;
 
         if (!options.headless)

@@ -22,7 +22,6 @@ local fsRaw = require("@lute/fs")
 local json = require("@std/json")
 local net = require("@lute/net")
 local task = require("@lute/task")
-local time = require("@lute/time")
 
 local project = require("./project")
 
@@ -54,9 +53,16 @@ local DefaultDebounce = 0.05
 --- Not a secret in the cryptographic sense and not pretending to be one. What
 --- it buys is that another process on this machine cannot drive your engine by
 --- guessing a port, which is the whole exposure a loopback listener has.
+---
+--- Drawn from `math.random` rather than from a clock: `time.now()` returns an
+--- `instant` userdata that `string.format` will not take, and the value here
+--- needs to be unguessable rather than unique-in-time.
 local function mintToken(): string
-    local stamp = string.format("%.9f", time.now() :: any)
-    return (string.gsub(`{stamp}-{math.random(1, 2 ^ 30)}`, "[^%w]", ""))
+    local parts: { string } = {}
+    for _ = 1, 8 do
+        table.insert(parts, string.format("%04x", math.random(0, 0xFFFF)))
+    end
+    return table.concat(parts)
 end
 
 local function start(options: Options): Handle
@@ -96,11 +102,10 @@ local function start(options: Options): Handle
     local server = net.server.serve({
         hostname = "127.0.0.1",
         port = options.port,
-        handler = function(_request, _server)
-            -- The HTTP side exists only so the upgrade has something to answer
-            -- from. There is no page here and there is not meant to be.
-            return { status = 426, body = "" }
-        end,
+        -- No `handler`. Supplying one at all is what stops the upgrade: the
+        -- HTTP handler is consulted first and the WebSocket handlers below
+        -- never see the request, even when it returns nil (U-62). There is no
+        -- HTTP surface here and there is not meant to be one.
         websocket = {
             message = function(socket, raw)
                 local text = if typeof(raw) == "string" then raw else buffer.tostring(raw :: buffer)
@@ -155,6 +160,10 @@ local function start(options: Options): Handle
 
     -- --- the watcher ---------------------------------------------------------
 
+    -- Declared before the watcher task so it can reach the connection, and
+    -- defined after the handle exists.
+    local sendReload: ({ string }) -> ()
+
     local snapshot = project.sourceSnapshot(options.root)
     local dirty = false
     local watched: { fsRaw.WatchHandle } = {}
@@ -189,9 +198,14 @@ local function start(options: Options): Handle
                 continue
             end
 
+            -- The server sends the reload, rather than leaving it to whoever
+            -- supplied a callback. It owns the protocol; `onChanged` is a
+            -- notification, and a caller that did not want one should not
+            -- thereby get a watcher that notices saves and does nothing.
             if options.onChanged ~= nil then
                 options.onChanged(changed)
             end
+            sendReload(changed)
         end
     end)
 
@@ -214,6 +228,15 @@ local function start(options: Options): Handle
         end
         socket:send(json.serialize(json.object(message :: any)))
         return true
+    end
+
+    function sendReload(changed: { string })
+        nextId += 1
+        local socket = engineSocket
+        if socket == nil then
+            return
+        end
+        socket:send(json.serialize(json.object({ type = "reload", id = nextId, paths = changed :: any })))
     end
 
     function handle.close(_self: Handle)

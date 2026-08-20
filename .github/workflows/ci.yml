@@ -396,6 +396,41 @@ jobs:
           cmake --build --preset ${{ matrix.preset }}
           ctest --preset ${{ matrix.preset }} -LE gpu-golden
 
+      # The M3 gate wants two things green "on both tiers" that ctest cannot
+      # give: `luaug test`, which is the CLI's own path to the same suite, and
+      # the end-to-end hot-reload test, which starts a dev server, launches this
+      # build headless against it and waits for a reload to be confirmed over
+      # the WebSocket. Both need the pinned Luau toolchain, which only the
+      # `luau-check` job installed before M3.
+      - name: Install the pinned Luau toolchain
+        if: runner.os != 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            Windows) archive="rokit-${ROKIT_VERSION}-windows-x86_64.zip" ;;
+            *)       archive="rokit-${ROKIT_VERSION}-linux-x86_64.zip" ;;
+          esac
+          curl -fsSL -o /tmp/rokit.zip             "https://github.com/rojo-rbx/rokit/releases/download/v${ROKIT_VERSION}/${archive}"
+          unzip -q /tmp/rokit.zip -d /tmp/rokit
+          /tmp/rokit/rokit self-install
+          echo "$HOME/.rokit/bin" >> "$GITHUB_PATH"
+          # --no-trust-check: the tools are pinned in the in-repo, ADR-gated
+          # rokit.toml (R5); the interactive trust prompt has no answer in CI.
+          "$HOME/.rokit/bin/rokit" install --no-trust-check
+
+      - name: luaug test (the CLI's path to the conformance suite)
+        if: runner.os != 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/luaug.sh test tests/conformance | tail -n 3
+
+      - name: Hot reload, end to end (M3 gate)
+        if: runner.os != 'macOS'
+        shell: bash
+        run: lute test tests/hotreload
+
       # A compiler cache that never hits is indistinguishable, from the outside,
       # from one that works: the build is green either way and the only symptom
       # is a bill. So the numbers go on the run's summary page, where they can be

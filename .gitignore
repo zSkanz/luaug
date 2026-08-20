@@ -49,3 +49,7 @@ Thumbs.db
 # Packaging output
 dist/
 *.lpack
+
+# `luaug test`'s machine-readable report. Written beside the suite when no
+# --report path is given, and regenerated on every run.
+luaug-test-report.json

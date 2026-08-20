@@ -109,7 +109,7 @@ void DevControl::Impl::ingest(const std::string& text)
     command.type = std::string(root["type"].asString());
     command.kind = kindOf(command.type);
     command.id = static_cast<core::u64>(root["id"].asInteger(0));
-    command.afterTicks = static_cast<core::u64>(root["afterTicks"].asInteger(0));
+    command.atTick = static_cast<core::u64>(root["atTick"].asInteger(0));
 
     const core::JsonValue paths = root["paths"];
     for (core::usize i = 0; i < paths.size(); ++i)

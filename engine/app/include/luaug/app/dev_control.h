@@ -53,8 +53,11 @@ struct DevCommand
 
     Kind kind = Kind::Unsupported;
     core::u64 id = 0;
-    // `sample`: how many ticks to advance before answering.
-    core::u64 afterTicks = 0;
+    // `sample`: the world tick to answer at. ABSOLUTE, not a delta: a reload
+    // restarts the tick counter, so "tick 40" is the only thing that means the
+    // same in two different worlds -- which is what makes a reloaded world
+    // comparable to a cold boot at all (M3 brief, Decision 11).
+    core::u64 atTick = 0;
     // As received, so an `error` reply can name what it refused.
     std::string type;
     // `reload`: the rescan's real changed-file list.

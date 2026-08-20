@@ -93,7 +93,15 @@ local function run(options: Options): number
     end
 
     print(tr("cli.test.running", { path = suite }))
-    local result = process.run({ engine :: string, `--run-tests={suite}`, `--test-report={reportPath}` }, {
+    -- `--rhi=null` because a conformance run is about the world and not about
+    -- pixels: it renders nothing, and asking for a device would make the suite
+    -- unrunnable on any machine without a GPU -- which is every CI container.
+    local result = process.run({
+        engine :: string,
+        `--run-tests={suite}`,
+        `--test-report={reportPath}`,
+        "--rhi=null",
+    }, {
         stdio = "inherit",
     })
 

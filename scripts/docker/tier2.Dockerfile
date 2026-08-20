@@ -51,6 +51,30 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends \
         libwayland-dev wayland-protocols libdecor-0-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# The Luau toolchain, from the same `rokit.toml` a developer installs. `luaug
+# test` is a gate item "on both tiers" (roadmap M3), and it runs the CLI, which
+# is Lute scripts -- so this tier needs Lute, which it did not before M3.
+#
+# Baked into the image rather than installed per run: a container that fetched
+# three release archives on every gate would spend more time downloading than
+# compiling, and the pins are in `rokit.toml` either way.
+#
+# `--no-trust-check` on `install` because rokit otherwise blocks on a trust
+# prompt in any non-interactive session, which here means forever. `self-install`
+# does not take the flag -- it installs rokit's own shims and trusts nothing.
+COPY rokit.toml /tmp/rokit/rokit.toml
+# The installer's own version is pinned rather than tracking `latest`: an image
+# whose toolchain moves on its own stops matching the machine it reproduces.
+ARG ROKIT_VERSION=1.2.0
+RUN curl -fsSL "https://github.com/rojo-rbx/rokit/releases/download/v${ROKIT_VERSION}/rokit-${ROKIT_VERSION}-linux-x86_64.zip" -o /tmp/rokit.zip \
+    && unzip -q /tmp/rokit.zip -d /tmp/rokit-bin \
+    && install -m 0755 /tmp/rokit-bin/rokit /usr/local/bin/rokit \
+    && cd /tmp/rokit \
+    && rokit self-install \
+    && rokit install --no-trust-check \
+    && rm -rf /tmp/rokit.zip /tmp/rokit-bin
+ENV PATH="/root/.rokit/bin:${PATH}"
+
 # Out-of-tree (R14), and on a named volume so an incremental run reuses the
 # previous one's objects. That is what makes this fast enough to run before
 # every push -- the first build is a cold one, every build after it is not.

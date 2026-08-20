@@ -60,6 +60,9 @@ Captured with `luaug-host --bench=tests/bench --bench-repeats=5`, median of
 | M2 | `tests/bench/instances500` | `win-msvc-dev` | worst sim tick | 0.357 ms | — |
 | M2 | `tests/bench/churn10k` (10,000 parts, 1,000 listeners, two thirds moving) | `win-msvc-dev` | mean sim tick | **2.02 ms** | 16 ms — the property-churn CI threshold |
 | M2 | `tests/bench/churn10k` | `win-msvc-dev` | worst sim tick | 2.95 ms | — |
+| M3 | `tests/hotreload` one-script project | `win-msvc-dev` | reload span | **0.9 ms** | 500 ms — ADR 0024's hard requirement |
+| M3 | `tests/hotreload` 500-instance project (5 models × 100 parts, all moving) | `win-msvc-dev` | reload span, worst of 3 | **1.6 ms** | 500 ms |
+| M3 | `tests/hotreload` 500-instance project | `linux-clang-dev` (container) | reload span, worst of 3 | 0.7 ms | 500 ms |
 
 **What the numbers say.** The gate scene sits at 0.8% of a 60 Hz frame, with a
 factor of 30 to the budget: at M2 the simulation kernel is not what will make a
@@ -68,6 +71,21 @@ frame late. The churn scene is the interesting one — 10,000 property writes an
 is that low only because a write that does not change the value raises nothing
 (M2 brief, Decision 6). That design choice is worth roughly the whole
 measurement: a third of the writes in that scene are no-ops by construction.
+
+**What the reload numbers say, and what they do not.** ADR 0024 set 500 ms as a
+hard requirement and the measurement comes in at 1.6 ms — a factor of three
+hundred. That is not a triumph; it is a statement about what is being measured.
+The span is the FrameStart safe point through `PostReload` returning, on a
+project whose scripts compile in under a millisecond, and the whole of the
+budget's difficulty was always going to be somewhere else: the bytecode cache
+ADR 0024 names and M3 did not need to build, and the assets and shaders a real
+project reloads alongside its scripts. What these numbers establish is that the
+*mechanism* — destroy a world, build another, carry the state bag and the
+preserved instances across — costs nothing worth counting. The budget becomes
+interesting again in M4, when a reload has meshes and pipelines behind it.
+
+The Linux number being lower than the Windows one is not a portability finding
+either: it is a container with no window, no device and a warm page cache.
 
 **Why the budgets are so loose.** They are catastrophe detectors, not
 instruments. A CI runner's speed varies by more than the regression anyone would

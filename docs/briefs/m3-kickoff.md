@@ -315,7 +315,7 @@ reason; it never degrades to a subset.
 | `type` | Meaning |
 |---|---|
 | `reload` | `paths: {string}` — the rescan's real changed-file list. Perform the fast world restart. |
-| `sample` | `afterTicks: number` — reply with the world hash once the sim has advanced that many ticks. This is what makes the gate's assertion race-free. |
+| `sample` | `atTick: number` — reply with the world hash when the sim reaches that tick. **Absolute**, because a reload restarts the counter and "tick 40" is then the only thing that means the same in two different worlds; a delta would compare a reloaded world against a later part of itself. A tick already past is answered at once, and the reply says which tick it was taken at. |
 | `ping` | Liveness. |
 | `shutdown` | Exit cleanly, running `BindToClose`. The E2E test's teardown, and the answer to orphaned processes (entering risk 4). |
 | `asset-changed`, `eval` | **Reserved.** Answered with `dev.err.not_implemented`. Not M3 scope, and named here so the protocol does not have to change to gain them. |
