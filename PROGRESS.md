@@ -77,6 +77,28 @@ it, and building it on speculation is what §5 rejects.
 
 ## Now / Next
 
+- **`BasePart.Transparency` writes, travels, and then does nothing, reported by
+  the human on 2026-08-20.** It is declared in the IDL, and `render_world.cpp`
+  extracts it into the snapshot — `.transparency = part.transparency` — and
+  `renderer_default` never reads it. There is no blend state, no transparent
+  pass and no back-to-front sort, so every value renders opaque.
+
+  This is the failure `instances.api.luau`'s own header names, in its worst
+  shape: not a property that is obviously unbacked, but one that is wired
+  *almost* all the way down. Anyone tracing it finds a working extract and
+  concludes the fault is elsewhere.
+
+  Three honest ways out, and the choice is a scope call rather than a fix:
+  implement a transparent pass (sorted, blended, after the opaque one, which is
+  real M4-sized work); implement alpha *cutout* only, which the material block
+  already carries a field for (`shader_types.h`: "w alpha cutoff") and which
+  needs no sorting; or drop the property to the milestone that renders it and
+  say so, as M4 already did for `Sky`, `Camera.ViewportSize` and
+  `MeshPart.CollisionFidelity`.
+
+  Whichever it is, it should be decided rather than left — the property is
+  visible in the inspector the human is clicking through.
+
 - **There is no crash artifact, and the human has now reported four defects
   without one (2026-08-20).** `architecture.md` §app promises a "crash handler
   (minidump + log)"; it does not exist, and `core::log` has no file sink either
