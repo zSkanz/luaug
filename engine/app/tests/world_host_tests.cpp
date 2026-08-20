@@ -2,13 +2,16 @@
 
 #include <ostream>
 
+#include <array>
 #include <filesystem>
+#include <limits>
 #include <fstream>
 #include <string>
 
 #include "luaug_test_nearly.h"
 #include "project_fixture.h"
 
+#include "luaug/app/inspector.h"
 #include "luaug/app/world_host.h"
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
@@ -571,4 +574,81 @@ TEST_CASE("the render module's positional classes are PVInstances too")
     REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
     CHECK_FALSE(log.contains("[script.err."));
     CHECK(host.world().childCount(host.workspace()) == 1);
+}
+
+TEST_CASE("dragging Size and CFrame through their extremes does not take the host down")
+{
+    // The reproduction attempt for the one reported defect with no repro: the
+    // host died while values were being dragged in the inspector, and the
+    // captured log held the two lines an ordinary run prints -- the signature of
+    // a fault rather than of any C++ error path.
+    //
+    // A drag is not one write. It is a write every frame, each one read back
+    // from the property it just set, and it passes through whatever values the
+    // mouse sweeps over on the way -- including zero, negative and absurd. This
+    // drives exactly that loop through `Inspector`, so it goes through
+    // `enqueue` -> FrameStart drain -> `World::setProperty`, and extracts a
+    // frame each time so the renderer sees every value too.
+    //
+    // It has not reproduced the crash. That is worth recording rather than
+    // deleting: it rules out the write path itself, which narrows what remains
+    // to the ImGui half and to the defocus the human's note mentions.
+    Captured log;
+    Project project;
+    project.write("src/scripts/main.luau", R"(
+        local part = Instance.new("MeshPart")
+        part.Name = "Target"
+        part.Parent = workspace
+
+        local camera = Instance.new("Camera")
+        camera.CFrame = CFrame.lookAt(Vector3.new(6, 4, 6), Vector3.new(0, 0, 0))
+        camera.Parent = workspace
+        workspace.CurrentCamera = camera
+    )");
+
+    app::WorldHost host;
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
+
+    const core::InstanceId target =
+        host.world().findFirstChild(host.workspace(), host.world().atoms().lookup("Target"));
+    REQUIRE(target.valid());
+
+    const core::NameAtom sizeProperty = host.world().atoms().lookup("Size");
+    const core::NameAtom cframeProperty = host.world().atoms().lookup("CFrame");
+
+    // The values a drag actually sweeps through, plus the ones a fast drag
+    // overshoots into. Infinity and NaN are here because `DragScalar` with a
+    // speed and no bounds will reach them, and because a NaN in a transform is
+    // how a renderer stops being a renderer.
+    const std::array<core::f32, 8> sweep{1.0f, 0.5f, 0.0f, -1.0f, -0.0f, 1e6f, 1e30f,
+        std::numeric_limits<core::f32>::infinity()};
+
+    app::Inspector inspector;
+    inspector.select(target);
+
+    render::RenderWorld snapshot;
+    for (std::size_t frame = 0; frame < sweep.size() * 4; ++frame)
+    {
+        const core::f32 value = sweep[frame % sweep.size()];
+        // Read back first, exactly as the widget does: a drag edits the value
+        // the panel is showing, not a value it remembers.
+        const std::optional<scene::Value> current = host.world().getProperty(target, sizeProperty);
+        REQUIRE(current.has_value());
+
+        inspector.enqueue(target, sizeProperty, scene::Value{core::Vec3{value, value, value}});
+
+        core::CFrameD moved;
+        moved.position = core::DVec3{static_cast<core::f64>(value), 1.0, static_cast<core::f64>(value)};
+        inspector.enqueue(target, cframeProperty, scene::Value{moved});
+
+        inspector.applyPending(host.world());
+        host.tick();
+        render::extract(host.world(), host.workspace(), host.lighting(), render::MeshLibrary{}, 1.0f, 0.0f, snapshot);
+    }
+
+    // Still alive, still answering, and the panel can still format what it
+    // holds -- `formatValue` is the other thing that touches every value.
+    CHECK(host.world().alive(target));
+    CHECK_FALSE(app::formatValue(host.world(), *host.world().getProperty(target, sizeProperty)).empty());
+    CHECK_FALSE(app::formatValue(host.world(), *host.world().getProperty(target, cframeProperty)).empty());
 }

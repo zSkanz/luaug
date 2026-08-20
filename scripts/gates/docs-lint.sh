@@ -109,6 +109,68 @@ for example in examples/*/; do
     fi
 done
 
+# --- The defect register keeps every row it ever had ------------------------
+#
+# `docs/defects.md` is append-only, and this is what makes that a fact rather
+# than an instruction nobody reads. Three human-reported defects were removed
+# from PROGRESS.md -- not archived, removed -- while it was being rewritten to
+# close M4, on the day the human was being asked to sign that milestone off.
+# A close rewrites the ledger wholesale, and a bullet that disappears leaves
+# nothing behind.
+#
+# A row cannot disappear the same way: the ids have to run D001, D002, ... with
+# no holes and no duplicates, so a deleted row leaves a gap this names. It does
+# not need git history, which is what lets it run identically in a shallow CI
+# clone and on a developer's machine.
+echo "== defect register =="
+if [[ ! -f docs/defects.md ]]; then
+    err "docs/defects.md is missing; it is append-only and never deleted" "docs/defects.md"
+    status=1
+else
+    mapfile -t ids < <(grep -oE '^\| D[0-9]{3} ' docs/defects.md | tr -d '| ' || true)
+    if [[ ${#ids[@]} -eq 0 ]]; then
+        err "docs/defects.md has no D### rows" "docs/defects.md"
+        status=1
+    fi
+    expected=1
+    for id in "${ids[@]}"; do
+        want=$(printf 'D%03d' "$expected")
+        if [[ "$id" != "$want" ]]; then
+            err "defect ids must run in order with no gaps: expected $want, found $id" "docs/defects.md"
+            status=1
+            break
+        fi
+        expected=$((expected + 1))
+    done
+
+    # Every row says what state it is in, from a closed set. "It is in the
+    # table" is not a status, and a row whose state nobody can read is a row
+    # that gets skipped when someone asks what is still open.
+    while IFS= read -r line; do
+        state=$(echo "$line" | awk -F'|' '{gsub(/^ +| +$/, "", $5); print $5}')
+        case "$state" in
+            open|fixed|not-a-defect|scheduled) ;;
+            *)
+                id=$(echo "$line" | awk -F'|' '{gsub(/^ +| +$/, "", $2); print $2}')
+                err "$id has state '$state'; expected open|fixed|not-a-defect|scheduled" "docs/defects.md"
+                status=1
+                ;;
+        esac
+    done < <(grep -E '^\| D[0-9]{3} ' docs/defects.md || true)
+
+    # A defect referred to anywhere else has to exist here. This is the half
+    # that catches the opposite mistake from a deletion: a ledger or a brief
+    # citing D0xx that the register never had.
+    while IFS=: read -r file cited; do
+        if ! grep -qE "^\| $cited " docs/defects.md; then
+            err "cites $cited, which docs/defects.md does not list" "$file"
+            status=1
+        fi
+    done < <(grep -RonE '\bD[0-9]{3}\b' --include='*.md' \
+        --exclude-dir=third_party --exclude=defects.md . |
+        sed -E 's/^([^:]+):[0-9]+:/\1:/' | sort -u)
+fi
+
 if [[ $status -eq 0 ]]; then
     echo "docs-lint: ok"
 fi
