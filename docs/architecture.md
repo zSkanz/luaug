@@ -245,23 +245,43 @@ slot is reserved before ui2d for the post-v1 2D layer. Meshlet data ships in
 assets from day one; the GPU-driven path gates on `Capabilities`.
 
 **physics_api** (headers-only; deps: core) + `physics_jolt`, later
-`physics_box2d` (a separate `IPhysics2D`).
+`physics_box2d` (a separate `IPhysics2D`). Shipped at M5; the shape below is
+what it is, not a sketch.
 ```cpp
 namespace luaug::physics {
   class IPhysics3D {
-    WorldHandle createWorld(const PhysicsWorldDesc&);   // gravity, fixedDt, collision groups
+    WorldHandle createWorld(const WorldDesc&);          // gravity, body budget
     BodyHandle  createBody(WorldHandle, const BodyDesc&);      // shape, motion type, group
-    void setBodyTransform(...); Transform getBodyTransform(...);
-    void step(WorldHandle, float fixedDt);              // deterministic per ADR 0025
+    void updateBody(WorldHandle, BodyHandle, const BodyDesc&); // a rebuild that keeps the handle
+    void setBodyTransform(...); BodyState bodyState(...) const;
+    void collectActiveBodies(WorldHandle, std::vector<ActiveBody>&) const;  // STABLE order
+    void step(WorldHandle, f32 fixedDt);                // deterministic per ADR 0025
     std::span<const ContactEvent> drainContacts(WorldHandle);  // → deferred Touched signals
-    bool raycast(WorldHandle, const RayD&, RayHit&); /* shapecast, overlap */
-    CharacterHandle createCharacter(const CharacterDesc&);     // Jolt CharacterVirtual
-    void moveCharacter(CharacterHandle, Vec3 vel, float dt); CharacterState characterState(...);
-    void saveState(WorldHandle, StateBlob&); void restoreState(WorldHandle, const StateBlob&); // rollback-oriented seam
-    void registerCollisionGroup(NameAtom, u32 mask);
+    bool raycast(WorldHandle, const RayD&, const QueryFilter&, RayHit&) const;  // + spherecast, overlapBox
+    CharacterHandle createCharacter(WorldHandle, const CharacterDesc&);  // Jolt CharacterVirtual
+    void moveCharacter(WorldHandle, CharacterHandle, Vec3 velocity, f32 dt);
+    CharacterState characterState(WorldHandle, CharacterHandle) const;
+    bool saveState(WorldHandle, std::vector<u8>&) const;       // rollback-oriented seam:
+    bool restoreState(WorldHandle, std::span<const u8>);       // declared, refuses in v1
+    CollisionGroup registerCollisionGroup(WorldHandle, std::string_view);
+    void setGroupsCollidable(WorldHandle, CollisionGroup, CollisionGroup, bool);
+    void debugDraw(WorldHandle, IDebugDrawSink&);       // the backend's own wireframe
   };
 }
 ```
+A body carries an opaque `u64 userData` the caller chooses and this module never
+interprets — that is how `scene` owns the tree and `physics` owns the simulation
+without either learning the other's vocabulary, and it is why a contact event
+reports two user-data values rather than two things this module would have to
+name.
+
+**Three of these methods promise a STABLE ORDER, and that is R10 rather than
+tidiness.** Upstream documents contact callbacks, the active-body list and a
+query's hit order as non-deterministic under a multi-threaded job system
+(`third_party/jolt/Docs/Architecture.md:804-807`). None of it is true today
+under the single-threaded one, which is exactly why the sorts had to be written
+at M5: M7 wires the pool, and the milestone that discovers a thousand recorded
+traces are worthless is not one anybody wants.
 
 **audio** (deps: core, jobs, platform) — miniaudio. **The module itself is the
 swappable seam** (ADR 0009): one implementation in v1, selected at build time;
@@ -389,7 +409,8 @@ Frame:
         b. RP PreAnimation                           (animation clip sampling after drain)
         c. RP PreSimulation                          [parallel window A seam]
         d. physics.step(fixedDt)  → drainContacts → enqueue Touched signals
-        e. scene systems: transform hierarchy sync, character update, day/night tick
+        e. scene systems: transform hierarchy sync, character update, weld
+           resolution (topological, cycles refused at write time), day/night tick
         f. RP PostSimulation
         g. task-resume: SimClock timer wheel (task.wait/delay resume here, fixed dt args)
         h. RP Heartbeat

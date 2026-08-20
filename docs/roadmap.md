@@ -511,7 +511,15 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   test).
 - **Performance and determinism notes.** The tick budget this gate records
   should be broken down — broadphase, narrowphase, solver — because one number
-  says a budget was missed and three say which stage missed it. And the
+  says a budget was missed and three say which stage missed it.
+  **Amended at M5 (§5: docs follow reality).** Those three are not available:
+  the split exists only inside Jolt's own profiler, which is a compile-time
+  feature that dumps to a file rather than answering a query, and whose
+  alternative replaces the measurement class in every scope of the library in
+  every configuration (`UNCONFIRMED.md` U-56). The breakdown the gate records is
+  therefore the one that is separable at this seam and measures stages that
+  really are distinct — **apply / step / writeback** — which answers the same
+  question the note was asking: which stage missed it. And the
   determinism gate becomes *blocking* here while Jolt is single-threaded, but
   M7 wires it to the job system: whether recorded hashes survive that is a
   question for the grounding pass that vendors Jolt (§9, `UNCONFIRMED.md`),

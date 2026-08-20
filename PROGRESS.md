@@ -5,73 +5,63 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- **M4.5 — Correcting the World: the Environment the Renderer Never Read —
-  COMPLETE, signed off 2026-08-20** by the human in words, which is the only
-  thing that closes a milestone (MASTER_PROMPT §6, and the roadmap says it again
-  for this one specifically). Tagged `milestone/m4.5`. Brief, with the Gate
-  Record, the §app audit and seventeen Findings:
-  [`docs/briefs/m4.5-kickoff.md`](docs/briefs/m4.5-kickoff.md).
-- **M4 — Seeing the World — signed off 2026-08-20**, and `milestone/m4` stands.
-  It was tagged over a defect and written up complete on its own gate, which is
-  what made §6 spell out that a green gate is evidence rather than a decision.
-  What restores the claim is not the approval but the work: all five of its gate
-  items are now green against **re-recorded** artifacts — both capture goldens,
-  the lavapipe screenshot, the determinism traces on both tiers and the 1080p
-  baseline — none of which existed when the tag was made.
-  **This reads the human's "aprovado para finalizar" as covering both entries
-  that were under `## Blocked`.** If the intent was M4.5 alone, the tag comes
-  back off and this bullet returns to "NOT complete" on a word.
-- **M3 — Tooling Loop — signed off 2026-08-20**, tagged `milestone/m3`;
-  **M2 — Kernel — signed off 2026-08-20** (`milestone/m2`); **M1** signed off
-  2026-08-19 (`milestone/m1`); **M0** signed off 2026-08-19 (`milestone/m0`).
+- **M5 — Feeling the World: Jolt Physics + Character — BUILT, AWAITING HUMAN
+  REVIEW.** Not complete: a milestone is complete when the human says so in
+  words (§6), so there is no `milestone/m5` tag and this line does not say
+  COMPLETE. The full gate is green on both local tiers and the Gate Record is in
+  [`docs/briefs/m5-kickoff.md`](docs/briefs/m5-kickoff.md), with twelve Findings
+  and a "what a reviewer should know before signing" section.
+- **M4.5 — Correcting the World — COMPLETE, signed off 2026-08-20**, tagged
+  `milestone/m4.5`. **M4 — Seeing the World — signed off 2026-08-20**
+  (`milestone/m4`), its five gate items green against re-recorded artifacts.
+  **M3** (`milestone/m3`), **M2** (`milestone/m2`), **M1**, **M0** — all signed
+  off.
 - **CI is green on `main`.** macOS is blocking on every code push.
 
-### M4.5: what changed
+### M5: what the world can do that it could not
 
-- **`Lighting` exists from boot**, beside `Workspace` and `ScriptService`. It was
-  created by its first `GetService`, which is after `WorldHost::start` cached its
-  id, so `extract` answered every frame with `RenderEnvironment`'s defaults and
-  no scene's environment ever reached a pixel. api-design.md §1.2 corrected in
-  the same commit.
-- **Four checks now catch that**, and all four were verified by reintroducing it:
-  the host resolves the service on a world no script touched; the snapshot's
-  environment equals what the world holds, field by field; `determinism` moves;
-  and `clock_differential` renders one scene at two clock times and requires the
-  frames to differ. The last is deliberately not a golden — a golden compares a
-  recording against a recording, which is what certified this defect six times.
-- **The capture backend records uniform CONTENTS**, by a digest of the block's
-  floats quantized onto the same four-decimal grid the rest of the stream uses.
-  It recorded the byte count before, so the blocking render gate could see the
-  shape of a frame and nothing in it. Byte-identical across MSVC and Clang.
-- **`Transparency` fades**, through a sorted back-to-front blended pass:
-  `GpuObjectUniforms` carries the per-draw alpha, the order is `extract`'s, and
-  no RHI call was added — ADR 0037's freeze is untouched.
-- **The shadow grid moves in whole texels**, so an orbiting camera no longer
-  slides it 0.42 of a texel per frame. The rotational half is named and out of
-  scope.
-- **`PVInstance` is a real class** carrying `PivotOffset`, `GetPivot` and
-  `PivotTo` for `BasePart`, `Model` and `Camera`. Without the offset,
-  `Model:PivotTo(cf)` was `PrimaryPart.CFrame = cf` — the deprecated call under
-  the new name, passing its tests and unable to hinge a door.
-- **A crash handler and a log file**, four milestones after `architecture.md`
-  §app promised them. The handler is tested by a process that faults on purpose.
-- **`Property.Inert`** in the IDL and "(stored)" in the inspector, so a property
-  that is backed and unread says so.
-- **`docs/defects.md`**, append-only and gate-enforced, so a milestone-close
-  rewrite cannot quietly empty the open list again.
-- **Every M4 artifact re-recorded**: both capture goldens, the lavapipe
-  screenshot, the determinism traces on both tiers, and the 1080p baseline —
-  whose median did not move and whose worst frame improved by a factor of four
-  on two cores.
+- **A `BasePart` that is not `Anchored` is a Jolt body.** Gravity, contacts,
+  impulses, friction, restitution, density, collision groups, and `Touched` /
+  `TouchEnded` as deferred signals. `Workspace.Gravity` is real and signed.
+- **The mirror lives in `scene`**, where architecture.md §2 always said it
+  would: "physics sync via an injected `IPhysics3D*`". The tree is the authority
+  and the body mirrors it; `scene` never learns a body's identity beyond an
+  opaque handle and `physics` never learns what an Instance is.
+- **`CharacterBody` walks**, on a Jolt `CharacterVirtual` rather than a rigid
+  body — it climbs steps under `AutoStepHeight`, is stopped by anything above
+  it, jumps only when grounded, and reports what it landed on.
+- **A script can ask the world what is there**: `Workspace:Raycast`,
+  `:Spherecast`, `:GetBodiesInBox`, over `RaycastParams` and `RaycastResult`.
+- **`Weld` and `WeldConstraint`** (added to M5 by human decision on 2026-08-20):
+  a transform weld, resolved in dependency order after the step, with cycles
+  refused at the write that would create one.
+- **The determinism gate is blocking and replays INPUT.** A scenario carries a
+  recorded `inputs.txt` and the keyboard snapshot comes from it, so what is
+  replayed is a keystroke's whole path to the character rather than a bot
+  calling `Move`.
+- **`WorldHash` covers physics state**, including the four things no script can
+  read: a queued impulse, a character's command, its vertical velocity, and
+  which bodies the solver has put to sleep.
+- **The C++ formatting gate exists**, five milestones after architecture.md §9
+  first listed it, at a pinned clang-format 18 — and it now sees files that are
+  not yet staged, which it did not when it was turned on.
+- **D016 is fixed**: a `BindToClose` handler that yields is waited for, up to a
+  capped grace period.
 
-### M4.5: what does NOT exist yet
+### M5: what does NOT exist yet
 
-The brief's fifteen NOT-in-scope items. The ones most likely to be mistaken for
-bugs: no order-independent transparency (two transparent surfaces that intersect
-sort per draw, not per pixel); a half-transparent part still casts a full
-shadow; the shadow flicker caused by a *rotating* sun is unfixed and visible only
-while `ClockTime` moves; still no IBL, one shadow cascade, eight lights per draw
-and no `Sky`.
+The brief's fifteen NOT-in-scope items, narrowed by one when the weld came into
+scope. The ones most likely to be mistaken for bugs:
+
+- **Every `Part` renders as a wireframe box** — D022, scheduled with M7.5. Only
+  a `MeshPart` reaches the solid renderer, and that has been true since M2. The
+  boxes are where the bodies are.
+- **`BasePart.Material` is not shipped**, and neither is `RaycastResult.Material`.
+- **`Enum.CollisionFidelity` round-trips and every value collides as a box**;
+  a hull needs mesh geometry the mirror cannot see until M7.
+- No joints or solver constraints beyond the transform weld; no sleeping policy
+  exposed; no `saveState`/`restoreState` (declared, refuses); Jolt runs
+  single-threaded until M7 wires the job system.
 
 ## Now / Next
 
@@ -84,54 +74,55 @@ and no `Sky`.
   still not reproduced.** Two halves are ruled out: the write path driven through
   zero, negative, 1e30 and infinity with a render extraction every frame, and 25
   minimize/restore cycles over 900 windowed frames. What remains is the ImGui
-  half, and the crash handler is now in place for the next occurrence — the next
+  half, and the crash handler is in place for the next occurrence — the next
   report should carry `luaug-crash-<pid>.dmp` and `luaug.log` from beside
   whatever was being run.
-- **D016 — `BindToClose` has no capped grace period.** A close handler that
-  yields is cut off at the next drain rather than waited for. Scheduled with M5,
-  where shutdown ordering has physics state to care about.
 - **D017 — the `DebugShell` has no memory-category table and no log/REPL pane**,
   both named by `architecture.md` §app. Scheduled with M6.
 - **D018 — `luaug_net_tests` hung once** on Windows and passed on a re-run. §12
   quarantines on the second occurrence; this is the entry that makes a second
   one countable.
-- **M5 opens in a NEW session** (§6: never start a second milestone in the one
-  that closed a milestone). Its first action, written out so the next session
-  does not have to re-derive it: **turn on the clang-format gate** — pin the
-  toolchain version, reformat the whole C++ tree in one commit that does nothing
-  else, and add the check to `scripts/gates/`. M4's brief moved it here
-  deliberately, because doing it while the renderer was being written would have
-  bought a milestone of diff noise. Then write
-  `docs/briefs/m5-kickoff.md` from `docs/roadmap.md`'s M5 section.
-- **When M5 wires physics: `PivotOffset` is not a centre of mass.** Jolt has its
-  own notion of where a body turns about, and joining them would make hinging a
-  door change how it falls. Said in `components.h` where the field is.
+- **D021 — a range refusal reports the key for a type.** `FixedTimestep = 1/10`
+  raises "it takes a number" about a number. Every M5 property with a range is
+  affected; the fix is a per-property error-key override in the IDL.
+- **D022 — a `Part` never reaches the solid renderer.** Scheduled with M7.5.
+- **M6 opens in a NEW session** (§6: never start a second milestone in the one
+  that closed one, and M5 is not closed until the human says so). Its first
+  action, written out so the next session does not re-derive it: **read
+  `docs/briefs/m5-kickoff.md`'s Findings**, then write
+  `docs/briefs/m6-kickoff.md` from `docs/roadmap.md`'s M6 section — whose first
+  scope item is the Input Action System, and whose gate includes migrating
+  `examples/03-physics-playground` off `KeyboardService`, which is what deletes
+  that service.
+- **The physics mirror costs ~160 ns per body per tick to decide nothing
+  changed.** Recorded in `docs/perf-baselines.md`. The remaining fix is a
+  dirty-flag design, and it belongs with M7's streaming rather than with M6.
+- **A check on a moving thing names a window, not a moment.** Three M5 test
+  cases in a row failed by measuring after the thing they were testing: a
+  character crosses a six-metre ledge in a second and a half, so a check taken at
+  the end reads "never climbed" and means "climbed and kept going".
+- **A picture of two things at once catches what neither test can.** The Jolt
+  debug-draw bridge found, on the frame it first drew, that `CharacterBody` was
+  the one `BasePart` whose `Position` meant its feet. Every test passed.
+- **Physics arriving changed what every scene already in the repository meant.**
+  An unanchored part is a rigid body, and every example, fixture and benchmark
+  predates that. The proof the change is inert where it should be is that
+  `capture_gate_meshes` passes against the unchanged M4.5 golden.
+- **A gate that can pass while doing nothing keeps being built by accident.**
+  Twelve instances in six milestones. M5's was a conformance run reporting "938
+  passed, 0 failed" over a suite that had silently lost seventeen cases to a
+  syntax error.
 - **A golden cannot detect a defect that was present when it was recorded.** It
   asserts stability, not correctness, and it *feels* like the other one. The
-  shape that catches this is a differential: change one input the output must
-  depend on, and require the output to change.
-- **Test the step that resolves, not the step that computes.** M4's environment
-  assertions all passed against a `Lighting` id the test made itself, so the one
-  broken step was the one nothing covered — because covering it needs a host and
-  constructing a component does not.
-- **A plausible default hides a defect for a milestone.** An unresolved
-  `Lighting` looked like a lit scene rather than a black one, so nothing ever
-  asked.
-- **The tail carries what the median cannot see.** Re-measuring at 1080p moved
-  the median not at all and the worst frame by a factor of four on two cores.
-- **An audit scoped to one module is not an audit.** The sweep that "found"
-  `Model.PrimaryPart` unread searched `engine/render` for a value consumed in
-  `engine/script`.
-- **A build directory is evidence of what was built once, never of what would be
-  built now** — and a failed link is worse: LNK1168 moves the executable's
-  timestamp before failing, so Ninja considers it current and CTest runs the old
-  binary.
-- **A gate that can pass while doing nothing keeps being built by accident.** Ten
-  instances in six milestones, and the tenth certified a whole milestone.
+  shape that catches this is a differential.
+- **Test the step that resolves, not the step that computes.** M5 acted on this:
+  the host test asserts that a part falls in a world no script touched, because a
+  mirror that was never handed a `Workspace` produces a world where nothing does
+  and every API-level test still passes.
 - **The Linux tier is the only thing between this repository and a whole family
-  of defects** MSVC does not mention.
-- **`fs.watch` cannot be trusted on either platform, and Linux is the worse
-  one** — a change below the watched directory produces no event at all there.
+  of defects** MSVC does not mention — M5 added an ABI one to the family: Jolt
+  compiled `-fno-rtti` emits no typeinfo, so a class deriving from one of its
+  types fails to link on Clang and links fine on MSVC.
 - Carried forward, none blocking:
   - **Two of the five generated artifacts api-design.md §5 lists do not exist**:
     the typed `@std`/`@luaug` stubs and `docs/reference/**`.
@@ -141,14 +132,21 @@ and no `Sky`.
   - **The message catalog does not load inside the APK.** `Catalog::loadFromFile`
     uses `std::filesystem`; `loadFromJson` plus `platform::readTextFile` is the
     fix.
-  - **`architecture.md` §9 lists a clang-format gate that does not exist** —
-    scheduled at the start of M5, above.
 
 ## Blocked — needs human
 
-- (none — M4.5 and M4 were signed off on 2026-08-20; the open defects that
-  outlived them are in [`docs/defects.md`](docs/defects.md) and are work rather
-  than questions)
+- **M5 is built and awaiting review.** The Gate Record is in
+  [`docs/briefs/m5-kickoff.md`](docs/briefs/m5-kickoff.md) §Gate Record, and its
+  last section is written for a reviewer: what is deliberately absent, what
+  round-trips without acting, and what a screenshot will look like and why.
+  Nothing is tagged.
+- **One decision worth a word, and it is cheap either way.** Jolt's
+  `CROSS_PLATFORM_DETERMINISTIC` build switch is off, which is ADR 0025's level B
+  rather than an oversight — upstream documents it as buying determinism across
+  compiler, OS and architecture for about 8% of the library's speed
+  (`third_party/jolt/Docs/Architecture.md:792`). Turning it on is one line and
+  would likely make the win↔linux comparison green; it is a human decision with a
+  performance bill, so it is asked rather than assumed.
 
 ## Decisions pending ADR
 
@@ -156,9 +154,41 @@ and no `Sky`.
 
 ## Session Log
 
-Entries for the planning session and for M0, M1, M2 and M3 are in
+Entries for the planning session and for M0 through M4 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
+
+- **2026-08-20 (session 10, Claude Opus): M5 built, awaiting sign-off.** Ran the
+  §2 boot sequence green, spent the ledger's named first action on the
+  clang-format gate over a quiet tree (205 of 205 files moved, in a commit that
+  did nothing else), then wrote `docs/briefs/m5-kickoff.md` and worked its build
+  order: Jolt vendored at the tag the manifest has named since planning, the
+  `physics_api` seam and a Jolt behind it, the Instance↔body mirror in `scene`
+  where architecture.md always put it, `CharacterBody` on a `CharacterVirtual`,
+  the query family, `Weld`/`WeldConstraint` (added to the milestone by the human
+  mid-session, and appended to the brief rather than assumed to have been read),
+  the keyboard scaffold and the recorded input stream the determinism gate
+  replays, the Jolt debug-draw bridge, `examples/03-physics-playground`, and
+  D016.
+  Learned, and the one to keep: **physics arriving changed what every scene
+  already in the repository meant.** An unanchored `BasePart` is a rigid body, so
+  on the first green build the mesh example rained its own scenery and a
+  property-churn benchmark quietly became a ten-thousand-body physics benchmark
+  under a name that says otherwise. The fix is one line per scene; the discipline
+  is that `capture_gate_meshes` then passes against the UNCHANGED M4.5 golden,
+  which is what says the change is inert rather than re-recorded.
+  Also learned: **a picture of two things at once catches what neither test
+  can** — the debug-draw bridge, on the frame it first drew, showed the
+  character's collider floating half a body above the character's own box, with
+  every test passing. **A check on a moving thing names a window, not a moment**:
+  three cases in a row failed by measuring after the thing they tested.
+  **A sleeping contact is not an ended contact.** **A gate that can pass while
+  doing nothing keeps being built by accident** — the twelfth, and the first
+  caught in the session that wrote it: a conformance run reported 938 passed over
+  a suite that had just lost seventeen cases to a syntax error. And **the Linux
+  tier found an ABI defect, not just a warning**: Jolt compiled `-fno-rtti` emits
+  no typeinfo, which MSVC hides by emitting RTTI per translation unit.
+  Next: **stop for M5 human review** (§6). Do not start M6 this session.
 
 - **2026-08-20 (session 9, Claude Opus): M4.5, awaiting sign-off.** Ran the §2
   boot sequence, found the repo green, wrote `docs/briefs/m4.5-kickoff.md`, and
@@ -199,75 +229,6 @@ there when this file passed its ~300-line cap.
   what closed it; tagged `milestone/m4.5`, and `milestone/m4` stands with it.
   Next: **open M5 in a new session** (§6) and make its first act the clang-format
   gate, on a quiet tree.
-
-- **2026-08-20 (session 8, Claude Opus): M4 complete, awaiting sign-off.** The
-  renderer, from a content URN to a lit pixel: `engine/asset` with a glTF
-  importer, `MeshCache` and `MeshLoader`, `RenderWorld` v2 with a camera, an
-  environment, lights and pre-sorted draws, `renderer_default` behind the
-  `IRenderer` contract, five new classes with real backing, the `DebugShell`,
-  the triangle sample and its Android package, and three carried debts paid.
-  Five subagents did the glTF importer, the shader set, the DebugShell, the
-  Android packaging and the multi-module generator; the seams, the integration
-  and every gate run stayed here (§7).
-  Learned, and the one worth keeping above all: **the first screenshot of the
-  deliverable was a black floor, and it was my scene rather than the shader.**
-  The ground had a metallic top face, this renderer has no IBL, and a metal has
-  no diffuse lobe -- so the physically correct image is black. Every test in the
-  milestone passed while it rendered. Nothing except §8's observation rule would
-  have caught it, and behind it was a real defect: ambient reaching only the
-  diffuse lobe renders every metal in every scene black.
-  Also learned, in descending order of how much they cost: **a failed link
-  leaves a stale executable Ninja considers current**, so the gate measures
-  yesterday's binary -- four cycles and one wrong measurement, and the
-  verified-fresh answer was 0 forward draws where the stale one said 64. **The
-  M4 capture golden could not fail when first recorded**, because one MeshPart
-  culled against one bound gives the same draw count either way; reading its
-  per-frame counts then found that the shadow pass was culled against the camera
-  frustum, so everything behind the camera lost its shadow. **I broke `main`**
-  by committing a file two workstreams were editing, capturing an include
-  without the file it names -- a green working tree is not a green commit.
-  **Installing lavapipe turned skips into failures** and exposed that
-  `-LE gpu-golden`, written into the CMakeLists as what must happen to pixel
-  goldens, had never been passed on the Linux tier; the absence of a device had
-  been doing that job by accident for three milestones. And **six Clang-only
-  build failures**, all in the same two warning families.
-  Next: **stop for M4 human review** (§6). Do not start M5 this session.
-
-- **2026-08-20 (session 7, Claude Opus): opened M4.** Ran the §2 boot sequence —
-  the repo had moved two commits past the ledger and carried an uncommitted
-  api-design correction from the previous session, so the repo won and that
-  landed on its own first. Re-ran the M3 gate green on both tiers (903
-  conformance, 3 hot-reload, reload 0.3 ms against 500 ms). Deep-read
-  architecture §2, §3, §7 and §9, api-design §2.1–§2.3, ADRs 0005, 0006, 0010
-  and 0027, and the ecosystem report's asset section, then wrote
-  `docs/briefs/m4-kickoff.md`.
-  Then build-order step 1, which produced three findings before any engine code
-  existed — all from reading vendored `CMakeLists.txt` files rather than
-  documentation. **fastgltf has a mandatory dependency no document here
-  mentions**, and with no `simdjson::simdjson` target present it downloads
-  simdjson's amalgamated pair, unpinned and unhashed, into
-  `third_party/fastgltf/deps/` at configure time: R5, R13, R14 and ADR 0032's
-  fetch rule in one upstream default. Escalated; the human approved vendoring
-  simdjson (ADR 0036), pinned at the 3.12.3 fastgltf itself targets, with a
-  patch turning the download branch into a `FATAL_ERROR`.
-  Which exercised **the patch mechanism R13 rests on for the first time in four
-  milestones, and it reported success while doing nothing**: `git apply`
-  resolves paths against the repository root even from a subdirectory, and
-  *skips* — exit 0 — anything outside the current directory. Patches now apply
-  from the root with `--directory=`, a `Skipped patch` is an error, and each
-  patch is verified with `--check --reverse` immediately after.
-  And then the patch still would not apply, which found the sharpest one:
-  **no vendored tree in this repository has ever been byte-identical to its
-  pinned commit.** `vendor.luau` checks out through its own git dir, where
-  `.gitattributes` cannot reach it, so `core.autocrlf=true` mangled every file
-  on Windows — and `third_party/** -text`, the rule written to guarantee
-  byte-exactness, then committed the mangling faithfully. Every tree since M0 is
-  affected. The checkout forces `core.autocrlf=false core.eol=lf` now and this
-  milestone's three trees are correct; whether to re-vendor the historical ones
-  is a ~20,000-file question left for the human.
-  Next: implement `core::AABB` and `core::Frustum` per architecture §2's math
-  list, with the plane/box tests, then specs for them in
-  `engine/core/tests/math_tests.cpp`.
 
 <!-- Format for future entries:
 - **YYYY-MM-DD (session N):** did X; learned Y; Next: <literal first action>.

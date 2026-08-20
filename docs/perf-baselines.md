@@ -64,6 +64,53 @@ Captured with `luaug-host --bench=tests/bench --bench-repeats=5`, median of
 | M3 | `tests/hotreload` 500-instance project (5 models × 100 parts, all moving) | `win-msvc-dev` | reload span, worst of 3 | **1.6 ms** | 500 ms |
 | M3 | `tests/hotreload` 500-instance project | `linux-clang-dev` (container) | reload span, worst of 3 | 0.7 ms | 500 ms |
 
+### M5 — the world gets mass
+
+Captured with `luaug-host --bench=tests/bench --bench-repeats=5`, median of 5
+runs, three times over; the spread across those three was under 3%.
+
+**Every simulation number in this table is measured against a scene that now
+contains rigid bodies, and the M2 rows are not comparable to it.** A `BasePart`
+that is not `Anchored` is a Jolt body from this milestone on, so `instances500`
+and `churn10k` did not get slower doing the same work -- they are doing more of
+it, in a world that has a simulation in it. Anchoring their parts is what keeps
+what they were written to measure measurable (see `churn10k`'s own comment); the
+physics cost that remains is the mirror's per-tick sweep over ten thousand
+static bodies plus Jolt's own broad-phase pass over them.
+
+**The physics tick is recorded in three stages**, which is the roadmap's ask
+("one number says a budget was missed and three say which stage missed it")
+answered with the three stages that are separable at this seam: `apply` is the
+scene's writes going down, `step` is the solver, `writeback` is the result
+coming back. It is not broadphase / narrowphase / solver, and `UNCONFIRMED.md`
+U-56 records why -- Jolt exposes that split only through a profiler that dumps
+to a file and taxes every configuration to enable.
+
+| Milestone | Scene | Preset | Metric | Value | Budget/Gate |
+|---|---|---|---|---|---|
+| **M5** | `tests/bench/physics1k` (1,000 active bodies: 25 towers of 40 crates, so the islands stay awake) | `win-msvc-dev` | mean sim tick | **2.02 ms** | 16 ms — the roadmap's "physics tick budget for 1,000 active bodies" |
+| M5 | `tests/bench/physics1k` | `win-msvc-dev` | worst sim tick | 4.51 ms | — |
+| M5 | `tests/bench/physics1k` | `win-msvc-dev` | physics: apply / step / writeback | 0.024 / 1.78 / 0.214 ms | — |
+| M5 | `tests/bench/instances500` (500 parts, one CFrame write each per tick, now also 500 static bodies) | `win-msvc-dev` | mean sim tick | **0.62 ms** | 4 ms |
+| M5 | `tests/bench/instances500` | `win-msvc-dev` | physics: apply / step / writeback | 0.081 / 0.313 / 0.078 ms | — |
+| M5 | `tests/bench/churn10k` (10,000 anchored parts, 1,000 listeners, two thirds moving) | `win-msvc-dev` | mean sim tick | **4.96 ms** | 16 ms |
+| M5 | `tests/bench/churn10k` | `win-msvc-dev` | worst sim tick | 9.13 ms | — |
+| M5 | `tests/bench/churn10k` | `win-msvc-dev` | physics: apply / step / writeback | 1.60 / 1.23 / 0.026 ms | — |
+| M5 | `examples/03-physics-playground` (the deliverable: 18 dynamic crates, a seesaw, ramps, a character, the Jolt wireframe on) | `win-msvc-dev` | median frame, 1080p | **1.11 ms** | 16.7 ms — a 60 fps frame |
+| M5 | `examples/03-physics-playground` | `win-msvc-dev` | worst frame | 1.93 ms | — |
+| M5 | `examples/03-physics-playground` | `win-msvc-dev` | draws / triangles | 0 / 0 — every part is a debug wireframe (D022) |
+
+**The mirror costs about 160 ns per body per tick to decide that nothing
+changed**, which is the 1.60 ms `apply` row above over ten thousand static
+bodies. Two cheap wins were taken while measuring -- the in-world test is
+memoised by parent, and the body records moved from a hash map to a
+slot-indexed vector walked in the same ascending order the component pool is,
+which together took `apply` from 2.27 ms to 1.60 ms and `writeback` from 0.127
+to 0.026. What remains is a dirty-flag design: the mirror rebuilds a
+`BodyDesc` per body per tick and compares it, where a scene that changes
+nothing should touch nothing. That belongs with M7, which is the milestone that
+puts tens of thousands of objects in a world and streams them.
+
 ### M4.5 — the renderer, re-measured against a scene it actually reads
 
 Captured with `luaug-host <project> --headless --width=1920 --height=1080

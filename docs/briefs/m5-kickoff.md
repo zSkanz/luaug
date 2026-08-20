@@ -29,18 +29,18 @@ at least one of them is a differential.
 
 ## Scope checklist (from roadmap)
 
-- [ ] Jolt 5.6 on the fixed tick, single-threaded first; the job-system seam
+- [x] Jolt 5.6 on the fixed tick, single-threaded first; the job-system seam
       named but not wired (M7 wires it)
-- [ ] rigidbody/collider state as `BasePart` properties per `api-design.md`
-- [ ] collision events as deferred signals (`Touched` / `TouchEnded`)
-- [ ] raycast / shapecast API (`Workspace:Raycast`, `:Spherecast`,
+- [x] rigidbody/collider state as `BasePart` properties per `api-design.md`
+- [x] collision events as deferred signals (`Touched` / `TouchEnded`)
+- [x] raycast / shapecast API (`Workspace:Raycast`, `:Spherecast`,
       `:GetBodiesInBox`, `RaycastParams`, `RaycastResult`)
-- [ ] Jolt debug-draw bridge
-- [ ] `CharacterBody` on Jolt `CharacterVirtual`: capsule, slopes, steps, jump
-- [ ] third-person follow camera
-- [ ] minimal direct keyboard polling — deliberately replaced in M6 by the
+- [x] Jolt debug-draw bridge
+- [x] `CharacterBody` on Jolt `CharacterVirtual`: capsule, slopes, steps, jump
+- [x] third-person follow camera
+- [x] minimal direct keyboard polling — deliberately replaced in M6 by the
       Input Action System (that migration is an M6 gate item)
-- [ ] **`Weld` and `WeldConstraint`** — added to the roadmap 2026-08-20 by human
+- [x] **`Weld` and `WeldConstraint`** — added to the roadmap 2026-08-20 by human
       decision, **after this brief imported its scope**, so it is appended rather
       than assumed to have been read. A **transform** weld and not a Jolt
       constraint, and that is forced: `CharacterVirtual` is not a `Body`
@@ -54,20 +54,20 @@ at least one of them is a differential.
       the tick and **reject cycles**. It arrives here because nothing else in v1
       can keep a skinned `MeshPart` on a `CharacterBody`, and the alternative is
       a `Heartbeat` handler doing it per frame in every project.
-- [ ] `PhysicsService.FixedTimestep` becomes writable; collision groups
+- [x] `PhysicsService.FixedTimestep` becomes writable; collision groups
       (`RegisterCollisionGroup`, `CollisionGroupSetCollidable`,
       `GetRegisteredCollisionGroups`)
-- [ ] the tick budget is recorded **broken down** — broadphase, narrowphase,
+- [x] the tick budget is recorded **broken down** — broadphase, narrowphase,
       solver — because one number says a budget was missed and three say which
       stage missed it
-- [ ] the grounding pass that vendors Jolt answers, in `UNCONFIRMED.md`,
+- [x] the grounding pass that vendors Jolt answers, in `UNCONFIRMED.md`,
       whether recorded hashes survive Jolt's job system being wired at M7 —
       **before** the gate hardens, not after it breaks
-- [ ] `examples/03-physics-playground`
+- [x] `examples/03-physics-playground`
 
 ### Carried debts this milestone pays
 
-- [ ] **D016 — `BindToClose` has no capped grace period.** Scheduled here by the
+- [x] **D016 — `BindToClose` has no capped grace period.** Scheduled here by the
       M4.5 close, because shutdown ordering now has physics state to care about.
 
 ## NOT in scope
@@ -116,12 +116,12 @@ decision rather than against a hope.
 
 ## Gate checklist (verbatim from roadmap)
 
-- [ ] **determinism becomes blocking**: recorded 60 s input replay → identical
+- [x] **determinism becomes blocking**: recorded 60 s input replay → identical
       final world hash across 3 runs in CI
-- [ ] physics tick budget for 1,000 active bodies recorded and regression-gated
-- [ ] a scripted bot replay drives the character up ramps and steps (functional
+- [x] physics tick budget for 1,000 active bodies recorded and regression-gated
+- [x] a scripted bot replay drives the character up ramps and steps (functional
       gate)
-- [ ] collision-event conformance specs green
+- [x] collision-event conformance specs green
 
 And the standing items every gate here carries: both tiers green through
 `scripts/localgate.ps1`, the docs gate, the formatting gate, a screenshot of the
@@ -307,13 +307,265 @@ thing being designed.
 
 ## Attempted / abandoned
 
-(append during the milestone)
+- **A per-phase physics breakdown from Jolt's own profiler.** The roadmap asks
+  for broadphase / narrowphase / solver, and Jolt has all three — inside a
+  profiler whose aggregation is private and whose only output is a file
+  (`Jolt/Core/Profiler.h:120-175`). The alternative, `JPH_USE_EXTERNAL_PROFILE`,
+  replaces the measurement class in EVERY scope of the library in EVERY
+  configuration, shipping included. Abandoned in favour of the three stages this
+  seam can separate, with the roadmap note amended and the reason recorded as
+  U-56 rather than left as an unmet "should".
+- **A hash map from instance to body record.** Correct and 214 ns per body per
+  tick, most of it missing cache on a key the pool walk already had. Replaced by
+  a slot-indexed vector; `apply` went from 2.27 ms to 1.60 ms over ten thousand
+  bodies and every determinism trace stayed byte-identical, which is the proof
+  that it changed a data structure and not a simulation.
 
 ## Findings
 
-(append during the milestone — the things the docs assumed that reality
-corrected)
+Things the documents assumed that reality corrected, in the order they cost
+time.
+
+1. **Physics arriving changed what every scene already in the repository
+   meant.** An unanchored `BasePart` is a rigid body, and every example, capture
+   fixture and benchmark scene was written before that was true — so on the first
+   green build, `examples/02-meshes` rained its scenery and `churn10k` became a
+   ten-thousand-body physics benchmark under a name that says property churn.
+   The fix is one line per scene, and the discipline is in which line: scenery
+   says `Anchored = true` because it is scenery, and the proof that this is inert
+   rather than a re-record is that `capture_gate_meshes` passes against the
+   **unchanged** M4.5 golden.
+
+2. **A gate that can pass while doing nothing, the twelfth in six milestones,
+   and the first caught in the session that wrote it.** A syntax error in a new
+   conformance spec logged one line and the runner reported "938 passed, 0
+   failed" over a suite that had just lost seventeen cases. It was noticed only
+   because the case count did not move when a file was added. The run now fails
+   on a load failure, verified by breaking a spec on purpose.
+
+3. **The debug-draw bridge found a defect on the frame it first drew.** The
+   character's collider capsule floated half a body above the character's own
+   box, because `CharacterBody` was the one `BasePart` whose `Position` meant its
+   feet rather than the middle of its `Size`. Every test passed. The character
+   walked, climbed and jumped. Nothing but a picture of the two things at once
+   could have shown it — which is what the roadmap means by "the only picture
+   that can disagree with the rendered one".
+
+4. **The Linux tier found two defects MSVC does not have the diagnostics for**,
+   and one of them was an ABI mismatch rather than a warning: Jolt compiled
+   `-fno-rtti` emits no typeinfo, so a debug-draw bridge deriving from one of its
+   classes fails to link — invisible on MSVC, which emits RTTI data per
+   translation unit. The other was `-Wformat-nonliteral` on a trace callback.
+
+5. **Three test cases in a row failed by measuring after the thing they were
+   testing.** A character walking at 4 m/s crosses a six-metre ledge in a second
+   and a half, so a check taken at the end reads "never climbed" and means
+   "climbed and kept going". The same shape appeared in the seam test, the
+   conformance spec and the gate scene. The rule that came out of it: **a check
+   on a moving thing names a window, not a moment.**
+
+6. **A sleeping contact is not an ended contact.** Jolt stops calling the
+   contact listener for an island it has put to sleep, so a diff of this tick's
+   pairs against last tick's fires `TouchEnded` for a crate that is still visibly
+   resting on the floor — and `Touched` again the moment anything nudges it. The
+   pair is carried forward when both bodies are inactive. Found by a test that
+   waited four seconds instead of two.
+
+7. **Jolt's determinism does not depend on thread count, and three other things
+   do.** Upstream's own documentation (`Docs/Architecture.md:787-807`) lists two
+   conditions for a deterministic simulation and thread count is not one of them
+   — but contact-callback order, the active-body list's order and a query's hit
+   order all are. That is the M7 answer the roadmap wanted before the gate
+   hardened: recorded hashes survive the job system provided nothing observable
+   is derived from those three orders, which is why they are sorted now, under a
+   single-threaded job system where none of it matters yet.
+
+8. **`Enum.X` inside a composite type reached the definitions verbatim**, where
+   `Enum` is a value rather than a namespace of types — and luau-lsp answers that
+   by refusing to read the whole file, so every global in the repository became
+   unknown at once. One `RaycastParams.new` parameter did it. The generator now
+   substitutes inside composite types rather than only matching whole ones.
+
+9. **A `Part` still renders as a wireframe box**, because only a `MeshPart`
+   reaches the solid renderer. True since M2, unchanged by M4, and found by
+   looking at the first screenshot of a physics playground made entirely of
+   primitives. Recorded as D022 and scheduled with M7.5 rather than fixed here:
+   the fix moves every render golden, which makes it a milestone's work.
+
+10. **A range refusal reports the key for a type.** `FixedTimestep = 1/10`
+    raises "it takes a number" about a number, because a setter answers with a
+    bool and `PropertyDesc` carries one key per value type. Recorded as D021;
+    every M5 property with a range is affected.
+
+11. **`-text` did not stop `eol` from rewriting a vendored tree.** Git documents
+    `eol` as implying `text`, so the `*.bat text eol=crlf` rule kept applying
+    inside `third_party/` with `text` unset — and Jolt ships twenty-three `.bat`
+    files. The committed blobs were already correct; what was wrong was the
+    working tree a fresh clone would produce. Same class as M4's `core.autocrlf`
+    finding, found the same way: by reading a warning instead of ignoring it.
+
+12. **One thing recorded and not explained.** The `character` scenario's tick-0
+    hash moved once between two builds inside this milestone while `churn` and
+    `example01`'s did not — and those two are byte-identical to their M4.5
+    goldens today, which is what says the engine's boot path did not move. The
+    scenario is new this milestone, its trace is recorded at the end of it, and
+    three fresh processes plus two in-process runs agree. Written down rather
+    than smoothed over: if it happens again, this is the precedent.
 
 ## Gate Record
 
-(filled at milestone end, before human review)
+Filled 2026-08-20, before human review. Every command below was run on the
+reference machine recorded in `docs/perf-baselines.md`; the Linux rows come from
+the Tier-2 container `scripts/localgate.ps1` builds.
+
+### 1. Determinism becomes blocking — 60 s input replay, identical across 3 runs
+
+```
+$ luaug-host --replay=tests/determinism        (three fresh processes)
+[info] Replay character: 3600 ticks, hash beefd65851f1f593, reproduced.
+[info] Replay character: 3600 ticks, hash beefd65851f1f593, reproduced.
+[info] Replay character: 3600 ticks, hash beefd65851f1f593, reproduced.
+```
+
+3,600 ticks is sixty seconds at the default 1/60. **The input is recorded** —
+`tests/determinism/character/inputs.txt`, one line per key transition — and in
+replay mode the keyboard snapshot comes from it rather than from a device, so
+what is replayed is a keystroke's whole path to the character rather than a bot
+calling `Move`. That is the difference the gate's own wording asks for.
+
+"Three runs" maps onto architecture.md §9's design rather than onto three
+identical invocations: each run compares the scenario against itself twice
+in-process (which catches leaked global state) and against the recorded trace,
+and the process is fresh every time CTest starts it (which is the cross-process
+leg). The three lines above are three fresh processes on top of that.
+
+`ctest -R determinism` is green on both tiers, against per-tier traces —
+win↔linux hash equality is ADR 0025's level C and remains a tracked
+non-blocking aspiration, not a gate.
+
+### 2. Physics tick budget for 1,000 active bodies, recorded and regression-gated
+
+```
+$ luaug-host --bench=tests/bench --bench-repeats=5      (median of 5, three times)
+[info] Bench physics1k: 1007 instances, 300 ticks, 2.0447 ms/tick mean, 4.7405 ms worst.
+[info] Bench physics1k physics: 1001 bodies, 0.0240 ms apply, 1.7989 ms step, 0.2178 ms writeback (per tick).
+```
+
+**2.02 ms per tick for 1,001 bodies against a 16 ms budget**, recorded in
+`docs/perf-baselines.md` under "M5 — the world gets mass" and gated by
+`ctest -R perf_budget` on both tiers.
+
+*Active* is the load-bearing word: the scene is twenty-five towers of forty
+crates, because a thousand crates spread on a floor settle in under a second and
+then measure a world where nothing happens.
+
+The breakdown is **apply / step / writeback** rather than broadphase /
+narrowphase / solver. The roadmap note is amended in place with the reason and
+`UNCONFIRMED.md` U-56 records it: Jolt exposes that split only through a
+profiler that dumps to a file and taxes every configuration to enable.
+
+### 3. A scripted bot replay drives the character up ramps and steps
+
+The same 3,600-tick recording, with seven assertions in the scene itself. They
+are `error` calls, and the replay harness fails a run that logged one — so the
+functional gate and the determinism gate are the same run, and a scenario that
+climbed nothing cannot have its emptiness recorded as a golden.
+
+| Tick | What the recording should have made happen |
+|---|---|
+| 130 | the character settles on the floor before the recording moves it |
+| 220 | walking north climbs onto the kerb |
+| 330 | and is stopped by the wall behind it |
+| 372 | Space leaves the ground |
+| 620 | walking south comes back down off the kerb |
+| 940 | walking east climbs the ramp |
+| 1200 | the crates have settled and gone to sleep |
+
+All seven pass. Two of them earned their tick numbers the hard way — see
+Finding 5.
+
+### 4. Collision-event conformance specs green
+
+```
+$ luaug-host --run-tests=tests/conformance --rhi=null
+[info] 966 passed, 0 failed, 966 total
+```
+
+966 cases, up from 903 at M4.5. The 63 new ones are six physics files:
+`falling` (12), `touched` (6), `collision_groups` (8), `character` (9),
+`queries` (17) and `welds` (11). `Touched`/`TouchEnded` are pinned at the edges
+the document names: once per pair, once for each side, nothing while resting —
+**including across the moment the simulation puts both bodies to sleep** — a
+non-collidable part still reporting a touch, and a destroyed part firing no
+`TouchEnded`.
+
+Green on both tiers through `luaug test` as well as through `ctest`.
+
+### 5. The standing items
+
+```
+$ scripts/localgate.ps1
+  ok    docs (4.3 s)
+  ok    luau (2.6 s)
+  ok    format (7.5 s)
+  ok    windows (26.0 s)
+  ok    linux (32.4 s)
+green (macOS is Tier-3 and only CI can build it)
+```
+
+- **27/27 CTest on Windows, 26/26 on Linux** (the pixel golden is
+  `-LE gpu-golden` there).
+- **`capture_gate_meshes` passes against the UNCHANGED M4.5 golden**, which is
+  the evidence that physics arriving is inert for a scene whose scenery says it
+  is scenery. Nothing was re-recorded to make a render gate pass.
+- **Both determinism traces for `churn` and `example01` are byte-identical to
+  their M4.5 recordings**, before and after the mirror's data-structure rewrite.
+- **The formatting gate covers new files now.** It did not when this milestone
+  started; it reported 205 files green while a fourteen-hundred-line new module
+  sat beside them unchecked.
+- **The defect register is reconciled**: D016 closed with the commit that fixed
+  it, D021 and D022 opened with milestones attached.
+
+### 6. The picture, looked at against the scene it describes
+
+`docs/images/m5-playground.png` — `examples/03-physics-playground` at frame 400,
+1280×720, with `DebugService:ShowPanel("Physics")` on so the solver's own
+wireframe is over the top of the rendered world.
+
+What it shows, checked against what the script asks for: three towers of six
+crates standing where they were stacked; the seesaw's plank resting on its
+fulcrum with the weight on one end; the two ramps; the character's blue box with
+its green collider capsule **inside it** rather than floating half a body above
+it, which is the defect this picture found (Finding 3); and the welded marker
+held over the capsule's head by a `Weld` rather than by a per-frame handler.
+
+**Everything is a wireframe**, and that is D022 rather than a physics failure: a
+`Part` has no geometry of its own in this release, only a `MeshPart` reaches the
+solid renderer, and the boxes are exactly where the bodies are. It is scheduled
+with M7.5, which owns how this engine renders, and the example's README says so
+where somebody running it will read it.
+
+Frame time for the deliverable at 1080p: **median 1.11 ms, worst 1.93 ms**
+(0 draws — see above), recorded in the baselines table.
+
+### 7. What a reviewer should know before signing
+
+- **`Enum.Material` and `BasePart.Material` are not in M5**, and neither is
+  `RaycastResult.Material`. They are a surface look rather than rigidbody state,
+  nothing reads them, and a type-checked no-op looks more like a working API
+  than a missing member does. api-design.md §2.2 says so in the class tree.
+- **`Enum.CollisionFidelity` round-trips and every value collides as a box.**
+  `MeshPart` geometry lives in `render`, which sits above the mirror, so there is
+  no hull to build from yet — the property reads back what was written and the
+  gap is stated in `physics_sync.cpp` where the shape is chosen. M7's asset
+  pipeline is where a hull comes from.
+- **The physics mirror costs ~160 ns per body per tick to decide nothing
+  changed.** Two cheap wins were taken; what remains is a dirty-flag design that
+  belongs with M7's streaming. It is recorded in the baselines rather than left
+  to be discovered.
+- **`KeyboardService` is a scaffold with an expiry**, tagged `DevOnly` so it
+  cannot reach a shipping build, and migrating the deliverable off it is an M6
+  gate item.
+- **Nothing here is tagged.** Per MASTER_PROMPT §6 the milestone is complete when
+  the human says so in words; `PROGRESS.md` records it as awaiting review and
+  `milestone/m5` does not exist yet.

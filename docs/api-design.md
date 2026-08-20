@@ -106,13 +106,19 @@ and is an ordinary child of it.
 
 ## 2. v1 API surface
 
-### 2.1 Services (the complete v1 list — 15 + 1 dev-only)
+### 2.1 Services (the complete v1 list — 15 + 2 dev-only)
 
 **`Workspace`** (global `workspace`) — 3D scene root.
 - Props: `Gravity: vector` (SI, default `(0, -9.81, 0)`), `CurrentCamera: Camera`
 - Methods: `Raycast(origin, direction, params?) → RaycastResult?`,
   `Spherecast(origin, radius, direction, params?)`,
   `GetBodiesInBox(cframe, size, params?) → {BasePart}`
+- **The direction is not normalised: its length is how far the cast reaches.**
+  `direction * 100` is a hundred-metre ray, and `RaycastResult.Distance` is
+  therefore a distance rather than a fraction. A tie between two surfaces at the
+  same distance resolves the same way on every run (R10) — a query whose answer
+  depends on traversal order is a replay divergence waiting for a body count to
+  change.
 
 **`RunService`** — frame loop.
 - Props: `SimTime: number` (read-only) — SimClock time in seconds at the
@@ -172,11 +178,21 @@ per-part props.
   the grid every timing guarantee in §3.2 is expressed against. It ships
   before any physics does, because it is a scheduler property that physics
   merely names: express durations as multiples of it and code stays correct at
-  30 Hz or 240 Hz. **Read-only until the physics module lands (M5)**, when a
-  write takes effect at the next FrameStart safe point rather than mid-tick.
-- Collision groups (M5): `RegisterCollisionGroup(name)`,
-  `CollisionGroupSetCollidable(a, b, collidable)`,
-  `GetRegisteredCollisionGroups()`.
+  30 Hz or 240 Hz. **Writable from M5**, and a write takes effect at the next
+  FrameStart safe point rather than mid-tick — the accumulator, the timer wheel
+  and the solver all read it, and a value that changed between two of those
+  reads inside one frame is a class of bug worth designing out. A read gives
+  back what was last written, so the property round-trips immediately and takes
+  effect one frame later. Values outside 1/240 to 1/30 are refused rather than
+  clamped.
+- Collision groups (M5): `RegisterCollisionGroup(name)` — idempotent, so a
+  script may register at file scope and survive a hot reload;
+  `CollisionGroupSetCollidable(a, b, collidable)` — symmetric, because a
+  one-way collision is not something a solver can express;
+  `GetRegisteredCollisionGroups()` — a fresh array in registration order,
+  `Default` first. An unregistered name on `BasePart.CollisionGroup` is an
+  error rather than a silent fallback: the failure mode of a typo is a wall
+  players walk through.
 
 **`StreamingService`** — StreamingEnabled-modeled, as a dedicated service
 (streaming is a system, not scene-root state).
@@ -233,6 +249,28 @@ tree *is* the API.
 
 **`HotReloadService`** — dev builds only (§3).
 
+**`KeyboardService`** — dev builds only, and **for one milestone**. Direct
+keyboard polling: `IsKeyDown(key: string) → boolean`, named by the US-layout
+legend (`"W"`, `"Space"`, `"LeftShift"`). A name no key carries is `false`
+rather than an error.
+
+It exists because M5 ships a character somebody has to be able to steer and the
+Input Action System does not land until M6, and ADR 0029 makes the IAS the only
+input model — so it is tagged `DevOnly`, which means a shipping build does not
+contain it and its removal is structural rather than a promise. Migrating
+`examples/03-physics-playground` off it is an M6 gate item.
+
+The key is a **string** rather than an `Enum.KeyCode` deliberately.
+`Enum.KeyCode`'s full list — keys, mouse, gamepad — belongs to the IAS, where
+it is designed once with the whole list in front of it; a third of it shipped
+here would fix item values for a surface nobody has designed yet. A
+stringly-typed scaffold also cannot be mistaken for the real API.
+
+What it reads is the keyboard **as of the current simulation tick**, not the
+device: two polls inside one tick agree, and a recorded input stream can hand
+the same answers back with no keyboard attached — which is what the M5
+determinism gate replays.
+
 **Reserved meanings, not implemented in v1** (do not squat them): the service
 names `Players`, `NetworkService`, `ReplicationService` and
 `NavigationService`, which name no class at all in v1; and `Enum.RunContext`,
@@ -261,6 +299,11 @@ Instance (abstract)
 │  │  │                        -- Material, CollisionGroup, Friction, Restitution, Density,
 │  │  │                        -- LinearVelocity/AngularVelocity (read), ApplyImpulse(v),
 │  │  │                        -- Touched/TouchEnded signals
+│  │  │                        -- (`Material` is the one member of this list M5 did
+│  │  │                        --  not ship: it is a surface look rather than
+│  │  │                        --  rigidbody state, nothing reads it, and a
+│  │  │                        --  type-checked no-op looks more like a working API
+│  │  │                        --  than a missing member does)
 │  │  ├─ Part                  -- Shape: Enum.PartShape (Block/Ball/Cylinder/Capsule/Wedge)
 │  │  ├─ MeshPart              -- MeshContent: Content, CollisionFidelity: Enum.CollisionFidelity
 │  │  └─ CharacterBody         -- Jolt character controller (capsule): Move(direction: vector),
@@ -479,7 +522,7 @@ change how it falls.
 | `Rect` | `Rect.new(min: Vector2, max: Vector2)`; `Min`, `Max`, `Width`, `Height`. |
 | `TweenInfo` | `TweenInfo.new(time, easingStyle?, easingDirection?, repeatCount?, reverses?, delayTime?)` — enum params also accept string literals ("Quad") via typed unions. |
 | `Signal<T...>` / `Connection` | THE signal types (never "RBXScriptSignal"). `Signal:Connect(fn) → Connection`, `:Once(fn)`, `:Wait() → T...`; `Connection:Disconnect()`, `.Connected`. `Disconnect` is idempotent: a second call is a no-op and `.Connected` stays `false`. Deferred-only (ADR 0015), ordering per §3.1. User-creatable: `Signal.new()` with `:Fire(...)`, `:Destroy()` — replaces BindableEvent/BindableFunction. `Signal.new()` is generic and its pack is inferred from the `Fire`/`Connect` sites; annotate it (`Signal<string>`, `Signal<()>`) where inference has nothing to work from, such as an array element type. `ConnectParallel` reserved, not in v1. |
-| `RaycastParams` / `RaycastResult` | `RaycastParams.new { Filter = {Instance}, FilterType = Enum.RaycastFilterType.Exclude, CollisionGroup = "Default" }` (table constructor); result: `Instance`, `Position`, `Normal`, `Distance`, `Material`. |
+| `RaycastParams` / `RaycastResult` | `RaycastParams.new { Filter = {Instance}, FilterType = Enum.RaycastFilterType.Exclude, CollisionGroup = "Default" }` (table constructor); result: `Instance`, `Position`, `Normal`, `Distance`. Both are read-only once built: a params object mutated between two casts is a question that means something different depending on when the engine looked at it. The filter covers a named instance's **descendants**, so filtering a `Model` filters its parts, and each word means what it says at the edges — an empty `Exclude` filter hits everything and an empty `Include` filter hits nothing. `CollisionGroup` is the empty string for "any group". **`RaycastResult.Material` is not in M5**: `BasePart.Material` is not either, and a field that reported a value nothing sets would be worse than one that is absent — both arrive with the surface-material work. Note for `--!strict` callers: Luau table types are invariant, so `Filter = { part }` needs `:: { Instance }` — the annotation a `{Instance}` field costs. |
 | `Random` | `Random.new(seed?)`: `NextNumber(min?, max?)`, `NextInteger(min, max)`, `NextUnitVector()`, `Clone()`. `NextNumber()` is [0, 1) and `NextNumber(min, max)` is [min, max) — half-open, like every other range in the engine; `NextInteger(min, max)` is inclusive at **both** ends, which is the one place the engine is not half-open and the reason it is spelled out. `min > max`, or a non-integer bound to `NextInteger`, raises `script.err.random_range`. `NextUnitVector` is uniform over the sphere, not merely unit length. The seed is any number, truncated toward zero. Deterministic streams (R10) — see the note below the table. |
 | `Content` | A type alias of `string` in v1 (`asset://…`, `save://…` URIs); reserved to become opaque later. It is a real exported type name, generated into `engine.d.luau` (§5), so `local c: Content = "asset://models/tree.glb"` type-checks — which is what makes the alias worth having before it becomes opaque. |
 | `Enum` | Global `Enum` namespace; `EnumItem` = `Name`, `Value`, `EnumType` — and `EnumType` is the enum **object**, not its name as a string, so `Enum.PartShape.Ball.EnumType == Enum.PartShape`. `Enum.X:GetEnumItems()` returns a **fresh** array on every call, in declaration order (fresh so a caller may sort it; ordered because R10 forbids container order reaching observable order). v1 enums: `EasingStyle` (Linear, Sine, Quad, Cubic, Quart, Quint, Exponential, Circular, Back, Bounce, Elastic), `EasingDirection`, `KeyCode` (keys + mouse + gamepad buttons), `InputActionType` (Bool, Direction1D, Direction2D, Direction3D, ViewportPosition), `InputDeviceType` (KeyboardMouse, Gamepad, Touch), `PartShape`, `Material` (small v1 set), `CollisionFidelity` (Default, Hull, Box, Precise), `RotationOrder` (XYZ, XZY, YXZ, YZX, ZXY, ZYX — all six permutations; YXZ wherever an `order` parameter is omitted), `RaycastFilterType` (Include, Exclude), `StreamingMode` (Default, Atomic, Persistent), `PlaybackState`, `CharacterState` (Grounded, Airborne), `AutomaticSize`, `FillDirection`, `HorizontalAlignment`, `VerticalAlignment`, `SortOrder`, `ScaleType` (Stretch, Slice, Tile), `WindowMode`, `LogLevel` (Trace, Debug, Info, Warning, Error — ascending severity, and `Value` orders them), `RunContext` (Client, Server — declared and carrying both items in v1, but nothing reads them; §2.1). |
