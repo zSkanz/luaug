@@ -2,8 +2,15 @@
 
 #include <lua.h>
 
+// `std::sort` for the frame-time median, and `std::ptrdiff_t` beside it. Both
+// were reached transitively for a milestone: this file compiles on Windows and
+// in the Tier-2 container without either include, and fails on the CI runner's
+// libstdc++, which is a different version with a different transitive graph.
+// A header a translation unit uses is a header it includes.
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <memory>
