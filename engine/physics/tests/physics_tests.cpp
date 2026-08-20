@@ -387,6 +387,271 @@ TEST_CASE("a character falls, lands, and names what it landed on")
     CHECK(state.groundUserData == 1);
 }
 
+TEST_CASE("two characters cannot walk through each other")
+{
+    Fixture fixture;
+    fixture.spawn(floorDesc());
+
+    // Six metres apart, walking straight at one another. Two metres wide each,
+    // so "not overlapping" means their centres stay at least two apart.
+    CharacterDesc left;
+    left.transform.position = core::DVec3{-3.0, 2.5, 0.0};
+    left.userData = 10;
+    CharacterDesc right;
+    right.transform.position = core::DVec3{3.0, 2.5, 0.0};
+    right.userData = 11;
+
+    const CharacterHandle a = fixture.physics->createCharacter(fixture.world, left);
+    const CharacterHandle b = fixture.physics->createCharacter(fixture.world, right);
+    REQUIRE(a.valid());
+    REQUIRE(b.valid());
+
+    for (int i = 0; i < 180; ++i) {
+        fixture.physics->moveCharacter(fixture.world, a, core::Vec3{2.0f, 0.0f, 0.0f}, kFixedDt);
+        fixture.physics->moveCharacter(fixture.world, b, core::Vec3{-2.0f, 0.0f, 0.0f}, kFixedDt);
+        fixture.physics->step(fixture.world, kFixedDt);
+    }
+
+    const f64 gap = fixture.physics->characterState(fixture.world, b).transform.position.x -
+                    fixture.physics->characterState(fixture.world, a).transform.position.x;
+
+    // Three seconds of walking into each other at 2 m/s. What stops them is
+    // the inner body -- verified by deleting `settings.mInnerBodyShape` and
+    // re-running, which walks them straight through one another and fails this
+    // check at a gap of -40. With it, they stop at 2.02: two metres of width
+    // and Jolt's own collision padding.
+    CHECK(gap > 1.8);
+}
+
+TEST_CASE("a character is not pushed by another walking into it")
+{
+    Fixture fixture;
+    fixture.spawn(floorDesc());
+
+    CharacterDesc still;
+    still.transform.position = core::DVec3{0.0, 2.5, 0.0};
+    still.userData = 30;
+    CharacterDesc charger;
+    charger.transform.position = core::DVec3{-8.0, 2.5, 0.0};
+    charger.userData = 31;
+
+    const CharacterHandle stationary = fixture.physics->createCharacter(fixture.world, still);
+    const CharacterHandle running = fixture.physics->createCharacter(fixture.world, charger);
+
+    // One runs at 12 m/s -- three times a walk -- and is told to keep running
+    // long after it has arrived. The other is told nothing at all.
+    for (int i = 0; i < 240; ++i) {
+        fixture.physics->moveCharacter(fixture.world, running, core::Vec3{12.0f, 0.0f, 0.0f}, kFixedDt);
+        fixture.physics->moveCharacter(fixture.world, stationary, core::Vec3{0.0f, 0.0f, 0.0f}, kFixedDt);
+        fixture.physics->step(fixture.world, kFixedDt);
+    }
+
+    // Characters BLOCK each other; neither pushes the other. Four seconds of a
+    // running character against a standing one moves the standing one by
+    // nothing that rounds to a centimetre.
+    const f64 pushed = fixture.physics->characterState(fixture.world, stationary).transform.position.x;
+    CHECK(std::abs(pushed) < 0.01);
+    const f64 stoppedAt = fixture.physics->characterState(fixture.world, running).transform.position.x;
+    CHECK(stoppedAt < -1.9);
+    CHECK(stoppedAt > -2.2);
+}
+
+TEST_CASE("four characters walking into one another queue instead of overlapping")
+{
+    Fixture fixture;
+    fixture.spawn(floorDesc());
+
+    std::vector<CharacterHandle> crowd;
+    for (int i = 0; i < 4; ++i) {
+        CharacterDesc desc;
+        desc.transform.position = core::DVec3{-6.0 + i * 4.0, 2.5, 0.0};
+        desc.userData = static_cast<u64>(40 + i);
+        crowd.push_back(fixture.physics->createCharacter(fixture.world, desc));
+    }
+
+    for (int i = 0; i < 300; ++i) {
+        // Everybody walks at the middle. Two from the left, two from the right.
+        const f32 push = 6.0f;
+        fixture.physics->moveCharacter(fixture.world, crowd[0], core::Vec3{push, 0.0f, 0.0f}, kFixedDt);
+        fixture.physics->moveCharacter(fixture.world, crowd[1], core::Vec3{push, 0.0f, 0.0f}, kFixedDt);
+        fixture.physics->moveCharacter(fixture.world, crowd[2], core::Vec3{-push, 0.0f, 0.0f}, kFixedDt);
+        fixture.physics->moveCharacter(fixture.world, crowd[3], core::Vec3{-push, 0.0f, 0.0f}, kFixedDt);
+        fixture.physics->step(fixture.world, kFixedDt);
+    }
+
+    // A file, not a heap: every neighbouring pair is at least a diameter apart,
+    // and the order they started in is the order they end in.
+    for (std::size_t i = 1; i < crowd.size(); ++i) {
+        const f64 left = fixture.physics->characterState(fixture.world, crowd[i - 1]).transform.position.x;
+        const f64 right = fixture.physics->characterState(fixture.world, crowd[i]).transform.position.x;
+        CHECK(right - left > 1.9);
+    }
+}
+
+TEST_CASE("a character walks through a wall its group does not collide with")
+{
+    Fixture fixture;
+    fixture.spawn(floorDesc());
+
+    const CollisionGroup walls = fixture.physics->registerCollisionGroup(fixture.world, "Walls");
+    const CollisionGroup ghosts = fixture.physics->registerCollisionGroup(fixture.world, "Ghosts");
+    fixture.physics->setGroupsCollidable(fixture.world, walls, ghosts, false);
+
+    BodyDesc wall;
+    wall.shape.type = ShapeType::Box;
+    wall.shape.size = core::Vec3{1.0f, 8.0f, 20.0f};
+    wall.transform.position = core::DVec3{0.0, 4.0, 0.0};
+    wall.motion = MotionType::Static;
+    wall.group = walls;
+    wall.userData = 60;
+    fixture.spawn(wall);
+
+    REQUIRE(walls != ghosts);
+    REQUIRE(!fixture.physics->groupsCollidable(fixture.world, walls, ghosts));
+    REQUIRE(!fixture.physics->groupsCollidable(fixture.world, ghosts, walls));
+
+    CharacterDesc walker;
+    walker.transform.position = core::DVec3{-6.0, 2.5, 0.0};
+    walker.group = ghosts;
+    walker.userData = 61;
+    const CharacterHandle handle = fixture.physics->createCharacter(fixture.world, walker);
+
+    for (int i = 0; i < 240; ++i) {
+        fixture.physics->moveCharacter(fixture.world, handle, core::Vec3{6.0f, 0.0f, 0.0f}, kFixedDt);
+        fixture.physics->step(fixture.world, kFixedDt);
+    }
+
+    // Well past the wall. Before the character's sweep was given the world's
+    // own layer filter it stopped dead at the wall's face, which made
+    // `CollisionGroup` a property that worked for every pair except the one a
+    // player controls.
+    CHECK(fixture.physics->characterState(fixture.world, handle).transform.position.x > 6.0);
+}
+
+TEST_CASE("two characters whose groups do not collide walk through each other")
+{
+    Fixture fixture;
+    fixture.spawn(floorDesc());
+
+    const CollisionGroup ghosts = fixture.physics->registerCollisionGroup(fixture.world, "Ghosts");
+    fixture.physics->setGroupsCollidable(fixture.world, ghosts, ghosts, false);
+
+    CharacterDesc left;
+    left.transform.position = core::DVec3{-3.0, 2.5, 0.0};
+    left.group = ghosts;
+    left.userData = 70;
+    CharacterDesc right;
+    right.transform.position = core::DVec3{3.0, 2.5, 0.0};
+    right.group = ghosts;
+    right.userData = 71;
+
+    const CharacterHandle a = fixture.physics->createCharacter(fixture.world, left);
+    const CharacterHandle b = fixture.physics->createCharacter(fixture.world, right);
+
+    for (int i = 0; i < 180; ++i) {
+        fixture.physics->moveCharacter(fixture.world, a, core::Vec3{2.0f, 0.0f, 0.0f}, kFixedDt);
+        fixture.physics->moveCharacter(fixture.world, b, core::Vec3{-2.0f, 0.0f, 0.0f}, kFixedDt);
+        fixture.physics->step(fixture.world, kFixedDt);
+    }
+
+    // They have swapped sides. This is the other half of the case above: a
+    // group that says "do not collide" has to mean it between two characters as
+    // well, which is the thing a per-character collision list could not have
+    // expressed.
+    const f64 crossedA = fixture.physics->characterState(fixture.world, a).transform.position.x;
+    const f64 crossedB = fixture.physics->characterState(fixture.world, b).transform.position.x;
+    CHECK(crossedA > crossedB);
+}
+
+TEST_CASE("a character walks through a part that cannot collide")
+{
+    Fixture fixture;
+    fixture.spawn(floorDesc());
+
+    BodyDesc ghost;
+    ghost.shape.type = ShapeType::Box;
+    ghost.shape.size = core::Vec3{1.0f, 8.0f, 20.0f};
+    ghost.transform.position = core::DVec3{0.0, 4.0, 0.0};
+    ghost.motion = MotionType::Static;
+    ghost.collidable = false;
+    ghost.userData = 50;
+    fixture.spawn(ghost);
+
+    CharacterDesc walker;
+    walker.transform.position = core::DVec3{-6.0, 2.5, 0.0};
+    walker.userData = 51;
+    const CharacterHandle handle = fixture.physics->createCharacter(fixture.world, walker);
+
+    for (int i = 0; i < 240; ++i) {
+        fixture.physics->moveCharacter(fixture.world, handle, core::Vec3{6.0f, 0.0f, 0.0f}, kFixedDt);
+        fixture.physics->step(fixture.world, kFixedDt);
+    }
+
+    CHECK(fixture.physics->characterState(fixture.world, handle).transform.position.x > 6.0);
+}
+
+TEST_CASE("fifty characters in one crowd stay inside the tick budget")
+{
+    Fixture fixture;
+    fixture.spawn(floorDesc());
+
+    // Fifty enemies in a ten-by-five block two metres apart, which is shoulder
+    // to shoulder for a two-metre capsule: every one of them is inside its
+    // neighbours' sweep every tick, so this is the crowd, not fifty characters
+    // that happen to share a world.
+    std::vector<CharacterHandle> crowd;
+    for (int i = 0; i < 50; ++i) {
+        CharacterDesc desc;
+        desc.transform.position = core::DVec3{-9.0 + (i % 10) * 2.0, 2.5, -4.0 + (i / 10) * 2.0};
+        desc.userData = static_cast<u64>(100 + i);
+        crowd.push_back(fixture.physics->createCharacter(fixture.world, desc));
+    }
+
+    for (int i = 0; i < 120; ++i) {
+        for (const CharacterHandle handle : crowd) {
+            fixture.physics->moveCharacter(fixture.world, handle, core::Vec3{2.0f, 0.0f, 0.0f}, kFixedDt);
+        }
+        fixture.physics->step(fixture.world, kFixedDt);
+    }
+
+    // Nobody has been squeezed out of the crowd or through the floor. The
+    // number this case exists to defend is in `docs/perf-baselines.md`; what it
+    // asserts here is only that fifty of them is a supported thing to do.
+    for (const CharacterHandle handle : crowd) {
+        const CharacterState state = fixture.physics->characterState(fixture.world, handle);
+        CHECK(state.transform.position.y > 2.0);
+        CHECK(state.transform.position.y < 3.0);
+    }
+}
+
+TEST_CASE("a character that has been destroyed stops blocking the ones that remain")
+{
+    Fixture fixture;
+    fixture.spawn(floorDesc());
+
+    CharacterDesc blocker;
+    blocker.transform.position = core::DVec3{0.0, 2.5, 0.0};
+    blocker.userData = 20;
+    CharacterDesc walker;
+    walker.transform.position = core::DVec3{-6.0, 2.5, 0.0};
+    walker.userData = 21;
+
+    const CharacterHandle stationary = fixture.physics->createCharacter(fixture.world, blocker);
+    const CharacterHandle moving = fixture.physics->createCharacter(fixture.world, walker);
+
+    // Destroying a character has to take its inner body out of the world with
+    // it. If it did not, the space it occupied would keep blocking, and the
+    // check below would read as "walked into a ghost".
+    fixture.physics->destroyCharacter(fixture.world, stationary);
+
+    for (int i = 0; i < 240; ++i) {
+        fixture.physics->moveCharacter(fixture.world, moving, core::Vec3{4.0f, 0.0f, 0.0f}, kFixedDt);
+        fixture.physics->step(fixture.world, kFixedDt);
+    }
+
+    CHECK(fixture.physics->characterState(fixture.world, moving).transform.position.x > 2.0);
+}
+
 TEST_CASE("two identical worlds stepped identically agree, body for body")
 {
     // The seam's own half of ADR 0025: same build, same platform, same inputs.

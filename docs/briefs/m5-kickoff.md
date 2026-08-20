@@ -271,6 +271,14 @@ The consequence to state loudly: **things collide with the character; whether
 the character pushes them back is a separate wiring decision**, and which way it
 went is recorded in the Findings rather than left for a player to discover.
 
+**Answered, after the milestone was built and before it was signed: characters
+BLOCK each other, and neither pushes the other.** Walking a character at three
+times walking speed into one that is standing still, for four seconds, moves the
+standing one by less than a centimetre — it is a hard stop, not a shove.
+Knockback, shoving and crowd flow are game rules, and a game writes them by
+moving the other character itself. It is in the class doc, in `api-design.md`'s
+class tree, and in two tests. Finding 15 is how it got there.
+
 ### 9. `FixedTimestep` becomes writable at a safe point, never mid-tick
 
 api-design §2.1 already says it: read-only until M5, and from here a write takes
@@ -429,6 +437,52 @@ time.
     three fresh processes plus two in-process runs agree. Written down rather
     than smoothed over: if it happens again, this is the precedent.
 
+15. **The reported defect did not reproduce, and a real one was underneath it.**
+    Two `CharacterBody` walking into each other were said to pass through, on a
+    reading of Jolt that is correct in every particular: a `CharacterVirtual` is
+    not a `Body`, `mCharacterVsCharacterCollision` is born null
+    (`CharacterVirtual.h:696`), and `SetCharacterVsCharacterCollision` appears
+    nowhere in this engine. Every sentence true, and the conclusion wrong,
+    because this backend sets `mInnerBodyShape` — each character carries a rigid
+    body inside its capsule, and THAT is what another character's sweep finds.
+    Written as a test they stop at 2.02 metres apart, which is two metres of
+    width and Jolt's own padding; four of them queue instead of piling up; and
+    deleting the inner body walks them through each other to a gap of −40.
+
+    What the investigation did find is that the character was the one thing in
+    the world that ignored `CollisionGroup`. `ExtendedUpdate` was being handed a
+    default-constructed `ObjectLayerFilter`, which accepts every layer, so a
+    wall in a group the character's group is set never to collide with still
+    stopped it dead — and two characters in a non-colliding group still blocked
+    each other. Both are now the world's own filters, both are tested, and both
+    tests go red when the filters are put back. D025.
+
+    `CharacterVsCharacterCollisionSimple` (`CharacterVirtual.h:246`) is
+    deliberately NOT used, and the reason is the second half of the same
+    finding: its `mCharacters` walk has no filter at all, so it would have made
+    character-against-character the one pair in the world that cannot be turned
+    off — reintroducing, by a different door, the exact defect this work
+    removed. It would also have been a second source of a contact the broad
+    phase already reports.
+
+16. **The benchmark harness was the thirteenth gate that could pass while doing
+    nothing**, and it was found by writing a scene that failed its own
+    assertions. `replay.cpp` counts logged errors and fails the run; `bench.cpp`
+    did not, so a crowd scene whose fifty characters never reached the wall
+    printed its assertion failure and then reported a perfectly respectable
+    0.24 ms/tick — the cost of fifty characters walking across an empty floor,
+    under a name that says otherwise. The counting sink is now in both, and it
+    was verified by breaking the scene's assertion on purpose.
+
+17. **A restore that the build could not see.** `Copy-Item` preserves the
+    source's timestamp, so putting a file back from a copy taken earlier gave it
+    an mtime older than the object built from the broken version — Ninja said
+    "build ok", changed nothing, and the test suite reported a failure against
+    code that was no longer on disk. It cost a wrong conclusion about a working
+    fix, and it is the same family as every other gate that passes while doing
+    nothing: **the build agreeing is not evidence that the build read your
+    file.** Break-verification restores are done with `cp` and a `touch` now.
+
 ## Gate Record
 
 Filled 2026-08-20, before human review. Every command below was run on the
@@ -482,6 +536,7 @@ the library's speed, which is the decision under `## Blocked` in the ledger.
 $ luaug-host --bench=tests/bench --bench-repeats=5      (median of 5, three times)
 [info] Bench physics1k: 1007 instances, 300 ticks, 2.0447 ms/tick mean, 4.7405 ms worst.
 [info] Bench physics1k physics: 1001 bodies, 0.0240 ms apply, 1.7989 ms step, 0.2178 ms writeback (per tick).
+[info] Bench crowd50: 59 instances, 300 ticks, 0.2190 ms/tick mean, 0.6801 ms worst.
 ```
 
 **2.02 ms per tick for 1,001 bodies against a 16 ms budget**, recorded in
@@ -521,12 +576,13 @@ Finding 5.
 
 ```
 $ luaug-host --run-tests=tests/conformance --rhi=null
-[info] 966 passed, 0 failed, 966 total
+[info] 969 passed, 0 failed, 969 total
 ```
 
-966 cases, up from 903 at M4.5. The 63 new ones are six physics files:
-`falling` (12), `touched` (6), `collision_groups` (8), `character` (9),
-`queries` (17) and `welds` (11). `Touched`/`TouchEnded` are pinned at the edges
+969 cases, up from 903 at M4.5. The 66 new ones are six physics files:
+`falling` (12), `touched` (6), `collision_groups` (8), `character` (12),
+`queries` (17) and `welds` (11) -- the three added during review pin
+character-against-character and `CollisionGroup` for a character (Finding 15). `Touched`/`TouchEnded` are pinned at the edges
 the document names: once per pair, once for each side, nothing while resting —
 **including across the moment the simulation puts both bodies to sleep** — a
 non-collidable part still reporting a touch, and a destroyed part firing no
@@ -537,17 +593,19 @@ Green on both tiers through `luaug test` as well as through `ctest`.
 ### 5. The standing items
 
 ```
-$ scripts/localgate.ps1
-  ok    docs (4.3 s)
+$ scripts/localgate.ps1                        (re-run after the review changes)
+  ok    docs (4.6 s)
   ok    luau (2.6 s)
-  ok    format (7.5 s)
-  ok    windows (26.0 s)
-  ok    linux (32.4 s)
+  ok    format (8.0 s)
+  ok    windows (25.6 s)
+  ok    linux (33.8 s)
 green (macOS is Tier-3 and only CI can build it)
 ```
 
 - **27/27 CTest on Windows, 26/26 on Linux** (the pixel golden is
-  `-LE gpu-golden` there).
+  `-LE gpu-golden` there), with `luaug_physics_tests` at 23 cases — six of them
+  added during review, four for character-against-character and two for the
+  `CollisionGroup` defect underneath it.
 - **`capture_gate_meshes` passes against the UNCHANGED M4.5 golden**, which is
   the evidence that physics arriving is inert for a scene whose scenery says it
   is scenery. Nothing was re-recorded to make a render gate pass.
@@ -630,6 +688,40 @@ Frame time for the deliverable at 1080p: **median 1.11 ms, worst 1.93 ms**
   budget either way, the physics half of it is itemised in the baselines table,
   and the remaining fix is named and scheduled. If the answer is "that is a
   regression", the ADR is a paragraph and the work is the dirty-flag design.
+- **Two characters block each other; neither pushes the other.** This was asked
+  during review, on the reading that they pass through — see Finding 15 for why
+  they do not and what the investigation found instead. What a reviewer needs
+  from it in one place:
+
+  - **The mechanism is the inner rigid body**, not
+    `CharacterVsCharacterCollision`, which is deliberately left unset. That is a
+    decision with a reason (an unfilterable brute-force list that would break
+    `CollisionGroup` for characters) and it is written where the line is, in
+    `jolt_physics.cpp`'s `createCharacter`.
+  - **Order.** R10 asked what decides resolution order between two characters,
+    and the answer is that no per-character list exists to order: each character
+    sweeps the broad phase, and the broad phase is the same structure every
+    body pair already goes through, whose determinism the milestone's other
+    work already covers. What IS observable is the order the mirror calls
+    `Move` in, and that is slot order over `physics_sync`'s vector — handle
+    order, a pure function of the operation sequence, the same discipline
+    `collectActiveBodies` and the contact list follow (U-55).
+  - **Cost.** Not O(n²). A registration list would have been; the inner bodies
+    are indexed by the broad phase, so fifty characters cost fifty tree queries
+    rather than 1,225 pair tests. Measured with fifty of them shoulder to
+    shoulder in `tests/bench/crowd50` and recorded in `docs/perf-baselines.md`.
+    There is no ceiling in the engine — nothing refuses the fifty-first — and
+    the honest limit is the tick budget, which the baseline states.
+  - **`CollisionGroup` decides this pair like any other**, which is the part
+    that was broken and is now tested in both directions.
+  - **One visible consequence of the order, worth knowing before it is
+    reported as a bug.** Two characters run at each other at 16 m/s and settle
+    two metres apart — but around a midpoint shifted by about an eighth of a
+    metre, not around zero. The one the mirror updates first in a tick gets a
+    tick of movement the other has not had yet, and at walking speed the shift
+    is a centimetre. It is deterministic, it is the same every run, and it is
+    the reason the order is fixed rather than incidental.
+
 - **Nothing here is tagged.** Per MASTER_PROMPT §6 the milestone is complete when
   the human says so in words; `PROGRESS.md` records it as awaiting review and
   `milestone/m5` does not exist yet.

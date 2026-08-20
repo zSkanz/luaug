@@ -308,7 +308,10 @@ Instance (abstract)
 │  │  ├─ MeshPart              -- MeshContent: Content, CollisionFidelity: Enum.CollisionFidelity
 │  │  └─ CharacterBody         -- Jolt character controller (capsule): Move(direction: vector),
 │  │                           -- Jump(), WalkSpeed, JumpSpeed, MaxSlopeAngle, AutoStepHeight,
-│  │                           -- Grounded (read), State: Enum.CharacterState, Landed signal
+│  │                           -- Grounded (read), State: Enum.CharacterState, Landed signal.
+│  │                           -- Two characters BLOCK each other; neither pushes the
+│  │                           -- other, and knockback is a game rule the game writes.
+│  │                           -- CollisionGroup decides the pair, this one included
 │  ├─ Model                    -- PrimaryPart, GetExtentsSize(), StreamingMode
 │  └─ Camera                   -- CFrame, FieldOfView, NearPlane, FarPlane, ViewportSize (read),
 │                              -- WorldToViewportPoint(), ViewportPointToRay(). No CameraType.

@@ -39,6 +39,7 @@
   "engine.replay.err.length_mismatch": "Trace lengths differ: {expectedLabel} has {expected} checkpoints, {actualLabel} has {actual}.",
   "engine.bench.info.physics": "Bench {name} physics: {bodies} bodies, {apply} ms apply, {step} ms step, {writeback} ms writeback (per tick).",
   "engine.bench.info.result": "Bench {name}: {instances} instances, {ticks} ticks, {mean} ms/tick mean, {max} ms worst.",
+  "engine.bench.err.script_errors": "Bench {name} logged {count} errors, so the world it measured is not the one it describes.",
   "engine.bench.err.over_budget": "Bench {name} took {mean} ms/tick, over its {budget} ms budget.",
   "engine.project.warn.no_scripts": "No entry scripts under {path}; the project will boot and do nothing. A project mounts src/scripts/**/*.luau.",
   "engine.capture.info.written": "Wrote the render command stream to {path}.",

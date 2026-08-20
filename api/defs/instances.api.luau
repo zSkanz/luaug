@@ -591,7 +591,13 @@ local Classes: { Schema.Class } = {
             .. "instead of tumbling. It is a controller rather than a rigid body -- it sweeps its own shape and "
             .. "moves at the velocity you give it, which is why it does not tip over and why gravity is yours to "
             .. "apply through Move. There is no Humanoid and no HumanoidRootPart: this is one instance (§2.7 "
-            .. "divergence 13).",
+            .. "divergence 13). "
+            .. "Two characters BLOCK each other and neither pushes the other. Walking into somebody who is "
+            .. "standing still stops you and leaves them where they were, however fast you were going and "
+            .. "however long you keep walking -- shoving, knockback and crowd flow are game rules, and a game "
+            .. "writes them by moving the other character itself. What holds the block is the rigid body inside "
+            .. "the capsule, so CollisionGroup decides it like any other pair: two characters in a group set "
+            .. "never to collide with itself walk straight through one another.",
         Properties = {
             {
                 Name = "WalkSpeed",

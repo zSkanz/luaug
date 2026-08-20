@@ -199,6 +199,69 @@ describe("CharacterBody", function()
         expect(body.Position.z < 6.5):ToBe(true)
     end)
 
+    it("is blocked by another character, and neither pushes the other", function()
+        ground()
+        local left = character(vector.create(-3, 2.6, 0))
+        local right = character(vector.create(3, 2.6, 0))
+        task.wait(0.5)
+
+        local ticks = math.floor(3 / game:GetService("PhysicsService").FixedTimestep)
+        for _ = 1, ticks do
+            left:Move(vector.create(1, 0, 0))
+            right:Move(vector.create(-1, 0, 0))
+            task.wait()
+        end
+
+        -- Two metres wide each, so touching means their centres are two apart.
+        -- What holds this is the inner rigid body every `CharacterBody` carries:
+        -- a `CharacterVirtual` alone is not a `Body` and would not appear in the
+        -- other one's sweep at all.
+        expect(right.Position.x - left.Position.x > 1.9):ToBe(true)
+        -- Neither has crossed the other, and both are still near the middle
+        -- rather than shoved out of it.
+        expect(left.Position.x < 0):ToBe(true)
+        expect(right.Position.x > 0):ToBe(true)
+    end)
+
+    it("does not push a character that is standing still", function()
+        ground()
+        local still = character(vector.create(0, 2.6, 0))
+        local charger = character(vector.create(-8, 2.6, 0))
+        task.wait(0.5)
+
+        -- Four seconds of a character running at its full WalkSpeed into one
+        -- that is told nothing at all. Characters BLOCK; they do not shove.
+        -- Knockback is a game rule, and a game writes it by moving the other
+        -- character itself.
+        walk(charger, vector.create(1, 0, 0), 4)
+        expect(still.Position.x):ToBeCloseTo(0, 0.01)
+        expect(charger.Position.x):ToBeCloseTo(-2.02, 0.05)
+    end)
+
+    it("obeys CollisionGroup, against scenery and against another character", function()
+        local PhysicsService = game:GetService("PhysicsService")
+        PhysicsService:RegisterCollisionGroup("Spectators")
+        PhysicsService:CollisionGroupSetCollidable("Spectators", "Spectators", false)
+
+        ground()
+        local wall = block("Wall", vector.create(0, 4, 8), vector.create(20, 8, 1))
+        wall.CollisionGroup = "Spectators"
+
+        local walker = character(vector.create(0, 2.6, 0))
+        walker.CollisionGroup = "Spectators"
+        local other = character(vector.create(0, 2.6, 12))
+        other.CollisionGroup = "Spectators"
+        task.wait(0.5)
+
+        -- Through the wall AND through the other character: a group that says
+        -- "do not collide" has to mean it for the thing a player controls, and
+        -- for a pair of them. Before the character's sweep was given the world's
+        -- own layer filter it was the one thing in the world that ignored this
+        -- property.
+        walk(walker, vector.create(0, 0, 1), 2.5)
+        expect(walker.Position.z > 12):ToBe(true)
+    end)
+
     it("refuses a MaxSlopeAngle of ninety degrees or more, because then nothing is a wall", function()
         local body = character(vector.create(0, 2.6, 0))
         expect(function()

@@ -54,6 +54,29 @@ Changing any of it is an ADR plus a full re-baseline (see Methodology).
 Captured with `luaug-host --bench=tests/bench --bench-repeats=5`, median of
 5 runs, three times over; the spread across those three was under 1.5%.
 
+**What fifty characters cost, and whether there is a ceiling.** Asked during
+M5's review, on the concern that character-against-character is O(n²). It is
+not, and the measurement is why: a `CharacterBody` collides with another one
+through the rigid body inside its capsule, which the broad phase indexes like
+any other. A registration list would have been quadratic; a tree query is not.
+Measured on the reference machine by scaling `crowd50`'s scene, five repeats
+each:
+
+| Characters | Mean sim tick | Per character |
+|---|---|---|
+| 10 | 0.026 ms | 2.6 µs |
+| 50 | 0.209 ms | 4.2 µs |
+| 100 | 0.475 ms | 4.7 µs |
+| 200 | 0.939 ms | 4.7 µs |
+
+Four times the crowd costs four and a half times the tick, and the per-character
+cost stops climbing at around 4.7 µs — that is linear with a constant, which is
+what a broad phase buys. **There is no ceiling in the engine**: nothing refuses
+the fifty-first character, and the honest limit is the tick budget. Two hundred
+of them, all touching, is 0.94 ms of a 16.7 ms frame. Only `crowd50` is
+committed as a gate; the other three points were measured outside the repository
+so that CI pays for one scene rather than four.
+
 | Milestone | Scene | Preset | Metric | Value | Budget/Gate |
 |---|---|---|---|---|---|
 | M2 | `tests/bench/instances500` (500 parts in 10 models, one CFrame write each per tick) | `win-msvc-dev` | mean sim tick | **0.134 ms** | 4 ms — the roadmap's "500-instance scene ticks under budget" |
@@ -96,6 +119,9 @@ to a file and taxes every configuration to enable.
 | M5 | `tests/bench/churn10k` (10,000 anchored parts, 1,000 listeners, two thirds moving) | `win-msvc-dev` | mean sim tick | **4.96 ms** | 16 ms |
 | M5 | `tests/bench/churn10k` | `win-msvc-dev` | worst sim tick | 9.13 ms | — |
 | M5 | `tests/bench/churn10k` | `win-msvc-dev` | physics: apply / step / writeback | 1.60 / 1.23 / 0.026 ms | — |
+| M5 | `tests/bench/crowd50` (50 `CharacterBody` shoulder to shoulder, all walking into a wall, so the crowd stays a crowd) | `win-msvc-dev` | mean sim tick | **0.22 ms** | 16 ms |
+| M5 | `tests/bench/crowd50` | `win-msvc-dev` | worst sim tick | 0.68 ms | — |
+| M5 | `tests/bench/crowd50` | `win-msvc-dev` | physics: apply / step / writeback | 0.191 / 0.019 / 0.004 ms | — |
 | M5 | `examples/03-physics-playground` (the deliverable: 18 dynamic crates, a seesaw, ramps, a character, the Jolt wireframe on) | `win-msvc-dev` | median frame, 1080p | **1.11 ms** | 16.7 ms — a 60 fps frame |
 | M5 | `examples/03-physics-playground` | `win-msvc-dev` | worst frame | 1.93 ms | — |
 | M5 | `examples/03-physics-playground` | `win-msvc-dev` | draws / triangles | 0 / 0 — every part is a debug wireframe (D022) |

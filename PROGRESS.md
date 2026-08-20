@@ -34,6 +34,11 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   it, jumps only when grounded, and reports what it landed on.
 - **A script can ask the world what is there**: `Workspace:Raycast`,
   `:Spherecast`, `:GetBodiesInBox`, over `RaycastParams` and `RaycastResult`.
+- **Two `CharacterBody` block each other, and `CollisionGroup` decides it.**
+  Raised in review as "they pass through"; they do not, because each character
+  carries a rigid body inside its capsule. What was real is that the character
+  was the one thing in the world outside the collidability matrix — D025, fixed,
+  with the decision (block, never push) written into the class doc.
 - **`Weld` and `WeldConstraint`** (added to M5 by human decision on 2026-08-20):
   a transform weld, resolved in dependency order after the step, with cycles
   refused at the write that would create one.
@@ -86,6 +91,10 @@ scope. The ones most likely to be mistaken for bugs:
 - **D018 — `luaug_net_tests` hung once** on Windows and passed on a re-run. §12
   quarantines on the second occurrence; this is the entry that makes a second
   one countable.
+- **The build agreeing is not evidence that the build read your file.** A
+  break-verification restored with `Copy-Item` kept the source's old timestamp,
+  Ninja rebuilt nothing, and a passing fix was reported as failing against code
+  that was no longer on disk. Restore with `cp` and `touch`.
 - **D021 — a range refusal reports the key for a type.** `FixedTimestep = 1/10`
   raises "it takes a number" about a number. Every M5 property with a range is
   affected; the fix is a per-property error-key override in the IDL.

@@ -55,8 +55,35 @@ struct Sample
     return document.root()["budgetMs"].asNumber(0.0);
 }
 
+// Where the host's sink is parked while a scenario's counting sink is installed.
+// Same shape and same reason as `replay.cpp`'s.
+[[nodiscard]] core::LogSink& hostSink()
+{
+    static core::LogSink sink;
+    return sink;
+}
+
 [[nodiscard]] std::optional<core::EngineError> runOnce(const ReplayScenario& scenario, Sample& out)
 {
+    // A benchmark scene's assertions are the only thing standing between a
+    // number and a number that means nothing: fifty characters that never
+    // reached the wall cost about as much to measure as fifty that did, and the
+    // run reports the same shape of result either way. A script error is
+    // contained by design, so without this the harness prints it and carries on
+    // -- which it did, for the scene that made this necessary.
+    u64 errors = 0;
+    core::LogSink previous = core::setLogSink([&errors](LogLevel level, std::string_view text) {
+        if (level == LogLevel::Error)
+            ++errors;
+        if (const core::LogSink& host = hostSink(); host)
+            host(level, text);
+    });
+    hostSink() = std::move(previous);
+    const struct SinkScope
+    {
+        ~SinkScope() { core::setLogSink(std::move(hostSink())); }
+    } sinkScope;
+
     WorldHost host;
     if (auto error = host.boot({
             .projectPath = scenario.scriptPath,
@@ -109,6 +136,12 @@ struct Sample
     out.maxTickMs = static_cast<f64>(worstNs) / kNanosPerMs;
 
     host.close();
+
+    if (errors != 0) {
+        const std::array<I18nArg, 2> args{I18nArg{"name", scenario.name},
+                                          I18nArg{"count", static_cast<core::i64>(errors)}};
+        return core::makeError(LUAUG_TR("engine.bench.err.script_errors"), args);
+    }
     return std::nullopt;
 }
 

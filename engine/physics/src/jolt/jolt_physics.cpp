@@ -251,6 +251,10 @@ struct CharacterRecord
     bool alive = false;
     f32 stepHeight = 0.5f;
     u64 userData = 0;
+    // The layer the character sweeps the world as -- its own group, moving.
+    // Kept because `ExtendedUpdate` needs it every tick and the settings that
+    // carried it are gone by then.
+    JPH::ObjectLayer layer = 0;
 };
 
 // A contacting pair, keyed by our own handles rather than by Jolt's body ids.
@@ -894,6 +898,24 @@ public:
         // bodies pass through it, which is not what "a capsule standing on a
         // seesaw" means. The inner body is what makes the character push and be
         // pushed against, and it is why a crate the capsule walks into moves.
+        //
+        // It is also what makes TWO characters collide, and that is worth
+        // stating because the obvious reading of Jolt says they cannot: a
+        // `CharacterVirtual` is not a `Body`, and `mCharacterVsCharacterCollision`
+        // is null unless somebody sets it (`CharacterVirtual.h:696`). Both true
+        // -- and beside the point here, because the thing another character
+        // sweeps into is this inner body, which IS a `Body` and is in the
+        // broad phase like any other.
+        //
+        // So `CharacterVsCharacterCollisionSimple` (`CharacterVirtual.h:246`) is
+        // deliberately not used. It would be a second, redundant source of the
+        // same contact; it is brute force over every registered character where
+        // the inner bodies are already indexed by the broad phase; and its
+        // `mCharacters` walk has no filter, so it would make character-against-
+        // character the one pair in the world that ignores `CollisionGroup`.
+        // The tests that hold this down are "two characters cannot walk through
+        // each other" and "two characters whose groups do not collide walk
+        // through each other" -- both go red if this line is removed.
         settings.mInnerBodyShape = settings.mShape;
         settings.mInnerBodyLayer = encodeLayer(desc.group, true);
         // No shape offset: `transform` is the character's CENTRE, like every
@@ -921,8 +943,10 @@ public:
         record.alive = true;
         record.stepHeight = desc.stepHeight;
         record.userData = desc.userData;
+        record.layer = settings.mInnerBodyLayer;
         record.character = new JPH::CharacterVirtual(&settings, toJoltPosition(desc.transform.position),
                                                      toJolt(desc.transform.rotation), desc.userData, &m_system);
+
         return CharacterHandle{slot, record.generation};
     }
 
@@ -950,8 +974,16 @@ public:
         settings.mWalkStairsStepUp = JPH::Vec3(0.0f, record->stepHeight, 0.0f);
         settings.mStickToFloorStepDown = JPH::Vec3(0.0f, -record->stepHeight, 0.0f);
 
-        record->character->ExtendedUpdate(fixedDt, toJolt(m_gravity), settings, JPH::BroadPhaseLayerFilter{},
-                                          JPH::ObjectLayerFilter{}, JPH::BodyFilter{}, JPH::ShapeFilter{}, m_temp);
+        // The filters are the world's, not the defaults. A default-constructed
+        // `ObjectLayerFilter` accepts every layer, which made the character the
+        // one thing in the world that ignored `CollisionGroup`: a wall in a
+        // group the character's group is set never to collide with still
+        // stopped it, and nothing said so. `GetDefaultLayerFilter` asks the same
+        // `ObjectPairFilter` every body pair goes through, against the
+        // character's own layer.
+        record->character->ExtendedUpdate(
+            fixedDt, toJolt(m_gravity), settings, m_system.GetDefaultBroadPhaseLayerFilter(record->layer),
+            m_system.GetDefaultLayerFilter(record->layer), JPH::BodyFilter{}, JPH::ShapeFilter{}, m_temp);
     }
 
     void setCharacterTransform(CharacterHandle handle, const core::CFrameD& transform)

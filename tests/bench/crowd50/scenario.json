@@ -1,0 +1,7 @@
+{
+  "name": "crowd50",
+  "script": "init.luau",
+  "seed": 5000,
+  "ticks": 300,
+  "budgetMs": 16.0
+}
