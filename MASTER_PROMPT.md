@@ -147,9 +147,24 @@ checklist copied **verbatim** from the roadmap.
 
 **At milestone end:** run the full gate; paste the results (commands + output
 summaries + screenshot/capture references) into the brief's "Gate Record"
-section; update `PROGRESS.md`; tag `milestone/mX`; then **stop for human
-review**. Milestone boundaries are the human checkpoints. (The human may
-pre-authorize batching M0–M3 reviews by saying so in `PROGRESS.md` — check.)
+section; update `PROGRESS.md`; then **stop for human review**. Milestone
+boundaries are the human checkpoints. (The human may pre-authorize batching
+M0–M3 reviews by saying so in `PROGRESS.md` — check.)
+
+**A milestone is complete when the human says so, in words, and not before**
+(standing instruction, 2026-08-20). A green gate is evidence offered to that
+decision, never the decision. Concretely: do not write "COMPLETE" in
+`PROGRESS.md` and do not create the `milestone/mX` tag until the approval
+exists — write the state as awaiting review, and tag on approval. M4 is why
+this is spelled out: it was written up complete and tagged on its own gate, and
+the renderer it certified turned out never to have read `Lighting` at all, so
+every image the gate recorded showed a scene lit by a sun the scene never
+described.
+
+**And a milestone close must not lose the ledger's open items.** Rewriting
+`PROGRESS.md` for a close is exactly when they are most likely to be dropped and
+least affordable to lose, because the next reader is the human deciding whether
+to sign. Open defects move to the archive or stay; they do not disappear.
 
 Never start a second milestone in the same session that closed one.
 
@@ -195,6 +210,14 @@ claims it relied on (which you register per §9).
 - **The observation rule: you have eyes — use them.** Any change with visible
   output must be verified by a screenshot (`--headless --screenshot`), not by
   "the code looks right." Attach evidence to the gate record.
+- **Look at the screenshot against the scene, not against itself.** A picture
+  proves that something drew; it does not prove that what drew is what was
+  asked for. M4's goldens were recorded, compared and green while the sun stood
+  still, because nothing ever asked whether the image matched the script that
+  described it. The cheap form of that question is a **differential**: change one
+  input the output must depend on, render again, and require the two to differ.
+  `Lighting.Ambient` set to red rendering byte-identical to `Lighting.Ambient`
+  set to blue is a defect a golden cannot see and one line of shell can.
 - Perf regression > 10% vs the recorded baseline blocks the gate unless a
   human-approved ADR accepts it.
 
