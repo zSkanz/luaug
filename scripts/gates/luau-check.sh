@@ -89,6 +89,25 @@ for pair in "$header_before:engine/scene/generated/class_descriptors.gen.h" \
     fi
 done
 
+# The api-dump is the artifact api-design.md §5 keeps for a different reason
+# from the other two: not so a build can consume it, but so that a change to the
+# public surface CANNOT land without appearing in a reviewable diff -- "to force
+# changelog entries and catch accidental API breaks". Same comparison, taken the
+# same way round, for the same reason.
+echo "== the api dump matches the IDL =="
+dump_before="$(mktemp)"
+trap 'rm -f "$defs_before" "$header_before" "$source_before" "$dump_before"' EXIT
+cp api/api-dump.json "$dump_before"
+lute api/generator/gen_dump.luau >/dev/null
+if ! diff -q "$dump_before" api/api-dump.json >/dev/null; then
+    echo "luau-check: api/api-dump.json does not match the IDL." >&2
+    echo "  The public surface changed. Commit the regenerated dump alongside the" >&2
+    echo "  definition change, so the diff is on the record -- that is the whole" >&2
+    echo "  job of this file (api-design.md section 5)." >&2
+    diff -u "$dump_before" api/api-dump.json | head -40 >&2
+    exit 1
+fi
+
 echo "== i18n keys and hardcoded strings (R3) =="
 lute tools/repo/i18nlint.luau
 

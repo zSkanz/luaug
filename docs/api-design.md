@@ -996,7 +996,7 @@ property getter/setter tables, method dispatch glue, enum registration, and
 thread-safety assertions.
 
 **Generated artifacts per engine release** (all diff-checked in CI):
-1. `.luaug/types/engine.d.luau` — `declare extern type` for every
+1. `runtime/types/engine.d.luau` — `declare extern type` for every
    class/datatype + global declarations (`game`, `workspace`, `script`,
    `Instance.new` string-singleton overloads). Never `declare class`. **The doc
    text rides in this file** as `---` comments above each declaration, from the
@@ -1009,14 +1009,25 @@ thread-safety assertions.
    existing freshness gate already covering it.
 3. `.luaug/types/std/**` and `.luaug/types/luaug/**` — typed stub modules for
    `@std`/`@luaug` (editor resolution via `require.directoryAliases`).
-4. `api-dump.json` — versioned, machine-readable; CI diffs it to force
-   changelog entries and catch accidental API breaks.
+4. `api/api-dump.json` — versioned, machine-readable; CI diffs it to force
+   changelog entries and catch accidental API breaks. It records what a script
+   can observe and deliberately nothing else: no backend accessor names (R17),
+   and **no doc prose**, which rides in (1) and would bury a removed method
+   under a reflowed paragraph. Ordered by name rather than by declaration
+   order, so moving a class between `.api.luau` files produces no diff at all
+   and an added member produces one in a single place.
 5. `docs/reference/**` — markdown reference pages.
 
 **Built so far:** (1) since M2, freshness-gated, carrying the doc comments since
-M3. (2) is dropped. **(3), (4) and (5) are declared here and not generated yet**
-— they are recorded as carried work in `PROGRESS.md` rather than left to read as
-though they exist.
+M3; (4) since M4, freshness-gated the same way. (2) is dropped. **(3) and (5)
+are declared here and not generated yet** — they are recorded as carried work in
+`PROGRESS.md` rather than left to read as though they exist.
+
+The paths in (1) and (4) are the real ones. They were written here as
+`.luaug/types/...` when this section was drafted and never corrected as the
+generators landed, which is the stale-spec bug MASTER_PROMPT §5 names: `.luaug/`
+is per-project generated state, and these two are repository artifacts that ship
+with the engine.
 
 Naming-rule lints run inside the generator (§9) as a CI gate.
 

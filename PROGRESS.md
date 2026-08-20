@@ -117,15 +117,11 @@ it, and building it on speculation is what §5 rejects.
 - **Run `scripts/localgate.ps1` before every push.** Both tiers, ~50 s warm now
   that it carries the conformance suite and the hot-reload gate.
 - Carried forward, none blocking:
-  - **Three of the five generated artifacts api-design.md §5 lists do not
-    exist.** `.luaug/types/std/**` and `.luaug/types/luaug/**` (typed stubs for
-    `@std`/`@luaug`), `api-dump.json`, and `docs/reference/**`. The stubs were
-    named in M3's own goal and planned as fan-out; the api-dump was assigned to
-    M3 by M2's Decision 12 and never picked up by M3's brief, which is how it
-    fell between the two. None blocked M3's gate — the gate asks for defs that
-    lint clean and are diff-checked, and those are (1). Recorded here because a
-    list that reads as present tense is how an artifact stays missing without
-    anyone deciding that it should be.
+  - **Two of the five generated artifacts api-design.md §5 lists do not
+    exist**, down from three: the typed `@std`/`@luaug` stubs and
+    `docs/reference/**`. `api-dump.json` was the third and landed at M4. Both
+    survivors are DX surface with no gate behind them, and neither degrades by
+    waiting the way the api-dump did.
   - **The shipping profile does not configure.** `engine/script/src/modules.cpp`
     and `runtime.cpp` include `<luacode.h>` unconditionally while
     `LUAUG_LUAU_COMPILER` is forced off in shipping (ADR 0002).
