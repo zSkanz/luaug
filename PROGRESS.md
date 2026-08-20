@@ -65,6 +65,185 @@ while nothing acts on it.
 
 ## Now / Next
 
+- **`Lighting` is never read by the renderer. The whole environment has been the
+  struct defaults since M4 shipped it** — found 2026-08-20 by the human saying
+  the shadow did not seem to move, and confirmed by observation rather than by
+  reading. **This is urgent: it changes every rendered image, and the M4 render
+  goldens and lavapipe screenshots are being recorded against it.**
+
+  **The proof, before the cause.** `examples/02-meshes` with `Lighting.Ambient`
+  set to pure red renders **byte-identical** to the same frame with the ambient
+  the example ships (md5 `170446b8…` both). A property the shader multiplies
+  into every pixel cannot change and leave the image identical. Nothing from
+  `Lighting` reaches the frame.
+
+  **The cause.** `WorldHost::start` caches
+  `findFirstChildOfClass(dataModel, Lighting)` into `m_lighting` before any
+  script runs, and its comment says "Created by `registerServices` during the
+  boot above, so this is a lookup rather than a creation". That is true of
+  `Workspace` and false of `Lighting`: `services.cpp` states the rule one line
+  from where it is broken — "`Workspace` and `ScriptService` exist from boot;
+  every other service is created by its first `GetService`". So the lookup finds
+  nothing, `m_lighting` stays invalid for the life of the world, and
+  `extract`'s `world.lighting().find(lightingHost)` returns null every frame.
+  The environment then keeps `RenderWorld`'s defaults: sun straight up
+  (`Vec3{0, 1, 0}`), brightness 2.0, the default ambient, and fog off because
+  the default `fogEnd <= fogStart`.
+
+  **Which is exactly what the human saw, and explains three reports as one.**
+  A sun pinned to straight up casts shadows that are the object's own footprint
+  and never lengthen, whatever `ClockTime` says — confirmed at a 12-degree sun
+  where a three-metre pillar's shadow should cross the floor and is instead a
+  patch at its foot. The lit faces are the tops rather than the sides facing
+  the sunrise. And the flicker reported separately is the only thing left that
+  moves: the shadow box is centred on the camera (the snapshot is
+  camera-relative and `sunViewProjection` looks at the origin), the camera orbits
+  at 1.47 m/s, and one shadow texel is 0.059 m — so the grid slides 0.42 of a
+  texel per frame and the edges crawl. The day/night slider ADR 0025 and the
+  deliverable both advertise has never done anything.
+
+  **The fix is a boot-order question, not a renderer one.** `Lighting` should
+  exist from boot as `Workspace` does, and for the identical reason: `extract`
+  reads it every frame whether or not a script ever asks for it, so "created on
+  first `GetService`" cannot be true of it. That also makes the cached id correct
+  by construction rather than by timing. Resolving lazily on each miss is the
+  smaller change and leaves the same trap one refactor away.
+
+  **And the sixth gate this milestone that passes while doing nothing.**
+  `render_world_tests.cpp` creates a `Lighting` instance itself and hands its id
+  straight to `extract`, so every environment assertion passes against a
+  hand-made id the host never produces. The untested step is the one that
+  resolves the id — which is the step that is broken. The test to add is the
+  host's, not the extractor's.
+
+- **Three human-reported defects were dropped from this file when it was
+  rewritten to close M4, and are restored below.** Not archived -- removed. A
+  milestone-close rewrite is the moment a ledger is least able to afford losing
+  its open items, because the next reader is the human deciding whether to sign
+  it off. They are listed after the entry above, unchanged except where reality
+  corrected them.
+
+- **`BasePart.Transparency` is decided: alpha cutout here, a blended pass at M6**
+  (human decision, 2026-08-20, on the report from the same day). It is declared
+  in the IDL and `render_world.cpp` extracts it, and every value still renders
+  opaque.
+
+  **The first diagnosis here said `renderer_default` "never reads it", and that
+  is true but too kind.** The value cannot reach it. There are two draw paths
+  and Transparency exists in only one:
+
+  - `RenderPart` — a `BasePart` as a debug wire box — carries `transparency`,
+    and `submitWorld` honours it (`engine.cpp`: `if (part.transparency >= 1.0f)
+    continue;`). This is the path that works, and it is the one the human's
+    observation exercised: setting the orbiting lamp `Part` to 1 made it vanish
+    while the scene did not.
+  - `DrawItem` — the real renderer's unit of work — **has no such field**. Not
+    an unread value: an absent one.
+
+  That observation is also what settled the scope call, because the scene did
+  not change for a second reason worth writing down: `examples/02-meshes` is one
+  `MeshPart`, so the boxes and floor are sections of a single glTF file and have
+  no per-instance property to set at all.
+
+  **The obvious place to put it is wrong.** `GpuMaterialUniforms` already
+  carries an alpha cutoff, but its own comment states why it cannot hold this:
+  "per material rather than per frame, because it changes with the bind set and
+  the sort key already groups draws by material". Materials are deduplicated
+  across the frame; a per-instance alpha written there splits one material into
+  as many as there are distinct transparencies and fights the grouping the sort
+  key was built for.
+
+  **The shape that fits, and it needs nothing the freeze closed.**
+  `GpuObjectUniforms` is already per draw (`b0 space1`, vertex stage). Widen it,
+  carry the alpha through an interpolant, and `clip()` in the fragment shader
+  against the material's existing cutoff. No new bind, no new RHI call — ADR
+  0037 froze the calls, and this adds none — and `DrawItem` gains the field it
+  is missing. The `static_assert` on the struct size moves with it, which is the
+  layout check doing its job rather than an obstacle.
+
+  Cutout is honest and partial, and the entry should say so where a user reads
+  it: `Transparency` becomes a threshold, not a fade. **The blended half is M6
+  scope** — sorted back-to-front, after the opaque pass — recorded in
+  `roadmap.md` under that milestone, where UI and tweens make blending
+  mandatory anyway rather than speculative.
+
+- **There is no crash artifact, and the human has now reported four defects
+  without one (2026-08-20).** `architecture.md` §app promises a "crash handler
+  (minidump + log)"; it does not exist, and `core::log` has no file sink either
+  — every line the engine prints dies with the window. A human running the
+  engine by hand is this project's verification model, and it currently asks
+  that human to report from memory.
+
+  **Amended the same day, by evidence.** The human captured a crash to a file and
+  it held two lines — the two an ordinary successful run prints. `core::log`
+  already `fflush`es after every line, so nothing was lost to buffering: the
+  process died silently, without reaching any C++ error path, which is the
+  signature of an access violation. **A file sink would not have helped at all
+  here.** The ordering below is therefore backwards for this class of crash: the
+  handler is the piece that matters, because it is the only one that runs after
+  the fault and before the process is gone.
+
+  Two pieces:
+
+  - **A file sink for `core::log`.** With a layering constraint: `core` is L0 and
+    `platform::paths()` is L1, so the path is *injected by `app` at boot* rather
+    than resolved downward. The console sink stays exactly as it is — every gate
+    and the conformance runner read it — and the file is an addition, not a
+    replacement. Print its path at startup, or the log nobody can find is the log
+    nobody sends.
+  - **The handler proper.** `SetUnhandledExceptionFilter` plus a minidump on
+    Windows, a signal handler elsewhere. Platform work, and it belongs in
+    `platform` for the same reason the SDL seam does.
+
+  Fourth thing `architecture.md` §app named that no milestone had imported —
+  after the `DebugShell`, the api-dump and the triangle sample. That list is
+  worth reading against reality once, rather than one entry at a time as each is
+  discovered missing.
+
+- **The sun's shadow flickers in `examples/02-meshes`, reported by the human on
+  2026-08-20.** Not anchoring: there is no physics before M5 and nothing in that
+  scene moves itself. What moves is the sun, a pure function of `ClockTime` on
+  the SimClock, and the 47-second camera orbit.
+
+  `renderer_default` fixed the shadow extent deliberately, against the crawl a
+  camera-fitted box produces. Nothing addresses the other half: a directional
+  light that *rotates* turns its own texel grid every tick, so a world point
+  lands on a different texel each frame, and `sampleSunShadow` resolves each tap
+  with a binary `reference <= occluder`. A point sitting near the bias threshold
+  therefore flips between lit and shadowed frame to frame. Texel snapping — the
+  usual answer — fixes translation and not rotation, so it would not help here.
+
+  **Check first, because it is one line if true:** whether the shadow pass and
+  the forward pass read the *same* sun. The map is built from one direction and
+  sampled with another if either takes the tick value while the other takes the
+  interpolated one, and that flickers at exactly the tick rate.
+
+  If the sun is consistent, the fix is a **normal-offset bias** — displacing the
+  sample along the surface normal rather than only in depth is what survives a
+  moving texel grid — with a hardware comparison sampler
+  (`SampleCmpLevelZero`) so a tap degrades instead of switching. Resolution
+  alone only moves the threshold.
+
+- **The inspector crashes on "go" from `RunService.Parent`, reported by the human
+  on 2026-08-20.** Following the reference from a service to the DataModel takes
+  the whole host down. Reading the code did not settle which of the two paths
+  does it, and both are worth checking with a debugger rather than by eye:
+
+  - **The button's guard is on the reference, not on what follows.** `go` checks
+    `reference.valid() && world.alive(reference)` and then selects. Everything
+    after that -- `world.classOf(game)`, the ancestry walk in
+    `collectProperties`, the per-property getter, `formatValue` -- runs against
+    the DataModel, which is the one instance in the world that no test selects.
+  - **The explorer is rooted at `root`, and the selection just went above it.**
+    `drawExplorer` walks from the root it was handed; selecting an ancestor of
+    that root leaves `selection()` outside every row the tree produces. Anything
+    that assumes the selection is reachable from the root breaks exactly here.
+
+  Whatever it turns out to be, the fix is not only the crash: **the DataModel
+  deserves a case in `inspector_tests.cpp`**. 618 lines of tests passed while
+  this shipped, which says the fixture builds a world the panel is then pointed
+  at from below -- and the human clicked the one edge that walks the other way.
+
 - **Next: stop for M4 human review** (MASTER_PROMPT §6). `milestone/m4` is
   tagged. Do not open M5 in the session that closed M4.
 - **When M5 opens, its first act is the clang-format gate**, on a quiet tree.
