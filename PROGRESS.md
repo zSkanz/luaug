@@ -295,10 +295,22 @@ and what that needs is `require` plus the mounted-script lifecycle.
   raised; and `lua_unref` before `lua_getref` reads the registry's free list
   rather than the value, which made the first `:Once` handler "attempt to call a
   number value". Clang caught nineteen `-Wdouble-promotion` errors MSVC did not.
-  Next: build the DataModel and its services in the world and bind
-  `game`/`workspace`/`script`, then drive `drain`/`resumeTimers`/
-  `retireDestroyed` from `app`'s `FrameScheduler` in the order
-  `engine/script/tests/script_fixture.h::tick` already models.
+  Then, in the same session: **the DataModel and every service.** `game` and
+  `workspace` are globals, services are created on demand and singleton
+  thereafter, the five phase signals fire from the scheduler, `WaitForChild`
+  parks on a tree state, and the method cross-check closes at 43 declared / 43
+  bound / 0 unbacked. `DebugService` was going to be deferred and deferring it
+  would have been the worse choice -- `__index` on an event pushes a signal
+  object unconditionally, so `MessageOut:Connect` would have succeeded and never
+  fired, and no error key can cover an event because an event is a value rather
+  than a call.
+  Next: **`require` and the mounted-script lifecycle**, then move the resumption
+  sequence out of `script_fixture.h::tick` into `app`'s `FrameScheduler`. That
+  second half is a migration rather than an addition -- it replaces
+  `engine/app/src/script_host.cpp` and `preview_api.cpp`, both M1 scaffolding
+  with a demolition date, and `examples/00-clear` renders through the temporary
+  `luaug` global those two provide. The M1 screenshot golden is what proves the
+  migration kept the picture, so do it with the observation rule (§8) in hand.
 
 <!-- Format for future entries:
 - **YYYY-MM-DD (session N):** did X; learned Y; Next: <literal first action>.
