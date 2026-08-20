@@ -774,6 +774,12 @@ self-registration.**
   same seed/inputs/tick-config ⇒ same WorldHash.** Same-binary determinism is
   a merge gate from M5; cross-platform (win↔linux) comparison runs as a
   tracked non-blocking job.
+  **A committed trace is a cross-BUILD check and the guarantee is same-build**,
+  which is free for integer and tree state and is not for floating point: a
+  scenario whose hash depends on the compiler's code generation sets
+  `sameBuildOnly` in its manifest, carries no trace, and is verified by three
+  runs of one build plus tolerance-based assertions inside the scene. M5's
+  character replay is the first of those, and CI is what found the distinction.
 - **Render tests — capture first:** the `rhi_capture` backend records a
   canonical JSON command stream (pipelines, bind sets, draw params, resource
   descs, debug groups; floats quantized) → hash vs golden per scenario. This

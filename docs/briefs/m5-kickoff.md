@@ -412,7 +412,16 @@ time.
     milestones that only CI could see — the other two were a transitively
     included header and an unauthenticated API quota.
 
-13. **One thing recorded and not explained.** The `character` scenario's tick-0
+13. **A committed trace is a cross-BUILD check, and ADR 0025 only promises a
+    same-build one.** That gap was free for four milestones because integer and
+    tree state survives a change of compiler; the first floating-point scenario
+    spent it, on CI, at tick 600 of 3,600. The lesson is not "physics is
+    nondeterministic" — it reproduced perfectly on every build, three times each
+    — it is that **a gate can be stronger than the guarantee it rests on and get
+    away with it until the day it cannot**, and the day arrives without warning
+    because nothing about the gate changed. D024.
+
+14. **One thing recorded and not explained.** The `character` scenario's tick-0
     hash moved once between two builds inside this milestone while `churn` and
     `example01`'s did not — and those two are byte-identical to their M4.5
     goldens today, which is what says the engine's boot path did not move. The
@@ -429,10 +438,10 @@ the Tier-2 container `scripts/localgate.ps1` builds.
 ### 1. Determinism becomes blocking — 60 s input replay, identical across 3 runs
 
 ```
-$ luaug-host --replay=tests/determinism        (three fresh processes)
-[info] Replay character: 3600 ticks, hash beefd65851f1f593, reproduced.
-[info] Replay character: 3600 ticks, hash beefd65851f1f593, reproduced.
-[info] Replay character: 3600 ticks, hash beefd65851f1f593, reproduced.
+$ luaug-host --replay=tests/determinism
+[info] Replay character: 3600 ticks, hash beefd65851f1f593, identical across 3 runs of this build.
+[info] Replay churn: 10000 ticks, hash 791aea530728a474, reproduced.
+[info] Replay example01: 900 ticks, hash e002bbcb84435346, reproduced.
 ```
 
 3,600 ticks is sixty seconds at the default 1/60. **The input is recorded** —
@@ -441,15 +450,31 @@ replay mode the keyboard snapshot comes from it rather than from a device, so
 what is replayed is a keystroke's whole path to the character rather than a bot
 calling `Move`. That is the difference the gate's own wording asks for.
 
-"Three runs" maps onto architecture.md §9's design rather than onto three
-identical invocations: each run compares the scenario against itself twice
-in-process (which catches leaked global state) and against the recorded trace,
-and the process is fresh every time CTest starts it (which is the cross-process
-leg). The three lines above are three fresh processes on top of that.
+**"3 runs" is three runs, and the physics scenario carries no committed
+trace — which CI taught this milestone rather than the milestone deciding it.**
+The first version compared the character's replay against a trace recorded on
+this machine, the way every scenario since M2 has been checked. It went red on
+the CI Windows runner at tick 600 of 3,600, and the reason is exactly what
+ADR 0025 says: the guarantee is **same BUILD**, and the runner's compiler is not
+this machine's. Every scenario before M5 was integer and tree state, which
+happens to survive a change of compiler, so the stronger check worked and was
+worth having — a committed trace catches a behaviour change, which running
+something three times cannot.
 
-`ctest -R determinism` is green on both tiers, against per-tier traces —
-win↔linux hash equality is ADR 0025's level C and remains a tracked
-non-blocking aspiration, not a gate.
+A physics scenario is different in kind: floating point, amplifying over ticks.
+So `scenario.json` gains `sameBuildOnly`, the character scenario sets it, and
+the harness runs it three times and requires the three to agree. What replaces
+the behaviour half is the seven assertions in §3 below — which have tolerances,
+and therefore survive a compiler change while still catching a real regression.
+
+`churn` keeps its committed cross-build trace, and its parts are anchored to
+keep it: that scenario is about tree and property churn, and it was never
+written to be a physics test. `example01` keeps its trace unchanged.
+
+`ctest -R determinism` is green on both tiers. win↔linux hash equality is
+ADR 0025's level C and remains a tracked non-blocking aspiration — and it is now
+also what Jolt's `CROSS_PLATFORM_DETERMINISTIC` switch would buy, at about 8% of
+the library's speed, which is the decision under `## Blocked` in the ledger.
 
 ### 2. Physics tick budget for 1,000 active bodies, recorded and regression-gated
 

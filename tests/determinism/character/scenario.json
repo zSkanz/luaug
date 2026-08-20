@@ -3,5 +3,6 @@
   "script": ".",
   "seed": 5,
   "ticks": 3600,
-  "checkpointEvery": 200
+  "checkpointEvery": 200,
+  "sameBuildOnly": true
 }

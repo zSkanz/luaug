@@ -43,6 +43,13 @@ for i = 1, 24 do
     part.Size = vector.create(1 + Rng:NextNumber(), 1 + Rng:NextNumber(), 1 + Rng:NextNumber())
     part.CFrame = CFrame.new(vector.create(Rng:NextNumber(-8, 8), Rng:NextNumber(0, 4), Rng:NextNumber(-8, 8)))
     part.Color = Color3.fromRGB(Rng:NextInteger(0, 255), Rng:NextInteger(0, 255), Rng:NextInteger(0, 255))
+    -- Anchored, from M5 on, and for the same reason `churn10k` is: this
+    -- scenario is about TREE and PROPERTY churn, and its committed trace is
+    -- compared against a build made by a different compiler on CI. A falling
+    -- part's position depends on floating-point code generation, so leaving
+    -- these simulated would trade a cross-build regression detector for a
+    -- physics test this file was never written to be.
+    part.Anchored = true
     part.Parent = Root
     if i % 2 == 0 then
         part:AddTag("Even")
@@ -87,6 +94,7 @@ RunService.Heartbeat:Connect(function()
         replacement.Name = `Rebuilt{Tick}`
         replacement.Size = vector.create(1, 1, 1)
         replacement.CFrame = CFrame.new(vector.create(Rng:NextNumber(-8, 8), 1, Rng:NextNumber(-8, 8)))
+        replacement.Anchored = true
         replacement.Parent = Root
         if wasTagged then
             replacement:AddTag("Even")

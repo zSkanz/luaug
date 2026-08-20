@@ -105,6 +105,7 @@ std::optional<core::EngineError> loadScenario(const std::filesystem::path& direc
     out.seed = static_cast<u64>(root["seed"].asInteger(1));
     out.ticks = static_cast<u64>(std::max<core::i64>(0, root["ticks"].asInteger(0)));
     out.checkpointEvery = static_cast<u64>(std::max<core::i64>(1, root["checkpointEvery"].asInteger(1)));
+    out.sameBuildOnly = root["sameBuildOnly"].asBool(false);
 
     const std::string_view script = root["script"].asString("init.luau");
     out.scriptPath = std::filesystem::absolute(directory / script);
@@ -367,6 +368,41 @@ std::optional<core::EngineError> runReplayGate(const std::filesystem::path& root
             return error;
 
         const std::filesystem::path tracePath = tracePathFor(directory);
+
+        // A scenario whose hash is only comparable within one build carries no
+        // committed trace: it is run three times and the three must agree.
+        //
+        // Three rather than two because that is the roadmap's wording for the
+        // M5 gate -- "identical final world hash across 3 runs in CI" -- and
+        // because the run that catches leaked state is the one after the first,
+        // so a third costs one more and covers a leak that only shows up on a
+        // later repeat. What it does NOT cover is a behaviour change, and the
+        // scenario is expected to carry its own assertions for that.
+        if (scenario.sameBuildOnly) {
+            if (record) {
+                const std::array<I18nArg, 1> args{I18nArg{"name", scenario.name}};
+                core::log(LogLevel::Info, LUAUG_TR("engine.replay.info.same_build_only"), args);
+                continue;
+            }
+
+            for (int repeat = 2; repeat <= 3; ++repeat) {
+                ReplayTrace again;
+                if (auto error = runScenario(scenario, again); error.has_value())
+                    return error;
+                const std::string label = "run " + std::to_string(repeat);
+                if (auto error = compareTraces(first, again, "run 1", label); error.has_value())
+                    return error;
+            }
+
+            const std::array<I18nArg, 3> selfArgs{
+                I18nArg{"name", scenario.name},
+                I18nArg{"ticks", static_cast<core::i64>(scenario.ticks)},
+                I18nArg{"hash", hex(first.finalHash())},
+            };
+            core::log(LogLevel::Info, LUAUG_TR("engine.replay.info.same_build_ok"), selfArgs);
+            continue;
+        }
+
         if (record) {
             if (auto error = writeTrace(tracePath, first); error.has_value())
                 return error;

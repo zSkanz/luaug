@@ -38,7 +38,9 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 - **The determinism gate is blocking and replays INPUT.** A scenario carries a
   recorded `inputs.txt` and the keyboard snapshot comes from it, so what is
   replayed is a keystroke's whole path to the character rather than a bot
-  calling `Move`.
+  calling `Move`. The physics scenario is `sameBuildOnly` — run three times,
+  compared against itself, with no committed trace — because ADR 0025's
+  guarantee is same-BUILD and CI's compiler is not this machine's (D024).
 - **`WorldHash` covers physics state**, including the four things no script can
   read: a queued impulse, a character's command, its vertical velocity, and
   which bodies the solver has put to sleep.
@@ -108,6 +110,12 @@ scope. The ones most likely to be mistaken for bugs:
   An unanchored part is a rigid body, and every example, fixture and benchmark
   predates that. The proof the change is inert where it should be is that
   `capture_gate_meshes` passes against the unchanged M4.5 golden.
+- **A gate can be stronger than the guarantee it rests on, and get away with it
+  until the day it cannot.** Committing a determinism trace and checking it on CI
+  is a cross-BUILD check; ADR 0025 promises same-build. Four milestones of
+  integer and tree state paid nothing for the gap, and the first floating-point
+  scenario spent it — on CI, at tick 600 of 3,600, with nothing about the gate
+  having changed.
 - **A gate that can pass while doing nothing keeps being built by accident.**
   Twelve instances in six milestones. M5's was a conformance run reporting "938
   passed, 0 failed" over a suite that had silently lost seventeen cases to a

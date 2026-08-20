@@ -28,6 +28,8 @@
   "engine.replay.err.write_failed": "Cannot write {path}.",
   "engine.replay.err.bad_manifest": "{path} is not a valid scenario manifest: {reason}",
   "engine.replay.err.bad_trace": "{path} is not a valid trace; this line is: {reason}",
+  "engine.replay.info.same_build_only": "Skipped recording {name}: its hash is only comparable within one build, so it carries no trace.",
+  "engine.replay.info.same_build_ok": "Replay {name}: {ticks} ticks, hash {hash}, identical across 3 runs of this build.",
   "engine.replay.err.bad_input": "{path}:{line} is not a recorded input; a line reads \"<tick> <+|-> <Key>\".",
   "engine.replay.err.no_ticks": "{path} runs zero ticks, so it proves nothing. Set \"ticks\".",
   "engine.replay.err.script_errors": "Scenario {name} logged {count} errors, so its world is not the one it describes.",

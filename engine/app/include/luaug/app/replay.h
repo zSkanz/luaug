@@ -55,6 +55,28 @@ struct ReplayScenario
     // Sorted by tick, and stable within a tick: the order two keys change in on
     // the same tick is part of the recording (R10).
     std::vector<ReplayInput> inputs;
+
+    // **This scenario's hash is only comparable within one build**, so it
+    // carries no committed trace and is verified by running it three times and
+    // requiring the three to agree.
+    //
+    // That is ADR 0025's level B stated exactly: "same engine BUILD + same
+    // platform ... same observable simulation result". Every scenario before M5
+    // was integer and tree state, which happens to survive a change of
+    // compiler, so committing a trace and checking it on CI worked and was
+    // worth more than self-consistency -- it catches a behaviour change, which
+    // running something three times cannot.
+    //
+    // A physics scenario is different in kind: its state is floating point, its
+    // divergence amplifies over ticks, and the CI runner's compiler is not this
+    // machine's. Verified by CI, at tick 600 of a 3,600-tick replay, against a
+    // trace recorded here.
+    //
+    // What replaces the behaviour half for such a scenario is assertions inside
+    // the scene, with tolerances -- which is what `tests/determinism/character`
+    // has seven of, and which survive a compiler change precisely because they
+    // are not bit comparisons.
+    bool sameBuildOnly = false;
 };
 
 struct ReplayCheckpoint
