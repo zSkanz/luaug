@@ -5,10 +5,15 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- Current milestone: **M3 — Tooling Loop: CLI, Hot Reload, Types, Tests — SCOPE
-  AND GATE COMPLETE, awaiting human sign-off** (brief:
-  [`docs/briefs/m3-kickoff.md`](docs/briefs/m3-kickoff.md)). All four gate items
-  green on both tiers, plus ADR 0024's own <500 ms requirement.
+- **M3 — Tooling Loop: CLI, Hot Reload, Types, Tests — COMPLETE and SIGNED OFF
+  by the human on 2026-08-20**, tagged `milestone/m3` (brief:
+  [`docs/briefs/m3-kickoff.md`](docs/briefs/m3-kickoff.md), which carries the
+  Gate Record and seventeen Findings). All four gate items green on both tiers,
+  plus ADR 0024's own <500 ms requirement.
+- Next milestone: **M4 — Seeing the World: Meshes, Materials, Camera,
+  Lighting**. Not opened: the human asked for M3 to close without M4 starting,
+  and MASTER_PROMPT §6 forbids opening a second milestone in the session that
+  closed one anyway.
 - **M2 — Kernel — signed off 2026-08-20**, tagged `milestone/m2`; **M1** signed
   off 2026-08-19 (`milestone/m1`); **M0** signed off 2026-08-19
   (`milestone/m0`).
@@ -61,13 +66,17 @@ it, and building it on speculation is what §5 rejects.
 
 ## Now / Next
 
-- **Next: stop for M3 human review** (MASTER_PROMPT §6). The scope is closed and
-  every gate item is green on both tiers. **Do not start M4 this session.**
-- **Push, and then read CI.** Three steps are new to the workflow and have never
-  run on a hosted runner; macOS has not compiled since M1.
-- When M4 opens, its brief is written from `docs/roadmap.md` and from this
-  milestone's Findings. The dogfooding claim starts binding there: M4's meshes
-  are developed by editing a `.luau` file and watching, not by rebuilding.
+- **Next: open M4 by writing `docs/briefs/m4-kickoff.md`** from
+  `docs/roadmap.md` §M4 and from M3's Findings — in a NEW session, per §6. The
+  dogfooding claim starts binding there: M4's meshes are developed by editing a
+  `.luau` file and watching `luaug dev` rebuild the world, not by rebuilding the
+  engine. If that turns out not to be practical, that is a finding worth more
+  than the feature it blocks.
+- **Read CI before anything else.** Three steps are new to the workflow this
+  milestone — the toolchain install, `luaug test`, and the hot-reload suite —
+  and the run for `e05f06d` was still in flight when the session ended. macOS
+  (Tier-3, CI-only) has not compiled since M1 and only a `milestone/*` tag or a
+  manual dispatch builds it; `milestone/m3` is pushed, so that run exists.
 - **Read the installed artifact, not the report about it.** Six of this
   milestone's fifteen findings are Lute behaving differently from its own
   typedefs or documentation, and every one was settled by a ten-line probe:
