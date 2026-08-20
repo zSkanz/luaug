@@ -7,7 +7,8 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 - Current milestone: **M3 — Tooling Loop: CLI, Hot Reload, Types, Tests**,
   opened 2026-08-20 (brief: [`docs/briefs/m3-kickoff.md`](docs/briefs/m3-kickoff.md)).
-  Nothing of it is built yet.
+  Built so far: the brief with its fourteen decisions and the control protocol,
+  and `engine/net` — the RFC 6455 client the engine dials the dev server with.
 - **M2 — Kernel: Instances over ECS, Scheduler, Signals, `task` — COMPLETE and
   SIGNED OFF by the human on 2026-08-20**, tagged `milestone/m2` (brief:
   [`docs/briefs/m2-kickoff.md`](docs/briefs/m2-kickoff.md), which carries the
@@ -16,7 +17,7 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   Windows 9.8 s / Linux 15.2 s.
 - **M1** signed off 2026-08-19 (`milestone/m1`); **M0** signed off 2026-08-19
   (`milestone/m0`).
-- **`main` is 17 commits ahead of `origin/main`** — M2's work has never been
+- **`main` is 21 commits ahead of `origin/main`** — M2's work has never been
   pushed, so CI has not seen it and macOS (Tier-3, CI-only) has not compiled it
   since M1. Pushing is a human call because Actions minutes are metered on this
   private repo; see Now / Next.
@@ -42,7 +43,7 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   `docs/api-design.md` by authors forbidden to read `engine/`; `--replay=DIR`
   (determinism, 10,000 ticks, in-process and against a per-platform trace);
   `--bench=DIR` (sim ticks against a per-scenario budget); the capture-stream
-  and screenshot render gates. 20 CTest entries, green on Windows and Linux.
+  and screenshot render gates. 21 CTest entries, green on Windows and Linux.
 
 ### What M3 has to build
 
@@ -50,16 +51,24 @@ The CLI (`luaug dev|test|check|new|fmt`) as Lute scripts, the hot-reload world
 restart under 500 ms with the state bag and `PreserveOnReload`, the editor-facing
 half of the type pipeline (docs JSON, `@std`/`@luaug` stubs, `.vscode` settings),
 the `starter` template, and R3's second half in the i18n lint. The brief's
-thirteen numbered decisions are the design; its six entering risks are what to
-watch.
+fourteen numbered decisions are the design; its six entering risks are what to
+watch. `engine/net` is done; the reload seam is next.
 
 ## Now / Next
 
-- **Next: write the dev-server control protocol** (message set, JSON shape, the
-  reload handshake and its failure replies) into the brief, then build the C++
-  WebSocket **client** seam ADR 0035 needs — TCP connect, the upgrade handshake
-  with the SHA-1 + base64 accept check, RFC 6455 frame read/write with client
-  masking — tested against the published vectors in RFC 6455 §1.3 and §5.7.
+- **Next: the reload seam.** Rebuild `WorldHost` at the FrameStart safe point,
+  build-before-destroy (brief Decision 14, ADR 0024 addendum), with
+  `HotReloadService` and the C++ state bag — and a headless C++ test that asserts
+  **reload == cold restart** by world hash (Decision 11), with no network in it
+  at all. Then the control loop, then the Lute dev server.
+- **The control protocol is written** into the brief (message set, envelope,
+  token handshake, the three emptiness checks), and the transport under it is
+  built: `engine/net` (L2) has the RFC 6455 client, 28 cases / 214 assertions,
+  green on both tiers.
+- **`core::json` parses and does not serialize**, and its own header says a
+  writer would be unused surface. M3 is what changes that: the engine sends JSON
+  control messages and writes the `luaug test` report (Decision 6). The writer
+  lands with the first of those, and ADR 0033 gets a line saying why.
 - **Lute is now grounded** (U-55…U-59): `process.run` returns only at child exit
   with no stdin and no incremental read, there is no raw TCP, `process.run`
   yields rather than blocking, `fs.watch` names the top-level entry rather than
@@ -69,7 +78,7 @@ watch.
 - **`fs.watch` on Linux is still unverified**, and its failure mode there is
   silence rather than an error. Verify it in the same task that puts Lute into
   the Tier-2 image.
-- **Ask the human whether to push.** 17 commits sit unpushed. CI proves `main` is
+- **Ask the human whether to push.** 21 commits sit unpushed. CI proves `main` is
   green and is the only thing that builds macOS; it also spends metered minutes
   on a private repo. The local gate is green on both tiers either way.
 - **The Tier-2 container has no Lute** (entering risk 1). `luaug test` green "on
@@ -153,8 +162,26 @@ there when this file passed its ~300-line cap.
   (U-58), so the watcher watches every directory and rescans instead of trusting
   the payload; and `time.since` returns a number where the installed typedef says
   `Duration` (U-59).
-  Next: **write the dev-server control protocol into the brief**, then build the
-  C++ WebSocket client seam ADR 0035 needs.
+  Then wrote the protocol into the brief and built the transport under it.
+  `engine/net` is L2, the first slice of the `net_api` the architecture has
+  always reserved: the pure half (framing, handshake, accept) tested against RFC
+  6455's own published examples -- the worked handshake in §1.3 and the seven
+  frames in §5.7 -- and the socket half tested against a loopback server that
+  sends the frames a real server never would. 28 cases, 214 assertions.
+  Learned in the doing: **a test that asserted a digest against a value I had
+  written from memory failed, and the code was right** -- FIPS publishes no
+  55-byte vector, so the expectation now carries what Windows CNG computes and
+  says so. The handshake-failure test asserted on message text without loading
+  the catalog, which is M2 Finding 11 arriving on schedule. The ping test waited
+  for a Close the client had no reason to send and **hung the suite instead of
+  failing it**; the helper takes a read deadline now, because a hang costs a CI
+  runner its whole timeout to say nothing. And Clang caught a `socklen_t` MSVC
+  did not -- the address length is `int` on Winsock and unsigned on POSIX -- the
+  third time in this family of milestones that the Linux tier was the only thing
+  between an implicit conversion and `main`.
+  Next: **the reload seam** -- rebuild `WorldHost` at the FrameStart safe point,
+  build-before-destroy, with a headless test asserting reload == cold restart by
+  world hash. No network in that step at all.
 
 <!-- Format for future entries:
 - **YYYY-MM-DD (session N):** did X; learned Y; Next: <literal first action>.
