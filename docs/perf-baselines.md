@@ -54,6 +54,52 @@ Changing any of it is an ADR plus a full re-baseline (see Methodology).
 Captured with `luaug-host --bench=tests/bench --bench-repeats=5`, median of
 5 runs, three times over; the spread across those three was under 1.5%.
 
+**What a horde costs, and where the ceiling actually is.** Asked on 2026-08-20
+as "could I build a survivors-like on this engine, it has to be optimized", and
+answered by building one and measuring it rather than by estimating. The scene:
+N enemies as anchored `MeshPart`s whose `Position` is written from Luau **every
+tick**, each chasing a `CharacterBody` player that circles so the horde never
+settles; one sun with shadows; 1080p; the default SDL3 GPU backend; measured
+with `--frame-stats`, 300 frames, first ten dropped as warm-up.
+
+| Enemies | Simulation | Shadow pass | Forward pass | Visible draws | Frame |
+|---|---|---|---|---|---|
+| 200 | 0.69 ms | 0.70 ms | 1.23 ms | 400 | **2.63 ms** |
+| 500 | 0.87 ms | 1.78 ms | 2.60 ms | 990 | **5.25 ms** |
+| 1,000 | 1.18 ms | 2.59 ms | 4.07 ms | 1,560 | **7.84 ms** |
+| 2,000 | 1.84 ms | 2.40 ms | 6.86 ms | 2,092 | **11.10 ms** |
+
+The simulation column is the whole engine below the renderer — the Luau chase
+loop over every enemy, the Instance writes, the scene walk, physics — and two
+thousand enemies cost 1.84 ms of it. That is not the ceiling and this table is
+the evidence.
+
+**The ceiling is one draw call per visible object**, and the proof is that the
+2,000-enemy scene costs the same at every resolution:
+
+```
+ 320x180 : median 10.21 ms
+1920x1080: median 10.22 ms
+3840x2160: median 10.22 ms
+```
+
+Identical, for a scene with 12,552 triangles in it. The GPU is idle; the frame
+is CPU-side submission at roughly **2.6–3.3 µs per visible draw**, one
+`bindUniforms` and one `draw` each (`renderer_default.cpp:407`), with nothing
+batching the two thousand objects that share a single mesh. Off-screen casters
+are already culled against the shadow radius (`render_world.cpp:282`), so the
+shadow column is bounded rather than growing with the horde — the leak that was
+looked for and is not there.
+
+**So a survivors-like with two thousand enemies runs at 60 Hz today**, with five
+milliseconds to spare, and nearly all of the spent budget is the one thing
+M7.5 now names as scope: instanced draws. Enemies that *collide* with each other
+rather than merely being drawn cost 4.7 µs each on top (below), which is why the
+scene above writes positions instead — the same architecture the genre uses.
+
+Not committed as a gate scene: it was measured outside the repository, because
+M7.5 is where it becomes a number something defends.
+
 **What fifty characters cost, and whether there is a ceiling.** Asked during
 M5's review, on the concern that character-against-character is O(n²). It is
 not, and the measurement is why: a `CharacterBody` collides with another one

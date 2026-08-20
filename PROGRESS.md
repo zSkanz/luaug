@@ -107,6 +107,13 @@ scope. The ones most likely to be mistaken for bugs:
   scope item is the Input Action System, and whose gate includes migrating
   `examples/03-physics-playground` off `KeyboardService`, which is what deletes
   that service.
+- **The renderer submits one draw call per visible object, and that is the
+  engine's real ceiling for a crowd.** Measured 2026-08-20 against a
+  survivors-like horde: two thousand enemies run at 11.1 ms a frame, of which
+  1.8 ms is the whole simulation and 6.9 ms is submitting 2,092 forward draws —
+  and the same scene costs the same 10.2 ms at 320×180 as at 4K, for twelve
+  thousand triangles. Instanced draws are now named M7.5 scope with that number
+  attached; the table is in `docs/perf-baselines.md`.
 - **The physics mirror costs ~160 ns per body per tick to decide nothing
   changed.** Recorded in `docs/perf-baselines.md`. The remaining fix is a
   dirty-flag design, and it belongs with M7's streaming rather than with M6.

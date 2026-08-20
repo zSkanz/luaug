@@ -693,6 +693,26 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   - **The post chain that makes the rest visible**: exposure, bloom, an ambient
     occlusion term, anti-aliasing. A correctly lit frame through a naive resolve
     still does not look like the reference.
+  - **Instanced draws for repeated meshes.** Human question, 2026-08-20, asked
+    as "could I build a survivors-like on this" and answered by measuring one:
+    the ceiling is one draw call and one uniform upload per visible object,
+    which `renderer_default.cpp:407` emits in a loop, and which nothing batches.
+    Two thousand enemies sharing one mesh cost 11.1 ms a frame, of which 6.9 ms
+    is submitting 2,092 forward draws — and the same scene costs the *same*
+    10.2 ms at 320×180 and at 4K, which is what says the GPU is idle and the
+    cost is CPU-side submission. Twelve thousand triangles, in total.
+
+    `roadmap.md`'s own M4 note already places this — "draw order and batching
+    belong to `extract`, not to a backend" — so what is missing is the batching,
+    not the seam. `extract` already sorts by material and mesh (M4 Decision 7),
+    which is the sort an instanced path needs; the work is grouping the sorted
+    run into one call with a per-instance transform buffer, and the RHI's
+    `draw(vertexCount, instanceCount, ...)` already takes the count.
+
+    **The measurement is recorded in `docs/perf-baselines.md`** so this is
+    priced rather than argued, and so the milestone can show the same scene
+    before and after. Per R16 the win is largest exactly where it matters most:
+    a CPU-bound frame is what a phone has.
 - **Build order note.** IBL first is the likely order — it is the largest visual
   win for the least work, and it is independent of the other three. That is an
   ordering, not a stopping point: ADR 0038 explicitly rejects shipping it alone.
@@ -713,7 +733,11 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   previous milestone's; per-feature frame cost recorded at 1080p including a
   reduced-CPU row; GPU validation clean; goldens re-recorded and the clock
   differential still differing. **"Looks better" is not a gate result** — the
-  comparison is against a stated reference, or it is not a comparison.
+  comparison is against a stated reference, or it is not a comparison. **Plus
+  one number that is not about looking**: the horde scene in
+  `docs/perf-baselines.md`, re-measured, with the count of draw *calls* stated
+  beside the count of visible objects — if those two numbers are still equal,
+  the instanced path is not doing anything.
 
 ### M8 — Flagship, Hardening, Docs, v1.0 (M)
 
