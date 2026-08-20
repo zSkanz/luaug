@@ -77,3 +77,4 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0034](0034-luau-casing-objects-modules-files.md) | Luau casing: objects vs modules, and the file-level rule |
 | [0035](0035-engine-is-a-websocket-client-of-the-dev-server.md) | The engine is a WebSocket client of the dev server; only the dev server listens |
 | [0036](0036-simdjson-vendored-for-fastgltf.md) | simdjson is vendored for fastgltf, and fastgltf's downloader is made unreachable |
+| [0037](0037-rhi-interface-frozen-at-m4.md) | The RHI interface is frozen at the end of M4 |

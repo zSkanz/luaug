@@ -778,10 +778,14 @@ self-registration.**
   whether a push can affect a build at all; a documentation-only push skips the
   build jobs, and anything it cannot classify builds); `docs-lint`;
   `luau-check`; `build-test` matrix {windows MSVC, ubuntu Clang}. `build-macos`
-  is compile-only and runs on `workflow_dispatch` or a `milestone/*` tag rather
-  than every push — a deliberate cost decision, since macOS minutes are charged
-  at 10× and Tier-3 runtime verification is post-v1. It gives up finding a
-  macOS-only break at the commit that caused it. Planned and not yet present:
+  is compile-only and **blocking on every code push from M4**, which is that
+  milestone's own gate item. It ran on `workflow_dispatch` or a `milestone/*`
+  tag until then — a deliberate cost decision, since macOS minutes are charged
+  at 10× and Tier-3 runtime verification is post-v1 — and the cost of that was
+  giving up finding a macOS-only break at the commit that caused it. M4 added a
+  shader toolchain, a new module and the first code with no Windows equivalent,
+  which is where that trade stopped paying. The `changes` filter still skips it
+  for a documentation-only push. Planned and not yet present:
   `sanitize` (ubuntu ASan/UBSan), `determinism` (win+linux), conformance
   bundled into build-test. `nightly.yml`: the Android NDK cross-compile job
   (non-blocking, from M1–M2); planned there too are the GCC build, TSan, image

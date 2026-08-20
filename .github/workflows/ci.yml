@@ -3,8 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
-    # Milestone tags are what now triggers the Tier-3 macOS job; see build-macos
-    # for why it left the every-push set.
+    # Milestone tags still build so a tag is provably green on its own, but they
+    # are no longer what carries Tier-3: `build-macos` became blocking on every
+    # code push at M4, which is the roadmap's own gate item.
     tags: ["milestone/*"]
   pull_request:
   # The "run everything, macOS included" button, for when a change needs the
@@ -538,7 +539,26 @@ jobs:
   # finishes in under three.
   # ---------------------------------------------------------------------------
   build-macos:
-    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/milestone/') }}
+    # **Blocking from M4**, which is the roadmap's own gate item: "Tier-3 compile
+    # gate becomes blocking". It ran on a milestone tag or a manual dispatch
+    # until now, which gave up finding a macOS-only break at the commit that
+    # caused it -- and M4 is the milestone that added a shader toolchain, a new
+    # module and the first code with no Windows equivalent, so that trade stops
+    # paying.
+    #
+    # The cost is real and is the reason it was not blocking before: macOS
+    # minutes are charged at 10x on a private repository. The mitigation is the
+    # `changes` filter -- a documentation-only push does not build at all -- plus
+    # the 20-minute timeout above against a job whose observed wall time is under
+    # three minutes. If the quota becomes the binding constraint, narrowing this
+    # back is a decision to take deliberately rather than by letting a red macOS
+    # be ignored.
+    #
+    # Gated exactly as `build-test` is, and for the reason stated there: only a
+    # literal `false` from `changes` stops it, and a tag push is skipped because
+    # the tag points at a commit this job already built when it landed.
+    needs: changes
+    if: ${{ !cancelled() && !startsWith(github.ref, 'refs/tags/') && needs.changes.outputs.code != 'false' }}
     runs-on: macos-latest
     # Was 45, which at 10x is 450 charged minutes for a job whose observed wall
     # time is 168 s. This is the largest single tail risk in the file; 20 still
