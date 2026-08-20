@@ -254,21 +254,22 @@ Instance (abstract)
 ├─ <all services above>
 ├─ Folder
 ├─ Script                      -- entry-point code (§3); there is NO ModuleScript class
-├─ BasePart (abstract)         -- CFrame, Position, Orientation (degrees, YXZ), Size,
-│  │                           -- Anchored, CanCollide, CanQuery, Transparency, Color,
-│  │                           -- Material, CollisionGroup, Friction, Restitution, Density,
-│  │                           -- LinearVelocity/AngularVelocity (read), ApplyImpulse(v),
-│  │                           -- Touched/TouchEnded signals
-│  ├─ Part                     -- Shape: Enum.PartShape (Block/Ball/Cylinder/Capsule/Wedge)
-│  ├─ MeshPart                 -- MeshContent: Content, CollisionFidelity: Enum.CollisionFidelity
-│  └─ CharacterBody            -- Jolt character controller (capsule): Move(direction: vector),
-│                              -- Jump(), WalkSpeed, JumpSpeed, MaxSlopeAngle, AutoStepHeight,
-│                              -- Grounded (read), State: Enum.CharacterState, Landed signal
-├─ Model                       -- PrimaryPart, GetPivot()/PivotTo(cf), GetExtentsSize(),
-│                              -- StreamingMode
-├─ Attachment                  -- CFrame (relative to parent BasePart), WorldCFrame (read)
-├─ Camera                      -- CFrame, FieldOfView, NearPlane, FarPlane, ViewportSize (read),
+├─ PVInstance (abstract)       -- anything with a place in the world: PivotOffset: CFrame,
+│  │                           -- GetPivot() -> CFrame, PivotTo(cf)
+│  ├─ BasePart (abstract)      -- CFrame, Position, Orientation (degrees, YXZ), Size,
+│  │  │                        -- Anchored, CanCollide, CanQuery, Transparency, Color,
+│  │  │                        -- Material, CollisionGroup, Friction, Restitution, Density,
+│  │  │                        -- LinearVelocity/AngularVelocity (read), ApplyImpulse(v),
+│  │  │                        -- Touched/TouchEnded signals
+│  │  ├─ Part                  -- Shape: Enum.PartShape (Block/Ball/Cylinder/Capsule/Wedge)
+│  │  ├─ MeshPart              -- MeshContent: Content, CollisionFidelity: Enum.CollisionFidelity
+│  │  └─ CharacterBody         -- Jolt character controller (capsule): Move(direction: vector),
+│  │                           -- Jump(), WalkSpeed, JumpSpeed, MaxSlopeAngle, AutoStepHeight,
+│  │                           -- Grounded (read), State: Enum.CharacterState, Landed signal
+│  ├─ Model                    -- PrimaryPart, GetExtentsSize(), StreamingMode
+│  └─ Camera                   -- CFrame, FieldOfView, NearPlane, FarPlane, ViewportSize (read),
 │                              -- WorldToViewportPoint(), ViewportPointToRay(). No CameraType.
+├─ Attachment                  -- CFrame (relative to parent BasePart), WorldCFrame (read)
 ├─ PointLight / SpotLight      -- child of BasePart/Attachment (the Roblox attach model),
 │                              -- Color, Brightness, Range, (Spot: Angle), Shadows: boolean
 ├─ Sky                         -- under Lighting
@@ -426,6 +427,37 @@ Object-valued properties pointing *inside* the cloned subtree
 (`Model.PrimaryPart` is the one that catches people) are rewired to the
 corresponding clone at any depth; references pointing *outside* it are
 preserved as they are and keep pointing at the original instance. See §2.6.
+
+#### The pivot, and what `PivotOffset` is for
+
+Everything with a place in the world derives from **`PVInstance`**, and it exists
+so that "move this so it sits *there*" is one call with one meaning rather than
+three. `BasePart`, `Model` and `Camera` are the three; `Attachment` is not one,
+because its `CFrame` is relative to its parent and it is not positional in this
+sense.
+
+- **`PivotOffset: CFrame`** says where the pivot sits relative to the object.
+  The identity puts it at the object's own centre, which is the default and the
+  behaviour anything that ignores this property gets.
+- **`GetPivot() -> CFrame`** is that pivot in world space.
+- **`PivotTo(target)`** moves the object so its pivot lands on `target`. A
+  `Model` moves every part beneath it by the same transform, so relative layout
+  is preserved; a `BasePart` or a `Camera` moves itself.
+
+**`PivotOffset` is the whole point of the API.** Without it, `PivotTo(cf)` is
+`CFrame = cf` under a longer name and nothing can hinge: set the offset to a
+door's hinge edge and `PivotTo` rotates the door about that edge.
+
+A `Model` takes its pivot from its `PrimaryPart` — including that part's own
+`PivotOffset`, so assigning a primary part means more than picking a position.
+With no primary part it falls back to the centre of the box `GetExtentsSize`
+reports, unrotated: a group of parts has no orientation to inherit, and an
+identity fallback would move a model built far from the origin by its whole
+distance the first time anything pivoted it.
+
+**It is not a centre of mass.** When physics arrives it will have its own notion
+of where a body turns about, and joining the two would make hinging a door
+change how it falls.
 
 ### 2.3 Datatypes
 

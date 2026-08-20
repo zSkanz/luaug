@@ -231,6 +231,38 @@ local Classes: { Schema.Class } = {
         },
     },
     {
+        Name = "PVInstance",
+        Extends = "Instance",
+        Module = "scene",
+        Tags = { "Abstract", "NotCreatable" } :: { Schema.ClassTag },
+        Storage = "PV",
+        Doc = "The base of everything with a position and orientation in the world: a pivot to move it by, and "
+            .. "an offset saying where that pivot sits. BasePart, Model and Camera are the three.",
+        Properties = {
+            {
+                Name = "PivotOffset",
+                Type = "CFrame",
+                Doc = "Where this object's pivot sits relative to the object itself; the identity puts it at the "
+                    .. "centre. Set it to a hinge edge and PivotTo rotates about that edge.",
+            },
+        },
+        Methods = {
+            {
+                Name = "GetPivot",
+                Parameters = {},
+                Returns = { "CFrame" },
+                Doc = "This object's pivot in world space.",
+            },
+            {
+                Name = "PivotTo",
+                Parameters = { { Name = "target", Type = "CFrame" } },
+                Returns = {},
+                Doc = "Moves this object so its pivot lands on target. A Model moves every part under it and keeps "
+                    .. "their relative layout; a BasePart or Camera moves itself.",
+            },
+        },
+    },
+    {
         Name = "Folder",
         Extends = "Instance",
         Module = "scene",
@@ -238,7 +270,7 @@ local Classes: { Schema.Class } = {
     },
     {
         Name = "Model",
-        Extends = "Instance",
+        Extends = "PVInstance",
         Module = "scene",
         Storage = "Model",
         Doc = "A group of parts handled as one object, with a pivot to move it by and an extents box to measure it with.",
@@ -250,18 +282,6 @@ local Classes: { Schema.Class } = {
             },
         },
         Methods = {
-            {
-                Name = "GetPivot",
-                Parameters = {},
-                Returns = { "CFrame" },
-                Doc = "This model's pivot in world space.",
-            },
-            {
-                Name = "PivotTo",
-                Parameters = { { Name = "targetCFrame", Type = "CFrame" } },
-                Returns = {},
-                Doc = "Moves the model so that its pivot lands on targetCFrame, carrying every descendant part along by the same transform.",
-            },
             {
                 Name = "GetExtentsSize",
                 Parameters = {},
@@ -296,7 +316,7 @@ local Classes: { Schema.Class } = {
         -- simulation that does not exist until M5, and a type-checked no-op
         -- looks more like a working API than a missing member does.
         Name = "BasePart",
-        Extends = "Instance",
+        Extends = "PVInstance",
         Module = "scene",
         Tags = { "Abstract" } :: { Schema.ClassTag },
         -- `Part` inherits this rather than declaring its own: `World::create`
@@ -370,7 +390,7 @@ local Classes: { Schema.Class } = {
     },
     {
         Name = "Camera",
-        Extends = "Instance",
+        Extends = "PVInstance",
         Module = "render",
         Storage = "Camera",
         Doc = "The viewpoint the world is rendered from. A camera is an ordinary instance a script owns and moves; "

@@ -39,6 +39,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     // the module that holds its `ClassId`. That module's `registerClasses`
     // must already have run -- engine/app/src/world_host.cpp orders them.
     const scene::ClassId basePartClass = classes.findId(atoms.intern("BasePart"));
+    const scene::ClassId pVInstanceClass = classes.findId(atoms.intern("PVInstance"));
     const scene::ClassId instanceClass = classes.findId(atoms.intern("Instance"));
 
     // --- MeshPart ---
@@ -117,7 +118,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     }};
     scene::ClassDescriptor cameraDesc;
     cameraDesc.name = atoms.intern("Camera");
-    cameraDesc.super = instanceClass;
+    cameraDesc.super = pVInstanceClass;
     cameraDesc.flags = scene::ClassFlags::None;
     cameraDesc.defaultName = atoms.intern("Camera");
     cameraDesc.docKey = {};

@@ -9,8 +9,11 @@ digest for any agent touching this repo.**
 LuauG — an open-source (Apache-2.0) standalone game engine: C++ core embedding
 Luau 0.734 directly, Roblox-familiar Instance/Service API over a data-oriented
 ECS, deterministic fixed-tick simulation, SDL3 + custom RHI (SDL3 GPU default),
-Jolt physics, code-first DX with hot reload. **Pre-alpha, M0 complete**: the
-host boots a sandboxed VM and runs Luau; nothing renders yet. The engine is
+Jolt physics, code-first DX with hot reload. **Pre-alpha, M0–M3 signed off, M4
+built but not signed off**: the host boots a sandboxed VM, runs a deterministic
+tick over an Instance tree, hot-reloads in under two milliseconds, and renders
+glTF meshes with forward PBR, a shadowed sun and a day/night cycle. **M4.5 is
+open** and corrects a renderer that never read `Lighting`. The engine is
 built milestone by milestone per `docs/roadmap.md`; `PROGRESS.md` says where
 things stand.
 

@@ -526,3 +526,127 @@ TEST_CASE("the boot-time method cross-check reports both directions")
     CHECK(coverage.bound == 46);
     CHECK(coverage.declaredWithoutBinding == 0);
 }
+
+TEST_CASE("the pivot is a PVInstance concept, and PivotOffset is what gives it meaning")
+{
+    Fixture fixture;
+
+    SUBCASE("every positional class answers IsA(\"PVInstance\")")
+    {
+        // The question generic code wants to ask, and it can only be asked of a
+        // class that exists -- which is why `PVInstance` is one rather than two
+        // copies of the same two methods.
+        //
+        // `MeshPart` and `Camera` are the render module's and this fixture
+        // registers scene's classes alone; they are covered at the host, where
+        // both modules have registered.
+        CHECK(fixture.failure(R"(
+            assert(Instance.new("Part"):IsA("PVInstance"))
+            assert(Instance.new("Model"):IsA("PVInstance"))
+            assert(not Instance.new("Folder"):IsA("PVInstance"))
+        )") == "");
+    }
+
+    SUBCASE("PVInstance itself cannot be constructed")
+    {
+        CHECK(fixture.failure(R"(
+            Instance.new("PVInstance")
+        )") != "");
+    }
+
+    SUBCASE("a part with no offset pivots about its own centre")
+    {
+        CHECK(fixture.failure(R"(
+            local part = Instance.new("Part")
+            part.CFrame = CFrame.new(3, 0, 0)
+            assert(part:GetPivot().Position == Vector3.new(3, 0, 0))
+
+            part:PivotTo(CFrame.new(10, 0, 0))
+            assert(part.CFrame.Position == Vector3.new(10, 0, 0))
+        )") == "");
+    }
+
+    SUBCASE("PivotOffset hinges a part about an edge")
+    {
+        // The case the whole API exists for, and the one M4's `PivotTo` could
+        // not do: with an offset, rotating about the pivot swings the object
+        // rather than spinning it in place. Without `PivotOffset` this is
+        // `CFrame = target` and both assertions below read (0, 0, 0).
+        CHECK(fixture.failure(R"(
+            local door = Instance.new("Part")
+            door.Size = Vector3.new(2, 4, 0.2)
+            door.CFrame = CFrame.new(0, 0, 0)
+            -- The hinge is the left edge, one metre along -X from the centre.
+            door.PivotOffset = CFrame.new(-1, 0, 0)
+
+            assert(door:GetPivot().Position == Vector3.new(-1, 0, 0))
+
+            -- Swing 90 degrees about the hinge, leaving the hinge where it is.
+            door:PivotTo(CFrame.new(-1, 0, 0) * CFrame.fromEuler(0, math.pi / 2, 0))
+            assert((door:GetPivot().Position - Vector3.new(-1, 0, 0)).Magnitude < 1e-6)
+
+            -- The centre swung to the hinge's -Z side, which is what a door does
+            -- and what setting CFrame directly cannot.
+            local centre = door.CFrame.Position
+            assert(math.abs(centre.X - (-1)) < 1e-6, tostring(centre))
+            assert(math.abs(centre.Z - (-1)) < 1e-6, tostring(centre))
+        )") == "");
+    }
+
+    SUBCASE("a model with no primary part pivots about its extents box, not its centroid")
+    {
+        // The two differ whenever parts differ in size, which is exactly the
+        // case M4's comment claimed to handle and its code did not: it averaged
+        // part POSITIONS. Here the average is x = 5 and the box centre is x = 6.
+        CHECK(fixture.failure(R"(
+            local model = Instance.new("Model")
+            local small = Instance.new("Part")
+            small.Size = Vector3.new(1, 1, 1)
+            small.Position = Vector3.new(0, 0, 0)
+            small.Parent = model
+            local big = Instance.new("Part")
+            big.Size = Vector3.new(5, 1, 1)
+            big.Position = Vector3.new(10, 0, 0)
+            big.Parent = model
+
+            -- Box spans x in [-0.5, 12.5], so its centre is 6.
+            assert(model:GetExtentsSize().X == 13)
+            local pivot = model:GetPivot().Position
+            assert(math.abs(pivot.X - 6) < 1e-9, tostring(pivot))
+        )") == "");
+    }
+
+    SUBCASE("a model takes its primary part's own pivot, offset included")
+    {
+        CHECK(fixture.failure(R"(
+            local model = Instance.new("Model")
+            local part = Instance.new("Part")
+            part.CFrame = CFrame.new(4, 0, 0)
+            part.PivotOffset = CFrame.new(0, 2, 0)
+            part.Parent = model
+            model.PrimaryPart = part
+
+            -- Assigning a primary part means more than picking a position: the
+            -- part's own hinge becomes the model's.
+            assert(model:GetPivot().Position == Vector3.new(4, 2, 0))
+        )") == "");
+    }
+
+    SUBCASE("PivotTo on a model still moves every part and keeps their layout")
+    {
+        CHECK(fixture.failure(R"(
+            local model = Instance.new("Model")
+            local a = Instance.new("Part")
+            local b = Instance.new("Part")
+            a.Position = Vector3.new(0, 0, 0)
+            b.Position = Vector3.new(2, 0, 0)
+            a.Parent = model
+            b.Parent = model
+            model.PrimaryPart = a
+
+            model:PivotTo(CFrame.new(10, 0, 0))
+            assert(a.Position == Vector3.new(10, 0, 0))
+            assert(b.Position == Vector3.new(12, 0, 0))
+        )") == "");
+    }
+}

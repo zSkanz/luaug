@@ -4,12 +4,19 @@
 
 LuauG gives you the developer experience you already know — `Instance` trees, `game:GetService`, `task.spawn`, signals with `:Connect` — in an independent, professional engine: a modern C++ core embedding the Luau VM directly, a data-oriented ECS behind a familiar Instance facade, a swappable renderer and physics stack, deterministic fixed-tick simulation, and a code-first workflow (VS Code + CLI + sub-second hot reload). It targets complete 2D and 3D games, from small scenes to huge streamed open worlds, on desktop first, then mobile, with a console-ready architecture.
 
-> **STATUS: pre-alpha, and running.** Four of nine milestones are complete and
-> human-signed-off; the fifth is in progress. The engine boots a sandboxed Luau
-> VM, opens a window, runs a deterministic fixed-tick simulation over an
-> Instance tree on an ECS, and hot-reloads a saved script into a new world in
-> under two milliseconds. It does not draw a mesh yet — that is the milestone
-> being built now.
+> **STATUS: pre-alpha, and drawing.** Four of eleven milestones are complete and
+> human-signed-off. The engine boots a sandboxed Luau VM, opens a window, runs a
+> deterministic fixed-tick simulation over an Instance tree on an ECS,
+> hot-reloads a saved script into a new world in under two milliseconds, and
+> renders glTF meshes with forward PBR, a shadow-casting sun, point and spot
+> lights, fog, and transparency — on Windows, Linux and macOS, with an Android
+> triangle proving the graphics seam on a real device.
+>
+> **M4 is built but not signed off.** After it was written up complete, a human
+> using the engine noticed that the shadow never moved: the renderer had never
+> once read the `Lighting` service, so every frame it had drawn used struct
+> defaults instead of the scene's own environment. **M4.5** exists to correct
+> that and everything found beside it, and it closes only on human approval.
 >
 > It is written autonomously, milestone by milestone, by an AI agent (Claude
 > Opus, multi-agent orchestration) following [`MASTER_PROMPT.md`](MASTER_PROMPT.md),
@@ -23,21 +30,27 @@ LuauG gives you the developer experience you already know — `Instance` trees, 
 | ✅ | **M1** — window, RHI (SDL3 GPU / capture / null), fixed-tick loop, screenshot + capture harness | signed off, `milestone/m1` |
 | ✅ | **M2** — the kernel: ECS, Instance facade, deferred signals, `task`, services, world hash | signed off, `milestone/m2` |
 | ✅ | **M3** — `luaug` CLI, hot reload, generated type definitions, conformance runner | signed off, `milestone/m3` |
-| 🔨 | **M4** — meshes, materials, camera, lighting; RHI interface freeze | in progress |
+| 🔨 | **M4** — meshes, materials, camera, lighting; RHI interface freeze (ADR 0037) | built, `milestone/m4` — **not signed off** |
+| 🔨 | **M4.5** — correcting the environment the renderer never read, and what was found beside it | in progress |
 | ⬜ | **M5** — Jolt physics and a character you can steer | |
 | ⬜ | **M6** — input actions, UI, tweens, audio, minimal animation | |
 | ⬜ | **M7** — asset pipeline, async IO, streaming, floating origin | |
+| ⬜ | **M7.5** — cascaded shadows, clustered lights, image-based lighting, post | |
 | ⬜ | **M8** — the flagship open-world demo, hardening, docs, v1.0 | |
 
 **What runs today:** `luaug dev` on a project, edit a `.luau` file, watch the
-world rebuild without the window closing. 903 conformance specs written against
+world rebuild without the window closing. A glTF scene lit by forward PBR with a
+single-cascade shadow map and a day/night cycle driven from the simulation clock.
+An in-game explorer and property inspector that writes through the same setters a
+script goes through. 903 conformance specs written against
 [`docs/api-design.md`](docs/api-design.md) — not against the implementation —
 pass on Windows and Linux, alongside a determinism harness that replays a
-recorded run and compares world hashes. Debug-draw geometry is how anything is
-seen until M4 lands.
+recorded run and compares world hashes, and a capture-stream gate that compares
+draw commands rather than pixels.
 
-**What does not:** meshes, materials, lighting, shadows, physics, UI, audio,
-streaming. Each arrives with the milestone that owns it.
+**What does not, yet:** physics, characters, UI, audio, animation, streaming,
+image-based lighting, cascaded shadows. Each arrives with the milestone that owns
+it, and [`docs/roadmap.md`](docs/roadmap.md) says which.
 
 ## Not affiliated with Roblox
 
@@ -62,7 +75,7 @@ LuauG is an independent project. It is **not** affiliated with, endorsed by, or 
 | Physics 3D | **Jolt 5.6** | MIT |
 | Physics 2D (post-v1) | **Box2D 3.1** | MIT |
 | Audio | **miniaudio 0.11.25** | MIT-0 / Unlicense |
-| Assets | fastgltf · meshoptimizer · basis_universal/KTX2 · stb (assimp: offline importer only) | MIT / Apache-2.0 / BSD / PD |
+| Assets | fastgltf (+ **simdjson 3.12.3**, its required parser) · meshoptimizer · basis_universal/KTX2 · stb (assimp: offline importer only) | MIT / Apache-2.0 / BSD / PD |
 | Debug UI | Dear ImGui (docking) | MIT |
 | In-game UI layout | Clay (behind Roblox-style UI Instances) | zlib |
 | Navigation (post-v1) | Recast & Detour | zlib |
@@ -76,7 +89,7 @@ Everything in the default path is permissively licensed. Exact pinned commits li
 - [`PROGRESS.md`](PROGRESS.md) — the build ledger (current state, session log)
 - [`docs/architecture.md`](docs/architecture.md) — native core architecture (modules, layering, scheduler, ECS bridge, streaming)
 - [`docs/api-design.md`](docs/api-design.md) — the Luau-facing API and developer experience
-- [`docs/roadmap.md`](docs/roadmap.md) — milestones M0–M8 with verification gates
+- [`docs/roadmap.md`](docs/roadmap.md) — milestones M0 through M8 with verification gates
 - [`docs/decisions/`](docs/decisions/) — architecture decision records (ADRs)
 - [`docs/research/`](docs/research/) — frozen research reports (Luau, Lute, ecosystem — August 2026)
 - [`docs/coming-from-roblox.md`](docs/coming-from-roblox.md) — the migration guide (habit-by-habit mapping)

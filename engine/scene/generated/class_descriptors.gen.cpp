@@ -255,6 +255,48 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     instanceDesc.events = instanceEvents;
     const ClassId instanceClass = classes.registerClass(instanceDesc);
 
+    // --- PVInstance ---
+    static std::array<PropertyDesc, 1> pVInstanceProperties;
+    pVInstanceProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("PivotOffset"),
+            .type = ValueType::CFrame,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_cframe"),
+            .get = native::getPVInstancePivotOffset,
+            .set = native::setPVInstancePivotOffset,
+        },
+    }};
+    static std::array<MethodDesc, 2> pVInstanceMethods;
+    pVInstanceMethods = {{
+        MethodDesc{
+            .name = atoms.intern("GetPivot"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .docKey = {},
+        },
+        MethodDesc{
+            .name = atoms.intern("PivotTo"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .docKey = {},
+        },
+    }};
+    ClassDescriptor pVInstanceDesc;
+    pVInstanceDesc.name = atoms.intern("PVInstance");
+    pVInstanceDesc.super = instanceClass;
+    pVInstanceDesc.flags = ClassFlags::Abstract | ClassFlags::NotCreatable;
+    pVInstanceDesc.defaultName = atoms.intern("PVInstance");
+    pVInstanceDesc.docKey = {};
+    pVInstanceDesc.properties = pVInstanceProperties;
+    pVInstanceDesc.methods = pVInstanceMethods;
+    pVInstanceDesc.attachComponents = native::attachPVComponents;
+    pVInstanceDesc.detachComponents = native::detachPVComponents;
+    const ClassId pVInstanceClass = classes.registerClass(pVInstanceDesc);
+
     // --- Folder ---
     ClassDescriptor folderDesc;
     folderDesc.name = atoms.intern("Folder");
@@ -279,20 +321,8 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .set = native::setModelPrimaryPart,
         },
     }};
-    static std::array<MethodDesc, 3> modelMethods;
+    static std::array<MethodDesc, 1> modelMethods;
     modelMethods = {{
-        MethodDesc{
-            .name = atoms.intern("GetPivot"),
-            .yields = false,
-            .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
-        },
-        MethodDesc{
-            .name = atoms.intern("PivotTo"),
-            .yields = false,
-            .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
-        },
         MethodDesc{
             .name = atoms.intern("GetExtentsSize"),
             .yields = false,
@@ -302,7 +332,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     }};
     ClassDescriptor modelDesc;
     modelDesc.name = atoms.intern("Model");
-    modelDesc.super = instanceClass;
+    modelDesc.super = pVInstanceClass;
     modelDesc.flags = ClassFlags::None;
     modelDesc.defaultName = atoms.intern("Model");
     modelDesc.docKey = {};
@@ -410,7 +440,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     }};
     ClassDescriptor basePartDesc;
     basePartDesc.name = atoms.intern("BasePart");
-    basePartDesc.super = instanceClass;
+    basePartDesc.super = pVInstanceClass;
     basePartDesc.flags = ClassFlags::Abstract;
     basePartDesc.defaultName = atoms.intern("BasePart");
     basePartDesc.docKey = {};

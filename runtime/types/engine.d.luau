@@ -264,18 +264,24 @@ declare extern type Instance with
     function GetTags(self): {string}
 end
 
+declare extern type PVInstance extends Instance with
+    --- Where this object's pivot sits relative to the object itself; the identity puts it at the
+    --- centre. Set it to a hinge edge and PivotTo rotates about that edge.
+    PivotOffset: CFrame
+    --- This object's pivot in world space.
+    function GetPivot(self): CFrame
+    --- Moves this object so its pivot lands on target. A Model moves every part under it and keeps
+    --- their relative layout; a BasePart or Camera moves itself.
+    function PivotTo(self, target: CFrame): ()
+end
+
 declare extern type Folder extends Instance with
 end
 
-declare extern type Model extends Instance with
+declare extern type Model extends PVInstance with
     --- The part this model's pivot follows; Clone rewires it to the copy, since it is the reference
     --- into a cloned subtree that catches people.
     PrimaryPart: BasePart?
-    --- This model's pivot in world space.
-    function GetPivot(self): CFrame
-    --- Moves the model so that its pivot lands on targetCFrame, carrying every descendant part along by
-    --- the same transform.
-    function PivotTo(self, targetCFrame: CFrame): ()
     --- The size in metres of the smallest box enclosing every part in this model.
     function GetExtentsSize(self): vector
 end
@@ -287,7 +293,7 @@ declare extern type Script extends Instance with
     Enabled: boolean
 end
 
-declare extern type BasePart extends Instance with
+declare extern type BasePart extends PVInstance with
     --- This part's transform in world space, and the f64 source of truth Position and Orientation are
     --- read back from.
     CFrame: CFrame
@@ -317,7 +323,7 @@ declare extern type MeshPart extends BasePart with
     MeshContent: Content
 end
 
-declare extern type Camera extends Instance with
+declare extern type Camera extends PVInstance with
     --- Where the camera is and which way it looks. The look direction is the CFrame's LookVector, which
     --- is -Z.
     CFrame: CFrame

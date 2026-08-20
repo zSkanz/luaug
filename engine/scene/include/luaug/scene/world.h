@@ -271,6 +271,8 @@ public:
     [[nodiscard]] const ComponentPool<PartComponent>& parts() const noexcept { return m_parts; }
     [[nodiscard]] ComponentPool<WorkspaceComponent>& workspaces() noexcept { return m_workspaces; }
     [[nodiscard]] const ComponentPool<WorkspaceComponent>& workspaces() const noexcept { return m_workspaces; }
+    [[nodiscard]] ComponentPool<PVComponent>& pvInstances() noexcept { return m_pvInstances; }
+    [[nodiscard]] const ComponentPool<PVComponent>& pvInstances() const noexcept { return m_pvInstances; }
     [[nodiscard]] ComponentPool<ModelComponent>& models() noexcept { return m_models; }
     [[nodiscard]] const ComponentPool<ModelComponent>& models() const noexcept { return m_models; }
     [[nodiscard]] ComponentPool<ScriptComponent>& scripts() noexcept { return m_scripts; }
@@ -311,6 +313,7 @@ private:
     core::NameAtom m_parentProperty;
 
     core::SlotMap<InstanceRecord> m_instances;
+    ComponentPool<PVComponent> m_pvInstances;
     ComponentPool<PartComponent> m_parts;
     ComponentPool<WorkspaceComponent> m_workspaces;
     ComponentPool<ModelComponent> m_models;

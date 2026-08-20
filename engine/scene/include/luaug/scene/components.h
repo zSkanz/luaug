@@ -125,6 +125,22 @@ struct WorkspaceComponent
     core::InstanceId currentCamera;
 };
 
+// `PVInstance`'s own state, and therefore attached to every `BasePart`, `Model`
+// and `Camera` in the world.
+//
+// One field, and it is what gives `PivotTo` a meaning `CFrame = target` does not
+// already have. Without it the pivot is always the object's centre, `PivotTo` is
+// an assignment under a longer name, and nothing can hinge about an edge.
+//
+// **It is not a centre of mass.** Jolt has its own notion of where a body turns
+// about, and joining the two would make hinging a door change its dynamics --
+// which is a defect that would take a milestone to notice. M5 must keep them
+// apart.
+struct PVComponent
+{
+    core::CFrameD pivotOffset;
+};
+
 struct ModelComponent
 {
     core::InstanceId primaryPart;

@@ -535,3 +535,40 @@ TEST_CASE("the two lights' Shadows properties are the ones marked")
         CHECK_FALSE(brightness->inert);
     }
 }
+
+TEST_CASE("the render module's positional classes are PVInstances too")
+{
+    // At the host rather than in `engine/script`, because `MeshPart` and
+    // `Camera` are registered by `render` and that module's classes do not
+    // exist in a fixture holding scene's alone. Which is also the shape of the
+    // audit mistake this whole scope item came from: a sweep that searched one
+    // module for a value used in another concluded it was unused.
+    Captured log;
+    Project project;
+    project.write("src/scripts/main.luau", R"(
+        local camera = Instance.new("Camera")
+        assert(camera:IsA("PVInstance"), "Camera is positional")
+        assert(Instance.new("MeshPart"):IsA("PVInstance"), "MeshPart is positional")
+        assert(not Instance.new("PointLight"):IsA("PVInstance"), "a light is not")
+
+        camera.CFrame = CFrame.new(0, 5, 0)
+        assert(camera:GetPivot().Position == Vector3.new(0, 5, 0))
+
+        -- An offset moves where the camera turns about, which is what makes an
+        -- orbit camera a `PivotTo` rather than trigonometry at every call site.
+        camera.PivotOffset = CFrame.new(0, 0, -10)
+        assert(camera:GetPivot().Position == Vector3.new(0, 5, -10))
+
+        camera:PivotTo(CFrame.new(1, 2, 3))
+        assert(camera.CFrame.Position == Vector3.new(1, 2, 13))
+
+        local marker = Instance.new("Folder")
+        marker.Name = "PivotOk"
+        marker.Parent = workspace
+    )");
+
+    app::WorldHost host;
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
+    CHECK_FALSE(log.contains("[script.err."));
+    CHECK(host.world().childCount(host.workspace()) == 1);
+}

@@ -3,7 +3,7 @@
   "Classes": [
     {
       "Name": "BasePart",
-      "Extends": "Instance",
+      "Extends": "PVInstance",
       "Tags": ["Abstract"],
       "Properties": [
         {
@@ -36,7 +36,7 @@
     },
     {
       "Name": "Camera",
-      "Extends": "Instance",
+      "Extends": "PVInstance",
       "Tags": [],
       "Properties": [
         {
@@ -664,7 +664,7 @@
     },
     {
       "Name": "Model",
-      "Extends": "Instance",
+      "Extends": "PVInstance",
       "Tags": [],
       "Properties": [
         {
@@ -677,7 +677,21 @@
           "Name": "GetExtentsSize",
           "Parameters": [],
           "Returns": ["vector"]
-        },
+        }
+      ],
+      "Events": []
+    },
+    {
+      "Name": "PVInstance",
+      "Extends": "Instance",
+      "Tags": ["Abstract", "NotCreatable"],
+      "Properties": [
+        {
+          "Name": "PivotOffset",
+          "Type": "CFrame"
+        }
+      ],
+      "Methods": [
         {
           "Name": "GetPivot",
           "Parameters": [],
@@ -687,7 +701,7 @@
           "Name": "PivotTo",
           "Parameters": [
             {
-              "Name": "targetCFrame",
+              "Name": "target",
               "Type": "CFrame"
             }
           ],

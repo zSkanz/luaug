@@ -42,6 +42,16 @@ constexpr f64 DegreesToRadians = 0.017453292519943295;
 // `BasePart`'s pair and declares none of its own -- declaring it twice would
 // attach twice.
 
+void attachPVComponents(World& world, core::InstanceId id)
+{
+    world.pvInstances().add(id, PVComponent{});
+}
+
+void detachPVComponents(World& world, core::InstanceId id)
+{
+    world.pvInstances().remove(id);
+}
+
 void attachPartComponents(World& world, core::InstanceId id)
 {
     world.parts().add(id, PartComponent{});
@@ -213,6 +223,24 @@ bool setScriptEnabled(World& world, core::InstanceId id, const Value& value)
 }
 
 // --- BasePart ---------------------------------------------------------------
+
+// --- PVInstance --------------------------------------------------------------
+
+Value getPVInstancePivotOffset(const World& world, core::InstanceId id)
+{
+    const PVComponent* pv = world.pvInstances().find(id);
+    return pv == nullptr ? Value{} : Value{pv->pivotOffset};
+}
+
+bool setPVInstancePivotOffset(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* cframe = std::get_if<core::CFrameD>(&value);
+    PVComponent* pv = world.pvInstances().find(id);
+    if (cframe == nullptr || pv == nullptr)
+        return false;
+    pv->pivotOffset = *cframe;
+    return true;
+}
 
 Value getBasePartCFrame(const World& world, core::InstanceId id)
 {

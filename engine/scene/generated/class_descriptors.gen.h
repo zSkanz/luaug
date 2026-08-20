@@ -63,6 +63,12 @@ Value getInstanceParent(const World& world, core::InstanceId id);
 bool setInstanceParent(World& world, core::InstanceId id, const Value& value);
 Value getInstanceClassName(const World& world, core::InstanceId id);
 
+// PVInstance
+Value getPVInstancePivotOffset(const World& world, core::InstanceId id);
+bool setPVInstancePivotOffset(World& world, core::InstanceId id, const Value& value);
+void attachPVComponents(World& world, core::InstanceId id);
+void detachPVComponents(World& world, core::InstanceId id);
+
 // Model
 Value getModelPrimaryPart(const World& world, core::InstanceId id);
 bool setModelPrimaryPart(World& world, core::InstanceId id, const Value& value);

@@ -563,46 +563,132 @@ int methodGetTags(lua_State* L)
     return 1;
 }
 
-// --- Model -------------------------------------------------------------------
+// --- PVInstance ---------------------------------------------------------------
+//
+// `GetPivot` and `PivotTo` live on the abstract base rather than on `Model`,
+// which is where they were through M4. Three things had gone wrong with that,
+// and only the third is about where the methods are declared:
+//
+//   * **`PivotOffset` did not exist**, so a pivot was always an object's centre
+//     and `Model:PivotTo(cf)` was `PrimaryPart.CFrame = cf` -- the deprecated
+//     call the pivot API exists to replace, reimplemented under the new name. It
+//     passed its tests and could not hinge a door.
+//   * **The fallback said one thing and did another.** The comment read "the
+//     centre of the extents box" and the code averaged part positions, which is
+//     a different point whenever parts differ in size. The box is computed here
+//     now, by the same walk `GetExtentsSize` uses.
+//   * **Generic code had to branch on class.** Anything positional can take
+//     `obj:PivotTo(cf)` now, and `obj:IsA("PVInstance")` is the question that
+//     asks whether it can -- which needs `PVInstance` to be a real class, and is
+//     why it is one.
 
-[[nodiscard]] core::CFrameD modelPivot(World& w, core::InstanceId id)
+[[nodiscard]] core::CFrameD pivotOffsetOf(const World& w, core::InstanceId id) noexcept
 {
-    const scene::ModelComponent* model = w.models().find(id);
-    if (model != nullptr && w.alive(model->primaryPart))
-    {
-        if (const scene::PartComponent* part = w.parts().find(model->primaryPart))
-            return part->cframe;
-    }
+    const scene::PVComponent* pv = w.pvInstances().find(id);
+    return pv == nullptr ? core::CFrameD{} : pv->pivotOffset;
+}
 
-    // No primary part: the centre of the extents box, with no rotation. A pivot
-    // that defaulted to the identity would move a model built far from the
-    // origin by its whole distance the first time anything pivoted it.
+// The axis-aligned box enclosing every part under `id`, in world space. Shared
+// with `GetExtentsSize`, which is the point: the model's fallback pivot is the
+// centre of the box that call reports, rather than a second definition of
+// "middle" that happens to agree when every part is the same size.
+[[nodiscard]] bool worldExtents(World& w, core::InstanceId id, core::DVec3& minimum, core::DVec3& maximum)
+{
     std::vector<core::InstanceId> descendants;
     w.collectDescendants(id, descendants);
 
-    core::DVec3 total;
-    usize count = 0;
+    bool any = false;
     for (const core::InstanceId descendant : descendants)
     {
-        if (const scene::PartComponent* part = w.parts().find(descendant))
+        const scene::PartComponent* part = w.parts().find(descendant);
+        if (part == nullptr)
+            continue;
+
+        // The standard OBB-to-AABB bound; see `methodGetExtentsSize` for the
+        // column-major indexing note.
+        const core::Mat3& r = part->cframe.rotation;
+        const f64 half[3] = {
+            static_cast<f64>(part->size.x) * 0.5,
+            static_cast<f64>(part->size.y) * 0.5,
+            static_cast<f64>(part->size.z) * 0.5,
+        };
+        f64 extents[3] = {0.0, 0.0, 0.0};
+        for (int axis = 0; axis < 3; ++axis)
         {
-            total = total + part->cframe.position;
-            ++count;
+            for (int local = 0; local < 3; ++local)
+                extents[axis] += std::fabs(static_cast<f64>(r.m[local][axis])) * half[local];
         }
+
+        const core::DVec3 centre = part->cframe.position;
+        const core::DVec3 low{centre.x - extents[0], centre.y - extents[1], centre.z - extents[2]};
+        const core::DVec3 high{centre.x + extents[0], centre.y + extents[1], centre.z + extents[2]};
+        if (!any)
+        {
+            minimum = low;
+            maximum = high;
+            any = true;
+            continue;
+        }
+        minimum = core::DVec3{std::min(minimum.x, low.x), std::min(minimum.y, low.y), std::min(minimum.z, low.z)};
+        maximum = core::DVec3{std::max(maximum.x, high.x), std::max(maximum.y, high.y), std::max(maximum.z, high.z)};
+    }
+    return any;
+}
+
+// The transform a pivot is measured from, before `PivotOffset` is applied.
+//
+// A `BasePart` and a `Camera` each have one of their own. A `Model` has no
+// transform, so it borrows its primary part's when there is one and falls back
+// to the centre of its extents box when there is not -- unrotated, because a
+// group of parts has no orientation to inherit.
+[[nodiscard]] core::CFrameD pivotBase(World& w, core::InstanceId id)
+{
+    if (const scene::ModelComponent* model = w.models().find(id); model != nullptr)
+    {
+        if (w.alive(model->primaryPart))
+        {
+            if (const scene::PartComponent* part = w.parts().find(model->primaryPart))
+            {
+                // The primary part's OWN pivot, offset included: a model whose
+                // primary part hinges about its edge hinges about that edge too,
+                // which is the property that makes assigning a primary part mean
+                // something beyond "pick a position".
+                return part->cframe * pivotOffsetOf(w, model->primaryPart);
+            }
+        }
+
+        core::DVec3 minimum;
+        core::DVec3 maximum;
+        core::CFrameD pivot;
+        // An identity fallback would move a model built far from the origin by
+        // its whole distance the first time anything pivoted it.
+        if (worldExtents(w, id, minimum, maximum))
+        {
+            pivot.position = core::DVec3{(minimum.x + maximum.x) * 0.5, (minimum.y + maximum.y) * 0.5,
+                (minimum.z + maximum.z) * 0.5};
+        }
+        return pivot;
     }
 
-    core::CFrameD pivot;
-    if (count > 0)
-    {
-        const f64 scale = 1.0 / static_cast<f64>(count);
-        pivot.position = core::DVec3{total.x * scale, total.y * scale, total.z * scale};
-    }
-    return pivot;
+    if (const scene::PartComponent* part = w.parts().find(id); part != nullptr)
+        return part->cframe;
+    if (const scene::CameraComponent* camera = w.cameras().find(id); camera != nullptr)
+        return camera->cframe;
+    return {};
+}
+
+[[nodiscard]] core::CFrameD pivotOf(World& w, core::InstanceId id)
+{
+    // A Model's base already carries its primary part's offset, so applying the
+    // model's own on top of it would compose two. It does not: `PivotOffset` on
+    // a Model shifts the model's pivot away from wherever the base put it, which
+    // is the same sentence as for a part.
+    return pivotBase(w, id) * pivotOffsetOf(w, id);
 }
 
 int methodGetPivot(lua_State* L)
 {
-    pushCFrame(L, modelPivot(world(L), liveInstance(L, 1)));
+    pushCFrame(L, pivotOf(world(L), liveInstance(L, 1)));
     return 1;
 }
 
@@ -611,25 +697,50 @@ int methodPivotTo(lua_State* L)
     const core::InstanceId id = liveInstance(L, 1);
     World& w = world(L);
     const core::CFrameD target = checkCFrame(L, 2);
-    // Every descendant part moves by the same transform, so relative layout is
-    // preserved: `delta = target * inverse(pivot)` applied on the left.
-    const core::CFrameD delta = target * core::inverse(modelPivot(w, id));
-
-    std::vector<core::InstanceId> descendants;
-    w.collectDescendants(id, descendants);
     const core::NameAtom cframeProperty = context(L).wellKnown.cframe;
-    for (const core::InstanceId descendant : descendants)
+
+    // `delta` moves the pivot onto the target, and everything the object owns
+    // moves by the same transform -- which is what preserves relative layout.
+    const core::CFrameD delta = target * core::inverse(pivotOf(w, id));
+
+    if (w.models().find(id) != nullptr)
     {
-        const scene::PartComponent* part = w.parts().find(descendant);
-        if (part == nullptr)
-            continue;
-        // Through `setProperty` rather than by writing the component, so the
-        // change is enqueued for anything watching `CFrame`.
-        w.setProperty(descendant, cframeProperty, scene::Value{delta * part->cframe});
+        std::vector<core::InstanceId> descendants;
+        w.collectDescendants(id, descendants);
+        for (const core::InstanceId descendant : descendants)
+        {
+            const scene::PartComponent* part = w.parts().find(descendant);
+            if (part == nullptr)
+                continue;
+            // Through `setProperty` rather than by writing the component, so the
+            // change is enqueued for anything watching `CFrame`.
+            w.setProperty(descendant, cframeProperty, scene::Value{delta * part->cframe});
+        }
+        flushSceneChanges(L);
+        return 0;
     }
-    flushSceneChanges(L);
+
+    if (const scene::PartComponent* part = w.parts().find(id); part != nullptr)
+    {
+        // Only itself. Parts welded or attached to it are M5's business, and
+        // moving descendants of a part would make `PivotTo` mean two different
+        // things depending on what happened to be parented under it.
+        w.setProperty(id, cframeProperty, scene::Value{delta * part->cframe});
+        flushSceneChanges(L);
+        return 0;
+    }
+
+    if (const scene::CameraComponent* camera = w.cameras().find(id); camera != nullptr)
+    {
+        w.setProperty(id, cframeProperty, scene::Value{delta * camera->cframe});
+        flushSceneChanges(L);
+        return 0;
+    }
+
     return 0;
 }
+
+// --- Model -------------------------------------------------------------------
 
 int methodGetExtentsSize(lua_State* L)
 {
@@ -749,8 +860,8 @@ constexpr InstanceMethodBinding InstanceMethods[] = {
     {"Instance", "RemoveTag", methodRemoveTag},
     {"Instance", "HasTag", methodHasTag},
     {"Instance", "GetTags", methodGetTags},
-    {"Model", "GetPivot", methodGetPivot},
-    {"Model", "PivotTo", methodPivotTo},
+    {"PVInstance", "GetPivot", methodGetPivot},
+    {"PVInstance", "PivotTo", methodPivotTo},
     {"Model", "GetExtentsSize", methodGetExtentsSize},
 };
 
