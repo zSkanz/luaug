@@ -28,10 +28,22 @@ path — but the counters of the letters (the enclosed space inside `a`, inside
 `u`) were traced as their own green shapes, because in a bitmap that space *is*
 background. Deleting only the plate leaves a green block sitting inside the `a`.
 
-So every green-family fill is removed, classified by `g > r and g > b` with
-near-white excluded, and the blues and whites are kept byte-for-byte from the
-original. **If the logo is ever re-traced, this has to be redone** — a fresh
-trace will bring its own fringe colours.
+So the green-family fills are classified — `g > r and g > b`, near-white
+excluded — and then split by what each one *is*, which a bounding box cannot tell
+you and rendering can:
+
+- The **plate** is deleted.
+- The **counter of the `a`** is punched out with a `<mask>`. Deleting it leaves
+  the letter filled solid; masking makes it a hole, which is what it always was.
+- Everything else is **anti-aliasing fringe** and is deleted. One of those,
+  `#C6E0D3`, has a 129×160 bounding box and almost no area — a sliver down the
+  edge of the second `u`. Promoting it to a counter on the strength of its box
+  would have cut a chunk out of that letter, which is why each candidate was
+  rendered alone and looked at before anything was masked.
+
+The blues and whites are byte-for-byte from the original. **If the logo is ever
+re-traced, this has to be redone** — a fresh trace brings its own fringe colours
+and its own counters.
 
 ## Where these get used
 
