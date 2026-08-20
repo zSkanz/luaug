@@ -105,7 +105,8 @@ RNG/unordered iteration; stable parallel commit) · R11 main always green ·
 R12 conventional commits · R13 never edit `third_party/` in place ·
 R14 out-of-tree builds only · R15 v1 scope closed (no editor/multiplayer/2D/
 mobile/navmesh) · R16 interpreter-first perf (iOS has no JIT) · R17 no backend
-types in the public API.
+types in the public API · R18 rendering is judged against a stated reference,
+and visual fidelity is a v1 target (ADR 0038).
 
 ## Style
 

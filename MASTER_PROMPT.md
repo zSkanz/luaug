@@ -44,7 +44,7 @@ relevant research report(s) in `docs/research/`.
 
 ---
 
-## 3. Non-Negotiable Rules (R1–R17)
+## 3. Non-Negotiable Rules (R1–R18)
 
 Cite these by number in reviews and commit discussions. None may be weakened
 without a human-approved ADR.
@@ -94,6 +94,13 @@ without a human-approved ADR.
 - **R17** — **Game Luau code never sees backend types.** No Jolt, SDL, SDL_GPU,
   miniaudio, bgfx, Vulkan/D3D/Metal type or concept may leak into the public
   API. Scripts talk to LuauG Instances, services, and datatypes only.
+- **R18** — **What the renderer draws is judged against a stated reference, not
+  against taste.** Visual fidelity is a v1 target (ADR 0038, human decision
+  2026-08-20): a gap against mainstream engines in shadows, lights or
+  reflections is a defect with an owner and a milestone, not a preference to be
+  argued about. "Looks fine" is not a gate result — a comparison against a named
+  reference is. This adds fidelity to what v1 renders; it does not open R15's
+  closed list.
 
 ---
 

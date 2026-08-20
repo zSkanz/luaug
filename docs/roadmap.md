@@ -60,16 +60,17 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
 
 | ID | Name | Size | Runnable artifact |
 |----|------|------|-------------------|
-| M0 | Bootstrap and First Light | S (5%) | `luaug-host` runs `boot.luau`, prints via i18n catalog, exits 0 |
-| M1 | Window, RHI, Frame Loop, Agent Eyes | M (10%) | `examples/00-clear`: pulsing clear + debug cubes driven by Luau; screenshot harness |
-| M2 | Kernel: Instances/ECS, Scheduler, Signals, task | XL (18%) | `examples/01-instances`: 500 scripted spinning debug cubes, services, deferred signals |
-| M3 | Tooling Loop: CLI, Hot Reload, Types, Tests | M (9%) | `luaug dev` — edit script, behavior changes <1 s; `luaug test` runs conformance suite |
-| M4 | Seeing the World: Meshes, Materials, Lighting | L (11%) | `examples/02-meshes`: glTF scene, PBR, shadows, day/night slider |
+| M0 | Bootstrap and First Light | S (4%) | `luaug-host` runs `boot.luau`, prints via i18n catalog, exits 0 |
+| M1 | Window, RHI, Frame Loop, Agent Eyes | M (9%) | `examples/00-clear`: pulsing clear + debug cubes driven by Luau; screenshot harness |
+| M2 | Kernel: Instances/ECS, Scheduler, Signals, task | XL (16%) | `examples/01-instances`: 500 scripted spinning debug cubes, services, deferred signals |
+| M3 | Tooling Loop: CLI, Hot Reload, Types, Tests | M (8%) | `luaug dev` — edit script, behavior changes <1 s; `luaug test` runs conformance suite |
+| M4 | Seeing the World: Meshes, Materials, Lighting | L (10%) | `examples/02-meshes`: glTF scene, PBR, shadows, day/night slider |
 | M4.5 | Correcting the World: the environment the renderer never read | S (3%) | `examples/02-meshes` rendering the scene its own script describes: the sun crosses the sky, shadows lengthen, the day/night slider works |
-| M5 | Feeling the World: Jolt + Character | L (12%) | `examples/03-physics-playground`: third-person capsule on ramps/stacks |
-| M6 | Playing the World: Input Actions, UI, Tween, Audio, Minimal Animation | L (12%) | `examples/04-obby`: menus, HUD, checkpoints, tweens, sound, rebindable input, animated character |
-| M7 | Scaling the World: Assets, Streaming, Floating Origin | L (13%) | `examples/05-streaming`: fly-cam over large chunked world, bounded memory |
-| M8 | Flagship, Hardening, Docs, v1.0 | M (7%) | `examples/10-open-world` + tagged v1.0.0 release artifacts |
+| M5 | Feeling the World: Jolt + Character | L (11%) | `examples/03-physics-playground`: third-person capsule on ramps/stacks |
+| M6 | Playing the World: Input Actions, UI, Tween, Audio, Minimal Animation | L (11%) | `examples/04-obby`: menus, HUD, checkpoints, tweens, sound, rebindable input, animated character |
+| M7 | Scaling the World: Assets, Streaming, Floating Origin | L (12%) | `examples/05-streaming`: fly-cam over large chunked world, bounded memory |
+| M7.5 | Looking Like an Engine: Shadows, Lights, Reflections | L (10%) | `examples/02-meshes` and the streaming world through CSM + clustered lights + IBL + post, each beside its M4.5 render at the same camera and clock |
+| M8 | Flagship, Hardening, Docs, v1.0 | M (6%) | `examples/10-open-world` + tagged v1.0.0 release artifacts |
 
 ## Milestone detail
 
@@ -547,6 +548,85 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   CI; loopback socket echo test; pak round-trip fuzz test (truncated/corrupt
   pak → structured error, no crash).
 
+### M7.5 — Looking Like an Engine: Shadows, Lights, Reflections (L)
+
+- **Why it exists.** Human decision, 2026-08-20, after watching a full day pass
+  in `examples/02-meshes`: the engine looks far from Unity and Unreal, and
+  closing that is a requirement rather than a preference. Recorded as **ADR
+  0038**, which states the gap M4 actually shipped rather than a feeling about
+  it — one cascade at 5.9 cm per texel, eight unculled lights per draw, no
+  image-based lighting at all, and no post chain beyond the tonemap resolve.
+- **Why here and not at M8.** M8 is the flagship plus hardening plus docs plus
+  the release, and a renderer's second half is none of those. Built here, the
+  flagship is built *on* this; built at M8, the flagship ships against the
+  renderer this milestone exists to replace. Cascades also want a streamed world
+  to be designed against, which M7 is what produces.
+- **Goal:** the same scenes, rendered so that a person who has used another
+  engine does not immediately notice which one they are looking at.
+- **Scope.** Named techniques with published parameters, because a milestone
+  whose scope is "better" cannot be finished:
+  - **Cascaded shadow maps.** Four cascades. Splits by the practical scheme
+    (GPU Gems 3 ch. 10), a blend of uniform and logarithmic partitioning with
+    `λ` between them. **Normal-offset bias** replacing depth-only — displacing
+    the sample along the surface normal is what survives a grazing receiver, and
+    it is the half of the M4.5 flicker that snapping deliberately did not fix.
+    A **hardware comparison sampler** so a tap degrades instead of switching.
+    PCF between 2×2 and 7×7; the published cost of the widest at 1080p is about
+    0.4 ms, which prices the choice rather than arguing it.
+
+    **Three of the four pieces already exist**, which makes this smaller than it
+    reads: `sampleSunShadow` already does 3×3 PCF and already carries a
+    slope-scaled bias (`lerp(0.005, 0.0005, N·L)`) — the pair a comparable engine
+    exposes as `shadowBias` and `shadowBiasAngleScale`. What is missing is
+    literally the cascades.
+
+    **And the two things that make a CSM implementation look amateur are not the
+    cascades**, so they are named here rather than discovered:
+    - **The PCF radius must be constant in WORLD space across cascades.** Each
+      cascade has a different world-units-per-texel, so a kernel fixed in texels
+      makes shadow softness change as an object crosses a split — read by a
+      viewer as a seam, and the most common tell of a first CSM.
+    - **Cascades must blend over a band, not switch at a plane.** A hard
+      handover is visible for the same reason, and the fix is a lerp or a dither
+      across the last fraction of each cascade.
+  - **Clustered forward shading**, so eight lights per draw stops being the
+    limit. Olsson and Assarsson's clustering with a 16×9×24 grid and exponential
+    depth slicing, `slice = max(log2(linearDepth) · scale + bias, 0)` — one grid
+    serving a near plane at 0.1 and a far plane in the thousands is the whole
+    reason for the log.
+  - **Image-based lighting**, split-sum (Karis 2013): a prefiltered environment
+    cubemap whose mip chain is indexed by roughness, plus a 2D BRDF LUT indexed
+    by (N·V, roughness) supplying the Fresnel scale and bias. **This is the
+    single largest visual difference** between what M4 draws and a mainstream
+    engine — `pbr.hlsl`'s own comment already calls its flat ambient "the
+    degenerate case of the split-sum approximation where the environment is one
+    colour". A metal currently reflects nothing because there is nothing to
+    reflect.
+  - **The post chain that makes the rest visible**: exposure, bloom, an ambient
+    occlusion term, anti-aliasing. A correctly lit frame through a naive resolve
+    still does not look like the reference.
+- **Build order note.** IBL first is the likely order — it is the largest visual
+  win for the least work, and it is independent of the other three. That is an
+  ordering, not a stopping point: ADR 0038 explicitly rejects shipping it alone.
+- **Not here:** anything on R15's closed list; ray tracing; virtualized geometry
+  or shadow maps; global illumination beyond what a prefiltered environment
+  gives; temporal upscaling. Reflection probes placed by hand are a judgement
+  call for the brief, since v1 has no editor to place them with (ADR 0017).
+- **Performance notes.** Every feature here is a frame-time cost and the table
+  records each separately, not a lump: a milestone that makes the frame twice as
+  expensive without saying which half is which cannot be optimized afterwards.
+  The reduced-CPU row `perf-baselines.md` asks for stops being optional here —
+  R16's logic is about the low end, and this is the milestone most able to
+  forget it.
+- **Deliverable:** `examples/02-meshes` and the M7 streaming example, both
+  rendered through the new path, each shown beside its M4.5 render at the same
+  camera and clock — so the difference is the only variable.
+- **Gate:** the same scene compared against a reference render and against the
+  previous milestone's; per-feature frame cost recorded at 1080p including a
+  reduced-CPU row; GPU validation clean; goldens re-recorded and the clock
+  differential still differing. **"Looks better" is not a gate result** — the
+  comparison is against a stated reference, or it is not a comparison.
+
 ### M8 — Flagship, Hardening, Docs, v1.0 (M)
 
 - **Goal:** assemble, polish, prove, ship.
@@ -559,6 +639,14 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   the defs pipeline, README with screenshots/GIF; license/NOTICE audit of
   every vendored dep; CHANGELOG; tag `v1.0.0`, GitHub release with Windows
   binaries + source instructions.
+- **Graphics settings, as a family rather than a number.** Human decision,
+  2026-08-20, from asking whether shadow resolution could be changed and finding
+  that no configuration concept exists anywhere in the engine: shadow resolution,
+  cascade count and distance, render scale, light budget and post toggles are all
+  `constexpr` today. They are **engine** settings and not `Lighting` properties —
+  a scene must not decide the player's GPU budget — and they land here because
+  until M7.5 exists there is nothing worth exposing, and a quality slider is a
+  hardening concern. See ADR 0038.
 - **Application identity.** Not "set the window icon" — the thing an engine owes
   a game it ships. `branding/` carries the LuauG mark, and that mark is the
   *fallback for the dev host only*: a game built with `luaug build` takes its
