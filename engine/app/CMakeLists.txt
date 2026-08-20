@@ -16,6 +16,7 @@ luaug_add_module(app
         src/bench.cpp
         src/screenshot.cpp
         src/debug_overlay.cpp
+        src/inspector.cpp
         src/dev_control.cpp
     DEPS
         asset
@@ -95,6 +96,7 @@ luaug_add_module_tests(app
         tests/reload_tests.cpp
         tests/world_host_tests.cpp
         tests/debug_overlay_tests.cpp
+        tests/inspector_tests.cpp
 )
 
 if(LUAUG_BUILD_TESTS)

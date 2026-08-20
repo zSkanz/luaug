@@ -77,6 +77,26 @@ it, and building it on speculation is what §5 rejects.
 
 ## Now / Next
 
+- **The inspector crashes on "go" from `RunService.Parent`, reported by the human
+  on 2026-08-20.** Following the reference from a service to the DataModel takes
+  the whole host down. Reading the code did not settle which of the two paths
+  does it, and both are worth checking with a debugger rather than by eye:
+
+  - **The button's guard is on the reference, not on what follows.** `go` checks
+    `reference.valid() && world.alive(reference)` and then selects. Everything
+    after that -- `world.classOf(game)`, the ancestry walk in
+    `collectProperties`, the per-property getter, `formatValue` -- runs against
+    the DataModel, which is the one instance in the world that no test selects.
+  - **The explorer is rooted at `root`, and the selection just went above it.**
+    `drawExplorer` walks from the root it was handed; selecting an ancestor of
+    that root leaves `selection()` outside every row the tree produces. Anything
+    that assumes the selection is reachable from the root breaks exactly here.
+
+  Whatever it turns out to be, the fix is not only the crash: **the DataModel
+  deserves a case in `inspector_tests.cpp`**. 618 lines of tests passed while
+  this shipped, which says the fixture builds a world the panel is then pointed
+  at from below -- and the human clicked the one edge that walks the other way.
+
 - **The F3 stats panel is unreadable while running, reported by the human on
   2026-08-20.** `drawStats` prints two values that change every frame:
   `frame.index`, which is a bare counter and cannot be read at 60 Hz, and

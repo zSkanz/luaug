@@ -7,19 +7,24 @@
 
 #include <array>
 #include <string>
+#include <vector>
 
+#include "inspector_fixture.h"
 #include "luaug/app/backends.h"
 #include "luaug/app/debug_overlay.h"
 #include "luaug/app/frame_scheduler.h"
+#include "luaug/app/inspector.h"
 #include "luaug/core/i18n.h"
 #include "luaug/core/text_key.h"
 #include "luaug/platform/event.h"
 #include "luaug/platform/platform.h"
 #include "luaug/platform/window.h"
 #include "luaug/rhi/device.h"
+#include "luaug/scene/world.h"
 
 using luaug::app::DebugOverlay;
 using luaug::app::Frame;
+using luaug::app::Inspector;
 using luaug::core::EngineError;
 
 namespace
@@ -30,6 +35,31 @@ void seedRealCatalog()
     const auto result = luaug::core::engineCatalog().loadFromFile(LUAUG_TEST_CATALOG);
     REQUIRE_MESSAGE(result.ok, result.diagnostic);
 }
+
+// A world for the explorer to walk: a root, two children out of alphabetical
+// order, and a grandchild, over the never-before-seen classes in
+// `inspector_fixture.h`. Small on purpose -- what this exercises is the drawing
+// code's ID stack and its Begin/End pairing, not the tree's size.
+struct InspectedWorld
+{
+    luaug::app::testing::Fixture schema;
+    luaug::scene::World world{schema.classes, schema.enums, schema.atoms, 1234u};
+    luaug::core::InstanceId root;
+
+    InspectedWorld()
+    {
+        root = schema.widget(world, "Root");
+        const luaug::core::InstanceId zulu = schema.widget(world, "Zulu");
+        const luaug::core::InstanceId alpha = schema.widget(world, "Alpha");
+        const luaug::core::InstanceId leaf = schema.widget(world, "Leaf");
+        static_cast<void>(world.setParent(zulu, root));
+        static_cast<void>(world.setParent(alpha, root));
+        static_cast<void>(world.setParent(leaf, zulu));
+
+        // A reference for the Instance widget to render and offer to follow.
+        static_cast<void>(world.setProperty(zulu, schema.atom("Link"), luaug::scene::Value{alpha}));
+    }
+};
 
 // One F3 press, as the pump would have reported it.
 [[nodiscard]] luaug::platform::Event pressF3()
@@ -151,6 +181,17 @@ TEST_CASE("on a real device, F3 flips the panel")
     {
         DebugOverlay overlay(*window, *device);
 
+        // The panel's drawing half cannot be asserted on -- it is pixels of
+        // text -- but it can be RUN, and running it is what catches an
+        // unbalanced ImGui ID stack, a BeginChild without its EndChild, or a
+        // widget reading a property the world will not give it. Without this
+        // the explorer and the properties table are never executed by any test
+        // at all, and `world` null is the only path the suite would cover.
+        InspectedWorld inspected;
+        Inspector inspector;
+        inspector.select(inspected.root);
+        overlay.setInspectionTarget(&inspected.world, inspected.root, &inspector);
+
         // Dev builds compile ImGui in; shipping does not, and the same overlay
         // is then inert on the very device it was written for. Asserting both
         // halves is what makes ADR 0011's "compiled out of shipping" a claim
@@ -181,6 +222,18 @@ TEST_CASE("on a real device, F3 flips the panel")
             cmd->endRenderPass();
 
             overlay.render(*cmd, swapchain.texture, Frame{.index = 1, .renderDt = 1.0 / 60.0});
+
+            // Every instance in turn, so each of the fixture's ValueTypes goes
+            // through its own widget rather than only the root's. A type whose
+            // editor crashed or left the ID stack unbalanced would show up
+            // here and nowhere else.
+            std::vector<luaug::app::TreeRow> rows;
+            luaug::app::collectTree(inspected.world, inspected.root, rows);
+            for (const luaug::app::TreeRow& row : rows)
+            {
+                inspector.select(row.id);
+                overlay.render(*cmd, swapchain.texture, Frame{.index = 2, .renderDt = 1.0 / 60.0});
+            }
         }
         else
         {

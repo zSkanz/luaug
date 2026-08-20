@@ -19,12 +19,19 @@
 #include <span>
 
 #include "luaug/app/frame_scheduler.h"
+#include "luaug/app/inspector.h"
+#include "luaug/core/id.h"
 #include "luaug/platform/event.h"
 #include "luaug/rhi/types.h"
 
 namespace luaug::platform
 {
 class Window;
+}
+
+namespace luaug::scene
+{
+class World;
 }
 
 namespace luaug::rhi
@@ -76,6 +83,21 @@ public:
     // next.
     void handleEvents(std::span<const platform::Event> events);
 
+    // What the explorer walks and where its edits go (M4 brief, Decisions 14
+    // to 16). `world` null -- the default -- draws the stats panel alone,
+    // which is the state of a host with no world and of every test with no
+    // scene; `root` is the instance the tree is drawn from, `game`.
+    //
+    // Re-point this after a reload. A reload destroys the outgoing `WorldHost`
+    // and with it the `World` this points at, so a stale pointer here is a
+    // dangling one rather than a wrong one.
+    void setInspectionTarget(scene::World* world, core::InstanceId root, Inspector* inspector) noexcept
+    {
+        world_ = world;
+        root_ = root;
+        inspector_ = inspector;
+    }
+
     // Draws the panel into `target` in a render pass of its own, so it sits on
     // top of whatever the frame already rendered.
     //
@@ -89,6 +111,13 @@ public:
 private:
     bool active_ = false;
     bool visible_ = false;
+
+    // Non-owning and rebindable, because the world they describe is rebuilt by
+    // every hot reload while the overlay is not (ADR 0024: the reload destroys
+    // `WorldHost` and nothing above it).
+    scene::World* world_ = nullptr;
+    core::InstanceId root_;
+    Inspector* inspector_ = nullptr;
 };
 
 } // namespace luaug::app
