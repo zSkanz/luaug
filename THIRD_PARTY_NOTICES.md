@@ -22,8 +22,8 @@ vendored yet; the roadmap allows lazy vendoring so long as the row exists.
 | jolt | 5.6.0 | _not vendored yet_ | MIT | https://github.com/jrouwe/JoltPhysics | `third_party/jolt/` |
 | box2d | 3.1.1 | _not vendored yet_ | MIT | https://github.com/erincatto/box2d | `third_party/box2d/` |
 | miniaudio | 0.11.25 | _not vendored yet_ | MIT-0 OR Unlicense | https://github.com/mackron/miniaudio | `third_party/miniaudio/` |
-| fastgltf | 0.9.x | _not vendored yet_ | MIT | https://github.com/spnda/fastgltf | `third_party/fastgltf/` |
-| meshoptimizer | 1.x | _not vendored yet_ | MIT | https://github.com/zeux/meshoptimizer | `third_party/meshoptimizer/` |
+| fastgltf | 0.9.0 | `0d1b67a28c49` | MIT | https://github.com/spnda/fastgltf | `third_party/fastgltf/` |
+| meshoptimizer | 1.2 | `9d9890c73011` | MIT | https://github.com/zeux/meshoptimizer | `third_party/meshoptimizer/` |
 | basis_universal | 2.5x | _not vendored yet_ | Apache-2.0 | https://github.com/BinomialLLC/basis_universal | `third_party/basis_universal/` |
 | ktx | latest-tag | _not vendored yet_ | Apache-2.0 | https://github.com/KhronosGroup/KTX-Software | `third_party/ktx/` |
 | stb | master-2026-08-01 | `2c980bb59875` | MIT OR Public Domain | https://github.com/nothings/stb | `third_party/stb/` |
@@ -35,7 +35,7 @@ vendored yet; the roadmap allows lazy vendoring so long as the row exists.
 | assimp | 6.0.x | _not vendored yet_ | BSD-3-Clause | https://github.com/assimp/assimp | `third_party/assimp/` |
 | doctest | 2.5.3 | `2d0a9359a60c` | MIT | https://github.com/doctest/doctest | `third_party/doctest/` |
 | blake3 | latest-tag | _not vendored yet_ | CC0-1.0 OR Apache-2.0 | https://github.com/BLAKE3-team/BLAKE3 | `third_party/blake3/` |
-| xxhash | latest-tag | _not vendored yet_ | BSD-2-Clause | https://github.com/Cyan4973/xxHash | `third_party/xxhash/` |
+| xxhash | 0.8.3 | `e626a72bc232` | BSD-2-Clause | https://github.com/Cyan4973/xxHash | `third_party/xxhash/` |
 
 ## Fetched binary artifacts
 

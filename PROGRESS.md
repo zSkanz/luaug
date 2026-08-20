@@ -134,7 +134,37 @@ it, and building it on speculation is what §5 rejects.
 
 ## Blocked — needs human
 
-- (none)
+- **fastgltf requires simdjson, and left alone it downloads it, unpinned, into
+  our vendored tree at configure time.** No document here records that fastgltf
+  has a dependency at all; it does, unconditionally and with no option to
+  disable it (`third_party/fastgltf/CMakeLists.txt:77-82`), and absent a
+  pre-existing `simdjson::simdjson` target its
+  `cmake/dependencies.cmake:17-20` runs `file(DOWNLOAD)` against
+  `raw.githubusercontent.com` for simdjson 3.12.3's single-header pair, writing
+  them into `third_party/fastgltf/deps/`. No hash check. That is R5 (a
+  dependency with no manifest row), R13 (a write inside a vendored tree), R14 (a
+  write into the source tree) and ADR 0032's fetch rule (configure-time
+  artifacts are SHA256-pinned) in one default, plus no offline configure.
+  Full write-up: M4 brief, Finding 1.
+
+  **The question: may simdjson be added to the manifest as a vendored
+  dependency?** It is Apache-2.0, so R6 is satisfied; R5 makes it a
+  human-approved ADR.
+
+  Recommended, if approved: vendor simdjson at the v3.12.3 that fastgltf pins,
+  compile the single-header pair into a `simdjson::simdjson` target we define
+  **before** `add_subdirectory(fastgltf)`, so the downloader is unreachable —
+  and add a patch under `third_party/patches/fastgltf/` turning the download
+  branch into a `FATAL_ERROR`, so a future version cannot silently start
+  fetching again.
+
+  The alternative is switching to cgltf (MIT, single header, no dependencies),
+  which is also an ADR since ADR 0010 chose fastgltf over it deliberately, and
+  costs the 5–7× import speed that was the reason.
+
+  Blocks: build-order step 1 (build wiring) and step 3 (the importer).
+  Not blocked by it: step 2 (`core::AABB`/`Frustum`), and the IDL half of
+  step 7.
 
 ## Decisions pending ADR
 

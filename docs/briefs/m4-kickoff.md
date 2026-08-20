@@ -395,6 +395,48 @@ frozen is the expensive order.
 *(the things the docs assumed that reality corrected — appended as they are
 learned, not at the end)*
 
+**1. fastgltf is not a leaf dependency, and its own CMake downloads the one it
+needs into our vendored tree.** ADR 0010 chose fastgltf on its merits and no
+document in this repository mentions that it requires **simdjson**. It does,
+unconditionally: `CMakeLists.txt:77-82` links `simdjson::simdjson` if that
+target exists and otherwise compiles `deps/simdjson` into the library. There is
+no option to turn it off — the fifteen `option()` lines at the top of the file
+do not include one.
+
+When the target does not exist and `find_package(simdjson CONFIG)` fails,
+`cmake/dependencies.cmake:17-20` runs `file(DOWNLOAD)` twice against
+`raw.githubusercontent.com` for simdjson 3.12.3's single-header pair, and writes
+them to `${CMAKE_CURRENT_SOURCE_DIR}/deps/simdjson` — that is, **inside
+`third_party/fastgltf/`**. There is no hash check of any kind, and a failed
+download is detected only by the file's absence or a version string parsed back
+out of the header it just wrote.
+
+That single default breaks four things this repository has already decided:
+
+- **R5** — simdjson is a dependency with no manifest row, at a version nothing
+  here approved.
+- **R13** — the write lands inside a vendored tree, which is never edited in
+  place.
+- **R14** — and inside the source tree, which never receives build output.
+- **ADR 0032's rule** — an artifact fetched at configure time is pinned by
+  SHA256 and cached under `$LUAUG_BUILD_ROOT`. This one is pinned by nothing.
+
+It also means no offline configure and a network round trip on every clean CI
+configure, on a dependency whose whole selling point is load speed.
+
+This was found before a line of build wiring was written, by reading the
+vendored `CMakeLists.txt` rather than the library's documentation — which is M3
+Finding 1 repeating with a different vendor, and the second time in this project
+that the pinned artifact contradicted the plan at kickoff instead of at the
+gate.
+
+**Escalated rather than decided** (§10, R5): the fix needs simdjson on the
+manifest, and adding a dependency is a human call. The recommendation is in
+`PROGRESS.md` under "Blocked — needs human".
+
+*(meshoptimizer, checked at the same time, is clean: its `CMakeLists.txt`
+fetches nothing and its only `find_package` is `Threads`.)*
+
 ## Gate Record
 
 *Filled at milestone end, before human review.*
