@@ -61,6 +61,12 @@ public:
     // whose content directory is missing its shaders should boot and say why.
     [[nodiscard]] virtual bool valid() const noexcept = 0;
 
+    // The radius around the camera this renderer's shadow map covers, in
+    // metres. `extract` needs it to decide which off-screen geometry is still
+    // worth keeping as a caster, and the number belongs to the pass list rather
+    // than to the host -- a renderer with cascades would answer differently.
+    [[nodiscard]] virtual core::f32 shadowRadius() const noexcept = 0;
+
 protected:
     IRenderer() = default;
 };

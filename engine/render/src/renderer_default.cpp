@@ -101,6 +101,9 @@ public:
     void render(rhi::IDevice& device, rhi::ICmdList& cmd, const RenderTarget& target, const RenderWorld& world,
         const MeshCache& meshes) override;
     [[nodiscard]] bool valid() const noexcept override { return valid_; }
+    // The ortho box is a cube of half-extent `kShadowExtent` centred on the
+    // camera, so its corner reaches sqrt(3) times as far.
+    [[nodiscard]] f32 shadowRadius() const noexcept override { return kShadowExtent * 1.7320508f; }
 
 private:
     [[nodiscard]] std::optional<core::EngineError> ensureTargets(rhi::IDevice& device, u32 width, u32 height);
@@ -370,6 +373,11 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
 
     for (const DrawItem& draw : world.draws)
     {
+        // The shadow pass takes everything; the forward pass takes only what the
+        // camera can see. A caster behind the camera still casts into the frame.
+        if (!shadowPass && !draw.inCameraFrustum)
+            continue;
+
         const MeshCache::Resolved* resolved = meshes.resolve(draw.mesh);
         if (resolved == nullptr || draw.section >= resolved->sections.size())
             continue;

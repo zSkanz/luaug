@@ -205,6 +205,22 @@ if(LUAUG_BUILD_TESTS)
                 -DFRAMES=3
                 -P ${CMAKE_SOURCE_DIR}/tests/rendercapture/run_capture_gate.cmake)
         set_tests_properties(capture_gate PROPERTIES TIMEOUT 60)
+
+        # M4's gate: three camera angles by two lighting states, as six
+        # consecutive frames of one stream. Every camera position and clock
+        # value is a literal at a named tick -- an orbit driven by elapsed time
+        # would make the golden depend on how many ticks had passed when it was
+        # recorded, and a one-tick shift changes every number in a command
+        # stream (M1 Finding 9, M3 Finding 15).
+        add_test(NAME capture_gate_meshes
+            COMMAND ${CMAKE_COMMAND}
+                -DHOST=$<TARGET_FILE:luaug_host>
+                -DGOLDEN=${CMAKE_SOURCE_DIR}/tests/rendercapture/meshes-6frames.jsonl
+                -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/capture-gate-meshes.jsonl
+                -DSCRIPT=${CMAKE_SOURCE_DIR}/tests/rendercapture/meshes
+                -DFRAMES=6
+                -P ${CMAKE_SOURCE_DIR}/tests/rendercapture/run_capture_gate.cmake)
+        set_tests_properties(capture_gate_meshes PROPERTIES TIMEOUT 120)
     endif()
 
     # The M1 gate's reference screenshot: render a frame on a real GPU, read it

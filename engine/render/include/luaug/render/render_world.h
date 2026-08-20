@@ -158,6 +158,12 @@ struct DrawItem
     // Index into `RenderWorld::materials`, deduplicated across the frame so the
     // sort key groups draws that share a bind set.
     u32 material = 0;
+    // Whether the camera can see it. False items are still in the list because
+    // **a caster outside the view still casts into it**: dropping them from the
+    // snapshot removed the shadows of everything behind the camera, which is a
+    // correct-looking image with the wrong shadows in it. The shadow pass draws
+    // every item; the forward pass draws only these.
+    bool inCameraFrustum = true;
 };
 
 struct RenderWorld
@@ -173,6 +179,9 @@ struct RenderWorld
     // asks for the *why* next to the *what*. `culled` is the interesting one: a
     // frame where it is zero is a frame the culler did not help.
     u32 candidateDraws = 0;
+    // Not in the camera's frustum. They are still drawn into the shadow map, so
+    // this is "how many the forward pass skipped" rather than "how many were
+    // discarded".
     u32 culledDraws = 0;
 
     void clear() noexcept
@@ -260,6 +269,12 @@ void extract(
     core::InstanceId lightingHost,
     const MeshLibrary& meshes,
     f32 viewportAspect,
+    // Metres. Geometry further than this from the camera is dropped entirely --
+    // it can neither be seen nor cast into view, because the shadow map only
+    // covers a bounded region around the camera. The renderer owns the number
+    // and passes it, rather than `extract` guessing at a constant that lives in
+    // the pass list.
+    f32 shadowRadius,
     RenderWorld& out);
 
 } // namespace luaug::render

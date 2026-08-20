@@ -594,6 +594,16 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             if (!options.headless)
                 host->preRender(frame.renderDt);
 
+            // Loading comes BEFORE extraction, and the order is load-bearing:
+            // `extract` reads the mesh library, so a MeshPart whose file has not
+            // been read yet contributes nothing. Running the loader afterwards
+            // made every newly created MeshPart invisible for exactly one frame
+            // -- which a golden records faithfully and a person notices as a
+            // flicker they cannot reproduce.
+            meshCache.beginFrame(*device);
+            if (renderer != nullptr && renderer->valid())
+                (void)meshLoader.sync(*device, *cmd, host->world(), host->workspace(), meshCache, meshLibrary);
+
             // Extraction happens once, at a known moment, from a world that is
             // between ticks (ADR 0027). Rendering never walks the ECS.
             // The aspect comes from the target rather than from the camera:
@@ -603,17 +613,16 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             const f32 aspect = targetHeight == 0
                 ? 1.0f
                 : static_cast<f32>(targetWidth) / static_cast<f32>(targetHeight);
-            render::extract(
-                host->world(), host->workspace(), host->lighting(), meshLibrary, aspect, snapshot);
+            const f32 shadowRadius =
+                renderer != nullptr && renderer->valid() ? renderer->shadowRadius() : 0.0f;
+            render::extract(host->world(), host->workspace(), host->lighting(), meshLibrary, aspect, shadowRadius,
+                snapshot);
             submitWorld(snapshot, debugDraw);
 
             // Uploaded before the render pass opens, because a copy cannot run
             // inside one -- the seam says so and the backend enforces it. The
             // mesh loader is here for the same reason and one more: it is the
             // FrameStart safe point, so a file read cannot land mid-tick.
-            meshCache.beginFrame(*device);
-            if (renderer != nullptr && renderer->valid())
-                (void)meshLoader.sync(*device, *cmd, host->world(), host->workspace(), meshCache, meshLibrary);
             if (debugRenderer.valid())
                 debugRenderer.upload(*device, *cmd, debugDraw);
 

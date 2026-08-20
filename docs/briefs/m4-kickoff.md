@@ -1085,6 +1085,43 @@ anyone who tried, which is why the fix is defaults on the struct rather than
 nine more lines in one fixture: it removes the trap instead of stepping around
 it.
 
+**23. A failed link leaves a stale executable that Ninja then considers current,
+so the gate runs yesterday's binary and passes.** Worth more than everything
+else in this section, because it makes every other measurement suspect.
+
+`LNK1168` -- "cannot open luaug-host.exe for writing" -- happens when something
+still holds the file. The link fails, but the file's timestamp has already
+moved, so the next build sees an executable newer than the library it links and
+does nothing. `ctest` then runs it. I spent forty minutes concluding that a
+planted defect had no effect on the command stream, when what had no effect was
+the build.
+
+The proof, once the binary was verified fresh by deleting it: culling everything
+gives 96 shadow draws and **0** forward draws. The stale binary had reported 64.
+
+Two things follow. The gate catching a broken culler had to be verified against a
+build I had *watched* relink, not one I assumed had. And the thing holding the
+file was an orphaned `luaug-host` -- left by **my own commands**, which piped the
+host's output through `head`; the reader exits, the writer keeps running.
+`CLAUDE.md` says not to pipe a build through `tail`/`head` and gives the same
+reason for a different symptom. It applies to anything that runs.
+
+**24. The M4 golden could not fail until it had geometry to cull.** The first
+version framed the whole scene from all three angles, and the scene is one
+`MeshPart` culled against one bound -- so the draw count was identical whether
+or not the frustum test ran at all. A distant second copy makes frames 3 to 6
+draw 16 into the shadow map and 8 in the forward pass, which is a number that
+moves when the culler breaks.
+
+**25. Culling shadow casters against the camera frustum deletes the shadows of
+everything behind the camera.** Found while reading the per-frame draw counts of
+that same golden: shadow and forward were equal, which they should not be. A
+caster outside the view still casts into it, so `extract` keeps off-screen
+geometry and flags it, the shadow pass draws everything, and the forward pass
+draws only what the camera can see. The bound is `IRenderer::shadowRadius()`,
+because the number belongs to the pass list -- a renderer with cascades would
+answer differently -- rather than to a constant `extract` guesses at.
+
 ## Gate Record
 
 *Filled at milestone end, before human review.*

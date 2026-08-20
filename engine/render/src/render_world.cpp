@@ -108,6 +108,7 @@ void extract(
     core::InstanceId lightingHost,
     const MeshLibrary& meshes,
     f32 viewportAspect,
+    f32 shadowRadius,
     RenderWorld& out)
 {
     out.clear();
@@ -276,10 +277,18 @@ void extract(
                 // is conservative in the direction that never drops geometry,
                 // and a per-section test is the optimization to make when a
                 // profile says the draws it saves are worth the fetch.
-                if (!core::intersects(out.camera.frustum, worldBounds))
+                const bool visible = core::intersects(out.camera.frustum, worldBounds);
+                if (!visible)
                 {
                     ++out.culledDraws;
-                    continue;
+                    // Kept anyway when it is close enough to cast into view. The
+                    // first version dropped it, which deleted the shadow of
+                    // everything behind the camera -- an image that looks right
+                    // until you notice what is missing from it.
+                    const Vec3 toCentre = core::center(worldBounds);
+                    const f32 reach = shadowRadius + 0.5f * core::length(core::size(worldBounds));
+                    if (core::length(toCentre) > reach)
+                        continue;
                 }
 
                 u32 materialSlot = 0;
@@ -314,6 +323,7 @@ void extract(
                     .mesh = entry->mesh,
                     .section = section,
                     .material = materialSlot,
+                    .inCameraFrustum = visible,
                 });
             }
         });
