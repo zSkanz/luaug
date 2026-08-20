@@ -476,8 +476,60 @@ enumerated here so that each gets an emptiness check by construction.
 
 ## Findings
 
-(append during the milestone — the things the docs assumed that reality
-corrected)
+*(the things the docs assumed that reality corrected)*
+
+**1. Lute cannot hold a pipe to a running child, and has no raw TCP — so the
+transport `api-design.md` §3.2 named was right and this brief's first answer was
+wrong.** `process.run` returns only when the child exits, handing back `stdout`
+and `stderr` as whole strings: no handle, no stdin, no incremental read (U-55).
+The entire net surface is an HTTP client, a WebSocket client, an HTTP server and
+a WebSocket server (U-57). So WebSocket is the only bidirectional push channel
+Lute can speak, and the stdio design was unimplementable rather than merely
+worse. What *was* still open is which side listens, and there §3.2's wording
+implied the wrong one: the dev server listens and the engine dials out, so the
+engine opens no port in any profile (ADR 0035).
+
+This is the M2 lesson repeating with a different vendor: **the pinned artifact
+contradicted the plan, and the cost of finding out was one hour at kickoff
+instead of a milestone of rework.** The research report was honest that it was
+web-derived; reading it as though it were source was the mistake.
+
+**2. `fs.watch` cannot tell you which file changed.** Editing
+`src/scripts/sub/deep.luau` under a watch on `src/scripts` fires with
+`filename = "sub"` — the top-level entry, not the file. One ordinary rewrite
+fires two events; a write-temp-then-rename save fires six across two names
+(U-58). The watcher therefore watches every directory individually and
+**rescans** on a debounce rather than trusting the payload, which is also what
+makes it behave the same on inotify. Linux is still unverified, and its failure
+mode there is silence rather than an error.
+
+**3. A syntax error does not fail `boot`, so a reload had to learn to be
+stricter than a boot.** `startScripts` logs the error, skips that script and
+carries on — correct at boot, where the engine has nothing better to offer than
+a world missing one script. The first version of `reloadWorld` inherited that
+and reported a **successful reload of a world in which the developer's edit had
+never run**: the exact shape of M2's Finding 19, arriving in the one place the
+brief had predicted it would. A reload now refuses on any compile failure,
+because unlike a boot it has the world that was already running to fall back on.
+The asymmetry is written into `reload.h` so the next reader does not "fix" it.
+
+**4. A digest test failed and the code was right.** The 55-byte SHA-1 vector had
+been written from memory; FIPS publishes none at that length. The expectation now
+carries what Windows CNG computes and says so in the comment. MASTER_PROMPT §9
+says never guess an API signature; this is the same rule one level down — never
+guess a *value* either, and if no published one exists, cross-check against an
+implementation you did not write.
+
+**5. A test that waited for bytes the client had no reason to send hung the whole
+suite instead of failing it.** The loopback helper takes a read deadline now. A
+hang costs a CI runner its entire timeout to say nothing, which is strictly worse
+than a red test with a message — and the mistake is easy enough to make twice.
+
+**6. Clang caught a `socklen_t` MSVC did not.** The address length is `int` on
+Winsock and unsigned on POSIX, so one cast was a `-Wsign-conversion` error on
+exactly one tier. That is now the third time in this project's life that the
+Linux stage was the only thing between an implicit conversion and `main`, which
+is the entire argument for CLAUDE.md's rule about not skipping it.
 
 ## Gate Record
 

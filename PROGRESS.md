@@ -8,7 +8,8 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 - Current milestone: **M3 — Tooling Loop: CLI, Hot Reload, Types, Tests**,
   opened 2026-08-20 (brief: [`docs/briefs/m3-kickoff.md`](docs/briefs/m3-kickoff.md)).
   Built so far: the brief with its fourteen decisions and the control protocol,
-  and `engine/net` — the RFC 6455 client the engine dials the dev server with.
+  `engine/net` (the RFC 6455 client the engine dials the dev server with), and
+  the reload seam in `app`.
 - **M2 — Kernel: Instances over ECS, Scheduler, Signals, `task` — COMPLETE and
   SIGNED OFF by the human on 2026-08-20**, tagged `milestone/m2` (brief:
   [`docs/briefs/m2-kickoff.md`](docs/briefs/m2-kickoff.md), which carries the
@@ -56,11 +57,17 @@ watch. `engine/net` is done; the reload seam is next.
 
 ## Now / Next
 
-- **Next: the reload seam.** Rebuild `WorldHost` at the FrameStart safe point,
-  build-before-destroy (brief Decision 14, ADR 0024 addendum), with
-  `HotReloadService` and the C++ state bag — and a headless C++ test that asserts
-  **reload == cold restart** by world hash (Decision 11), with no network in it
-  at all. Then the control loop, then the Lute dev server.
+- **Next: `HotReloadService` and the state bag.** The reload mechanism is built
+  and proved; what it does not yet do is carry anything across. `SaveState` /
+  `LoadState` / `IsReload` / `BeforeReload` / `AfterReload` in
+  `api/defs/services.api.luau` with the `DevOnly` tag, an engine-side bag that
+  outlives the VM (Decision 4), and `PreserveOnReload` instances re-materialized
+  before the new entry scripts are deferred (Decision 5). Then the control loop,
+  then the Lute dev server.
+- **The reload seam is done.** `app::reloadWorld` rebuilds `WorldHost` and
+  nothing above it, build-before-destroy, and the test that matters asserts
+  **reload == cold boot by world hash**. A reload refuses on a compile failure or
+  on zero mounted scripts and leaves the running world alone.
 - **The control protocol is written** into the brief (message set, envelope,
   token handshake, the three emptiness checks), and the transport under it is
   built: `engine/net` (L2) has the RFC 6455 client, 28 cases / 214 assertions,
@@ -179,9 +186,21 @@ there when this file passed its ~300-line cap.
   did not -- the address length is `int` on Winsock and unsigned on POSIX -- the
   third time in this family of milestones that the Linux tier was the only thing
   between an implicit conversion and `main`.
-  Next: **the reload seam** -- rebuild `WorldHost` at the FrameStart safe point,
-  build-before-destroy, with a headless test asserting reload == cold restart by
-  world hash. No network in that step at all.
+  Then built the reload seam. `app::reloadWorld` destroys and rebuilds
+  `WorldHost` and nothing above it, so ADR 0024's "engine-side content survives"
+  is a C++ lifetime rather than a promise; the frame loop holds the host by
+  pointer for exactly that reason. The assertion that matters is one line --
+  `afterReload == hashOfColdBoot(project, kTicks)` -- paired with one that the
+  hash actually moved, because either alone passes against a reload that did
+  nothing.
+  Learned by running it: **a syntax error does not fail `boot`**. `startScripts`
+  logs it, skips that script and carries on, which is right for a boot and wrong
+  for a reload -- the first version reported a successful reload of a world in
+  which the edit had never run. A reload is now stricter than a boot, because
+  unlike a boot it has the world that was already running to fall back on, and
+  the asymmetry is written into `reload.h`.
+  Next: **`HotReloadService` and the state bag** -- the reload carries nothing
+  across yet.
 
 <!-- Format for future entries:
 - **YYYY-MM-DD (session N):** did X; learned Y; Next: <literal first action>.
