@@ -953,6 +953,38 @@ The general form, and it is sharper than "write good tests": **a test written
 from the same understanding as the code inherits that understanding's blind
 spots.** Planting the defect is what separates the two.
 
+**14. The camera's position was applied twice, and only a test written at a
+million metres could have said so.** `extract` builds the view matrix from the
+camera's `CFrame`, and the first version inverted the whole frame — rotation and
+translation. But the position is already `origin`, subtracted out of every other
+coordinate in the snapshot, so leaving it in the view applies it a second time.
+
+Near the world origin that is invisible: the double-subtraction is a few
+centimetres of nothing. It is catastrophic a kilometre out, which is precisely
+where ADR 0014 says the f64 path has to hold — so the failure mode is a renderer
+that looks perfect in every test written near zero and breaks in the open world
+the engine exists to make.
+
+The test that caught it puts the camera at 1,000,000 metres and asserts the view
+matrix's translation column is zero. It is the ADR's own claim, asserted rather
+than assumed.
+
+**15. `alive` and "still part of the world" are different questions, and the
+renderer is the first caller that needed the second.** `World::alive` stays true
+for a destroyed instance until retirement, deliberately — that window is what
+gives a `Destroying` handler a handle to work with (divergence #25). A camera
+destroyed mid-drain is therefore `alive`, and rendering through it draws a frame
+from a viewpoint the world has already let go of. `World::destroyed` is now a
+public question, because a consumer that means "is this still part of the world"
+had no way to ask it.
+
+**16. Fifth time the Linux tier caught a `-Wdouble-promotion` MSVC did not, and
+the second time it was `doctest::Approx`.** It takes a `double`, so comparing an
+f32 against one promotes. Finding 5 recorded it; recording was not enough, and I
+walked into it again in the same milestone. The render tests now carry a
+`nearly(f32, f32)` helper, which also states the tolerance in the expression
+instead of in a comment — a fix that removes the trap rather than remembering it.
+
 ## Gate Record
 
 *Filled at milestone end, before human review.*

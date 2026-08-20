@@ -167,6 +167,12 @@ bool World::alive(core::InstanceId id) const noexcept
     return m_instances.find(id) != nullptr;
 }
 
+bool World::destroyed(core::InstanceId id) const noexcept
+{
+    const InstanceRecord* record = m_instances.find(id);
+    return record != nullptr && record->destroyed;
+}
+
 ClassId World::classOf(core::InstanceId id) const noexcept
 {
     const InstanceRecord* record = m_instances.find(id);

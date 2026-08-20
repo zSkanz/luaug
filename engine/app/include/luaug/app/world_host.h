@@ -139,6 +139,10 @@ public:
     // `Workspace`, which is what `render::extract` treats as the world root:
     // whatever is parented under it is in the world and whatever is not, is not.
     [[nodiscard]] core::InstanceId workspace() const noexcept { return m_workspace; }
+
+    // The `Lighting` service, which carries the environment `extract` reads.
+    // Invalid in a build with no render module, which is not an error.
+    [[nodiscard]] core::InstanceId lighting() const noexcept { return m_lighting; }
     [[nodiscard]] script::ScriptRuntime& runtime() noexcept { return *m_runtime; }
     [[nodiscard]] bool shutdownRequested();
 
@@ -176,6 +180,7 @@ private:
 
     std::filesystem::path m_root;
     core::InstanceId m_workspace;
+    core::InstanceId m_lighting;
     PreserveReport m_preserveReport;
     render::DebugDraw* m_gizmos = nullptr;
 

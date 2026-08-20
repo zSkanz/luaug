@@ -132,6 +132,16 @@ public:
     void retireDestroyed();
 
     [[nodiscard]] bool alive(core::InstanceId id) const noexcept;
+
+    // Whether `destroy` has been called and the retirement has not happened
+    // yet. `alive` is deliberately true through that window so a `Destroying`
+    // handler has a handle to work with, so the two questions are different and
+    // a caller that means "is this still part of the world" wants this one.
+    //
+    // The renderer is the first to need it: a camera destroyed mid-drain is
+    // still `alive`, and rendering through it would be drawing a frame from a
+    // viewpoint the world has already let go of.
+    [[nodiscard]] bool destroyed(core::InstanceId id) const noexcept;
     [[nodiscard]] ClassId classOf(core::InstanceId id) const noexcept;
     [[nodiscard]] bool isA(core::InstanceId id, ClassId base) const noexcept;
 

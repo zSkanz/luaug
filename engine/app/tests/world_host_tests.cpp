@@ -356,7 +356,7 @@ TEST_CASE("the world ticks, and a Heartbeat handler sees the clock advance")
         host.tick();
 
     render::RenderWorld snapshot;
-    render::extract(host.world(), host.workspace(), snapshot);
+    render::extract(host.world(), host.workspace(), host.lighting(), render::MeshLibrary{}, 1.0f, snapshot);
     REQUIRE(snapshot.parts.size() == 1);
     // Ten: the script connected during the boot drain, so it saw every one of
     // the ten ticks.

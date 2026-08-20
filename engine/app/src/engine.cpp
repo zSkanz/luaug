@@ -228,6 +228,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // renders nothing -- capture, null -- has no pipeline to build, and a
     // machine whose content directory is missing its shaders should boot and
     // say why rather than refuse to start.
+    // Empty until something loads a mesh into it. `extract` skips a `MeshPart`
+    // whose content is not here, so an unpopulated library renders the debug
+    // path and nothing else -- which is exactly the state a world with no
+    // MeshParts is in.
+    render::MeshLibrary meshLibrary;
     render::ShaderLibrary shaders;
     render::DebugRenderer debugRenderer;
     render::DebugDraw debugDraw;
@@ -518,7 +523,15 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
             // Extraction happens once, at a known moment, from a world that is
             // between ticks (ADR 0027). Rendering never walks the ECS.
-            render::extract(host->world(), host->workspace(), snapshot);
+            // The aspect comes from the target rather than from the camera:
+            // a `Camera` has no ViewportSize in this release (it needs a
+            // Vector2, which the UI brings at M6), and the renderer is the one
+            // that knows how many pixels it is filling.
+            const f32 aspect = targetHeight == 0
+                ? 1.0f
+                : static_cast<f32>(targetWidth) / static_cast<f32>(targetHeight);
+            render::extract(
+                host->world(), host->workspace(), host->lighting(), meshLibrary, aspect, snapshot);
             submitWorld(snapshot, debugDraw);
 
             // Uploaded before the render pass opens, because a copy cannot run

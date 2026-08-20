@@ -245,6 +245,14 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
     // every frame.
     m_workspace =
         m_world->findFirstChildOfClass(m_runtime->dataModel(), m_classes.findId(m_atoms.lookup("Workspace")));
+    // Cached for the same reason, and separately: `Lighting` is a sibling of
+    // `Workspace` rather than a child of it, so `extract` cannot reach one from
+    // the other. An engine built without the render module registers no
+    // Lighting class at all, and this stays invalid -- which `extract` reads as
+    // "no environment state" and answers with the defaults, rather than as an
+    // error.
+    m_lighting =
+        m_world->findFirstChildOfClass(m_runtime->dataModel(), m_classes.findId(m_atoms.lookup("Lighting")));
 
     if (!options.projectPath.empty())
     {
