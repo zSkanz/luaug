@@ -733,6 +733,9 @@ Frame time for the deliverable at 1080p: **median 1.11 ms, worst 1.93 ms**
     is a centimetre. It is deterministic, it is the same every run, and it is
     the reason the order is fixed rather than incidental.
 
-- **Nothing here is tagged.** Per MASTER_PROMPT §6 the milestone is complete when
-  the human says so in words; `PROGRESS.md` records it as awaiting review and
-  `milestone/m5` does not exist yet.
+- **Signed off by the human on 2026-08-20** and tagged `milestone/m5`. Until
+  that sentence existed this section ended by saying nothing was tagged, which is
+  MASTER_PROMPT §6: a green gate is evidence offered to the decision, never the
+  decision. The review round is why the paragraph above this one exists — the
+  milestone shipped one more defect fixed than the gate that certified it had
+  found.

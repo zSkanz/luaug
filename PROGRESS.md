@@ -5,20 +5,21 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- **M5 — Feeling the World: Jolt Physics + Character — BUILT, AWAITING HUMAN
-  REVIEW.** Not complete: a milestone is complete when the human says so in
-  words (§6), so there is no `milestone/m5` tag and this line does not say
-  COMPLETE. The full gate is green on both local tiers and the Gate Record is in
-  [`docs/briefs/m5-kickoff.md`](docs/briefs/m5-kickoff.md), with twelve Findings
-  and a "what a reviewer should know before signing" section.
+- **M5 — Feeling the World: Jolt Physics + Character — COMPLETE, signed off
+  2026-08-20**, tagged `milestone/m5`. Signed after a review round that found
+  something: two `CharacterBody` were reported as passing through each other,
+  which did not reproduce — and the investigation found the real defect
+  underneath, a character that ignored `CollisionGroup` (D025). The Gate Record
+  is in [`docs/briefs/m5-kickoff.md`](docs/briefs/m5-kickoff.md), with seventeen
+  Findings and the section written for a reviewer.
 - **M4.5 — Correcting the World — COMPLETE, signed off 2026-08-20**, tagged
   `milestone/m4.5`. **M4 — Seeing the World — signed off 2026-08-20**
   (`milestone/m4`), its five gate items green against re-recorded artifacts.
   **M3** (`milestone/m3`), **M2** (`milestone/m2`), **M1**, **M0** — all signed
   off.
-- **CI is green on `main`**, run 32408288019, all three tiers — the first time
-  macOS has compiled Jolt. Two red runs preceded it and both found something a
-  local tier cannot see (D023, D024).
+- **CI is green on `main`**, run 32429107275, all three tiers — including the
+  first macOS build of Jolt. Two red runs preceded the first green one and both
+  found something a local tier cannot see (D023, D024).
 
 ### M5: what the world can do that it could not
 
@@ -100,8 +101,8 @@ scope. The ones most likely to be mistaken for bugs:
   affected; the fix is a per-property error-key override in the IDL.
 - **D022 — a `Part` never reaches the solid renderer.** Scheduled with M7.5.
 - **M6 opens in a NEW session** (§6: never start a second milestone in the one
-  that closed one, and M5 is not closed until the human says so). Its first
-  action, written out so the next session does not re-derive it: **read
+  that closed one, and this one closed M5). Its first action, written out so the
+  next session does not re-derive it: **read
   `docs/briefs/m5-kickoff.md`'s Findings**, then write
   `docs/briefs/m6-kickoff.md` from `docs/roadmap.md`'s M6 section — whose first
   scope item is the Input Action System, and whose gate includes migrating
@@ -161,11 +162,10 @@ scope. The ones most likely to be mistaken for bugs:
 
 ## Blocked — needs human
 
-- **M5 is built and awaiting review.** The Gate Record is in
-  [`docs/briefs/m5-kickoff.md`](docs/briefs/m5-kickoff.md) §Gate Record, and its
-  last section is written for a reviewer: what is deliberately absent, what
-  round-trips without acting, and what a screenshot will look like and why.
-  Nothing is tagged.
+- **The Android run of `examples/02-meshes` is due.** Deferred by the human
+  until M4.5 closed, and M4.5 and M5 have both closed since. It is a device
+  checkpoint rather than milestone work, and it is here so that it is asked for
+  rather than forgotten.
 - **A judgement I made that a reviewer may want to remake.** `churn10k` reads
   4.96 ms/tick where M2 recorded 2.02, and the Gate Record calls that a changed
   measurement rather than a regression: the benchmark's scene now holds ten
@@ -221,7 +221,33 @@ there when this file passed its ~300-line cap.
   a suite that had just lost seventeen cases to a syntax error. And **the Linux
   tier found an ABI defect, not just a warning**: Jolt compiled `-fno-rtti` emits
   no typeinfo, which MSVC hides by emitting RTTI per translation unit.
-  Next: **stop for M5 human review** (§6). Do not start M6 this session.
+  **Signed off by the human 2026-08-20** ("tá aprovado"), after a review round
+  that found something and after the answer changed what the milestone shipped:
+  two `CharacterBody` were reported as passing through each other, on a reading
+  of Jolt correct in every particular. It did not reproduce -- this backend gives
+  every character an inner rigid body, and that is what the other one's sweep
+  finds -- and the investigation found the real defect underneath, a character
+  whose sweep was handed a filter that accepts every layer, so `CharacterBody`
+  was the one thing in the world outside the collidability matrix (D025).
+  The general shape, which is the one to keep: **a report whose reasoning is
+  sound can still have the wrong conclusion, and the way to find out is to run
+  it rather than to argue with it.** Two probes and a break-verification cost
+  twenty minutes and turned a wrong fix into a right one. The near-miss is that
+  registering every character in `CharacterVsCharacterCollisionSimple`, which is
+  what was asked for and would have "worked", would have reintroduced the same
+  defect by a different door: its list has no filter at all.
+  Also learned: **the build agreeing is not evidence that the build read your
+  file** -- a restore with `Copy-Item` kept the old timestamp, Ninja rebuilt
+  nothing, and a working fix reported itself as broken. And **the bench harness
+  was the thirteenth gate found able to pass while doing nothing**, caught by
+  writing a scene that failed its own assertions and watching it report a
+  respectable number anyway.
+  Closed with one thing measured that nobody asked for as work: **the renderer
+  submits one draw call per visible object**, which is the engine's real ceiling
+  for a crowd -- two thousand enemies at 11.1 ms, of which 1.8 ms is the entire
+  simulation, and the same frame costs the same at 320x180 as at 4K. Instanced
+  draws are now named M7.5 scope with that number attached.
+  Next: **open M6 in a new session** (§6). Its first action is in Now/Next.
 
 - **2026-08-20 (session 9, Claude Opus): M4.5, awaiting sign-off.** Ran the §2
   boot sequence, found the repo green, wrote `docs/briefs/m4.5-kickoff.md`, and
