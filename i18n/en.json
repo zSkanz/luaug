@@ -74,6 +74,9 @@
   "rhi.err.target_create_failed": "Could not create the offscreen render target.",
   "rhi.err.upload_inside_pass": "Cannot upload while a render pass is open; upload before beginRenderPass.",
 
+  "engine.reload.err.script_failed": "Reload refused: {count} entry script(s) would not compile. The previous world is still running.",
+  "engine.reload.err.no_scripts": "Reload refused: no entry scripts were found under {path}. The previous world is still running.",
+
   "net.err.handshake_failed": "The WebSocket handshake failed: {detail}.",
   "net.err.connect_failed": "Could not connect to {host}:{port} — {detail}.",
   "net.err.protocol_violation": "The peer broke the WebSocket protocol: {detail}.",

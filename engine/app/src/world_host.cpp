@@ -414,6 +414,16 @@ std::optional<core::EngineError> WorldHost::mountConformance(const std::filesyst
     return std::nullopt;
 }
 
+core::u64 WorldHost::mountedScriptCount() const
+{
+    return static_cast<core::u64>(script::mountedScriptCount(m_runtime->state()));
+}
+
+core::u64 WorldHost::scriptLoadFailures() const
+{
+    return static_cast<core::u64>(script::scriptLoadFailures(m_runtime->state()));
+}
+
 ConformanceReport WorldHost::conformanceReport() const
 {
     const core::InstanceId root = m_runtime->dataModel();

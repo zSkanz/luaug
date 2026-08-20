@@ -102,6 +102,13 @@ public:
     // errors, so debug drawing left in shared code cannot fail a headless test.
     void setGizmoTarget(render::DebugDraw* draw);
 
+    // Entry scripts this world mounted, and how many of them failed to
+    // compile. The reload reads both: a reload that mounted nothing, or that
+    // mounted something it could not compile, is a gate passing while doing
+    // nothing (M2 Finding 19).
+    [[nodiscard]] core::u64 mountedScriptCount() const;
+    [[nodiscard]] core::u64 scriptLoadFailures() const;
+
     [[nodiscard]] scene::World& world() noexcept { return *m_world; }
 
     // `Workspace`, which is what `render::extract` treats as the world root:

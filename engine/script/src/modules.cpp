@@ -394,6 +394,7 @@ void startScripts(lua_State* L)
                 {"message", std::string_view{error}},
             };
             core::logText(core::LogLevel::Error, core::formatKeyPrefixed(LUAUG_TR("script.err.syntax"), args));
+            ++modules.loadFailures;
             lua_remove(L, rooted);
             continue;
         }
@@ -418,6 +419,11 @@ void startScripts(lua_State* L)
 usize mountedScriptCount(lua_State* L)
 {
     return registry(L).entries.size();
+}
+
+usize scriptLoadFailures(lua_State* L)
+{
+    return registry(L).loadFailures;
 }
 
 } // namespace luaug::script

@@ -10,6 +10,7 @@ luaug_add_module(app
         src/frame_scheduler.cpp
         src/backends.cpp
         src/engine.cpp
+        src/reload.cpp
         src/replay.cpp
         src/bench.cpp
         src/screenshot.cpp
@@ -83,6 +84,7 @@ add_custom_command(TARGET luaug_host POST_BUILD
 
 luaug_add_module_tests(app
     SOURCES
+        tests/reload_tests.cpp
         tests/world_host_tests.cpp
         tests/debug_overlay_tests.cpp
 )

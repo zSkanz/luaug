@@ -5,6 +5,7 @@
 #include <array>
 #include <cmath>
 #include <fstream>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -254,8 +255,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // first resumption is a deferred callback, and the first drain is inside the
     // first tick -- so a script that fails to compile says so here rather than
     // one frame later.
-    WorldHost host;
-    if (std::optional<core::EngineError> bootError = host.boot({
+    //
+    // Held by pointer rather than by value because a hot reload replaces it
+    // wholesale (ADR 0024, `reload.h`): everything above this line -- the
+    // window, the device, the renderer, the shader cache -- outlives the swap,
+    // and that is what "engine-side content survives" means in C++.
+    auto host = std::make_unique<WorldHost>();
+    if (std::optional<core::EngineError> bootError = host->boot({
             .projectPath = options.scriptPath,
             .seed = options.worldSeed,
             .fixedTimestep = scheduler.timing().fixedDt,
@@ -295,25 +301,25 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // target armed after the ticks would collect nothing, which is exactly
         // what happened the first time this was written the other way round.
         debugDraw.clear();
-        host.setGizmoTarget(&debugDraw);
+        host->setGizmoTarget(&debugDraw);
 
         // Published between frames, before anything this frame can read one.
         // Derived from the wall clock and therefore never legal in simulation
         // code (R10) -- they exist for a human looking at an overlay.
-        host.publishStats({
+        host->publishStats({
             .fps = frame.renderDt > 0.0 ? 1.0 / frame.renderDt : 0.0,
             .frameTimeMs = frame.renderDt * 1000.0,
             .drawCalls = static_cast<f64>(debugRenderer.valid() ? 1 : 0),
             .physicsBodies = 0.0,
-            .luaMemoryKb = static_cast<f64>(lua_totalbytes(host.runtime().state(), 0)) / 1024.0,
+            .luaMemoryKb = static_cast<f64>(lua_totalbytes(host->runtime().state(), 0)) / 1024.0,
         });
 
         // The simulation, before anything is drawn: rendering shows the state a
         // tick settled on, never one being written.
         for (u32 step = 0; step < frame.simTicks; ++step)
-            host.tick();
+            host->tick();
 
-        if (host.shutdownRequested())
+        if (host->shutdownRequested())
             quit = true;
 
         if (!options.headless)
@@ -359,11 +365,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             ensureDebugPass(targetFormat);
 
             if (!options.headless)
-                host.preRender(frame.renderDt);
+                host->preRender(frame.renderDt);
 
             // Extraction happens once, at a known moment, from a world that is
             // between ticks (ADR 0027). Rendering never walks the ECS.
-            render::extract(host.world(), host.workspace(), snapshot);
+            render::extract(host->world(), host->workspace(), snapshot);
             submitWorld(snapshot, debugDraw);
 
             // Uploaded before the render pass opens, because a copy cannot run
@@ -402,7 +408,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // Cleared once the frame is over. A `DrawLine` from a task resumed
         // outside a frame has nowhere to go and is the silent no-op the headless
         // contract already describes.
-        host.setGizmoTarget(nullptr);
+        host->setGizmoTarget(nullptr);
 
         device->submitAndPresent();
 
@@ -410,7 +416,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             quit = true;
     }
 
-    host.close();
+    host->close();
     device->waitIdle();
 
     if (!options.screenshotPath.empty() && offscreen.valid())
@@ -441,7 +447,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
     if (!options.conformanceRoot.empty())
     {
-        const ConformanceReport report = host.conformanceReport();
+        const ConformanceReport report = host->conformanceReport();
         if (!report.ran)
             return core::makeError(LUAUG_TR("engine.tests.err.never_ran"));
 

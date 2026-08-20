@@ -112,6 +112,12 @@ public:
         core::InstanceId instance;
     };
     std::vector<Entry> entries;
+
+    // Entry scripts that failed to compile at `startScripts`. Boot is
+    // deliberately forgiving about this -- one bad script must not stop the
+    // engine -- but a hot reload is not, because it has the world that was
+    // already running to fall back on (M3 brief Decision 14).
+    usize loadFailures = 0;
 };
 
 // Installs the `require` global. Runs during boot, before the sandbox.
@@ -140,5 +146,9 @@ void startScripts(lua_State* L);
 // How many entry scripts were mounted. The conformance runner reports it, and a
 // project that mounted nothing is worth saying so about.
 [[nodiscard]] usize mountedScriptCount(lua_State* L);
+
+// How many of them failed to compile when `startScripts` ran. Zero at boot is
+// not required; zero after a reload is (see `ModuleRegistry::loadFailures`).
+[[nodiscard]] usize scriptLoadFailures(lua_State* L);
 
 } // namespace luaug::script
