@@ -32,8 +32,11 @@ struct DevControlOptions
     std::string token;
 
     // The engine may start before the dev server is listening, so a refused
-    // connection is retried rather than fatal.
-    core::u32 connectAttempts = 20;
+    // connection is retried rather than fatal. Five seconds: two was enough on
+    // an idle machine and not on a busy one, and the symptom of running out is
+    // an engine that exits before it ever attaches -- which reads as a hang
+    // rather than as a failure.
+    core::u32 connectAttempts = 50;
     core::u32 retryDelayMs = 100;
 };
 

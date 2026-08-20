@@ -28,18 +28,18 @@ this milestone, not of the docs site.
 
 ## Scope checklist (from roadmap)
 
-- [ ] `luaug` CLI implemented as Lute 1.0.0 scripts (unmodified Lute, pinned via
+- [x] `luaug` CLI implemented as Lute 1.0.0 scripts (unmodified Lute, pinned via
       rokit)
-- [ ] `luaug dev` — launch engine + `fs.watch` + WebSocket control channel →
+- [x] `luaug dev` — launch engine + `fs.watch` + WebSocket control channel →
       **fast world restart** per ADR 0024: state bag + `PreserveOnReload`,
       engine-side content survives, < 500 ms
-- [ ] `luaug test` — headless engine executing spec files, TAP/JUnit output
-- [ ] `luaug check` — luau-analyze + StyLua + i18n lint
-- [ ] `luaug new` — template project
-- [ ] `luaug fmt` — StyLua (CLAUDE.md lists it as active from M3)
-- [ ] Typedef generation: engine API emitted as `declare extern type` defs
+- [x] `luaug test` — headless engine executing spec files, TAP/JUnit output
+- [x] `luaug check` — luau-analyze + StyLua + i18n lint
+- [x] `luaug new` — template project
+- [x] `luaug fmt` — StyLua (CLAUDE.md lists it as active from M3)
+- [x] Typedef generation: engine API emitted as `declare extern type` defs
       consumed by luau-lsp 1.69 custom-platform mode
-- [ ] VS Code workspace settings in the template
+- [x] VS Code workspace settings in the template
 
 Two of these are partly built. `gen_dts.luau` has emitted
 `runtime/types/engine.d.luau` since M2 and is freshness-gated; what M3 adds is
@@ -300,7 +300,13 @@ relays between the engine and its other clients.
 `type` is answered — never ignored — with
 `{"type":"error", "id":N, "key":"dev.err.unknown_message"}`.
 
-**Handshake.** The engine's first frame is
+**Handshake, and it is state rather than an event.** The dev server keeps the
+engine's `hello` and replays it to any client that connects afterwards. Relayed
+only to whoever happened to be connected when it arrived, the attach is a
+message you had to be present for — and a client racing the engine at startup is
+most of them (Finding 16).
+
+The engine's first frame is
 `{"type":"hello", "id":1, "protocol":1, "role":"engine", "token":"…",
 "engine":"0.1.0", "pid":N}`. The dev server generates the token, passes it to the
 engine on the command line, and **rejects a connection that does not carry it**
@@ -410,18 +416,18 @@ web-derived. Every claim that flows into the dev server gets a row in
 
 ## Gate checklist (verbatim from roadmap)
 
-- [ ] automated E2E hot-reload test (dev server started headless, file mutated by
+- [x] automated E2E hot-reload test (dev server started headless, file mutated by
       the test, WebSocket confirms reload, behavior change asserted via world
       hash)
-- [ ] `luaug test` green in CI on both tiers
-- [ ] defs file lints clean and is regenerated + diff-checked in CI (drift
+- [x] `luaug test` green in CI on both tiers
+- [x] defs file lints clean and is regenerated + diff-checked in CI (drift
       between API and defs fails the build)
-- [ ] i18n lint now enforces zero hardcoded user-facing strings in C++ and CLI
+- [x] i18n lint now enforces zero hardcoded user-facing strings in C++ and CLI
       Luau
 
 And, carried by ADR 0024 rather than by the roadmap's gate list:
 
-- [ ] the reload span is < 500 ms, recorded in `docs/perf-baselines.md`
+- [x] the reload span is < 500 ms, recorded in `docs/perf-baselines.md`
 
 ## Entering risks
 
@@ -572,6 +578,128 @@ exactly one tier. That is now the third time in this project's life that the
 Linux stage was the only thing between an implicit conversion and `main`, which
 is the entire argument for CLAUDE.md's rule about not skipping it.
 
+**9. A module and a sibling directory of the same name cannot coexist.**
+`require("../i18n")` with both `i18n.luau` and `i18n/` present fails as
+"ambiguous" -- the resolver will not pick one (U-61). The module became
+`catalog.luau`; the directory keeps the name api-design.md §6 gives it. Worth
+knowing before laying out any module tree that also ships data beside it.
+
+**10. `process.args` is not the arguments passed to the script.** Under
+`lute run x.luau -- a --b` it is `{x.luau, --, a, --b}`: the script path is entry
+one and the separator that was meant to end Lute's own options survives into it
+(U-60). A CLI reading `args[1]` as its command reads a path.
+
+**11. `net.server.serve` refuses the WebSocket upgrade when an HTTP `handler` is
+present** — whatever that handler returns, `nil` included (U-62). The typedef
+carries both fields in one `Configuration` and says nothing about the
+interaction. Reducing to a ten-line probe was the only way to see it, which is
+the same move that settled every other Lute question this milestone: the
+installed binary answers, the documentation does not.
+
+**12. `fs.watch` on Linux is worse than on Windows, and the difference is
+silence.** Editing `sub/deep.luau` under a watch on the parent produces **no
+event at all** on inotify, where Windows at least reported the directory's name
+(U-58, closed in the Tier-2 container). Watching every directory individually is
+therefore not an optimisation but the only design that works on both — and had
+the watcher trusted its events, the Linux dev loop would have been silently
+broken for everything below the top level.
+
+**13. A headless dev session had nobody to stop it.** An engine whose control
+connection dropped kept running: no window to close, and the connection loss is
+deliberately not fatal so that closing `luaug dev` does not take a windowed
+session with it. Headless there is no window, so the same rule left a process
+running forever. It surfaced as a test suite that passed with two cases and
+timed out with three, once enough orphans had accumulated to matter — which is
+entering risk 4 arriving exactly as written, and not from the direction the risk
+described.
+
+**14. The synthetic headless clock is wrong for a dev session.** It exists so a
+golden capture does not depend on how busy the runner was; a dev session has no
+golden, and left synthetic it ran 37,000 ticks before the first request for "the
+hash at tick 40" finished crossing the socket. The clock is now chosen by whether
+a control channel is attached, which is the honest test of "is this a session or
+a gate run".
+
+**15. `sample` had to take an absolute tick, and the reason is the thing being
+tested.** A reload restarts the tick counter -- that is the claim Decision 11
+makes -- so a delta compares a reloaded world against a later part of itself.
+"Tick 60" is the only thing that means the same in two different worlds, and it
+means it precisely *because* a reload is a restart.
+
 ## Gate Record
 
-(filled at milestone end, before human review)
+Filled 2026-08-20, at milestone end, before human review. Every number below was
+produced by `scripts/localgate.ps1` on the reference machine described in
+`docs/perf-baselines.md`, both tiers, from a clean `main`.
+
+### The four gate items
+
+| # | Gate (verbatim from the roadmap) | Result | Where it is proved |
+|---|---|---|---|
+| 1 | automated E2E hot-reload test (dev server started headless, file mutated by the test, WebSocket confirms reload, behavior change asserted via world hash) | **3 cases, all passing on both tiers** | `tests/hotreload/reload.test.luau`, run by both tier scripts |
+| 2 | `luaug test` green in CI on both tiers | **903/903 through the CLI on Windows and Linux** | `scripts/gates/linux-build.sh`, `scripts/localgate.ps1`, `.github/workflows/ci.yml` |
+| 3 | defs file lints clean and is regenerated + diff-checked in CI (drift between API and defs fails the build) | **0 diagnostics across 83 files; both generated outputs diff-checked** | `scripts/gates/luau-check.sh` |
+| 4 | i18n lint now enforces zero hardcoded user-facing strings in C++ and CLI Luau | **203 sink calls swept, 0 findings, 172 catalog keys** | `tools/repo/i18nlint.luau` |
+
+And ADR 0024's own requirement, which the roadmap's list does not carry:
+
+| # | Requirement | Result | Where |
+|---|---|---|---|
+| 5 | hot reload < 500 ms | **1.6 ms worst on Windows, 0.8 ms on Linux**, for a 500-instance project | `docs/perf-baselines.md`; asserted by the gate test itself |
+
+### The run
+
+```
+=== local gate ===
+  ok    docs (2.6 s)
+  ok    luau (1.9 s)
+  ok    windows (21.2 s)   21/21 tests + 903 conformance + 3 hot-reload
+  ok    linux (26.3 s)     21/21 tests + 903 conformance + 3 hot-reload
+
+green (macOS is Tier-3 and only CI can build it)
+```
+
+CTest grew from 20 entries at M2 to 21: `net` is new. The Luau side grew more —
+`luau check` analyses 83 files where M2's gate analysed 67, and the gate now
+also runs the CLI's own unit tests and the end-to-end hot-reload suite.
+
+**What has NOT run here:** CI itself. The workflow gained three steps this
+milestone (the toolchain install, `luaug test`, and the hot-reload suite) and
+they have been exercised locally on both tiers but not on a hosted runner, and
+macOS has not compiled since M1. That is the first thing to look at after the
+push.
+
+### The deliverable, verified by running it
+
+> live edit of the M2 example: change spin speed in the `.luau` file, see it
+> under 1 s without restart.
+
+`luaug dev` on a copy of `examples/01-instances`, headless, with two live edits
+of `ModelCount`:
+
+```
+Dev server on ws://127.0.0.1:45631. Waiting for the engine to attach.
+Engine attached (0.0.1).
+Changed: .../src/scripts/init.luau. Reloading.
+Reloaded in 1.7 ms — 1 script(s), 0 instance(s) preserved.
+Changed: .../src/scripts/init.luau. Reloading.
+Reloaded in 2.2 ms — 1 script(s), 0 instance(s) preserved.
+```
+
+A copy rather than the checked-in example, so a session that died mid-edit could
+not leave a modified file behind in the repository.
+
+### What the gates cost, and what they caught
+
+- **The i18n lint found itself before it found anything else.** Its call pattern
+  excluded `:`, so `core::makeError(` — the only spelling this engine uses —
+  matched nothing, and it reported a clean tree because it was looking for a
+  call nobody writes. It now fails when the sweep matches zero sinks.
+- **The hot-reload test found an orphaned-process defect.** A headless engine
+  whose control connection dropped ran forever: no window to close, nobody left
+  to stop it. It surfaced as a suite that passed with two cases and timed out
+  with three, once enough of them had accumulated.
+- **The Tier-2 container found that it had no Lute**, which is exactly what the
+  brief's entering risk 1 predicted, and finding it at the start rather than at
+  the gate is the only reason it cost twenty minutes.
+

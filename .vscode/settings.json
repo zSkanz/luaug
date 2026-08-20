@@ -29,7 +29,7 @@
     ],
 
     "luau-lsp.types.definitionFiles": [
-        "examples/00-clear/preview.d.luau"
+        "runtime/types/engine.d.luau"
     ],
 
     "$comment.definitions": [

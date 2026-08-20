@@ -73,6 +73,13 @@ local function start(options: Options): Handle
     local observers: { net.ServerWebSocket } = {}
     local nextId = 1
 
+    -- "The engine is attached, and this is who it is" is STATE, not an event.
+    -- Relayed only to whoever happened to be connected when it arrived, it is
+    -- invisible to every client that attaches afterwards -- including the one
+    -- racing the engine at startup, which is most of them. Kept and replayed
+    -- on open instead.
+    local lastHello: string? = nil
+
     local function relayToObservers(text: string)
         for _, socket in observers do
             socket:send(text)
@@ -81,6 +88,9 @@ local function start(options: Options): Handle
 
     local function handleFromEngine(text: string)
         relayToObservers(text)
+        if string.find(text, '"type":"hello"', 1, true) ~= nil then
+            lastHello = text
+        end
 
         local decoded = json.deserialize(text)
         local message = json.asObject(decoded)
@@ -154,6 +164,14 @@ local function start(options: Options): Handle
                 -- Everyone starts as an observer. The engine promotes itself by
                 -- sending a `hello` carrying the token.
                 table.insert(observers, socket)
+
+                -- A client that arrived after the engine did still needs to know
+                -- it is there. Without this the attach is a message you had to
+                -- be present for, and losing that race is how the hot-reload
+                -- gate flaked one run in four.
+                if lastHello ~= nil then
+                    socket:send(lastHello :: string)
+                end
             end,
         },
     })

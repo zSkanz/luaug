@@ -5,115 +5,94 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- Current milestone: **M3 — Tooling Loop: CLI, Hot Reload, Types, Tests**,
-  opened 2026-08-20 (brief: [`docs/briefs/m3-kickoff.md`](docs/briefs/m3-kickoff.md)).
-  Built so far: the brief with its fourteen decisions and the control protocol,
-  `engine/net` (the RFC 6455 client the engine dials the dev server with), the
-  reload seam in `app`, `HotReloadService` with its state bag, and
-  `PreserveOnReload`.
-- **M2 — Kernel: Instances over ECS, Scheduler, Signals, `task` — COMPLETE and
-  SIGNED OFF by the human on 2026-08-20**, tagged `milestone/m2` (brief:
-  [`docs/briefs/m2-kickoff.md`](docs/briefs/m2-kickoff.md), which carries the
-  full scope record, the Gate Record and twenty-two Findings). Its gate re-ran
-  green on both tiers at M3 kickoff: `scripts/localgate.ps1`, 20/20 tests,
-  Windows 9.8 s / Linux 15.2 s.
-- **M1** signed off 2026-08-19 (`milestone/m1`); **M0** signed off 2026-08-19
+- Current milestone: **M3 — Tooling Loop: CLI, Hot Reload, Types, Tests — SCOPE
+  AND GATE COMPLETE, awaiting human sign-off** (brief:
+  [`docs/briefs/m3-kickoff.md`](docs/briefs/m3-kickoff.md)). All four gate items
+  green on both tiers, plus ADR 0024's own <500 ms requirement.
+- **M2 — Kernel — signed off 2026-08-20**, tagged `milestone/m2`; **M1** signed
+  off 2026-08-19 (`milestone/m1`); **M0** signed off 2026-08-19
   (`milestone/m0`).
-- **`main` is 21 commits ahead of `origin/main`** — M2's work has never been
-  pushed, so CI has not seen it and macOS (Tier-3, CI-only) has not compiled it
-  since M1. Pushing is a human call because Actions minutes are metered on this
-  private repo; see Now / Next.
+- **CI has not run the three steps this milestone added to it** — the toolchain
+  install, `luaug test`, and the hot-reload suite. They are exercised locally on
+  both tiers; macOS (Tier-3, CI-only) has not compiled since M1. First thing to
+  look at after the push.
 
-### What exists, in one pass
+### M3: what exists
 
-- **The engine runs a world from a script.** `Instance.new("Part")` builds a
-  real instance over the ECS, every datatype is bound, signals deliver deferred
-  in one queue with the ordering `api-design.md` §3.1 specifies, `task` runs on
-  the SimClock in integer ticks, `game`/`workspace` are globals and services are
-  singleton-on-demand. `WorldHost` owns the world, the VM and the project;
-  `WorldHost::tick` is the only place architecture §3's resumption order exists
-  as code, and the frame loop drives it.
-- **The API IDL generates the engine.** `api/defs/*.api.luau` (13 classes, 6
-  datatypes, 4 enums) → `gen_dts.luau` → `runtime/types/engine.d.luau` and
-  `gen_cpp.luau` → `engine/scene/generated/class_descriptors.gen.{h,cpp}`. Both
-  outputs are checked in and freshness-gated, and both gates were proved by
-  tampering. 43 methods declared, 43 bound, 0 unbacked, enforced at boot.
-- **The picture.** `examples/00-clear` (pulsing clear + orbiting wire cubes) and
-  `examples/01-instances` (500 scripted instances in five rings) render through
-  the SDL3 GPU backend; F3 toggles an ImGui overlay in dev builds.
-- **The harnesses.** 903 conformance cases in 46 files written from
-  `docs/api-design.md` by authors forbidden to read `engine/`; `--replay=DIR`
-  (determinism, 10,000 ticks, in-process and against a per-platform trace);
-  `--bench=DIR` (sim ticks against a per-scenario budget); the capture-stream
-  and screenshot render gates. 21 CTest entries, green on Windows and Linux.
+- **The loop the engine sells.** `luaug dev` watches a project, and a saved file
+  becomes a new world in **1.7 ms** on the M2 example — against a 500 ms budget.
+  The engine dials out to the dev server as a WebSocket client (ADR 0035) and
+  opens no port in any profile; commands are applied at the FrameStart safe
+  point, never mid-tick, which is what keeps within-run determinism true with a
+  watcher attached.
+- **The reload is a restart, and that is testable.** `app::reloadWorld` destroys
+  and rebuilds `WorldHost` and nothing above it, building the new world before
+  destroying the old so a syntax error leaves the running one alone. The
+  assertion that matters, in C++ and again end to end: a reloaded world hashes
+  the same as a cold boot of the edited source at the same tick.
+- **`HotReloadService`** (`SaveState` / `LoadState` / `IsReload()` / `PreReload`
+  / `PostReload`), a state bag that lives in C++ because the VM that held the
+  value is what a reload destroys, and `PreserveOnReload` instances captured as
+  descriptions and re-materialised before the new entry scripts are deferred.
+- **`engine/net` (L2)** — the RFC 6455 client, tested against the RFC's own
+  published vectors; and **`core::JsonWriter`**, which `json.h` said would have
+  no caller until this milestone gave it two.
+- **`tools/cli`** — `dev`, `test`, `check`, `fmt`, `new` on the pinned Lute, a
+  TOML-subset reader for `luaug.toml`, the dev server, and the `starter`
+  template with the `.vscode` settings that make `luaug new` plus opening the
+  folder a complete setup.
+- **The gate got teeth.** `luau-check.sh` calls `luaug check`; the i18n lint
+  enforces R3's second half over 203 sink calls; the CLI's own tests and the
+  end-to-end hot-reload suite both run in the gate, on both tiers.
 
-### What M3 has to build
+### M3: the gate
 
-The CLI (`luaug dev|test|check|new|fmt`) as Lute scripts, the hot-reload world
-restart under 500 ms with the state bag and `PreserveOnReload`, the editor-facing
-half of the type pipeline (docs JSON, `@std`/`@luaug` stubs, `.vscode` settings),
-the `starter` template, and R3's second half in the i18n lint. The brief's
-fourteen numbered decisions are the design; its six entering risks are what to
-watch. `engine/net` is done; the reload seam is next.
+**4 of 4, plus ADR 0024's own.** The Gate Record in the brief carries the
+numbers, the commands and the deliverable's transcript.
+
+### M3: what does NOT exist yet
+
+Nothing from M3's own scope. The brief's NOT-in-scope list names nine things
+deliberately left: `luaug build`, `asset`, `add`, `doctor`, `lute compile`
+packaging, module-level `__hotreload`, asset and shader hot swap, the `eval` dev
+console, engine-side `luaug.toml`, and the `obby`/`openworld-demo` templates.
+The bytecode cache ADR 0024 names is also not built — the budget did not need
+it, and building it on speculation is what §5 rejects.
 
 ## Now / Next
 
-- **Next: the control loop in `app`** — a `--dev-control=ws://…` flag, the
-  WebSocket client on its own thread, and the reload applied at the FrameStart
-  safe point rather than wherever the message arrived. Then the Lute dev server
-  (`luaug dev`), and the CLI around it.
-- **The reload works and carries state.** `app::reloadWorld` rebuilds
-  `WorldHost` and nothing above it, build-before-destroy; the test that matters
-  asserts **reload == cold boot by world hash**. `HotReloadService` is in the IDL
-  (`SaveState` / `LoadState` / `IsReload()` / `PreReload` / `PostReload`), the
-  bag lives in C++ because the VM that held the value is what a reload destroys,
-  and a value that cannot cross raises rather than being dropped.
-- **The control protocol is written** into the brief (message set, envelope,
-  token handshake, the three emptiness checks), and the transport under it is
-  built: `engine/net` (L2) has the RFC 6455 client, 28 cases / 214 assertions,
-  green on both tiers.
-- **`core::json` parses and does not serialize**, and its own header says a
-  writer would be unused surface. M3 is what changes that: the engine sends JSON
-  control messages and writes the `luaug test` report (Decision 6). The writer
-  lands with the first of those, and ADR 0033 gets a line saying why.
-- **Lute is now grounded** (U-55…U-59): `process.run` returns only at child exit
-  with no stdin and no incremental read, there is no raw TCP, `process.run`
-  yields rather than blocking, `fs.watch` names the top-level entry rather than
-  the changed file and fires 2–6 times per save, and `time.since` returns a
-  number where the typedef says `Duration`. The first two reversed the brief's
-  Decision 1 before a line of code existed.
-- **`fs.watch` on Linux is still unverified**, and its failure mode there is
-  silence rather than an error. Verify it in the same task that puts Lute into
-  the Tier-2 image.
-- **Ask the human whether to push.** 21 commits sit unpushed. CI proves `main` is
-  green and is the only thing that builds macOS; it also spends metered minutes
-  on a private repo. The local gate is green on both tiers either way.
-- **The Tier-2 container has no Lute** (entering risk 1). `luaug test` green "on
-  both tiers" needs rokit + the already-pinned `lute@1.0.0` in
-  `scripts/docker/tier2.Dockerfile`. Discover this now, not at the gate.
-- **Read the M2 brief's Findings before writing M3 code.** The three that bind
-  hardest here: a gate that can pass while doing nothing is not a gate (19); a
-  spec that holds a claim across many ticks is worth more than three that hold it
-  across one (20); the conformance rule — specs are written against `docs/`,
-  never against the implementation (17).
-- **Fan out narrow.** M2 proved that large C++ kernel blocks handed to subagents
-  stall; tight, interface-frozen tasks land well. The reload seam is
-  orchestrator-only work.
-- **Run `scripts/localgate.ps1` before every push. Do not use CI as a test
-  runner.** Both tiers, ~20 s warm.
+- **Next: stop for M3 human review** (MASTER_PROMPT §6). The scope is closed and
+  every gate item is green on both tiers. **Do not start M4 this session.**
+- **Push, and then read CI.** Three steps are new to the workflow and have never
+  run on a hosted runner; macOS has not compiled since M1.
+- When M4 opens, its brief is written from `docs/roadmap.md` and from this
+  milestone's Findings. The dogfooding claim starts binding there: M4's meshes
+  are developed by editing a `.luau` file and watching, not by rebuilding.
+- **Read the installed artifact, not the report about it.** Six of this
+  milestone's fifteen findings are Lute behaving differently from its own
+  typedefs or documentation, and every one was settled by a ten-line probe:
+  `process.run` cannot hold a pipe, there is no raw TCP, `process.args` carries
+  the script path, a module and a directory cannot share a name, an HTTP handler
+  refuses the WebSocket upgrade, `time.now()` is a userdata. The research report
+  said it was web-derived; treating it as source was the mistake.
+- **`fs.watch` cannot be trusted on either platform, and Linux is the worse
+  one** — a change below the watched directory produces no event at all there.
+  Anything that watches files in a later milestone watches every directory and
+  rescans.
+- **A gate that can pass while doing nothing keeps being built by accident.**
+  This milestone caught three more: the i18n lint looking for a call spelling
+  nobody uses, a `luaug test` that would have reported success on a stale report
+  file, and a dev server that noticed saves and did nothing because the caller
+  supplied no callback. All three now fail loudly.
+- **Run `scripts/localgate.ps1` before every push.** Both tiers, ~50 s warm now
+  that it carries the conformance suite and the hot-reload gate.
 - Carried forward, none blocking:
   - **The shipping profile does not configure.** `engine/script/src/modules.cpp`
     and `runtime.cpp` include `<luacode.h>` unconditionally while
-    `LUAUG_LUAU_COMPILER` is forced off in shipping (ADR 0002). The guard is one
-    line, but a shipping host also needs the bytecode-loading path — which M3's
-    reload budget may want anyway (entering risk 3).
+    `LUAUG_LUAU_COMPILER` is forced off in shipping (ADR 0002).
   - **`architecture.md` §9 lists a clang-format gate that does not exist.**
-    Turning it on means reformatting the tree and pinning a toolchain version;
-    the version-pinning half is M3's `luaug check` work.
   - **`Luau.Analysis` is still compiled and never linked** — carried from M0.
-  - **DXIL produced on Linux is never verified as signed.** It is also never
-    loaded there, so this only matters if a Linux job ever produces a shipping
-    shader pack for Windows (M8).
+  - **DXIL produced on Linux is never verified as signed.**
 
 ## Blocked — needs human
 
@@ -227,6 +206,38 @@ there when this file passed its ~300-line cap.
   fails on the line that caused it.
   Next: **the control loop in `app`** -- the `--dev-control` flag, the WebSocket
   client on its own thread, and the reload applied at the FrameStart safe point.
+
+- **2026-08-20 (session 6, continued): M3 closed.** The control channel, the
+  CLI, the dev server, the starter template, R3's second half in the i18n lint,
+  and the end-to-end hot-reload gate. `luaug dev` on the M2 example reloads a
+  saved file in **1.7 ms** against ADR 0024's 500 ms, and the gate asserts the
+  strong claim rather than the easy one: a reloaded world hashes the same as a
+  cold boot of the edited source at the same tick.
+  Learned, and six of these are Lute rather than us: `process.run` cannot hold a
+  pipe to a running child and there is no raw TCP (U-55, U-57), which reversed
+  the brief's Decision 1 before any code existed; `process.args` carries the
+  script path and the `--` separator (U-60); a module and a sibling directory
+  cannot share a name (U-61); `net.server.serve` refuses the WebSocket upgrade
+  whenever an HTTP handler is present, whatever it returns (U-62); `time.now()`
+  is a userdata `string.format` will not take (U-63); and **`fs.watch` on Linux
+  reports nothing at all for a change below the watched directory** where
+  Windows at least named it (U-58) — so watching every directory individually is
+  the only design that works on both, and trusting the event payload would have
+  left the Linux dev loop silently broken.
+  Ours, and the sharpest one: **the engine's `hello` was an event where it had to
+  be state.** The dev server relayed it to whoever was connected at that instant,
+  so a client that finished its own handshake milliseconds later waited forever
+  for an engine that was already attached -- a flake one run in four whose
+  symptom named the thing that was working. Found by running the suite eight
+  times instead of once. Also **a headless dev session had nobody to stop it** and ran forever once its
+  control connection dropped, which is entering risk 4 arriving from a direction
+  the risk did not describe; **the i18n lint was looking for `makeError(` in an
+  engine that only writes `core::makeError(`** and reported a clean tree because
+  it matched nothing; and **the synthetic headless clock is wrong for a dev
+  session**, which ran 37,000 ticks before the first request for tick 40 finished
+  crossing the socket.
+  Next: **stop for M3 human review** (§6). Do not start M4 this session.
+
 
 <!-- Format for future entries:
 - **YYYY-MM-DD (session N):** did X; learned Y; Next: <literal first action>.

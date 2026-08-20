@@ -123,6 +123,11 @@ type Session = {
     server: devserver.Handle,
     socket: net.WebSocket,
     inbox: { { [string]: any } },
+    -- Filled when the engine process exits. Present while the test is still
+    -- waiting for something means the engine died, and what it said is the
+    -- diagnosis -- without this a failure reads as "timed out" and names
+    -- nothing.
+    exited: { result: process.ProcessResult? },
     close: () -> (),
 }
 
@@ -135,15 +140,18 @@ local function startSession(root: string): Session
     local token = devserver.mintToken()
     local server = devserver.start({ root = root, port = 0, token = token })
 
+    -- Captured rather than discarded: an engine that exits early is the one
+    -- failure this test cannot otherwise explain.
+    local exited: { result: process.ProcessResult? } = {}
     task.spawn(function()
-        process.run({
+        exited.result = process.run({
             engine :: string,
             root,
             `--dev-control=ws://127.0.0.1:{server.port}/control`,
             `--dev-token={token}`,
             "--headless",
             "--rhi=null",
-        }, { stdio = "none" })
+        })
     end)
 
     local inbox: { { [string]: any } } = {}
@@ -161,6 +169,7 @@ local function startSession(root: string): Session
         server = server,
         socket = socket,
         inbox = inbox,
+        exited = exited,
         close = function()
             -- Through the protocol rather than by killing the process: a dev
             -- session that cannot be asked to stop is one that leaves engines
@@ -187,6 +196,22 @@ local function waitFor(session: Session, what: string, predicate: ({ [string]: a
                 return message
             end
         end
+
+        -- An engine that has already exited is never going to answer, and it
+        -- said why on its way out.
+        local result = session.exited.result
+        if result ~= nil then
+            error(
+                "the engine exited with code "
+                    .. tostring(result.exitcode)
+                    .. " while waiting for "
+                    .. what
+                    .. ": "
+                    .. result.stderr
+                    .. result.stdout
+            )
+        end
+
         task.wait(0.05)
     end
     error(`timed out waiting for {what}`)
