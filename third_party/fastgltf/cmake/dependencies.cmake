@@ -2,46 +2,20 @@ include(FetchContent)
 
 # If the target already exists due to the parent script already including it as a dependency, just directly link it.
 if (NOT TARGET simdjson::simdjson)
-    # Try to find simdjson through a find_package call.
-    find_package(simdjson CONFIG)
-    if (simdjson_FOUND)
-        message(STATUS "fastgltf: Found simdjson config")
-    else ()
-        # Download and configure simdjson
-        set(SIMDJSON_TARGET_VERSION "3.12.3")
-        file(MAKE_DIRECTORY ${SIMDJSON_DL_DIR})
-
-        set(SIMDJSON_HEADER_FILE "${SIMDJSON_DL_DIR}/simdjson.h")
-        set(SIMDJSON_SOURCE_FILE "${SIMDJSON_DL_DIR}/simdjson.cpp")
-
-        macro(download_simdjson)
-            file(DOWNLOAD "https://raw.githubusercontent.com/simdjson/simdjson/v${SIMDJSON_TARGET_VERSION}/singleheader/simdjson.h" ${SIMDJSON_HEADER_FILE})
-            file(DOWNLOAD "https://raw.githubusercontent.com/simdjson/simdjson/v${SIMDJSON_TARGET_VERSION}/singleheader/simdjson.cpp" ${SIMDJSON_SOURCE_FILE})
-        endmacro ()
-
-        if (EXISTS ${SIMDJSON_HEADER_FILE})
-            # Look for the SIMDJSON_VERSION define in the header to check the version.
-            file(STRINGS ${SIMDJSON_HEADER_FILE} SIMDJSON_HEADER_VERSION_LINE REGEX "^#define SIMDJSON_VERSION ")
-            string(REGEX MATCHALL "[0-9.]+" SIMDJSON_HEADER_VERSION "${SIMDJSON_HEADER_VERSION_LINE}")
-            message(STATUS "fastgltf: Found simdjson (Version ${SIMDJSON_HEADER_VERSION})")
-
-            if (SIMDJSON_HEADER_VERSION STREQUAL "")
-                message(FATAL_ERROR "fastgltf: Failed to download simdjson")
-            endif ()
-
-            if (SIMDJSON_HEADER_VERSION VERSION_LESS SIMDJSON_TARGET_VERSION)
-                message(STATUS "fastgltf: simdjson outdated, downloading...")
-                download_simdjson()
-            endif ()
-        else ()
-            message(STATUS "fastgltf: Did not find simdjson, downloading...")
-            download_simdjson()
-
-            if (NOT EXISTS "${SIMDJSON_HEADER_FILE}")
-                message(FATAL_ERROR "fastgltf: Failed to download simdjson.")
-            endif ()
-        endif ()
-    endif ()
+    # LuauG patch (ADR 0036). Upstream downloads simdjson's amalgamated pair
+    # from raw.githubusercontent.com into ${SIMDJSON_DL_DIR} -- inside this
+    # vendored tree, with no hash check -- whenever the target is absent. That
+    # is R5, R13, R14 and ADR 0032's fetch rule in one default, and it means no
+    # offline configure.
+    #
+    # third_party/CMakeLists.txt defines simdjson::simdjson from the vendored
+    # third_party/simdjson before adding fastgltf, so this branch is dead. It
+    # is a hard error rather than a fallback because reaching it means the
+    # guard has been defeated and the next configure would go to the network.
+    message(FATAL_ERROR
+            "fastgltf: simdjson::simdjson is not defined. LuauG vendors simdjson "
+            "(third_party/simdjson, ADR 0036) and defines that target before adding "
+            "fastgltf; upstream's download path is removed on purpose.")
 endif ()
 
 # glm

@@ -23,6 +23,7 @@ vendored yet; the roadmap allows lazy vendoring so long as the row exists.
 | box2d | 3.1.1 | _not vendored yet_ | MIT | https://github.com/erincatto/box2d | `third_party/box2d/` |
 | miniaudio | 0.11.25 | _not vendored yet_ | MIT-0 OR Unlicense | https://github.com/mackron/miniaudio | `third_party/miniaudio/` |
 | fastgltf | 0.9.0 | `0d1b67a28c49` | MIT | https://github.com/spnda/fastgltf | `third_party/fastgltf/` |
+| simdjson | 3.12.3 | `7382dc2be88e` | Apache-2.0 OR MIT | https://github.com/simdjson/simdjson | `third_party/simdjson/` |
 | meshoptimizer | 1.2 | `9d9890c73011` | MIT | https://github.com/zeux/meshoptimizer | `third_party/meshoptimizer/` |
 | basis_universal | 2.5x | _not vendored yet_ | Apache-2.0 | https://github.com/BinomialLLC/basis_universal | `third_party/basis_universal/` |
 | ktx | latest-tag | _not vendored yet_ | Apache-2.0 | https://github.com/KhronosGroup/KTX-Software | `third_party/ktx/` |

@@ -21,10 +21,10 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 - **M2 — Kernel — signed off 2026-08-20**, tagged `milestone/m2`; **M1** signed
   off 2026-08-19 (`milestone/m1`); **M0** signed off 2026-08-19
   (`milestone/m0`).
-- **CI has not run the three steps this milestone added to it** — the toolchain
-  install, `luaug test`, and the hot-reload suite. They are exercised locally on
-  both tiers; macOS (Tier-3, CI-only) has not compiled since M1. First thing to
-  look at after the push.
+- **CI is green on `main`**, and the three steps M3 added to the workflow — the
+  toolchain install, `luaug test` and the hot-reload suite — have now run on
+  hosted runners on both tiers. macOS built green on the `milestone/m3` tag,
+  its first compile since M1.
 
 ### M3: what exists
 
@@ -70,40 +70,32 @@ it, and building it on speculation is what §5 rejects.
 
 ## Now / Next
 
-- **Next: build-order step 1 of the M4 brief — vendor `fastgltf` and
-  `meshoptimizer`**, fill their manifest rows with real commit SHAs and resolved
-  versions, regenerate `THIRD_PARTY_NOTICES.md`, and wire both into the build as
-  SYSTEM includes, with the gate green before anything else is written. Both
-  rows already exist carrying `TBD-AT-M0`, so this is the lazy vendoring M0's
-  scope allows and not a new dependency (brief, Decision 3).
-- **Two M4 items need the human, neither blocking yet.** The **Android device
-  checkpoint** (roadmap: before the RHI freeze at the end of M4 — the agent does
-  not hold phones) and **which glTF sample asset the repository carries**, which
-  would be its first binary content. Both are written up in the brief; ask
-  before the freeze and before committing any binary, respectively.
+- **Next: build-order step 2 — `core::AABB` and `core::Frustum`** with their
+  plane/box tests. Both are absent today for a stated reason (`math.h`'s header
+  comment: the sign conventions had not been checked), and M4 is the milestone
+  that checks them, because `extract` cannot cull without them.
+- **Step 1 is done.** fastgltf 0.9.0, meshoptimizer 1.2 and simdjson 3.12.3 are
+  vendored and pinned, the notices are regenerated, and fastgltf carries the
+  first patch this repository has ever applied (ADR 0036). Nothing is wired into
+  the build yet, on `third_party/CMakeLists.txt`'s own rule: a tree is added
+  when a module links it, which is step 3.
+- **The Android device checkpoint still needs the human**, before the RHI freeze
+  at the end of M4 — the agent does not hold phones. The glTF sample-asset
+  question is answered: a CC0 model under ~1 MB, recorded in
+  `THIRD_PARTY_NOTICES.md`, beside a hand-authored fixture for the importer's
+  unit tests.
+- **Read the vendored `CMakeLists.txt`, not the library's documentation.** M4's
+  first three findings all came from doing that at kickoff: fastgltf has an
+  undocumented mandatory dependency that it downloads unpinned into our tree,
+  the patch mechanism that was supposed to fix such things reported success
+  while doing nothing, and no vendored tree here has ever matched its pinned
+  commit byte for byte. None of the three cost more than an hour at kickoff;
+  each would have cost a milestone at the gate.
 - **The dogfooding claim binds from here and is weaker than it sounds.** What
   `luaug dev` reloads is the *scene* — mesh, camera, sun, materials — while the
   renderer is C++ and needs a rebuild. The brief's Decision 13 commits to
   recording the real reload-vs-rebuild count in the Gate Record, so the claim
   ends the milestone either evidenced or as a finding.
-- **CI is green on `main` at `2794263`**, and the two `build-test` tiers ran the
-  three steps this milestone added: the toolchain install, `luaug test`, and the
-  hot-reload suite. Gate item 2 is therefore green *in CI* and not only locally,
-  which is what it actually asks for.
-- **CI went red once on the M3 tag and was fixed in the same session.**
-  `scripts/luaug.sh` was committed without its executable bit — a Git working
-  tree on Windows does not track file modes, and a local run invokes the script
-  through PowerShell, so nothing here could notice. Every caller goes through
-  `bash` explicitly now and the bit is set in the index. The same push built
-  **macOS green for the first time since M1**, which is the tier nothing local
-  can check.
-- **Read the installed artifact, not the report about it.** Six of this
-  milestone's fifteen findings are Lute behaving differently from its own
-  typedefs or documentation, and every one was settled by a ten-line probe:
-  `process.run` cannot hold a pipe, there is no raw TCP, `process.args` carries
-  the script path, a module and a directory cannot share a name, an HTTP handler
-  refuses the WebSocket upgrade, `time.now()` is a userdata. The research report
-  said it was web-derived; treating it as source was the mistake.
 - **`fs.watch` cannot be trusted on either platform, and Linux is the worse
   one** — a change below the watched directory produces no event at all there.
   Anything that watches files in a later milestone watches every directory and
@@ -134,37 +126,31 @@ it, and building it on speculation is what §5 rejects.
 
 ## Blocked — needs human
 
-- **fastgltf requires simdjson, and left alone it downloads it, unpinned, into
-  our vendored tree at configure time.** No document here records that fastgltf
-  has a dependency at all; it does, unconditionally and with no option to
-  disable it (`third_party/fastgltf/CMakeLists.txt:77-82`), and absent a
-  pre-existing `simdjson::simdjson` target its
-  `cmake/dependencies.cmake:17-20` runs `file(DOWNLOAD)` against
-  `raw.githubusercontent.com` for simdjson 3.12.3's single-header pair, writing
-  them into `third_party/fastgltf/deps/`. No hash check. That is R5 (a
-  dependency with no manifest row), R13 (a write inside a vendored tree), R14 (a
-  write into the source tree) and ADR 0032's fetch rule (configure-time
-  artifacts are SHA256-pinned) in one default, plus no offline configure.
-  Full write-up: M4 brief, Finding 1.
+- **Every vendored tree in `third_party/` is CRLF-mangled and has never been
+  byte-identical to its pinned commit.** `vendor.luau` checks out through its
+  own git dir, which `.gitattributes` cannot reach, so `core.autocrlf=true`
+  applied on Windows; then `third_party/** -text` — the rule written to protect
+  byte-exactness — disabled normalization and committed the mangling faithfully.
+  Affects luau, sdl3, imgui, stb, doctest, spirv_cross and sdl_shadercross, i.e.
+  everything vendored before this milestone. ADR 0021's central claim has been
+  false since M0. Found because it was the second reason the first patch this
+  repository has ever applied refused to apply. Full write-up: M4 brief,
+  Finding 3.
 
-  **The question: may simdjson be added to the manifest as a vendored
-  dependency?** It is Apache-2.0, so R6 is satisfied; R5 makes it a
-  human-approved ADR.
+  **Fixed at the source:** the checkout now forces
+  `core.autocrlf=false core.eol=lf`, and the three trees vendored this milestone
+  are correct.
 
-  Recommended, if approved: vendor simdjson at the v3.12.3 that fastgltf pins,
-  compile the single-header pair into a `simdjson::simdjson` target we define
-  **before** `add_subdirectory(fastgltf)`, so the downloader is unreachable —
-  and add a patch under `third_party/patches/fastgltf/` turning the download
-  branch into a `FATAL_ERROR`, so a future version cannot silently start
-  fetching again.
+  **The question: re-vendor the historical trees now, or leave them?** It is a
+  purely mechanical `lute tools/repo/vendor.luau sync` over the pinned commits
+  — no version changes — but it rewrites on the order of 20,000 files in one
+  commit and roughly doubles the pack's third_party footprint. Nothing is
+  functionally wrong today: compilers do not care about line endings, and the
+  only mechanism that does is patching, which no historical tree uses.
 
-  The alternative is switching to cgltf (MIT, single header, no dependencies),
-  which is also an ADR since ADR 0010 chose fastgltf over it deliberately, and
-  costs the 5–7× import speed that was the reason.
-
-  Blocks: build-order step 1 (build wiring) and step 3 (the importer).
-  Not blocked by it: step 2 (`core::AABB`/`Frustum`), and the IDL half of
-  step 7.
+  Recommendation: do it, once, in a commit that touches nothing else, so that
+  ADR 0021 is true and any future "does this tree match upstream?" check has a
+  clean baseline. It does not block M4.
 
 ## Decisions pending ADR
 
@@ -172,140 +158,45 @@ it, and building it on speculation is what §5 rejects.
 
 ## Session Log
 
-Entries for the planning session and for M0, M1 and M2 are in
+Entries for the planning session and for M0, M1, M2 and M3 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
 
-- **2026-08-20 (session 6, Claude Opus): M2 signed off; opened M3.** Ran the §2
-  boot sequence — the ledger and the repo agreed, and the M2 gate re-ran green on
-  both tiers locally (20/20; Windows 9.8 s, Linux 15.2 s). Deep-read the roadmap's
-  M3 section, ADR 0024 and ADR 0003, `docs/research/lute-2026.md`, api-design §3,
-  §4, §5 and §6, and architecture §3, §5 and §8. Wrote
-  `docs/briefs/m3-kickoff.md`: the scope checklist, an explicit NOT-in-scope list
-  naming nine things this milestone will not do, the subagent split, the gate
-  verbatim, six entering risks, and thirteen numbered decisions each naming the
-  alternative it rejects.
-  Learned at planning time, before any code: **the transport api-design §3.2
-  specifies would put an RFC 6455 server inside the engine** — a TCP listener, a
-  handshake and a parse surface in every dev build — to serve one tool that
-  already sits on the other end of a pipe, so the control channel is stdio to the
-  engine and the WebSocket stays in the dev server where ADR 0003 put Lute (ADR
-  0035, §3.2 corrected in the same commit). **The state bag and the preserved
-  instances cannot be preserved *in* Luau or *in* the world**, because a reload
-  destroys both — they are captured into C++ and restored before the new entry
-  scripts are deferred, which is a spec ruling §3.2 did not carry. **`luaug test`
-  must read a report file rather than the console**, because every line the engine
-  prints is catalog-resolved and parsing it would break the first time a locale is
-  added. And the Tier-2 container has no Lute at all, which the gate's phrase "on
-  both tiers" quietly requires.
-  Then did exactly that, and it **reversed Decision 1 before any code existed**.
-  `process.run` returns only when the child exits and hands back whole strings —
-  no child handle, no stdin, no incremental read (U-55) — and Lute has no raw TCP
-  at all (U-57), so a pipe protocol is not writable and WebSocket is the only
-  bidirectional push channel it can speak. api-design §3.2 was right and my
-  argument against it was not. What was still open is which side listens, and the
-  answer is the opposite of what §3.2 implies: the dev server listens, the engine
-  dials out as a WebSocket client, and the engine opens no port in any profile.
-  ADR 0035 rewritten, §3.2 corrected, and the first draft kept in the ADR under
-  "What this ADR nearly said" because the next reader will have the same idea for
-  the same good reasons.
-  Also learned by probing rather than reading: `process.run` **yields** the
-  calling coroutine, so one task can run the engine while another serves (U-56);
-  `fs.watch` names the top-level entry rather than the changed file — a nested
-  edit reports the *directory* — and one save fires between two and six events
-  (U-58), so the watcher watches every directory and rescans instead of trusting
-  the payload; and `time.since` returns a number where the installed typedef says
-  `Duration` (U-59).
-  Then wrote the protocol into the brief and built the transport under it.
-  `engine/net` is L2, the first slice of the `net_api` the architecture has
-  always reserved: the pure half (framing, handshake, accept) tested against RFC
-  6455's own published examples -- the worked handshake in §1.3 and the seven
-  frames in §5.7 -- and the socket half tested against a loopback server that
-  sends the frames a real server never would. 28 cases, 214 assertions.
-  Learned in the doing: **a test that asserted a digest against a value I had
-  written from memory failed, and the code was right** -- FIPS publishes no
-  55-byte vector, so the expectation now carries what Windows CNG computes and
-  says so. The handshake-failure test asserted on message text without loading
-  the catalog, which is M2 Finding 11 arriving on schedule. The ping test waited
-  for a Close the client had no reason to send and **hung the suite instead of
-  failing it**; the helper takes a read deadline now, because a hang costs a CI
-  runner its whole timeout to say nothing. And Clang caught a `socklen_t` MSVC
-  did not -- the address length is `int` on Winsock and unsigned on POSIX -- the
-  third time in this family of milestones that the Linux tier was the only thing
-  between an implicit conversion and `main`.
-  Then built the reload seam. `app::reloadWorld` destroys and rebuilds
-  `WorldHost` and nothing above it, so ADR 0024's "engine-side content survives"
-  is a C++ lifetime rather than a promise; the frame loop holds the host by
-  pointer for exactly that reason. The assertion that matters is one line --
-  `afterReload == hashOfColdBoot(project, kTicks)` -- paired with one that the
-  hash actually moved, because either alone passes against a reload that did
-  nothing.
-  Learned by running it: **a syntax error does not fail `boot`**. `startScripts`
-  logs it, skips that script and carries on, which is right for a boot and wrong
-  for a reload -- the first version reported a successful reload of a world in
-  which the edit had never run. A reload is now stricter than a boot, because
-  unlike a boot it has the world that was already running to fall back on, and
-  the asymmetry is written into `reload.h`.
-  Then `HotReloadService` and the bag. It is in the IDL with the `DevOnly` tag,
-  the bag lives in C++ because `lua_close` takes a Luau table with it, and a
-  value that cannot cross -- a function, an Instance, a cyclic table, a table
-  that is half an array -- raises instead of being dropped, because a reload that
-  quietly loses state is discovered a save later and blamed on the reload.
-  Learned before any C++ existed: **`api-design.md` §3.2 named three members the
-  API definition's own §9 lints reject.** `BeforeReload`/`AfterReload` are
-  neither past-tense facts nor `Pre*`/`Post*` phases, and `IsReload: boolean` is
-  a boolean property carrying the prefix §9 reserves for boolean methods.
-  `apicheck` said so the moment the service was declared. The rules were right;
-  the surface is `PreReload` / `PostReload` / `IsReload()`, and making the third
-  a method deleted the service's only property and the component behind it -- the
-  implementation got *smaller* by obeying the naming rule.
-  Then `PreserveOnReload`: tagged instances are captured as descriptions --
-  class, name, ancestry, writable properties, attributes, tags, subtree -- and
-  re-created before the new entry scripts are deferred, with an ancestor the new
-  world lacks *replayed* with the class it had rather than invented as a Folder.
-  Skips are counted, never silent, and child order is pinned by a case because
-  it is observable through the world hash.
-  Learned, and it was about the test rather than the feature: the first version
-  set `Anchored` on a `Part`, which no class declares -- BasePart's physics half
-  lands with Jolt in M5 -- so the entry script died before setting `Parent` and
-  the failure surfaced three assertions later as a missing child. **M2's Finding
-  14 arriving in a new file.** The `Captured` fixture now keeps error lines apart
-  and the session requires there were none, so the next version of that mistake
-  fails on the line that caused it.
-  Next: **the control loop in `app`** -- the `--dev-control` flag, the WebSocket
-  client on its own thread, and the reload applied at the FrameStart safe point.
-
-- **2026-08-20 (session 6, continued): M3 closed.** The control channel, the
-  CLI, the dev server, the starter template, R3's second half in the i18n lint,
-  and the end-to-end hot-reload gate. `luaug dev` on the M2 example reloads a
-  saved file in **1.7 ms** against ADR 0024's 500 ms, and the gate asserts the
-  strong claim rather than the easy one: a reloaded world hashes the same as a
-  cold boot of the edited source at the same tick.
-  Learned, and six of these are Lute rather than us: `process.run` cannot hold a
-  pipe to a running child and there is no raw TCP (U-55, U-57), which reversed
-  the brief's Decision 1 before any code existed; `process.args` carries the
-  script path and the `--` separator (U-60); a module and a sibling directory
-  cannot share a name (U-61); `net.server.serve` refuses the WebSocket upgrade
-  whenever an HTTP handler is present, whatever it returns (U-62); `time.now()`
-  is a userdata `string.format` will not take (U-63); and **`fs.watch` on Linux
-  reports nothing at all for a change below the watched directory** where
-  Windows at least named it (U-58) — so watching every directory individually is
-  the only design that works on both, and trusting the event payload would have
-  left the Linux dev loop silently broken.
-  Ours, and the sharpest one: **the engine's `hello` was an event where it had to
-  be state.** The dev server relayed it to whoever was connected at that instant,
-  so a client that finished its own handshake milliseconds later waited forever
-  for an engine that was already attached -- a flake one run in four whose
-  symptom named the thing that was working. Found by running the suite eight
-  times instead of once. Also **a headless dev session had nobody to stop it** and ran forever once its
-  control connection dropped, which is entering risk 4 arriving from a direction
-  the risk did not describe; **the i18n lint was looking for `makeError(` in an
-  engine that only writes `core::makeError(`** and reported a clean tree because
-  it matched nothing; and **the synthetic headless clock is wrong for a dev
-  session**, which ran 37,000 ticks before the first request for tick 40 finished
-  crossing the socket.
-  Next: **stop for M3 human review** (§6). Do not start M4 this session.
-
+- **2026-08-20 (session 7, Claude Opus): opened M4.** Ran the §2 boot sequence —
+  the repo had moved two commits past the ledger and carried an uncommitted
+  api-design correction from the previous session, so the repo won and that
+  landed on its own first. Re-ran the M3 gate green on both tiers (903
+  conformance, 3 hot-reload, reload 0.3 ms against 500 ms). Deep-read
+  architecture §2, §3, §7 and §9, api-design §2.1–§2.3, ADRs 0005, 0006, 0010
+  and 0027, and the ecosystem report's asset section, then wrote
+  `docs/briefs/m4-kickoff.md`.
+  Then build-order step 1, which produced three findings before any engine code
+  existed — all from reading vendored `CMakeLists.txt` files rather than
+  documentation. **fastgltf has a mandatory dependency no document here
+  mentions**, and with no `simdjson::simdjson` target present it downloads
+  simdjson's amalgamated pair, unpinned and unhashed, into
+  `third_party/fastgltf/deps/` at configure time: R5, R13, R14 and ADR 0032's
+  fetch rule in one upstream default. Escalated; the human approved vendoring
+  simdjson (ADR 0036), pinned at the 3.12.3 fastgltf itself targets, with a
+  patch turning the download branch into a `FATAL_ERROR`.
+  Which exercised **the patch mechanism R13 rests on for the first time in four
+  milestones, and it reported success while doing nothing**: `git apply`
+  resolves paths against the repository root even from a subdirectory, and
+  *skips* — exit 0 — anything outside the current directory. Patches now apply
+  from the root with `--directory=`, a `Skipped patch` is an error, and each
+  patch is verified with `--check --reverse` immediately after.
+  And then the patch still would not apply, which found the sharpest one:
+  **no vendored tree in this repository has ever been byte-identical to its
+  pinned commit.** `vendor.luau` checks out through its own git dir, where
+  `.gitattributes` cannot reach it, so `core.autocrlf=true` mangled every file
+  on Windows — and `third_party/** -text`, the rule written to guarantee
+  byte-exactness, then committed the mangling faithfully. Every tree since M0 is
+  affected. The checkout forces `core.autocrlf=false core.eol=lf` now and this
+  milestone's three trees are correct; whether to re-vendor the historical ones
+  is a ~20,000-file question left for the human.
+  Next: implement `core::AABB` and `core::Frustum` per architecture §2's math
+  list, with the plane/box tests, then specs for them in
+  `engine/core/tests/math_tests.cpp`.
 
 <!-- Format for future entries:
 - **YYYY-MM-DD (session N):** did X; learned Y; Next: <literal first action>.

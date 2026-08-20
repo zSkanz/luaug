@@ -437,6 +437,61 @@ manifest, and adding a dependency is a human call. The recommendation is in
 *(meshoptimizer, checked at the same time, is clean: its `CMakeLists.txt`
 fetches nothing and its only `find_package` is `Threads`.)*
 
+**Resolved the same day:** the human approved vendoring simdjson (ADR 0036).
+It is pinned at v3.12.3 — the version fastgltf's own CMake targets, on the
+`spirv_cross` row's precedent — the `simdjson::simdjson` target will be defined
+before `add_subdirectory(fastgltf)`, and a patch under
+`third_party/patches/fastgltf/` turns the download branch into a `FATAL_ERROR`
+so a future version cannot quietly resume fetching.
+
+**2. The patch mechanism R13 rests on had never been run, and it reported
+success while doing nothing.** Every manifest row until now carried
+`"patches": []`, so `applyPatches` had never applied a patch in four
+milestones. The first one it was given did not land, and the tool said
+`applying 0001-no-simdjson-download.patch` and moved on.
+
+The cause: `vendor.luau` ran `git apply` with the working directory set to the
+vendored tree. **`git apply` resolves a patch's paths against the *repository*
+root even when invoked from a subdirectory, and a path that lands outside the
+current directory is not an error** — it prints `Skipped patch` to stderr and
+exits **0**. So `a/cmake/dependencies.cmake` was read as
+`<repo-root>/cmake/dependencies.cmake`, found to be outside
+`third_party/fastgltf`, skipped, and reported as done.
+
+Patches now apply from the repository root with `--directory=`, any `Skipped
+patch` in stderr is turned back into a failure, and — because a patch that
+quietly did not take is worse than one that failed — each patch is verified
+immediately afterwards with `--check --reverse`, which succeeds only against
+content that already carries it.
+
+This is the fourth "a gate that can pass while doing nothing" in three
+milestones, and the first one in a mechanism that a *rule* depends on rather
+than a test.
+
+**3. No vendored tree in this repository has ever been byte-identical to its
+pinned commit, and `.gitattributes` is what made the mangling durable.**
+Finding 2's patch still refused to apply after the path fix, because the
+vendored file was CRLF and the patch was LF. It is CRLF because `vendor.luau`
+checks out through **its own git dir**, which our `.gitattributes` cannot reach,
+so the user's `core.autocrlf=true` applied and every file landed with CRLF on
+Windows.
+
+Then the rule written to protect byte-exactness preserved the damage instead:
+`third_party/** -text` disables normalization, so git faithfully committed the
+CRLF. Checked across the repository, **every** vendored tree is affected — luau,
+sdl3, imgui, stb, doctest, spirv_cross, and both trees vendored today.
+
+ADR 0021's central claim is that a vendored tree is exact upstream content at
+the pinned commit. It has not been true since M0, and nothing noticed because
+compilers do not care about line endings and no patch had ever been applied.
+The checkout now forces `core.autocrlf=false core.eol=lf`, so a vendored tree is
+upstream's bytes on every platform.
+
+The trees vendored this milestone are correct as of this commit. **The
+historical trees are not, and re-vendoring them is a ~20,000-file mechanical
+rewrite** — recorded in the ledger as a decision for the human rather than done
+on the way past.
+
 ## Gate Record
 
 *Filled at milestone end, before human review.*

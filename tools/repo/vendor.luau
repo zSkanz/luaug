@@ -222,6 +222,28 @@ local function scratchRoot(): string
     return `{buildRoot}/vendor-scratch`
 end
 
+-- `git apply` resolves a patch's paths against the *repository* root even when
+-- it is invoked from a subdirectory, and it does not fail on a path that lands
+-- outside the current directory -- it prints "Skipped patch" to stderr and exits
+-- **0**. Applying from inside `third_party/<name>` therefore changed nothing and
+-- reported success, which is the failure mode this repository keeps finding: a
+-- check that passes while doing nothing.
+--
+-- So patches are applied from the repository root with `--directory`, and any
+-- skip is turned back into the error it should always have been.
+local function runGitApply(args: { string }, what: string)
+    local argv = table.clone(args)
+    table.insert(argv, 1, "git")
+
+    local result = process.run(argv)
+    if not result.ok then
+        fail(`{what} failed (exit {result.exitcode})\n{result.stderr}`)
+    end
+    if string.find(result.stderr, "Skipped patch", 1, true) then
+        fail(`{what}: git skipped the patch (paths outside the target tree)\n{result.stderr}`)
+    end
+end
+
 local function applyPatches(dependency: Dependency)
     local dir = `{PatchRoot}/{dependency.name}`
     if #dependency.patches == 0 then
@@ -234,10 +256,15 @@ local function applyPatches(dependency: Dependency)
             fail(`{dependency.name}: manifest lists patch "{patch}" but {patchPath} is missing`)
         end
         info(`{dependency.name}: applying {patch}`)
-        runGit(
-            { "apply", "--whitespace=nowarn", "-p1", `{process.cwd()}/{patchPath}` },
-            `patch {patch}`,
-            dependency.path
+        local target = `--directory={dependency.path}`
+        runGitApply({ "apply", "--whitespace=nowarn", "-p1", target, patchPath }, `patch {patch}`)
+
+        -- A patch that quietly did not take is worse than one that failed, and
+        -- R13 rests entirely on this call, so prove it landed: an applied patch
+        -- is exactly one that reverses cleanly.
+        runGitApply(
+            { "apply", "--whitespace=nowarn", "-p1", target, "--check", "--reverse", patchPath },
+            `verify {patch}`
         )
     end
 end
@@ -275,7 +302,19 @@ local function syncOne(dependency: Dependency)
         fail(`{dependency.name}: fetched {head} but manifest pins {dependency.commit}`)
     end
 
+    -- `-c core.autocrlf=false -c core.eol=lf` is load-bearing, not tidiness.
+    -- This checkout uses its own git dir, so the repository's `.gitattributes`
+    -- (`third_party/** -text`) does not reach it and the user's global
+    -- `core.autocrlf` does: on Windows every vendored file landed with CRLF,
+    -- and `-text` then faithfully committed the mangling instead of preventing
+    -- it. The tree stopped being byte-identical to the pinned commit -- which
+    -- is ADR 0021's whole claim -- and nothing noticed for four milestones,
+    -- because compilers do not care and no patch had ever been applied.
     runGit({
+        "-c",
+        "core.autocrlf=false",
+        "-c",
+        "core.eol=lf",
         `--git-dir={gitDir}`,
         `--work-tree={dependency.path}`,
         "checkout",

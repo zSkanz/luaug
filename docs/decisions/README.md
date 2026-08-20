@@ -76,3 +76,4 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0033](0033-hand-written-json-reader-in-core.md) | One hand-written JSON reader in `core`, not a dependency |
 | [0034](0034-luau-casing-objects-modules-files.md) | Luau casing: objects vs modules, and the file-level rule |
 | [0035](0035-engine-is-a-websocket-client-of-the-dev-server.md) | The engine is a WebSocket client of the dev server; only the dev server listens |
+| [0036](0036-simdjson-vendored-for-fastgltf.md) | simdjson is vendored for fastgltf, and fastgltf's downloader is made unreachable |
