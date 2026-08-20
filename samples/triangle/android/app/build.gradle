@@ -1,0 +1,156 @@
+plugins {
+    id 'com.android.application'
+}
+
+// ---------------------------------------------------------------------------
+// Pins are READ, not repeated.
+//
+// The NDK revision, the minimum API level and the ABI already exist as literals
+// in cmake/toolchains/android.cmake, where the nightly cross-compile reads them
+// and where the toolchain asserts the NDK it resolved actually reports that
+// revision. Parsing them back out here keeps one version string in the
+// repository per decision (R5) -- the same trick .github/workflows/nightly.yml
+// already uses on the same file, for the same reason.
+// ---------------------------------------------------------------------------
+def repoRoot = rootDir.parentFile.parentFile.parentFile
+def toolchainText = new File(repoRoot, 'cmake/toolchains/android.cmake').text
+
+def cmakePin = { String name ->
+    def matcher = (toolchainText =~ /(?m)^set\(\s*${name}\s+"([^"]*)"/)
+    if (!matcher) {
+        throw new GradleException(
+            "cmake/toolchains/android.cmake no longer defines ${name} -- the pin moved or changed shape.")
+    }
+    return matcher[0][1]
+}
+
+def ndkPin = cmakePin('LUAUG_ANDROID_NDK_VERSION')
+def abiPin = cmakePin('ANDROID_ABI')
+def minSdkPin = cmakePin('ANDROID_PLATFORM').replace('android-', '') as int
+
+def versionMatcher = (new File(repoRoot, 'CMakeLists.txt').text =~ /(?m)^\s*VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)/)
+def engineVersion = versionMatcher ? versionMatcher[0][1] : '0.0.0'
+
+// ---------------------------------------------------------------------------
+// Where the payload comes from.
+//
+// This project builds no native code. That is deliberate: letting the Android
+// Gradle Plugin drive CMake would use AGP's own toolchain file, which silently
+// discards cmake/toolchains/android.cmake -- and with it the assertion that the
+// NDK in use is the pinned one, which is the only thing making the pin real. It
+// would also force AGP and this repository to agree on a CMake version (AGP
+// ships 3.22.1; the root CMakeLists requires 3.28).
+//
+// So the .so is cross-compiled by the same two commands the nightly already
+// runs, the SPIR-V comes from a host build (shadercross is a host tool and
+// LUAUG_SHADER_TOOLCHAIN is off when cross-compiling), and
+// cmake/stage_android_apk.cmake collects both into one directory that Gradle
+// merely packages. Nothing is written into src/main/ -- R14 keeps build output
+// out of the tree.
+// ---------------------------------------------------------------------------
+def stageDir = project.findProperty('luaug.stageDir')
+if (stageDir == null && System.getenv('LUAUG_BUILD_ROOT') != null) {
+    stageDir = "${System.getenv('LUAUG_BUILD_ROOT')}/android-triangle-stage"
+}
+if (stageDir == null) {
+    throw new GradleException(
+        'Nothing to package. Pass -Pluaug.stageDir=<dir> (or set LUAUG_BUILD_ROOT) and run\n' +
+        '  cmake -DLIBRARY=... -DSHADER_DIR=... -DCATALOG=... -DABI=... -DSTAGE=<dir> \\\n' +
+        '        -P cmake/stage_android_apk.cmake\n' +
+        'first. That script writes <dir>/jniLibs and <dir>/assets.')
+}
+
+// SDL's Java glue is used where it is vendored instead of being copied in.
+// SDLActivity carries SDL_MAJOR/MINOR/MICRO_VERSION and refuses to start when
+// they disagree with the native library's, so a copy would be a version skew
+// waiting to happen -- and copying it would also duplicate third_party under a
+// directory R13 says never to edit. Referencing it keeps the Java and the C on
+// the same pinned commit by construction.
+def sdlJavaDir = new File(repoRoot, 'third_party/sdl3/android-project/app/src/main/java')
+
+android {
+    namespace = 'org.luaug.triangle'
+    compileSdk = 35
+    // Pinned rather than left to AGP's built-in default, which moves with the
+    // plugin version (R5). The nightly installs exactly this package.
+    buildToolsVersion = '35.0.0'
+    // Only used to strip the staged .so for packaging -- nothing here compiles
+    // native code (see the block above) -- but naming it keeps the tool that
+    // touches the binary on the same pinned NDK that produced it.
+    ndkVersion = ndkPin
+
+    defaultConfig {
+        applicationId = 'org.luaug.triangle'
+        minSdk = minSdkPin
+        targetSdk = 35
+        versionCode = 1
+        versionName = engineVersion
+    }
+
+    sourceSets.main {
+        java.srcDirs = ['src/main/java', sdlJavaDir]
+        jniLibs.srcDirs = ["${stageDir}/jniLibs"]
+        assets.srcDirs = ["${stageDir}/assets"]
+    }
+
+    androidResources {
+        // SDL reads an asset through AAssetManager two ways: a file descriptor
+        // into the APK, which is fast and needs the entry stored uncompressed,
+        // and an InputStream fallback for everything else. Storing the shader
+        // blobs and the JSON uncompressed takes the first path and, more to the
+        // point, makes SDL_GetIOSize() answer -- so a failure to read one is a
+        // fact about the packaging rather than about compression.
+        noCompress.addAll(['spv', 'json'])
+    }
+
+    // No buildTypes block. `assembleDebug` is the only target this project has a
+    // reason to produce -- a debug APK is signed with the shared debug key,
+    // which is what makes `adb install` work; a release build would come out
+    // unsigned and uninstallable, and a release keystore is a decision for
+    // whoever ships rather than for a checkpoint.
+
+    // The vendored SDL Java sources are third-party code held to their own bar,
+    // not ours; failing our build on their lint findings would be enforcing a
+    // rule we cannot fix without editing third_party (R13).
+    lint {
+        abortOnError = false
+    }
+}
+
+// A staging directory that is absent or half-written produces an APK that
+// installs, launches, and shows a black screen -- the single worst outcome for
+// a checkpoint whose whole job is to tell one failure apart from another. So it
+// is checked before anything is packaged, and the message says which command
+// was skipped.
+def verifyStagedPayload = tasks.register('verifyStagedPayload') {
+    doLast {
+        def library = file("${stageDir}/jniLibs/${abiPin}/libmain.so")
+        if (!library.exists()) {
+            throw new GradleException(
+                "No native library at ${library}.\n" +
+                'Cross-compile it, then re-run cmake/stage_android_apk.cmake:\n' +
+                '  cmake -S . -B $LUAUG_BUILD_ROOT/android-arm64 -G Ninja \\\n' +
+                '        -DCMAKE_TOOLCHAIN_FILE=$PWD/cmake/toolchains/android.cmake \\\n' +
+                '        -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLUAUG_PROFILE=dev -DLUAUG_BUILD_TESTS=OFF\n' +
+                '  cmake --build $LUAUG_BUILD_ROOT/android-arm64 --target luaug_triangle_sample')
+        }
+
+        def manifest = file("${stageDir}/assets/content/shaders/manifest.json")
+        if (!manifest.exists()) {
+            throw new GradleException(
+                "No shader manifest at ${manifest}.\n" +
+                'The SPIR-V comes from a HOST build -- LUAUG_SHADER_TOOLCHAIN is off when cross-compiling:\n' +
+                '  cmake --build <host-build> --target luaug_triangle_sample_shaders\n' +
+                'then re-run cmake/stage_android_apk.cmake.')
+        }
+
+        def catalog = file("${stageDir}/assets/content/i18n/en.json")
+        if (!catalog.exists()) {
+            throw new GradleException("No message catalog at ${catalog}; re-run cmake/stage_android_apk.cmake.")
+        }
+    }
+}
+
+tasks.named('preBuild') {
+    dependsOn verifyStagedPayload
+}

@@ -1,0 +1,33 @@
+// Root build file. Version pins and the out-of-tree rule live here.
+//
+// The Android Gradle Plugin is pinned to the version SDL3 itself vendors in
+// `third_party/sdl3/android-project/build.gradle` (8.7.3), and Gradle to the
+// version its wrapper names (8.12, see gradle/wrapper/gradle-wrapper.properties).
+// Matching upstream is the cheapest way to stay inside a combination the
+// vendored Java glue is known to build under; newer numbers would be a change
+// nobody had a reason for, and R5 forbids the "latest" that would otherwise
+// make the choice implicitly.
+
+plugins {
+    id 'com.android.application' version '8.7.3' apply false
+}
+
+// R14, applied to Gradle. Left alone, AGP writes `app/build/` straight into the
+// source tree -- and `.gitignore`'s build patterns are root-anchored on purpose
+// (an unanchored `build-*/` once swallowed a vendored upstream directory), so
+// nothing there would catch it. Redirecting the build directory is the fix that
+// matches the rule rather than the fix that hides the symptom.
+//
+// The project cache (`.gradle/`) cannot be moved from here -- Gradle only takes
+// `--project-cache-dir` on the command line -- so the CI job passes it and a
+// local run should too.
+def buildRoot = project.findProperty('luaug.buildRoot') ?: System.getenv('LUAUG_BUILD_ROOT')
+if (buildRoot == null) {
+    throw new GradleException(
+        'LUAUG_BUILD_ROOT is not set. Builds in this repository are always out-of-tree (R14);\n' +
+        'scripts/bootstrap.ps1 and scripts/bootstrap.sh set it, or pass -Pluaug.buildRoot=<dir>.')
+}
+
+allprojects {
+    layout.buildDirectory = file("${buildRoot}/android-triangle-gradle/${project.name}")
+}

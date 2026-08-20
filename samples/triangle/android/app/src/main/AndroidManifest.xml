@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Modelled on third_party/sdl3/android-project/app/src/main/AndroidManifest.xml
+    and cut down to what one triangle needs: no permissions, no USB or HID
+    intent filters, no launcher icon of our own (the platform default is used,
+    so this package adds no binary content to the repository).
+
+    `android:versionCode` and `android:versionName` are absent on purpose --
+    app/build.gradle sets them, reading the version out of the root CMakeLists.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:installLocation="auto">
+
+    <!--
+        SDL_GPU on Android is Vulkan (ADR 0005), and whether it rasterizes here
+        is the entire question this package exists to ask. Declared
+        required="false" on purpose: a hard requirement would make the package
+        refuse to install on a device without Vulkan, turning "SDL3 GPU does not
+        work on this phone" into "the APK would not install" -- the same answer
+        with the diagnosis removed. Installed and failing out loud is the more
+        useful outcome.
+    -->
+    <uses-feature
+        android:name="android.hardware.vulkan.version"
+        android:version="0x400003"
+        android:required="false" />
+
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+
+    <application
+        android:label="@string/app_name"
+        android:allowBackup="false"
+        android:theme="@style/AppTheme"
+        android:enableOnBackInvokedCallback="false"
+        android:hardwareAccelerated="true">
+
+        <!--
+            configChanges is copied verbatim from SDL's manifest: SDLActivity
+            handles all of these itself, and letting Android recreate the
+            activity instead would tear down the GPU device mid-run and report
+            it as a rendering failure.
+        -->
+        <activity
+            android:name="org.luaug.triangle.TriangleActivity"
+            android:label="@string/app_name"
+            android:alwaysRetainTaskState="true"
+            android:launchMode="singleInstance"
+            android:configChanges="layoutDirection|locale|grammaticalGender|fontScale|fontWeightAdjustment|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
+            android:preferMinimalPostProcessing="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

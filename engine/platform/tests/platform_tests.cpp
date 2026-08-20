@@ -1,11 +1,17 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <cstddef>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <string>
+#include <vector>
 
 #include "luaug/core/i18n.h"
 #include "luaug/core/text_key.h"
 #include "luaug/platform/event.h"
+#include "luaug/platform/file.h"
 #include "luaug/platform/platform.h"
 #include "luaug/platform/sdl_interop.h"
 #include "luaug/platform/window.h"
@@ -155,4 +161,56 @@ TEST_CASE("the pump translates what the engine models and drops the rest")
 
     CHECK(std::ranges::any_of(
         raw, [](const SDL_Event& e) { return e.type == SDL_EVENT_KEY_DOWN && e.key.scancode == SDL_SCANCODE_A; }));
+}
+
+// --- platform::readFile ------------------------------------------------------
+//
+// The seam ShaderLibrary reads content through. On this tier it is an ordinary
+// file read; the reason it exists at all is Android, where the same call lands
+// on AAssetManager instead -- and that half cannot be tested without a device.
+// What IS testable here is the contract every caller relies on: exact bytes,
+// including embedded NULs and CR, and a clean false for anything unreadable.
+
+TEST_CASE("readFile returns the file's bytes exactly")
+{
+    const std::filesystem::path path
+        = std::filesystem::temp_directory_path() / "luaug-platform-readfile.bin";
+
+    // A NUL in the middle and a bare CR: a reader that went through a text-mode
+    // FILE* or treated the buffer as a C string would lose one or the other.
+    const std::string payload("ab\0cd\r\n", 7);
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out.write(payload.data(), static_cast<std::streamsize>(payload.size()));
+    }
+
+    std::vector<std::byte> bytes;
+    REQUIRE(luaug::platform::readFile(path, bytes));
+    REQUIRE(bytes.size() == payload.size());
+    CHECK(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
+
+    std::string text;
+    REQUIRE(luaug::platform::readTextFile(path, text));
+    CHECK(text == payload);
+
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
+TEST_CASE("readFile fails without touching the caller's buffer")
+{
+    const std::filesystem::path missing
+        = std::filesystem::temp_directory_path() / "luaug-platform-does-not-exist.bin";
+
+    std::vector<std::byte> bytes{std::byte{0x7f}};
+    CHECK_FALSE(luaug::platform::readFile(missing, bytes));
+    CHECK(bytes.size() == 1);
+
+    // A directory is not a file. It is worth pinning because the platform
+    // layers disagree: opening one succeeds on POSIX and fails on Windows, and
+    // a caller that got a zero-byte "success" would report a corrupt shader
+    // instead of a missing one.
+    std::string text{"kept"};
+    CHECK_FALSE(luaug::platform::readTextFile(std::filesystem::temp_directory_path(), text));
+    CHECK(text == "kept");
 }

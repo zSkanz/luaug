@@ -176,3 +176,277 @@ jobs:
             echo "Compile-only: no device, no tests, no runtime claim."
             echo "Non-blocking by construction -- this workflow has no pull-request trigger."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # The triangle APK (roadmap M4, "The triangle sample and its Android package").
+  #
+  # A separate job from the compile check above, not an extension of it, because
+  # the two answer different questions and one must not be able to hide the
+  # other: `android-ndk` asks whether the platform/RHI seam still compiles for
+  # arm64 and is meaningful on its own, while this one produces the artifact the
+  # human device checkpoint before the end-of-M4 RHI freeze is passed with.
+  #
+  # It packages and does not test. There is no device in CI and there is not
+  # going to be one; what a green run here proves is that an installable APK
+  # exists for this commit, containing a library that links and shaders that
+  # were actually compiled. Whether SDL3 GPU rasterizes on a phone -- ADR 0005
+  # calls its Android support "limited" -- is the question the human answers
+  # with the artifact this job uploads.
+  # ---------------------------------------------------------------------------
+  android-apk:
+    name: Triangle APK (checkpoint artifact)
+    runs-on: ubuntu-latest
+    # Two builds of the vendored subsystem set -- one host, for the shader
+    # toolchain, one cross-compiled -- plus Gradle. A hang guard, not a
+    # schedule.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set out-of-tree build root (R14)
+        shell: bash
+        run: echo "LUAUG_BUILD_ROOT=${RUNNER_TEMP}/luaug-build" >> "$GITHUB_ENV"
+
+      - name: Ensure Ninja
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v ninja >/dev/null 2>&1; then
+            echo "ninja already present: $(ninja --version)"
+          else
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends ninja-build
+          fi
+
+      # The host half of this job configures the whole tree, and SDL refuses to
+      # configure on Linux with neither X11 nor Wayland present. Same list and
+      # same reasoning as ci.yml's copy of this step -- taken from SDL's own
+      # README-linux rather than assembled from whatever the last failure named.
+      - name: Install SDL video dependencies
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
+            libxi-dev libxss-dev libxtst-dev libxkbcommon-dev \
+            libthai-dev libfribidi-dev \
+            libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
+            libdbus-1-dev libibus-1.0-dev libudev-dev \
+            libwayland-dev wayland-protocols libdecor-0-dev
+
+      # Same key as ci.yml's step, so this job restores the archive that
+      # workflow already verified and saved instead of fetching it again.
+      # luaug_dxc.cmake re-hashes it against third_party/manifest.json on every
+      # configure, so a restored archive is checked rather than trusted.
+      - name: Cache the pinned DirectXShaderCompiler archive
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/luaug-build/toolchains/dxc/**/*.zip
+            ${{ runner.temp }}/luaug-build/toolchains/dxc/**/*.tar.gz
+          key: dxc-${{ runner.os }}-${{ hashFiles('third_party/manifest.json') }}
+
+      # Read back rather than repeated, exactly as the compile job above does:
+      # cmake/toolchains/android.cmake is the one place the NDK revision is
+      # written, and the toolchain asserts that the NDK it resolves reports it.
+      - name: Resolve the pinned NDK version (R5)
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^set(LUAUG_ANDROID_NDK_VERSION "\([^"]*\)".*/\1/p' \
+                     cmake/toolchains/android.cmake | head -n 1)"
+          if [[ -z "$version" ]]; then
+            echo "::error file=cmake/toolchains/android.cmake::LUAUG_ANDROID_NDK_VERSION not found -- the pin moved or changed shape"
+            exit 1
+          fi
+          echo "ANDROID_NDK_VERSION=$version" >> "$GITHUB_ENV"
+          echo "pinned NDK: $version"
+
+      - name: Install the pinned Android NDK and SDK packages
+        timeout-minutes: 20
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          if [[ -z "$sdk_root" ]]; then
+            echo "::error::no Android SDK on this runner (ANDROID_SDK_ROOT and ANDROID_HOME are both unset)"
+            exit 1
+          fi
+          sdkmanager="$(command -v sdkmanager || echo "$sdk_root/cmdline-tools/latest/bin/sdkmanager")"
+          if [[ ! -x "$sdkmanager" ]]; then
+            echo "::error::sdkmanager not found (looked for it on PATH and under $sdk_root/cmdline-tools/latest/bin)"
+            exit 1
+          fi
+
+          # Every package named by exact revision. AGP would otherwise download
+          # a missing platform or build-tools itself, at whatever version it
+          # chose -- which is the "latest" R5 exists to forbid, arriving through
+          # a side door. The two SDK numbers are the ones
+          # samples/triangle/android/app/build.gradle declares.
+          #
+          # pipefail is off for the same reason as the compile job's copy: `yes`
+          # dies of SIGPIPE the moment sdkmanager stops reading, so it exits 141
+          # and would turn every successful install into a failed step.
+          set +o pipefail
+          yes | "$sdkmanager" --install \
+            "ndk;$ANDROID_NDK_VERSION" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" > /dev/null
+          set -o pipefail
+
+          echo "ANDROID_NDK_ROOT=$sdk_root/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
+
+      # AGP 8.7 needs a JDK 17 toolchain. Pinned here rather than taken from
+      # whatever the image default happens to be that week.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # Gradle by pinned URL, from the wrapper's own distributionUrl. This
+      # repository takes no third-party actions (ci.yml's sccache step gives the
+      # reasons: one fewer supply-chain surface, and the version stays visible
+      # in the file), and reading the URL out of gradle-wrapper.properties means
+      # the Gradle a human uses and the Gradle CI uses cannot drift apart.
+      #
+      # The wrapper JAR itself is not committed -- see that file's comment --
+      # which is why this step exists instead of `./gradlew`.
+      - name: Install the pinned Gradle
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          props="samples/triangle/android/gradle/wrapper/gradle-wrapper.properties"
+          url="$(sed -n 's/^distributionUrl=//p' "$props" | head -n 1)"
+          # A Java .properties file escapes the colon as `\:`; the URL itself
+          # contains no backslashes, so stripping every one is exact. The
+          # backslash goes through a variable rather than being written inline:
+          # it would otherwise have to survive YAML, then bash's quoting, then
+          # whichever tool did the stripping, and two of those three eat it.
+          backslash='\'
+          url="${url//"$backslash"/}"
+          if [[ -z "$url" ]]; then
+            echo "::error file=$props::distributionUrl not found -- the Gradle pin moved or changed shape"
+            exit 1
+          fi
+          echo "pinned Gradle: $url"
+          curl -fsSL -o "${RUNNER_TEMP}/gradle.zip" "$url"
+          unzip -q "${RUNNER_TEMP}/gradle.zip" -d "${RUNNER_TEMP}/gradle"
+          dir="$(find "${RUNNER_TEMP}/gradle" -maxdepth 1 -mindepth 1 -type d | head -n 1)"
+          "$dir/bin/gradle" --version
+          echo "$dir/bin" >> "$GITHUB_PATH"
+
+      # -----------------------------------------------------------------------
+      # 1. The shaders, on the HOST.
+      #
+      # LUAUG_SHADER_TOOLCHAIN defaults OFF when cross-compiling
+      # (cmake/luaug_options.cmake): shadercross is a host tool and Microsoft
+      # publishes no Android DirectXShaderCompiler, so the Android build
+      # produces a library and no blobs. Only the `_shaders` custom target is
+      # built here -- that is what luaug_add_shaders() hangs the compiles on, so
+      # this compiles shadercross and the two shaders and never links a sample.
+      # -----------------------------------------------------------------------
+      - name: Configure the host build (shaders only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B "$LUAUG_BUILD_ROOT/host-shaders" -G Ninja \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DLUAUG_PROFILE=dev \
+            -DLUAUG_BUILD_TESTS=OFF
+
+      - name: Compile the triangle's shaders
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build "$LUAUG_BUILD_ROOT/host-shaders" --target luaug_triangle_sample_shaders
+
+      # -----------------------------------------------------------------------
+      # 2. The library, cross-compiled.
+      #
+      # Same toolchain file, flags and profile as the compile job above, so what
+      # ships is built the way the nightly already proves compiles. Our
+      # toolchain file rather than AGP's, because it is what asserts that the
+      # NDK actually in use reports the pinned revision.
+      # -----------------------------------------------------------------------
+      - name: Configure (Android arm64)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B "$LUAUG_BUILD_ROOT/android-arm64-apk" -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/cmake/toolchains/android.cmake" \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DLUAUG_PROFILE=dev \
+            -DLUAUG_BUILD_TESTS=OFF
+
+      - name: Build libmain.so
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build "$LUAUG_BUILD_ROOT/android-arm64-apk" --target luaug_triangle_sample
+
+      # -----------------------------------------------------------------------
+      # 3. Bring the two halves together, then package.
+      # -----------------------------------------------------------------------
+      - name: Stage the APK payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake \
+            -DLIBRARY="$LUAUG_BUILD_ROOT/android-arm64-apk/samples/triangle/libmain.so" \
+            -DSHADER_DIR="$LUAUG_BUILD_ROOT/host-shaders/samples/triangle/content/shaders" \
+            -DCATALOG="$PWD/i18n/en.json" \
+            -DABI="arm64-v8a" \
+            -DSTAGE="$LUAUG_BUILD_ROOT/android-triangle-stage" \
+            -P cmake/stage_android_apk.cmake
+
+      # `--project-cache-dir` for the same reason the project's root
+      # build.gradle moves the build directory: R14, and `.gitignore`'s build
+      # patterns are root-anchored, so anything Gradle left under `samples/`
+      # would show up as untracked rather than being ignored.
+      - name: Assemble the debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --project-dir samples/triangle/android \
+                 --project-cache-dir "$LUAUG_BUILD_ROOT/android-triangle-gradle/cache" \
+                 --no-daemon \
+                 assembleDebug
+
+      # Debug-signed, which is exactly what makes it side-loadable with
+      # `adb install` and nothing more: it is not a release artifact and carries
+      # no release key. Retained 30 days -- long enough for a checkpoint to be
+      # scheduled, short enough that a stale APK is not lying around to be
+      # tested by mistake.
+      - name: Upload the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: luaug-triangle-apk-${{ github.sha }}
+          path: ${{ env.LUAUG_BUILD_ROOT }}/android-triangle-gradle/app/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Triangle APK"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| NDK | \`${ANDROID_NDK_VERSION:-unresolved}\` |"
+            echo "| ABI / minSdk | \`arm64-v8a\` / 21 |"
+            echo "| shaders | SPIR-V, compiled on the Linux host -- the cross build has no shader toolchain |"
+            echo "| result | **${{ job.status }}** |"
+            echo
+            echo "Packaging only: no device runs this. Download the artifact, \`adb install -r\` it,"
+            echo "launch **LuauG Triangle**, and expect a pink triangle on a dark blue field."
+            echo "A black screen or an immediate exit is the answer ADR 0005 asks for; capture"
+            echo "\`adb logcat -s SDL:V luaug:V\` before uninstalling."
+          } >> "$GITHUB_STEP_SUMMARY"

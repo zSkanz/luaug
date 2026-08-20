@@ -10,6 +10,7 @@ luaug_add_module(platform
     LAYER 1
     SOURCES
         src/platform.cpp
+        src/file.cpp
         src/window.cpp
         src/events.cpp
         src/console.cpp

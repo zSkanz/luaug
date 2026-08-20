@@ -1,10 +1,10 @@
 #include "luaug/render/shader_library.h"
 
 #include <array>
-#include <cstdio>
 
 #include "luaug/core/json.h"
 #include "luaug/core/text_key.h"
+#include "luaug/platform/file.h"
 
 namespace luaug::render
 {
@@ -35,41 +35,6 @@ using core::I18nArg;
     return std::nullopt;
 }
 
-[[nodiscard]] bool readWholeFile(const std::filesystem::path& path, std::vector<std::byte>& out)
-{
-    std::error_code ec;
-    const auto size = std::filesystem::file_size(path, ec);
-    if (ec)
-        return false;
-
-    // Binary, and wide on Windows: a shader blob is bytes, and a project living
-    // under an accented directory name must not lose them.
-    std::FILE* file = nullptr;
-#ifdef _WIN32
-    if (_wfopen_s(&file, path.c_str(), L"rb") != 0)
-        file = nullptr;
-#else
-    file = std::fopen(path.c_str(), "rb");
-#endif
-    if (file == nullptr)
-        return false;
-
-    out.resize(static_cast<std::size_t>(size));
-    const std::size_t read = std::fread(out.data(), 1, out.size(), file);
-    std::fclose(file);
-    return read == out.size();
-}
-
-[[nodiscard]] bool readText(const std::filesystem::path& path, std::string& out)
-{
-    std::vector<std::byte> bytes;
-    if (!readWholeFile(path, bytes))
-        return false;
-
-    out.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-    return true;
-}
-
 } // namespace
 
 std::optional<core::EngineError> ShaderLibrary::load(
@@ -89,7 +54,7 @@ std::optional<core::EngineError> ShaderLibrary::load(
 
     const std::filesystem::path manifestPath = contentDir / "shaders" / "manifest.json";
     std::string text;
-    if (!readText(manifestPath, text))
+    if (!platform::readTextFile(manifestPath, text))
     {
         const std::array<I18nArg, 1> args{I18nArg{"path", manifestPath.string()}};
         return core::makeError(LUAUG_TR("render.err.shader_manifest_missing"), args);
@@ -129,7 +94,7 @@ std::optional<core::EngineError> ShaderLibrary::load(
         // nothing.
         const std::filesystem::path reflectPath = root / shader["reflect"].asString();
         std::string reflectText;
-        if (!readText(reflectPath, reflectText))
+        if (!platform::readTextFile(reflectPath, reflectText))
         {
             const std::array<I18nArg, 1> args{I18nArg{"path", reflectPath.string()}};
             return core::makeError(LUAUG_TR("render.err.shader_reflect_missing"), args);
@@ -180,7 +145,7 @@ rhi::ShaderHandle ShaderLibrary::create(
     }
 
     std::vector<std::byte> code;
-    if (!readWholeFile(entry->blob, code))
+    if (!platform::readFile(entry->blob, code))
     {
         if (outError != nullptr)
         {

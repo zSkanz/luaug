@@ -17,8 +17,32 @@ if(NOT LUAUG_RHI_SDLGPU)
     return()
 endif()
 
-add_executable(luaug_triangle_sample src/main.cpp)
-set_target_properties(luaug_triangle_sample PROPERTIES OUTPUT_NAME luaug-triangle)
+# One CMake target, two shapes. Android has no notion of running an executable
+# from a package: `SDLActivity` dlopen()s a shared object and calls an entry
+# point inside it, so the same translation unit has to link as `libmain.so`
+# there and as a plain executable everywhere else. Keeping the *target* name the
+# same across both is what lets every line below this one -- the link list, the
+# shader pack, the CTest entry -- stay written once.
+if(ANDROID)
+    add_library(luaug_triangle_sample SHARED src/main.cpp)
+
+    # `main`, not `luaug-triangle`: SDLActivity.getMainSharedObject() derives
+    # the file name from getLibraries(), and org.luaug.triangle.TriangleActivity
+    # answers "main" (samples/triangle/android). cmake/stage_android_apk.cmake
+    # asserts the resulting name rather than trusting this line.
+    set_target_properties(luaug_triangle_sample PROPERTIES OUTPUT_NAME main)
+
+    # The entry point is resolved with dlsym() on the name
+    # TriangleActivity.getMainFunction() returns, which is "main" because this
+    # sample has an ordinary main() and does not include SDL_main.h. A symbol
+    # with default visibility in a shared object is already exported, so this
+    # only removes the possibility of a future -fvisibility=hidden turning a
+    # link-time detail into a black screen with one line in logcat.
+    target_link_options(luaug_triangle_sample PRIVATE "LINKER:--export-dynamic-symbol=main")
+else()
+    add_executable(luaug_triangle_sample src/main.cpp)
+    set_target_properties(luaug_triangle_sample PROPERTIES OUTPUT_NAME luaug-triangle)
+endif()
 
 target_link_libraries(luaug_triangle_sample PRIVATE
     luaug::warnings
@@ -33,7 +57,10 @@ target_link_libraries(luaug_triangle_sample PRIVATE
 
 # The sample's own content, staged beside its own executable, because
 # `platform::paths()` derives the content directory from the running binary's
-# location -- the shape a packaged build has, and the shape an APK will need.
+# location -- the shape a packaged build has. An APK is the exception that
+# proved the rule: it has no executable directory, so `paths()` answers a
+# relative `content` there and cmake/stage_android_apk.cmake reproduces this
+# same tree inside the package's assets.
 #
 # Only `triangle.hlsl`: the shader pack a sample carries should be the shaders
 # it draws with, so a missing blob on a device is a fact about this pipeline
@@ -48,13 +75,22 @@ luaug_add_shaders(luaug_triangle_sample GLOB "${CMAKE_CURRENT_SOURCE_DIR}/shader
 # The message catalog, for the same reason the host stages it: engine errors are
 # TextKeys, and without the catalog a device that failed to create a GPU device
 # would report a hash instead of saying so.
-add_custom_command(TARGET luaug_triangle_sample POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_SOURCE_DIR}/i18n/en.json"
-        "$<TARGET_FILE_DIR:luaug_triangle_sample>/content/i18n/en.json"
-    COMMENT "Staging the engine message catalog for the triangle sample")
+#
+# Not on Android, where there is no directory beside the binary to stage into --
+# the same file is copied into the Gradle assets tree by
+# cmake/stage_android_apk.cmake instead.
+if(NOT ANDROID)
+    add_custom_command(TARGET luaug_triangle_sample POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/i18n/en.json"
+            "$<TARGET_FILE_DIR:luaug_triangle_sample>/content/i18n/en.json"
+        COMMENT "Staging the engine message catalog for the triangle sample")
+endif()
 
-if(LUAUG_BUILD_TESTS)
+# `NOT ANDROID` because there is nothing here that could run the test: the
+# Android target is a shared library with no entry point a CTest driver can
+# invoke, and the machine that built it is not the machine that would run it.
+if(LUAUG_BUILD_TESTS AND NOT ANDROID)
     # Renders headless, writes a PNG, and asserts on the frame it rendered.
     #
     # The assertion is the sample's own `--verify` -- centre is the triangle

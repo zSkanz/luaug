@@ -1,0 +1,27 @@
+// The triangle sample's Android package (roadmap M4, "The triangle sample and
+// its Android package"). It lives beside the sample rather than at
+// `platform/android/`, because a top-level directory of that name would claim
+// the engine has an Android port -- and mobile is post-v1 (R15). What this
+// packages is one sample, for one human checkpoint before the RHI freeze.
+//
+// Deliberately a SEPARATE Gradle build from anything else in the repository:
+// there is no other Gradle project here, and rooting it at the sample keeps
+// `gradlew`-shaped tooling out of the repository root.
+
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'luaug-triangle'
+include ':app'

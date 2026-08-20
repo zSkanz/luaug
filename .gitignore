@@ -24,6 +24,11 @@
 shaders/compiled/
 content/cache/
 
+# Gradle's own state for the Android package. Root-anchored patterns above
+# cannot reach it, and Android Studio creates both on first open.
+/samples/triangle/android/.gradle/
+/samples/triangle/android/local.properties
+
 # IDE / editor cruft
 .vs/
 .vscode/*

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The APK's launcher label, and the only user-visible string this package owns.
+    It is here rather than in i18n/en.json because R3 governs *engine* text: this
+    is an Android resource read by the launcher before a line of engine code
+    runs, and the platform's own localisation mechanism is the res/values-<lang>
+    directory, not the engine catalog.
+-->
+<resources>
+    <string name="app_name">LuauG Triangle</string>
+</resources>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Fullscreen and title-less, the same base theme SDL's own template uses. A
+    status bar over the frame would put pixels the engine did not draw inside
+    the photograph the checkpoint is judged on.
+-->
+<resources>
+    <style name="AppTheme" parent="android:Theme.NoTitleBar.Fullscreen">
+    </style>
+</resources>

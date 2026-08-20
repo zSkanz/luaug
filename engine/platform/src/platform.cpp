@@ -6,6 +6,7 @@
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_hints.h>
 #include <SDL3/SDL_init.h>
+#include <SDL3/SDL_platform_defines.h>
 
 #include "luaug/core/text_key.h"
 
@@ -28,6 +29,20 @@ void resolvePaths()
 {
     Paths& paths = pathsSlot();
 
+#ifdef SDL_PLATFORM_ANDROID
+    // An APK has no executable directory and its assets are not a filesystem:
+    // they are zip entries the package manager serves through AAssetManager.
+    // SDL reaches them by opening a *relative* path -- an absolute one is sent
+    // to the C runtime instead and finds nothing -- so the content directory is
+    // deliberately the bare relative name that matches the Gradle project's
+    // `assets/content/` tree, and everything that reads it must go through
+    // platform::readFile (file.h).
+    //
+    // SDL_GetBasePath() answers "./" here. That is not used: the "./" prefix
+    // survives into the lookup key and AAssetManager indexes exact names.
+    paths.executableDir = std::filesystem::path(".");
+    paths.contentDir = std::filesystem::path("content");
+#else
     // Null on platforms that do not implement it; the working directory is the
     // same fallback the M0 host used, and is what CTest provides.
     if (const char* base = SDL_GetBasePath(); base != nullptr)
@@ -41,6 +56,7 @@ void resolvePaths()
     }
 
     paths.contentDir = paths.executableDir / "content";
+#endif
 }
 
 } // namespace

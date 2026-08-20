@@ -66,6 +66,13 @@ struct Paths
     std::filesystem::path contentDir;
 };
 
+// Both members are ABSOLUTE on every desktop tier. On Android they are
+// deliberately RELATIVE -- `.` and `content` -- because an APK's content is a
+// set of zip entries served by AAssetManager and SDL only routes a relative
+// path there. Anything that opens a file under contentDir must therefore go
+// through platform::readFile (file.h), which SDL resolves per platform;
+// std::filesystem and fopen find nothing inside a package.
+//
 // The user-data and cache directories architecture.md §2 also names are not
 // here yet: nothing in M1 writes to either (the bytecode and shader caches
 // live under the build root per §8), and a path nobody uses is a path nobody
