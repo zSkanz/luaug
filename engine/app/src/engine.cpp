@@ -243,6 +243,15 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // whose content is not here, so an unpopulated library renders the debug
     // path and nothing else -- which is exactly the state a world with no
     // MeshParts is in.
+    // What the last frame actually submitted. Reported beside frame time because
+    // the roadmap asks for the *why* next to the *what*: a frame that got slower
+    // with the same draw count is a different problem from one that got slower
+    // because it drew more.
+    core::u32 frameDrawCalls = 0;
+    core::u64 frameTriangles = 0;
+    std::vector<f64> frameTimesMs;
+    core::u64 lastFrameNs = 0;
+
     render::MeshLibrary meshLibrary;
     render::MeshCache meshCache;
     render::MeshLoader meshLoader;
@@ -422,10 +431,26 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         host->publishStats({
             .fps = frame.renderDt > 0.0 ? 1.0 / frame.renderDt : 0.0,
             .frameTimeMs = frame.renderDt * 1000.0,
-            .drawCalls = static_cast<f64>(debugRenderer.valid() ? 1 : 0),
+            .drawCalls = static_cast<f64>(frameDrawCalls),
             .physicsBodies = 0.0,
             .luaMemoryKb = static_cast<f64>(lua_totalbytes(host->runtime().state(), 0)) / 1024.0,
         });
+
+        if (options.frameStats)
+        {
+            // The WALL clock, not `frame.renderDt`. Headless drives the frame
+            // loop from a synthetic 1/60 s step so a golden capture cannot
+            // depend on how busy the machine was (M1 Finding 8) -- which makes
+            // `renderDt` exactly 16.666667 ms every frame and a perf baseline
+            // built on it a measurement of the constant.
+            //
+            // R10 is not in the way: it forbids SIMULATION reading a wall clock.
+            // A profiler is the one thing that has to.
+            const core::u64 sampleNs = platform::nowNs();
+            if (lastFrameNs != 0)
+                frameTimesMs.push_back(static_cast<f64>(sampleNs - lastFrameNs) / 1'000'000.0);
+            lastFrameNs = sampleNs;
+        }
 
         // The FrameStart safe point. Overlay edits are applied HERE and not
         // where they were typed (M4 brief, Decision 15): the panel draws at the
@@ -617,6 +642,22 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 renderer != nullptr && renderer->valid() ? renderer->shadowRadius() : 0.0f;
             render::extract(host->world(), host->workspace(), host->lighting(), meshLibrary, aspect, shadowRadius,
                 snapshot);
+            frameDrawCalls = 0;
+            frameTriangles = 0;
+            for (const render::DrawItem& draw : snapshot.draws)
+            {
+                // Counted from the snapshot rather than from the backend: it is
+                // the same number, it costs nothing, and it is available on a
+                // device that rasterizes nothing.
+                if (!draw.inCameraFrustum)
+                    continue;
+                const render::MeshCache::Resolved* resolved = meshCache.resolve(draw.mesh);
+                if (resolved == nullptr || draw.section >= resolved->sections.size())
+                    continue;
+                ++frameDrawCalls;
+                frameTriangles += resolved->sections[draw.section].indexCount / 3u;
+            }
+
             submitWorld(snapshot, debugDraw);
 
             // Uploaded before the render pass opens, because a copy cannot run
@@ -768,6 +809,31 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         I18nArg{"frames", static_cast<core::i64>(scheduler.totalFrames())},
         I18nArg{"ticks", static_cast<core::i64>(scheduler.totalTicks())}};
     core::log(LogLevel::Info, LUAUG_TR("engine.frame.info.summary"), summary);
+
+    if (options.frameStats && !frameTimesMs.empty())
+    {
+        // The first frames are warm-up -- shader creation, the first mesh load,
+        // the swapchain settling -- and including them makes a median that
+        // describes startup rather than the scene. Dropped rather than averaged
+        // away, because averaging a spike in is exactly how a baseline stops
+        // being comparable.
+        constexpr core::usize kWarmupFrames = 10;
+        std::vector<f64> measured = frameTimesMs;
+        if (measured.size() > kWarmupFrames * 2)
+            measured.erase(measured.begin(), measured.begin() + static_cast<std::ptrdiff_t>(kWarmupFrames));
+        std::sort(measured.begin(), measured.end());
+
+        const f64 median = measured[measured.size() / 2];
+        const f64 worst = measured.back();
+        const std::array<I18nArg, 5> stats{
+            I18nArg{"frames", static_cast<core::i64>(measured.size())},
+            I18nArg{"median", median},
+            I18nArg{"worst", worst},
+            I18nArg{"draws", static_cast<core::i64>(frameDrawCalls)},
+            I18nArg{"triangles", static_cast<core::i64>(frameTriangles)},
+        };
+        core::log(LogLevel::Info, LUAUG_TR("engine.frame.info.stats"), stats);
+    }
 
     debugRenderer.destroy(*device);
     if (offscreen.valid())

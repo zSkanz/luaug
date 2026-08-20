@@ -54,6 +54,7 @@
   "platform.window.title": "LuauG {version}",
 
   "engine.frame.warn.catch_up_clamped": "Frame took {ms} ms; dropped simulated time after {ticks} catch-up ticks.",
+  "engine.frame.info.stats": "{frames} measured frames: median {median} ms, worst {worst} ms, {draws} draws, {triangles} triangles.",
   "engine.frame.info.summary": "Ran {frames} frames, {ticks} simulation ticks.",
 
   "asset.image.err.decode_failed": "Could not decode the image.",

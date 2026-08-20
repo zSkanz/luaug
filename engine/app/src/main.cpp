@@ -123,6 +123,30 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
             options.exitAfterFrames = true;
             continue;
         }
+        if (arg == "--frame-stats")
+        {
+            options.frameStats = true;
+            continue;
+        }
+        // The render target's size. Windowed it is the window; headless it is the
+        // offscreen texture. The M4 gate records a frame-time baseline at 1080p
+        // and the host had no way to be asked for one.
+        if (arg.starts_with("--width=") || arg.starts_with("--height="))
+        {
+            const std::string_view value = arg.substr(arg.find('=') + 1);
+            luaug::core::u64 parsed = 0;
+            // Bounded rather than merely positive: a target larger than any GPU
+            // will allocate fails inside the backend with a message about
+            // memory, which is a long way from "you typed a silly number".
+            if (!numericValue(value, parsed) || parsed == 0 || parsed > 16384)
+            {
+                const std::array<I18nArg, 2> badValue{I18nArg{"option", arg}, I18nArg{"value", value}};
+                luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.bad_value"), badValue);
+                return kExitUsage;
+            }
+            (arg.starts_with("--width=") ? options.width : options.height) = static_cast<luaug::core::i32>(parsed);
+            continue;
+        }
         if (arg.starts_with("--frames="))
         {
             if (!numericValue(arg.substr(9), options.frames))

@@ -86,6 +86,11 @@ struct EngineOptions
 
     rhi::BackendId backend = rhi::BackendId::SdlGpu;
 
+    // Print a frame-time summary at exit. Off by default because the numbers
+    // are wall-clock and a run that is not being measured should not pay for
+    // keeping them (R10 forbids simulation reading them at all).
+    bool frameStats = false;
+
     i32 width = 1280;
     i32 height = 720;
 };
