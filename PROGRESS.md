@@ -198,27 +198,6 @@ it, and building it on speculation is what §5 rejects.
   this shipped, which says the fixture builds a world the panel is then pointed
   at from below -- and the human clicked the one edge that walks the other way.
 
-- **The F3 stats panel is unreadable while running, reported by the human on
-  2026-08-20.** `drawStats` prints two values that change every frame:
-  `frame.index`, which is a bare counter and cannot be read at 60 Hz, and
-  `renderDt` formatted to two decimals, whose last digits are compositor jitter
-  rather than engine cost. The human can only read it by pausing a frame.
-
-  The panel's own comment defends this — "nothing here is sampled or estimated"
-  — and for the four static facts that is right. For frame time it is what makes
-  the panel useless: a held, smoothed number is *more* honest about what the
-  engine costs than one that trembles because of VSync and the window manager.
-
-  The fix, in order of value: sample the displayed value on a fixed cadence
-  (4–10 Hz) and hold it between updates; smooth it (ImGui ships
-  `GetIO().Framerate`, a 60-frame mean, for exactly this); show the window's
-  **worst** frame beside the mean, because a hitch is the number a developer
-  actually needs; and drop `frame.index`, or show it only when paused.
-
-  Worth doing while the overlay is open anyway: the inspector lands in this same
-  panel, and from M3 onward every milestone is developed inside the reload loop.
-  A panel nobody can read is a panel nobody looks at.
-
 - **Next: build-order step 7 — the IDL for M4's new classes**: `Camera`,
   `MeshPart`, `PointLight`, `SpotLight`, `Sky`, `Lighting` and
   `Workspace.CurrentCamera`, in `api/defs` first and the scene components
