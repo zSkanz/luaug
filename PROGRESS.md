@@ -72,11 +72,13 @@ it, and building it on speculation is what §5 rejects.
   `.luau` file and watching `luaug dev` rebuild the world, not by rebuilding the
   engine. If that turns out not to be practical, that is a finding worth more
   than the feature it blocks.
-- **Read CI before anything else.** Three steps are new to the workflow this
-  milestone — the toolchain install, `luaug test`, and the hot-reload suite —
-  and the run for `e05f06d` was still in flight when the session ended. macOS
-  (Tier-3, CI-only) has not compiled since M1 and only a `milestone/*` tag or a
-  manual dispatch builds it; `milestone/m3` is pushed, so that run exists.
+- **CI went red once on the M3 tag and was fixed in the same session.**
+  `scripts/luaug.sh` was committed without its executable bit — a Git working
+  tree on Windows does not track file modes, and a local run invokes the script
+  through PowerShell, so nothing here could notice. Every caller goes through
+  `bash` explicitly now and the bit is set in the index. The same push built
+  **macOS green for the first time since M1**, which is the tier nothing local
+  can check.
 - **Read the installed artifact, not the report about it.** Six of this
   milestone's fifteen findings are Lute behaving differently from its own
   typedefs or documentation, and every one was settled by a ten-line probe:

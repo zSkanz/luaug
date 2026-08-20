@@ -424,7 +424,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          scripts/luaug.sh test tests/conformance | tail -n 3
+          bash scripts/luaug.sh test tests/conformance | tail -n 3
 
       - name: Hot reload, end to end (M3 gate)
         if: runner.os != 'macOS'

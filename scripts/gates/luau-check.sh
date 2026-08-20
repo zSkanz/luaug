@@ -32,7 +32,12 @@ for tool in stylua luau-lsp lute; do
 done
 
 echo "== luaug check (analysis + formatting) =="
-scripts/luaug.sh check . --definitions=runtime/types/engine.d.luau
+# Through `bash` rather than by executing it. The executable bit is not tracked
+# by a Git working tree on Windows unless `core.fileMode` says so, and this
+# script was committed without it -- which is a red CI and a green local run,
+# the exact split "run the gates locally" is supposed to prevent. The bit is set
+# in the index now as well; this is the half that cannot be lost again.
+bash scripts/luaug.sh check . --definitions=runtime/types/engine.d.luau
 
 # The IDL's own lints: casing, the Async biconditional, event tense, enum
 # singularity (api-design.md §9). These are the rules a type cannot express, and

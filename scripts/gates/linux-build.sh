@@ -50,7 +50,7 @@ ctest --preset "$preset" --output-on-failure
 # after ctest rather than instead of it is deliberate: ctest proves the engine,
 # this proves the tool a developer actually types.
 echo "== luaug test =="
-scripts/luaug.sh test tests/conformance > /tmp/luaug-test.tap
+bash scripts/luaug.sh test tests/conformance > /tmp/luaug-test.tap
 tail -n 3 /tmp/luaug-test.tap
 
 # The M3 gate's first item. It starts a dev server, launches this build headless
