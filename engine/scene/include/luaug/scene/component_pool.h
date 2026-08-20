@@ -37,9 +37,19 @@ public:
     {
         ensureSparse(id.index);
         const u32 existing = m_sparse[id.index];
-        if (existing != Absent && m_owners[existing] == id)
+        // Same slot index, whatever the generation. An equal id is the ordinary
+        // overwrite; a stale one means the previous occupant died without its
+        // component being removed, and the dense entry is reused rather than
+        // orphaned. Appending instead would leave a dead entity's component
+        // reachable from `forEach` forever, which a test found by recycling a
+        // slot and looking.
+        if (existing != Absent && existing < m_owners.size() && m_owners[existing].index == id.index)
         {
+            const bool wasLive = m_owners[existing].valid();
             m_dense[existing] = std::move(value);
+            m_owners[existing] = id;
+            if (!wasLive)
+                ++m_liveCount;
             return m_dense[existing];
         }
 

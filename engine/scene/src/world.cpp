@@ -498,8 +498,10 @@ World::SetResult World::setProperty(core::InstanceId id, core::NameAtom property
     if (!descriptor->set(*this, id, value))
         return SetResult::InvalidValue;
 
-    const usize bit = static_cast<usize>(descriptor - &m_classes.find(record->classId)->properties[0]);
-    const bool subscribed = bit >= 64 || (record->subscribedProperties & (u64{1} << bit)) != 0;
+    const u16 slot = m_classes.propertySlot(record->classId, property);
+    // Past 64 properties the mask cannot say, so the write is loud. Correct,
+    // and slower, for a class nothing in v1 has.
+    const bool subscribed = slot >= 64 || (record->subscribedProperties & (u64{1} << slot)) != 0;
     if (subscribed)
         m_changes.push({ChangeKind::PropertyChanged, id, core::InstanceId{}, property});
 
@@ -512,23 +514,16 @@ void World::setPropertySubscribed(core::InstanceId id, core::NameAtom property, 
     if (record == nullptr)
         return;
 
-    const ClassDescriptor* descriptor = m_classes.find(record->classId);
-    const PropertyDesc* target = m_classes.findProperty(record->classId, property);
-    if (descriptor == nullptr || target == nullptr || descriptor->properties.empty())
+    const u16 slot = m_classes.propertySlot(record->classId, property);
+    // Past 64 the mask cannot represent it, and `setProperty` treats that as
+    // always-subscribed, so there is nothing to record.
+    if (slot >= 64)
         return;
 
-    const auto* base = &descriptor->properties[0];
-    if (target < base || target >= base + descriptor->properties.size())
-        return; // Inherited: it lives in an ancestor's array, so it has no bit here.
-
-    const usize bit = static_cast<usize>(target - base);
-    if (bit >= 64)
-        return; // Saturated: past 64 the mask cannot say, so every write enqueues.
-
     if (subscribed)
-        record->subscribedProperties |= (u64{1} << bit);
+        record->subscribedProperties |= (u64{1} << slot);
     else
-        record->subscribedProperties &= ~(u64{1} << bit);
+        record->subscribedProperties &= ~(u64{1} << slot);
 }
 
 // --- Attributes and tags ----------------------------------------------------

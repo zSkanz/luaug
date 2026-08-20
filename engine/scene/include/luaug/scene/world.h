@@ -208,6 +208,9 @@ public:
 
     [[nodiscard]] usize instanceCount() const noexcept { return m_instances.size(); }
     [[nodiscard]] core::AtomTable& atoms() noexcept { return m_atoms; }
+    // A property getter takes a `const World&`, and resolving an atom to text
+    // is the one thing it routinely needs the table for.
+    [[nodiscard]] const core::AtomTable& atoms() const noexcept { return m_atoms; }
     [[nodiscard]] const ClassRegistry& classes() const noexcept { return m_classes; }
 
     // Component storage the generated property accessors read and write. Public

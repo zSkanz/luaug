@@ -62,8 +62,18 @@ ClassId ClassRegistry::registerClass(const ClassDescriptor& descriptor)
     // Overlaid after the copy, so a class that redeclares an inherited member
     // shadows it. The pointers are into the generated static storage the spans
     // view, which outlives the registry.
+    //
+    // A shadowing property keeps the slot it inherited: the slot identifies the
+    // member, and a subscription made through the base must survive the derived
+    // class redeclaring it.
+    u16 nextSlot = static_cast<u16>(entry.properties.size());
     for (const PropertyDesc& property : entry.descriptor.properties)
-        entry.properties[property.name.id] = &property;
+    {
+        PropertyEntry& slot = entry.properties[property.name.id];
+        slot.descriptor = &property;
+        if (slot.slot == NoSlot)
+            slot.slot = nextSlot++;
+    }
     for (const MethodDesc& method : entry.descriptor.methods)
         entry.methods[method.name.id] = &method;
     for (const EventDesc& event : entry.descriptor.events)
@@ -106,7 +116,17 @@ const PropertyDesc* ClassRegistry::findProperty(ClassId id, core::NameAtom name)
         return nullptr;
 
     const auto it = entry->properties.find(name.id);
-    return it == entry->properties.end() ? nullptr : it->second;
+    return it == entry->properties.end() ? nullptr : it->second.descriptor;
+}
+
+u16 ClassRegistry::propertySlot(ClassId id, core::NameAtom name) const noexcept
+{
+    const Entry* entry = entryAt(m_classes, id);
+    if (entry == nullptr)
+        return NoSlot;
+
+    const auto it = entry->properties.find(name.id);
+    return it == entry->properties.end() ? NoSlot : it->second.slot;
 }
 
 const MethodDesc* ClassRegistry::findMethod(ClassId id, core::NameAtom name) const noexcept

@@ -174,18 +174,38 @@ public:
     // for a name the class does not have, which is what raises
     // `scene.err.unknown_member` above.
     [[nodiscard]] const PropertyDesc* findProperty(ClassId id, core::NameAtom name) const noexcept;
+
+    // The property's dense index within this class, inherited members included
+    // and counted first. `NoSlot` for a name the class does not have.
+    //
+    // A pointer offset into the descriptor array cannot serve here, and getting
+    // that wrong is silent: a property declared on `BasePart` lives in
+    // `BasePart`'s array, so measuring it against `Part`'s produces a garbage
+    // index. That made every inherited property permanently unsubscribable and
+    // permanently noisy -- found by a test, not by reading.
+    static constexpr u16 NoSlot = 0xFFFFu;
+    [[nodiscard]] u16 propertySlot(ClassId id, core::NameAtom name) const noexcept;
     [[nodiscard]] const MethodDesc* findMethod(ClassId id, core::NameAtom name) const noexcept;
     [[nodiscard]] const EventDesc* findEvent(ClassId id, core::NameAtom name) const noexcept;
 
     [[nodiscard]] usize classCount() const noexcept { return m_classes.size(); }
 
 private:
+    struct PropertyEntry
+    {
+        const PropertyDesc* descriptor = nullptr;
+        // Stable across the hierarchy: a class keeps its super's numbering and
+        // appends its own after it, so `Name` is slot 0 on every class that
+        // inherits it.
+        u16 slot = NoSlot;
+    };
+
     struct Entry
     {
         ClassDescriptor descriptor;
         // Every ancestor including itself, so `isA` is one hash probe.
         std::vector<ClassId> ancestry;
-        std::unordered_map<u32, const PropertyDesc*> properties;
+        std::unordered_map<u32, PropertyEntry> properties;
         std::unordered_map<u32, const MethodDesc*> methods;
         std::unordered_map<u32, const EventDesc*> events;
     };

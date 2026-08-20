@@ -29,6 +29,7 @@ target_include_directories(luaug_scene SYSTEM PRIVATE "${LUAUG_THIRD_PARTY_DIR}/
 
 luaug_add_module_tests(scene
     SOURCES
+        tests/scene_fixture.cpp
         tests/component_pool_tests.cpp
         tests/class_registry_tests.cpp
         tests/world_tests.cpp
