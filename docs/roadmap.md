@@ -647,6 +647,27 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   a scene must not decide the player's GPU budget — and they land here because
   until M7.5 exists there is nothing worth exposing, and a quality slider is a
   hardening concern. See ADR 0038.
+- **Prove the editor seam is still open** (human decision, 2026-08-20). ADR 0017
+  declines a visual editor for v1 on the explicit condition that **nothing in v1
+  hard-codes an assumption that blocks one**, and four milestones in, nobody has
+  checked whether that is still true. The concrete test is the one the phase-2
+  editor needs first, and it is what prefab-isolation mode is made of: **two
+  `WorldHost`s alive at once**, each with its own `ScriptRuntime` — that is two
+  Luau VMs — rendered into two targets.
+  - **Half of it already works and should be recorded as such.** `IRenderer`
+    takes an arbitrary `RenderTarget` and an arbitrary `RenderWorld`, and
+    headless renders a world into an offscreen texture in the gate every day.
+    Rendering a second world into a second texture is already expressible in the
+    interface ADR 0037 froze, which is the half that would have been expensive
+    to discover missing.
+  - **The untested half is the second world.** `engine.cpp` creates exactly one
+    host. A static, a singleton or a global index anywhere between here and v1.0
+    would make the phase-2 editor pay a refactor, and this check is how that is
+    found while it is still cheap.
+  - It is owed here because hardening is where architectural promises are
+    proven, not because this is the first milestone that could run it — the test
+    is small enough for any milestone to take early, and its value decays with
+    every milestone that adds code before it.
 - **Application identity.** Not "set the window icon" — the thing an engine owes
   a game it ships. `branding/` carries the LuauG mark, and that mark is the
   *fallback for the dev host only*: a game built with `luaug build` takes its
