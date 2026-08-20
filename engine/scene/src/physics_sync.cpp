@@ -76,7 +76,21 @@ bool PhysicsSync::inWorld(core::InstanceId id) const
     // Under `Workspace`, which is what "in the world" means (api-design.md
     // §2.1). A part parented to a Folder under Workspace is in; one parented to
     // nil or to a service that is not Workspace is not.
-    return m_workspace.valid() && m_scene.isAncestorOf(m_workspace, id);
+    if (!m_workspace.valid())
+        return false;
+
+    // Answered for the PARENT and remembered for one tick, because the walk is
+    // O(depth) and ten thousand parts in one folder ask the identical question
+    // ten thousand times. A single-entry memo rather than a map: the parts of a
+    // scene arrive in pool order, which is creation order, which groups them by
+    // parent for free.
+    const core::InstanceId parent = m_scene.parentOf(id);
+    if (parent == m_lastParent)
+        return m_lastParentInWorld;
+
+    m_lastParent = parent;
+    m_lastParentInWorld = parent == m_workspace || m_scene.isAncestorOf(m_workspace, parent);
+    return m_lastParentInWorld;
 }
 
 physics::ShapeDesc PhysicsSync::shapeOf(core::InstanceId id, const PartComponent& part) const
@@ -146,15 +160,26 @@ void PhysicsSync::syncCollisionGroups()
 
 void PhysicsSync::applyBody(core::InstanceId id, PartComponent& part, RigidBodyComponent& body)
 {
-    const u64 key = packInstance(id);
+    if (id.index >= m_bodies.size())
+        m_bodies.resize(static_cast<usize>(id.index) + 1);
+
+    BodyRecord& record = m_bodies[id.index];
     const physics::BodyDesc desc = descOf(id, part, body);
 
-    auto found = m_bodies.find(key);
-    if (found == m_bodies.end()) {
+    if (record.generation != id.generation) {
+        // The slot is empty, or it holds a body that belonged to a different
+        // instance in the same slot. Either way this instance has no body yet.
+        if (record.generation != 0) {
+            m_backend.destroyBody(m_world, record.handle);
+            --m_bodyCount;
+        }
+
         const physics::BodyHandle handle = m_backend.createBody(m_world, desc);
-        if (!handle.valid())
+        if (!handle.valid()) {
+            record = BodyRecord{};
             return;
-        BodyRecord record;
+        }
+        record.generation = id.generation;
         record.handle = handle;
         record.shape = desc.shape;
         record.motion = desc.motion;
@@ -166,11 +191,10 @@ void PhysicsSync::applyBody(core::InstanceId id, PartComponent& part, RigidBodyC
         record.density = desc.density;
         record.written = part.cframe;
         record.seen = true;
-        m_bodies.emplace(key, record);
+        ++m_bodyCount;
         return;
     }
 
-    BodyRecord& record = found->second;
     record.seen = true;
 
     // A shape, motion type or density change is a rebuild on the backend's
@@ -310,8 +334,13 @@ void PhysicsSync::applyScene()
 {
     syncCollisionGroups();
 
-    for (auto& entry : m_bodies)
-        entry.second.seen = false;
+    // Cleared every tick: a part reparented between two ticks must not be
+    // answered from the previous one's memo.
+    m_lastParent = core::InstanceId{};
+    m_lastParentInWorld = false;
+
+    for (BodyRecord& record : m_bodies)
+        record.seen = false;
     for (auto& entry : m_characters)
         entry.second.seen = false;
 
@@ -396,13 +425,12 @@ void PhysicsSync::resolveWeld(core::InstanceId weldId, WeldComponent& weld)
 
 void PhysicsSync::retireUnseen()
 {
-    for (auto it = m_bodies.begin(); it != m_bodies.end();) {
-        if (it->second.seen) {
-            ++it;
+    for (BodyRecord& record : m_bodies) {
+        if (record.generation == 0 || record.seen)
             continue;
-        }
-        m_backend.destroyBody(m_world, it->second.handle);
-        it = m_bodies.erase(it);
+        m_backend.destroyBody(m_world, record.handle);
+        record = BodyRecord{};
+        --m_bodyCount;
     }
     for (auto it = m_characters.begin(); it != m_characters.end();) {
         if (it->second.seen) {
@@ -424,16 +452,16 @@ void PhysicsSync::writeBack()
         if (!m_scene.alive(id))
             continue;
 
-        const auto found = m_bodies.find(active.userData);
-        if (found == m_bodies.end())
+        if (id.index >= m_bodies.size() || m_bodies[id.index].generation != id.generation)
             continue;
+        BodyRecord& record = m_bodies[id.index];
 
         // The QUIET write: straight into the component, with the changed set
         // reaching a listener only if one exists (architecture.md §4). Ten
         // thousand moving parts enqueue nothing while nobody is watching.
         if (PartComponent* part = m_scene.parts().find(id); part != nullptr) {
             part->cframe = active.state.transform;
-            found->second.written = active.state.transform;
+            record.written = active.state.transform;
         }
         if (RigidBodyComponent* body = m_scene.rigidBodies().find(id); body != nullptr) {
             body->linearVelocity = active.state.linearVelocity;
@@ -445,20 +473,23 @@ void PhysicsSync::writeBack()
     // A body that just went to sleep is no longer in the active list, and its
     // component still says it is moving. One pass over the records fixes that
     // and costs nothing for a world where nothing is asleep.
-    for (const auto& entry : m_bodies) {
-        const core::InstanceId id = unpackInstance(entry.first);
-        RigidBodyComponent* body = m_scene.rigidBodies().find(id);
-        if (body == nullptr || !body->active)
-            continue;
+    // Over what the SCENE says is still moving rather than over every record: a
+    // body that just went to sleep has left the active list while its component
+    // still says it is moving, and a world where nothing is asleep pays for
+    // nothing.
+    m_scene.rigidBodies().forEach([&](core::InstanceId id, RigidBodyComponent& body) {
+        if (!body.active)
+            return;
+        const u64 packed = packInstance(id);
         const bool stillActive = std::any_of(m_active.begin(), m_active.end(), [&](const physics::ActiveBody& active) {
-            return active.userData == entry.first;
+            return active.userData == packed;
         });
         if (!stillActive) {
-            body->active = false;
-            body->linearVelocity = core::Vec3{0.0f, 0.0f, 0.0f};
-            body->angularVelocity = core::Vec3{0.0f, 0.0f, 0.0f};
+            body.active = false;
+            body.linearVelocity = core::Vec3{0.0f, 0.0f, 0.0f};
+            body.angularVelocity = core::Vec3{0.0f, 0.0f, 0.0f};
         }
-    }
+    });
 
     writeCharacters();
 }

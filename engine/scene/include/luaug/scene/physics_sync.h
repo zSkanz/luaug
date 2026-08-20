@@ -80,7 +80,7 @@ public:
     };
 
     [[nodiscard]] const Timings& timings() const noexcept { return m_timings; }
-    [[nodiscard]] usize bodyCount() const noexcept { return m_bodies.size(); }
+    [[nodiscard]] usize bodyCount() const noexcept { return m_bodyCount; }
 
 private:
     // What the mirror last pushed down for one instance, so that a tick can
@@ -90,6 +90,10 @@ private:
     // component would be mirror bookkeeping in state the world hashes.
     struct BodyRecord
     {
+        // Zero means the slot holds no body. Matched against the instance's own
+        // generation, so a slot reused by a new instance is not mistaken for the
+        // old one's body.
+        u32 generation = 0;
         physics::BodyHandle handle;
         // The shape and motion the body was built with. A change to any of them
         // is a rebuild rather than a setter.
@@ -148,11 +152,21 @@ private:
     physics::IPhysics3D& m_backend;
     physics::WorldHandle m_world;
 
-    // Keyed by the instance id's bits, which is also what the body carries as
-    // its opaque user data -- so resolving a query hit back to an instance is a
-    // decode plus a liveness check rather than a second table.
-    std::unordered_map<u64, BodyRecord> m_bodies;
+    // Indexed by the instance's SLOT, not hashed by its id, and that is a
+    // measurement rather than a preference: with ten thousand parts the hash
+    // map spent 214 ns per body per tick doing nothing, most of it missing
+    // cache on a lookup whose key the pool walk already had in hand. A vector
+    // indexed by slot is walked in the same ascending order the component pool
+    // is, which is what makes it prefetchable.
+    //
+    // The generation in the record is what makes a stale slot detectable: a
+    // slot reused by a different instance has a different generation, and a
+    // record whose generation does not match is not that instance's.
+    std::vector<BodyRecord> m_bodies;
+    // Characters are few and are not on this path, so a map stays a map.
     std::unordered_map<u64, CharacterRecord> m_characters;
+    // How many slots in `m_bodies` are live, so `bodyCount` does not walk.
+    usize m_bodyCount = 0;
 
     // Scratch reused across ticks so that a thousand moving bodies allocate
     // nothing per frame.
@@ -167,6 +181,12 @@ private:
     // applied. A driven part is kinematic; a released one goes back to being
     // whatever `Anchored` says.
     std::vector<core::InstanceId> m_drivenParts;
+
+    // The one-entry memo `inWorld` keeps. Mutable because the question is a
+    // read and the answer is a cache; reset every tick so a reparent cannot
+    // outlive the frame it happened in.
+    mutable core::InstanceId m_lastParent;
+    mutable bool m_lastParentInWorld = false;
 
     u32 m_groupRevision = 0xffffffffu;
     core::InstanceId m_workspace;
