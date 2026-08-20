@@ -49,6 +49,22 @@ export type Property = {
     ReadOnly: boolean?,
     Default: string?,
     ThreadSafety: ThreadSafety?,
+    --- The base name of the hand-written C++ accessor pair backing this
+    --- property: `Native = "basePartTransparency"` means the engine implements
+    --- `getBasePartTransparency` and `setBasePartTransparency`, and the
+    --- generator emits the declarations and wires the descriptor to them.
+    ---
+    --- This is the one place the IDL admits C++ exists, and it is deliberately
+    --- a *name* rather than a storage expression: architecture.md §4 says
+    --- hand-written C++ implements only the referenced native functions, so the
+    --- generator stays ignorant of components, and moving a property's storage
+    --- is a change in one C++ file rather than in the API definition.
+    ---
+    --- Absent means the property is declared but not yet backed. It appears in
+    --- the type definitions and the documentation, and reading it yields
+    --- nothing -- which is honest for a surface that ships ahead of its
+    --- implementation, and visible, because the generator counts them.
+    Native: string?,
     --- Whether the property survives serialization; the default is that it
     --- does, so only the exceptions are marked.
     Transient: boolean?,
@@ -86,6 +102,20 @@ export type Class = {
     Tags: { ClassTag }?,
     --- The `Name` a fresh instance carries. Defaults to the class name.
     DefaultName: string?,
+    --- The base name of the hand-written hooks that attach and detach this
+    --- class's own component storage: `Storage = "Part"` means the engine
+    --- implements `attachPartComponents` and `detachPartComponents`, and the
+    --- generator wires the descriptor to them.
+    ---
+    --- Like `Property.Native` it is a *name* rather than a storage expression,
+    --- which is what keeps the generator ignorant of what a component is
+    --- (architecture.md §4).
+    ---
+    --- Only a class that DECLARES storage carries it. `World::create` walks the
+    --- ancestry root-first and calls every hook it finds, so repeating a
+    --- parent's name on a child would attach the same component twice. Absent
+    --- means the class stores nothing of its own, which is most of them.
+    Storage: string?,
     Properties: { Property }?,
     Methods: { Method }?,
     Events: { Event }?,

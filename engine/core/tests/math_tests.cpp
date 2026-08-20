@@ -729,7 +729,8 @@ TEST_CASE("euler YXZ round-trips through the rotation it builds")
                 for (int column = 0; column < 3; ++column)
                 {
                     for (int row = 0; row < 3; ++row)
-                        CHECK(built.m[column][row] == doctest::Approx(rebuilt.m[column][row]).epsilon(1e-4));
+                        CHECK(static_cast<f64>(built.m[column][row])
+                              == doctest::Approx(static_cast<f64>(rebuilt.m[column][row])).epsilon(1e-4));
                 }
             }
         }
@@ -741,20 +742,21 @@ TEST_CASE("euler YXZ keeps pitch in the principal range and resolves the poles")
     // Pitch is the middle rotation, so its branch is the one that has to be
     // chosen: [-pi/2, pi/2] is the documented half.
     const Vec3 recovered = toEulerYxz(fromEulerYxz(Vec3{2.0f, 0.3f, 0.4f}));
-    CHECK(recovered.x <= doctest::Approx(1.5708).epsilon(1e-4));
-    CHECK(recovered.x >= doctest::Approx(-1.5708).epsilon(1e-4));
+    CHECK(static_cast<f64>(recovered.x) <= doctest::Approx(1.5708).epsilon(1e-4));
+    CHECK(static_cast<f64>(recovered.x) >= doctest::Approx(-1.5708).epsilon(1e-4));
 
     // At the pole, yaw and roll describe the same rotation and the pair is not
     // recoverable. Roll resolves to zero rather than splitting the angle
     // arbitrarily, which is what keeps a round trip stable.
     const Vec3 atPole = toEulerYxz(fromEulerYxz(Vec3{1.5707963f, 0.8f, 0.6f}));
-    CHECK(atPole.z == doctest::Approx(0.0f).epsilon(1e-4));
+    CHECK(static_cast<f64>(atPole.z) == doctest::Approx(0.0).epsilon(1e-4));
 
     const Mat3 built = fromEulerYxz(Vec3{1.5707963f, 0.8f, 0.6f});
     const Mat3 rebuilt = fromEulerYxz(atPole);
     for (int column = 0; column < 3; ++column)
     {
         for (int row = 0; row < 3; ++row)
-            CHECK(built.m[column][row] == doctest::Approx(rebuilt.m[column][row]).epsilon(1e-3));
+            CHECK(static_cast<f64>(built.m[column][row])
+                  == doctest::Approx(static_cast<f64>(rebuilt.m[column][row])).epsilon(1e-3));
     }
 }

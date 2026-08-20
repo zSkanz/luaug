@@ -240,6 +240,7 @@ local Classes: { Schema.Class } = {
         Name = "Model",
         Extends = "Instance",
         Module = "scene",
+        Storage = "Model",
         Doc = "A group of parts handled as one object, with a pivot to move it by and an extents box to measure it with.",
         Properties = {
             {
@@ -276,6 +277,7 @@ local Classes: { Schema.Class } = {
         Extends = "Instance",
         Module = "scene",
         Tags = { "NotCreatable" } :: { Schema.ClassTag },
+        Storage = "Script",
         Doc = "An entry-point Luau file, mounted from src/scripts at boot and started on its own coroutine; modules are required by string and never appear in the tree.",
         Properties = {
             {
@@ -297,6 +299,10 @@ local Classes: { Schema.Class } = {
         Extends = "Instance",
         Module = "scene",
         Tags = { "Abstract" } :: { Schema.ClassTag },
+        -- `Part` inherits this rather than declaring its own: `World::create`
+        -- calls every hook down the ancestry, so a second one would attach a
+        -- second `PartComponent`.
+        Storage = "Part",
         Doc = "The abstract base of every solid object in the world: a transform, a size and a look.",
         Properties = {
             {

@@ -88,6 +88,30 @@ if ! diff -q "$defs_before" runtime/types/engine.d.luau >/dev/null; then
     exit 1
 fi
 
+# The C++ reflection tables are checked in for the same reason, and compared the
+# same way round: against copies taken BEFORE the generator runs. Regenerating
+# first and diffing the working tree would overwrite a hand edit and then report
+# that nothing is wrong.
+echo "== generated class descriptors are fresh =="
+header_before="$(mktemp)"
+source_before="$(mktemp)"
+trap 'rm -f "$defs_before" "$header_before" "$source_before"' EXIT
+cp engine/scene/generated/class_descriptors.gen.h "$header_before"
+cp engine/scene/generated/class_descriptors.gen.cpp "$source_before"
+lute api/generator/gen_cpp.luau >/dev/null
+for pair in "$header_before:engine/scene/generated/class_descriptors.gen.h" \
+            "$source_before:engine/scene/generated/class_descriptors.gen.cpp"; do
+    before="${pair%%:*}"
+    after="${pair#*:}"
+    if ! diff -q "$before" "$after" >/dev/null; then
+        echo "luau-check: $after does not match the IDL." >&2
+        echo "  Either the descriptors were hand-edited, or api/defs changed without" >&2
+        echo "  regenerating. Both are the same fix: commit the regenerated file." >&2
+        diff -u "$before" "$after" | head -40 >&2
+        exit 1
+    fi
+done
+
 echo "== i18n keys (R3) =="
 lute tools/repo/i18nlint.luau
 
