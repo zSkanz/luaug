@@ -40,6 +40,20 @@ at least one of them is a differential.
 - [ ] third-person follow camera
 - [ ] minimal direct keyboard polling — deliberately replaced in M6 by the
       Input Action System (that migration is an M6 gate item)
+- [ ] **`Weld` and `WeldConstraint`** — added to the roadmap 2026-08-20 by human
+      decision, **after this brief imported its scope**, so it is appended rather
+      than assumed to have been read. A **transform** weld and not a Jolt
+      constraint, and that is forced: `CharacterVirtual` is not a `Body`
+      (Decision 8 below), a Jolt constraint connects bodies, so a constraint
+      could never reach a character. The welded part is driven from its anchor
+      and is not independently simulated; the solver is not involved. Both names
+      or neither — `Weld` carries explicit `C0`/`C1`, `WeldConstraint` captures
+      the relative transform when it becomes active, and shipping one is worse
+      than shipping neither because the wrong one is silently wrong. R10: welds
+      form a graph, so resolve in stable topological order at a defined point in
+      the tick and **reject cycles**. It arrives here because nothing else in v1
+      can keep a skinned `MeshPart` on a `CharacterBody`, and the alternative is
+      a `Heartbeat` handler doing it per frame in every project.
 - [ ] `PhysicsService.FixedTimestep` becomes writable; collision groups
       (`RegisterCollisionGroup`, `CollisionGroupSetCollidable`,
       `GetRegisteredCollisionGroups`)
@@ -61,7 +75,9 @@ at least one of them is a differential.
 Written before the work so that a gap found later is measured against a
 decision rather than against a hope.
 
-1. **No joints, constraints or motors.** No `Weld`, `HingeConstraint`,
+1. **No joints, motors or solver constraints** — narrowed 2026-08-20, when the
+   human moved the rigid weld into scope; the rest of this entry stands and the
+   weld is in the checklist above. No `HingeConstraint`,
    `SpringConstraint`, `Motor6D`. The seesaw in the deliverable is a body
    resting on a fulcrum, not a hinge — and that is deliberate: `PivotOffset`
    already exists and it is *not* a constraint anchor.
