@@ -49,6 +49,7 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends \
         libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
         libdbus-1-dev libibus-1.0-dev libudev-dev \
         libwayland-dev wayland-protocols libdecor-0-dev \
+        mesa-vulkan-drivers vulkan-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # The Luau toolchain, from the same `rokit.toml` a developer installs. `luaug

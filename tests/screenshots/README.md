@@ -52,3 +52,30 @@ This compares **pixels**, and it needs a GPU. The blocking render-regression
 gate is the `rhi_capture` command stream, which needs none — see
 `docs/architecture.md` §9. Real-image comparison is the agent's own
 verification tool and, from M4, a nightly non-blocking job.
+
+## `meshes-lavapipe.png` — the Tier-2 attempt (M4, non-blocking)
+
+The roadmap's M4 gate asks for "Tier-2 lavapipe image goldens attempted
+(non-blocking)". This is the attempt, and it is recorded as evidence rather than
+compared against: `examples/02-meshes` at 960x540, thirty frames, rendered in the
+Tier-2 container on Mesa's software Vulkan device (`llvmpipe (LLVM 20.1.2, 256
+bits)`).
+
+It carries the whole pass list -- shadow map, sky, forward PBR, tonemap -- and
+the image agrees with the Tier-1 one on everything that matters: lit ground,
+cast shadows, the four materials reading as the metals and dielectrics they are.
+
+**Nothing compares it, deliberately.** A software rasterizer's output is not
+bit-identical to a discrete GPU's, and the pixel gate's own note above explains
+what happens to a golden that tries to span both. Promoting this to a comparison
+is what the roadmap means by "stable for two consecutive milestones", and that
+is M6's decision, not this one's.
+
+Getting it at all needed `mesa-vulkan-drivers` in the Tier-2 image. The image
+already carried `libvulkan1`, which is only the loader: with no ICD installed,
+`SDL_CreateGPUDevice` reported "No supported SDL_GPU backend found" and every
+pixel test on that tier skipped. Installing the driver turned those skips into
+failures, which is how it emerged that `-LE gpu-golden` -- written into
+`engine/app/CMakeLists.txt` as the thing that must happen to these tests -- had
+never actually been applied on the Linux tier. The absence of a device had been
+doing that job by accident.

@@ -123,6 +123,24 @@ Invoke-Stage 'luau' {
 }
 
 Invoke-Stage 'windows' {
+    # A running `luaug-host` holds its own .exe open, so the link fails with
+    # LNK1168 -- and the file's timestamp has already moved by then, so the NEXT
+    # build considers it current and does not retry. Ninja then reports success
+    # and CTest runs a binary from before the change.
+    #
+    # That cost four wasted cycles and one wrong measurement in M4 before it was
+    # understood, which is why this is a guard rather than a note: the orphans
+    # come from a run whose output was piped into something that exited early
+    # (CLAUDE.md warns about `tail`/`head` for a different symptom of the same
+    # thing), and a gate that silently measures yesterday's binary is worse than
+    # one that refuses to start.
+    $stale = Get-Process -Name 'luaug-host' -ErrorAction SilentlyContinue
+    if ($stale) {
+        Write-Host "[gate] $($stale.Count) luaug-host process(es) still running; they would hold the executable open." -ForegroundColor Yellow
+        $stale | Stop-Process -Force
+        Start-Sleep -Milliseconds 200
+    }
+
     $vcvars = Get-DeveloperShellEnv
     if (-not $env:LUAUG_BUILD_ROOT) {
         $env:LUAUG_BUILD_ROOT = Join-Path $env:LOCALAPPDATA 'LuauG\build'

@@ -42,7 +42,13 @@ echo "== test =="
 # difference between "no driver" and "the picture changed". The capture gate
 # does run, because it needs no GPU at all -- which is exactly why it, and not
 # the image comparison, is the blocking render gate (architecture.md §9).
-ctest --preset "$preset" --output-on-failure
+# `-LE gpu-golden` is what `engine/app/CMakeLists.txt` already says must happen
+# to the pixel goldens: they are tied to the GPU that recorded them, and this
+# tier is not it. That exclusion was written down and never applied here -- the
+# ABSENCE of a Vulkan device was doing the work, so the tests skipped and nobody
+# noticed. Installing lavapipe gave the tier a device and turned a skip into a
+# red, which is how a comment that had never been executed came to light.
+ctest --preset "$preset" --output-on-failure --label-exclude gpu-golden
 
 # The CLI's own path to the same suite, which the M3 gate requires green "on
 # both tiers". It runs the engine the build above produced -- LUAUG_BUILD_ROOT
