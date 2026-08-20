@@ -140,6 +140,13 @@ scope. The ones most likely to be mistaken for bugs:
   last section is written for a reviewer: what is deliberately absent, what
   round-trips without acting, and what a screenshot will look like and why.
   Nothing is tagged.
+- **A judgement I made that a reviewer may want to remake.** `churn10k` reads
+  4.96 ms/tick where M2 recorded 2.02, and the Gate Record calls that a changed
+  measurement rather than a regression: the benchmark's scene now holds ten
+  thousand rigid bodies where it held none. It is under its 16 ms budget either
+  way and the physics half is itemised in the baselines. If the answer is
+  "that is a regression", §8 wants an ADR and the work is the mirror's
+  dirty-flag design.
 - **One decision worth a word, and it is cheap either way.** Jolt's
   `CROSS_PLATFORM_DETERMINISTIC` build switch is off, which is ADR 0025's level B
   rather than an oversight — upstream documents it as buying determinism across

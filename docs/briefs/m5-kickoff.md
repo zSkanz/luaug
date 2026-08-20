@@ -404,7 +404,15 @@ time.
     working tree a fresh clone would produce. Same class as M4's `core.autocrlf`
     finding, found the same way: by reading a warning instead of ignoring it.
 
-12. **One thing recorded and not explained.** The `character` scenario's tick-0
+12. **A gate script with no execute bit passes locally and fails on CI.**
+    `localgate.ps1` invokes every gate script as `bash <script>`, which does not
+    care about the mode; `ci.yml` runs them as programs. The new formatting gate
+    was committed 100644 while the three that predate it are 100755, and both
+    local tiers were green. Recorded as D023, and it is the third defect in two
+    milestones that only CI could see — the other two were a transitively
+    included header and an unauthenticated API quota.
+
+13. **One thing recorded and not explained.** The `character` scenario's tick-0
     hash moved once between two builds inside this milestone while `churn` and
     `example01`'s did not — and those two are byte-identical to their M4.5
     goldens today, which is what says the engine's boot path did not move. The
@@ -566,6 +574,18 @@ Frame time for the deliverable at 1080p: **median 1.11 ms, worst 1.93 ms**
 - **`KeyboardService` is a scaffold with an expiry**, tagged `DevOnly` so it
   cannot reach a shipping build, and migrating the deliverable off it is an M6
   gate item.
+- **`churn10k` reads 4.96 ms where M2 recorded 2.02, and I am calling that a
+  changed measurement rather than a regression — which is a judgement worth a
+  reviewer's word.** MASTER_PROMPT §8 blocks a gate on a >10% regression against
+  the recorded baseline unless a human-approved ADR accepts it. The argument for
+  "not a regression": the benchmark's scene now contains ten thousand rigid
+  bodies where it contained none, so it is not the same measurement under the
+  same name — the same reasoning M4.5 used when it marked M4's frame times
+  superseded. The argument against: the name is the same, the budget is the same,
+  and a number that trebles is a number that trebles. It is under its 16 ms
+  budget either way, the physics half of it is itemised in the baselines table,
+  and the remaining fix is named and scheduled. If the answer is "that is a
+  regression", the ADR is a paragraph and the work is the dirty-flag design.
 - **Nothing here is tagged.** Per MASTER_PROMPT §6 the milestone is complete when
   the human says so in words; `PROGRESS.md` records it as awaiting review and
   `milestone/m5` does not exist yet.

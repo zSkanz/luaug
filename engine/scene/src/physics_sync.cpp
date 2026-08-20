@@ -3,7 +3,6 @@
 #include "luaug/scene/world.h"
 
 #include <algorithm>
-#include <bit>
 #include <chrono>
 #include <cmath>
 

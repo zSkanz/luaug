@@ -171,7 +171,6 @@ private:
     // Scratch reused across ticks so that a thousand moving bodies allocate
     // nothing per frame.
     std::vector<physics::ActiveBody> m_active;
-    std::vector<core::InstanceId> m_scratch;
 
     // The welds resolved so far this tick, so a chain -- A welded to B, B welded
     // to C -- resolves each link once and in dependency order rather than in
