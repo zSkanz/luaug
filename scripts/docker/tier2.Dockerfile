@@ -22,6 +22,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
         build-essential \
         clang \
+    # The formatting gate's binary, at the major scripts/gates/clang-format.sh
+    # pins. Versioned on purpose: clang-format's output changes between majors,
+    # so "formatted" has to name one of them or it means nothing.
+        clang-format-18 \
     # Deliberately NOT clang-tools. CMake 3.28+ would want `clang-scan-deps` to
     # scan C++20 translation units for module dependencies, and Ubuntu ships
     # that binary only under a versioned name, so the default configuration

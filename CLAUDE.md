@@ -24,7 +24,7 @@ things stand.
 ```
 scripts/localgate.ps1                # EVERYTHING that can run here: docs + Luau gates
                                      #   + Windows build/tests + the Linux tier in Docker
-scripts/localgate.ps1 -Only windows  # one stage while iterating: docs | luau | windows | linux
+scripts/localgate.ps1 -Only windows  # one stage while iterating: docs | luau | format | windows | linux
 ```
 
 **Run the Linux stage.** It is ~12 s warm, and it is not redundant with the
@@ -58,6 +58,10 @@ lute tools/repo/vendor.luau status   # what is vendored vs what the manifest pin
 cmake --preset win-msvc-dev          # configure (build dir OUTSIDE the repo tree)
 cmake --build --preset win-msvc-dev  # build
 ctest --preset win-msvc-dev          # C++ unit + integration tests
+scripts/gates/clang-format.sh        # C++ formatting, at the pinned clang-format 18
+                                     #   (Windows: scripts/localgate.ps1 -Only format [-Fix],
+                                     #    which runs it in the Tier-2 container -- VS ships 20,
+                                     #    and a different major reformats the whole tree)
 stylua --check .                     # formatting (third_party via .styluaignore)
 luau-lsp analyze --platform=standard --ignore="**/.lute/**" <files>
 lute tools/repo/i18nlint.luau        # every LUAUG_TR key exists in i18n/en.json

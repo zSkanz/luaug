@@ -1,4 +1,7 @@
-# LuauG C++ style (pin the clang-format major used in CI; recorded at M0).
+# LuauG C++ style. THE MAJOR IS PART OF THE STYLE: clang-format 18 (Ubuntu
+# 24.04's, which the Tier-2 image and `ubuntu-latest` both carry). A different
+# major formats this tree differently, so scripts/gates/clang-format.sh refuses
+# to run on one -- see its header. Recorded at M0, enforced from M5.
 BasedOnStyle: LLVM
 Standard: c++20
 ColumnLimit: 120

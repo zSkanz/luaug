@@ -16,8 +16,9 @@
 #
 # Usage:
 #   scripts/localgate.ps1              # everything -- what you run before a push
-#   scripts/localgate.ps1 -Only docs   # one stage while iterating: docs | luau | windows | linux
+#   scripts/localgate.ps1 -Only docs   # one stage: docs | luau | format | windows | linux
 #   scripts/localgate.ps1 -SkipLinux   # ONLY when Docker is genuinely unavailable
+#   scripts/localgate.ps1 -Only format -Fix   # rewrite the C++ tree instead of checking it
 #
 # The Linux stage is about twelve seconds warm and is not redundant with the
 # Windows one: Clang diagnoses things MSVC does not, warnings are errors, and it
@@ -27,8 +28,12 @@
 [CmdletBinding()]
 param(
     [switch]$SkipLinux,
-    [ValidateSet('docs', 'luau', 'windows', 'linux')]
-    [string]$Only
+    [ValidateSet('docs', 'luau', 'format', 'windows', 'linux')]
+    [string]$Only,
+    # Only meaningful with -Only format: reformat in place rather than report.
+    # Off by default, because a gate that edits your tree without being asked is
+    # not a gate.
+    [switch]$Fix
 )
 
 # 'Continue', not 'Stop', and this is not laziness. Windows PowerShell 5.1 turns
@@ -50,7 +55,10 @@ function Invoke-Stage {
     param([string]$Name, [scriptblock]$Body)
 
     if ($Only -and $Only -ne $Name) { return }
-    if ($Name -eq 'linux' -and $SkipLinux) { return }
+    # Both container stages answer to the same switch: -SkipLinux means "Docker
+    # is not available here", and the formatting gate runs in that same image
+    # because that is where the pinned clang-format lives.
+    if (($Name -eq 'linux' -or $Name -eq 'format') -and $SkipLinux) { return }
 
     Write-Host ""
     Write-Host "=== $Name ===" -ForegroundColor Cyan
@@ -112,6 +120,20 @@ function Get-DeveloperShellEnv {
     return Join-Path $install 'VC\Auxiliary\Build\vcvars64.bat'
 }
 
+# Two stages want the image now -- the formatting gate and the Tier-2 build --
+# so it is built once and reused. Docker's layer cache makes the second call
+# free; what this avoids is a second copy of the error handling, which is the
+# part that was subtle (see the stderr note above).
+function Initialize-Tier2Image {
+    $server = docker version --format '{{.Server.Version}}'
+    if ($LASTEXITCODE -ne 0 -or -not $server) {
+        throw "Docker is not running. Start Docker Desktop, or pass -SkipLinux."
+    }
+
+    docker build -f scripts/docker/tier2.Dockerfile -t luaug-tier2:latest .
+    if ($LASTEXITCODE -ne 0) { throw "the Tier-2 image failed to build" }
+}
+
 Invoke-Stage 'docs' {
     & (Get-BashPath) 'scripts/gates/docs-lint.sh'
     if ($LASTEXITCODE -ne 0) { throw "docs-lint failed" }
@@ -120,6 +142,22 @@ Invoke-Stage 'docs' {
 Invoke-Stage 'luau' {
     & (Get-BashPath) 'scripts/gates/luau-check.sh'
     if ($LASTEXITCODE -ne 0) { throw "luau-check failed" }
+}
+
+Invoke-Stage 'format' {
+    # In the container rather than on this machine, because clang-format's
+    # output changes between major versions: Visual Studio ships 20 here, Ubuntu
+    # 24.04 -- and therefore both the Tier-2 image and `ubuntu-latest` -- ships
+    # 18, and a tree formatted by one is unformatted to the other. The gate
+    # script refuses any major but its pin for that reason, so running it on the
+    # host would fail against a correctly formatted tree.
+    Initialize-Tier2Image
+
+    $arguments = @('scripts/gates/clang-format.sh')
+    if ($Fix) { $arguments += '--fix' }
+
+    docker run --rm -v "${repo}:/repo" luaug-tier2:latest bash @arguments
+    if ($LASTEXITCODE -ne 0) { throw "the C++ formatting gate failed" }
 }
 
 Invoke-Stage 'windows' {
@@ -185,13 +223,7 @@ Invoke-Stage 'linux' {
     # $ErrorActionPreference='Stop' throws even when the exit code is zero --
     # so `docker rm -f <nonexistent>` used to kill this stage in four seconds,
     # before a single object was compiled.
-    $server = docker version --format '{{.Server.Version}}'
-    if ($LASTEXITCODE -ne 0 -or -not $server) {
-        throw "Docker is not running. Start Docker Desktop, or pass -SkipLinux."
-    }
-
-    docker build -f scripts/docker/tier2.Dockerfile -t luaug-tier2:latest .
-    if ($LASTEXITCODE -ne 0) { throw "the Tier-2 image failed to build" }
+    Initialize-Tier2Image
 
     # A named volume, so the second run is incremental. This is the local
     # equivalent of CI's build cache, and it costs nothing.

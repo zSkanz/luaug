@@ -666,3 +666,29 @@ jobs:
       # went red here for reasons that had nothing to do with it.
       - name: Luau gates
         run: scripts/gates/luau-check.sh
+
+  # ---------------------------------------------------------------------------
+  # The C++ formatting gate (architecture.md §9), turned on at the start of M5
+  # on a quiet tree. Unconditional and cheap, like the two static jobs above.
+  #
+  # `clang-format-18` is installed by name rather than taken from whatever the
+  # runner image happens to preinstall: the tool's output changes between major
+  # versions, so an unpinned binary would make this job's verdict depend on when
+  # GitHub last rebuilt its image. scripts/gates/clang-format.sh refuses any
+  # other major, which turns that drift into a clear failure instead of a
+  # thousand-file diff.
+  # ---------------------------------------------------------------------------
+  clang-format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the pinned clang-format
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang-format-18
+
+      - name: C++ formatting gate
+        run: scripts/gates/clang-format.sh
