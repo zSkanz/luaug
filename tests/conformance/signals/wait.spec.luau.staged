@@ -1,0 +1,187 @@
+--!strict
+--- Conformance: `Signal:Wait()`.
+--- Written from api-design.md §3.1: "`:Wait()` parks the calling coroutine as a
+--- one-shot registration made at the moment of the call, resumed by the next
+--- fire it is eligible for, at that fire's position in the drain, returning
+--- that fire's arguments."
+
+local testing = require("@luaug/testing")
+
+local describe = testing.describe
+local it = testing.it
+local expect = testing.expect
+local beforeEach = testing.beforeEach
+local afterEach = testing.afterEach
+
+describe("Signal:Wait", function()
+    local root: Folder
+
+    beforeEach(function()
+        root = Instance.new("Folder")
+        root.Name = "WaitSpec"
+        root.Parent = workspace
+    end)
+
+    afterEach(function()
+        root:Destroy()
+    end)
+
+    it("returns the arguments of the fire that resumed it", function()
+        local sig = Signal.new()
+        task.delay(0, function()
+            sig:Fire("resumed")
+        end)
+
+        local value = sig:Wait()
+
+        expect(value):toBe("resumed")
+    end)
+
+    it("returns every argument of that fire", function()
+        local sig = Signal.new()
+        task.delay(0, function()
+            sig:Fire(1, "two", true)
+        end)
+
+        local first, second, third = sig:Wait()
+
+        expect(first):toBe(1)
+        expect(second):toBe("two")
+        expect(third):toBe(true)
+    end)
+
+    -- The registration is made "at the moment of the call", so a fire already
+    -- sitting in the queue is not one this waiter is eligible for.
+    it("does not resume for a fire raised before Wait was called", function()
+        local sig = Signal.new()
+        -- The delayed fire is the escape hatch: without it a wrong answer here
+        -- would hang the suite instead of failing this case.
+        task.delay(0, function()
+            sig:Fire("late")
+        end)
+
+        sig:Fire("early")
+        local value = sig:Wait()
+
+        expect(value):toBe("late")
+    end)
+
+    it("does not resume the caller at the moment of the fire", function()
+        local sig = Signal.new()
+        local log: { string } = {}
+        task.delay(0, function()
+            sig:Fire()
+            table.insert(log, "afterFire")
+        end)
+
+        sig:Wait()
+        table.insert(log, "waiter")
+
+        expect(log):toEqual({ "afterFire", "waiter" })
+    end)
+
+    it("resumes after a queue entry raised before the fire it waits for", function()
+        local sig = Signal.new()
+        local other = Signal.new()
+        local log: { string } = {}
+        other:Connect(function()
+            table.insert(log, "other")
+        end)
+        task.delay(0, function()
+            other:Fire()
+            sig:Fire()
+        end)
+
+        sig:Wait()
+        table.insert(log, "waiter")
+
+        expect(log):toEqual({ "other", "waiter" })
+    end)
+
+    -- "at that fire's position in the drain": the entry queued after it has not
+    -- been reached yet when the waiter comes back.
+    it("resumes before a queue entry raised after the fire it waits for", function()
+        local sig = Signal.new()
+        local other = Signal.new()
+        local log: { string } = {}
+        other:Connect(function()
+            table.insert(log, "other")
+        end)
+        task.delay(0, function()
+            sig:Fire()
+            other:Fire()
+        end)
+
+        sig:Wait()
+        table.insert(log, "waiter")
+        expect(log):toEqual({ "waiter" })
+
+        task.wait()
+        expect(log):toEqual({ "waiter", "other" })
+    end)
+
+    it("resumes every coroutine waiting on the same fire", function()
+        local sig = Signal.new()
+        local seen: { string } = {}
+        task.spawn(function()
+            local value = sig:Wait()
+            table.insert(seen, "a:" .. tostring(value))
+        end)
+        task.spawn(function()
+            local value = sig:Wait()
+            table.insert(seen, "b:" .. tostring(value))
+        end)
+
+        sig:Fire("x")
+
+        task.wait()
+        expect(#seen):toBe(2)
+        expect(seen):toContain("a:x")
+        expect(seen):toContain("b:x")
+    end)
+
+    it("resumes only once per call, so a second fire does not resume it again", function()
+        local sig = Signal.new()
+        local resumes = 0
+        task.spawn(function()
+            sig:Wait()
+            resumes += 1
+        end)
+
+        sig:Fire()
+        task.wait()
+        sig:Fire()
+        task.wait()
+
+        expect(resumes):toBe(1)
+    end)
+
+    it("delivers the same fire to a waiter and to the signal's connections", function()
+        local sig = Signal.new()
+        local connected: string? = nil
+        sig:Connect(function(value: string)
+            connected = value
+        end)
+        task.delay(0, function()
+            sig:Fire("shared")
+        end)
+
+        local waited = sig:Wait()
+
+        task.wait()
+        expect(waited):toBe("shared")
+        expect(connected):toBe("shared")
+    end)
+
+    it("returns the new child from ChildAdded:Wait()", function()
+        local child = Instance.new("Folder")
+        child.Name = "Awaited"
+        task.delay(0, function()
+            child.Parent = root
+        end)
+
+        local added = root.ChildAdded:Wait()
+
+        expect(added):toBe(child)
+    end)
+end)

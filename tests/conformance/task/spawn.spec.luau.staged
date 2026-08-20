@@ -1,0 +1,171 @@
+--!strict
+--- Conformance: `task.spawn` (api-design.md §3.2).
+---
+--- `task.spawn` is the one non-deferred call in the whole scheduling surface:
+--- "resumes `fn` on a new coroutine immediately, synchronously, before
+--- returning". Every case here therefore observes its side effect *before* the
+--- next statement rather than after a yield -- an assertion that only holds for
+--- this one call, and is what separates it from `task.defer`.
+
+local testing = require("@luaug/testing")
+
+local describe, it, expect = testing.describe, testing.it, testing.expect
+local afterEach = testing.afterEach
+
+local connections: { Connection } = {}
+
+local function track(connection: Connection): Connection
+    table.insert(connections, connection)
+    return connection
+end
+
+describe("task.spawn", function()
+    afterEach(function()
+        for _, connection in connections do
+            connection:Disconnect()
+        end
+        table.clear(connections)
+    end)
+
+    it("runs the function before the call returns", function()
+        local ran = false
+        task.spawn(function()
+            ran = true
+        end)
+        expect(ran):toBe(true)
+    end)
+
+    it("runs the function on a new coroutine, not the caller's", function()
+        local caller = coroutine.running()
+        local inner: thread? = nil
+        task.spawn(function()
+            inner = coroutine.running()
+        end)
+        expect(inner):toBeA("thread")
+        expect(inner).never:toBe(caller)
+    end)
+
+    it("returns the thread it created", function()
+        local inner: thread? = nil
+        local returned = task.spawn(function()
+            inner = coroutine.running()
+        end)
+        expect(returned):toBeA("thread")
+        expect(returned):toBe(inner)
+    end)
+
+    it("passes its extra arguments to the function", function()
+        local received: { any } = {}
+        task.spawn(function(first: number, second: string, third: boolean)
+            received = { first, second, third }
+        end, 1, "two", true)
+        expect(received):toEqual({ 1, "two", true })
+    end)
+
+    it("returns as soon as the spawned function yields", function()
+        local reached = { before = false, after = false }
+        task.spawn(function()
+            reached.before = true
+            task.wait()
+            reached.after = true
+        end)
+        expect(reached.before):toBe(true)
+        expect(reached.after):toBe(false)
+        task.wait()
+        task.wait()
+        expect(reached.after):toBe(true)
+    end)
+
+    it("resumes a nested spawn before the outer function continues", function()
+        local order: { string } = {}
+        task.spawn(function()
+            table.insert(order, "outer-start")
+            task.spawn(function()
+                table.insert(order, "inner")
+            end)
+            table.insert(order, "outer-end")
+        end)
+        expect(order):toEqual({ "outer-start", "inner", "outer-end" })
+    end)
+
+    -- The queue of §3.1 orders everything that defers; `task.spawn` never enters
+    -- it, so it overtakes work that was queued before the spawn call was made.
+    it("runs ahead of work that was deferred before it", function()
+        local order: { string } = {}
+        task.defer(function()
+            table.insert(order, "deferred")
+        end)
+        task.spawn(function()
+            table.insert(order, "spawned")
+        end)
+        expect(order):toEqual({ "spawned" })
+        task.wait()
+        expect(order):toEqual({ "spawned", "deferred" })
+    end)
+
+    it("runs immediately when called from inside a deferred callback", function()
+        local order: { string } = {}
+        task.defer(function()
+            task.spawn(function()
+                table.insert(order, "spawned")
+            end)
+            table.insert(order, "deferred")
+        end)
+        task.wait()
+        expect(order):toEqual({ "spawned", "deferred" })
+    end)
+
+    it("runs immediately when called from inside a signal handler", function()
+        local order: { string } = {}
+        local signal = Signal.new()
+        track(signal:Connect(function()
+            task.spawn(function()
+                table.insert(order, "spawned")
+            end)
+            table.insert(order, "handler")
+        end))
+        signal:Fire()
+        task.wait()
+        expect(order):toEqual({ "spawned", "handler" })
+        signal:Destroy()
+    end)
+
+    it("does not propagate an error from the spawned function to the caller", function()
+        expect(function()
+            task.spawn(function()
+                error("spawned failure")
+            end)
+        end).never:toThrow()
+    end)
+
+    it("keeps running the caller after the spawned function errors", function()
+        local after = false
+        task.spawn(function()
+            error("spawned failure")
+        end)
+        after = true
+        expect(after):toBe(true)
+    end)
+
+    it("keeps spawning after an earlier spawned function errored", function()
+        local ran = false
+        task.spawn(function()
+            error("spawned failure")
+        end)
+        task.spawn(function()
+            ran = true
+        end)
+        expect(ran):toBe(true)
+    end)
+
+    it("resumes a spawned function that yields on the SimClock like any other thread", function()
+        local elapsed: number? = nil
+        task.spawn(function()
+            elapsed = task.wait()
+        end)
+        expect(elapsed):toBeNil()
+        task.wait()
+        task.wait()
+        expect(elapsed):toBeCloseTo(game:GetService("PhysicsService").FixedTimestep, 1e-9)
+    end)
+end)

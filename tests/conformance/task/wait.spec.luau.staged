@@ -1,0 +1,183 @@
+--!strict
+--- Conformance: `task.wait` (api-design.md §3.2) and the SimClock guarantee that
+--- makes it deterministic (ADR 0025).
+---
+--- "Returns the elapsed sim time, which is a whole number of ticks and therefore
+--- >= `duration`." The tick grid is the contract: `task.wait(1)` is 60 ticks at
+--- the default 1/60 timestep "on every machine and every run", which is why
+--- there is no `tick()` to compare against. These cases pin the grid, the
+--- rounding direction, and the repeatability -- not merely "it yielded".
+
+local testing = require("@luaug/testing")
+
+local describe, it, expect = testing.describe, testing.it, testing.expect
+local afterEach = testing.afterEach
+
+local connections: { Connection } = {}
+
+local function track(connection: Connection): Connection
+    table.insert(connections, connection)
+    return connection
+end
+
+local function timestep(): number
+    return game:GetService("PhysicsService").FixedTimestep
+end
+
+describe("task.wait", function()
+    afterEach(function()
+        for _, connection in connections do
+            connection:Disconnect()
+        end
+        table.clear(connections)
+    end)
+
+    it("defaults the sim timestep to one sixtieth of a second", function()
+        expect(timestep()):toBeCloseTo(1 / 60, 1e-9)
+    end)
+
+    it("returns the elapsed sim time as a number", function()
+        expect(task.wait()):toBeA("number")
+    end)
+
+    it("returns exactly one value", function()
+        expect(select("#", task.wait())):toBe(1)
+    end)
+
+    it("resumes at the next tick when called with no argument", function()
+        local step = timestep()
+        expect(task.wait()):toBeCloseTo(step, 1e-9)
+    end)
+
+    it("waits a single tick for a duration of exactly one timestep", function()
+        local step = timestep()
+        expect(task.wait(step)):toBeCloseTo(step, 1e-9)
+    end)
+
+    it("waits a whole number of ticks for a whole multiple of the timestep", function()
+        local step = timestep()
+        expect(task.wait(step * 4)):toBeCloseTo(step * 4, 1e-9)
+    end)
+
+    it("returns an elapsed time that is a whole number of ticks", function()
+        local step = timestep()
+        local ticks = task.wait(step * 2.5) / step
+        expect(ticks - math.round(ticks)):toBeCloseTo(0, 1e-6)
+    end)
+
+    it("rounds a duration that is not a whole number of ticks up to the next tick", function()
+        local step = timestep()
+        local requested = step * 2.5
+        local elapsed = task.wait(requested)
+        expect(elapsed):toBeCloseTo(step * 3, 1e-9)
+        expect(elapsed >= requested):toBe(true)
+    end)
+
+    it("never returns less than the requested duration", function()
+        local step = timestep()
+        for factor = 1, 6 do
+            local requested = step * (factor + 0.25)
+            expect(task.wait(requested) >= requested):toBe(true)
+        end
+    end)
+
+    -- The headline determinism claim of §3.2: "`task.wait(1)` is exactly 60 ticks
+    -- at the default 1/60 timestep". Expressed through the timestep so the case
+    -- states the tick count rather than assuming the default twice.
+    it("waits exactly one second's worth of ticks for a one second duration", function()
+        local step = timestep()
+        local elapsed = task.wait(1)
+        expect(elapsed / step):toBeCloseTo(math.round(1 / step), 1e-6)
+        expect(elapsed):toBeCloseTo(1, 1e-6)
+    end)
+
+    it("returns the same elapsed time for the same requested duration on every call", function()
+        local step = timestep()
+        local first = task.wait(step * 7)
+        local second = task.wait(step * 7)
+        local third = task.wait(step * 7)
+        expect(second):toBeCloseTo(first, 1e-9)
+        expect(third):toBeCloseTo(first, 1e-9)
+    end)
+
+    it("accumulates exactly one timestep per no-argument wait", function()
+        local step = timestep()
+        local total = 0
+        for _ = 1, 10 do
+            total += task.wait()
+        end
+        expect(total):toBeCloseTo(step * 10, 1e-9)
+    end)
+
+    it("yields for one tick when asked to wait zero seconds", function()
+        local step = timestep()
+        expect(task.wait(0)):toBeCloseTo(step, 1e-9)
+    end)
+
+    it("yields the caller, so statements after it do not run before the resumption", function()
+        local order: { string } = {}
+        task.defer(function()
+            table.insert(order, "deferred")
+        end)
+        table.insert(order, "before")
+        task.wait()
+        table.insert(order, "after")
+        expect(order):toEqual({ "before", "deferred", "after" })
+    end)
+
+    it("resumes a spawned thread on the same tick grid as its caller", function()
+        local step = timestep()
+        local elapsed: number? = nil
+        task.spawn(function()
+            elapsed = task.wait(step * 3)
+        end)
+        task.wait(step * 6)
+        expect(elapsed):toBeCloseTo(step * 3, 1e-9)
+    end)
+
+    it("resumes a deferred callback that yields", function()
+        local step = timestep()
+        local elapsed: number? = nil
+        task.defer(function()
+            elapsed = task.wait(step * 2)
+        end)
+        task.wait(step * 6)
+        expect(elapsed):toBeCloseTo(step * 2, 1e-9)
+    end)
+
+    -- Each handler runs on its own coroutine (§3.1), so a handler is allowed to
+    -- yield -- and doing so must not hold up the rest of the drain.
+    it("yields a signal handler without stopping the drain it runs in", function()
+        local order: { string } = {}
+        local signal = Signal.new()
+        track(signal:Connect(function()
+            table.insert(order, "handler-start")
+            task.wait()
+            table.insert(order, "handler-resumed")
+        end))
+        signal:Fire()
+        task.defer(function()
+            table.insert(order, "deferred")
+        end)
+        task.wait()
+        expect(order):toEqual({ "handler-start", "deferred" })
+        task.wait()
+        task.wait()
+        expect(order):toEqual({ "handler-start", "deferred", "handler-resumed" })
+        signal:Destroy()
+    end)
+
+    it("measures sim time, so two threads waiting the same duration report the same elapsed", function()
+        local step = timestep()
+        local reported: { number } = {}
+        for _ = 1, 3 do
+            task.spawn(function()
+                table.insert(reported, task.wait(step * 4))
+            end)
+        end
+        task.wait(step * 8)
+        expect(#reported):toBe(3)
+        expect(reported[2]):toBeCloseTo(reported[1], 1e-9)
+        expect(reported[3]):toBeCloseTo(reported[1], 1e-9)
+    end)
+end)

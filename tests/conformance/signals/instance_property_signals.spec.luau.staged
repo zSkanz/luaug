@@ -1,0 +1,285 @@
+--!strict
+--- Conformance: property and attribute change signals, and the absence of the
+--- `.Changed` catch-all.
+--- Written from api-design.md §2.2 (`GetPropertyChangedSignal`,
+--- `AttributeChanged`, `GetAttributeChangedSignal`, "There is no `Changed`
+--- catch-all"), divergence #8 of §2.5, and the delivery rules of §3.1.
+
+local testing = require("@luaug/testing")
+
+local describe = testing.describe
+local it = testing.it
+local expect = testing.expect
+local beforeEach = testing.beforeEach
+local afterEach = testing.afterEach
+
+describe("property and attribute signals", function()
+    local root: Folder
+
+    beforeEach(function()
+        root = Instance.new("Folder")
+        root.Name = "PropertySignalsSpec"
+        root.Parent = workspace
+    end)
+
+    afterEach(function()
+        root:Destroy()
+    end)
+
+    describe("GetPropertyChangedSignal", function()
+        it("returns a Signal", function()
+            expect(typeof(root:GetPropertyChangedSignal("Name"))):toBe("Signal")
+        end)
+
+        it("fires when the named property changes", function()
+            local count = 0
+            root:GetPropertyChangedSignal("Name"):Connect(function()
+                count += 1
+            end)
+
+            root.Name = "Renamed"
+
+            task.wait()
+            expect(count):toBe(1)
+        end)
+
+        it("fires with no arguments", function()
+            local count = -1
+            root:GetPropertyChangedSignal("Name"):Connect(function(...)
+                count = select("#", ...)
+            end)
+
+            root.Name = "Renamed"
+
+            task.wait()
+            expect(count):toBe(0)
+        end)
+
+        it("delivers the new value to a handler that reads the property", function()
+            local seen: string? = nil
+            root:GetPropertyChangedSignal("Name"):Connect(function()
+                seen = root.Name
+            end)
+
+            root.Name = "Renamed"
+
+            task.wait()
+            expect(seen):toBe("Renamed")
+        end)
+
+        it("does not fire for a different property", function()
+            local count = 0
+            root:GetPropertyChangedSignal("Parent"):Connect(function()
+                count += 1
+            end)
+
+            root.Name = "Renamed"
+
+            task.wait()
+            expect(count):toBe(0)
+        end)
+
+        it("fires when the property is set to the value it already had", function()
+            root.Name = "Stable"
+            task.wait()
+
+            local count = 0
+            root:GetPropertyChangedSignal("Name"):Connect(function()
+                count += 1
+            end)
+
+            root.Name = "Stable"
+
+            task.wait()
+            expect(count):toBe(1)
+        end)
+
+        it("fires once per write, in write order", function()
+            local seen: { string } = {}
+            root:GetPropertyChangedSignal("Name"):Connect(function()
+                table.insert(seen, root.Name)
+            end)
+
+            root.Name = "First"
+            root.Name = "Second"
+
+            task.wait()
+            -- Both fires are queued, and both handlers read the property at
+            -- drain time, so the final value is what each of them sees.
+            expect(#seen):toBe(2)
+            expect(seen):toEqual({ "Second", "Second" })
+        end)
+
+        it("notifies handlers connected through two separate calls for one property", function()
+            local first = 0
+            local second = 0
+            root:GetPropertyChangedSignal("Name"):Connect(function()
+                first += 1
+            end)
+            root:GetPropertyChangedSignal("Name"):Connect(function()
+                second += 1
+            end)
+
+            root.Name = "Renamed"
+
+            task.wait()
+            expect(first):toBe(1)
+            expect(second):toBe(1)
+        end)
+
+        it("fires when Parent changes", function()
+            local child = Instance.new("Folder")
+            child.Parent = root
+            task.wait()
+
+            local count = 0
+            child:GetPropertyChangedSignal("Parent"):Connect(function()
+                count += 1
+            end)
+
+            child.Parent = nil
+
+            task.wait()
+            expect(count):toBe(1)
+        end)
+
+        it("does not fire for an attribute change", function()
+            local count = 0
+            root:GetPropertyChangedSignal("Name"):Connect(function()
+                count += 1
+            end)
+
+            root:SetAttribute("Name", "not a property")
+
+            task.wait()
+            expect(count):toBe(0)
+        end)
+
+        it("rejects a property name the class does not have", function()
+            expect(function()
+                root:GetPropertyChangedSignal("NotAProperty")
+            end):toThrow()
+        end)
+    end)
+
+    describe("AttributeChanged", function()
+        it("fires with the name of the attribute that changed", function()
+            local seen: string? = nil
+            root.AttributeChanged:Connect(function(name: string)
+                seen = name
+            end)
+
+            root:SetAttribute("Level", 3)
+
+            task.wait()
+            expect(seen):toBe("Level")
+        end)
+
+        it("delivers the new value to a handler that reads the attribute", function()
+            local seen: any = nil
+            root.AttributeChanged:Connect(function(name: string)
+                seen = root:GetAttribute(name)
+            end)
+
+            root:SetAttribute("Level", 3)
+
+            task.wait()
+            expect(seen):toBe(3)
+        end)
+
+        it("fires when an attribute is removed by setting it to nil", function()
+            root:SetAttribute("Level", 3)
+            task.wait()
+
+            local seen: string? = nil
+            root.AttributeChanged:Connect(function(name: string)
+                seen = name
+            end)
+
+            root:SetAttribute("Level", nil)
+
+            task.wait()
+            expect(seen):toBe("Level")
+            expect(root:GetAttribute("Level")):toBeNil()
+        end)
+
+        it("fires once per attribute when several are set, in write order", function()
+            local seen: { string } = {}
+            root.AttributeChanged:Connect(function(name: string)
+                table.insert(seen, name)
+            end)
+
+            root:SetAttribute("First", 1)
+            root:SetAttribute("Second", 2)
+
+            task.wait()
+            expect(seen):toEqual({ "First", "Second" })
+        end)
+
+        it("does not fire for a property change", function()
+            local count = 0
+            root.AttributeChanged:Connect(function()
+                count += 1
+            end)
+
+            root.Name = "Renamed"
+
+            task.wait()
+            expect(count):toBe(0)
+        end)
+    end)
+
+    describe("GetAttributeChangedSignal", function()
+        it("returns a Signal", function()
+            expect(typeof(root:GetAttributeChangedSignal("Level"))):toBe("Signal")
+        end)
+
+        it("fires only for the named attribute", function()
+            local count = 0
+            root:GetAttributeChangedSignal("Level"):Connect(function()
+                count += 1
+            end)
+
+            root:SetAttribute("Other", 1)
+            task.wait()
+            expect(count):toBe(0)
+
+            root:SetAttribute("Level", 1)
+            task.wait()
+            expect(count):toBe(1)
+        end)
+
+        it("accepts an attribute that does not exist yet and fires when it is first set", function()
+            local count = 0
+            root:GetAttributeChangedSignal("Unset"):Connect(function()
+                count += 1
+            end)
+
+            root:SetAttribute("Unset", true)
+
+            task.wait()
+            expect(count):toBe(1)
+        end)
+    end)
+
+    describe("the removed catch-all", function()
+        -- Divergence #8: whatever the spelling of "absent" turns out to be, what
+        -- must not exist is something connectable.
+        it("does not expose a Changed catch-all event", function()
+            local ok, changed = pcall(function(): any
+                return (root :: any).Changed
+            end)
+
+            expect(ok and changed ~= nil):toBe(false)
+        end)
+
+        it("does not expose a GetPropertyChangedSignal alias named Changed on a fresh instance", function()
+            local instance = Instance.new("Folder")
+            local ok, changed = pcall(function(): any
+                return (instance :: any).Changed
+            end)
+
+            expect(ok and changed ~= nil):toBe(false)
+        end)
+    end)
+end)

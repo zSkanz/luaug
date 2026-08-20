@@ -1,0 +1,230 @@
+--!strict
+--- Conformance: the re-entrancy cap.
+--- Written from api-design.md §3.1 ("Re-entrancy is capped at 10") and ADR
+--- 0015. Depth is a *generation* depth carried by each fire: fires raised
+--- outside any handler are depth 0, a fire raised by a handler running at depth
+--- d is depth d+1, and a fire that would exceed depth 10 is dropped with
+--- `script.err.reentrancy_limit`.
+---
+--- Every recursive case below carries a counter guard well above the cap. The
+--- guard is not part of the contract: it is there so that a broken cap fails a
+--- case instead of hanging the whole suite in an unbounded drain.
+
+local testing = require("@luaug/testing")
+
+local describe = testing.describe
+local it = testing.it
+local expect = testing.expect
+
+local GUARD = 40
+
+describe("the re-entrancy cap", function()
+    -- Depths 0 through 10 are permitted, so the eleventh invocation is the last
+    -- one and the fire it raises (depth 11) is the one that is dropped.
+    it("invokes a self-refiring handler exactly eleven times", function()
+        local sig = Signal.new()
+        local count = 0
+        sig:Connect(function()
+            count += 1
+            if count < GUARD then
+                sig:Fire()
+            end
+        end)
+
+        sig:Fire()
+
+        task.wait()
+        expect(count):toBe(11)
+    end)
+
+    it("terminates a two-signal loop after eleven invocations in total", function()
+        local first = Signal.new()
+        local second = Signal.new()
+        local firstCount = 0
+        local secondCount = 0
+
+        first:Connect(function()
+            firstCount += 1
+            if firstCount + secondCount < GUARD then
+                second:Fire()
+            end
+        end)
+        second:Connect(function()
+            secondCount += 1
+            if firstCount + secondCount < GUARD then
+                first:Fire()
+            end
+        end)
+
+        first:Fire()
+
+        task.wait()
+        expect(firstCount):toBe(6)
+        expect(secondCount):toBe(5)
+    end)
+
+    it("does not stop the handler whose fire was dropped", function()
+        local sig = Signal.new()
+        local entered = 0
+        local completed = 0
+        sig:Connect(function()
+            entered += 1
+            if entered < GUARD then
+                sig:Fire()
+            end
+            completed += 1
+        end)
+
+        sig:Fire()
+
+        task.wait()
+        expect(entered):toBe(11)
+        expect(completed):toBe(11)
+    end)
+
+    it("delivers a chain that stops one generation below the cap in full", function()
+        local sig = Signal.new()
+        local count = 0
+        sig:Connect(function()
+            count += 1
+            if count < 10 then
+                sig:Fire()
+            end
+        end)
+
+        sig:Fire()
+
+        task.wait()
+        expect(count):toBe(10)
+    end)
+
+    it("gives every top-level fire a fresh generation depth", function()
+        local sig = Signal.new()
+        local round = 0
+        local total = 0
+        sig:Connect(function()
+            round += 1
+            total += 1
+            if round < GUARD then
+                sig:Fire()
+            end
+        end)
+
+        sig:Fire()
+        task.wait()
+        expect(round):toBe(11)
+
+        round = 0
+        sig:Fire()
+        task.wait()
+        expect(round):toBe(11)
+        expect(total):toBe(22)
+    end)
+
+    -- "it is a generation depth, not a call-stack depth, so it does not fire
+    -- spuriously on a wide fan-out". Twenty handlers at depth 0 each raising one
+    -- fire produce twenty fires, all of them at depth 1.
+    it("does not drop a wide fan-out raised at depth zero", function()
+        local trigger = Signal.new()
+        local leaf = Signal.new()
+        local leafCount = 0
+        leaf:Connect(function()
+            leafCount += 1
+        end)
+        for _ = 1, 20 do
+            trigger:Connect(function()
+                leaf:Fire()
+            end)
+        end
+
+        trigger:Fire()
+
+        task.wait()
+        expect(leafCount):toBe(20)
+    end)
+
+    it("does not drop a wide fan-out raised by a single handler", function()
+        local trigger = Signal.new()
+        local leaf = Signal.new()
+        local leafCount = 0
+        leaf:Connect(function()
+            leafCount += 1
+        end)
+        trigger:Connect(function()
+            for _ = 1, 20 do
+                leaf:Fire()
+            end
+        end)
+
+        trigger:Fire()
+
+        task.wait()
+        expect(leafCount):toBe(20)
+    end)
+
+    it("does not accumulate depth across successive fires at the same generation", function()
+        local sig = Signal.new()
+        local count = 0
+        sig:Connect(function()
+            count += 1
+        end)
+
+        for _ = 1, 30 do
+            sig:Fire()
+        end
+
+        task.wait()
+        expect(count):toBe(30)
+    end)
+
+    -- A `task.defer` raised inside a handler must not launder the generation
+    -- depth away, or the cap would be trivially defeatable and a signal loop
+    -- would no longer be bounded.
+    it("bounds a loop built from task.defer raised inside a handler", function()
+        local sig = Signal.new()
+        local count = 0
+        sig:Connect(function()
+            count += 1
+            if count < GUARD then
+                task.defer(function()
+                    sig:Fire()
+                end)
+            end
+        end)
+
+        sig:Fire()
+
+        task.wait()
+        expect(count < GUARD):toBe(true)
+    end)
+
+    it("logs script.err.reentrancy_limit when a fire is dropped", function()
+        local debugService = game:GetService("DebugService")
+        local messages: { string } = {}
+        local capture = debugService.MessageOut:Connect(function(message: string)
+            table.insert(messages, message)
+        end)
+
+        local sig = Signal.new()
+        local count = 0
+        sig:Connect(function()
+            count += 1
+            if count < GUARD then
+                sig:Fire()
+            end
+        end)
+        sig:Fire()
+
+        task.wait()
+        task.wait()
+        capture:Disconnect()
+
+        local found = false
+        for _, message in messages do
+            if string.find(message, "script.err.reentrancy_limit", 1, true) then
+                found = true
+            end
+        end
+        expect(found):toBe(true)
+    end)
+end)

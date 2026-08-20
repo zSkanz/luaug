@@ -1,0 +1,177 @@
+--!strict
+--- The tree predicates from api-design.md §2.2: `IsA`, `IsAncestorOf`,
+--- `IsDescendantOf`. `IsA` answers over the class hierarchy drawn in §2.2;
+--- the other two answer over the live tree.
+
+local testing = require("@luaug/testing")
+
+local describe, it, expect = testing.describe, testing.it, testing.expect
+local beforeEach, afterEach = testing.beforeEach, testing.afterEach
+
+local function namedFolder(name: string, parent: Instance?): Folder
+    local folder = Instance.new("Folder")
+    folder.Name = name
+    folder.Parent = parent
+    return folder
+end
+
+describe("Instance predicates", function()
+    local root: Folder = nil :: any
+
+    beforeEach(function()
+        root = Instance.new("Folder")
+        root.Name = "PredicateSpecRoot"
+        root.Parent = workspace
+    end)
+
+    afterEach(function()
+        root:Destroy()
+    end)
+
+    describe("IsA", function()
+        it("is true for the instance's own class", function()
+            expect(Instance.new("Folder"):IsA("Folder")):toBeTruthy()
+            expect(Instance.new("Part"):IsA("Part")):toBeTruthy()
+            expect(Instance.new("Model"):IsA("Model")):toBeTruthy()
+        end)
+
+        it("is true for an abstract base class", function()
+            expect(Instance.new("Part"):IsA("BasePart")):toBeTruthy()
+        end)
+
+        it("is true for Instance, which every class extends", function()
+            expect(Instance.new("Folder"):IsA("Instance")):toBeTruthy()
+            expect(Instance.new("Part"):IsA("Instance")):toBeTruthy()
+            expect(workspace:IsA("Instance")):toBeTruthy()
+        end)
+
+        it("is false for an unrelated class", function()
+            expect(Instance.new("Folder"):IsA("Part")):toBeFalsy()
+            expect(Instance.new("Part"):IsA("Folder")):toBeFalsy()
+            expect(Instance.new("Model"):IsA("BasePart")):toBeFalsy()
+        end)
+
+        it("is false for a subclass of the instance's own class", function()
+            -- MeshPart extends BasePart alongside Part, so a Part is not one.
+            expect(Instance.new("Part"):IsA("MeshPart")):toBeFalsy()
+        end)
+
+        it("is false for a name that is not a class", function()
+            expect(Instance.new("Folder"):IsA("NoSuchClassExistsHere")):toBeFalsy()
+        end)
+
+        it("is unaffected by the instance's Name or Parent", function()
+            local part = Instance.new("Part")
+            part.Name = "Folder"
+            part.Parent = root
+            expect(part:IsA("Folder")):toBeFalsy()
+            expect(part:IsA("BasePart")):toBeTruthy()
+        end)
+
+        it("answers for services too", function()
+            expect(workspace:IsA("Workspace")):toBeTruthy()
+            expect(game:IsA("DataModel")):toBeTruthy()
+        end)
+    end)
+
+    describe("IsAncestorOf", function()
+        it("is true for a direct child", function()
+            local child = namedFolder("Child", root)
+            expect(root:IsAncestorOf(child)):toBeTruthy()
+        end)
+
+        it("is true for a deep descendant", function()
+            local branch = namedFolder("Branch", root)
+            local leaf = namedFolder("Leaf", branch)
+            expect(root:IsAncestorOf(leaf)):toBeTruthy()
+            expect(branch:IsAncestorOf(leaf)):toBeTruthy()
+        end)
+
+        it("is false in the other direction", function()
+            local child = namedFolder("Child", root)
+            expect(child:IsAncestorOf(root)):toBeFalsy()
+        end)
+
+        it("is false for a sibling", function()
+            local left = namedFolder("Left", root)
+            local right = namedFolder("Right", root)
+            expect(left:IsAncestorOf(right)):toBeFalsy()
+            expect(right:IsAncestorOf(left)):toBeFalsy()
+        end)
+
+        it("is false for itself", function()
+            local folder = namedFolder("Self", root)
+            expect(folder:IsAncestorOf(folder)):toBeFalsy()
+        end)
+
+        it("is false for an instance in another tree", function()
+            local outsider = namedFolder("Outsider", nil)
+            expect(root:IsAncestorOf(outsider)):toBeFalsy()
+        end)
+
+        it("stops being true once the descendant is detached", function()
+            local branch = namedFolder("Branch", root)
+            local leaf = namedFolder("Leaf", branch)
+            branch.Parent = nil
+            expect(root:IsAncestorOf(leaf)):toBeFalsy()
+            expect(branch:IsAncestorOf(leaf)):toBeTruthy()
+        end)
+
+        it("becomes true when a subtree is moved in", function()
+            local branch = namedFolder("Branch", nil)
+            local leaf = namedFolder("Leaf", branch)
+            expect(root:IsAncestorOf(leaf)):toBeFalsy()
+            branch.Parent = root
+            expect(root:IsAncestorOf(leaf)):toBeTruthy()
+        end)
+    end)
+
+    describe("IsDescendantOf", function()
+        it("is true for its own parent", function()
+            local child = namedFolder("Child", root)
+            expect(child:IsDescendantOf(root)):toBeTruthy()
+        end)
+
+        it("is true for a distant ancestor", function()
+            local branch = namedFolder("Branch", root)
+            local leaf = namedFolder("Leaf", branch)
+            expect(leaf:IsDescendantOf(root)):toBeTruthy()
+        end)
+
+        it("is true for the services above the spec tree", function()
+            local leaf = namedFolder("Leaf", root)
+            expect(leaf:IsDescendantOf(workspace)):toBeTruthy()
+            expect(leaf:IsDescendantOf(game)):toBeTruthy()
+        end)
+
+        it("is false in the other direction", function()
+            local child = namedFolder("Child", root)
+            expect(root:IsDescendantOf(child)):toBeFalsy()
+        end)
+
+        it("is false for itself", function()
+            local folder = namedFolder("Self", root)
+            expect(folder:IsDescendantOf(folder)):toBeFalsy()
+        end)
+
+        it("is false for a sibling", function()
+            local left = namedFolder("Left", root)
+            local right = namedFolder("Right", root)
+            expect(left:IsDescendantOf(right)):toBeFalsy()
+        end)
+
+        it("is false while unparented", function()
+            local orphan = namedFolder("Orphan", nil)
+            expect(orphan:IsDescendantOf(root)):toBeFalsy()
+            expect(orphan:IsDescendantOf(game)):toBeFalsy()
+        end)
+
+        it("agrees with IsAncestorOf on every pair", function()
+            local branch = namedFolder("Branch", root)
+            local leaf = namedFolder("Leaf", branch)
+            expect(leaf:IsDescendantOf(branch)):toBe(branch:IsAncestorOf(leaf))
+            expect(leaf:IsDescendantOf(root)):toBe(root:IsAncestorOf(leaf))
+            expect(root:IsDescendantOf(leaf)):toBe(leaf:IsAncestorOf(root))
+        end)
+    end)
+end)

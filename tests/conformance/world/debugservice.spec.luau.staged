@@ -1,0 +1,186 @@
+--!strict
+--- Conformance: DebugService (docs/api-design.md 2.1, 3.1).
+---
+--- 2.1 says DebugService is "present in shipped builds with the overlay off
+--- unless enabled", which makes its surface -- not its pixels -- the thing a
+--- spec can hold. The stats table and `MessageOut` are the two halves that
+--- mean something with no window attached, and `MessageOut` is also where
+--- 3.1's contained handler errors are promised to surface.
+
+local testing = require("@luaug/testing")
+
+local describe, it, expect = testing.describe, testing.it, testing.expect
+local beforeEach, afterEach = testing.beforeEach, testing.afterEach
+
+--- 2.1 names these five built-in overlay panels.
+local BUILT_IN_PANELS = { "Stats", "Scene", "Log", "Streaming", "Physics" }
+
+describe("DebugService", function()
+    local debugService: DebugService
+    local connections: { Connection }
+
+    beforeEach(function()
+        debugService = game:GetService("DebugService")
+        connections = {}
+    end)
+
+    afterEach(function()
+        for _, connection in connections do
+            connection:Disconnect()
+        end
+    end)
+
+    describe("acquisition", function()
+        it("is a singleton child of game", function()
+            expect(game:GetService("DebugService")).toBe(debugService)
+            expect(debugService.Parent).toBe(game)
+            expect(debugService.ClassName).toBe("DebugService")
+        end)
+    end)
+
+    describe("stats", function()
+        it("returns a number for each documented built-in stat", function()
+            for _, statName in { "FPS", "FrameTimeMs", "InstanceCount", "LuaMemoryKB" } do
+                expect(debugService:GetStat(statName)).toBeA("number")
+            end
+        end)
+
+        it("reports a positive instance count for a world that has a DataModel in it", function()
+            expect(debugService:GetStat("InstanceCount") > 0).toBe(true)
+        end)
+
+        it("round-trips a custom stat", function()
+            debugService:SetCustomStat("ConformanceProbe", 12.5)
+            expect(debugService:GetStat("ConformanceProbe")).toBe(12.5)
+        end)
+
+        it("overwrites a custom stat", function()
+            debugService:SetCustomStat("ConformanceProbe", 1)
+            debugService:SetCustomStat("ConformanceProbe", 2)
+            expect(debugService:GetStat("ConformanceProbe")).toBe(2)
+        end)
+
+        it("errors on a stat name that was never registered or set", function()
+            local service = debugService :: any
+            expect(function()
+                service:GetStat("ConformanceNeverSetStat")
+            end).toThrow()
+        end)
+
+        it("rejects a custom stat value that is not a number", function()
+            local service = debugService :: any
+            expect(function()
+                service:SetCustomStat("ConformanceProbe", "twelve")
+            end).toThrow()
+        end)
+    end)
+
+    describe("overlay", function()
+        it("exposes OverlayVisible as a boolean", function()
+            expect(debugService.OverlayVisible).toBeA("boolean")
+        end)
+
+        it("round-trips OverlayVisible", function()
+            local before = debugService.OverlayVisible
+            debugService.OverlayVisible = not before
+            expect(debugService.OverlayVisible).toBe(not before)
+            debugService.OverlayVisible = before
+            expect(debugService.OverlayVisible).toBe(before)
+        end)
+
+        it("accepts every documented built-in panel name", function()
+            expect(function()
+                for _, panel in BUILT_IN_PANELS do
+                    debugService:ShowPanel(panel)
+                    debugService:HidePanel(panel)
+                end
+            end).never:toThrow()
+        end)
+
+        it("errors on an unknown panel name", function()
+            local service = debugService :: any
+            expect(function()
+                service:ShowPanel("ConformanceNoSuchPanel")
+            end).toThrow()
+        end)
+    end)
+
+    describe("MessageOut", function()
+        it("is a connectable signal", function()
+            local connection = debugService.MessageOut:Connect(function() end)
+            table.insert(connections, connection)
+            expect(connection.Connected).toBe(true)
+        end)
+
+        it("reports a warn call at the next resumption point", function()
+            local messages: { string } = {}
+            local connection = debugService.MessageOut:Connect(function(message)
+                table.insert(messages, message)
+            end)
+            table.insert(connections, connection)
+
+            warn("conformance.debugservice.probe")
+            task.wait()
+            expect(messages).toContain("conformance.debugservice.probe")
+        end)
+
+        it("passes a LogLevel EnumItem alongside the message", function()
+            local levels: { EnumItem } = {}
+            local connection = debugService.MessageOut:Connect(function(_message, level)
+                table.insert(levels, level)
+            end)
+            table.insert(connections, connection)
+
+            warn("conformance.debugservice.probe")
+            task.wait()
+            expect(#levels >= 1).toBe(true)
+            expect(levels[1].EnumType).toBe(Enum.LogLevel)
+        end)
+
+        it("does not run the handler before the next resumption point", function()
+            local runs = 0
+            local connection = debugService.MessageOut:Connect(function()
+                runs += 1
+            end)
+            table.insert(connections, connection)
+
+            warn("conformance.debugservice.probe")
+            expect(runs).toBe(0)
+        end)
+
+        it("stops delivering after Disconnect", function()
+            local runs = 0
+            local connection = debugService.MessageOut:Connect(function()
+                runs += 1
+            end)
+            table.insert(connections, connection)
+
+            connection:Disconnect()
+            warn("conformance.debugservice.probe")
+            task.wait()
+            expect(runs).toBe(0)
+        end)
+    end)
+
+    describe("gizmos", function()
+        -- 2.1 calls the gizmos per-frame dev drawing: with no renderer
+        -- attached the calls have nothing to draw into, and doing nothing is
+        -- the only answer that keeps a headless conformance run honest.
+        it("accepts the documented gizmo calls", function()
+            expect(function()
+                debugService:DrawLine(Vector3.new(0, 0, 0), Vector3.new(1, 1, 1))
+                debugService:DrawBox(CFrame.new(0, 0, 0), Vector3.new(1, 1, 1))
+                debugService:DrawSphere(Vector3.new(0, 0, 0), 1)
+            end).never:toThrow()
+        end)
+
+        it("accepts an optional colour on every gizmo call", function()
+            local color = Color3.new(1, 0, 0)
+            expect(function()
+                debugService:DrawLine(Vector3.new(0, 0, 0), Vector3.new(1, 1, 1), color)
+                debugService:DrawBox(CFrame.new(0, 0, 0), Vector3.new(1, 1, 1), color)
+                debugService:DrawSphere(Vector3.new(0, 0, 0), 1, color)
+            end).never:toThrow()
+        end)
+    end)
+end)

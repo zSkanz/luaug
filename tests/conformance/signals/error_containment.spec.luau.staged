@@ -1,0 +1,204 @@
+--!strict
+--- Conformance: errors are contained.
+--- Written from api-design.md §3.1: "Each handler runs on its own coroutine; an
+--- error in one handler does not stop the other handlers of that fire, does not
+--- stop the drain, and does not stop the script that fired."
+
+local testing = require("@luaug/testing")
+
+local describe = testing.describe
+local it = testing.it
+local expect = testing.expect
+local beforeEach = testing.beforeEach
+local afterEach = testing.afterEach
+
+local MARKER = "luaug-conformance-handler-error"
+
+describe("error containment", function()
+    local root: Folder
+
+    beforeEach(function()
+        root = Instance.new("Folder")
+        root.Name = "ErrorContainmentSpec"
+        root.Parent = workspace
+    end)
+
+    afterEach(function()
+        root:Destroy()
+    end)
+
+    it("runs the remaining handlers of a fire after one of them errors", function()
+        local sig = Signal.new()
+        local log: { string } = {}
+        sig:Connect(function()
+            table.insert(log, "before")
+        end)
+        sig:Connect(function()
+            error(MARKER)
+        end)
+        sig:Connect(function()
+            table.insert(log, "after")
+        end)
+
+        sig:Fire()
+
+        task.wait()
+        expect(log):toEqual({ "before", "after" })
+    end)
+
+    it("continues the drain past an erroring handler", function()
+        local failing = Signal.new()
+        local following = Signal.new()
+        local ran = false
+        failing:Connect(function()
+            error(MARKER)
+        end)
+        following:Connect(function()
+            ran = true
+        end)
+
+        failing:Fire()
+        following:Fire()
+
+        task.wait()
+        expect(ran):toBe(true)
+    end)
+
+    it("returns normally to the caller of Fire", function()
+        local sig = Signal.new()
+        sig:Connect(function()
+            error(MARKER)
+        end)
+
+        local ok = pcall(function()
+            sig:Fire()
+        end)
+
+        task.wait()
+        expect(ok):toBe(true)
+    end)
+
+    -- The observable form of "does not stop the script that fired": the firing
+    -- coroutine survives the drain and its later fires are still delivered.
+    it("does not stop the script that fired", function()
+        local sig = Signal.new()
+        local delivered = 0
+        sig:Connect(function()
+            error(MARKER)
+        end)
+        sig:Connect(function()
+            delivered += 1
+        end)
+
+        sig:Fire()
+        task.wait()
+        sig:Fire()
+        task.wait()
+
+        expect(delivered):toBe(2)
+    end)
+
+    it("keeps an erroring connection connected for later fires", function()
+        local sig = Signal.new()
+        local count = 0
+        local connection = sig:Connect(function()
+            count += 1
+            error(MARKER)
+        end)
+
+        sig:Fire()
+        task.wait()
+        sig:Fire()
+        task.wait()
+
+        expect(count):toBe(2)
+        expect(connection.Connected):toBe(true)
+    end)
+
+    it("still disconnects a Once handler that errors", function()
+        local sig = Signal.new()
+        local count = 0
+        local connection = sig:Once(function()
+            count += 1
+            error(MARKER)
+        end)
+
+        sig:Fire()
+        task.wait()
+        sig:Fire()
+        task.wait()
+
+        expect(count):toBe(1)
+        expect(connection.Connected):toBe(false)
+    end)
+
+    it("does not undo the tree mutation that raised the fire", function()
+        root.ChildAdded:Connect(function()
+            error(MARKER)
+        end)
+
+        local child = Instance.new("Folder")
+        child.Name = "Survivor"
+        child.Parent = root
+
+        task.wait()
+        expect(child.Parent):toBe(root)
+        expect(root:FindFirstChild("Survivor")):toBe(child)
+    end)
+
+    it("does not stop the other handlers of an engine-raised fire", function()
+        local log: { string } = {}
+        root.ChildAdded:Connect(function()
+            error(MARKER)
+        end)
+        root.ChildAdded:Connect(function()
+            table.insert(log, "second")
+        end)
+
+        local child = Instance.new("Folder")
+        child.Parent = root
+
+        task.wait()
+        expect(log):toEqual({ "second" })
+    end)
+
+    it("does not stop a handler that errors from having already run", function()
+        local sig = Signal.new()
+        local reached = false
+        sig:Connect(function()
+            reached = true
+            error(MARKER)
+        end)
+
+        sig:Fire()
+
+        task.wait()
+        expect(reached):toBe(true)
+    end)
+
+    it("reports the error on DebugService.MessageOut", function()
+        local debugService = game:GetService("DebugService")
+        local messages: { string } = {}
+        local capture = debugService.MessageOut:Connect(function(message: string)
+            table.insert(messages, message)
+        end)
+
+        local sig = Signal.new()
+        sig:Connect(function()
+            error(MARKER)
+        end)
+        sig:Fire()
+
+        task.wait()
+        task.wait()
+        capture:Disconnect()
+
+        local found = false
+        for _, message in messages do
+            if string.find(message, MARKER, 1, true) then
+                found = true
+            end
+        end
+        expect(found):toBe(true)
+    end)
+end)

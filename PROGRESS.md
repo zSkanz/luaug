@@ -17,25 +17,58 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 - The engine renders: three wire cubes orbiting a world triad over a pulsing
   clear colour, driven from `examples/00-clear/init.luau` through a temporary
   Luau binding that M2 replaces. F3 toggles an ImGui overlay in dev builds.
-- 15 CTest entries, green on Windows and Linux.
+- 17 CTest entries, green on Windows and Linux.
+
+### M2: what exists
+
+- **`core`** — `SlotMap`, `AtomTable`, `Pcg32`, `Phase`, `CFrameD`/`Mat3`/
+  `Color3`, YXZ euler both ways. Heavily tested and mutation-checked.
+- **The API IDL is real and generates the engine.** `api/schema.luau` with the
+  §9 naming lints, `api/defs/*.api.luau` (13 classes, 6 datatypes, 4 enums),
+  `gen_dts.luau` → `runtime/types/engine.d.luau`, `gen_cpp.luau` →
+  `engine/scene/generated/class_descriptors.gen.cpp`. Both generated outputs are
+  checked in and **freshness-gated**, and both gates were proved by tampering.
+- **`scene` (L3)** — the ECS, the Instance facade, the duplicate-name index
+  (ADR 0026), attributes, tags, the POD change queue, `WorldHash` over xxh3.
+  35 cases / 297 assertions. `native_accessors.cpp` is the hand-written half of
+  reflection: 17 properties, 35 functions, matching the generated declarations
+  name for name.
+- **`script` (L5)** — the VM boots in the one order that works, and the sandbox
+  curation R4 actually requires (`luaL_sandbox` removes nothing). Tested from
+  C++ in both directions.
+
+### M2: what does NOT exist yet
+
+Nothing reaches Luau. There is no Instance binding, so a script cannot create or
+touch an instance; no datatype bindings; no signal drain; no `task`; no
+`require`; no service wiring in `app`; no `examples/01-instances`; no replay
+harness, frame-budget instrumentation or 10k/1k benchmark.
+
+**The M2 gate is 0 of 4**, and cannot move until the Instance binding exists.
 
 ## Now / Next
 
-- **Next: write `api/defs/*.api.luau` for the M2 surface**, against
-  `api/schema.luau` (which exists and type-checks). The rulings that fill in
-  every previously-unanswered semantic are now in `docs/api-design.md`, so the
-  def files have something to be faithful to. Then `api/generator/gen_dts.luau`
-  — it unblocks the conformance suite, which cannot pass `luau-analyze` until
-  engine declarations exist.
-- 932 conformance cases in 47 files are **staged outside the repo** at
-  `…/scratchpad/conformance/` and are NOT yet integrated: they cannot pass the
-  analyzer until `gen_dts` emits `runtime/types/engine.d.luau`. Several need
-  correcting first against rulings that overrode their author's guess — the
-  equality-filtered property write, the re-entrancy cap covering `task.defer`,
-  and the removed-globals files, which move to C++ entirely.
+- **Next: the Instance binding** — `engine/script/src/instance_binding.cpp`.
+  One `UserdataTag::Instance` with one metatable, the class resolved from the
+  `InstanceId` through `scene::ClassRegistry` (brief Decision 13, forced by the
+  VM: `lua_setuserdatametatable` refuses to reassign). `__index`/`__newindex`
+  switch on the Luau atom, which `runtime.cpp` already maps to a
+  `core::NameAtom` through the `useratom` callback. A per-VM weak-valued cache
+  keyed on the id's `index` gives `a == b` identity.
+  Then, in order: the datatype bindings (`datatypes.h` declares the entry
+  points), the signal drain, `task`, `require`, and the `app` wiring.
+- **The 932 conformance cases now live in `tests/conformance/`** with a
+  `.spec.luau.staged` extension so the analyzer's glob skips them.
+  `tests/conformance/README.md` lists exactly what integrating them needs: a
+  mechanical matcher rename (ADR 0034 landed after they were written), three
+  specs corrected against rulings that overrode their author's guess, and the
+  datatype-operator gap in the generated definitions.
 - Kernel work (ECS, Instance facade, signal queue, `task`, bindings) stays
-  single-threaded per MASTER_PROMPT §7. `core` primitives, spec authoring, the
-  IDL and the doc passes are what fanned out.
+  single-threaded per MASTER_PROMPT §7. **Delegating large C++ kernel blocks to
+  subagents did not work**: three in a row stalled with no output (class
+  registry, scene tests, sandbox) and had to be killed and redone by hand.
+  Tight, well-bounded tasks landed well — the two generators, the spec authors,
+  the math. Fan out narrow, write the kernel yourself.
 - **Read `docs/research/luau-c-api-2026.md` before writing any binding code.**
   It is the frozen, file-and-line-verified account of the Luau C API at the pin,
   and rows U-17…U-51 in `docs/research/UNCONFIRMED.md` record where it
@@ -168,6 +201,25 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   scheduled for M3 — so `gen_dts` is pulled forward, forced by the gate rather
   than by preference.
   Next: write the ordering semantics into `docs/api-design.md`.
+
+- **2026-08-19/20 (session 4, continued):** Built the M2 spine below Luau. The
+  IDL now generates both the type definitions and the C++ reflection tables,
+  both checked in and freshness-gated; `scene` has the ECS, the Instance facade
+  and the world hash; `script` boots a VM with the sandbox R4 actually needs.
+  Learned, each found by running rather than by reading: `ComponentPool` left a
+  dead entity's component visible to `forEach` after a slot was recycled; the
+  property subscription mask measured a pointer offset into the *declaring*
+  class's array, which made every inherited property permanently unsubscribable
+  and permanently noisy — the exact inverse of the quiet-write path the 10k
+  benchmark rests on; `lua_newthread` pushes the thread above the loaded
+  function, so load-then-`xmove` moves the wrong value and fails far from its
+  cause; `luaL_sandbox` removes nothing at all; and Luau's base library defines
+  neither `collectgarbage` (which api-design listed and now does not) nor
+  `warn` (which the runtime now installs). Clang caught an unused private field
+  MSVC would have kept forever, and caught three `-Wdouble-promotion` errors in
+  a commit I pushed without running the Linux tier — the rule in CLAUDE.md
+  exists for exactly that and I went around it.
+  Next: `engine/script/src/instance_binding.cpp`.
 
 - **2026-08-19 (session 4 continued):** Wrote api-design §3.1/§3.2 (the deferred
   ordering contract), settled the casing rule with the human (ADR 0034), and

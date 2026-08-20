@@ -1,0 +1,239 @@
+--!strict
+--- Pins the `CFrame` constructors of `api-design.md` §2.3 and divergence #10:
+--- `fromEuler` is the ONE euler constructor, and the three Roblox spellings it
+--- replaces must not exist.
+
+local testing = require("@luaug/testing")
+
+local describe, it, expect = testing.describe, testing.it, testing.expect
+
+local function expectVectorClose(actual: vector, expected: vector, tolerance: number?): ()
+    local epsilon = tolerance or 1e-5
+    expect(actual.x):toBeCloseTo(expected.x, epsilon)
+    expect(actual.y):toBeCloseTo(expected.y, epsilon)
+    expect(actual.z):toBeCloseTo(expected.z, epsilon)
+end
+
+local function expectCFrameClose(actual: CFrame, expected: CFrame, tolerance: number?): ()
+    local epsilon = tolerance or 1e-5
+    expectVectorClose(actual.Position, expected.Position, epsilon)
+    expectVectorClose(actual.RightVector, expected.RightVector, epsilon)
+    expectVectorClose(actual.UpVector, expected.UpVector, epsilon)
+    expectVectorClose(actual.LookVector, expected.LookVector, epsilon)
+end
+
+local function expectIdentityRotation(cf: CFrame): ()
+    expectVectorClose(cf.RightVector, vector.create(1, 0, 0))
+    expectVectorClose(cf.UpVector, vector.create(0, 1, 0))
+    expectVectorClose(cf.LookVector, vector.create(0, 0, -1))
+end
+
+describe("CFrame construction", function()
+    describe("the datatype itself", function()
+        it("reports typeof CFrame", function()
+            expect(typeof(CFrame.new())):toBe("CFrame")
+        end)
+
+        it("is not the vector primitive", function()
+            expect(typeof(CFrame.new())).never:toBe(typeof(vector.zero))
+        end)
+    end)
+
+    describe("CFrame.new", function()
+        it("builds the identity transform with no arguments", function()
+            local cf = CFrame.new()
+            expectVectorClose(cf.Position, vector.zero)
+            expectIdentityRotation(cf)
+        end)
+
+        it("takes the translation as three numbers", function()
+            expectVectorClose(CFrame.new(1, 2, 3).Position, vector.create(1, 2, 3))
+        end)
+
+        it("defaults the omitted translation components to zero", function()
+            -- §2.3 spells the signature `CFrame.new(x?, y?, z?)`: each component
+            -- is independently optional.
+            expectVectorClose(CFrame.new(5).Position, vector.create(5, 0, 0))
+            expectVectorClose(CFrame.new(5, 6).Position, vector.create(5, 6, 0))
+        end)
+
+        it("carries no rotation", function()
+            expectIdentityRotation(CFrame.new(10, -20, 30))
+        end)
+    end)
+
+    describe("CFrame.identity", function()
+        it("is a lowercase constant, matching the §9 naming rule", function()
+            expect(typeof(CFrame.identity)):toBe("CFrame")
+        end)
+
+        it("has a zero translation and the identity basis", function()
+            expectVectorClose(CFrame.identity.Position, vector.zero)
+            expectIdentityRotation(CFrame.identity)
+        end)
+
+        it("leaves any CFrame unchanged under composition", function()
+            local cf = CFrame.new(7, 8, 9) * CFrame.fromEuler(0.3, -0.4, 0.5)
+            expectCFrameClose(CFrame.identity * cf, cf)
+            expectCFrameClose(cf * CFrame.identity, cf)
+        end)
+    end)
+
+    describe("CFrame.lookAt", function()
+        it("places the transform at the given position", function()
+            local cf = CFrame.lookAt(vector.create(1, 2, 3), vector.create(1, 2, -10))
+            expectVectorClose(cf.Position, vector.create(1, 2, 3))
+        end)
+
+        it("aims LookVector from the position toward the target", function()
+            local cf = CFrame.lookAt(vector.zero, vector.create(10, 0, 0))
+            expectVectorClose(cf.LookVector, vector.create(1, 0, 0))
+        end)
+
+        it("produces a unit LookVector regardless of the distance to the target", function()
+            local cf = CFrame.lookAt(vector.zero, vector.create(0, 0, -1000))
+            expect(vector.magnitude(cf.LookVector)):toBeCloseTo(1, 1e-5)
+        end)
+
+        it("looking down -Z from the origin reproduces the identity basis", function()
+            expectIdentityRotation(CFrame.lookAt(vector.zero, vector.create(0, 0, -5)))
+        end)
+
+        it("defaults the up hint to positive Y", function()
+            local implicit = CFrame.lookAt(vector.zero, vector.create(1, 0, -1))
+            local explicit = CFrame.lookAt(vector.zero, vector.create(1, 0, -1), vector.create(0, 1, 0))
+            expectCFrameClose(implicit, explicit)
+        end)
+
+        it("honours an explicit up hint", function()
+            local rolled = CFrame.lookAt(vector.zero, vector.create(0, 0, -1), vector.create(1, 0, 0))
+            expectVectorClose(rolled.LookVector, vector.create(0, 0, -1))
+            expectVectorClose(rolled.UpVector, vector.create(1, 0, 0))
+        end)
+    end)
+
+    describe("CFrame.fromEuler", function()
+        it("returns the identity rotation for zero angles", function()
+            expectIdentityRotation(CFrame.fromEuler(0, 0, 0))
+        end)
+
+        it("carries no translation", function()
+            expectVectorClose(CFrame.fromEuler(0.1, 0.2, 0.3).Position, vector.zero)
+        end)
+
+        it("turns the look direction from -Z toward -X for a positive quarter-turn yaw", function()
+            -- Pins the sign of a rotation about +Y in a right-handed, Y-up world.
+            expectVectorClose(CFrame.fromEuler(0, math.pi / 2, 0).LookVector, vector.create(-1, 0, 0))
+        end)
+
+        it("takes its first angle about X, its second about Y and its third about Z", function()
+            expectVectorClose(CFrame.fromEuler(math.pi / 2, 0, 0).UpVector, vector.create(0, 0, 1))
+            expectVectorClose(CFrame.fromEuler(0, math.pi / 2, 0).RightVector, vector.create(0, 0, -1))
+            expectVectorClose(CFrame.fromEuler(0, 0, math.pi / 2).RightVector, vector.create(0, 1, 0))
+        end)
+
+        it("defaults the rotation order to YXZ", function()
+            local implicit = CFrame.fromEuler(0.3, -0.4, 0.5)
+            local explicit = CFrame.fromEuler(0.3, -0.4, 0.5, Enum.RotationOrder.YXZ)
+            expectCFrameClose(implicit, explicit)
+        end)
+
+        it("produces a different rotation for a different order", function()
+            local yxz = CFrame.fromEuler(0.3, -0.4, 0.5, Enum.RotationOrder.YXZ)
+            local xyz = CFrame.fromEuler(0.3, -0.4, 0.5, Enum.RotationOrder.XYZ)
+            expect(yxz.LookVector.x).never:toBeCloseTo(xyz.LookVector.x, 1e-4)
+        end)
+
+        it("round-trips through ToEuler", function()
+            local rx, ry, rz = CFrame.fromEuler(0.3, -0.4, 0.5):ToEuler()
+            expect(rx):toBeCloseTo(0.3, 1e-5)
+            expect(ry):toBeCloseTo(-0.4, 1e-5)
+            expect(rz):toBeCloseTo(0.5, 1e-5)
+        end)
+
+        it("is the only euler constructor", function()
+            -- Divergence #10 is frozen: three confusing spellings became one.
+            expect((CFrame :: any).Angles):toBeNil()
+            expect((CFrame :: any).angles):toBeNil()
+            expect((CFrame :: any).fromOrientation):toBeNil()
+            expect((CFrame :: any).fromEulerAnglesXYZ):toBeNil()
+            expect((CFrame :: any).fromEulerAnglesYXZ):toBeNil()
+        end)
+    end)
+
+    describe("CFrame.fromAxisAngle", function()
+        it("returns the identity rotation for a zero angle", function()
+            expectIdentityRotation(CFrame.fromAxisAngle(vector.create(0, 1, 0), 0))
+        end)
+
+        it("carries no translation", function()
+            expectVectorClose(CFrame.fromAxisAngle(vector.create(0, 1, 0), 1).Position, vector.zero)
+        end)
+
+        it("leaves the rotation axis fixed", function()
+            local axis = vector.normalize(vector.create(1, 2, 3))
+            local cf = CFrame.fromAxisAngle(axis, 1.1)
+            expectVectorClose(cf:VectorToWorldSpace(axis), axis)
+        end)
+
+        it("agrees with fromEuler for a rotation about Y", function()
+            local byAxis = CFrame.fromAxisAngle(vector.create(0, 1, 0), math.pi / 2)
+            local byEuler = CFrame.fromEuler(0, math.pi / 2, 0)
+            expectCFrameClose(byAxis, byEuler)
+        end)
+
+        it("round-trips through ToAxisAngle", function()
+            local axis = vector.normalize(vector.create(1, -2, 0.5))
+            local original = CFrame.fromAxisAngle(axis, 1.2)
+            local outAxis, outAngle = original:ToAxisAngle()
+            expectCFrameClose(CFrame.fromAxisAngle(outAxis, outAngle), original)
+        end)
+    end)
+
+    describe("CFrame.fromQuaternion", function()
+        it("takes the position first and the four quaternion components after it", function()
+            local cf = CFrame.fromQuaternion(vector.create(1, 2, 3), 0, 0, 0, 1)
+            expectVectorClose(cf.Position, vector.create(1, 2, 3))
+            expectIdentityRotation(cf)
+        end)
+
+        it("normalises a quarter-turn quaternion about Y into the matching rotation", function()
+            local half = math.sqrt(0.5)
+            local cf = CFrame.fromQuaternion(vector.zero, 0, half, 0, half)
+            expectCFrameClose(cf, CFrame.fromEuler(0, math.pi / 2, 0))
+        end)
+
+        it("round-trips through ToQuaternion", function()
+            local original = CFrame.new(4, 5, 6) * CFrame.fromEuler(0.3, -0.4, 0.5)
+            local qx, qy, qz, qw = original:ToQuaternion()
+            expectCFrameClose(CFrame.fromQuaternion(original.Position, qx, qy, qz, qw), original)
+        end)
+    end)
+
+    describe("CFrame.fromMatrix", function()
+        it("takes the position and then the right, up and back axes", function()
+            local cf = CFrame.fromMatrix(
+                vector.create(1, 2, 3),
+                vector.create(1, 0, 0),
+                vector.create(0, 1, 0),
+                vector.create(0, 0, 1)
+            )
+            expectVectorClose(cf.Position, vector.create(1, 2, 3))
+            expectVectorClose(cf.RightVector, vector.create(1, 0, 0))
+            expectVectorClose(cf.UpVector, vector.create(0, 1, 0))
+        end)
+
+        it("makes LookVector the negation of the third axis", function()
+            -- §2.3 states `LookVector` is -Z, so the `b` argument is the back axis.
+            local cf =
+                CFrame.fromMatrix(vector.zero, vector.create(0, 0, -1), vector.create(0, 1, 0), vector.create(1, 0, 0))
+            expectVectorClose(cf.LookVector, vector.create(-1, 0, 0))
+        end)
+
+        it("reproduces the identity basis from the world axes", function()
+            local cf =
+                CFrame.fromMatrix(vector.zero, vector.create(1, 0, 0), vector.create(0, 1, 0), vector.create(0, 0, 1))
+            expectIdentityRotation(cf)
+        end)
+    end)
+end)

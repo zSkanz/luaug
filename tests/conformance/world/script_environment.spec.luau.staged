@@ -1,0 +1,144 @@
+--!strict
+--- Conformance: the script environment (docs/api-design.md 2.2, 2.5, 3).
+---
+--- Section 3 makes three promises about the shape of running code: the mount
+--- is a tree of `Script`s and `Folder`s under `ScriptService`, the `script`
+--- global is the running one of those, and modules are files reached by
+--- string -- there is no `ModuleScript` class and no `require(instance)`
+--- (divergence 6). Dynamic script creation is out of scope for v1, which is
+--- the same statement read from the other side.
+
+local testing = require("@luaug/testing")
+
+local describe, it, expect = testing.describe, testing.it, testing.expect
+local beforeEach = testing.beforeEach
+
+describe("the script global", function()
+    it("is a Script instance", function()
+        expect(script).never:toBeNil()
+        expect(script:IsA("Script")).toBe(true)
+    end)
+
+    it("reports Script as its ClassName", function()
+        expect(script.ClassName).toBe("Script")
+    end)
+
+    it("has a non-empty Name", function()
+        expect(script.Name).toBeA("string")
+        expect(#script.Name > 0).toBe(true)
+    end)
+
+    it("is a descendant of the DataModel", function()
+        expect(script:IsDescendantOf(game)).toBe(true)
+    end)
+
+    it("is mounted under ScriptService", function()
+        expect(script:IsDescendantOf(game:GetService("ScriptService"))).toBe(true)
+    end)
+
+    it("is enabled while it runs", function()
+        expect(script.Enabled).toBeA("boolean")
+        expect(script.Enabled).toBe(true)
+    end)
+
+    it("is not the DataModel or a service", function()
+        expect(script).never:toBe(game)
+        expect(script).never:toBe(workspace)
+        expect(script).never:toBe(game:GetService("ScriptService"))
+    end)
+
+    -- Section 3 points script authors at attributes for per-script config, so
+    -- the running Script has to accept them like any other instance.
+    it("carries attributes like any other instance", function()
+        expect(script:GetAttribute("ConformanceProbe")).toBeNil()
+        script:SetAttribute("ConformanceProbe", 3)
+        expect(script:GetAttribute("ConformanceProbe")).toBe(3)
+        script:SetAttribute("ConformanceProbe", nil)
+        expect(script:GetAttribute("ConformanceProbe")).toBeNil()
+    end)
+
+    it("carries tags like any other instance", function()
+        expect(script:HasTag("ConformanceProbeTag")).toBe(false)
+        script:AddTag("ConformanceProbeTag")
+        expect(script:HasTag("ConformanceProbeTag")).toBe(true)
+        script:RemoveTag("ConformanceProbeTag")
+        expect(script:HasTag("ConformanceProbeTag")).toBe(false)
+    end)
+end)
+
+describe("ScriptService", function()
+    local scriptService: ScriptService
+
+    beforeEach(function()
+        scriptService = game:GetService("ScriptService")
+    end)
+
+    it("is a singleton child of game", function()
+        expect(game:GetService("ScriptService")).toBe(scriptService)
+        expect(scriptService.Parent).toBe(game)
+        expect(scriptService.ClassName).toBe("ScriptService")
+    end)
+
+    it("holds at least the running script", function()
+        expect(#scriptService:GetDescendants() > 0).toBe(true)
+    end)
+
+    -- Section 3: every mounted file is a `Script` and every source
+    -- subdirectory is a `Folder`. Nothing else has a reason to be in the
+    -- mount, so anything else there is a mounting bug.
+    it("contains only Script and Folder instances", function()
+        for _, descendant in scriptService:GetDescendants() do
+            local className = descendant.ClassName
+            expect(className == "Script" or className == "Folder").toBe(true)
+        end
+    end)
+
+    it("gives every mounted Script an Enabled boolean", function()
+        for _, descendant in scriptService:GetDescendants() do
+            if descendant:IsA("Script") then
+                expect(descendant.Enabled).toBeA("boolean")
+            end
+        end
+    end)
+
+    it("names every mounted instance", function()
+        for _, descendant in scriptService:GetDescendants() do
+            expect(descendant.Name).toBeA("string")
+            expect(#descendant.Name > 0).toBe(true)
+        end
+    end)
+end)
+
+describe("the module model", function()
+    it("has no ModuleScript class", function()
+        local instanceLibrary = Instance :: any
+        expect(function()
+            instanceLibrary.new("ModuleScript")
+        end).toThrow()
+    end)
+
+    it("does not support dynamic script creation", function()
+        local instanceLibrary = Instance :: any
+        expect(function()
+            instanceLibrary.new("Script")
+        end).toThrow()
+    end)
+
+    it("refuses require of an Instance", function()
+        local requireByValue = require :: any
+        expect(function()
+            requireByValue(script)
+        end).toThrow()
+    end)
+
+    it("refuses require of an unknown module path", function()
+        local requireByValue = require :: any
+        expect(function()
+            requireByValue("@luaug/there-is-no-such-module")
+        end).toThrow()
+    end)
+
+    it("returns the same table for two requires of one module", function()
+        expect(require("@luaug/testing")).toBe(testing)
+    end)
+end)
