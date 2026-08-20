@@ -22,6 +22,7 @@
 *.mp3 binary
 *.ttf binary
 *.otf binary
+*.ico binary
 
 # Golden images: binary and excluded from textual diffs.
 tests/**/golden/** binary -diff
