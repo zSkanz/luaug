@@ -406,6 +406,18 @@ jobs:
       - name: Install the pinned Luau toolchain
         if: runner.os != 'macOS'
         shell: bash
+        env:
+          # Rokit resolves every pinned tool through api.github.com, and
+          # unauthenticated that is sixty requests an hour shared across the
+          # runner's whole IP -- so it returns 403 on a busy afternoon and the
+          # step dies with "GitHub error: 403 Forbidden" for a release that is
+          # public and present. It happened once, on the push that closed M4.5,
+          # and the job it killed had already built and passed all 25 tests.
+          #
+          # `GITHUB_TOKEN` is the workflow's own automatic token: nothing to
+          # create, nothing to store, and read-only on a fork's pull request,
+          # which is all this needs.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           case "$RUNNER_OS" in
@@ -416,6 +428,11 @@ jobs:
           unzip -q /tmp/rokit.zip -d /tmp/rokit
           /tmp/rokit/rokit self-install
           echo "$HOME/.rokit/bin" >> "$GITHUB_PATH"
+          # Before `install`, so every release lookup it makes is authenticated.
+          # The subcommand and its flag are read off the pinned binary's own
+          # `--help` at 1.2.0 rather than from documentation for some other
+          # version (MASTER_PROMPT §9).
+          "$HOME/.rokit/bin/rokit" authenticate github --token "$GH_TOKEN"
           # --no-trust-check: the tools are pinned in the in-repo, ADR-gated
           # rokit.toml (R5); the interactive trust prompt has no answer in CI.
           "$HOME/.rokit/bin/rokit" install --no-trust-check
