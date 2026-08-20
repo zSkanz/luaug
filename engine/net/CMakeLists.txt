@@ -13,16 +13,26 @@ luaug_add_module(net_api
     INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include
     SOURCES
         src/digest.cpp
+        src/tcp.cpp
+        src/websocket.cpp
         src/websocket_protocol.cpp
     DEPS
         core
 )
+
+# The only platform library this module needs, and it is Windows-only: POSIX
+# sockets live in libc. Linked PUBLIC because a static library carries no
+# transitive link edges of its own -- whoever links net_api needs it too.
+if(WIN32)
+    target_link_libraries(luaug_net_api PUBLIC ws2_32)
+endif()
 
 luaug_add_module_tests(net
     MODULES
         net_api
     SOURCES
         tests/digest_tests.cpp
+        tests/websocket_client_tests.cpp
         tests/websocket_protocol_tests.cpp
 )
 
