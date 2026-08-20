@@ -74,11 +74,16 @@ fi
 #                 run by luau-check.sh. Reformatting a generated file makes that
 #                 check fail on the next regeneration, so the generator's output
 #                 is the authority on its own layout.
+#
+# `--others --exclude-standard` alongside `--cached` so a file that is written
+# but not yet staged is checked too. Without it this gate is blind to exactly
+# the files most likely to be unformatted -- the new ones -- and it passed a
+# whole new module on its first run for that reason.
 mapfile -t files < <(
-    git ls-files -- '*.cpp' '*.h' '*.hpp' '*.cc' '*.mm' |
+    git ls-files --cached --others --exclude-standard -- '*.cpp' '*.h' '*.hpp' '*.cc' '*.mm' |
         grep -v '^third_party/' |
         grep -v '/generated/' |
-        LC_ALL=C sort
+        LC_ALL=C sort -u
 )
 
 if [[ ${#files[@]} -eq 0 ]]; then
