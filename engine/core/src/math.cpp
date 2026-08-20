@@ -40,6 +40,64 @@ void setColumn(Mat3& m, int index, Vec3 v) noexcept
     m.m[index][2] = v.z;
 }
 
+// Row-then-column, which is how every rotation identity in the literature is
+// written and the opposite of how `Mat3` stores it. The euler and quaternion
+// derivations below are transcribed from that literature, so they read in its
+// indexing and this one function carries the transposition.
+[[nodiscard]] f32 element(const Mat3& m, int row, int column) noexcept
+{
+    return m.m[column][row];
+}
+
+// Axes are 0/1/2 so that a rotation order is three indices and the formulas can
+// be written once instead of once per order.
+struct AxisSequence
+{
+    int first = 0;
+    int second = 1;
+    int third = 2;
+};
+
+[[nodiscard]] AxisSequence sequenceOf(RotationOrder order) noexcept
+{
+    switch (order)
+    {
+    case RotationOrder::XYZ:
+        return {0, 1, 2};
+    case RotationOrder::XZY:
+        return {0, 2, 1};
+    case RotationOrder::YXZ:
+        return {1, 0, 2};
+    case RotationOrder::YZX:
+        return {1, 2, 0};
+    case RotationOrder::ZXY:
+        return {2, 0, 1};
+    case RotationOrder::ZYX:
+        return {2, 1, 0};
+    }
+    return {1, 0, 2};
+}
+
+[[nodiscard]] f32 component(Vec3 v, int axis) noexcept
+{
+    return axis == 0 ? v.x : (axis == 1 ? v.y : v.z);
+}
+
+void setComponent(Vec3& v, int axis, f32 value) noexcept
+{
+    if (axis == 0)
+        v.x = value;
+    else if (axis == 1)
+        v.y = value;
+    else
+        v.z = value;
+}
+
+[[nodiscard]] Mat3 axisRotation(int axis, f32 radians) noexcept
+{
+    return axis == 0 ? rotationX(radians) : (axis == 1 ? rotationY(radians) : rotationZ(radians));
+}
+
 } // namespace
 
 f32 length(Vec3 v) noexcept
@@ -419,34 +477,231 @@ void toHsv(Color3 color, f32& hue, f32& saturation, f32& value) noexcept
         hue += 1.0f;
 }
 
+Mat3 fromEuler(Vec3 radians, RotationOrder order) noexcept
+{
+    const AxisSequence axes = sequenceOf(order);
+    // Intrinsic, read left to right: the first turn happens about a world axis
+    // and each later one about the axis its predecessors produced. Under the
+    // column-vector convention that composes right to left, which is why the
+    // three factors appear in the order the letters are written.
+    return axisRotation(axes.first, component(radians, axes.first)) *
+           axisRotation(axes.second, component(radians, axes.second)) *
+           axisRotation(axes.third, component(radians, axes.third));
+}
+
+Vec3 toEuler(const Mat3& rotation, RotationOrder order) noexcept
+{
+    const AxisSequence axes = sequenceOf(order);
+    const int i = axes.first;
+    const int j = axes.second;
+    const int k = axes.third;
+    // +1 when (i, j, k) is a cyclic permutation of (X, Y, Z) and -1 otherwise.
+    // Every sign below is this one factor: the six Tait-Bryan orders are two
+    // formulas, not six, and writing them out six times is how one of them comes
+    // to disagree with the others.
+    const f32 parity = ((j - i + 3) % 3 == 1) ? 1.0f : -1.0f;
+
+    const f32 sinMiddle = std::clamp(parity * element(rotation, i, k), -1.0f, 1.0f);
+    Vec3 result;
+
+    // Gimbal lock: |sin| == 1 collapses the outer two angles into one degree of
+    // freedom, so the pair is not recoverable. The last is resolved to zero and
+    // the whole rotation is expressed in the first, which is the convention that
+    // keeps a round trip stable instead of splitting the angle arbitrarily.
+    constexpr f32 lockEpsilon = 1.0f - 1e-6f;
+    if (std::abs(sinMiddle) > lockEpsilon)
+    {
+        const f32 sign = sinMiddle < 0.0f ? -1.0f : 1.0f;
+        setComponent(result, i, std::atan2(sign * element(rotation, j, i), element(rotation, j, j)));
+        setComponent(result, j, std::asin(sinMiddle));
+        setComponent(result, k, 0.0f);
+        return result;
+    }
+
+    setComponent(result, i, std::atan2(-parity * element(rotation, j, k), element(rotation, k, k)));
+    setComponent(result, j, std::asin(sinMiddle));
+    setComponent(result, k, std::atan2(-parity * element(rotation, i, j), element(rotation, i, i)));
+    return result;
+}
+
 Mat3 fromEulerYxz(Vec3 radians) noexcept
 {
-    // Intrinsic YXZ read left to right: yaw, then pitch about the axis the yaw
-    // produced, then roll about the axis those two produced. Under the
-    // column-vector convention that composes right to left.
-    return rotationY(radians.y) * rotationX(radians.x) * rotationZ(radians.z);
+    return fromEuler(radians, RotationOrder::YXZ);
 }
 
 Vec3 toEulerYxz(const Mat3& rotation) noexcept
 {
-    // For R = Ry(y) * Rx(x) * Rz(z), the second row is
-    // [ cos(x)sin(z), cos(x)cos(z), -sin(x) ], which gives pitch directly and
-    // roll from the pair beside it. Yaw comes from the third column, which the
-    // pitch rotation leaves in the XZ plane.
-    const f32 sinPitch = std::clamp(-rotation.m[2][1], -1.0f, 1.0f);
-    const f32 pitch = std::asin(sinPitch);
+    return toEuler(rotation, RotationOrder::YXZ);
+}
 
-    // Gimbal lock: |sin(pitch)| == 1 collapses yaw and roll into one degree of
-    // freedom, so the pair is not recoverable. Roll is resolved to zero and the
-    // whole rotation is expressed as yaw, which is the convention that keeps a
-    // round trip stable instead of splitting the angle arbitrarily.
-    constexpr f32 lockEpsilon = 1.0f - 1e-6f;
-    if (std::abs(sinPitch) > lockEpsilon)
-        return {pitch, std::atan2(-rotation.m[0][2], rotation.m[0][0]), 0.0f};
+Mat3 fromAxisAngle(Vec3 axis, f32 radians) noexcept
+{
+    const Vec3 unit = normalize(axis);
+    if (unit == Vec3{})
+        return {}; // no direction to turn about; the identity beats NaN
 
-    const f32 yaw = std::atan2(rotation.m[2][0], rotation.m[2][2]);
-    const f32 roll = std::atan2(rotation.m[0][1], rotation.m[1][1]);
-    return {pitch, yaw, roll};
+    const f32 half = radians * 0.5f;
+    const f32 s = std::sin(half);
+    return fromQuaternion(unit.x * s, unit.y * s, unit.z * s, std::cos(half));
+}
+
+void toAxisAngle(const Mat3& rotation, Vec3& axis, f32& radians) noexcept
+{
+    // Through the quaternion rather than from the trace directly. Near a half
+    // turn the skew-symmetric part of the matrix goes to zero and the axis it
+    // encodes becomes numerically meaningless, while the quaternion's vector
+    // part is at its largest there -- the two failure regions are opposite, and
+    // `toQuaternion` already picks the well-conditioned branch.
+    f32 x = 0.0f;
+    f32 y = 0.0f;
+    f32 z = 0.0f;
+    f32 w = 1.0f;
+    toQuaternion(rotation, x, y, z, w);
+
+    // The sign convention that puts the angle in [0, pi]: q and -q are the same
+    // rotation, so flipping to w >= 0 chooses the short way round.
+    if (w < 0.0f)
+    {
+        x = -x;
+        y = -y;
+        z = -z;
+        w = -w;
+    }
+
+    const f32 sinHalf = length(Vec3{x, y, z});
+    if (sinHalf <= kParallelEpsilon)
+    {
+        // The identity, or near enough that no axis is recoverable. +X with a
+        // zero angle is arbitrary, which is why the header says so.
+        axis = Vec3{1.0f, 0.0f, 0.0f};
+        radians = 0.0f;
+        return;
+    }
+
+    axis = Vec3{x / sinHalf, y / sinHalf, z / sinHalf};
+    radians = 2.0f * std::atan2(sinHalf, std::clamp(w, -1.0f, 1.0f));
+}
+
+Mat3 fromQuaternion(f32 x, f32 y, f32 z, f32 w) noexcept
+{
+    const f32 norm = std::sqrt(x * x + y * y + z * z + w * w);
+    if (!(norm > 0.0f))
+        return {};
+
+    const f32 s = 1.0f / norm;
+    const f32 qx = x * s;
+    const f32 qy = y * s;
+    const f32 qz = z * s;
+    const f32 qw = w * s;
+
+    Mat3 result;
+    setColumn(result, 0, Vec3{1.0f - 2.0f * (qy * qy + qz * qz), 2.0f * (qx * qy + qz * qw), 2.0f * (qx * qz - qy * qw)});
+    setColumn(result, 1, Vec3{2.0f * (qx * qy - qz * qw), 1.0f - 2.0f * (qx * qx + qz * qz), 2.0f * (qy * qz + qx * qw)});
+    setColumn(result, 2, Vec3{2.0f * (qx * qz + qy * qw), 2.0f * (qy * qz - qx * qw), 1.0f - 2.0f * (qx * qx + qy * qy)});
+    return result;
+}
+
+void toQuaternion(const Mat3& rotation, f32& x, f32& y, f32& z, f32& w) noexcept
+{
+    // Shepperd's method: pick whichever of the four components is largest and
+    // solve for the rest from it. The naive trace formula divides by a quantity
+    // that vanishes at a half turn, and the failure is a silently wrong axis
+    // rather than a NaN, which is worse.
+    const f32 m00 = element(rotation, 0, 0);
+    const f32 m11 = element(rotation, 1, 1);
+    const f32 m22 = element(rotation, 2, 2);
+    const f32 trace = m00 + m11 + m22;
+
+    if (trace > 0.0f)
+    {
+        const f32 s = std::sqrt(trace + 1.0f) * 2.0f;
+        w = 0.25f * s;
+        x = (element(rotation, 2, 1) - element(rotation, 1, 2)) / s;
+        y = (element(rotation, 0, 2) - element(rotation, 2, 0)) / s;
+        z = (element(rotation, 1, 0) - element(rotation, 0, 1)) / s;
+    }
+    else if (m00 > m11 && m00 > m22)
+    {
+        const f32 s = std::sqrt(1.0f + m00 - m11 - m22) * 2.0f;
+        w = (element(rotation, 2, 1) - element(rotation, 1, 2)) / s;
+        x = 0.25f * s;
+        y = (element(rotation, 0, 1) + element(rotation, 1, 0)) / s;
+        z = (element(rotation, 0, 2) + element(rotation, 2, 0)) / s;
+    }
+    else if (m11 > m22)
+    {
+        const f32 s = std::sqrt(1.0f + m11 - m00 - m22) * 2.0f;
+        w = (element(rotation, 0, 2) - element(rotation, 2, 0)) / s;
+        x = (element(rotation, 0, 1) + element(rotation, 1, 0)) / s;
+        y = 0.25f * s;
+        z = (element(rotation, 1, 2) + element(rotation, 2, 1)) / s;
+    }
+    else
+    {
+        const f32 s = std::sqrt(1.0f + m22 - m00 - m11) * 2.0f;
+        w = (element(rotation, 1, 0) - element(rotation, 0, 1)) / s;
+        x = (element(rotation, 0, 2) + element(rotation, 2, 0)) / s;
+        y = (element(rotation, 1, 2) + element(rotation, 2, 1)) / s;
+        z = 0.25f * s;
+    }
+}
+
+Mat3 slerp(const Mat3& a, const Mat3& b, f32 alpha) noexcept
+{
+    f32 ax = 0.0f;
+    f32 ay = 0.0f;
+    f32 az = 0.0f;
+    f32 aw = 1.0f;
+    toQuaternion(a, ax, ay, az, aw);
+
+    f32 bx = 0.0f;
+    f32 by = 0.0f;
+    f32 bz = 0.0f;
+    f32 bw = 1.0f;
+    toQuaternion(b, bx, by, bz, bw);
+
+    // q and -q are the same rotation but opposite ends of the arc; without this
+    // flip an interpolation between two nearby frames can take the long way
+    // round, which reads as the object spinning 350 degrees to move 10.
+    f32 cosine = ax * bx + ay * by + az * bz + aw * bw;
+    if (cosine < 0.0f)
+    {
+        bx = -bx;
+        by = -by;
+        bz = -bz;
+        bw = -bw;
+        cosine = -cosine;
+    }
+
+    f32 weightA = 1.0f - alpha;
+    f32 weightB = alpha;
+    // Below this the arc is short enough that sin(theta) has lost most of its
+    // significant bits; the linear blend and the spherical one agree to well
+    // under an f32 ulp there, and only one of them divides by nearly zero.
+    constexpr f32 linearThreshold = 1.0f - 1e-6f;
+    if (cosine < linearThreshold)
+    {
+        const f32 theta = std::acos(std::clamp(cosine, -1.0f, 1.0f));
+        const f32 sinTheta = std::sin(theta);
+        weightA = std::sin((1.0f - alpha) * theta) / sinTheta;
+        weightB = std::sin(alpha * theta) / sinTheta;
+    }
+
+    return fromQuaternion(
+        weightA * ax + weightB * bx,
+        weightA * ay + weightB * by,
+        weightA * az + weightB * bz,
+        weightA * aw + weightB * bw);
+}
+
+CFrameD lerp(const CFrameD& a, const CFrameD& b, f64 alpha) noexcept
+{
+    const DVec3 position{
+        a.position.x + (b.position.x - a.position.x) * alpha,
+        a.position.y + (b.position.y - a.position.y) * alpha,
+        a.position.z + (b.position.z - a.position.z) * alpha,
+    };
+    return {position, slerp(a.rotation, b.rotation, static_cast<f32>(alpha))};
 }
 
 } // namespace luaug::core

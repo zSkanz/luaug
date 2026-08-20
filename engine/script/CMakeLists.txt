@@ -14,6 +14,9 @@
 luaug_add_module(script
     LAYER 5
     SOURCES
+        src/binding.cpp
+        src/datatypes.cpp
+        src/instance_binding.cpp
         src/sandbox.cpp
         src/runtime.cpp
     DEPS
@@ -26,10 +29,21 @@ target_link_libraries(luaug_script PRIVATE luaug::luau)
 luaug_add_module_tests(script
     SOURCES
         tests/sandbox_tests.cpp
+        tests/datatype_tests.cpp
+        tests/instance_binding_tests.cpp
 )
 
-# The tests boot a VM directly rather than through `ScriptRuntime`, so that a
-# sandbox failure has exactly one possible cause. That means they need Luau too.
+# The sandbox tests boot a VM directly rather than through `ScriptRuntime`, so
+# that a sandbox failure has exactly one possible cause. That means they need
+# Luau too.
+#
+# The catalog is a real dependency of the binding tests rather than a
+# convenience: an error is identified by its `[key]` prefix, and the prefix is
+# the catalog's own name for the key (ADR 0019). Without it every raise reports
+# `[i18n:missing:xxxxxxxx]` and a test asserting on a key would pass only by
+# matching nothing.
 if(LUAUG_BUILD_TESTS)
     target_link_libraries(luaug_script_tests PRIVATE luaug::luau)
+    target_compile_definitions(luaug_script_tests PRIVATE
+        LUAUG_TEST_CATALOG="${CMAKE_SOURCE_DIR}/i18n/en.json")
 endif()

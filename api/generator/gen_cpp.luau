@@ -5,7 +5,10 @@
 	Emits `engine/scene/generated/class_descriptors.gen.{h,cpp}` from the IDL:
 	the `PropertyDesc`/`MethodDesc`/`EventDesc` arrays `ClassRegistry` holds
 	spans into, one `ClassDescriptor` per class, and the single
-	`registerClasses` entry point that installs them parents-first.
+	`registerClasses` entry point that installs them parents-first -- plus the
+	`EnumDescriptor` tables and `registerEnums`, because an enum item's numeric
+	value is what a property write validates and what a snapshot stores, so the
+	list a script reads and the list the engine checks against must be one list.
 
 	This is what makes architecture.md §4's "all descriptors are generated" a
 	fact rather than an intention. `engine/scene/tests/scene_fixture.cpp` is the
@@ -473,6 +476,51 @@ for index, class in Emitted do
 end
 
 emit("}")
+
+--- Enums are registered in declaration order, which fixes the `EnumId` each one
+--- gets: the ids are emitted as header constants so that a hand-written
+--- accessor validating an enum property names the same number this file
+--- assigns. `enums.api.luau` already treats item values as contract; the id is
+--- the other half of the pair a `Value` stores.
+local Enums: { Schema.Enum } = orEmpty(Definition.Enums)
+local EnumItemCount = 0
+
+emit("")
+emit("// Registered in declaration order, so an enum's `EnumId` is its position in")
+emit("// `enums.api.luau` and the constants in the header stay true. Items keep")
+emit("// declaration order too -- that is `GetEnumItems`'s documented order, and R10")
+emit("// forbids a container from being the thing that decides it.")
+emit("void registerEnums(EnumRegistry& enums, core::AtomTable& atoms)")
+emit("{")
+
+for index, enumeration in Enums do
+    if index > 1 then
+        emit("")
+    end
+    local prefix = lowerFirst(enumeration.Name)
+    local arrayName = `{prefix}Items`
+    emit(`    // --- {enumeration.Name} ---`)
+    emit(`    static std::array<EnumItemDesc, {#enumeration.Items}> {arrayName};`)
+    emit(`    {arrayName} = \{\{`)
+    for _, item in enumeration.Items do
+        EnumItemCount += 1
+        emit("        EnumItemDesc{")
+        emit(`            .name = atoms.intern("{item.Name}"),`)
+        emit(`            .value = {item.Value},`)
+        emit("            .docKey = {},")
+        emit("        },")
+    end
+    emit("    }};")
+
+    local descriptor = `{prefix}Desc`
+    emit(`    EnumDescriptor {descriptor};`)
+    emit(`    {descriptor}.name = atoms.intern("{enumeration.Name}");`)
+    emit(`    {descriptor}.docKey = \{};`)
+    emit(`    {descriptor}.items = {arrayName};`)
+    emit(`    enums.registerEnum({descriptor});`)
+end
+
+emit("}")
 emit("")
 emit("} // namespace luaug::scene::generated")
 emit("")
@@ -497,6 +545,7 @@ emitHeader("")
 emitHeader(`#include "luaug/core/id.h"`)
 emitHeader(`#include "luaug/core/name_atom.h"`)
 emitHeader(`#include "luaug/scene/class_registry.h"`)
+emitHeader(`#include "luaug/scene/enum_registry.h"`)
 emitHeader(`#include "luaug/scene/value.h"`)
 emitHeader("")
 emitHeader("namespace luaug::scene")
@@ -511,6 +560,19 @@ emitHeader("// Registers every class this module owns, parents first -- the orde
 emitHeader("// `ClassRegistry::registerClass` requires. Interns each name into `atoms`,")
 emitHeader("// so the table handed in is the one the descriptors speak.")
 emitHeader("void registerClasses(ClassRegistry& classes, core::AtomTable& atoms);")
+emitHeader("")
+emitHeader("// Registers every enum in the IDL, in declaration order.")
+emitHeader("void registerEnums(EnumRegistry& enums, core::AtomTable& atoms);")
+emitHeader("")
+emitHeader("// The id `registerEnums` assigns each enum, so that a hand-written accessor")
+emitHeader("// validating an enum property names the same number a stored `EnumValue`")
+emitHeader("// carries. A registry lookup by name would answer the same question and")
+emitHeader("// would do it with a hash probe on a property write.")
+
+for index, enumeration in Enums do
+    emitHeader(`inline constexpr EnumId {enumeration.Name}EnumId = {index};`)
+end
+
 emitHeader("")
 emitHeader("} // namespace generated")
 emitHeader("")
@@ -562,4 +624,5 @@ print(
     `gen_cpp: {GetterCount + SetterCount + StorageCount * 2} native function(s) declared -- `
         .. `{GetterCount} getter(s), {SetterCount} setter(s), {StorageCount} storage hook pair(s)`
 )
+print(`gen_cpp: {#Enums} enum(s), {EnumItemCount} item(s)`)
 print(`gen_cpp: {Unbacked} unbacked propert(ies)`)

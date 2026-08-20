@@ -31,11 +31,25 @@
 //      perform, before the freeze.
 #pragma once
 
+#include <span>
+#include <unordered_map>
+#include <vector>
+
+#include "luaug/core/error.h"
+#include "luaug/core/i18n.h"
 #include "luaug/core/id.h"
 #include "luaug/core/math.h"
+#include "luaug/core/name_atom.h"
 #include "luaug/core/types.h"
+#include "luaug/scene/class_registry.h"
 
 struct lua_State;
+typedef int (*lua_CFunction)(lua_State* L);
+
+namespace luaug::scene
+{
+class World;
+}
 
 namespace luaug::script
 {
@@ -44,6 +58,7 @@ using core::f32;
 using core::f64;
 using core::i16;
 using core::i32;
+using core::i64;
 using core::u16;
 using core::u32;
 using core::u64;
@@ -68,6 +83,17 @@ enum class UserdataTag : int
     Signal = 5,
     Connection = 6,
     EnumItem = 7,
+
+    // An enum object -- `Enum.PartShape` -- and the `Enum` global itself. Both
+    // would read more naturally as frozen tables, and both are userdata for one
+    // reason: `typeof` reports a metatable's `__type` for userdata and
+    // deliberately does NOT for a table (`ltm.cpp:167`, "for all types except
+    // userdata and table"). api-design.md §2.3 requires `typeof(Enum.PartShape)`
+    // to be "Enum" and `typeof(Enum)` to be "Enums", and a table cannot answer
+    // either. One tag covers every enum object, the same way one covers every
+    // Instance class: the payload is the `EnumId`.
+    Enum = 8,
+    Enums = 9,
 
     // Not a tag. The count exists so a registration loop can assert it covered
     // everything, and so the budget remaining is a number someone can read.
@@ -98,5 +124,105 @@ static_assert(sizeof(InstanceUserdata) == 8, "the Instance payload's size is an 
 // The mapping from a Luau atom to an engine `NameAtom` is a table the runtime
 // fills as the VM interns each name.
 using LuauAtom = i16;
+
+// A member name and the C function that answers it. Datatype bindings dispatch
+// by scanning their tag's table, and scanning is the right shape here: no
+// datatype in the surface has more than a dozen members, so the whole table
+// fits in a cache line or two and a hash probe would cost more than it saves.
+//
+// Instances do NOT use these tables. A class's members are resolved through
+// `scene::ClassRegistry`, which memoises the inheritance walk -- that is the
+// path architecture risk #1 is measured on, and it is a hash probe by design.
+struct MemberEntry
+{
+    core::NameAtom name;
+    lua_CFunction fn = nullptr;
+};
+
+using MemberTable = std::vector<MemberEntry>;
+
+// Everything a C binding needs and cannot be handed as an argument, reachable
+// from any `lua_CFunction` through `lua_callbacks(L)->userdata` -- which
+// `lua.h:601` guarantees Luau never overwrites.
+//
+// This is per-VM rather than process-global, and that is not a refinement: it
+// is what `useratom`'s signature already allows. The callback receives the
+// `lua_State`, so it can reach this the same way every other binding does, and
+// the "exactly one game VM" limitation an earlier draft wrote down was a
+// property of that draft rather than of the VM.
+struct VmContext
+{
+    scene::World* world = nullptr;
+
+    // Indexed by Luau atom; holds the engine `NameAtom` id for the same text.
+    // Grown by `useratom` as the VM interns each name, and never shrunk: an
+    // atom is assigned once per string for the life of the state.
+    std::vector<u32> atomToName;
+
+    // Per tag. Populated at boot, before the sandbox and before any script
+    // loads, because a metatable registered later is one already-loaded chunks
+    // reach only through the slow path (rule 2 above).
+    MemberTable getters[static_cast<usize>(UserdataTag::Count)];
+    MemberTable methods[static_cast<usize>(UserdataTag::Count)];
+
+    // An Instance method's implementation, keyed by the descriptor the IDL
+    // generated for it. Keyed by the pointer rather than by name because a
+    // method name is only unique within a class -- `Clone` is declared on
+    // `Instance` and on `Random` -- and the descriptor is the thing that is
+    // already unique, already resolved through the inheritance walk, and
+    // already in static storage that outlives the VM.
+    //
+    // It is also the cross-check `MethodDesc` exists for: at boot, a declared
+    // method with no entry here and an entry with no declaration are both
+    // reported, so a surface that ships ahead of its implementation is a number
+    // at startup rather than a nil discovered by a script.
+    std::unordered_map<const scene::MethodDesc*, lua_CFunction> instanceMethods;
+
+    // Registry ref of the weak-valued table that gives `a == b` for two handles
+    // to the same instance. Keyed by the id's `index`, which is dense from the
+    // slot map and therefore lands in a Luau table's array part.
+    int instanceCacheRef = -1;
+
+    // Names a binding compares against on a path that runs per property write.
+    // Interned once at boot rather than looked up per call: `AtomTable::lookup`
+    // is a hash probe over a string, and the 10k-parts benchmark is measured on
+    // exactly this path.
+    struct WellKnownAtoms
+    {
+        core::NameAtom parent;
+        core::NameAtom cframe;
+    } wellKnown;
+
+    // Takes the `int` the Luau API hands out rather than a `LuauAtom`: every
+    // call site gets one from `lua_tostringatom` or `lua_namecallatom`, and
+    // narrowing it at each of them is a cast per property access that can only
+    // ever lose information.
+    //
+    // Invalid for -1, which is what Luau returns for a string interned before
+    // the callback existed, and for an atom past the end of the table.
+    [[nodiscard]] core::NameAtom resolve(int atom) const noexcept;
+};
+
+// Never null after `ScriptRuntime::boot`; calling a binding on a state that has
+// none is a programming error rather than a runtime condition, so this asserts
+// rather than branching on every property access.
+[[nodiscard]] VmContext& context(lua_State* L) noexcept;
+
+[[nodiscard]] const MemberEntry* findMember(const MemberTable& table, core::NameAtom name) noexcept;
+
+// Raises a Luau error carrying the key-prefixed catalog text, which is what
+// lets a conformance spec match on a stable identifier while the prose stays
+// free to be translated (`core::makeError`, ADR 0019). Never returns.
+[[noreturn]] void raise(lua_State* L, core::TextKey key, std::span<const core::I18nArg> args = {});
+
+// The `__type` a tag's metatable reports, which is what `typeof` answers
+// (api-design.md §2.3). Shared so that the name a value reports and the name an
+// error message uses cannot drift apart.
+[[nodiscard]] const char* typeName(UserdataTag tag) noexcept;
+
+// `script.err.unknown_member`, naming the type it was reached through. Reading
+// a member a datatype does not have is an error and not `nil`: that is what
+// makes the §2.5 renames enforceable rather than silently returning nothing.
+[[noreturn]] void raiseUnknownMember(lua_State* L, UserdataTag tag, const char* member);
 
 } // namespace luaug::script

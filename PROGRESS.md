@@ -21,42 +21,57 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ### M2: what exists
 
+- **A script reaches the engine.** `Instance.new("Part")` builds a real
+  instance, properties round-trip through their components, the tree walks in
+  document order, `a == b` holds for two handles to one instance, and every
+  datatype except `Signal`/`Connection` is bound. 50 cases over the bindings,
+  all asserting from inside the VM.
 - **`core`** — `SlotMap`, `AtomTable`, `Pcg32`, `Phase`, `CFrameD`/`Mat3`/
-  `Color3`, YXZ euler both ways. Heavily tested and mutation-checked.
+  `Color3`, all six euler orders both ways, axis-angle, quaternions, slerp.
+  Heavily tested and mutation-checked (102 cases).
 - **The API IDL is real and generates the engine.** `api/schema.luau` with the
   §9 naming lints, `api/defs/*.api.luau` (13 classes, 6 datatypes, 4 enums),
   `gen_dts.luau` → `runtime/types/engine.d.luau`, `gen_cpp.luau` →
-  `engine/scene/generated/class_descriptors.gen.cpp`. Both generated outputs are
-  checked in and **freshness-gated**, and both gates were proved by tampering.
+  `engine/scene/generated/class_descriptors.gen.{h,cpp}` — which now emits the
+  **enum** tables and their ids as well. Both generated outputs are checked in
+  and **freshness-gated**, and both gates were proved by tampering.
 - **`scene` (L3)** — the ECS, the Instance facade, the duplicate-name index
-  (ADR 0026), attributes, tags, the POD change queue, `WorldHash` over xxh3.
-  35 cases / 297 assertions. `native_accessors.cpp` is the hand-written half of
-  reflection: 17 properties, 35 functions, matching the generated declarations
-  name for name.
-- **`script` (L5)** — the VM boots in the one order that works, and the sandbox
-  curation R4 actually requires (`luaL_sandbox` removes nothing). Tested from
-  C++ in both directions.
+  (ADR 0026), attributes, tags, the POD change queue, `WorldHash` over xxh3, and
+  `EnumRegistry`. 41 cases / 328 assertions. `native_accessors.cpp` is the
+  hand-written half of reflection: 17 properties, 35 functions, matching the
+  generated declarations name for name.
+- **`script` (L5)** — the VM boots in the one order that works, with the sandbox
+  curation R4 actually requires; `VmContext` (reached through
+  `lua_callbacks(L)->userdata`) carries the world, the atom bridge and the
+  per-tag member tables; `instance_binding.cpp` and `datatypes.cpp` are the
+  surface itself. The boot-time method cross-check reports both directions, and
+  a declared-but-unimplemented member raises `script.err.not_implemented` rather
+  than reading as missing.
 
 ### M2: what does NOT exist yet
 
-Nothing reaches Luau. There is no Instance binding, so a script cannot create or
-touch an instance; no datatype bindings; no signal drain; no `task`; no
-`require`; no service wiring in `app`; no `examples/01-instances`; no replay
-harness, frame-budget instrumentation or 10k/1k benchmark.
+No signals — `part.ChildAdded` and `GetPropertyChangedSignal` are declared and
+raise `not_implemented`; no `task`, so `WaitForChild` does too. No `require`;
+no service wiring, so `game`/`workspace`/`script` do not exist and the
+DataModel, RunService, TagService and DebugService methods are unimplemented
+(30 of 43 declared methods). No `examples/01-instances`; no replay harness,
+frame-budget instrumentation or 10k/1k benchmark.
 
-**The M2 gate is 0 of 4**, and cannot move until the Instance binding exists.
+**The M2 gate is 0 of 4.** The conformance suite is the next lever on it.
 
 ## Now / Next
 
-- **Next: the Instance binding** — `engine/script/src/instance_binding.cpp`.
-  One `UserdataTag::Instance` with one metatable, the class resolved from the
-  `InstanceId` through `scene::ClassRegistry` (brief Decision 13, forced by the
-  VM: `lua_setuserdatametatable` refuses to reassign). `__index`/`__newindex`
-  switch on the Luau atom, which `runtime.cpp` already maps to a
-  `core::NameAtom` through the `useratom` callback. A per-VM weak-valued cache
-  keyed on the id's `index` gives `a == b` identity.
-  Then, in order: the datatype bindings (`datatypes.h` declares the entry
-  points), the signal drain, `task`, `require`, and the `app` wiring.
+- **Next: signals** — `Signal`/`Connection` on tags 5 and 6, the drain in
+  `ScriptRuntime::drain` that turns `scene`'s POD `Change` facts into fires, and
+  the instance event objects `__index` currently refuses. api-design §3.1 is the
+  written contract and the conformance specs under `tests/conformance/signals/`
+  were authored against it. Then `task`, then `require`, then the `app` wiring
+  that creates the DataModel and its services.
+- **The service methods are the other half of the cross-check.**
+  `MethodCoverage` reports 43 declared / 13 bound; every unbound one raises
+  `script.err.not_implemented`, and `instance_binding_tests.cpp` pins the
+  numbers so the next batch that lands is a visible change rather than a silent
+  one.
 - **The 932 conformance cases now live in `tests/conformance/`** with a
   `.spec.luau.staged` extension so the analyzer's glob skips them.
   `tests/conformance/README.md` lists exactly what integrating them needs: a

@@ -16,6 +16,7 @@ luaug_add_module(scene
     SOURCES
         src/value.cpp
         src/class_registry.cpp
+        src/enum_registry.cpp
         src/world.cpp
         src/world_hash.cpp
         src/native_accessors.cpp
@@ -45,5 +46,6 @@ luaug_add_module_tests(scene
         tests/scene_fixture.cpp
         tests/component_pool_tests.cpp
         tests/class_registry_tests.cpp
+        tests/enum_registry_tests.cpp
         tests/world_tests.cpp
 )

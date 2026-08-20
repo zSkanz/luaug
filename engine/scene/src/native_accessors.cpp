@@ -12,6 +12,7 @@
 #include <cmath>
 #include <string>
 
+#include "../generated/class_descriptors.gen.h"
 #include "luaug/scene/world.h"
 
 namespace luaug::scene::native
@@ -21,13 +22,6 @@ namespace
 
 constexpr f64 RadiansToDegrees = 57.29577951308232;
 constexpr f64 DegreesToRadians = 0.017453292519943295;
-
-// Enum ids are not registered anywhere yet: nothing in `scene` needs to name an
-// enum, and the script bindings that will are a later step. The stored value is
-// what a property write, the world hash and a snapshot all care about, so the
-// id is a placeholder rather than a lie -- and it is a constant here so that
-// there is exactly one place to change when the registry arrives.
-constexpr u16 PartShapeEnum = 1;
 
 [[nodiscard]] const PartComponent* readPart(const World& world, core::InstanceId id) noexcept
 {
@@ -288,14 +282,20 @@ bool setBasePartTransparency(World& world, core::InstanceId id, const Value& val
 Value getPartShape(const World& world, core::InstanceId id)
 {
     const PartComponent* part = readPart(world, id);
-    return part == nullptr ? Value{} : Value{EnumValue{PartShapeEnum, part->shape}};
+    return part == nullptr ? Value{} : Value{EnumValue{generated::PartShapeEnumId, part->shape}};
 }
 
 bool setPartShape(World& world, core::InstanceId id, const Value& value)
 {
     const auto* item = std::get_if<EnumValue>(&value);
     PartComponent* part = writePart(world, id);
-    if (item == nullptr || part == nullptr || item->enumId != PartShapeEnum)
+    if (item == nullptr || part == nullptr || item->enumId != generated::PartShapeEnumId)
+        return false;
+    // The id alone would let `Enum.PartShape` accept a number no item carries.
+    // The registry is the only thing that knows the item list, and this is a
+    // property write rather than a hot read, so the walk is affordable here in
+    // a way it would not be in `getPartShape`.
+    if (world.enums().findValue(item->enumId, item->value) == nullptr)
         return false;
     part->shape = item->value;
     return true;

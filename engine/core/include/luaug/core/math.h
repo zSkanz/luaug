@@ -195,18 +195,61 @@ struct Mat3
 [[nodiscard]] Mat3 rotationY(f32 radians) noexcept;
 [[nodiscard]] Mat3 rotationZ(f32 radians) noexcept;
 
-// The YXZ euler pair, in radians: yaw about Y, then pitch about X, then roll
-// about Z, applied as intrinsic rotations. This is `CFrame.fromEuler`'s default
-// order and what `BasePart.Orientation` is expressed in (api-design.md §2.3),
-// so the two directions have to be exact inverses of each other or a read of
-// `Orientation` after a write of it would drift.
+// Which axis each of the three euler angles turns about, and in what sequence.
+// The order is an argument rather than part of a function name because there is
+// exactly one euler constructor in the public API (api-design.md §2.3) -- the
+// `fromEulerAnglesXYZ`/`YXZ` family is a naming scheme, not six different
+// operations.
 //
-// `toEulerYxz` picks the branch with pitch in [-pi/2, pi/2]; at the poles, where
-// yaw and roll describe the same rotation, roll is resolved to zero. Every euler
-// extraction has to make that choice, and leaving it unstated is how two call
-// sites come to disagree.
+// The letters read left to right in application order, and the rotations are
+// **intrinsic**: each turns about the axis the previous ones produced.
+enum class RotationOrder : u8
+{
+    XYZ,
+    XZY,
+    YXZ,
+    YZX,
+    ZXY,
+    ZYX,
+};
+
+// The euler pair, in radians. `angles` is always indexed by axis -- `.x` is the
+// rotation about X whatever the order is -- so changing the order changes the
+// sequence and never which number means what.
+//
+// `toEuler` picks the branch with the middle angle in [-pi/2, pi/2]; at the
+// poles, where the outer two describe the same rotation, the last is resolved to
+// zero. Every euler extraction has to make that choice, and leaving it unstated
+// is how two call sites come to disagree.
+[[nodiscard]] Mat3 fromEuler(Vec3 radians, RotationOrder order) noexcept;
+[[nodiscard]] Vec3 toEuler(const Mat3& rotation, RotationOrder order) noexcept;
+
+// YXZ by name, because it is the default order and `BasePart.Orientation` is
+// defined in it (api-design.md §2.2). The two directions are exact inverses of
+// each other, or a read of `Orientation` after a write of it would drift.
 [[nodiscard]] Mat3 fromEulerYxz(Vec3 radians) noexcept;
 [[nodiscard]] Vec3 toEulerYxz(const Mat3& rotation) noexcept;
+
+// Right-hand rule about `axis`, which is normalized on the way in so its length
+// carries no meaning (api-design.md §2.3). A zero axis has no direction to turn
+// about and yields the identity rather than NaN.
+[[nodiscard]] Mat3 fromAxisAngle(Vec3 axis, f32 radians) noexcept;
+
+// The inverse, with a unit axis and an angle in [0, pi]. The identity has no
+// axis to report and yields +X with an angle of zero -- an arbitrary choice, so
+// it is a documented one.
+void toAxisAngle(const Mat3& rotation, Vec3& axis, f32& radians) noexcept;
+
+// Quaternion in (x, y, z, w) order -- w last, matching `ToQuaternion`'s tail,
+// which is the half of the convention people get wrong. Normalized on the way
+// in; a zero quaternion yields the identity.
+[[nodiscard]] Mat3 fromQuaternion(f32 x, f32 y, f32 z, f32 w) noexcept;
+void toQuaternion(const Mat3& rotation, f32& x, f32& y, f32& z, f32& w) noexcept;
+
+// Shortest-arc interpolation: the halfway rotation sits at an equal angle from
+// each end rather than cutting the corner, which is what component-wise
+// interpolation of a basis would do. `alpha` is not clamped.
+[[nodiscard]] Mat3 slerp(const Mat3& a, const Mat3& b, f32 alpha) noexcept;
 
 // The canonical world transform: f64 translation, f32 rotation. Rotation stays
 // f32 because a rotation has no magnitude to lose precision in -- the error is
@@ -230,6 +273,11 @@ struct CFrameD
 [[nodiscard]] Vec3 transformDirection(const CFrameD& cf, Vec3 v) noexcept;
 
 [[nodiscard]] CFrameD inverse(const CFrameD& cf) noexcept;
+
+// Translation linearly, rotation by `slerp` (api-design.md §2.3, `CFrame:Lerp`).
+// The translation stays f64 the whole way: interpolating two positions ten
+// million metres out through f32 would quantise the path into steps.
+[[nodiscard]] CFrameD lerp(const CFrameD& a, const CFrameD& b, f64 alpha) noexcept;
 
 // A degenerate direction or an up hint parallel to it yields the identity
 // rotation at `eye` rather than NaN (api-design.md §2.3): a camera that stops

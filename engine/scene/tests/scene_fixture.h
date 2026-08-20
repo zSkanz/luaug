@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "luaug/scene/class_registry.h"
+#include "luaug/scene/enum_registry.h"
 #include "luaug/scene/world.h"
 
 namespace luaug::scene::testing
@@ -33,6 +34,11 @@ struct Hierarchy
 {
     core::AtomTable atoms;
     ClassRegistry classes;
+    // Deliberately empty. The fixture's `Shape` is a plain number rather than
+    // an enum item, so nothing here validates against an enum -- and a fixture
+    // that registered the real ones would be asserting the generator's output
+    // from a file the generator does not write.
+    EnumRegistry enums;
 
     ClassId instanceClass = InvalidClass;
     ClassId folderClass = InvalidClass;
@@ -66,7 +72,7 @@ private:
 struct Fixture
 {
     Hierarchy schema;
-    World world{schema.classes, schema.atoms, 1234u};
+    World world{schema.classes, schema.enums, schema.atoms, 1234u};
 
     [[nodiscard]] core::NameAtom atom(std::string_view text) { return schema.atoms.intern(text); }
 

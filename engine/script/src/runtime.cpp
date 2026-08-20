@@ -11,6 +11,8 @@
 #include "luaug/core/error.h"
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
+#include "luaug/script/datatypes.h"
+#include "luaug/script/instance_binding.h"
 #include "luaug/script/sandbox.h"
 
 namespace luaug::script
@@ -18,29 +20,19 @@ namespace luaug::script
 namespace
 {
 
-// `useratom` is a plain C callback with no user pointer, and it fires for the
-// life of the VM rather than only during boot -- every string the VM interns
-// passes through it. So the sink has to be reachable from a free function.
-//
-// A process-global is honest here and would not be if v1 had more than one game
-// VM. architecture.md §5 is explicit that it has exactly one; the actor VMs it
-// plans for are a later phase, and this is one of the places that will have to
-// change when they arrive. It is written down rather than discovered.
-core::AtomTable* g_atomSink = nullptr;
-
-// Luau hands out atoms as small non-negative integers and reserves -1 for "no
-// atom". Ours are `core::NameAtom` ids, assigned by the engine, and the two must
-// not be conflated: an engine atom would otherwise depend on which strings a
-// script happened to mention first.
-std::vector<u32>* g_atomToName = nullptr;
-
-int16_t internAtom(lua_State*, const char* text, size_t length)
+// Fires for the life of the VM rather than only during boot -- every string the
+// VM interns passes through it -- so the sink has to be reachable from a free
+// function. It is reached through `lua_callbacks(L)->userdata` like every other
+// binding: the callback is handed the `lua_State`, which is what makes a
+// process-global unnecessary and the VM count irrelevant here.
+int16_t internAtom(lua_State* L, const char* text, size_t length)
 {
-    if (g_atomSink == nullptr || g_atomToName == nullptr)
+    void* stored = lua_callbacks(L)->userdata;
+    if (stored == nullptr)
         return -1;
 
-    const core::NameAtom name = g_atomSink->intern(std::string_view{text, length});
-    const auto atom = static_cast<int16_t>(g_atomToName->size());
+    VmContext& ctx = *static_cast<VmContext*>(stored);
+    const auto atom = static_cast<int16_t>(ctx.atomToName.size());
     // Luau's atom is an int16, so there are 32767 of them. A world that interned
     // more distinct property and method names than that has other problems, but
     // latching at -1 rather than wrapping is the difference between a slow
@@ -48,7 +40,7 @@ int16_t internAtom(lua_State*, const char* text, size_t length)
     if (static_cast<usize>(atom) >= 32767u)
         return -1;
 
-    g_atomToName->push_back(name.id);
+    ctx.atomToName.push_back(ctx.world->atoms().intern(std::string_view{text, length}).id);
     return atom;
 }
 
@@ -101,24 +93,23 @@ void installConsole(lua_State* L)
 struct ScriptRuntime::Impl
 {
     lua_State* state = nullptr;
-    // Indexed by Luau atom; holds the engine `NameAtom` id for the same text.
-    std::vector<u32> atomToName;
+    // Reached from every binding through `lua_callbacks(L)->userdata`. Owned
+    // here, and by a stable address: the callbacks hold a pointer to it for the
+    // life of the state.
+    VmContext context;
+    MethodCoverage coverage;
     u32 drainDepth = 0;
 };
 
 ScriptRuntime::ScriptRuntime(scene::World& world) : m_world(world), m_impl(std::make_unique<Impl>())
 {
+    m_impl->context.world = &world;
 }
 
 ScriptRuntime::~ScriptRuntime()
 {
     if (m_impl->state != nullptr)
     {
-        if (g_atomSink == &m_world.atoms())
-        {
-            g_atomSink = nullptr;
-            g_atomToName = nullptr;
-        }
         lua_close(m_impl->state);
         m_impl->state = nullptr;
     }
@@ -139,9 +130,13 @@ std::optional<core::EngineError> ScriptRuntime::boot()
     // lazy and one-shot per string: a name interned while it is absent latches
     // at -1 for the life of the VM, and the symptom is a property lookup that
     // silently stops using its atom -- slower, still correct, and invisible.
-    g_atomSink = &m_world.atoms();
-    g_atomToName = &m_impl->atomToName;
+    lua_callbacks(L)->userdata = &m_impl->context;
     lua_callbacks(L)->useratom = internAtom;
+
+    // Interned through the atom table rather than through the VM, because these
+    // are compared against an engine `NameAtom` and not against a Luau one.
+    m_impl->context.wellKnown.parent = m_world.atoms().intern("Parent");
+    m_impl->context.wellKnown.cframe = m_world.atoms().intern("CFrame");
 
     luaL_openlibs(L);
 
@@ -156,8 +151,20 @@ std::optional<core::EngineError> ScriptRuntime::boot()
     // in one function instead of in a caller's head.
     installConsole(L);
 
+    // Every tag metatable, then every global that constructs one. All of it
+    // before the first `luau_load`: the fast dispatch opcodes are chosen once
+    // per `Proto` at load time and a deopt is permanent (binding.h, rule 2).
+    m_impl->coverage = registerInstanceBinding(L);
+    registerDatatypes(L);
+    registerEnums(L);
+
     sealGlobals(L);
     return std::nullopt;
+}
+
+MethodCoverage ScriptRuntime::methodCoverage() const noexcept
+{
+    return m_impl->coverage;
 }
 
 std::optional<core::EngineError> ScriptRuntime::runSource(std::string_view source, std::string_view chunkName)

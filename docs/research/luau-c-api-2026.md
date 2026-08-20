@@ -1958,3 +1958,73 @@ pass could **not** settle from source alone.
    observed are consistent with an upstream checkout newer than the 0.734 tag
    rather than a local modification — but this pass did not diff against upstream
    to prove it.
+
+
+---
+
+## Addendum — 2026-08-20, found by implementing the bindings
+
+The body above is frozen (`rule` in the front matter). Two things this pass did
+not look for turned up while writing `engine/script/src/datatypes.cpp`, and both
+change a documented API answer rather than a performance characteristic.
+
+### A1. The interpreter answers `v.X` before any metatable does (U-52)
+
+`LOP_GETTABLEKS` has a vector branch that predates the metatable lookup
+(`VM/src/lvmexecute.cpp:619-635`):
+
+```c
+else if (ttisvector(rb))
+{
+    // fast-path: quick case-insensitive comparison with "X"/"Y"/"Z"
+    const char* name = getstr(tsvalue(kv));
+    int ic = (name[0] | ' ') - 'x';
+    if (unsigned(ic) < LUA_VECTOR_SIZE && name[1] == ' ')
+    {
+        const LUA_VECTOR_TYPE* v = vvalue(rb);
+        setnvalue(ra, v[ic]);
+        VM_NEXT();
+    }
+    fn = fasttm(L, L->global->mt[LUA_TVECTOR], TM_INDEX);
+    ...
+}
+```
+
+The `| ' '` lowercases, so `X`, `Y` and `Z` read components 0, 1 and 2 and the
+engine's `__index` is never consulted for them. The guard `name[1] == ' '`
+confines it to single-character keys, so `v.Nope`, `v.XY` and `v.Magnitude` do
+reach the metatable normally.
+
+api-design.md §2.3 said `v.X` raises `script.err.unknown_member`. That was not
+implementable at any price, and the document now records the exception. The
+lowercase spelling remains the only one the generated type definitions declare,
+so `v.X` is still a **type** error under `--!strict` — the loss is one runtime
+guard, not the naming rule.
+
+Luau's own `vector_index` (`VM/src/lveclib.cpp:256-281`) does the same
+lowercasing, which is why the engine replaces the stock vector metatable rather
+than extending it: without the replacement `v.Magnitude` would raise "attempt to
+index vector with 'Magnitude'" instead of answering.
+
+### A2. `typeof` never consults a **table's** `__type` (U-53)
+
+`luaT_objtypenamestr` (`VM/src/ltm.cpp:141-177`) reads `__type` off a full
+userdata's own metatable, then falls back to `lua_setlightuserdataname` for
+tagged light userdata, and only then reaches:
+
+```c
+// For all types except userdata and table, a global metatable can be set with a global name override
+if (LuaTable* mt = L->global->mt[ttype(o)])
+```
+
+A table's metatable is excluded by that comment and by the code: `global->mt` is
+indexed by type tag, and `LUA_TTABLE`'s slot is not what a `setmetatable` on a
+table writes. So a frozen table can carry `__type = "Enum"` and `typeof` will
+still answer `"table"`.
+
+api-design.md §2.3 requires `typeof(Enum.PartShape) == "Enum"` and
+`typeof(Enum) == "Enums"`. Both are therefore tagged userdata --
+`UserdataTag::Enum` and `UserdataTag::Enums`, one for every enum object and one
+for the global -- at a cost of two tags out of the 128 budget. The alternative
+was to weaken a documented answer to keep a table, which is the wrong way round:
+the budget has 118 tags left and the contract has none to spare.

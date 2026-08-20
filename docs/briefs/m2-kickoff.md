@@ -24,16 +24,18 @@ M6. So this brief spends its length on the seams and on what is deliberately
 
 ## Scope checklist (from roadmap)
 
-- [ ] ECS storage + component registry
-- [ ] Instance facade: `Instance.new`, properties, `Parent`/children,
+- [x] ECS storage + component registry
+- [x] Instance facade: `Instance.new`, properties, `Parent`/children,
       `FindFirstChild` with duplicate-name support (ADR 0026), attributes, tags
+      — reachable from Luau; `WaitForChild` waits on `task`
 - [ ] DataModel + services skeleton (`game:GetService`)
 - [ ] Deferred-only signal implementation with **documented** ordering semantics
 - [ ] `task` library (`spawn`/`defer`/`delay`/`wait`/`cancel`) on the fixed-tick
       scheduler with documented resumption points
 - [ ] Script host: lifecycle, `require` resolution per `.luaurc`, per-script
       sandboxing
-- [ ] Seeded deterministic RNG service
+- [x] Seeded deterministic RNG service — the `Random` datatype (Decision 4),
+      with an omitted seed drawn from the world's own stream rather than a clock
 - [ ] World-state hash function + record/replay harness v1
 - [ ] Frame-budget instrumentation
 - [ ] The 10k-parts / 1k-listeners property-churn benchmark with a CI threshold
@@ -44,8 +46,10 @@ M6. So this brief spends its length on the seams and on what is deliberately
 Two items are **added** to the roadmap list, and neither is new scope invented
 here — both are things M2's own gate or M1's ledger already demand:
 
-- [ ] **The API definition IDL and its C++ + `.d.luau` generators.** See
-      Decision 1 and Decision 12 below.
+- [x] **The API definition IDL and its C++ + `.d.luau` generators.** See
+      Decision 1 and Decision 12 below. Extended to emit the enum tables and
+      their ids, because an item's numeric value is what a property write
+      validates and what a snapshot stores.
 - [ ] **`render::extract` / `RenderWorld` (ADR 0027)** — carried forward from
       M1, where it was marked `[~]` for exactly one reason: it is the POD
       snapshot extracted from `scene`, and `scene` did not exist. It does now.
@@ -447,7 +451,58 @@ registry. The load-bearing ones:
   type annotation. Constant folding and fastcalls come from `vectorLib` plus
   `vectorCtor` alone.
 
-**7. A comment of mine broke R7 within an hour of the rule being re-read.** The
+**7. Two documented answers turned out to be things the VM does not permit**,
+and both were found by writing the binding rather than by reading the headers a
+third time. Recorded as U-52 and U-53 with an addendum on
+`docs/research/luau-c-api-2026.md`.
+
+- **`v.X` cannot raise.** api-design.md §2.3 said reading the uppercase
+  component is an error. `LOP_GETTABLEKS` answers a single-character index on a
+  vector *inline and case-insensitively*, before any metatable is consulted
+  (`lvmexecute.cpp:619-635`). There is no metatable the engine can install that
+  is reachable for x/y/z in either case. The document now records the exception;
+  lowercase is still the only declared spelling, so `v.X` remains a **type**
+  error and only the runtime guard is lost. Luau's own `vector_index` lowercases
+  the same way, which is separately why our metatable *replaces* the stock one:
+  without the replacement, `v.Magnitude` would raise instead of answering.
+- **`typeof` never consults a table's `__type`.** §2.3 requires
+  `typeof(Enum.PartShape) == "Enum"` and `typeof(Enum) == "Enums"`.
+  `luaT_objtypenamestr` reads `__type` for userdata and for `global->mt[type]`,
+  and its own comment at `ltm.cpp:167` excludes tables. So the `Enum` global and
+  every enum object are **tagged userdata** (tags 8 and 9) rather than the frozen
+  tables they read as. Two tags out of 128 to keep a documented answer true; the
+  alternative was to weaken the contract to keep a table, and the budget has 118
+  left while the contract has none to spare.
+
+**8. The `useratom` process-globals were never necessary.** `runtime.cpp` said
+the callback "has no user pointer", and it does: it receives the `lua_State`
+(`lua.h:607`), so it can reach `lua_callbacks(L)->userdata` exactly like every
+other binding. The two file-scope pointers and the "v1 has exactly one game VM"
+limitation written around them are both gone, replaced by a per-VM `VmContext`
+that also carries the world, the member tables and the identity cache.
+
+**9. Luau stores a C closure's debug name by raw pointer** unless
+`LuauManagedDebugNames` is on, and it defaults off (`lapi.cpp:792-795`). The
+obvious source for a method's name — the `const char*` `lua_tostringatom` just
+handed back — points into an interned Luau string that the collector may free
+while the closure outlives it. The name now comes from the engine's `AtomTable`,
+which is append-only and outlives the VM. Found by reading, not by crashing,
+which is the only way this one gets found.
+
+**10. Clang caught nineteen `-Wdouble-promotion` errors MSVC did not**, all of
+them `lua_pushnumber(L, someF32)` — the API takes a double and every scalar in
+the datatype bindings is an f32. That is the second time this milestone the
+Linux tier has been the only thing standing between an implicit widening and
+`main`.
+
+**11. A test that asserts on an error key needs the catalog loaded.** An error is
+identified by the `[key]` prefix `core::makeError` writes, and the prefix is the
+*catalog's* name for the key. Without `LUAUG_TEST_CATALOG` every raise reports
+`[i18n:missing:xxxxxxxx]` and every `raises(...)` assertion silently matched
+nothing — fourteen tests failed at once for one reason, which is at least a
+legible failure mode.
+
+**12. A comment of mine broke R7 within an hour of the rule being re-read.** The
 legal sweep caught "Roblox" in `engine/core/include/luaug/core/phase.h` — in a
 sentence explaining a divergence, which is exactly the well-intentioned use the
 rule exists to stop from spreading outside the docs set.

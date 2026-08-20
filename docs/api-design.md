@@ -452,10 +452,23 @@ own names: `"Vector2"`, `"CFrame"`, `"Color3"`, `"UDim"`, `"UDim2"`, `"Rect"`,
 `string` in v1 and answers `"string"`.
 
 Reading a member a datatype does not have raises
-`script.err.unknown_member`, exactly as on an instance (§2.2): `v.X` on a
-vector and `c.r` on a `Color3` are errors, not `nil`. The renames in §2.5 are
-frozen, and this is what makes them enforceable — the old spelling does not
-quietly return nothing, it says so.
+`script.err.unknown_member`, exactly as on an instance (§2.2): `c.r` on a
+`Color3` and `cf.position` on a `CFrame` are errors, not `nil`. The renames in
+§2.5 are frozen, and this is what makes them enforceable — the old spelling does
+not quietly return nothing, it says so.
+
+**The one exception is a vector's own components, and it is not ours to make.**
+`v.X`, `v.Y` and `v.Z` return the same numbers as `v.x`, `v.y` and `v.z`,
+because the interpreter answers a single-character index on a vector *inside
+`LOP_GETTABLEKS`*, case-insensitively, before any metatable is consulted
+(`VM/src/lvmexecute.cpp:619-635` at the 0.734 pin). No metatable the engine
+installs can be reached for those six names, so the rule stated here until
+2026-08-20 — that `v.X` raises — described something the VM does not permit.
+Lowercase is still the canonical spelling and the only one the type definitions
+declare, so `v.X` remains a type error under `--!strict`; it is a runtime error
+in one place fewer than the rest of this section. Every other name on a vector,
+`v.Nope` and `v.XY` included, raises through the engine's metatable as
+documented.
 
 **Handedness and rotation conventions.** The world is **right-handed, Y-up,
 −Z forward** — glTF's convention, which is why the importer needs no axis

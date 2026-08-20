@@ -20,6 +20,7 @@
 #include "luaug/core/phase.h"
 #include "luaug/scene/world.h"
 #include "luaug/script/binding.h"
+#include "luaug/script/instance_binding.h"
 
 struct lua_State;
 
@@ -62,6 +63,11 @@ public:
     // How deep the current drain has gone. Exposed for the tests that pin the
     // re-entrancy cap, which is otherwise only observable through a log line.
     [[nodiscard]] u32 deferredDepth() const noexcept;
+
+    // What the boot-time method cross-check found. Zeroed until `boot` runs.
+    // Exposed rather than logged so that a test can assert the two halves
+    // rather than a human having to read a startup line.
+    [[nodiscard]] MethodCoverage methodCoverage() const noexcept;
 
     [[nodiscard]] lua_State* state() const noexcept;
     [[nodiscard]] scene::World& world() noexcept { return m_world; }

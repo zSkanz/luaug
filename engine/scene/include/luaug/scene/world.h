@@ -28,6 +28,7 @@
 #include "luaug/scene/change_queue.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/component_pool.h"
+#include "luaug/scene/enum_registry.h"
 #include "luaug/scene/components.h"
 #include "luaug/scene/types.h"
 #include "luaug/scene/value.h"
@@ -104,7 +105,7 @@ struct NameIndex
 class World
 {
 public:
-    World(ClassRegistry& classes, core::AtomTable& atoms, u64 seed);
+    World(ClassRegistry& classes, EnumRegistry& enums, core::AtomTable& atoms, u64 seed);
 
     // --- Lifetime ------------------------------------------------------------
 
@@ -236,6 +237,10 @@ public:
     // is the one thing it routinely needs the table for.
     [[nodiscard]] const core::AtomTable& atoms() const noexcept { return m_atoms; }
     [[nodiscard]] const ClassRegistry& classes() const noexcept { return m_classes; }
+    // Held here rather than reached separately because every consumer that has
+    // one reflection table wants the other: a property write validates an enum
+    // value, and the binding that pushes one back out has to name its item.
+    [[nodiscard]] const EnumRegistry& enums() const noexcept { return m_enums; }
 
     // Component storage the generated property accessors read and write. Public
     // because those accessors are free functions in generated code rather than
@@ -260,6 +265,7 @@ private:
     void unindexName(core::InstanceId parentId, core::InstanceId childId);
 
     ClassRegistry& m_classes;
+    EnumRegistry& m_enums;
     core::AtomTable& m_atoms;
     core::Pcg32 m_rng;
 

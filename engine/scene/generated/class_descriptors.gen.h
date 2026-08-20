@@ -15,6 +15,7 @@
 #include "luaug/core/id.h"
 #include "luaug/core/name_atom.h"
 #include "luaug/scene/class_registry.h"
+#include "luaug/scene/enum_registry.h"
 #include "luaug/scene/value.h"
 
 namespace luaug::scene
@@ -29,6 +30,18 @@ namespace generated
 // `ClassRegistry::registerClass` requires. Interns each name into `atoms`,
 // so the table handed in is the one the descriptors speak.
 void registerClasses(ClassRegistry& classes, core::AtomTable& atoms);
+
+// Registers every enum in the IDL, in declaration order.
+void registerEnums(EnumRegistry& enums, core::AtomTable& atoms);
+
+// The id `registerEnums` assigns each enum, so that a hand-written accessor
+// validating an enum property names the same number a stored `EnumValue`
+// carries. A registry lookup by name would answer the same question and
+// would do it with a hash probe on a property write.
+inline constexpr EnumId PartShapeEnumId = 1;
+inline constexpr EnumId RotationOrderEnumId = 2;
+inline constexpr EnumId LogLevelEnumId = 3;
+inline constexpr EnumId RunContextEnumId = 4;
 
 } // namespace generated
 

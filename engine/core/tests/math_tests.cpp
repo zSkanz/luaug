@@ -760,3 +760,257 @@ TEST_CASE("euler YXZ keeps pitch in the principal range and resolves the poles")
                   == doctest::Approx(static_cast<f64>(rebuilt.m[column][row])).epsilon(1e-3));
     }
 }
+
+// --- The other five orders ---------------------------------------------------
+//
+// `CFrame.fromEuler` takes the order as an argument (api-design.md §2.3), so all
+// six have to work and not merely the one `Orientation` uses. The generalised
+// implementation is two formulas parameterised by a parity factor, which is
+// exactly the kind of code that is right for three orders and silently mirrored
+// for the other three -- hence a round trip over every one.
+
+TEST_CASE("every rotation order round-trips through the rotation it builds")
+{
+    const RotationOrder orders[] = {
+        RotationOrder::XYZ,
+        RotationOrder::XZY,
+        RotationOrder::YXZ,
+        RotationOrder::YZX,
+        RotationOrder::ZXY,
+        RotationOrder::ZYX,
+    };
+    const f32 samples[] = {-2.6f, -1.3f, -0.2f, 0.0f, 0.7f, 1.4f, 2.9f};
+
+    for (const RotationOrder order : orders)
+    {
+        for (const f32 a : samples)
+        {
+            for (const f32 b : samples)
+            {
+                for (const f32 c : samples)
+                {
+                    const Vec3 angles{a, b, c};
+                    const Mat3 built = fromEuler(angles, order);
+                    const Mat3 rebuilt = fromEuler(toEuler(built, order), order);
+                    CHECK(near(built, rebuilt));
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("the order says which axis turns first, and the vector never stops being indexed by axis")
+{
+    // A pure turn about one axis is the same rotation whatever order names it,
+    // because the other two angles are zero. That is the property that catches a
+    // sequence table wired to the wrong letters.
+    const f32 angle = 0.6f;
+    CHECK(near(fromEuler(Vec3{angle, 0.0f, 0.0f}, RotationOrder::ZYX), rotationX(angle)));
+    CHECK(near(fromEuler(Vec3{0.0f, angle, 0.0f}, RotationOrder::XZY), rotationY(angle)));
+    CHECK(near(fromEuler(Vec3{0.0f, 0.0f, angle}, RotationOrder::YXZ), rotationZ(angle)));
+
+    // And the sequence is what distinguishes them: two non-commuting turns come
+    // out different when the order is reversed.
+    const Vec3 angles{0.5f, 0.9f, 0.0f};
+    CHECK_FALSE(near(fromEuler(angles, RotationOrder::XYZ), fromEuler(angles, RotationOrder::YXZ)));
+
+    // Composed left to right in application order, under the column-vector
+    // convention that writes the first turn leftmost.
+    CHECK(near(fromEuler(angles, RotationOrder::XYZ), rotationX(0.5f) * rotationY(0.9f)));
+    CHECK(near(fromEuler(angles, RotationOrder::YXZ), rotationY(0.9f) * rotationX(0.5f)));
+}
+
+// --- Axis-angle and quaternions ----------------------------------------------
+
+TEST_CASE("axis-angle round-trips, and the axis it reports is the one turned about")
+{
+    const Vec3 axis = normalize(Vec3{0.3f, -0.8f, 0.5f});
+    const f32 angle = 1.1f;
+
+    Vec3 recoveredAxis;
+    f32 recoveredAngle = 0.0f;
+    toAxisAngle(fromAxisAngle(axis, angle), recoveredAxis, recoveredAngle);
+
+    CHECK(near(recoveredAxis, axis));
+    CHECK(near(recoveredAngle, angle));
+
+    // The axis itself is fixed by its own rotation -- the definition, and a
+    // check a sign error in the quaternion path cannot survive.
+    CHECK(near(fromAxisAngle(axis, angle) * axis, axis));
+
+    // Length carries no meaning: the axis is normalized on the way in.
+    CHECK(near(fromAxisAngle(axis * 7.5f, angle), fromAxisAngle(axis, angle)));
+}
+
+TEST_CASE("axis-angle agrees with the per-axis rotations, right-hand rule included")
+{
+    const f32 angle = 0.7f;
+    CHECK(near(fromAxisAngle(Vec3{1.0f, 0.0f, 0.0f}, angle), rotationX(angle)));
+    CHECK(near(fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, angle), rotationY(angle)));
+    CHECK(near(fromAxisAngle(Vec3{0.0f, 0.0f, 1.0f}, angle), rotationZ(angle)));
+}
+
+TEST_CASE("a half turn round-trips, which is where the naive trace formula fails")
+{
+    // The skew-symmetric part of the matrix vanishes at pi, so an axis read off
+    // it is numerically meaningless there. Shepperd's branch is chosen for this
+    // case and this is the case that proves it was chosen.
+    const f32 pi = 3.14159265f;
+    const Vec3 axes[] = {
+        Vec3{1.0f, 0.0f, 0.0f},
+        Vec3{0.0f, 1.0f, 0.0f},
+        Vec3{0.0f, 0.0f, 1.0f},
+        normalize(Vec3{1.0f, 1.0f, 0.0f}),
+        normalize(Vec3{-0.4f, 0.2f, 0.9f}),
+    };
+    for (const Vec3 axis : axes)
+    {
+        Vec3 recoveredAxis;
+        f32 recoveredAngle = 0.0f;
+        toAxisAngle(fromAxisAngle(axis, pi), recoveredAxis, recoveredAngle);
+
+        CHECK(near(recoveredAngle, pi));
+        // q and -q are the same rotation, so the axis may come back negated with
+        // the same angle; both describe the identical half turn.
+        CHECK((near(recoveredAxis, axis) || near(recoveredAxis, -axis)));
+        CHECK(near(fromAxisAngle(recoveredAxis, recoveredAngle), fromAxisAngle(axis, pi)));
+    }
+}
+
+TEST_CASE("the identity has no axis to report and says so rather than dividing by zero")
+{
+    Vec3 axis;
+    f32 angle = 99.0f;
+    toAxisAngle(Mat3{}, axis, angle);
+
+    CHECK(near(angle, 0.0f));
+    CHECK(near(axis, Vec3{1.0f, 0.0f, 0.0f}));
+
+    // A zero axis has no direction to turn about; the identity beats NaN.
+    CHECK(near(fromAxisAngle(Vec3{}, 1.0f), Mat3{}));
+}
+
+TEST_CASE("quaternions round-trip with w last, and both signs mean the same rotation")
+{
+    const Mat3 rotation = fromEuler(Vec3{0.4f, -1.1f, 2.2f}, RotationOrder::YXZ);
+
+    f32 x = 0.0f;
+    f32 y = 0.0f;
+    f32 z = 0.0f;
+    f32 w = 0.0f;
+    toQuaternion(rotation, x, y, z, w);
+    CHECK(near(fromQuaternion(x, y, z, w), rotation));
+    CHECK(near(fromQuaternion(-x, -y, -z, -w), rotation));
+
+    // Unit length, since a rotation quaternion is one.
+    CHECK(near(std::sqrt(x * x + y * y + z * z + w * w), 1.0f));
+
+    // Normalized on the way in, so an unnormalized quaternion is not a scaled
+    // rotation -- it is the same rotation.
+    CHECK(near(fromQuaternion(x * 3.0f, y * 3.0f, z * 3.0f, w * 3.0f), rotation));
+    CHECK(near(fromQuaternion(0.0f, 0.0f, 0.0f, 0.0f), Mat3{}));
+}
+
+TEST_CASE("every quaternion branch is exercised, because each is a separate formula")
+{
+    // Shepperd picks whichever component is largest; the four branches are four
+    // pieces of code and a test that only ever hits the trace one proves nothing
+    // about the other three.
+    const Mat3 rotations[] = {
+        Mat3{},                                                 // w largest
+        fromAxisAngle(Vec3{1.0f, 0.0f, 0.0f}, 3.14159265f),     // x largest
+        fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, 3.14159265f),     // y largest
+        fromAxisAngle(Vec3{0.0f, 0.0f, 1.0f}, 3.14159265f),     // z largest
+        fromEuler(Vec3{2.9f, 1.4f, -2.3f}, RotationOrder::ZXY), // an awkward one
+    };
+
+    for (const Mat3& rotation : rotations)
+    {
+        f32 x = 0.0f;
+        f32 y = 0.0f;
+        f32 z = 0.0f;
+        f32 w = 0.0f;
+        toQuaternion(rotation, x, y, z, w);
+        CHECK(near(std::sqrt(x * x + y * y + z * z + w * w), 1.0f));
+        CHECK(near(fromQuaternion(x, y, z, w), rotation));
+    }
+}
+
+// --- Interpolation -----------------------------------------------------------
+
+TEST_CASE("slerp hits both ends and turns at a constant rate between them")
+{
+    const Vec3 axis = normalize(Vec3{0.2f, 0.9f, -0.3f});
+    const Mat3 start = fromAxisAngle(axis, 0.3f);
+    const Mat3 end = fromAxisAngle(axis, 2.1f);
+
+    CHECK(near(slerp(start, end, 0.0f), start));
+    CHECK(near(slerp(start, end, 1.0f), end));
+
+    // Constant angular rate is what distinguishes slerp from interpolating the
+    // basis component-wise: halfway is half the angle, not the chord's midpoint.
+    Vec3 midAxis;
+    f32 midAngle = 0.0f;
+    toAxisAngle(slerp(start, end, 0.5f), midAxis, midAngle);
+    CHECK(near(midAngle, 1.2f));
+    CHECK(near(midAxis, axis));
+
+    // And it stays a rotation throughout, which a component-wise blend does not.
+    const Mat3 quarter = slerp(start, end, 0.25f);
+    CHECK(near(quarter * transpose(quarter), Mat3{}));
+}
+
+TEST_CASE("slerp takes the short way round")
+{
+    // 350 degrees one way is 10 degrees the other, and the two quaternions that
+    // describe the ends sit on opposite hemispheres. Without the sign flip the
+    // midpoint lands on the far side.
+    const Vec3 axis{0.0f, 1.0f, 0.0f};
+    const Mat3 start = fromAxisAngle(axis, 0.0f);
+    const Mat3 end = fromAxisAngle(axis, 6.1f); // just short of a full turn
+
+    Vec3 midAxis;
+    f32 midAngle = 0.0f;
+    toAxisAngle(slerp(start, end, 0.5f), midAxis, midAngle);
+
+    // Half of the SHORT arc, which is about 0.0916 rad -- not half of 6.1.
+    CHECK(midAngle < 0.2f);
+}
+
+TEST_CASE("slerp of two nearly identical rotations does not divide by zero")
+{
+    const Mat3 start = fromAxisAngle(Vec3{0.0f, 0.0f, 1.0f}, 0.5f);
+    const Mat3 end = fromAxisAngle(Vec3{0.0f, 0.0f, 1.0f}, 0.5f + 1e-7f);
+
+    const Mat3 middle = slerp(start, end, 0.5f);
+    CHECK(near(middle, start));
+    for (int column = 0; column < 3; ++column)
+    {
+        for (int row = 0; row < 3; ++row)
+            CHECK(std::isfinite(middle.m[column][row]));
+    }
+}
+
+TEST_CASE("CFrameD lerp interpolates the translation in f64")
+{
+    // Two positions ten million metres out, one metre apart. In f32 the
+    // difference does not survive the subtraction, so a midpoint that lands
+    // anywhere but halfway is the whole of ADR 0014 failing.
+    CFrameD start;
+    start.position = DVec3{10'000'000.0, 0.0, 0.0};
+    CFrameD end;
+    end.position = DVec3{10'000'001.0, 0.0, 0.0};
+    end.rotation = rotationY(1.0f);
+
+    const CFrameD middle = lerp(start, end, 0.5);
+    CHECK(middle.position.x == doctest::Approx(10'000'000.5).epsilon(1e-12));
+
+    // The rotation slerps, so halfway is half the angle.
+    Vec3 axis;
+    f32 angle = 0.0f;
+    toAxisAngle(middle.rotation, axis, angle);
+    CHECK(near(angle, 0.5f));
+
+    CHECK(lerp(start, end, 0.0).position == start.position);
+    CHECK(lerp(start, end, 1.0).position == end.position);
+}

@@ -215,8 +215,10 @@ local Datatypes: { Schema.Datatype } = {
                 ThreadSafety = "Safe",
                 Doc = "The X component. Lowercase because it is a field of the VM primitive itself, like a "
                     .. "string's length, and not a member of a type this project defines -- the one documented "
-                    .. "exception to the PascalCase rule (§9, divergence #9). `v.X` raises "
-                    .. "`script.err.unknown_member`; it does not return nil.",
+                    .. "exception to the PascalCase rule (§9, divergence #9). `v.X` reads the same component "
+                    .. "rather than raising, because the interpreter answers a single-character index on a "
+                    .. "vector case-insensitively before any metatable is consulted; lowercase is still the "
+                    .. "only spelling declared, so the uppercase one is a type error.",
             },
             {
                 Name = "y",

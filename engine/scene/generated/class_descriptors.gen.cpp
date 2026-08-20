@@ -732,4 +732,141 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(physicsServiceDesc);
 }
 
+// Registered in declaration order, so an enum's `EnumId` is its position in
+// `enums.api.luau` and the constants in the header stay true. Items keep
+// declaration order too -- that is `GetEnumItems`'s documented order, and R10
+// forbids a container from being the thing that decides it.
+void registerEnums(EnumRegistry& enums, core::AtomTable& atoms)
+{
+    // --- PartShape ---
+    static std::array<EnumItemDesc, 5> partShapeItems;
+    partShapeItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Block"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Ball"),
+            .value = 1,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Cylinder"),
+            .value = 2,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Capsule"),
+            .value = 3,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Wedge"),
+            .value = 4,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor partShapeDesc;
+    partShapeDesc.name = atoms.intern("PartShape");
+    partShapeDesc.docKey = {};
+    partShapeDesc.items = partShapeItems;
+    enums.registerEnum(partShapeDesc);
+
+    // --- RotationOrder ---
+    static std::array<EnumItemDesc, 6> rotationOrderItems;
+    rotationOrderItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("XYZ"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("XZY"),
+            .value = 1,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("YXZ"),
+            .value = 2,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("YZX"),
+            .value = 3,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("ZXY"),
+            .value = 4,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("ZYX"),
+            .value = 5,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor rotationOrderDesc;
+    rotationOrderDesc.name = atoms.intern("RotationOrder");
+    rotationOrderDesc.docKey = {};
+    rotationOrderDesc.items = rotationOrderItems;
+    enums.registerEnum(rotationOrderDesc);
+
+    // --- LogLevel ---
+    static std::array<EnumItemDesc, 5> logLevelItems;
+    logLevelItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Trace"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Debug"),
+            .value = 1,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Info"),
+            .value = 2,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Warning"),
+            .value = 3,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Error"),
+            .value = 4,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor logLevelDesc;
+    logLevelDesc.name = atoms.intern("LogLevel");
+    logLevelDesc.docKey = {};
+    logLevelDesc.items = logLevelItems;
+    enums.registerEnum(logLevelDesc);
+
+    // --- RunContext ---
+    static std::array<EnumItemDesc, 2> runContextItems;
+    runContextItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Client"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Server"),
+            .value = 1,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor runContextDesc;
+    runContextDesc.name = atoms.intern("RunContext");
+    runContextDesc.docKey = {};
+    runContextDesc.items = runContextItems;
+    enums.registerEnum(runContextDesc);
+}
+
 } // namespace luaug::scene::generated
