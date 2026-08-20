@@ -7,6 +7,8 @@
   "cli.err.unknown_option": "Unknown option \"{option}\" for luaug {command}.",
   "cli.err.no_engine": "Could not find luaug-host. Build the engine, or set LUAUG_HOST to its path.",
   "cli.err.not_a_project": "{path} is not a LuauG project: no luaug.toml and no src/scripts.",
+  "cli.err.no_version": "Could not read the LuauG version from {path}. luaug runs from the engine source tree; this one has no project() declaration to read.",
+  "cli.err.no_lute_version": "{path} did not report a version, so the Lute half of --version has nothing to show.",
   "cli.version": "luaug {version} (Lute {lute})",
 
   "cli.dev.watching": "Watching {count} director(ies) under {path}. Save a file to reload.",

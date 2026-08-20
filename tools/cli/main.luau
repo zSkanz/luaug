@@ -20,6 +20,7 @@ local dev = require("./commands/dev")
 local fmt = require("./commands/fmt")
 local new = require("./commands/new")
 local test = require("./commands/test")
+local version = require("./commands/version")
 
 local tr = catalog.tr
 
@@ -100,6 +101,14 @@ local function main(): number
     if parsed.command == "" or parsed.flags.help ~= nil or parsed.command == "--help" then
         print(tr("cli.usage"))
         return if parsed.command == "" then 2 else 0
+    end
+
+    -- Both spellings `--help` gets, and for the same reason: `--version` is
+    -- about the tool rather than about a command, so it is answered before
+    -- dispatch and never reaches `rejectUnknownFlags`. There is deliberately
+    -- no bare `version` subcommand, because there is no bare `help` one.
+    if parsed.command == "--version" or parsed.flags.version ~= nil then
+        return version.run()
     end
 
     if parsed.command == "dev" then
