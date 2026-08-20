@@ -270,6 +270,13 @@ Instance (abstract)
 │  └─ Camera                   -- CFrame, FieldOfView, NearPlane, FarPlane, ViewportSize (read),
 │                              -- WorldToViewportPoint(), ViewportPointToRay(). No CameraType.
 ├─ Attachment                  -- CFrame (relative to parent BasePart), WorldCFrame (read)
+├─ Weld / WeldConstraint       -- rigid attachment (ships in M5): Part0, Part1, Enabled;
+│                              -- Weld carries explicit C0/C1, WeldConstraint captures the
+│                              -- relative transform when it becomes active. A TRANSFORM
+│                              -- weld: the welded part is driven from its anchor and is
+│                              -- not independently simulated, and the solver is not
+│                              -- involved -- a CharacterBody is a CharacterVirtual rather
+│                              -- than a Body, so no constraint could reach it anyway
 ├─ PointLight / SpotLight      -- child of BasePart/Attachment (the Roblox attach model),
 │                              -- Color, Brightness, Range, (Spot: Angle), Shadows: boolean
 ├─ Sky                         -- under Lighting
@@ -306,8 +313,9 @@ Instance (abstract)
 
 Clay is the internal layout solver behind UDim2 + UIListLayout +
 AutomaticSize; it is never exposed. **Not in v1 (documented honestly):**
-Terrain, ParticleEmitter, constraints beyond the character controller,
-SurfaceGui/billboards, RichText, video.
+Terrain, ParticleEmitter, SurfaceGui/billboards, RichText, video, and every
+constraint except the rigid weld — no `HingeConstraint`, `SpringConstraint` or
+`Motor6D`, and no solver joint of any kind.
 
 **`Instance` base members:** `Name`, `Parent`; `ClassName` (read-only); tree:
 `FindFirstChild`, `FindFirstChildOfClass`, `FindFirstChildWhichIsA`,

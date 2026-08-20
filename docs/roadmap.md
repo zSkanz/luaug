@@ -516,6 +516,43 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   M7 wires it to the job system: whether recorded hashes survive that is a
   question for the grounding pass that vendors Jolt (§9, `UNCONFIRMED.md`),
   answered before the gate hardens rather than after it breaks.
+- **`Weld` and `WeldConstraint`, added to M5 by human decision on 2026-08-20.**
+  They arrive here rather than at M6 because the milestone is running ahead and
+  because nothing else in v1 can keep one part on another: `CharacterBody` is the
+  capsule that collides, a skinned `MeshPart` is what a player sees, and
+  `AnimationPlayer` is documented as living "under a Model/MeshPart with a
+  skinned mesh" — three pieces with no specified way to occupy the same place.
+  Without a weld the answer is a `Heartbeat` handler writing
+  `mesh.CFrame = body.CFrame * offset` in every character of every project,
+  which is a per-frame Luau cost standing in for a relationship the engine could
+  simply know.
+
+  - **It is a transform weld, not a Jolt constraint, and that is forced rather
+    than chosen.** `CharacterVirtual` is not a `Body` in the physics system
+    (Decision 8 of the M5 brief), and a Jolt constraint connects bodies — so a
+    constraint could not attach to a character at all. The motivating case
+    settles the design: a weld derives the welded part's `CFrame` from its
+    anchor's, and the solver is not involved.
+  - **A welded part is driven, not simulated.** While welded it stops being an
+    independently simulated body and follows its anchor; the anchor may be a
+    dynamic body, a `CharacterBody` or an anchored part. Welding two dynamic
+    bodies so the SOLVER treats them as one rigid assembly is a different
+    feature — Jolt's `FixedConstraint` — and is **not** this one. Name which
+    behaviour a script gets in the docs, because the two are indistinguishable
+    until something pushes.
+  - **`Weld` carries explicit `C0`/`C1`; `WeldConstraint` captures the relative
+    transform when it becomes active** and holds it. That difference is the
+    whole reason both names exist, and shipping only one of them is worse than
+    shipping neither, because the wrong one is silently wrong.
+  - **R10 binds here.** Welds form a graph, and a chain (A welded to B, B welded
+    to C) resolves in topological order or produces a frame of lag that depends
+    on container order. Resolve in a stable topological order at a defined point
+    in the tick, and **reject cycles** rather than iterating until something
+    converges.
+  - **Still not here:** `HingeConstraint`, `SpringConstraint`, `Motor6D`, and any
+    solver-level joint. The seesaw in the deliverable is still a body resting on
+    a fulcrum. `PivotOffset` is still not a constraint anchor and still must not
+    reach Jolt's centre of mass.
 - **Deliverable:** `examples/03-physics-playground` — stacks, ramps, seesaw,
   third-person character walking/jumping through it.
 - **Gate:** **determinism becomes blocking**: recorded 60 s input replay →
