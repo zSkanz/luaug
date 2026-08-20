@@ -18,6 +18,7 @@
 #include "luaug/core/name_atom.h"
 #include "luaug/core/text_key.h"
 #include "luaug/core/types.h"
+#include "luaug/scene/types.h"
 #include "luaug/scene/value.h"
 
 namespace luaug::scene
@@ -132,12 +133,28 @@ struct ClassDescriptor
     std::span<const PropertyDesc> properties;
     std::span<const MethodDesc> methods;
     std::span<const EventDesc> events;
+
+    // Attaches and detaches the components this class *declares*, and only
+    // those. `World::create` walks the ancestry root-first and calls each, so a
+    // `Part` gets `BasePart`'s component from `BasePart`'s hook rather than
+    // from a switch in `create` that would have to know every class in the
+    // engine. Null for a class that stores nothing of its own, which is most of
+    // them.
+    void (*attachComponents)(World&, core::InstanceId) = nullptr;
+    void (*detachComponents)(World&, core::InstanceId) = nullptr;
 };
 
+// Deliberately does NOT hold an `AtomTable`. It stores atoms and compares
+// atoms; resolving one back to text is the caller's business, and a reference
+// it never reads would be a dependency that looks load-bearing in every
+// constructor call. Clang's `-Wunused-private-field` is what pointed this out,
+// on a field MSVC was happy to keep forever.
 class ClassRegistry
 {
 public:
-    ClassRegistry(core::AtomTable& atoms);
+    // Not defaulted: the constructor seeds the unused slot 0 that keeps
+    // `ClassId` 0 meaning "no class".
+    ClassRegistry();
 
     // Registration order must place a class after its superclass, which the
     // generator guarantees by emitting parents first. Returns `InvalidClass` if
@@ -173,7 +190,6 @@ private:
         std::unordered_map<u32, const EventDesc*> events;
     };
 
-    core::AtomTable& m_atoms;
     // Index 0 is unused so that `ClassId` 0 stays invalid.
     std::vector<Entry> m_classes;
     std::unordered_map<u32, ClassId> m_byName;

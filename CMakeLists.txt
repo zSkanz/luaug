@@ -71,6 +71,7 @@ add_subdirectory(third_party)
 add_subdirectory(engine/core)
 add_subdirectory(engine/platform)
 add_subdirectory(engine/rhi)
+add_subdirectory(engine/scene)
 add_subdirectory(engine/render)
 add_subdirectory(engine/app)
 

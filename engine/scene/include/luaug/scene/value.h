@@ -17,6 +17,7 @@
 #include "luaug/core/id.h"
 #include "luaug/core/math.h"
 #include "luaug/core/types.h"
+#include "luaug/scene/types.h"
 
 namespace luaug::scene
 {

@@ -173,6 +173,12 @@ struct Mat3
         {0.0f, 1.0f, 0.0f},
         {0.0f, 0.0f, 1.0f},
     };
+
+    // Exact, element-wise. This is what a property write compares against to
+    // decide whether anything changed, so it must be identity of the stored
+    // bits and not an epsilon: "close enough" would swallow a real change and
+    // never fire the signal for it.
+    [[nodiscard]] constexpr bool operator==(const Mat3&) const noexcept = default;
 };
 
 [[nodiscard]] Mat3 operator*(const Mat3& a, const Mat3& b) noexcept;
@@ -196,6 +202,8 @@ struct CFrameD
 {
     DVec3 position;
     Mat3 rotation;
+
+    [[nodiscard]] constexpr bool operator==(const CFrameD&) const noexcept = default;
 };
 
 // "First `b`, then `a`", the column-vector convention -- so this reads
