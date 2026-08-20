@@ -82,6 +82,10 @@
   "render.err.shader_none_for_format": "No shaders were compiled for the {format} backend.",
   "render.err.shader_not_found": "No shader named \"{name}\" for this stage.",
   "render.err.shader_blob_missing": "Could not read the compiled shader at {path}.",
+  "render.info.mesh_loaded": "Loaded {path} ({triangles} triangles).",
+  "render.err.mesh_file_missing": "Could not read the mesh at {path}.",
+  "render.err.pipeline_create_failed": "Could not create a graphics pipeline for the renderer.",
+  "render.err.target_create_failed": "Could not create an offscreen render target.",
   "render.err.mesh_buffer_failed": "Could not create a GPU buffer for mesh geometry.",
   "render.err.debug_pipeline_failed": "Could not create the debug-draw pipeline.",
 

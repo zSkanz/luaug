@@ -1156,3 +1156,44 @@ TEST_CASE("Frustum: culling accepts what is in front and rejects what is not")
 
     CHECK_FALSE(intersects(frustum, AABB{}));
 }
+
+TEST_CASE("Mat4 inverse: M times its inverse is the identity, for the matrices the renderer builds")
+{
+    const auto isIdentity = [](const Mat4& m)
+    {
+        for (int column = 0; column < 4; ++column)
+        {
+            for (int row = 0; row < 4; ++row)
+            {
+                const f32 expected = column == row ? 1.0f : 0.0f;
+                if (!near(m.m[column][row], expected))
+                    return false;
+            }
+        }
+        return true;
+    };
+
+    // A perspective projection and a view matrix are what the sky pass actually
+    // inverts, so those are what this asserts on rather than a random matrix.
+    const Mat4 projection = perspective(kHalfPi, 16.0f / 9.0f, 0.5f, 500.0f);
+    CHECK(isIdentity(projection * inverse(projection)));
+    CHECK(isIdentity(inverse(projection) * projection));
+
+    const Mat4 view = lookAt(Vec3{3.0f, 4.0f, 5.0f}, Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f});
+    CHECK(isIdentity(view * inverse(view)));
+
+    const Mat4 viewProjection = projection * view;
+    CHECK(isIdentity(viewProjection * inverse(viewProjection)));
+
+    // A non-uniform scale composed with a translation, which is what a model
+    // transform is.
+    const Mat4 model = translation(Vec3{10.0f, -2.0f, 3.0f}) * scaling(Vec3{2.0f, 0.5f, 4.0f});
+    CHECK(isIdentity(model * inverse(model)));
+
+    // Singular: the identity back, not a matrix of infinities. The caller is
+    // undoing a projection, and a camera nobody configured should render badly
+    // rather than poison every later multiply with NaN.
+    const Mat4 flattened = scaling(Vec3{1.0f, 1.0f, 0.0f});
+    const Mat4 result = inverse(flattened);
+    CHECK(isIdentity(result));
+}

@@ -229,6 +229,16 @@ void extract(
     if (!out.camera.valid)
         return;
 
+    // Frame-local material dedup. Declared here rather than inside the lambda
+    // because it spans every MeshPart.
+    struct ResolvedMaterial
+    {
+        core::NameAtom content;
+        u32 local = 0;
+        u32 slot = 0;
+    };
+    std::vector<ResolvedMaterial> resolved;
+
     world.meshParts().forEach(
         [&](core::InstanceId id, const scene::MeshPartComponent& meshPart)
         {
@@ -249,6 +259,16 @@ void extract(
 
             for (u32 section = 0; section < entry->sectionCount; ++section)
             {
+                // Resolved before the cull test so that `material` is meaningful
+                // on every candidate, and deduplicated across the frame by
+                // (content, local index) so the sort key can group draws that
+                // share a bind set. A linear scan, because a scene has a handful
+                // of materials and an unordered container's iteration order must
+                // not reach observable output (R10).
+                u32 localMaterial = 0;
+                if (section < entry->sectionMaterial.size())
+                    localMaterial = entry->sectionMaterial[section];
+
                 ++out.candidateDraws;
                 // Culled against the whole mesh's bounds rather than the
                 // section's: the section bounds are in the library and this is
@@ -262,14 +282,38 @@ void extract(
                     continue;
                 }
 
+                u32 materialSlot = 0;
+                bool found = false;
+                for (u32 index = 0; index < static_cast<u32>(resolved.size()); ++index)
+                {
+                    if (resolved[index].content == meshPart.meshContent && resolved[index].local == localMaterial)
+                    {
+                        materialSlot = resolved[index].slot;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found)
+                {
+                    materialSlot = static_cast<u32>(out.materials.size());
+                    out.materials.push_back(localMaterial < entry->materials.size()
+                            ? entry->materials[localMaterial]
+                            // A section whose material the importer did not
+                            // produce still draws, in the default: a mesh that
+                            // vanishes because one primitive lacked a material
+                            // is harder to diagnose than a white one.
+                            : RenderMaterial{});
+                    resolved.push_back(ResolvedMaterial{meshPart.meshContent, localMaterial, materialSlot});
+                }
+
                 const Vec3 centre = core::center(worldBounds);
                 const f32 depth = core::length(centre);
                 out.draws.push_back(DrawItem{
-                    .sortKey = drawSortKey(0, 0, section, depth),
+                    .sortKey = drawSortKey(0, 0, materialSlot, depth),
                     .transform = transform,
                     .mesh = entry->mesh,
                     .section = section,
-                    .material = section,
+                    .material = materialSlot,
                 });
             }
         });

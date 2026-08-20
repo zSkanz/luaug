@@ -21,6 +21,8 @@ luaug_add_module(render
         src/mesh_cache.cpp
         src/lighting.cpp
         src/native_accessors.cpp
+        src/renderer_default.cpp
+        src/mesh_loader.cpp
         src/scene_types.cpp
         generated/class_descriptors.gen.cpp
     DEPS

@@ -118,6 +118,13 @@ static_assert(sizeof(Mat4) == 16 * sizeof(f32), "Mat4 must upload as 16 tightly 
 // Treats `v` as a direction (w = 0), so translation does not.
 [[nodiscard]] Vec3 transformDirection(const Mat4& m, Vec3 v) noexcept;
 
+// The general inverse, by cofactor expansion. Returns the identity for a
+// singular matrix rather than a matrix of infinities: the caller that needs this
+// is undoing a projection, and a projection that cannot be undone is a camera
+// nobody configured -- which should render badly, not poison every subsequent
+// multiply with NaN.
+[[nodiscard]] Mat4 inverse(const Mat4& m) noexcept;
+
 [[nodiscard]] Mat4 translation(Vec3 t) noexcept;
 [[nodiscard]] Mat4 scaling(Vec3 s) noexcept;
 

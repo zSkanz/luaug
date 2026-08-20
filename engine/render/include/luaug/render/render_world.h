@@ -24,6 +24,8 @@
 #include "luaug/core/math.h"
 #include "luaug/core/types.h"
 #include "luaug/render/mesh_cache.h"
+#include "luaug/render/shader_types.h"
+#include "luaug/rhi/types.h"
 
 namespace luaug::scene
 {
@@ -117,6 +119,21 @@ struct RenderEnvironment
     f32 fogEnd = 0.0f;
 };
 
+// A material, resolved into what the GPU binds.
+//
+// Copied INTO the snapshot rather than pointed at, which is ADR 0027's rule
+// working: the renderer must not be able to follow a pointer into a library
+// that something reloaded between extraction and submission. Sixty-four bytes
+// and four handles per distinct material in the frame is a cheap price for that.
+struct RenderMaterial
+{
+    GpuMaterialUniforms uniforms;
+    rhi::TextureHandle baseColor{};
+    rhi::TextureHandle normal{};
+    rhi::TextureHandle metallicRoughness{};
+    rhi::TextureHandle emissive{};
+};
+
 // One draw: a mesh section with a transform and a material.
 //
 // `sortKey` is computed here and never in a backend. That is the roadmap's third
@@ -132,6 +149,8 @@ struct DrawItem
     MeshHandle mesh;
     // Index into the mesh's sections.
     u32 section = 0;
+    // Index into `RenderWorld::materials`, deduplicated across the frame so the
+    // sort key groups draws that share a bind set.
     u32 material = 0;
 };
 
@@ -141,6 +160,7 @@ struct RenderWorld
     RenderEnvironment environment;
     std::vector<RenderPart> parts;
     std::vector<RenderLight> lights;
+    std::vector<RenderMaterial> materials;
     std::vector<DrawItem> draws;
 
     // Counters the perf table records beside frame time, because the roadmap
@@ -155,6 +175,7 @@ struct RenderWorld
         environment = RenderEnvironment{};
         parts.clear();
         lights.clear();
+        materials.clear();
         draws.clear();
         candidateDraws = 0;
         culledDraws = 0;
@@ -184,6 +205,11 @@ public:
         MeshHandle mesh;
         AABB bounds;
         u32 sectionCount = 0;
+        // `sectionMaterial[i]` indexes `materials`. Two vectors rather than one
+        // material per section, because a file whose four primitives share one
+        // material should upload one material.
+        std::vector<u32> sectionMaterial;
+        std::vector<RenderMaterial> materials;
     };
 
     void set(core::NameAtom content, const Entry& entry);
