@@ -77,27 +77,49 @@ it, and building it on speculation is what §5 rejects.
 
 ## Now / Next
 
-- **`BasePart.Transparency` writes, travels, and then does nothing, reported by
-  the human on 2026-08-20.** It is declared in the IDL, and `render_world.cpp`
-  extracts it into the snapshot — `.transparency = part.transparency` — and
-  `renderer_default` never reads it. There is no blend state, no transparent
-  pass and no back-to-front sort, so every value renders opaque.
+- **`BasePart.Transparency` is decided: alpha cutout here, a blended pass at M6**
+  (human decision, 2026-08-20, on the report from the same day). It is declared
+  in the IDL and `render_world.cpp` extracts it, and every value still renders
+  opaque.
 
-  This is the failure `instances.api.luau`'s own header names, in its worst
-  shape: not a property that is obviously unbacked, but one that is wired
-  *almost* all the way down. Anyone tracing it finds a working extract and
-  concludes the fault is elsewhere.
+  **The first diagnosis here said `renderer_default` "never reads it", and that
+  is true but too kind.** The value cannot reach it. There are two draw paths
+  and Transparency exists in only one:
 
-  Three honest ways out, and the choice is a scope call rather than a fix:
-  implement a transparent pass (sorted, blended, after the opaque one, which is
-  real M4-sized work); implement alpha *cutout* only, which the material block
-  already carries a field for (`shader_types.h`: "w alpha cutoff") and which
-  needs no sorting; or drop the property to the milestone that renders it and
-  say so, as M4 already did for `Sky`, `Camera.ViewportSize` and
-  `MeshPart.CollisionFidelity`.
+  - `RenderPart` — a `BasePart` as a debug wire box — carries `transparency`,
+    and `submitWorld` honours it (`engine.cpp`: `if (part.transparency >= 1.0f)
+    continue;`). This is the path that works, and it is the one the human's
+    observation exercised: setting the orbiting lamp `Part` to 1 made it vanish
+    while the scene did not.
+  - `DrawItem` — the real renderer's unit of work — **has no such field**. Not
+    an unread value: an absent one.
 
-  Whichever it is, it should be decided rather than left — the property is
-  visible in the inspector the human is clicking through.
+  That observation is also what settled the scope call, because the scene did
+  not change for a second reason worth writing down: `examples/02-meshes` is one
+  `MeshPart`, so the boxes and floor are sections of a single glTF file and have
+  no per-instance property to set at all.
+
+  **The obvious place to put it is wrong.** `GpuMaterialUniforms` already
+  carries an alpha cutoff, but its own comment states why it cannot hold this:
+  "per material rather than per frame, because it changes with the bind set and
+  the sort key already groups draws by material". Materials are deduplicated
+  across the frame; a per-instance alpha written there splits one material into
+  as many as there are distinct transparencies and fights the grouping the sort
+  key was built for.
+
+  **The shape that fits, and it needs nothing the freeze closed.**
+  `GpuObjectUniforms` is already per draw (`b0 space1`, vertex stage). Widen it,
+  carry the alpha through an interpolant, and `clip()` in the fragment shader
+  against the material's existing cutoff. No new bind, no new RHI call — ADR
+  0037 froze the calls, and this adds none — and `DrawItem` gains the field it
+  is missing. The `static_assert` on the struct size moves with it, which is the
+  layout check doing its job rather than an obstacle.
+
+  Cutout is honest and partial, and the entry should say so where a user reads
+  it: `Transparency` becomes a threshold, not a fade. **The blended half is M6
+  scope** — sorted back-to-front, after the opaque pass — recorded in
+  `roadmap.md` under that milestone, where UI and tweens make blending
+  mandatory anyway rather than speculative.
 
 - **There is no crash artifact, and the human has now reported four defects
   without one (2026-08-20).** `architecture.md` §app promises a "crash handler

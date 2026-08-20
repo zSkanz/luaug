@@ -317,6 +317,14 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   playback + linear blending (AnimationPlayer/AnimationTrack per
   api-design.md) — no state machines, no IK; enough for idle/walk/jump.
   *(Roadmap-gap fix: the API defines AnimationPlayer; this is where it ships.)*
+- **The sorted transparent pass, scheduled here by human decision on
+  2026-08-20.** `BasePart.Transparency` shipped at M4 as alpha *cutout* only — a
+  threshold, not a fade — because a blended pass needs back-to-front sorting and
+  that was M4-sized work at the end of M4. It lands with this milestone rather
+  than a later one because UI makes blending mandatory anyway: a `Frame` over a
+  world is the same pass, so building it here serves two systems and building it
+  at M7 would serve neither in time. The sort belongs in `extract` with the
+  opaque one (M4's third design constraint), not inside a backend.
 - **Performance notes.** Tweens are property churn and must write through the
   same quiet-write path the 10k-parts benchmark measures — a second write route
   would silently forfeit the equality filter that is worth roughly a third of
