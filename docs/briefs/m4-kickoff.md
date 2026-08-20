@@ -618,6 +618,30 @@ What it is for: ADR 0005 records SDL3 GPU's Android support as officially
 builds. Only a device proves it runs, and finding out after the interface is
 frozen is the expensive order.
 
+### Result — passed, 2026-08-20
+
+Run by the human on a **Samsung Galaxy S25 Ultra**. The APK installed, the app
+opened, and the triangle drew. **SDL3 GPU rasterizes on Android**, so the RHI
+interface freezes on the backend it was designed against and bgfx goes back to
+being the post-v1 mobile hedge ADR 0005 always described rather than a plan being
+held in reserve.
+
+Two things recorded so the next reader does not re-open either:
+
+- **The triangle is stretched, and that is correct.** Its three vertices are in
+  NDC, which covers whatever viewport it is given, so a portrait phone produces a
+  tall triangle exactly as a wide monitor produces a wide one. Correcting for
+  aspect is not part of the question the sample exists to answer (Decision 19),
+  and `--verify`'s five probes — centre plus four corners — mean the same thing
+  at any aspect, which is why the verdict is unaffected.
+- **What this does *not* establish.** The roadmap asks for "a real cheap Android
+  device" and this is the opposite of one: a current flagship with a recent
+  Adreno and full Vulkan 1.3. The question it answers is "does this path work on
+  Android at all", and that answer is yes. Whether it works on the low end —
+  older Mali parts, drivers with partial Vulkan — is untested, and it is the
+  bgfx hedge's actual job. Worth re-running on a budget device before mobile
+  becomes a supported tier post-v1, not before the freeze.
+
 ## Entering risks
 
 1. **The RHI freeze is a one-way door and its deadline is inside this

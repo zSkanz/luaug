@@ -139,12 +139,13 @@ it, and building it on speculation is what §5 rejects.
 
 ## Blocked — needs human
 
-- **The Android device checkpoint.** The roadmap requires a human to run the
-  triangle build on a real device before the RHI interface freezes at the end of
-  M4; the agent does not hold phones (§10). It does not block anything before
-  build-order step 10. What it is for: ADR 0005 records SDL3 GPU's Android
-  support as officially "limited", with bgfx as the hedge, and only a device can
-  tell us which way that goes before the interface is frozen.
+- (none) — **the Android device checkpoint passed on 2026-08-20**, on a Samsung
+  Galaxy S25 Ultra: the APK installed, the app opened, and the triangle drew.
+  SDL3 GPU rasterizes on Android, so the RHI interface freezes at the end of M4
+  on the backend it was designed against. The triangle is stretched because its
+  vertices are in NDC and the phone is portrait, which is the sample behaving as
+  specified rather than a defect. Full record, including what a flagship does
+  *not* establish about the low end, in the M4 brief.
 
 ## Decisions pending ADR
 
