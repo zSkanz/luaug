@@ -121,6 +121,13 @@ private:
     rhi::TextureHandle hdr_{};
     rhi::TextureHandle depth_{};
     rhi::TextureHandle shadowMap_{};
+    // 1x1 stand-ins for a material that has no map. `textureFlags` are
+    // multipliers rather than branches, so the shader samples every slot
+    // whatever the flag says -- and an unbound descriptor read is not a black
+    // pixel, it is whatever the backend last left in that slot.
+    rhi::TextureHandle whitePixel_{};
+    rhi::TextureHandle flatNormalPixel_{};
+    rhi::TextureHandle blackPixel_{};
     rhi::SamplerHandle linearSampler_{};
     rhi::SamplerHandle shadowSampler_{};
 
@@ -129,6 +136,7 @@ private:
     // looks like a driver problem.
     u32 width_ = 0;
     u32 height_ = 0;
+    bool defaultsUploaded_ = false;
 };
 
 } // namespace
@@ -241,6 +249,36 @@ std::optional<core::EngineError> DefaultRenderer::create(
         .debugName = "shadow",
     });
 
+    // The three defaults, in the values that make a missing map a no-op rather
+    // than a change: white multiplies to itself, (0.5, 0.5, 1) is the tangent-
+    // space normal pointing straight out, and black adds nothing.
+    const auto onePixel = [&](const char* name, core::u8 r, core::u8 g, core::u8 b) -> rhi::TextureHandle
+    {
+        const rhi::TextureHandle handle = device.createTexture({
+            .format = rhi::TextureFormat::Rgba8Unorm,
+            .usage = rhi::TextureUsage::Sampled,
+            .width = 1,
+            .height = 1,
+            .debugName = name,
+        });
+        (void)r;
+        (void)g;
+        (void)b;
+        // The pixels are written on the first frame rather than here: `create`
+        // runs outside a frame and has no command list, and an RHI call for
+        // "upload without one" would be a call added on the eve of the interface
+        // freeze that `render` already has a way to avoid.
+        return handle;
+    };
+    whitePixel_ = onePixel("default-white", 0xFF, 0xFF, 0xFF);
+    flatNormalPixel_ = onePixel("default-normal", 0x80, 0x80, 0xFF);
+    blackPixel_ = onePixel("default-black", 0x00, 0x00, 0x00);
+    if (!whitePixel_.valid() || !flatNormalPixel_.valid() || !blackPixel_.valid())
+    {
+        destroy(device);
+        return core::makeError(LUAUG_TR("render.err.target_create_failed"));
+    }
+
     shadowMap_ = device.createTexture({
         .format = kShadowFormat,
         .usage = rhi::TextureUsage::DepthStencilTarget | rhi::TextureUsage::Sampled,
@@ -302,7 +340,8 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
             device.destroy(*pipeline);
         *pipeline = {};
     }
-    for (rhi::TextureHandle* texture : {&hdr_, &depth_, &shadowMap_})
+    for (rhi::TextureHandle* texture :
+        {&hdr_, &depth_, &shadowMap_, &whitePixel_, &flatNormalPixel_, &blackPixel_})
     {
         if (texture->valid())
             device.destroy(*texture);
@@ -317,6 +356,7 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
 
     width_ = 0;
     height_ = 0;
+    defaultsUploaded_ = false;
     valid_ = false;
 }
 
@@ -355,11 +395,13 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
                 // Every slot is bound every time, with the shadow map last.
                 // A slot left over from the previous material is the classic
                 // way one mesh ends up wearing another's texture.
+                const auto orDefault = [](rhi::TextureHandle handle, rhi::TextureHandle fallback)
+                { return handle.valid() ? handle : fallback; };
                 const std::array<rhi::TextureBinding, 5> textures{
-                    rhi::TextureBinding{material.baseColor, linearSampler_},
-                    rhi::TextureBinding{material.normal, linearSampler_},
-                    rhi::TextureBinding{material.metallicRoughness, linearSampler_},
-                    rhi::TextureBinding{material.emissive, linearSampler_},
+                    rhi::TextureBinding{orDefault(material.baseColor, whitePixel_), linearSampler_},
+                    rhi::TextureBinding{orDefault(material.normal, flatNormalPixel_), linearSampler_},
+                    rhi::TextureBinding{orDefault(material.metallicRoughness, whitePixel_), linearSampler_},
+                    rhi::TextureBinding{orDefault(material.emissive, blackPixel_), linearSampler_},
                     rhi::TextureBinding{shadowMap_, shadowSampler_},
                 };
                 cmd.bindTextures(rhi::ShaderStage::Fragment, 0, textures);
@@ -381,6 +423,20 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         return;
     if (ensureTargets(device, target.width, target.height).has_value())
         return;
+
+    if (!defaultsUploaded_)
+    {
+        // White multiplies to itself, (0.5, 0.5, 1) is the tangent-space normal
+        // pointing straight out, and black adds nothing -- so a material with no
+        // map gets a sample that changes nothing rather than an unbound read.
+        const std::array<std::byte, 4> white{std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}};
+        const std::array<std::byte, 4> flat{std::byte{0x80}, std::byte{0x80}, std::byte{0xFF}, std::byte{0xFF}};
+        const std::array<std::byte, 4> black{std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0xFF}};
+        cmd.uploadTexture(whitePixel_, white, 0);
+        cmd.uploadTexture(flatNormalPixel_, flat, 0);
+        cmd.uploadTexture(blackPixel_, black, 0);
+        defaultsUploaded_ = true;
+    }
 
     const Mat4 sunMatrix = sunViewProjection(world.environment.sunDirection);
 

@@ -98,9 +98,15 @@ struct RenderLight
     f32 brightness = 1.0f;
     f32 range = 16.0f;
     // Cosine of the HALF angle, precomputed because a shader compares against a
-    // dot product and would otherwise take a cosine per fragment per light. 1.0
-    // for a point light, which no shader reads.
-    f32 spotCosHalfAngle = 1.0f;
+    // dot product and would otherwise take a cosine per fragment per light.
+    //
+    // **-1 for a point light, not 1.** This comment said 1 and called it "the
+    // value that makes the cone test pass everywhere", which is exactly
+    // backwards: cos(halfAngle) == 1 is the NARROWEST cone expressible, and -1
+    // is the one that admits every direction. The renderer already wrote -1;
+    // only the contract was wrong, which is the worse way round -- a shader
+    // author reading it would have implemented the opposite.
+    f32 spotCosHalfAngle = -1.0f;
     bool shadows = false;
 };
 

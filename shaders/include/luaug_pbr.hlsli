@@ -1,0 +1,139 @@
+// The uniform blocks, in HLSL, byte for byte as
+// `engine/render/include/luaug/render/shader_types.h` declares them in C++.
+//
+// That header names this file, and the rule it states binds both ways: SDL_GPU
+// hands a uniform block to a shader as an opaque span, so a disagreement about
+// an offset is not a build error, it is a scene lit by garbage. **Change one,
+// change the other, in the same commit.**
+//
+// Register assignment is fixed per stage by SDL_GPU and is not a style choice
+// (third_party/sdl3/include/SDL3/SDL_gpu.h:2699-2730, SDL_CreateGPUShader):
+//
+//   vertex   -- t[n]/s[n] in space0, uniform buffers b[n] in space1
+//   fragment -- t[n]/s[n] in space2, uniform buffers b[n] in space3
+//
+// A shader that ignores it compiles and then binds nothing.
+//
+// Every block is behind an opt-in macro because the register namespace is per
+// stage rather than per block: `GpuObjectUniforms` and `GpuShadowUniforms` both
+// want b0 space1, and all three fragment blocks want b0 space3. Declaring the
+// whole set unconditionally would collide, and a block a shader never reads
+// would still be counted in the reflection sidecar -- which is the number
+// `SDL_CreateGPUShader` is given and rejects the shader over.
+//
+// Matrices are `column_major` explicitly rather than by default: `core::Mat4`
+// stores `m[column][row]` (engine/core/src/math.cpp:114-128), so column n of
+// the matrix is 16-byte row n of the buffer, and `mul(M, v)` is then the
+// column-vector transform `v' = M * v` the engine's math means. Spelling the
+// qualifier out makes the shader immune to a compiler flag that flips the
+// default.
+#ifndef LUAUG_PBR_HLSLI
+#define LUAUG_PBR_HLSLI
+
+// Mirrors `render::kMaxForwardLights`. A macro rather than a `static const`
+// because it is an array bound.
+#define LUAUG_MAX_FORWARD_LIGHTS 8
+
+// Mirrors `render::GpuLight`, 48 bytes. Four-float rows because a constant
+// buffer packs to 16 and the array stride has to come out at 48 on every
+// backend.
+struct GpuLight
+{
+    // xyz position in the shading space (camera-relative), w range.
+    float4 PositionRange;
+    // rgb colour premultiplied by brightness, w unused.
+    float4 Color;
+    // xyz spot direction, w cosine of the half angle. See
+    // `luaug_brdf.hlsli`'s `evaluatePunctualLight` for what w == 1 means and
+    // why the shader has to remap it.
+    float4 DirectionCosAngle;
+};
+
+#if defined(LUAUG_UNIFORMS_OBJECT)
+// `render::GpuObjectUniforms`, 192 bytes.
+cbuffer GpuObjectUniforms : register(b0, space1)
+{
+    column_major float4x4 ViewProjection;
+    column_major float4x4 Model;
+    // The cofactor matrix of Model's rotation-scale block, so a normal survives
+    // a non-uniform scale. A float4x4 because a float3x3 in a constant buffer
+    // occupies three float4 rows anyway.
+    column_major float4x4 NormalMatrix;
+};
+#endif
+
+#if defined(LUAUG_UNIFORMS_FRAME)
+// `render::GpuFrameUniforms`, 528 bytes: 80 of float4 rows, 64 of matrix, then
+// 8 * 48 of lights starting at offset 144.
+cbuffer GpuFrameUniforms : register(b0, space3)
+{
+    // xyz points from the world TOWARDS the sun, w is its brightness.
+    float4 SunDirectionBrightness;
+    float4 Ambient;
+    float4 FogColor;
+    // x start, y end, z one over (end - start), w unused. z is zero when fog is
+    // off, which zeroes the fog factor without the shader testing for it.
+    float4 FogRange;
+    // x is how many entries of Lights are live.
+    float4 LightCountUnused;
+    column_major float4x4 SunViewProjection;
+    GpuLight Lights[LUAUG_MAX_FORWARD_LIGHTS];
+};
+#endif
+
+#if defined(LUAUG_UNIFORMS_MATERIAL)
+// `render::GpuMaterialUniforms`, 64 bytes.
+cbuffer GpuMaterialUniforms : register(b1, space3)
+{
+    // rgb base colour factor, w alpha.
+    float4 BaseColorFactor;
+    // rgb emissive factor, w unused.
+    float4 EmissiveFactor;
+    // x metallic, y roughness, z normal-map scale, w alpha cutoff.
+    float4 MetallicRoughnessNormalCutoff;
+    // x base colour, y normal, z metallic-roughness, w emissive: 1 when the
+    // material has that texture. Floats because the shader multiplies by them
+    // instead of branching -- which means **every slot must always have a
+    // texture bound**, a 1x1 default where the material has none, or the
+    // sample reads an unbound descriptor.
+    float4 TextureFlags;
+};
+#endif
+
+#if defined(LUAUG_UNIFORMS_SHADOW)
+// `render::GpuShadowUniforms`, 128 bytes. Its second matrix is `model` in C++
+// and `ShadowModel` here because a cbuffer's members land in HLSL's global
+// scope, where it would otherwise collide with `GpuObjectUniforms::Model`. Only
+// the offsets have to match, and they do.
+cbuffer GpuShadowUniforms : register(b0, space1)
+{
+    column_major float4x4 LightViewProjection;
+    column_major float4x4 ShadowModel;
+};
+#endif
+
+#if defined(LUAUG_UNIFORMS_TONEMAP)
+// `render::GpuTonemapUniforms`, 16 bytes -- a whole row for one float, because
+// that is the smallest a constant buffer row is.
+cbuffer GpuTonemapUniforms : register(b0, space3)
+{
+    // x exposure, rest unused.
+    float4 ExposureUnused;
+};
+#endif
+
+#if defined(LUAUG_UNIFORMS_SKY)
+// `render::GpuSkyUniforms`, 128 bytes.
+cbuffer GpuSkyUniforms : register(b0, space3)
+{
+    column_major float4x4 InverseViewProjection;
+    // xyz points from the world towards the sun, w the disc's angular size as a
+    // fraction (0.02 is roughly the real sun seen from Earth).
+    float4 SunDirectionSize;
+    float4 HorizonColor;
+    float4 ZenithColor;
+    float4 SunColor;
+};
+#endif
+
+#endif // LUAUG_PBR_HLSLI

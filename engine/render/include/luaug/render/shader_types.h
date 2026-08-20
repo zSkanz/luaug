@@ -31,6 +31,16 @@ namespace luaug::render
 using core::f32;
 using core::u32;
 
+// **The shading space is camera-relative, and nothing in these blocks says so
+// except this paragraph.** There is no camera position anywhere below, because
+// the eye is at the origin: `extract` subtracts the camera's world position from
+// every transform and every light before the snapshot is built (ADR 0014, the
+// M4 brief's Decision 8). Two consequences a shader author cannot see from the
+// struct definitions, and which silently produce a wrong image rather than an
+// error if they are broken: `GpuObjectUniforms::model` must carry a
+// camera-relative translation, and `sunViewProjection` must be built in the same
+// space.
+//
 // The most lights one draw is shaded by. A forward pass pays for every light in
 // its block on every fragment, so this is a budget rather than a limit of the
 // design: the clustered pass ADR 0027 describes is what removes it, and that is
@@ -48,9 +58,10 @@ struct GpuLight
     f32 positionRange[4]{0.0f, 0.0f, 0.0f, 0.0f};
     // rgb colour premultiplied by brightness, w unused.
     f32 color[4]{0.0f, 0.0f, 0.0f, 0.0f};
-    // xyz spot direction, w cosine of the half angle (1 for a point light,
-    // which makes the cone test pass everywhere and costs no branch).
-    f32 directionCosAngle[4]{0.0f, -1.0f, 0.0f, 1.0f};
+    // xyz spot direction, w cosine of the half angle. **-1 for a point light**,
+    // which is the value that admits every direction and so costs no branch; 1
+    // would be the narrowest cone expressible, which is the opposite.
+    f32 directionCosAngle[4]{0.0f, -1.0f, 0.0f, -1.0f};
 };
 
 static_assert(sizeof(GpuLight) == 48, "GpuLight is a cbuffer layout; see luaug_pbr.hlsli");
@@ -104,6 +115,12 @@ struct GpuMaterialUniforms
     // metallic-roughness, w emissive. Floats rather than a bitmask because a
     // shader multiplies by them and a branch per texture per fragment is worse
     // than a multiply by one.
+    //
+    // **Because they are multipliers rather than branches, the sample happens
+    // either way** -- so every one of the five fragment texture slots must have
+    // something bound, and a material with no base-colour map gets a 1x1
+    // default rather than an invalid handle. An unbound descriptor read is not
+    // a black pixel, it is whatever the backend last left there.
     f32 textureFlags[4]{0.0f, 0.0f, 0.0f, 0.0f};
 };
 

@@ -1009,6 +1009,48 @@ walked into it again in the same milestone. The render tests now carry a
 `nearly(f32, f32)` helper, which also states the tolerance in the expression
 instead of in a comment — a fix that removes the trap rather than remembering it.
 
+**17. The first scene I authored was one a physically-correct renderer draws as
+black, and I nearly filed it as a shader bug.** The example's ground had a
+metallic top face. This renderer has no IBL (NOT-in-scope 6), and a metal has no
+diffuse lobe at all -- so with only punctual lights it reflects nothing except a
+narrow specular highlight, and the correct image is a black floor. It looked
+exactly like a broken sun.
+
+Two things came out of that. The scene's ground is a dielectric now, and the
+generator says why in a comment so the next person does not re-derive it. And
+the sharper one: **the diagnosis was only possible because §8's observation rule
+forced a screenshot.** Every test in this milestone passed while the example
+rendered a black floor, because no test asserts on what a scene looks like.
+
+**18. Ambient reaching only the diffuse lobe is the physically wrong
+simplification, not the conservative one.** The shader shipped with ambient on
+diffuse alone, reasoned as "an ambient specular term without a reflection probe
+is a constant highlight pretending to be a reflection". The counter-example
+settles it: a mirror in a uniformly lit white room is white, not black.
+`Lighting.Ambient` is documented as light reaching every surface from every
+direction, and a uniform environment does reach a specular lobe.
+
+The practical consequence is what makes it worth changing rather than arguing
+about: a metal has no diffuse lobe, so diffuse-only ambient renders **every
+metal in every scene pure black** wherever a punctual highlight does not land.
+Correct-looking enough to ship and wrong enough to be reported as a renderer bug
+forever. It is still not IBL -- no probe, no prefiltered mips, no parallax -- it
+is the degenerate split-sum case where the environment is one colour, which is
+exactly what the property says it is.
+
+**19. The capture golden records shader blob sizes, so it is coupled to the
+shader compiler.** Editing one line of HLSL moved `pbr.fragment` from 13,064 to
+13,148 bytes and failed the blocking render gate -- correctly, because the
+shader really did change. But the same line would fail on a DXC or
+SDL_shadercross bump that recompiled identical semantics to different bytes, for
+a reason that has nothing to do with rendering.
+
+Left as it is for M4: the coupling is real but it is also the only thing that
+notices a shader edit at all, and the alternative -- hashing reflection instead
+of bytes -- is a change to the capture backend on the eve of the RHI freeze.
+Recorded so the next person to see a golden fail after a toolchain bump knows
+where to look.
+
 ## Gate Record
 
 *Filled at milestone end, before human review.*

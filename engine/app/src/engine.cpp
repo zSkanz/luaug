@@ -16,6 +16,7 @@
 #include "luaug/app/debug_overlay.h"
 #include "luaug/app/dev_control.h"
 #include "luaug/app/frame_scheduler.h"
+#include "luaug/app/inspector.h"
 #include "luaug/app/reload.h"
 #include "luaug/app/screenshot.h"
 #include "luaug/app/world_host.h"
@@ -28,7 +29,9 @@
 #include "luaug/platform/window.h"
 #include "luaug/render/debug_draw.h"
 #include "luaug/render/debug_renderer.h"
+#include "luaug/render/mesh_loader.h"
 #include "luaug/render/render_world.h"
+#include "luaug/render/renderer.h"
 #include "luaug/render/shader_library.h"
 #include "luaug/rhi/device.h"
 
@@ -218,6 +221,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     if (window != nullptr)
         overlay.emplace(*window, *device);
 
+    // The explorer's selection and the queue its edits wait in. Held by the
+    // frame loop rather than by the overlay because it outlives a hot reload
+    // and the world does not, and because the drain below has to happen in
+    // every profile -- including the shipping one, where nothing ever fills it
+    // and the call costs an empty loop (ADR 0011, and why this line carries no
+    // #ifdef).
+    Inspector inspector;
+
     // The debug pass is built on the first frame that has a target, not here,
     // because a graphics pipeline is compiled against one colour format and the
     // swapchain's is not known until it has been acquired. Headless knows its
@@ -233,6 +244,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // path and nothing else -- which is exactly the state a world with no
     // MeshParts is in.
     render::MeshLibrary meshLibrary;
+    render::MeshCache meshCache;
+    render::MeshLoader meshLoader;
+    std::unique_ptr<render::IRenderer> renderer;
     render::ShaderLibrary shaders;
     render::DebugRenderer debugRenderer;
     render::DebugDraw debugDraw;
@@ -256,6 +270,36 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         }
         if (auto error = debugRenderer.create(*device, shaders, colorFormat); error.has_value())
             core::logText(LogLevel::Warn, error->message);
+
+        // The real renderer is built beside the debug one and neither is
+        // required. A machine whose content directory has the debug shader and
+        // not the PBR set boots and draws wire boxes, which is a far better
+        // failure than refusing to start.
+        if (auto error = meshCache.create(*device); error.has_value())
+        {
+            core::logText(LogLevel::Warn, error->message);
+            return;
+        }
+        // The PROJECT's content directory, not the engine's. `asset://` is a
+        // URN in the game's namespace -- `asset://models/tree.glb` means the
+        // file the developer put in their own `content/models/`, and resolving
+        // it beside `luaug-host` would mean every project shipped its meshes
+        // into the engine's install. The engine's own content directory is for
+        // shaders and the message catalog, which are the engine's.
+        //
+        // `scriptPath` is a directory when it is a project root and a file when
+        // it is a bare script (engine.h), so a lone script gets the engine's
+        // content directory -- which is right: it has no project to have one.
+        std::error_code pathError;
+        const bool isProject = !options.scriptPath.empty()
+            && std::filesystem::is_directory(options.scriptPath, pathError);
+        meshLoader.setContentRoot(isProject ? options.scriptPath / "content" : platform::paths().contentDir);
+        renderer = render::createDefaultRenderer();
+        if (auto error = renderer->create(*device, shaders, colorFormat); error.has_value())
+        {
+            core::logText(LogLevel::Warn, error->message);
+            renderer.reset();
+        }
     };
 
     FrameScheduler scheduler;
@@ -287,6 +331,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     auto host = std::make_unique<WorldHost>();
     if (std::optional<core::EngineError> bootError = host->boot(worldOptions); bootError.has_value())
         return bootError;
+
+    // `game`, which is where the tree the explorer walks starts. Re-pointed
+    // after every reload, because a reload destroys this world and builds
+    // another (ADR 0024).
+    if (overlay.has_value())
+        overlay->setInspectionTarget(&host->world(), host->runtime().dataModel(), &inspector);
 
     // The dev-server connection, if `luaug dev` started this process. Nothing
     // listens here: the engine dials out (ADR 0035), and the whole path is
@@ -377,10 +427,23 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             .luaMemoryKb = static_cast<f64>(lua_totalbytes(host->runtime().state(), 0)) / 1024.0,
         });
 
-        // The FrameStart safe point, and the only place a reload happens: a
-        // world swapped mid-tick would break within-run determinism, which is
-        // the rule architecture.md §4 states (and the reason the connection
-        // hands its messages over here rather than acting on them itself).
+        // The FrameStart safe point. Overlay edits are applied HERE and not
+        // where they were typed (M4 brief, Decision 15): the panel draws at the
+        // end of the frame, after the sim has ticked and after `extract`, so a
+        // write applied there would land after the tick the drawn frame came
+        // from -- the mid-frame mutation the reload below is forbidden for the
+        // same reason. One frame of latency on a typed value; a replay that is
+        // still a replay.
+        //
+        // Before the reload, deliberately. A write queued against the outgoing
+        // world is dropped by `onWorldChanged` rather than replayed against a
+        // world that never issued the ids it names.
+        inspector.applyPending(host->world());
+
+        // The only place a reload happens, and for the same reason: a world
+        // swapped mid-tick would break within-run determinism, which is the
+        // rule architecture.md §4 states (and the reason the connection hands
+        // its messages over here rather than acting on them itself).
         if (!options.devControlUrl.empty())
         {
             control.takeCommands(commands);
@@ -392,6 +455,16 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 {
                     const ReloadReport reloaded = reloadWorld(host, worldOptions);
                     host->setGizmoTarget(&debugDraw);
+
+                    // Both halves matter. The selection and anything still
+                    // queued name ids the outgoing world minted, and slot
+                    // indices restart from zero -- so replaying them would
+                    // write to whatever moved into the same slot rather than
+                    // to nothing. The overlay's pointer is re-aimed for the
+                    // blunter reason: the world it held has been destroyed.
+                    inspector.onWorldChanged();
+                    if (overlay.has_value())
+                        overlay->setInspectionTarget(&host->world(), host->runtime().dataModel(), &inspector);
                     replyOk(
                         "reloaded",
                         command.id,
@@ -535,9 +608,49 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             submitWorld(snapshot, debugDraw);
 
             // Uploaded before the render pass opens, because a copy cannot run
-            // inside one -- the seam says so and the backend enforces it.
+            // inside one -- the seam says so and the backend enforces it. The
+            // mesh loader is here for the same reason and one more: it is the
+            // FrameStart safe point, so a file read cannot land mid-tick.
+            meshCache.beginFrame(*device);
+            if (renderer != nullptr && renderer->valid())
+                (void)meshLoader.sync(*device, *cmd, host->world(), host->workspace(), meshCache, meshLibrary);
             if (debugRenderer.valid())
                 debugRenderer.upload(*device, *cmd, debugDraw);
+
+            // The real renderer owns the target when there is a camera to look
+            // through. Without one -- an empty project, a world booting, a
+            // camera nobody assigned -- the M1 debug path still draws, which is
+            // what keeps every earlier example and the capture golden working.
+            const bool useRenderer = renderer != nullptr && renderer->valid() && snapshot.camera.valid;
+            if (useRenderer)
+            {
+                renderer->render(*device, *cmd,
+                    {.color = target, .colorFormat = targetFormat, .width = targetWidth, .height = targetHeight},
+                    snapshot, meshCache);
+
+                // Debug geometry goes on top, in a pass that LOADS rather than
+                // clears: it is an overlay on the rendered frame, not a
+                // replacement for it.
+                if (debugRenderer.valid() && !debugDraw.vertices().empty())
+                {
+                    const std::array<rhi::ColorAttachment, 1> overlayColors{rhi::ColorAttachment{
+                        .texture = target,
+                        .loadOp = rhi::LoadOp::Load,
+                        .storeOp = rhi::StoreOp::Store,
+                    }};
+                    cmd->pushDebugGroup("debug-draw");
+                    cmd->beginRenderPass({.colorAttachments = overlayColors, .debugName = "debug-draw"});
+                    cmd->setViewport({
+                        .width = static_cast<f32>(targetWidth),
+                        .height = static_cast<f32>(targetHeight),
+                    });
+                    debugRenderer.render(*cmd, snapshot.camera.viewProjection);
+                    cmd->endRenderPass();
+                    cmd->popDebugGroup();
+                }
+            }
+            else
+            {
 
             const std::array<rhi::ColorAttachment, 1> colors{rhi::ColorAttachment{
                 .texture = target,
@@ -560,6 +673,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
             cmd->endRenderPass();
             cmd->popDebugGroup();
+            }
 
             // Its own pass, on top of the finished frame, after ours closed and
             // before submit -- the ordering the overlay's contract asks for.
