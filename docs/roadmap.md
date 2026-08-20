@@ -65,9 +65,9 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
 | M2 | Kernel: Instances/ECS, Scheduler, Signals, task | XL (18%) | `examples/01-instances`: 500 scripted spinning debug cubes, services, deferred signals |
 | M3 | Tooling Loop: CLI, Hot Reload, Types, Tests | M (9%) | `luaug dev` — edit script, behavior changes <1 s; `luaug test` runs conformance suite |
 | M4 | Seeing the World: Meshes, Materials, Lighting | L (11%) | `examples/02-meshes`: glTF scene, PBR, shadows, day/night slider |
-| M4.5 | Correcting the World: the environment the renderer never read | S (2%) | `examples/02-meshes` rendering the scene its own script describes: the sun crosses the sky, shadows lengthen, the day/night slider works |
+| M4.5 | Correcting the World: the environment the renderer never read | S (3%) | `examples/02-meshes` rendering the scene its own script describes: the sun crosses the sky, shadows lengthen, the day/night slider works |
 | M5 | Feeling the World: Jolt + Character | L (12%) | `examples/03-physics-playground`: third-person capsule on ramps/stacks |
-| M6 | Playing the World: Input Actions, UI, Tween, Audio, Minimal Animation | L (13%) | `examples/04-obby`: menus, HUD, checkpoints, tweens, sound, rebindable input, animated character |
+| M6 | Playing the World: Input Actions, UI, Tween, Audio, Minimal Animation | L (12%) | `examples/04-obby`: menus, HUD, checkpoints, tweens, sound, rebindable input, animated character |
 | M7 | Scaling the World: Assets, Streaming, Floating Origin | L (13%) | `examples/05-streaming`: fly-cam over large chunked world, bounded memory |
 | M8 | Flagship, Hardening, Docs, v1.0 | M (7%) | `examples/10-open-world` + tagged v1.0.0 release artifacts |
 
@@ -292,10 +292,11 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   assumption that what M4 draws is what M4's scene describes, and every physics
   demo after it is looked at through that renderer.
 
-- **Weight.** Two of M4's thirteen points, not a new allocation: M4 is
-  reassessed at 11% delivered and the remainder moves here. The roadmap's total
-  is unchanged, because no new scope is being added — this is M4's own scope,
-  finished.
+- **Weight.** Three points, none of them new: two come from M4, which is
+  reassessed at 11% delivered, and one comes from M6, which no longer builds the
+  transparent pass. The roadmap still totals a hundred. Nothing here is scope
+  added — it is M4's own scope finished, plus one piece of M6's moved to where
+  its first caller already needs it.
 
 - **Sign-off, by human decision on 2026-08-20.** **This milestone may be marked
   complete only by explicit human approval.** Not by a green gate, and not by
@@ -324,18 +325,45 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
         lavapipe attempt and the 1080p baseline all describe a scene lit by the
         wrong sun. A number recorded against a defect is not a baseline, and
         M5's "no >10% regression" clause would be measured against it.
-  - [ ] **`BasePart.Transparency` must do something, by human instruction on
-        2026-08-20.** Alpha cutout, as decided the same day: a threshold here,
-        the sorted blended pass at M6. **Say plainly what that means, because it
-        is half of what the word promises** — at a cutoff of 0.5, `Transparency`
-        of 0.4 stays fully opaque and 0.6 disappears entirely. Nothing fades.
-        If the human wants a real fade in this milestone, the blended pass moves
-        here from M6 and this item grows by roughly its own size again; that is
-        a one-word decision and it has not been asked for yet. The value
-        reaches nothing today — `DrawItem` has no field for it, and the material
-        block cannot hold it because materials are deduplicated per frame.
-        `GpuObjectUniforms` is already per draw and needs no RHI call, which is
-        what makes this possible after the ADR 0037 freeze.
+  - [ ] **`BasePart.Transparency` must actually fade, by human instruction on
+        2026-08-20.** The sorted, blended transparent pass, which was scheduled
+        at M6 earlier the same day and moved here when the human was told what
+        cutout does not do: at a 0.5 cutoff, 0.4 renders fully opaque and 0.6
+        vanishes, and nothing in between fades. The property is named for the
+        thing cutout cannot do.
+
+        Three pieces, and the first two are shared with the cutout path so
+        nothing is wasted if this is ever split again:
+
+        - **The value has to reach the renderer at all.** `DrawItem` has no
+          field for it, and the material block cannot hold it: materials are
+          deduplicated per frame precisely so the sort key can group draws that
+          share a bind set, and a per-instance alpha written there splits one
+          material into as many as there are distinct values.
+          `GpuObjectUniforms` is already per draw and adds no RHI call, which
+          is what keeps this possible after the ADR 0037 freeze.
+        - **The pass.** After the opaque one, depth-tested and depth-write off,
+          source-alpha blending. The shadow pass keeps drawing everything: a
+          half-transparent part still occludes, and deciding otherwise is a
+          separate question this milestone should not open.
+        - **The sort, and it belongs in `extract`.** Back-to-front by view
+          depth, in the snapshot rather than in a backend — that is M4's third
+          design constraint, and doing it inside `rhi_sdlgpu` is work bgfx
+          would have to repeat. The existing `sortKey` already carries a pass
+          field and a quantized depth; what changes is that the transparent
+          pass reads that depth descending.
+
+        **What this still does not buy**, and the deliverable should not imply
+        otherwise: no order-independent transparency, so two transparent
+        surfaces intersecting each other sort per draw and not per pixel. That
+        is correct for the ninety-nine cases a part with `Transparency` set is
+        actually used for, and visibly wrong for the hundredth. Order-independent
+        transparency is not on the v1 list and this does not put it there.
+
+        **M6 inherits the pass rather than building it.** UI needs exactly this
+        one — a `Frame` over a world is the same blended, sorted draw — so the
+        milestone that ships UI now gets it already written and tested against
+        world geometry, which is the harder of its two callers.
   - [ ] **The shadow grid crawls.** The ortho box is centred on the camera (the
         snapshot is camera-relative and `sunViewProjection` looks at the
         origin), so an orbiting camera slides the texel grid 0.42 of a texel per
@@ -384,7 +412,7 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
 
   | Reported | State |
   |---|---|
-  | `Transparency` changes nothing | **M4.5**, alpha cutout |
+  | `Transparency` changes nothing | **M4.5**, the sorted blended pass — moved here from M6 by the human so it fades rather than switches |
   | The sun never moves; shadows never lengthen | **M4.5**, the `Lighting` defect above |
   | The sun's shadow flickers | **M4.5**, texel snapping |
   | A crash while editing `Size`/`CFrame`, no log | **M4.5**, above — and the handler with it |
@@ -415,7 +443,7 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
 - **Deliverable:** `examples/02-meshes`, unchanged as source, rendering what its
   script actually describes — the sun crossing the sky over the ninety-second
   day, shadows that lengthen towards evening, the fog and brightness the example
-  sets, and a `Transparency` that does something. Shown as a strip of frames
+  sets, and a `Transparency` that fades rather than switches. Shown as a strip of frames
   across one full day from a fixed camera, so the sun's motion is the only
   variable in the strip.
 - **Gate:** the M4 gate re-run in full and re-recorded, plus three additions
@@ -466,14 +494,12 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   playback + linear blending (AnimationPlayer/AnimationTrack per
   api-design.md) — no state machines, no IK; enough for idle/walk/jump.
   *(Roadmap-gap fix: the API defines AnimationPlayer; this is where it ships.)*
-- **The sorted transparent pass, scheduled here by human decision on
-  2026-08-20.** `BasePart.Transparency` shipped at M4 as alpha *cutout* only — a
-  threshold, not a fade — because a blended pass needs back-to-front sorting and
-  that was M4-sized work at the end of M4. It lands with this milestone rather
-  than a later one because UI makes blending mandatory anyway: a `Frame` over a
-  world is the same pass, so building it here serves two systems and building it
-  at M7 would serve neither in time. The sort belongs in `extract` with the
-  opaque one (M4's third design constraint), not inside a backend.
+- **The transparent pass is inherited, not built.** It was scheduled here on
+  2026-08-20 and moved to M4.5 the same day, when the human asked for a
+  `Transparency` that fades rather than one that switches. UI needs the same
+  blended, back-to-front pass a transparent part does, so this milestone gets it
+  already written and already tested against world geometry — the harder of its
+  two callers. What remains here is UI's own use of it, not the pass.
 - **Performance notes.** Tweens are property churn and must write through the
   same quiet-write path the 10k-parts benchmark measures — a second write route
   would silently forfeit the equality filter that is worth roughly a third of

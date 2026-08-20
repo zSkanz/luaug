@@ -140,7 +140,7 @@ while nothing acts on it.
   it off. They are listed after the entry above, unchanged except where reality
   corrected them.
 
-- **`BasePart.Transparency` is decided: alpha cutout here, a blended pass at M6**
+- **`BasePart.Transparency` is decided: the sorted blended pass, in M4.5**
   (human decision, 2026-08-20, on the report from the same day). It is declared
   in the IDL and `render_world.cpp` extracts it, and every value still renders
   opaque.
@@ -172,17 +172,27 @@ while nothing acts on it.
 
   **The shape that fits, and it needs nothing the freeze closed.**
   `GpuObjectUniforms` is already per draw (`b0 space1`, vertex stage). Widen it,
-  carry the alpha through an interpolant, and `clip()` in the fragment shader
-  against the material's existing cutoff. No new bind, no new RHI call — ADR
-  0037 froze the calls, and this adds none — and `DrawItem` gains the field it
-  is missing. The `static_assert` on the struct size moves with it, which is the
-  layout check doing its job rather than an obstacle.
+  carry the alpha through an interpolant, and let the fragment stage use it. No
+  new bind, no new RHI call — ADR 0037 froze the calls, and this adds none — and
+  `DrawItem` gains the field it is missing. The `static_assert` on the struct
+  size moves with it, which is the layout check doing its job rather than an
+  obstacle. That half is the same whether the alpha ends in a `clip()` or in a
+  blend, which is why it is written down separately from the pass.
 
-  Cutout is honest and partial, and the entry should say so where a user reads
-  it: `Transparency` becomes a threshold, not a fade. **The blended half is M6
-  scope** — sorted back-to-front, after the opaque pass — recorded in
-  `roadmap.md` under that milestone, where UI and tweens make blending
-  mandatory anyway rather than speculative.
+  The rest is the pass: after the opaque one, depth-test on and depth-write off,
+  source-alpha blending, sorted back-to-front in `extract` rather than in a
+  backend — M4's third design constraint, and `sortKey` already carries the
+  quantized depth the transparent pass would read descending. The shadow pass
+  keeps drawing everything; whether a half-transparent part should cast a
+  lighter shadow is a separate question and this should not open it.
+
+  The first decision was alpha cutout here and the blended pass at M6; the
+  human moved the blended pass into **M4.5** the same day, on being told what
+  cutout does not do — at a 0.5 cutoff, 0.4 is fully opaque and 0.6 is gone, and
+  nothing fades. The property is named for the thing cutout cannot do. M6 now
+  inherits the pass instead of building it, which is the better trade in both
+  directions: UI's first blended draw arrives already tested against world
+  geometry.
 
 - **There is no crash artifact, and the human has now reported four defects
   without one (2026-08-20).** `architecture.md` §app promises a "crash handler
