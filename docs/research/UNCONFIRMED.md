@@ -36,6 +36,21 @@ Full per-report lists live in each report's final section. When the M0 vendor
 step captures real tags/SHAs, update U-07/U-08/U-16 and
 `third_party/manifest.json` together.
 
+## Verified contradictions — the M3 dev loop vs the installed Lute (2026-08-20)
+
+`docs/research/lute-2026.md` was captured from documentation and the GitHub API,
+never from the binary. These five rows come from the typedefs `rokit` installed
+at the pin (`~/.lute/typedefs/1.0.0/`) and from probe scripts run under
+`lute 1.0.0`. Between them they decide the M3 control-channel design (ADR 0035).
+
+| ID | Claim | Source | Date added | Status | Verified by | Impact if wrong |
+|----|-------|--------|-----------|--------|-------------|-----------------|
+| U-55 | A Lute dev server can supervise a long-running engine over its stdin/stdout, so the hot-reload control channel can be a pipe | M3 brief Decision 1 (first draft) | 2026-08-20 | refuted | `process.run(args, options) -> ProcessResult` returns **after the child exits** and hands back `stdout`/`stderr` as whole strings (`typedefs/1.0.0/lute/process.luau:33-62`). There is no child handle, no stdin, and no incremental read. `StdioKind` offers only `default` (capture) / `inherit` / `none` | A pipe protocol is not writable in Lute 1.0.0. The channel has to be a socket the engine opens, which is what api-design §3.2 said before the brief argued otherwise |
+| U-56 | `process.run` blocks the whole runtime until the child exits, so a dev server cannot both run the engine and watch files | M3 brief entering risk 4 | 2026-08-20 | confirmed as **yields** | Probe: a `task.spawn`ed 150 ms heartbeat fired six times, and eleven `fs.watch` callbacks were delivered, while another coroutine sat inside a 600 ms / 2.5 s `process.run`. It yields the calling coroutine like the rest of the libuv-backed surface | The dev server's concurrency model is sound: one task runs the engine to completion, the rest keeps serving |
+| U-57 | Lute exposes raw TCP, so the engine hop can use a line protocol without WebSocket framing | lute-2026.md §4 ("net: HTTP+WS client & server") read optimistically | 2026-08-20 | refuted | The entire net surface is `client.request`, `client.websocket`, `server.serve` (`typedefs/1.0.0/lute/net/{client,server}.luau`). No socket, listener, or stream type exists | WebSocket is the only bidirectional push channel Lute can speak, so the engine implements an RFC 6455 **client**. Framing is not optional |
+| U-58 | `fs.watch(dir, cb)` reports the changed file, recursively | lute-2026.md §4 ("`watch(path, cb)` → `WatchHandle`") | 2026-08-20 | refuted | Probe on Windows: editing `root/sub/deep.luau` fires with `filename="sub"` — the top-level entry, not the file. One ordinary rewrite fires **2** events; a write-temp-then-rename save fires **6** across two names; a file creation fires **2** | The event payload cannot identify what changed. The watcher must watch every directory it cares about individually and rescan on a debounce, which is also what makes it behave the same on inotify. **Linux behaviour is still unverified** — a non-recursive inotify watch may report nothing at all for a subdirectory, which is a silent failure |
+| U-59 | `time.since(instant)` returns a `Duration` with `:milliseconds()` etc. | `typedefs/1.0.0/lute/time.luau` | 2026-08-20 | refuted | It returns a plain `number` of seconds; `:milliseconds()` raises "attempt to index number with 'milliseconds'". The installed typedef disagrees with the installed runtime | Any CLI timing code written from the typedef fails at runtime rather than at analysis. Treat `@lute/time` returns as numbers and convert explicitly |
+
 ## Verified contradictions — design docs vs vendored Luau (2026-08-19)
 
 The rows below are the **inverse** of the ones above: they were verified against

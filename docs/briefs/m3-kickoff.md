@@ -53,32 +53,42 @@ calls it (Decision 7).
 Each names the alternative it rejects, because the alternative is what a future
 session will otherwise re-derive.
 
-### 1. The engine speaks the control channel over **stdio**; the WebSocket lives in the dev server
+### 1. The engine is a WebSocket **client** of the dev server; only the dev server listens
 
-`api-design.md` §3.2 says the dev server "pushes `{script-changed |
-asset-changed | eval}` messages to the runtime on a localhost port." Taken
-literally that puts an RFC 6455 implementation inside the engine: a TCP
-listener, the SHA-1 + base64 handshake, frame parsing, a background thread, and
-a socket on the developer's machine that anything else can connect to. The
-engine has no `net` module today and `net_api` is M7 scope.
+**This decision was made twice.** The first version chose stdio — `luaug dev`
+launching the engine as a child and speaking a line protocol over its
+stdin/stdout, keeping the engine free of network code entirely. Then the
+installed Lute typedefs were read, and they refuted the premise:
 
-The decision: `luaug dev` launches `luaug-host` as a child process and speaks a
-line-delimited JSON protocol over its stdin/stdout. The dev server keeps the
-`@std/net` WebSocket and serves it to *clients* — the E2E gate test, and later
-the overlay console and any editor integration — relaying in both directions.
-Every message type §3.2 names still exists and still arrives; only the last hop
-changes.
+- `process.run` **returns after the child exits** and hands back `stdout` /
+  `stderr` as whole strings. No child handle, no stdin, no incremental read
+  (U-55). A pipe to a *running* engine is not writable in Lute 1.0.0.
+- There is **no raw TCP**: the entire net surface is an HTTP client, a WebSocket
+  client, an HTTP server and a WebSocket server (U-57).
 
-Rejected: a hand-written WebSocket server in the engine. It buys exactly one
-capability — attaching to a running engine that `luaug dev` did not start —
-which is editor territory, and ADR 0017/R15 put the editor after v1. It costs a
-network listener in every dev build (a Windows Defender prompt on first run, a
-port to allocate and collide on, and a parse surface reachable from off-box if
-the bind is ever wrong). A pipe the parent process owns has none of that, dies
-with the process, and is identical on all three tiers.
+So WebSocket is the only bidirectional push channel Lute can speak, and
+`api-design.md` §3.2 was right for a reason it did not state.
 
-Written up as ADR 0035; `api-design.md` §3.2's transport bullet is corrected in
-the same commit (MASTER_PROMPT §5).
+What remained open is *which side listens*, and §3.2's wording ("pushes … to
+the runtime on a localhost port") implies the wrong one. The decision:
+`luaug dev` runs the `@std/net` WebSocket server on the `[dev] port` and
+launches the engine in a spawned task (`process.run` yields — U-56); the engine
+**dials out** to it. The engine opens no port in any profile. The same server
+serves the gate test and, later, the overlay console.
+
+Rejected: the engine as the WebSocket *server*. It puts a listener on the
+developer's machine in every dev build — a port to allocate and collide on, a
+firewall prompt on first run, an inbound parse surface, and the frame-unmasking
+half of RFC 6455 — to buy attaching to an engine `luaug dev` did not start,
+which is editor territory (ADR 0017, R15).
+
+The cost is a small `net` seam in C++ that M3 must now build: TCP connect, the
+HTTP upgrade handshake with the SHA-1 + base64 accept check, and RFC 6455 frame
+read/write with client masking, tested against the published vectors in RFC 6455
+§1.3 and §5.7. That is real work this brief did not originally budget, and it is
+better learned now than at the gate.
+
+ADR 0035; `api-design.md` §3.2's transport bullet is corrected with it.
 
 ### 2. `luaug` is Lute **scripts run by the pinned `lute`**, not a `lute compile`d binary
 
@@ -227,13 +237,25 @@ The tick counter and instance ids restart with the world; the comparison is
 therefore between two runs that both start counting at zero, which is the only
 way it is well-defined.
 
-### 12. The watcher coalesces; the engine reloads once per batch
+### 12. The watcher watches every directory, debounces, and **rescans** — it does not trust the event
 
-`fs.watch` fires more than once per save — editors write to a temporary file and
-rename, and some fire on both metadata and content. The dev server holds events
-in a quiet-period window and sends one `script-changed` carrying the changed
-paths. Rejected: one reload per event, which turns every save into three world
-restarts and makes the 500 ms budget meaningless.
+`fs.watch` was probed rather than assumed, and it reports less than the research
+report implies (U-58). On Windows, editing `src/scripts/sub/deep.luau` under a
+watch on `src/scripts` fires with `filename = "sub"` — the top-level entry, not
+the file. One ordinary rewrite fires **two** events; a write-temp-then-rename
+save fires **six** across two names; a creation fires **two**.
+
+So: enumerate the project's source directories at startup and put a watch on
+each; on any event mark dirty and start a quiet-period timer; when it expires,
+**rescan** the script set and compare content hashes; reload only if something
+actually changed, and report the real changed-file list from the rescan.
+
+Rejected: trusting `filename` and reloading per event. It cannot name the file
+that changed below one directory, and it turns every save into several world
+restarts, which makes the 500 ms budget meaningless. A per-directory watch also
+behaves the same on inotify, where a non-recursive watch on the parent may
+report a subdirectory's contents not at all — which would be a silent failure,
+the worst kind. **That Linux behaviour is still unverified** (entering risk 2).
 
 ### 13. The CLI has its own catalog at `tools/cli/i18n/en.json`
 
@@ -259,7 +281,10 @@ Named so that a later session does not read the absence as an oversight.
   rejected by the engine with a not-implemented key. Running arbitrary source in
   a live world touches R4 and deserves its own design.
 - **Engine-side `luaug.toml`** — Decision 9.
-- **`net_api`, sockets, `@std/net` in the game VM.** M7.
+- **`net_api`, sockets, `@std/net` in the game VM.** M7. The WebSocket client
+  Decision 1 forces is a dev-profile host seam: it binds nothing to Luau, and no
+  game script can reach it (R17).
+- **The engine listening on any port, in any profile.** Decision 1.
 - **The `obby` and `openworld-demo` templates.** M6 and M8 per
   `templates/README.md`; M3 populates `starter` only.
 - **A second example.** M3's deliverable is the *existing* `examples/01-instances`
@@ -278,7 +303,10 @@ is friendlier to fan-out, but the reload seam is kernel work by any definition.
 **Orchestrator only** (single-threaded, by MASTER_PROMPT §7):
 
 - The reload seam in `app`: the `WorldHost` lifetime, the FrameStart batch point,
-  the child-process protocol loop.
+  and the control-connection loop.
+- The `net` seam Decision 1 forces: TCP connect, the WebSocket client handshake,
+  frame read/write. Dev-profile only, and not the M7 `net_api` module — it binds
+  nothing to Luau and no game script can reach it (R17).
 - `HotReloadService`, the state bag, and the preserved-instance capture/restore.
 - The dev server's protocol and process supervision.
 - Every gate run and every merge.
@@ -327,13 +355,17 @@ a second environment, not a new dependency — but it is a build-time network
 fetch inside the image, and it is the kind of thing discovered at the end of a
 milestone if it is not written down at the start.
 
-**2. Everything known about Lute is web-derived.** `docs/research/lute-2026.md`
-is explicit that it was captured from documentation and the GitHub API, and its
-own §12 lists twenty things it could not verify. M2 spent a session learning that
-reading the vendored VM contradicted the architecture in eight load-bearing ways.
-Lute is *not* vendored — there is no source tree to read — so the equivalent
-grounding is the installed binary's generated typedefs and small probe scripts.
-That is the first task, and its output is UNCONFIRMED rows.
+**2. Everything known about Lute was web-derived — and the first thing done in
+this milestone was to stop that.** `docs/research/lute-2026.md` says plainly that
+it was captured from documentation and the GitHub API. Lute is not vendored, so
+the grounding is the installed typedefs at the pin plus probe scripts. Done at
+kickoff, before any code: five rows, U-55…U-59, four of them refutations. One
+reversed Decision 1 outright.
+
+What is still open is **`fs.watch` on Linux**. Every probe above ran on Windows;
+inotify's non-recursive semantics differ, and the failure mode is silence rather
+than an error. It is verified in the same task that puts Lute into the Tier-2
+image (risk 1), and it must be verified before the dev server is called done.
 
 **3. The 500 ms budget has no bytecode cache behind it.** A reload re-compiles
 every script in the project from source. `examples/01-instances` is small; a

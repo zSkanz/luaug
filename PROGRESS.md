@@ -55,11 +55,20 @@ watch.
 
 ## Now / Next
 
-- **Next: verify Lute 1.0.0's `fs.watch`, `process.run` and `@std/net` WebSocket
-  server against the *installed binary's* typedefs**, not against
-  `docs/research/lute-2026.md` — which is web-derived and says so — and register
-  what it turns up in `docs/research/UNCONFIRMED.md`. This is entering risk 2 and
-  it gates the dev server's whole design.
+- **Next: write the dev-server control protocol** (message set, JSON shape, the
+  reload handshake and its failure replies) into the brief, then build the C++
+  WebSocket **client** seam ADR 0035 needs — TCP connect, the upgrade handshake
+  with the SHA-1 + base64 accept check, RFC 6455 frame read/write with client
+  masking — tested against the published vectors in RFC 6455 §1.3 and §5.7.
+- **Lute is now grounded** (U-55…U-59): `process.run` returns only at child exit
+  with no stdin and no incremental read, there is no raw TCP, `process.run`
+  yields rather than blocking, `fs.watch` names the top-level entry rather than
+  the changed file and fires 2–6 times per save, and `time.since` returns a
+  number where the typedef says `Duration`. The first two reversed the brief's
+  Decision 1 before a line of code existed.
+- **`fs.watch` on Linux is still unverified**, and its failure mode there is
+  silence rather than an error. Verify it in the same task that puts Lute into
+  the Tier-2 image.
 - **Ask the human whether to push.** 17 commits sit unpushed. CI proves `main` is
   green and is the only thing that builds macOS; it also spends metered minutes
   on a private repo. The local gate is green on both tiers either way.
@@ -126,9 +135,26 @@ there when this file passed its ~300-line cap.
   prints is catalog-resolved and parsing it would break the first time a locale is
   added. And the Tier-2 container has no Lute at all, which the gate's phrase "on
   both tiers" quietly requires.
-  Next: **verify Lute's `fs.watch`, `process.run` and `@std/net` WebSocket server
-  against the installed binary's typedefs**, then write the dev-server protocol
-  from what they actually are.
+  Then did exactly that, and it **reversed Decision 1 before any code existed**.
+  `process.run` returns only when the child exits and hands back whole strings —
+  no child handle, no stdin, no incremental read (U-55) — and Lute has no raw TCP
+  at all (U-57), so a pipe protocol is not writable and WebSocket is the only
+  bidirectional push channel it can speak. api-design §3.2 was right and my
+  argument against it was not. What was still open is which side listens, and the
+  answer is the opposite of what §3.2 implies: the dev server listens, the engine
+  dials out as a WebSocket client, and the engine opens no port in any profile.
+  ADR 0035 rewritten, §3.2 corrected, and the first draft kept in the ADR under
+  "What this ADR nearly said" because the next reader will have the same idea for
+  the same good reasons.
+  Also learned by probing rather than reading: `process.run` **yields** the
+  calling coroutine, so one task can run the engine while another serves (U-56);
+  `fs.watch` names the top-level entry rather than the changed file — a nested
+  edit reports the *directory* — and one save fires between two and six events
+  (U-58), so the watcher watches every directory and rescans instead of trusting
+  the payload; and `time.since` returns a number where the installed typedef says
+  `Duration` (U-59).
+  Next: **write the dev-server control protocol into the brief**, then build the
+  C++ WebSocket client seam ADR 0035 needs.
 
 <!-- Format for future entries:
 - **YYYY-MM-DD (session N):** did X; learned Y; Next: <literal first action>.
