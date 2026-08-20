@@ -15,15 +15,25 @@ luaug_add_module(render
         src/shader_library.cpp
         src/debug_renderer.cpp
         src/render_world.cpp
+        src/mesh_cache.cpp
     DEPS
+        asset
         core
         rhi_api
         scene
 )
 
+# `rhi_null` is linked into the TEST executable and nowhere else. ADR 0023's
+# rule is that a backend is linked only by `app`; a test binary is not a module,
+# and `MeshCache` cannot be exercised at all without a device that hands back
+# distinct buffer handles. `luaug_render` itself still sees only the seam.
 luaug_add_module_tests(render
+    MODULES
+        render
+        rhi_null
     SOURCES
         tests/debug_draw_tests.cpp
         tests/shader_library_tests.cpp
         tests/render_world_tests.cpp
+        tests/mesh_cache_tests.cpp
 )

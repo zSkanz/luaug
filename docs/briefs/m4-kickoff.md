@@ -861,6 +861,34 @@ This is M1 Finding 11 — "a property test that has never failed is decoration" 
 applied to a whole module instead of one suite, and it found more than the code
 review that preceded it.
 
+**13. I wrote two assertions that could not fail, and mutation testing found
+both within a minute of the suite going green.** `MeshCache`'s first test suite
+passed, and then passed again with the deferred ring destruction deleted *and*
+with the dynamic-handle expiry check deleted. Six times in three milestones this
+repository has found a check that passes while doing nothing; this is the first
+time the check was mine and was written the same hour.
+
+The two causes were different and both worth keeping:
+
+- **A buffer handle reveals nothing about whether it has been destroyed.** The
+  null device's `destroy` is a no-op and the handle stays comparable, so
+  "the old ring is still there" was asserting on a value that never changes.
+  `pendingRingReleases()` makes the rule assertable — and is worth exposing
+  anyway, for the same reason as the high-water marks: a count that does not
+  return to zero is GPU memory nobody is releasing.
+- **The second was a design fault dressed as a test gap.** `Entry::frame` was
+  supposed to make "a dynamic handle does not survive its frame" a checked
+  contract. Deleting it changed nothing, because `beginFrame` already clears
+  `live` on every dynamic entry and a recycled slot already bumps its
+  generation. The field was dead weight and its comment claimed a guarantee two
+  other mechanisms were providing. It is gone, and the test now asserts the
+  mechanism that actually holds: same slot, new generation, stale handle
+  resolves to nothing.
+
+The general form, and it is sharper than "write good tests": **a test written
+from the same understanding as the code inherits that understanding's blind
+spots.** Planting the defect is what separates the two.
+
 ## Gate Record
 
 *Filled at milestone end, before human review.*
