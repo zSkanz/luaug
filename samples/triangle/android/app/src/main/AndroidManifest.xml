@@ -5,7 +5,7 @@
     intent filters, no launcher icon of our own (the platform default is used,
     so this package adds no binary content to the repository).
 
-    `android:versionCode` and `android:versionName` are absent on purpose --
+    `android:versionCode` and `android:versionName` are absent on purpose:
     app/build.gradle sets them, reading the version out of the root CMakeLists.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -16,7 +16,7 @@
         is the entire question this package exists to ask. Declared
         required="false" on purpose: a hard requirement would make the package
         refuse to install on a device without Vulkan, turning "SDL3 GPU does not
-        work on this phone" into "the APK would not install" -- the same answer
+        work on this phone" into "the APK would not install" — the same answer
         with the diagnosis removed. Installed and failing out loud is the more
         useful outcome.
     -->
