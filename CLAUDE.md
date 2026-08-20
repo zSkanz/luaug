@@ -9,13 +9,15 @@ digest for any agent touching this repo.**
 LuauG — an open-source (Apache-2.0) standalone game engine: C++ core embedding
 Luau 0.734 directly, Roblox-familiar Instance/Service API over a data-oriented
 ECS, deterministic fixed-tick simulation, SDL3 + custom RHI (SDL3 GPU default),
-Jolt physics, code-first DX with hot reload. **Pre-alpha, M0–M3 signed off, M4
-built but not signed off**: the host boots a sandboxed VM, runs a deterministic
-tick over an Instance tree, hot-reloads in under two milliseconds, and renders
-glTF meshes with forward PBR, a shadowed sun and a day/night cycle. **M4.5 is
-open** and corrects a renderer that never read `Lighting`. The engine is
-built milestone by milestone per `docs/roadmap.md`; `PROGRESS.md` says where
-things stand.
+Jolt physics, code-first DX with hot reload. **Pre-alpha, M0 through M5 signed
+off**: the host boots a sandboxed VM, runs a deterministic tick over an Instance
+tree, hot-reloads in under two milliseconds, renders glTF meshes with forward
+PBR under a shadowed sun and a day/night cycle, and simulates a world with mass
+— rigid bodies, contacts, collision groups, queries, welds, and a character that
+walks. **M6 is next** and is the roadmap's Input Actions, UI, Tween, Audio and
+minimal animation. The engine is built milestone by milestone per
+`docs/roadmap.md`; `PROGRESS.md` says where things stand, and it is the file to
+trust when this paragraph and it disagree.
 
 ## Commands
 
@@ -36,7 +38,8 @@ has already caught a real defect that would otherwise have gone to CI. Use
 using it means accepting that a Clang-only diagnostic reaches `main` instead of
 you.
 
-Roughly 20 seconds warm, both tiers, 15 tests each. The same run costs ~35
+Roughly 90 seconds warm for the full five stages, 27 tests on Windows and 26 on
+Linux. The same run costs ~35
 charged minutes on GitHub, and this repository is **private**, so Actions
 minutes carry platform multipliers (Linux 1×, Windows 2×, macOS 10×) against a
 quota that has been close to exhausted. CI is there to prove `main` is green
@@ -46,8 +49,10 @@ change compiles.
 The gate logic lives in `scripts/gates/*.sh`, and `ci.yml` runs the same files.
 If you add a check, add it there, not in the workflow.
 
-**Only macOS cannot run locally.** It builds on a `milestone/*` tag or a manual
-`workflow_dispatch`, not on every push.
+**Only macOS cannot run locally.** It is **blocking on every push that touches
+code** (M4's gate item), and skipped on a documentation-only push and on a
+`milestone/*` tag — the tag points at a commit the job already built when it
+landed.
 
 Underneath, when you need a single step:
 

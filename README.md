@@ -4,19 +4,25 @@
 
 LuauG gives you the developer experience you already know — `Instance` trees, `game:GetService`, `task.spawn`, signals with `:Connect` — in an independent, professional engine: a modern C++ core embedding the Luau VM directly, a data-oriented ECS behind a familiar Instance facade, a swappable renderer and physics stack, deterministic fixed-tick simulation, and a code-first workflow (VS Code + CLI + sub-second hot reload). It targets complete 2D and 3D games, from small scenes to huge streamed open worlds, on desktop first, then mobile, with a console-ready architecture.
 
-> **STATUS: pre-alpha, and drawing.** Four of eleven milestones are complete and
-> human-signed-off. The engine boots a sandboxed Luau VM, opens a window, runs a
-> deterministic fixed-tick simulation over an Instance tree on an ECS,
-> hot-reloads a saved script into a new world in under two milliseconds, and
+> **STATUS: pre-alpha, drawing, and simulating.** Seven of eleven milestones are
+> complete and human-signed-off. The engine boots a sandboxed Luau VM, opens a
+> window, runs a deterministic fixed-tick simulation over an Instance tree on an
+> ECS, hot-reloads a saved script into a new world in under two milliseconds,
 > renders glTF meshes with forward PBR, a shadow-casting sun, point and spot
-> lights, fog, and transparency — on Windows, Linux and macOS, with an Android
+> lights, fog, and transparency, and simulates a thousand active rigid bodies in
+> two milliseconds a tick — on Windows, Linux and macOS, with an Android
 > triangle proving the graphics seam on a real device.
 >
-> **M4 is built but not signed off.** After it was written up complete, a human
-> using the engine noticed that the shadow never moved: the renderer had never
-> once read the `Lighting` service, so every frame it had drawn used struct
-> defaults instead of the scene's own environment. **M4.5** exists to correct
-> that and everything found beside it, and it closes only on human approval.
+> **M5 is signed off**, and it is the milestone that gave the world mass: an
+> unanchored part is a Jolt rigid body, a `CharacterBody` walks and climbs and is
+> blocked by another one, and the determinism gate replays a recorded keyboard
+> stream rather than a bot.
+>
+> The review gate is not ceremony. M4 was written up complete and tagged on its
+> own green gate, and a human using the engine then noticed the shadow never
+> moved: the renderer had never once read the `Lighting` service. M5 was signed
+> only after a reported defect turned out not to reproduce and the investigation
+> found a different, real one underneath it.
 >
 > It is written autonomously, milestone by milestone, by an AI agent (Claude
 > Opus, multi-agent orchestration) following [`MASTER_PROMPT.md`](MASTER_PROMPT.md),
@@ -30,10 +36,10 @@ LuauG gives you the developer experience you already know — `Instance` trees, 
 | ✅ | **M1** — window, RHI (SDL3 GPU / capture / null), fixed-tick loop, screenshot + capture harness | signed off, `milestone/m1` |
 | ✅ | **M2** — the kernel: ECS, Instance facade, deferred signals, `task`, services, world hash | signed off, `milestone/m2` |
 | ✅ | **M3** — `luaug` CLI, hot reload, generated type definitions, conformance runner | signed off, `milestone/m3` |
-| 🔨 | **M4** — meshes, materials, camera, lighting; RHI interface freeze (ADR 0037) | built, `milestone/m4` — **not signed off** |
-| 🔨 | **M4.5** — correcting the environment the renderer never read, and what was found beside it | in progress |
-| ⬜ | **M5** — Jolt physics and a character you can steer | |
-| ⬜ | **M6** — input actions, UI, tweens, audio, minimal animation | |
+| ✅ | **M4** — meshes, materials, camera, lighting; RHI interface freeze (ADR 0037) | signed off, `milestone/m4` |
+| ✅ | **M4.5** — correcting the environment the renderer never read, and what was found beside it | signed off, `milestone/m4.5` |
+| ✅ | **M5** — Jolt physics, queries, welds, and a character you can steer | signed off, `milestone/m5` |
+| 🔨 | **M6** — input actions, UI, tweens, audio, minimal animation | next |
 | ⬜ | **M7** — asset pipeline, async IO, streaming, floating origin | |
 | ⬜ | **M7.5** — cascaded shadows, clustered lights, image-based lighting, post | |
 | ⬜ | **M8** — the flagship open-world demo, hardening, docs, v1.0 | |
@@ -41,16 +47,21 @@ LuauG gives you the developer experience you already know — `Instance` trees, 
 **What runs today:** `luaug dev` on a project, edit a `.luau` file, watch the
 world rebuild without the window closing. A glTF scene lit by forward PBR with a
 single-cascade shadow map and a day/night cycle driven from the simulation clock.
-An in-game explorer and property inspector that writes through the same setters a
-script goes through. 903 conformance specs written against
+A physical world: gravity, contacts and `Touched` as deferred signals, impulses,
+friction, collision groups, raycasts and shape queries, transform welds, and a
+capsule character that climbs a kerb, is stopped by a wall, and is stopped by
+another character. An in-game explorer and property inspector that writes through
+the same setters a script goes through. 969 conformance specs written against
 [`docs/api-design.md`](docs/api-design.md) — not against the implementation —
 pass on Windows and Linux, alongside a determinism harness that replays a
-recorded run and compares world hashes, and a capture-stream gate that compares
-draw commands rather than pixels.
+recorded **input** stream and compares world hashes, and a capture-stream gate
+that compares draw commands rather than pixels.
 
-**What does not, yet:** physics, characters, UI, audio, animation, streaming,
-image-based lighting, cascaded shadows. Each arrives with the milestone that owns
-it, and [`docs/roadmap.md`](docs/roadmap.md) says which.
+**What does not, yet:** UI, audio, animation, streaming, image-based lighting,
+cascaded shadows, and instanced draws — the renderer still submits one draw call
+per visible object, which is the measured ceiling for a crowd
+([`docs/perf-baselines.md`](docs/perf-baselines.md)). Each arrives with the
+milestone that owns it, and [`docs/roadmap.md`](docs/roadmap.md) says which.
 
 ## Not affiliated with Roblox
 
