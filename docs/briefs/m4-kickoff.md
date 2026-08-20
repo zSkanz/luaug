@@ -389,6 +389,66 @@ MeshPart has one texture. The file has the materials; discarding them to match
 another engine's limitation would make "material handling per api-design.md"
 mean less than the file already offers.
 
+### 20. The render module's components are stored in `scene`, and that is not the layering violation it looks like
+
+`World` holds one `ComponentPool<T>` member per component type and has no
+extension point. So `Camera`, `MeshPart`, `PointLight`, `SpotLight` and
+`Lighting` get five more pools there, and their POD structs are declared in
+`scene/components.h`.
+
+Architecture §2 rule 3 says `scene` never includes `render`, and it still does
+not: these are plain structs `scene` stores and never interprets, exactly as it
+already stores `PartComponent` for a renderer that reads it. What the rule
+forbids is a dependency edge, and none is created.
+
+*Rejected:* a type-erased pool registry keyed by type id, which is the shape
+that would let a higher module own its own storage. It reworks the ECS core to
+buy an indirection on every component access, on a milestone that is not about
+the ECS. The day this file grows past the point of paying for itself — physics
+at M5 is the next candidate — that is the answer, and it is written down in
+`components.h` so the day is a decision rather than a discovery.
+
+**One thing checked rather than assumed:** `World::worldHash` walks instances and
+reaches class state *through the generated accessors*, not through the pools. So
+a new pool is covered by the determinism hash the moment its properties are
+declared, with nothing to remember. The comment there says why it was built that
+way — hashing components directly "would silently stop covering a property whose
+storage moved" — and it is the reason adding five pools did not open a blind
+spot in the one gate that would not have complained.
+
+### 21. Three members of the M4 surface are not shipped, because shipping them would mean shipping a lie
+
+`instances.api.luau`'s own header states the rule: *a property that accepts a
+write and changes nothing is worse than a missing one, because it type-checks.*
+Applying it honestly removed three things this brief had planned to declare.
+
+- **`Sky` and `SkyboxContent`** need the texture pipeline that arrives at M7.
+  The class goes with it. M4's sky is `Lighting`'s gradient, which is real.
+- **`Camera.ViewportSize`** is a `Vector2`, and `Vector2` is not a declared
+  datatype yet — it arrives with the UI at M6. The renderer knows the viewport;
+  a script does not need to until there is UI to lay out against it.
+- **`MeshPart.CollisionFidelity`** is a physics property and physics is M5, the
+  same call `BasePart` already made by shipping its structural half without
+  `Anchored` or `CanCollide`.
+
+**And one that is shipped despite doing nothing yet, deliberately:**
+`PointLight.Shadows` and `SpotLight.Shadows` are stored and read back
+faithfully while this release casts shadows from the sun alone (Decision 10). A
+property that round-trips is honest; the failure the rule names is one that
+*silently* discards the write.
+
+### 22. `PointLight` and `SpotLight` are siblings, not a hierarchy
+
+api-design §2.2 lists them on one line sharing four properties, with no `Light`
+base class anywhere in the document. Two independent classes extending
+`Instance` is what the spec says, so that is what ships, duplicated properties
+and all.
+
+*Rejected:* inventing an abstract `Light` for `FindFirstChildWhichIsA("Light")`
+to find. It is a real convenience and Roblox has it — but adding a class the
+authority does not name is a spec change, and §5 says a spec change is an ADR
+and a doc edit, not a quiet generosity in the IDL.
+
 ## The three seams, and what reopening each would have cost
 
 | Roadmap constraint | Where it lands | Cost if deferred |
@@ -412,8 +472,12 @@ oversight:
    clips are skipped rather than half-imported.
 6. **No IBL, no reflection probes, no ambient occlusion.** Ambient is
    `Lighting.Ambient`, flat.
-7. **No `Sky` cubemap rendering beyond a solid/gradient sky.** The `Sky` class
-   and `SkyboxContent` are declared; loading an HDRI is M7's texture pipeline.
+7. **No `Sky` class at all**, and this brief said the opposite until step 7
+   made it concrete. The plan was to declare `Sky` and `SkyboxContent` and load
+   nothing — which is exactly what `instances.api.luau`'s own header forbids: *a
+   property that accepts a write and changes nothing is worse than a missing
+   one, because it type-checks.* `Sky` needs the texture pipeline that arrives
+   at M7, so it arrives then. M4's sky is `Lighting`'s gradient, which is real.
 8. **No KTX2/basis, no GPU texture compression, no GPU mip generation**
    (Decision 2). Mips come from a CPU box filter or not at all.
 9. **No offline importer, no `assimp`, no `.lpack`, no content addressing**
@@ -483,7 +547,7 @@ Interfaces before implementations, and the freeze last:
    abstraction §5 rejects. Then `IRenderer` + `renderer_default` and its pass
    list.
 6. Shaders: `pbr.hlsl`, `shadow_depth.hlsl`, `tonemap.hlsl`, sky.
-7. `api/defs`: `Camera`, `MeshPart`, `PointLight`, `SpotLight`, `Sky`,
+7. `api/defs`: `Camera`, `MeshPart`, `PointLight`, `SpotLight`,
    `Lighting`, `Workspace.CurrentCamera` — IDL first, then the generated C++ and
    defs, then the scene components behind them. M3 Finding 4 says the lints will
    have opinions about the names before any C++ exists; let them. **Declared

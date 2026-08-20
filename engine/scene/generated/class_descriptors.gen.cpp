@@ -502,12 +502,28 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(dataModelDesc);
 
     // --- Workspace ---
+    static std::array<PropertyDesc, 1> workspaceProperties;
+    workspaceProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("CurrentCamera"),
+            .type = ValueType::Instance,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
+            .get = native::getWorkspaceCurrentCamera,
+            .set = native::setWorkspaceCurrentCamera,
+        },
+    }};
     ClassDescriptor workspaceDesc;
     workspaceDesc.name = atoms.intern("Workspace");
     workspaceDesc.super = instanceClass;
     workspaceDesc.flags = ClassFlags::Service | ClassFlags::NotCreatable;
     workspaceDesc.defaultName = atoms.intern("Workspace");
     workspaceDesc.docKey = {};
+    workspaceDesc.properties = workspaceProperties;
+    workspaceDesc.attachComponents = native::attachWorkspaceComponents;
+    workspaceDesc.detachComponents = native::detachWorkspaceComponents;
     classes.registerClass(workspaceDesc);
 
     // --- RunService ---

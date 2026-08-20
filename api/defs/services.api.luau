@@ -117,15 +117,83 @@ local Classes: { Schema.Class } = {
         Name = "Workspace",
         Extends = "Instance",
         Module = "scene",
+        Storage = "Workspace",
         Tags = { "Service", "NotCreatable" } :: { Schema.ClassTag },
-        -- No members of its own yet, and deliberately none: `Gravity` and the
-        -- cast queries are physics (M5) and `CurrentCamera` is the renderer
-        -- (M4). A property that type-checks and changes nothing is worse than a
-        -- missing one -- M2 brief, Decision 6.
+        -- `Gravity` and the cast queries are still physics (M5). `CurrentCamera`
+        -- arrived with the renderer at M4, as the note here always said it
+        -- would.
         Doc = "The root of the 3D scene, reached through the `workspace` global as well as through "
-            .. "`game:GetService`. Whatever is parented under it is in the world and whatever is not, is not. In "
-            .. "this release it carries no members of its own: gravity and the cast queries arrive with the physics "
-            .. "module, and `CurrentCamera` with the renderer.",
+            .. "`game:GetService`. Whatever is parented under it is in the world and whatever is not, is not. "
+            .. "Gravity and the cast queries arrive with the physics module.",
+        Properties = {
+            {
+                Name = "CurrentCamera",
+                Type = "Camera?",
+                Doc = "The camera the world is rendered from. Nil renders nothing rather than falling back to a "
+                    .. "camera the engine invented, because a view nobody asked for is harder to debug than a black "
+                    .. "frame that says why.",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "Lighting",
+        Extends = "Instance",
+        Module = "render",
+        Storage = "Lighting",
+        Tags = { "Service", "NotCreatable" } :: { Schema.ClassTag },
+        Doc = "Day/night and the environment every surface is lit against. The sun is service state rather than an "
+            .. "instance, because there is exactly one of it and its direction is derived rather than authored.",
+        Properties = {
+            {
+                Name = "ClockTime",
+                Type = "number",
+                Doc = "The hour of day, 0 to 24, wrapping rather than clamping so that adding a delta every tick "
+                    .. "never has to check. It is the ONLY input to the sun's direction, which is what makes a "
+                    .. "replay light the same way the live run did.",
+            },
+            {
+                Name = "GeographicLatitude",
+                Type = "number",
+                Doc = "Degrees north of the equator, which tilts the sun's arc across the sky. The second and last "
+                    .. "input to SunDirection.",
+            },
+            {
+                Name = "Ambient",
+                Type = "Color3",
+                Doc = "Flat light reaching every surface from every direction. A stand-in for bounced light until "
+                    .. "there is any; not clamped, so it can be pushed above one deliberately.",
+            },
+            {
+                Name = "Brightness",
+                Type = "number",
+                Doc = "How strong the sun is, independent of its colour.",
+            },
+            {
+                Name = "FogColor",
+                Type = "Color3",
+                Doc = "What distance fades towards between FogStart and FogEnd.",
+            },
+            {
+                Name = "FogStart",
+                Type = "number",
+                Doc = "Distance in metres at which fog begins.",
+            },
+            {
+                Name = "FogEnd",
+                Type = "number",
+                Doc = "Distance in metres at which fog is total. Equal to or below FogStart means no fog at all, "
+                    .. "which is how fog is turned off without a separate flag.",
+            },
+            {
+                Name = "SunDirection",
+                Type = "vector",
+                ReadOnly = true,
+                ThreadSafety = "ReadParallel",
+                Doc = "The unit vector pointing from the world towards the sun, derived from ClockTime and "
+                    .. "GeographicLatitude and nothing else -- no wall clock and no accumulated state, so the same "
+                    .. "ClockTime always gives the same direction.",
+            },
+        } :: { Schema.Property },
     },
     {
         Name = "RunService",

@@ -35,6 +35,31 @@
       "Events": []
     },
     {
+      "Name": "Camera",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "CFrame",
+          "Type": "CFrame"
+        },
+        {
+          "Name": "FarPlane",
+          "Type": "number"
+        },
+        {
+          "Name": "FieldOfView",
+          "Type": "number"
+        },
+        {
+          "Name": "NearPlane",
+          "Type": "number"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "DataModel",
       "Extends": "Instance",
       "Tags": ["NotCreatable"],
@@ -582,6 +607,62 @@
       ]
     },
     {
+      "Name": "Lighting",
+      "Extends": "Instance",
+      "Tags": ["NotCreatable", "Service"],
+      "Properties": [
+        {
+          "Name": "Ambient",
+          "Type": "Color3"
+        },
+        {
+          "Name": "Brightness",
+          "Type": "number"
+        },
+        {
+          "Name": "ClockTime",
+          "Type": "number"
+        },
+        {
+          "Name": "FogColor",
+          "Type": "Color3"
+        },
+        {
+          "Name": "FogEnd",
+          "Type": "number"
+        },
+        {
+          "Name": "FogStart",
+          "Type": "number"
+        },
+        {
+          "Name": "GeographicLatitude",
+          "Type": "number"
+        },
+        {
+          "Name": "SunDirection",
+          "Type": "vector",
+          "ReadOnly": true,
+          "ThreadSafety": "ReadParallel"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "MeshPart",
+      "Extends": "BasePart",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "MeshContent",
+          "Type": "Content"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "Model",
       "Extends": "Instance",
       "Tags": [],
@@ -639,6 +720,31 @@
           "ReadOnly": true,
           "Default": "1/60",
           "ThreadSafety": "ReadParallel"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "PointLight",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Brightness",
+          "Type": "number"
+        },
+        {
+          "Name": "Color",
+          "Type": "Color3"
+        },
+        {
+          "Name": "Range",
+          "Type": "number"
+        },
+        {
+          "Name": "Shadows",
+          "Type": "boolean"
         }
       ],
       "Methods": [],
@@ -747,6 +853,35 @@
       "Events": []
     },
     {
+      "Name": "SpotLight",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Angle",
+          "Type": "number"
+        },
+        {
+          "Name": "Brightness",
+          "Type": "number"
+        },
+        {
+          "Name": "Color",
+          "Type": "Color3"
+        },
+        {
+          "Name": "Range",
+          "Type": "number"
+        },
+        {
+          "Name": "Shadows",
+          "Type": "boolean"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "TagService",
       "Extends": "Instance",
       "Tags": ["NotCreatable", "Service"],
@@ -798,7 +933,12 @@
       "Name": "Workspace",
       "Extends": "Instance",
       "Tags": ["NotCreatable", "Service"],
-      "Properties": [],
+      "Properties": [
+        {
+          "Name": "CurrentCamera",
+          "Type": "Camera?"
+        }
+      ],
       "Methods": [],
       "Events": []
     }

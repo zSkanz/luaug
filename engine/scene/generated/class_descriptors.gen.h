@@ -99,6 +99,12 @@ bool setPartShape(World& world, core::InstanceId id, const Value& value);
 Value getDataModelEngineVersion(const World& world, core::InstanceId id);
 Value getDataModelLuauVersion(const World& world, core::InstanceId id);
 
+// Workspace
+Value getWorkspaceCurrentCamera(const World& world, core::InstanceId id);
+bool setWorkspaceCurrentCamera(World& world, core::InstanceId id, const Value& value);
+void attachWorkspaceComponents(World& world, core::InstanceId id);
+void detachWorkspaceComponents(World& world, core::InstanceId id);
+
 // RunService
 Value getRunServiceSimTime(const World& world, core::InstanceId id);
 

@@ -350,6 +350,125 @@ local Classes: { Schema.Class } = {
             },
         },
     },
+    {
+        Name = "MeshPart",
+        Extends = "BasePart",
+        Module = "render",
+        Storage = "MeshPart",
+        Doc = "A part whose geometry is an imported mesh rather than a primitive solid. One file is one mesh: a "
+            .. "model made of several pieces is several MeshParts, which is the shape §2.6's prefab example already "
+            .. "assumes.",
+        Properties = {
+            {
+                Name = "MeshContent",
+                Type = "Content",
+                Doc = "The glTF file this part renders. Setting it replaces the geometry; a file that fails to "
+                    .. "import leaves the previous mesh in place and reports why, because a part that silently "
+                    .. "becomes invisible is harder to diagnose than one that says it could not load.",
+            },
+        },
+    },
+    {
+        Name = "Camera",
+        Extends = "Instance",
+        Module = "render",
+        Storage = "Camera",
+        Doc = "The viewpoint the world is rendered from. A camera is an ordinary instance a script owns and moves; "
+            .. "the engine never takes it over, which is why there is no CameraType.",
+        Properties = {
+            {
+                Name = "CFrame",
+                Type = "CFrame",
+                Doc = "Where the camera is and which way it looks. The look direction is the CFrame's LookVector, "
+                    .. "which is -Z.",
+            },
+            {
+                Name = "FieldOfView",
+                Type = "number",
+                Doc = "The vertical field of view in degrees. Clamped to a sane open interval: zero and 180 both "
+                    .. "produce a projection matrix that renders nothing.",
+            },
+            {
+                Name = "NearPlane",
+                Type = "number",
+                Doc = "Distance in metres to the near clip plane. Small values buy little and cost depth precision "
+                    .. "everywhere, so this is worth raising rather than lowering.",
+            },
+            {
+                Name = "FarPlane",
+                Type = "number",
+                Doc = "Distance in metres to the far clip plane; geometry beyond it is not drawn.",
+            },
+        },
+    },
+    {
+        Name = "PointLight",
+        Extends = "Instance",
+        Module = "render",
+        Storage = "PointLight",
+        Doc = "A light radiating equally in every direction from its parent's position. Parent it to a BasePart or "
+            .. "an Attachment; a light with no such ancestor lights nothing.",
+        Properties = {
+            {
+                Name = "Color",
+                Type = "Color3",
+                Doc = "The light's colour, multiplied by Brightness. Not clamped, so a channel above one is a legal "
+                    .. "over-bright tint.",
+            },
+            {
+                Name = "Brightness",
+                Type = "number",
+                Doc = "How much light this emits. Zero is off without the instance having to be destroyed.",
+            },
+            {
+                Name = "Range",
+                Type = "number",
+                Doc = "The radius in metres beyond which this light contributes nothing, which is what lets the "
+                    .. "renderer skip it for distant geometry.",
+            },
+            {
+                Name = "Shadows",
+                Type = "boolean",
+                Doc = "Whether this light should cast shadows. Stored and reported faithfully, and not yet acted "
+                    .. "on: this release casts shadows from the sun alone.",
+            },
+        },
+    },
+    {
+        Name = "SpotLight",
+        Extends = "Instance",
+        Module = "render",
+        Storage = "SpotLight",
+        Doc = "A light confined to a cone about its parent's forward direction. A sibling of PointLight rather than "
+            .. "a subclass of it: the two share four properties and no behaviour.",
+        Properties = {
+            {
+                Name = "Color",
+                Type = "Color3",
+                Doc = "The light's colour, multiplied by Brightness.",
+            },
+            {
+                Name = "Brightness",
+                Type = "number",
+                Doc = "How much light this emits.",
+            },
+            {
+                Name = "Range",
+                Type = "number",
+                Doc = "The distance in metres beyond which this light contributes nothing.",
+            },
+            {
+                Name = "Angle",
+                Type = "number",
+                Doc = "The full width of the cone in degrees.",
+            },
+            {
+                Name = "Shadows",
+                Type = "boolean",
+                Doc = "Whether this light should cast shadows. Stored and not yet acted on, as on PointLight.",
+            },
+        },
+    },
 }
 
 local Definition: Schema.Definition = {

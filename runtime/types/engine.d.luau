@@ -310,6 +310,54 @@ declare extern type Part extends BasePart with
     Shape: EnumPartShape
 end
 
+declare extern type MeshPart extends BasePart with
+    --- The glTF file this part renders. Setting it replaces the geometry; a file that fails to import
+    --- leaves the previous mesh in place and reports why, because a part that silently becomes
+    --- invisible is harder to diagnose than one that says it could not load.
+    MeshContent: Content
+end
+
+declare extern type Camera extends Instance with
+    --- Where the camera is and which way it looks. The look direction is the CFrame's LookVector, which
+    --- is -Z.
+    CFrame: CFrame
+    --- The vertical field of view in degrees. Clamped to a sane open interval: zero and 180 both
+    --- produce a projection matrix that renders nothing.
+    FieldOfView: number
+    --- Distance in metres to the near clip plane. Small values buy little and cost depth precision
+    --- everywhere, so this is worth raising rather than lowering.
+    NearPlane: number
+    --- Distance in metres to the far clip plane; geometry beyond it is not drawn.
+    FarPlane: number
+end
+
+declare extern type PointLight extends Instance with
+    --- The light's colour, multiplied by Brightness. Not clamped, so a channel above one is a legal
+    --- over-bright tint.
+    Color: Color3
+    --- How much light this emits. Zero is off without the instance having to be destroyed.
+    Brightness: number
+    --- The radius in metres beyond which this light contributes nothing, which is what lets the
+    --- renderer skip it for distant geometry.
+    Range: number
+    --- Whether this light should cast shadows. Stored and reported faithfully, and not yet acted on:
+    --- this release casts shadows from the sun alone.
+    Shadows: boolean
+end
+
+declare extern type SpotLight extends Instance with
+    --- The light's colour, multiplied by Brightness.
+    Color: Color3
+    --- How much light this emits.
+    Brightness: number
+    --- The distance in metres beyond which this light contributes nothing.
+    Range: number
+    --- The full width of the cone in degrees.
+    Angle: number
+    --- Whether this light should cast shadows. Stored and not yet acted on, as on PointLight.
+    Shadows: boolean
+end
+
 declare extern type DataModel extends Instance with
     --- The version of the engine runtime executing this VM, as `luaug.toml` pins it. Read-only: the
     --- runtime is chosen before the VM exists, so nothing a script does can change it.
@@ -323,6 +371,7 @@ declare extern type DataModel extends Instance with
     --- registered while the world is still being built is registered in time. It carries no arguments.
     read Loaded: Signal<()>
     function GetService(self, name: "Workspace"): Workspace
+    function GetService(self, name: "Lighting"): Lighting
     function GetService(self, name: "RunService"): RunService
     function GetService(self, name: "ScriptService"): ScriptService
     function GetService(self, name: "TagService"): TagService
@@ -349,6 +398,36 @@ declare extern type DataModel extends Instance with
 end
 
 declare extern type Workspace extends Instance with
+    --- The camera the world is rendered from. Nil renders nothing rather than falling back to a camera
+    --- the engine invented, because a view nobody asked for is harder to debug than a black frame that
+    --- says why.
+    CurrentCamera: Camera?
+end
+
+declare extern type Lighting extends Instance with
+    --- The hour of day, 0 to 24, wrapping rather than clamping so that adding a delta every tick never
+    --- has to check. It is the ONLY input to the sun's direction, which is what makes a replay light
+    --- the same way the live run did.
+    ClockTime: number
+    --- Degrees north of the equator, which tilts the sun's arc across the sky. The second and last
+    --- input to SunDirection.
+    GeographicLatitude: number
+    --- Flat light reaching every surface from every direction. A stand-in for bounced light until there
+    --- is any; not clamped, so it can be pushed above one deliberately.
+    Ambient: Color3
+    --- How strong the sun is, independent of its colour.
+    Brightness: number
+    --- What distance fades towards between FogStart and FogEnd.
+    FogColor: Color3
+    --- Distance in metres at which fog begins.
+    FogStart: number
+    --- Distance in metres at which fog is total. Equal to or below FogStart means no fog at all, which
+    --- is how fog is turned off without a separate flag.
+    FogEnd: number
+    --- The unit vector pointing from the world towards the sun, derived from ClockTime and
+    --- GeographicLatitude and nothing else -- no wall clock and no accumulated state, so the same
+    --- ClockTime always gives the same direction.
+    read SunDirection: vector
 end
 
 declare extern type RunService extends Instance with
@@ -576,7 +655,11 @@ declare function warn(...: any): ()
 declare Instance: {
     new: (("Folder") -> Folder)
         & (("Model") -> Model)
-        & (("Part") -> Part),
+        & (("Part") -> Part)
+        & (("MeshPart") -> MeshPart)
+        & (("Camera") -> Camera)
+        & (("PointLight") -> PointLight)
+        & (("SpotLight") -> SpotLight),
 }
 
 declare game: DataModel

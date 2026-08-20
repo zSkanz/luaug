@@ -118,6 +118,56 @@ Value getInstanceClassName(const World& world, core::InstanceId id)
     return descriptor == nullptr ? std::string{} : std::string(world.atoms().text(descriptor->name));
 }
 
+// --- Workspace --------------------------------------------------------------
+
+Value getWorkspaceCurrentCamera(const World& world, core::InstanceId id)
+{
+    const WorkspaceComponent* workspace = world.workspaces().find(id);
+    if (workspace == nullptr || !world.alive(workspace->currentCamera))
+        return Value{};
+    return Value{workspace->currentCamera};
+}
+
+bool setWorkspaceCurrentCamera(World& world, core::InstanceId id, const Value& value)
+{
+    WorkspaceComponent* workspace = world.workspaces().find(id);
+    if (workspace == nullptr)
+        return false;
+    if (const auto* reference = std::get_if<core::InstanceId>(&value); reference != nullptr)
+    {
+        // The property is typed `Camera?`, and the type definitions enforce that
+        // for anyone who runs the analyzer. This is the runtime half, because a
+        // Part assigned here would otherwise be a camera that renders a view
+        // nobody can explain.
+        const ClassId cameraClass = world.classes().findId(world.atoms().lookup("Camera"));
+        // `lookup` rather than `intern`: this is a hot-ish write path and
+        // interning a name that must already exist would mint an atom on the one
+        // path where the answer is "no such class". An engine built without the
+        // render module registers no Camera, and then nothing may be assigned
+        // here -- which is correct, not a failure to handle.
+        if (cameraClass == InvalidClass || !world.isA(*reference, cameraClass))
+            return false;
+        workspace->currentCamera = *reference;
+        return true;
+    }
+    if (valueType(value) != ValueType::Nil)
+        return false;
+    // Nil renders nothing rather than falling back to a camera the engine
+    // invented: a view nobody asked for is harder to debug than a black frame.
+    workspace->currentCamera = core::InstanceId{};
+    return true;
+}
+
+void attachWorkspaceComponents(World& world, core::InstanceId id)
+{
+    world.workspaces().add(id, WorkspaceComponent{});
+}
+
+void detachWorkspaceComponents(World& world, core::InstanceId id)
+{
+    world.workspaces().remove(id);
+}
+
 // --- Model ------------------------------------------------------------------
 
 Value getModelPrimaryPart(const World& world, core::InstanceId id)

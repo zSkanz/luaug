@@ -259,10 +259,27 @@ public:
     // guess at now.
     [[nodiscard]] ComponentPool<PartComponent>& parts() noexcept { return m_parts; }
     [[nodiscard]] const ComponentPool<PartComponent>& parts() const noexcept { return m_parts; }
+    [[nodiscard]] ComponentPool<WorkspaceComponent>& workspaces() noexcept { return m_workspaces; }
+    [[nodiscard]] const ComponentPool<WorkspaceComponent>& workspaces() const noexcept { return m_workspaces; }
     [[nodiscard]] ComponentPool<ModelComponent>& models() noexcept { return m_models; }
     [[nodiscard]] const ComponentPool<ModelComponent>& models() const noexcept { return m_models; }
     [[nodiscard]] ComponentPool<ScriptComponent>& scripts() noexcept { return m_scripts; }
     [[nodiscard]] const ComponentPool<ScriptComponent>& scripts() const noexcept { return m_scripts; }
+
+    // The render module's classes (M4). Their storage is here and their meaning
+    // is not: `scene` never includes `render`, and these five pools hold POD it
+    // does not interpret. See components.h for why they are not behind a
+    // type-erased registry.
+    [[nodiscard]] ComponentPool<MeshPartComponent>& meshParts() noexcept { return m_meshParts; }
+    [[nodiscard]] const ComponentPool<MeshPartComponent>& meshParts() const noexcept { return m_meshParts; }
+    [[nodiscard]] ComponentPool<CameraComponent>& cameras() noexcept { return m_cameras; }
+    [[nodiscard]] const ComponentPool<CameraComponent>& cameras() const noexcept { return m_cameras; }
+    [[nodiscard]] ComponentPool<PointLightComponent>& pointLights() noexcept { return m_pointLights; }
+    [[nodiscard]] const ComponentPool<PointLightComponent>& pointLights() const noexcept { return m_pointLights; }
+    [[nodiscard]] ComponentPool<SpotLightComponent>& spotLights() noexcept { return m_spotLights; }
+    [[nodiscard]] const ComponentPool<SpotLightComponent>& spotLights() const noexcept { return m_spotLights; }
+    [[nodiscard]] ComponentPool<LightingComponent>& lighting() noexcept { return m_lighting; }
+    [[nodiscard]] const ComponentPool<LightingComponent>& lighting() const noexcept { return m_lighting; }
 
 private:
     void linkChild(InstanceRecord& parentRecord, core::InstanceId parentId, core::InstanceId childId);
@@ -285,8 +302,14 @@ private:
 
     core::SlotMap<InstanceRecord> m_instances;
     ComponentPool<PartComponent> m_parts;
+    ComponentPool<WorkspaceComponent> m_workspaces;
     ComponentPool<ModelComponent> m_models;
     ComponentPool<ScriptComponent> m_scripts;
+    ComponentPool<MeshPartComponent> m_meshParts;
+    ComponentPool<CameraComponent> m_cameras;
+    ComponentPool<PointLightComponent> m_pointLights;
+    ComponentPool<SpotLightComponent> m_spotLights;
+    ComponentPool<LightingComponent> m_lighting;
     ComponentPool<NameIndex> m_nameIndices;
     ComponentPool<AttributeMap> m_attributes;
     ComponentPool<TagSet> m_tags;
