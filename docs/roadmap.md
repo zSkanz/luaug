@@ -42,8 +42,10 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   post-v1).
 - **Early Android portability check (mobile itself stays post-v1).** From
   M1–M2, nightly CI gains a **non-blocking Android (NDK) cross-compile job** for
-  `platform` + `rhi_api` + `rhi_sdlgpu` + the triangle sample — compile-only, it
-  catches API/toolchain breaks early without a device. Validation on a real
+  `platform` + `rhi_api` + `rhi_sdlgpu` — compile-only, it catches API/toolchain
+  breaks early without a device. It builds those two libraries and stops: it does
+  not link an application and it produces no APK, which is why the sample the
+  checkpoint below needs is M4 scope rather than something already lying around. Validation on a real
   cheap Android device is a **human checkpoint** scheduled before the RHI
   interface freezes (end of M4): the agent escalates and asks the human to run
   the triangle APK; the agent does not hold phones.
@@ -196,6 +198,21 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
     decision because running arbitrary source in a live world touches R4 and
     needs its own design; the streaming map (M7) and the physics wireframe (M5)
     arrive with the systems they show.
+- **The triangle sample and its Android package.** Added to M4 by human decision
+  on 2026-08-20, because the checkpoint this milestone must pass has no artifact
+  to pass it with. The nightly job compiles two libraries for arm64 and stops;
+  there is no sample, no Android project, and no APK anywhere in the tree.
+  - **A standalone triangle**, not `luaug-host`. The host links the Luau VM, and
+    cross-compiling that answers a much larger question than "does SDL3 GPU draw
+    on this device" — the nightly job avoids it for exactly that reason. What is
+    wanted is a window, a clear, and one triangle through `rhi_sdlgpu`.
+  - **An Android project around it.** SDL3 vendors its own template under
+    `third_party/sdl3/android-project/`; the shaders ship as SPIR-V in the APK,
+    since Android is Vulkan.
+  - **Why it cannot slip past the freeze.** ADR 0005 records SDL3 GPU's Android
+    support as officially "limited" and keeps bgfx as the hedge. Which way that
+    goes is a question only a device answers, and answering it after the RHI
+    interface is frozen means changing backends against a frozen interface.
 - **Carried debt, scheduled here by human decision on 2026-08-20.** Five of these
   have been reappearing in `PROGRESS.md` since M0 or M1. Three are paid in this
   milestone; the other three get a named destination instead, because a debt
