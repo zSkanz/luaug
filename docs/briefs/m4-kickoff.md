@@ -612,6 +612,25 @@ Clang-only combination here. The check is written in f32 throughout now, which
 also states "relative" in the expression rather than in a comment. CLAUDE.md's
 rule about not skipping the Linux stage keeps paying for itself.
 
+**6. Two of the manifest's three "deliberate deviations from upstream" were not
+deviations.** Re-vendoring every tree meant checking what the notes claimed
+against what the repository holds, and the imgui row described excluding
+`examples/libs/glfw/lib-vc2010-{32,64}/glfw3.lib` — 291 KB of prebuilt MSVC
+static library — which has in fact been tracked here since M0. Its other
+claimed exclusion, and stb's `oversample.exe`, are real absences with the wrong
+cause recorded: upstream's own `.gitignore` leaves those files untracked, so
+they were never checked out and no decision of ours removed them.
+
+The notes are corrected rather than the trees, because the alternative was to
+delete files by hand and thereby create the first genuine deviation — with no
+mechanism to keep it, on the same day this milestone learned what an
+unenforced invariant costs. A `paths` field on the manifest row is what a real
+exclusion would need; nothing needs one yet.
+
+The pattern across findings 1, 2, 3 and 6 is one thing: **this repository has
+been trusting its own prose about `third_party/` instead of checking it.** Four
+claims, four wrong, none of them expensive to verify.
+
 ## Gate Record
 
 *Filled at milestone end, before human review.*

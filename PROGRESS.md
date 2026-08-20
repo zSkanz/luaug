@@ -133,31 +133,12 @@ it, and building it on speculation is what §5 rejects.
 
 ## Blocked — needs human
 
-- **Every vendored tree in `third_party/` is CRLF-mangled and has never been
-  byte-identical to its pinned commit.** `vendor.luau` checks out through its
-  own git dir, which `.gitattributes` cannot reach, so `core.autocrlf=true`
-  applied on Windows; then `third_party/** -text` — the rule written to protect
-  byte-exactness — disabled normalization and committed the mangling faithfully.
-  Affects luau, sdl3, imgui, stb, doctest, spirv_cross and sdl_shadercross, i.e.
-  everything vendored before this milestone. ADR 0021's central claim has been
-  false since M0. Found because it was the second reason the first patch this
-  repository has ever applied refused to apply. Full write-up: M4 brief,
-  Finding 3.
-
-  **Fixed at the source:** the checkout now forces
-  `core.autocrlf=false core.eol=lf`, and the three trees vendored this milestone
-  are correct.
-
-  **The question: re-vendor the historical trees now, or leave them?** It is a
-  purely mechanical `lute tools/repo/vendor.luau sync` over the pinned commits
-  — no version changes — but it rewrites on the order of 20,000 files in one
-  commit and roughly doubles the pack's third_party footprint. Nothing is
-  functionally wrong today: compilers do not care about line endings, and the
-  only mechanism that does is patching, which no historical tree uses.
-
-  Recommendation: do it, once, in a commit that touches nothing else, so that
-  ADR 0021 is true and any future "does this tree match upstream?" check has a
-  clean baseline. It does not block M4.
+- **The Android device checkpoint.** The roadmap requires a human to run the
+  triangle build on a real device before the RHI interface freezes at the end of
+  M4; the agent does not hold phones (§10). It does not block anything before
+  build-order step 10. What it is for: ADR 0005 records SDL3 GPU's Android
+  support as officially "limited", with bgfx as the hedge, and only a device can
+  tell us which way that goes before the interface is frozen.
 
 ## Decisions pending ADR
 
