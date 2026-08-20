@@ -408,6 +408,23 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
           anything positional take `obj:PivotTo(cf)`. That cost grows with every
           milestone that writes such code, which is the argument for taking it
           before M5 rather than after.
+
+        **Decided by the human, 2026-08-20: everything that has a pivot in the
+        reference gets one here.** That is a short and closed list — `BasePart`,
+        `Model` and `Camera`, all three of which already exist — and `PVInstance`
+        becomes a real abstract class between them and `Instance` rather than
+        two copies of the same methods. It has to be a class because `IsA` and
+        `FindFirstChildWhichIsA` are documented to accept abstract base names, so
+        `IsA("PVInstance")` is the question generic code actually wants to ask,
+        and it can only be asked of a class that exists. `Attachment` stays out,
+        as it does in the reference: it carries `CFrame`/`WorldCFrame` and is not
+        positional in this sense. `CharacterBody` inherits it through `BasePart`
+        at M5 without doing anything.
+
+        **One thing to name before M5 writes it: `PivotOffset` is not a centre of
+        mass.** It is a scripting-space transform, and Jolt has its own notion of
+        a body's centre. Wiring one into the other would make a hinge move a
+        body's dynamics, which is a bug that would take a milestone to notice.
   - [ ] **The crash handler and the log file sink.** `architecture.md` §app
         promises "crash handler (minidump + log)" and neither exists. A human
         running the engine by hand is this project's verification model, and has
