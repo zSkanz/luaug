@@ -1,4 +1,5 @@
 #include "luaug/render/renderer.h"
+#include "luaug/render/shadow.h"
 
 #include <algorithm>
 #include <array>
@@ -19,14 +20,6 @@ using core::Mat4;
 using core::u32;
 using core::Vec3;
 
-// One cascade, and the roadmap says so. A fixed extent rather than a fit to the
-// visible geometry: fitting makes the map's texels move with the camera, which
-// makes shadow edges crawl, and the stable-fit machinery that fixes that belongs
-// with the cascades it exists for.
-constexpr u32 kShadowResolution = 2048;
-constexpr f32 kShadowExtent = 60.0f;
-constexpr f32 kShadowDepth = 200.0f;
-
 constexpr rhi::TextureFormat kHdrFormat = rhi::TextureFormat::Rgba16Float;
 constexpr rhi::TextureFormat kDepthFormat = rhi::TextureFormat::D32Float;
 constexpr rhi::TextureFormat kShadowFormat = rhi::TextureFormat::D32Float;
@@ -43,21 +36,6 @@ constexpr rhi::TextureFormat kShadowFormat = rhi::TextureFormat::D32Float;
     result.m[2][2] = 1.0f / (nearZ - farZ);
     result.m[3][2] = nearZ / (nearZ - farZ);
     return result;
-}
-
-// The sun's view, looking along -sunDirection from far enough back to contain
-// the shadowed region. The camera sits at the origin of the snapshot's space, so
-// the region is centred on the origin.
-[[nodiscard]] Mat4 sunViewProjection(Vec3 sunDirection) noexcept
-{
-    const Vec3 direction = core::normalize(sunDirection);
-    // A sun exactly overhead makes the obvious up vector parallel to the view,
-    // which produces a NaN basis. `lookAt` already falls back to the identity
-    // there, and picking the alternate up here is cheaper than a scene that
-    // flickers when the clock passes noon.
-    const Vec3 up = std::fabs(direction.y) > 0.99f ? Vec3{0.0f, 0.0f, 1.0f} : Vec3{0.0f, 1.0f, 0.0f};
-    const Vec3 eye = direction * (kShadowDepth * 0.5f);
-    return orthographic(kShadowExtent, 0.1f, kShadowDepth) * core::lookAt(eye, Vec3{}, up);
 }
 
 // The cofactor matrix of the model transform's rotation-scale block, so a
@@ -101,9 +79,7 @@ public:
     void render(rhi::IDevice& device, rhi::ICmdList& cmd, const RenderTarget& target, const RenderWorld& world,
         const MeshCache& meshes) override;
     [[nodiscard]] bool valid() const noexcept override { return valid_; }
-    // The ortho box is a cube of half-extent `kShadowExtent` centred on the
-    // camera, so its corner reaches sqrt(3) times as far.
-    [[nodiscard]] f32 shadowRadius() const noexcept override { return kShadowExtent * 1.7320508f; }
+    [[nodiscard]] f32 shadowRadius() const noexcept override { return kShadowRadius; }
 
 private:
     [[nodiscard]] std::optional<core::EngineError> ensureTargets(rhi::IDevice& device, u32 width, u32 height);
@@ -143,6 +119,37 @@ private:
 };
 
 } // namespace
+
+Mat4 sunViewProjection(Vec3 sunDirection, core::DVec3 origin) noexcept
+{
+    const Vec3 direction = core::normalize(sunDirection);
+    // A sun exactly overhead makes the obvious up vector parallel to the view,
+    // which produces a NaN basis. `lookAt` already falls back to the identity
+    // there, and picking the alternate up here is cheaper than a scene that
+    // flickers when the clock passes noon.
+    const Vec3 up = std::fabs(direction.y) > 0.99f ? Vec3{0.0f, 0.0f, 1.0f} : Vec3{0.0f, 1.0f, 0.0f};
+    const Vec3 eye = direction * (kShadowDepth * 0.5f);
+    Mat4 view = core::lookAt(eye, Vec3{}, up);
+
+    // In f64, because `origin` is a world coordinate and an open world's are
+    // large (ADR 0014). What comes out is under half a texel and fits an f32
+    // with room to spare, which is the whole reason the rounding happens here
+    // rather than in a shader.
+    const core::f64 lightX = static_cast<core::f64>(view.m[0][0]) * origin.x
+        + static_cast<core::f64>(view.m[1][0]) * origin.y + static_cast<core::f64>(view.m[2][0]) * origin.z;
+    const core::f64 lightY = static_cast<core::f64>(view.m[0][1]) * origin.x
+        + static_cast<core::f64>(view.m[1][1]) * origin.y + static_cast<core::f64>(view.m[2][1]) * origin.z;
+
+    const auto texel = static_cast<core::f64>(kShadowTexel);
+    const core::f64 residualX = lightX - std::round(lightX / texel) * texel;
+    const core::f64 residualY = lightY - std::round(lightY / texel) * texel;
+
+    view.m[3][0] += static_cast<f32>(residualX);
+    view.m[3][1] += static_cast<f32>(residualY);
+
+    return orthographic(kShadowExtent, 0.1f, kShadowDepth) * view;
+}
+
 
 std::optional<core::EngineError> DefaultRenderer::create(
     rhi::IDevice& device, const ShaderLibrary& shaders, rhi::TextureFormat colorFormat)
@@ -446,7 +453,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         defaultsUploaded_ = true;
     }
 
-    const Mat4 sunMatrix = sunViewProjection(world.environment.sunDirection);
+    const Mat4 sunMatrix = sunViewProjection(world.environment.sunDirection, world.camera.origin);
 
     // --- Shadow pass --------------------------------------------------------
     //

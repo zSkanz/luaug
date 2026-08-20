@@ -58,4 +58,5 @@ luaug_add_module_tests(render
         tests/render_world_tests.cpp
         tests/mesh_cache_tests.cpp
         tests/lighting_tests.cpp
+        tests/shadow_tests.cpp
 )
