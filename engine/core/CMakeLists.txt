@@ -22,6 +22,7 @@ luaug_add_module_tests(core
         tests/i18n_tests.cpp
         tests/json_tests.cpp
         tests/json_writer_tests.cpp
+        tests/log_tests.cpp
         tests/error_tests.cpp
         tests/math_tests.cpp
         tests/phase_tests.cpp

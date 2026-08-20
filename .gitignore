@@ -58,3 +58,10 @@ dist/
 # `luaug test`'s machine-readable report. Written beside the suite when no
 # --report path is given, and regenerated on every run.
 luaug-test-report.json
+
+# The host writes these beside whatever it was run from (main.cpp): a log file
+# and, on a fault, a minidump. They are evidence a person sends, never something
+# a repository keeps.
+luaug.log
+luaug-crash-*.dmp
+luaug-crash-*.txt

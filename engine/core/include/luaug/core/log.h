@@ -3,6 +3,7 @@
 // engine-authored string, because that is exactly the hole R3 exists to close.
 #pragma once
 
+#include <filesystem>
 #include <functional>
 #include <span>
 #include <string>
@@ -41,6 +42,26 @@ using LogSink = std::function<void(LogLevel, std::string_view)>;
 // sink temporarily" means "silence whatever the host installed".
 LogSink setLogSink(LogSink sink);
 void resetLogSink();
+
+// Also writes every line to `path`, in addition to wherever it already goes.
+//
+// **An addition, never a replacement.** Every gate, the conformance runner and
+// the replay harness read stdout, and a sink that redirected would take their
+// eyes rather than give a human theirs. The file receives lines even while a
+// sink is installed, because a captured stream is exactly when a person running
+// the engine by hand would otherwise see nothing.
+//
+// The path is INJECTED rather than resolved. `core` is L0 and
+// `platform::paths()` is L1, so this module cannot ask where anything belongs;
+// `app` decides at boot and prints where it went, because a log nobody can find
+// is a log nobody sends.
+//
+// Returns false when the file cannot be opened, which is not fatal to anything:
+// the console sink is untouched and the caller reports it.
+[[nodiscard]] bool openLogFile(const std::filesystem::path& path);
+
+// Flushes and closes it. Idempotent, and safe without a preceding open.
+void closeLogFile() noexcept;
 
 void log(LogLevel level, TextKey key, std::span<const I18nArg> args = {});
 

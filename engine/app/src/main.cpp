@@ -23,6 +23,7 @@
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
 #include "luaug/platform/console.h"
+#include "luaug/platform/crash.h"
 #include "luaug/platform/platform.h"
 
 namespace
@@ -326,8 +327,44 @@ int main(int argc, char** argv)
     if (const int usageExit = parseOptions(args, options); usageExit != kExitOk)
         return usageExit;
 
+    // The two artifacts `architecture.md` §app has promised since M0, and the
+    // reason they are HERE: `core` is L0 and cannot ask where a file belongs,
+    // `platform::paths()` is L1, and this is the layer that sees both. The
+    // directory is the process's own, so `run.bat` leaves them beside the
+    // example a person was running.
+    //
+    // Neither failure is fatal. An engine that refuses to start because it could
+    // not open a log is an engine that a read-only directory takes away
+    // entirely, which is a worse trade than losing the log.
+    const std::filesystem::path artifactDir = std::filesystem::current_path();
+    const std::filesystem::path logPath = artifactDir / "luaug.log";
+    const bool logOpened = luaug::core::openLogFile(logPath);
+    const bool handlerInstalled = luaug::platform::installCrashHandler(artifactDir);
+
     const std::array<I18nArg, 1> bootArgs{I18nArg{"version", LUAUG_VERSION_STRING}};
     luaug::core::log(LogLevel::Info, LUAUG_TR("engine.boot.hello"), bootArgs);
+
+    // Printed, not assumed. The whole failure this closes is a human reporting a
+    // crash from memory, and a log whose path nobody knows is a log nobody
+    // sends. It goes out at Info so it is in the log file as well -- the first
+    // line of which then says where the log file is, which sounds circular and
+    // is not: the copy in the terminal is the one a person reads.
+    if (logOpened)
+    {
+        const std::array<I18nArg, 1> logArgs{I18nArg{"path", logPath.string()}};
+        luaug::core::log(LogLevel::Info, LUAUG_TR("engine.boot.info.log_file"), logArgs);
+    }
+    else
+    {
+        const std::array<I18nArg, 1> logArgs{I18nArg{"path", logPath.string()}};
+        luaug::core::log(LogLevel::Warn, LUAUG_TR("engine.boot.warn.log_file_failed"), logArgs);
+    }
+    if (handlerInstalled)
+    {
+        const std::array<I18nArg, 1> crashArgs{
+            I18nArg{"path", luaug::platform::crashArtifactPath().string()}};
+        luaug::core::log(LogLevel::Info, LUAUG_TR("engine.boot.info.crash_artifact"), crashArgs);
+    }
 
     if (!options.benchRoot.empty())
     {
