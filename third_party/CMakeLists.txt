@@ -279,6 +279,84 @@ if(LUAUG_DEBUG_UI)
     target_link_libraries(luaug_imgui PRIVATE SDL3::SDL3-static)
 endif()
 
+# ---------------------------------------------------------------------------
+# The asset pipeline (ADR 0010): glTF in, optimized meshes out. Wired here from
+# M4, which is the milestone whose `asset` module links them.
+#
+# simdjson is first and it is not optional: fastgltf requires it
+# unconditionally (its CMakeLists.txt:77-82) and, with no `simdjson::simdjson`
+# target already defined, downloads the amalgamated pair from
+# raw.githubusercontent.com into its own vendored tree at configure time, with
+# no hash check -- R5, R13, R14 and ADR 0032's fetch rule in one upstream
+# default. ADR 0036 vendors simdjson and defines that target here, BEFORE
+# fastgltf is added, so the download branch is unreachable; a patch on fastgltf
+# turns that branch into a FATAL_ERROR so a future version cannot quietly
+# resume fetching.
+#
+# The amalgamated pair is compiled directly rather than by adding simdjson's
+# own subdirectory: upstream's CMake builds tests, benchmarks and tools, and
+# its singleheader/ directory exists to *regenerate* the amalgamation with
+# Python rather than to compile it. Two files are what fastgltf consumes.
+add_library(luaug_simdjson STATIC "${CMAKE_CURRENT_SOURCE_DIR}/simdjson/singleheader/simdjson.cpp")
+add_library(simdjson::simdjson ALIAS luaug_simdjson)
+# BUILD_INTERFACE, not a bare path: naming this target in fastgltf's export set
+# below makes CMake check its interface for source-tree paths, and a target that
+# advertised one would be describing a directory that does not exist on whatever
+# machine consumed the installed package. fastgltf's own include directories are
+# written the same way (its CMakeLists.txt:81).
+target_include_directories(luaug_simdjson SYSTEM PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/simdjson/singleheader>)
+target_compile_features(luaug_simdjson PUBLIC cxx_std_17)
+
+#   COMPILE_AS_CPP20 -- the engine is C++20 and fastgltf's types cross the seam
+#                       into our headers; compiling it as C++17 beside C++20
+#                       callers is an ODR hazard nobody needs.
+#   TESTS/EXAMPLES/DOCS/GLTF_RS/ASSIMP
+#                    -- upstream's own benchmark and test rig. All default OFF;
+#                       set explicitly because `cmake/dependencies.cmake`
+#                       FetchContent-declares glm, Catch2 and corrosion the
+#                       moment any of them is ON, and a network fetch during
+#                       configure is exactly what ADR 0036 exists to prevent.
+set(FASTGLTF_COMPILE_AS_CPP20 ON  CACHE BOOL "" FORCE)
+set(FASTGLTF_ENABLE_TESTS     OFF CACHE BOOL "" FORCE)
+set(FASTGLTF_ENABLE_EXAMPLES  OFF CACHE BOOL "" FORCE)
+set(FASTGLTF_ENABLE_DOCS      OFF CACHE BOOL "" FORCE)
+set(FASTGLTF_ENABLE_GLTF_RS   OFF CACHE BOOL "" FORCE)
+set(FASTGLTF_ENABLE_ASSIMP    OFF CACHE BOOL "" FORCE)
+add_subdirectory(fastgltf ${CMAKE_BINARY_DIR}/third_party/fastgltf SYSTEM)
+
+# fastgltf's install rules are unconditional -- it exposes no INSTALL option --
+# and `install(EXPORT fastgltf-targets)` refuses to generate while anything in
+# fastgltf's link interface sits outside an export set. `luaug_simdjson` is
+# ours and is linked PRIVATE, which a static library still records as
+# `$<LINK_ONLY:...>` in its interface, so the check finds it and stops the
+# whole configure.
+#
+# Naming it in the same export set satisfies that check. Nothing is ever
+# installed from this build -- `luaug build` (M8) is the packaging story -- so
+# this is a generate-time formality rather than an install decision, and it is
+# the same shape as the `export(TARGETS spirv-cross-...)` line above, which
+# exists for the mirror-image reason.
+install(TARGETS luaug_simdjson EXPORT fastgltf-targets)
+
+# The guard is only a guard if it is checked. If fastgltf ever populates its
+# deps/ directory, the download branch ran, and this repository has quietly
+# gained an unpinned dependency fetched over the network.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/fastgltf/deps/simdjson")
+    message(FATAL_ERROR
+        "fastgltf downloaded simdjson into its vendored tree -- the ADR 0036 guard has been defeated. "
+        "Delete third_party/fastgltf/deps and re-run `lute tools/repo/vendor.luau sync fastgltf`.")
+endif()
+
+#   DEMO/GLTFPACK -- upstream's sample viewer and CLI; we link the library.
+#   INSTALL       -- defaults ON and would add install rules for a static
+#                    library nothing installs.
+set(MESHOPT_BUILD_DEMO     OFF CACHE BOOL "" FORCE)
+set(MESHOPT_BUILD_GLTFPACK OFF CACHE BOOL "" FORCE)
+set(MESHOPT_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(MESHOPT_INSTALL        OFF CACHE BOOL "" FORCE)
+add_subdirectory(meshoptimizer ${CMAKE_BINARY_DIR}/third_party/meshoptimizer SYSTEM)
+
 # Restored so nothing above this directory inherits the ceiling. Our own build
 # does not shell out to git during configure today, and this is what keeps that
 # from becoming a silent dependency if it ever does.

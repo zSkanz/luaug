@@ -18,7 +18,22 @@ set(LUAU_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(LUAU_EXTERN_C OFF CACHE BOOL "" FORCE)
 set(LUAU_WERROR OFF CACHE BOOL "" FORCE)
 
-add_subdirectory(${LUAUG_THIRD_PARTY_DIR}/luau ${CMAKE_BINARY_DIR}/third_party/luau SYSTEM)
+# EXCLUDE_FROM_ALL, and it is load-bearing rather than tidiness. Upstream creates
+# twelve libraries unconditionally -- third_party/luau/CMakeLists.txt:31-57, with
+# options guarding only the CLI, test and web targets (lines 9-15) -- and this
+# engine links six: Common, Ast, Bytecode, Compiler, CodeGen, VM. The other six
+# were compiled on every build and thrown away, Luau.Analysis worst of all: 407 s
+# of the 1178 s of compile time a cold RelWithDebInfo build spent, 35% of it.
+# Excluding them took a cold build on twenty cores from 53.9 s to 34.8 s.
+#
+# Upstream exposes no option to switch Analysis off, so the alternative was
+# patching the vendored tree (R13). This does not need one: the `all` target
+# stops reaching into Luau, and CMake still builds whatever the six linked
+# libraries pull in transitively. The effect is exactly "build what we link and
+# nothing else", and it keeps holding when the pin moves and upstream adds,
+# renames or splits a library.
+add_subdirectory(${LUAUG_THIRD_PARTY_DIR}/luau ${CMAKE_BINARY_DIR}/third_party/luau
+                 EXCLUDE_FROM_ALL SYSTEM)
 
 # The engine links these three. Analysis is deliberately absent: type checking
 # is `luau-analyze` at the pinned version (ADR 0018), a tool, never a runtime

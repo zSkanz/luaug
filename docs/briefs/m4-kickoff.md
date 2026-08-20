@@ -70,6 +70,16 @@ explorer and properties"):
       descriptors, honouring `readOnly` and going through the same setters a
       script goes through — never a second write path
 
+The triangle sample and its Android package, added by human decision on
+2026-08-20 after the same gap was hit from two directions on the same day:
+
+- [ ] a standalone triangle sample — window, clear, one triangle through
+      `rhi_sdlgpu` — deliberately **not** `luaug-host`, which links the Luau VM
+      and answers a much larger question
+- [ ] an Android project around it, from SDL3's own vendored template, with the
+      shaders shipped as SPIR-V
+- [ ] the nightly Android job builds and packages it
+
 Carried debt, scheduled into M4 by the same decision:
 
 - [ ] **Trim `Luau.Analysis`** (carried from M0) — a patch under
@@ -321,6 +331,64 @@ there is **no per-property default** — `ClassDescriptor` carries a `defaultNam
 for the instance, which is a different thing. A "reset to default" button would
 need the IDL to start emitting one, so the panel does not offer one in M4.
 
+### 18. The triangle sample links `asset` for its eyes, and that is why the asset module came first
+
+§8's observation rule is not satisfied by "the code looks right": a change with
+visible output is verified by a screenshot. So the sample needs a PNG writer,
+and until this milestone the only one lived in `engine/app` — which links the
+Luau VM, the scene, the script host and everything else the sample exists to
+avoid.
+
+That is the whole reason `engine/asset` was created before the sample rather
+than after: `app::writePng` moved into `asset::writePng`, exactly as its own
+header had promised since M1 that M4 would do. The sample links
+core + platform + rhi + render + asset, and no VM.
+
+*Rejected:* a second PNG writer inside the sample, and linking `luaug_app` to
+borrow the first one. The first duplicates the thing the move just consolidated;
+the second puts a Luau VM inside the artifact whose entire purpose is to not
+have one.
+
+### 19. The sample answers one question, and it is not "does the engine work"
+
+It draws a triangle through `rhi_sdlgpu` and nothing else. No Luau, no scene, no
+`RenderWorld`, no content directory. The question the human's device checkpoint
+asks is narrow — **does SDL3 GPU rasterize on this phone** — and ADR 0005 says
+why it is worth asking: Android support there is officially "limited", with bgfx
+as the hedge.
+
+A sample that also booted a VM and loaded a project would fail on Android for a
+dozen reasons that have nothing to do with the answer, and each one would have to
+be excluded before the result meant anything.
+
+Its shaders ship as SPIR-V because Android is Vulkan, and it reads them the way
+the host does — `ShaderLibrary` over a content directory — with **the APK's
+asset staging as the one open question**, because `std::filesystem` does not
+read an APK. That is named in the risks rather than assumed away.
+
+### 17. One glTF file is one mesh, and `api-design.md` §2.6 already said so
+
+A `MeshPart` names a file and renders it. That is not an invention: §2.6's
+prefab example builds a tree from `MeshContent = "asset://models/trunk.glb"`
+and a sibling `MeshPart` naming `leaves.glb`, so a multi-part model is multiple
+MeshParts rather than one file addressed piecewise. Node transforms inside the
+file are baked into the vertices.
+
+A file whose mesh carries several primitives with different materials is
+ordinary glTF and becomes several **submeshes**, each with its own material and
+its own bounds — which is also the unit the renderer culls and sorts, since a
+draw is a submesh.
+
+*Rejected:* a URN fragment syntax (`asset://models/scene.glb#Mesh3`) so one file
+could feed many MeshParts. It would need a spec change in api-design, and the
+prefab path that M7 builds is the answer the document already has for
+assembling many meshes into one thing.
+
+*Also rejected:* flattening every primitive into one material, the way a Roblox
+MeshPart has one texture. The file has the materials; discarding them to match
+another engine's limitation would make "material handling per api-design.md"
+mean less than the file already offers.
+
 ## The three seams, and what reopening each would have cost
 
 | Roadmap constraint | Where it lands | Cost if deferred |
@@ -419,12 +487,16 @@ Interfaces before implementations, and the freeze last:
    Deliberately after the new classes exist, so its first run is against a
    `Camera`, a `MeshPart` and a `PointLight` rather than against `Part` alone —
    a generic sweep that has only ever swept one class has not been tested.
-10. The three carried-debt items. `luaug --version` and the `Luau.Analysis`
+10. The triangle sample, then its Android project and the nightly packaging
+    step. The sample is verifiable here on both tiers with a screenshot; the
+    APK is not — there is no Android SDK, NDK or JDK on this machine, so only a
+    runner can build it and only the human can run it.
+11. The three carried-debt items. `luaug --version` and the `Luau.Analysis`
     patch are independent of everything above and can be taken whenever the
     tree is quiet; **`api-dump.json` must land before step 7's IDL edits**, or
     its first diff is the whole of M4's new surface arriving at once and it
     guards nothing.
-11. Goldens, screenshots, perf, the freeze, the gate.
+12. Goldens, screenshots, perf, the freeze, the gate.
 
 ## Subagent plan
 
@@ -511,6 +583,17 @@ frozen is the expensive order.
    look like.
 
 ## Open questions this brief does not settle
+
+- **How the triangle sample reads its shaders inside an APK.** `ShaderLibrary`
+  resolves a content directory through `std::filesystem`, and an APK's assets
+  are not a filesystem — they are a zip the platform reads through its own API.
+  Three ways out: embed the SPIR-V in the binary as generated bytes, extract the
+  assets to internal storage on first run, or teach `ShaderLibrary` to read
+  through `SDL_IOStream`. The third is the one the engine will eventually need
+  and the largest; the first is the smallest thing that answers the checkpoint's
+  actual question. Decide when the packaging is attempted, and record which,
+  because M7's packaging inherits it.
+
 
 - **Which real glTF asset ships in the repository, and under which licence.** The
   roadmap authorises "permissively-licensed sample assets, licenses recorded in
@@ -668,6 +751,41 @@ exclusion would need; nothing needs one yet.
 The pattern across findings 1, 2, 3 and 6 is one thing: **this repository has
 been trusting its own prose about `third_party/` instead of checking it.** Four
 claims, four wrong, none of them expensive to verify.
+
+**7. The dead third of every build was removable without a patch, and the doc
+that described it was wrong in a way nobody could have noticed.**
+`architecture.md` §8 said "Compiler+Analysis gated by `LUAUG_LUAU_COMPILER`".
+Analysis was linked under **no** profile — `cmake/luaug_luau.cmake`'s own comment
+said so — and upstream compiled it anyway, because
+`third_party/luau/CMakeLists.txt:31-57` creates all twelve libraries
+unconditionally and guards only the CLI, test and web executables.
+
+So the carried M0 item was never about a gate: it was 407 s of the 1178 s a cold
+build spent compiling, thrown away every time. The fix is not the patch the
+roadmap expected but `EXCLUDE_FROM_ALL` on our own `add_subdirectory` — the
+targets stay declared, the `all` target stops reaching them, and CMake still
+builds transitively whatever the six libraries we link require. **53.9 s → 34.8 s
+cold on twenty cores, −35%**, and 22/22 tests unchanged. It also survives a pin
+bump better than a patch would, because it names no upstream target.
+
+Verified by deleting `Luau.Analysis.lib` from an existing build tree and
+rebuilding: it does not come back. An incremental build directory still holding
+yesterday's artifacts is not evidence of anything, which is the trap this check
+exists to avoid.
+
+**8. Wiring fastgltf broke the configure, and the error moved twice before it
+was right.** fastgltf exposes no install option and its
+`install(EXPORT fastgltf-targets)` is unconditional, so it refuses to generate
+while anything in its link interface sits outside an export set — and
+`luaug_simdjson`, linked `PRIVATE`, is still recorded as `$<LINK_ONLY:...>` in a
+static library's interface. Naming our target in the same export set fixed that
+and produced a second error: an exported target may not advertise a source-tree
+include path. `$<BUILD_INTERFACE:...>` is the answer, and it is how fastgltf
+writes its own.
+
+Nothing is ever installed from this build, so both are generate-time formalities
+— but they stop the whole configure, which is how a subagent building in an
+isolated tree found it before the orchestrator did.
 
 ## Gate Record
 

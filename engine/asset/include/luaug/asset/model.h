@@ -1,0 +1,152 @@
+// CPU-side geometry and materials (architecture.md §2 `asset`, ADR 0010).
+//
+// This module produces these; `render` owns every GPU upload and this header
+// mentions no GPU type at all. That split is what lets a mesh arrive from a
+// glTF file, from a procedural generator, or from a voxel mesher without the
+// renderer knowing which -- the M4 brief's Decision 4, and one of the three
+// seams the roadmap requires stay open.
+//
+// One glTF file is one mesh. `api-design.md` §2.6's prefab example settles it:
+// a `MeshPart` names `asset://models/trunk.glb` and a second `MeshPart` names
+// `leaves.glb`, so a multi-part model is multiple MeshParts rather than one
+// file addressed piecewise. A file whose mesh has several primitives with
+// different materials is normal and becomes several submeshes below.
+#pragma once
+
+#include <string>
+#include <vector>
+
+#include "luaug/asset/image.h"
+#include "luaug/core/math.h"
+#include "luaug/core/types.h"
+
+namespace luaug::asset
+{
+
+using core::AABB;
+using core::Color3;
+using core::f32;
+using core::u32;
+using core::Vec3;
+
+// The one static-mesh vertex, interleaved, 48 bytes.
+//
+// Interleaved rather than one stream per attribute because every pass in M4
+// reads every attribute: a deinterleaved layout pays for itself when a depth
+// or shadow pass reads position alone, and the moment that is measured rather
+// than assumed is the moment to split it. Recorded so the choice is revisited
+// with numbers instead of taste.
+//
+// `tangent.w` is the bitangent's handedness (+1 or -1), which is glTF's own
+// convention -- storing the bitangent instead would cost 12 bytes to say what
+// one sign already says.
+struct Vertex
+{
+    Vec3 position;
+    Vec3 normal;
+    f32 tangent[4]{0.0f, 0.0f, 0.0f, 1.0f};
+    f32 uv[2]{0.0f, 0.0f};
+};
+
+static_assert(sizeof(Vertex) == 48, "the vertex layout is a GPU buffer layout; changing it changes the shaders");
+
+// How a material's alpha is meant to be read. glTF's three modes, kept because
+// they are what the file says and translating them into something else here
+// would only move the switch.
+enum class AlphaMode : core::u8
+{
+    Opaque,
+    // Alpha is a coverage test against `alphaCutoff`, not a blend.
+    Mask,
+    Blend,
+};
+
+// An index into `Model::images`, plus the UV set it samples. `Missing` rather
+// than an optional so the struct stays trivially copyable and hashable, which
+// is what a material sort key needs (Decision 7).
+struct TextureRef
+{
+    static constexpr u32 Missing = 0xFFFFFFFFu;
+
+    u32 image = Missing;
+    u32 uvSet = 0;
+
+    [[nodiscard]] constexpr bool present() const noexcept { return image != Missing; }
+};
+
+// The material as the file describes it, in the terms the default PBR shader
+// consumes. No GPU handles, no shader objects: `render` resolves the name and
+// the images into a pipeline and bindings.
+//
+// `shader` is a name rather than an enum, which is the roadmap's second design
+// constraint (M4 brief, Decision 6): a material that wants vertex-displaced
+// water names a different shader and nothing else changes. Everything a glTF
+// produces names the built-in `"pbr"`.
+struct MaterialDef
+{
+    std::string name;
+    std::string shader = "pbr";
+
+    Color3 baseColorFactor{1.0f, 1.0f, 1.0f};
+    f32 baseColorAlpha = 1.0f;
+    f32 metallicFactor = 1.0f;
+    f32 roughnessFactor = 1.0f;
+    Color3 emissiveFactor{0.0f, 0.0f, 0.0f};
+    // Scales the sampled tangent-space normal's XY, per glTF's normalTexture
+    // scale. 1.0 is "use the texture as authored".
+    f32 normalScale = 1.0f;
+
+    AlphaMode alphaMode = AlphaMode::Opaque;
+    f32 alphaCutoff = 0.5f;
+    bool doubleSided = false;
+
+    TextureRef baseColor;
+    TextureRef normal;
+    // glTF packs occlusion, roughness and metalness into one texture's R, G and
+    // B channels. One reference, because they are one image.
+    TextureRef metallicRoughness;
+    TextureRef emissive;
+};
+
+// A contiguous run of indices drawn with one material. A glTF primitive becomes
+// one of these.
+struct Submesh
+{
+    u32 firstIndex = 0;
+    u32 indexCount = 0;
+    // Index into `Model::materials`. Every submesh has one: a primitive with no
+    // material in the file gets the default appended by the importer, because a
+    // draw with no material is a draw the renderer cannot make.
+    u32 material = 0;
+    // Of this submesh alone, in the model's own space. The renderer culls per
+    // draw, and a draw is a submesh.
+    AABB bounds;
+};
+
+// One mesh: the geometry a single `MeshPart` renders.
+//
+// Indices are always u32. A 16-bit path would halve the index buffer for small
+// meshes and is worth having when something measures it; until then one width
+// is one code path in the importer, the uploader and every backend.
+struct Mesh
+{
+    std::vector<Vertex> vertices;
+    std::vector<u32> indices;
+    std::vector<Submesh> submeshes;
+    AABB bounds;
+};
+
+// What an importer produces from one file: the mesh, the materials it names,
+// and the images those materials sample, decoded.
+//
+// Images are decoded here rather than left as encoded bytes because the caller
+// that matters uploads them immediately, and because an image referenced by two
+// materials should be decoded once.
+struct Model
+{
+    Mesh mesh;
+    std::vector<MaterialDef> materials;
+    std::vector<Image> images;
+};
+
+} // namespace luaug::asset

@@ -696,8 +696,15 @@ self-registration.**
   (`INTERPROCEDURAL_OPTIMIZATION`) in shipping only.
 - **Luau configuration:** vendored pin (0.734; upgraded only via
   `tools/repo/vendor.luau` + ADR), `LUA_VECTOR_SIZE=3`, `LUA_VECTOR_DOUBLE=0`
-  (ADR 0013); targets VM+CodeGen always; Compiler+Analysis gated by
-  `LUAUG_LUAU_COMPILER` (ON in debug/dev/profile, OFF shipping).
+  (ADR 0013); targets VM+CodeGen always; Compiler+Ast gated by
+  `LUAUG_LUAU_COMPILER` (ON in debug/dev/profile, OFF shipping); **Analysis is
+  never built** — type checking is `luau-analyze` at the pinned toolchain
+  version (ADR 0018), a tool rather than a runtime dependency. This line said
+  "Compiler+Analysis gated" until M4; Analysis was in fact linked under no
+  profile at all, and upstream built it on every build anyway because its
+  CMakeLists creates all twelve libraries unconditionally. `cmake/luaug_luau.cmake`
+  now adds the directory `EXCLUDE_FROM_ALL`, which took a cold build from 53.9 s
+  to 34.8 s — Analysis alone was 35% of the compile time.
   `luaug_add_luau_bytecode()` precompiles `runtime/` + project scripts at
   pack time with the §5 options.
 - **Shaders in the build:** `luaug_add_shaders(target GLOB shaders/src/*.hlsl)`

@@ -22,6 +22,12 @@ luaug_add_module(asset
 # once, in src/image.cpp.
 target_include_directories(luaug_asset SYSTEM PRIVATE "${LUAUG_THIRD_PARTY_DIR}/stb")
 
+# fastgltf and meshoptimizer are PRIVATE, and that is the point of this module:
+# no fastgltf type appears in `luaug/asset/*.h`, so `render` and `scene` link an
+# importer without inheriting a parser's headers. R17 is about the Luau API, but
+# the same instinct applies one layer down.
+target_link_libraries(luaug_asset PRIVATE fastgltf::fastgltf meshoptimizer)
+
 luaug_add_module_tests(asset
     MODULES
         asset
