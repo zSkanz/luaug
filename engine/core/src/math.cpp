@@ -1,5 +1,6 @@
 #include "luaug/core/math.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace luaug::core
@@ -416,6 +417,36 @@ void toHsv(Color3 color, f32& hue, f32& saturation, f32& value) noexcept
     hue = sextants / 6.0f;
     if (hue < 0.0f)
         hue += 1.0f;
+}
+
+Mat3 fromEulerYxz(Vec3 radians) noexcept
+{
+    // Intrinsic YXZ read left to right: yaw, then pitch about the axis the yaw
+    // produced, then roll about the axis those two produced. Under the
+    // column-vector convention that composes right to left.
+    return rotationY(radians.y) * rotationX(radians.x) * rotationZ(radians.z);
+}
+
+Vec3 toEulerYxz(const Mat3& rotation) noexcept
+{
+    // For R = Ry(y) * Rx(x) * Rz(z), the second row is
+    // [ cos(x)sin(z), cos(x)cos(z), -sin(x) ], which gives pitch directly and
+    // roll from the pair beside it. Yaw comes from the third column, which the
+    // pitch rotation leaves in the XZ plane.
+    const f32 sinPitch = std::clamp(-rotation.m[2][1], -1.0f, 1.0f);
+    const f32 pitch = std::asin(sinPitch);
+
+    // Gimbal lock: |sin(pitch)| == 1 collapses yaw and roll into one degree of
+    // freedom, so the pair is not recoverable. Roll is resolved to zero and the
+    // whole rotation is expressed as yaw, which is the convention that keeps a
+    // round trip stable instead of splitting the angle arbitrarily.
+    constexpr f32 lockEpsilon = 1.0f - 1e-6f;
+    if (std::abs(sinPitch) > lockEpsilon)
+        return {pitch, std::atan2(-rotation.m[0][2], rotation.m[0][0]), 0.0f};
+
+    const f32 yaw = std::atan2(rotation.m[2][0], rotation.m[2][2]);
+    const f32 roll = std::atan2(rotation.m[0][1], rotation.m[1][1]);
+    return {pitch, yaw, roll};
 }
 
 } // namespace luaug::core

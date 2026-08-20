@@ -701,3 +701,60 @@ TEST_CASE("Color3 channels are not clamped, because HDR values are legal")
     // lerp between HDR endpoints does not clamp on the way through.
     CHECK(near(lerp(Color3{0.0f, 0.0f, 0.0f}, Color3{4.0f, -2.0f, 0.0f}, 0.5f), Color3{2.0f, -1.0f, 0.0f}));
 }
+
+// --- YXZ euler round trip ----------------------------------------------------
+//
+// `BasePart.Orientation` reads through `toEulerYxz` and writes through
+// `fromEulerYxz`, so the two have to be exact inverses or reading a part's
+// orientation right after setting it would return something else.
+
+TEST_CASE("euler YXZ round-trips through the rotation it builds")
+{
+    const f32 angles[] = {-2.9f, -1.2f, -0.4f, 0.0f, 0.3f, 1.1f, 2.7f};
+    // Pitch stays clear of the poles here; the pole is its own test below,
+    // because there the pair genuinely is not recoverable.
+    const f32 pitches[] = {-1.2f, -0.5f, 0.0f, 0.5f, 1.2f};
+    for (const f32 yaw : angles)
+    {
+        for (const f32 pitch : pitches)
+        {
+            for (const f32 roll : angles)
+            {
+                const Mat3 built = fromEulerYxz(Vec3{pitch, yaw, roll});
+                const Vec3 recovered = toEulerYxz(built);
+                const Mat3 rebuilt = fromEulerYxz(recovered);
+
+                // The angles themselves may differ by a full turn or by the
+                // equivalent mirrored triple; the ROTATION must not.
+                for (int column = 0; column < 3; ++column)
+                {
+                    for (int row = 0; row < 3; ++row)
+                        CHECK(built.m[column][row] == doctest::Approx(rebuilt.m[column][row]).epsilon(1e-4));
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("euler YXZ keeps pitch in the principal range and resolves the poles")
+{
+    // Pitch is the middle rotation, so its branch is the one that has to be
+    // chosen: [-pi/2, pi/2] is the documented half.
+    const Vec3 recovered = toEulerYxz(fromEulerYxz(Vec3{2.0f, 0.3f, 0.4f}));
+    CHECK(recovered.x <= doctest::Approx(1.5708).epsilon(1e-4));
+    CHECK(recovered.x >= doctest::Approx(-1.5708).epsilon(1e-4));
+
+    // At the pole, yaw and roll describe the same rotation and the pair is not
+    // recoverable. Roll resolves to zero rather than splitting the angle
+    // arbitrarily, which is what keeps a round trip stable.
+    const Vec3 atPole = toEulerYxz(fromEulerYxz(Vec3{1.5707963f, 0.8f, 0.6f}));
+    CHECK(atPole.z == doctest::Approx(0.0f).epsilon(1e-4));
+
+    const Mat3 built = fromEulerYxz(Vec3{1.5707963f, 0.8f, 0.6f});
+    const Mat3 rebuilt = fromEulerYxz(atPole);
+    for (int column = 0; column < 3; ++column)
+    {
+        for (int row = 0; row < 3; ++row)
+            CHECK(built.m[column][row] == doctest::Approx(rebuilt.m[column][row]).epsilon(1e-3));
+    }
+}

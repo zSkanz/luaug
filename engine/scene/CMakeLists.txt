@@ -18,6 +18,7 @@ luaug_add_module(scene
         src/class_registry.cpp
         src/world.cpp
         src/world_hash.cpp
+        src/native_accessors.cpp
     DEPS
         core
 )

@@ -195,6 +195,19 @@ struct Mat3
 [[nodiscard]] Mat3 rotationY(f32 radians) noexcept;
 [[nodiscard]] Mat3 rotationZ(f32 radians) noexcept;
 
+// The YXZ euler pair, in radians: yaw about Y, then pitch about X, then roll
+// about Z, applied as intrinsic rotations. This is `CFrame.fromEuler`'s default
+// order and what `BasePart.Orientation` is expressed in (api-design.md §2.3),
+// so the two directions have to be exact inverses of each other or a read of
+// `Orientation` after a write of it would drift.
+//
+// `toEulerYxz` picks the branch with pitch in [-pi/2, pi/2]; at the poles, where
+// yaw and roll describe the same rotation, roll is resolved to zero. Every euler
+// extraction has to make that choice, and leaving it unstated is how two call
+// sites come to disagree.
+[[nodiscard]] Mat3 fromEulerYxz(Vec3 radians) noexcept;
+[[nodiscard]] Vec3 toEulerYxz(const Mat3& rotation) noexcept;
+
 // The canonical world transform: f64 translation, f32 rotation. Rotation stays
 // f32 because a rotation has no magnitude to lose precision in -- the error is
 // bounded by the angle, not by the distance from the origin.

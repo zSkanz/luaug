@@ -15,6 +15,7 @@
 #pragma once
 
 #include <optional>
+#include <string>
 #include <span>
 #include <unordered_map>
 #include <vector>
@@ -72,6 +73,26 @@ struct InstanceRecord
 // walk this, and R10 forbids either observing a container's own order.
 using AttributeMap = std::vector<std::pair<core::NameAtom, Value>>;
 using TagSet = std::vector<core::NameAtom>;
+
+// Engine state that a *service* property reads.
+//
+// `RunService.SimTime` and `PhysicsService.FixedTimestep` are produced by the
+// frame scheduler, which lives in `app` at L6 -- and the descriptors that
+// expose them are scene's, at L3, which cannot see it. So the scheduler writes
+// here and the accessors read here. One instance per world rather than a
+// component per service, because there is exactly one of each service in a
+// world and a component would be ceremony around a single struct.
+struct EngineState
+{
+    // Seconds, constant for the whole tick and advanced by the scheduler
+    // (api-design.md §2.1).
+    f64 simTime = 0.0;
+    f64 fixedTimestep = 1.0 / 60.0;
+    bool paused = false;
+    bool overlayVisible = false;
+    std::string engineVersion;
+    std::string luauVersion;
+};
 
 // Per-parent name index. Held in its own pool rather than inline in the record
 // so that a leaf instance -- most of them -- pays nothing for it.
@@ -207,6 +228,9 @@ public:
     [[nodiscard]] core::Pcg32& rng() noexcept { return m_rng; }
 
     [[nodiscard]] usize instanceCount() const noexcept { return m_instances.size(); }
+    [[nodiscard]] EngineState& engineState() noexcept { return m_engineState; }
+    [[nodiscard]] const EngineState& engineState() const noexcept { return m_engineState; }
+
     [[nodiscard]] core::AtomTable& atoms() noexcept { return m_atoms; }
     // A property getter takes a `const World&`, and resolving an atom to text
     // is the one thing it routinely needs the table for.
@@ -253,6 +277,7 @@ private:
     // drain that carries their `Destroying` finishes.
     std::vector<core::InstanceId> m_pendingRetire;
 
+    EngineState m_engineState;
     ChangeQueue m_changes;
 };
 
