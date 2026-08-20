@@ -6,17 +6,21 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 ## State
 
 - **M4.5 — Correcting the World: the Environment the Renderer Never Read —
-  AWAITING HUMAN REVIEW** since 2026-08-20. The gate is green and that is
-  evidence, not a decision: the roadmap and MASTER_PROMPT §6 both say this
-  milestone may be marked complete only by explicit human approval. **No
-  `milestone/m4.5` tag exists and none will before the human says so in words.**
-  Brief, with the Gate Record, the §app audit and seventeen Findings:
+  COMPLETE, signed off 2026-08-20** by the human in words, which is the only
+  thing that closes a milestone (MASTER_PROMPT §6, and the roadmap says it again
+  for this one specifically). Tagged `milestone/m4.5`. Brief, with the Gate
+  Record, the §app audit and seventeen Findings:
   [`docs/briefs/m4.5-kickoff.md`](docs/briefs/m4.5-kickoff.md).
-- **M4 — Seeing the World — NOT complete**, tagged `milestone/m4` on 2026-08-20
-  over the defect M4.5 exists to fix. Whether that tag stands is the human's
-  call. Its build order, module work, RHI freeze and Android checkpoint all
-  stand; what did not was the claim that what it drew was what its scene
-  described. Every image it recorded has now been re-recorded.
+- **M4 — Seeing the World — signed off 2026-08-20**, and `milestone/m4` stands.
+  It was tagged over a defect and written up complete on its own gate, which is
+  what made §6 spell out that a green gate is evidence rather than a decision.
+  What restores the claim is not the approval but the work: all five of its gate
+  items are now green against **re-recorded** artifacts — both capture goldens,
+  the lavapipe screenshot, the determinism traces on both tiers and the 1080p
+  baseline — none of which existed when the tag was made.
+  **This reads the human's "aprovado para finalizar" as covering both entries
+  that were under `## Blocked`.** If the intent was M4.5 alone, the tag comes
+  back off and this bullet returns to "NOT complete" on a word.
 - **M3 — Tooling Loop — signed off 2026-08-20**, tagged `milestone/m3`;
   **M2 — Kernel — signed off 2026-08-20** (`milestone/m2`); **M1** signed off
   2026-08-19 (`milestone/m1`); **M0** signed off 2026-08-19 (`milestone/m0`).
@@ -91,9 +95,14 @@ and no `Sky`.
 - **D018 — `luaug_net_tests` hung once** on Windows and passed on a re-run. §12
   quarantines on the second occurrence; this is the entry that makes a second
   one countable.
-- **M5 does not open until a human approves M4.5.** Not when the gate is green —
-  when the human says so. And not in this session either way (§6).
-- **When M5 opens, its first act is the clang-format gate**, on a quiet tree.
+- **M5 opens in a NEW session** (§6: never start a second milestone in the one
+  that closed a milestone). Its first action, written out so the next session
+  does not have to re-derive it: **turn on the clang-format gate** — pin the
+  toolchain version, reformat the whole C++ tree in one commit that does nothing
+  else, and add the check to `scripts/gates/`. M4's brief moved it here
+  deliberately, because doing it while the renderer was being written would have
+  bought a milestone of diff noise. Then write
+  `docs/briefs/m5-kickoff.md` from `docs/roadmap.md`'s M5 section.
 - **When M5 wires physics: `PivotOffset` is not a centre of mass.** Jolt has its
   own notion of where a body turns about, and joining them would make hinging a
   door change how it falls. Said in `components.h` where the field is.
@@ -137,15 +146,9 @@ and no `Sky`.
 
 ## Blocked — needs human
 
-- **M4.5 sign-off.** The gate is green on both tiers, the Gate Record is in the
-  brief, and the three additions the roadmap asked for were each verified by
-  reintroducing the defect they exist to catch. **Nothing here is marked
-  complete and nothing is tagged**, per the roadmap's own instruction and
-  MASTER_PROMPT §6. The deliverable to look at is
-  [`docs/images/daystrip.png`](docs/images/daystrip.png): one day, fixed camera,
-  the sun crossing and the pane fading.
-- **M4 sign-off, and whether `milestone/m4` stands.** Its five gate items are now
-  green against re-recorded artifacts rather than against the defective ones.
+- (none — M4.5 and M4 were signed off on 2026-08-20; the open defects that
+  outlived them are in [`docs/defects.md`](docs/defects.md) and are work rather
+  than questions)
 
 ## Decisions pending ADR
 
@@ -192,8 +195,10 @@ there when this file passed its ~300-line cap.
   And **an audit scoped to one module is not an audit**: the sweep that "found"
   `Model.PrimaryPart` unread searched `engine/render` for a value consumed in
   `engine/script`.
-  Next: **stop for M4.5 human review** (§6, and the roadmap says it again for
-  this milestone). Do not tag, do not write COMPLETE, do not open M5.
+  **Signed off by the human the same day** ("aprovado para finalizar"), which is
+  what closed it; tagged `milestone/m4.5`, and `milestone/m4` stands with it.
+  Next: **open M5 in a new session** (§6) and make its first act the clang-format
+  gate, on a quiet tree.
 
 - **2026-08-20 (session 8, Claude Opus): M4 complete, awaiting sign-off.** The
   renderer, from a content URN to a lit pixel: `engine/asset` with a glTF
