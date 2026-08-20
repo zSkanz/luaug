@@ -72,6 +72,10 @@ it, and building it on speculation is what §5 rejects.
   `.luau` file and watching `luaug dev` rebuild the world, not by rebuilding the
   engine. If that turns out not to be practical, that is a finding worth more
   than the feature it blocks.
+- **CI is green on `main` at `2794263`**, and the two `build-test` tiers ran the
+  three steps this milestone added: the toolchain install, `luaug test`, and the
+  hot-reload suite. Gate item 2 is therefore green *in CI* and not only locally,
+  which is what it actually asks for.
 - **CI went red once on the M3 tag and was fixed in the same session.**
   `scripts/luaug.sh` was committed without its executable bit — a Git working
   tree on Windows does not track file modes, and a local run invokes the script
