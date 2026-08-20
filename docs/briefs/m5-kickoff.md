@@ -702,10 +702,21 @@ Frame time for the deliverable at 1080p: **median 1.11 ms, worst 1.93 ms**
     and the answer is that no per-character list exists to order: each character
     sweeps the broad phase, and the broad phase is the same structure every
     body pair already goes through, whose determinism the milestone's other
-    work already covers. What IS observable is the order the mirror calls
-    `Move` in, and that is slot order over `physics_sync`'s vector — handle
-    order, a pure function of the operation sequence, the same discipline
-    `collectActiveBodies` and the contact list follow (U-55).
+    work already covers. What IS observable is the order the mirror drives
+    the characters in, and that is the rigid-body pool's dense slot walk
+    (`physics_sync.cpp:351`) — a pure function of the operation sequence, the
+    same discipline `collectActiveBodies` and the contact list follow (U-55).
+    The `m_characters` side table is an `unordered_map` and is deliberately
+    never walked to decide anything: it is looked up by key.
+
+    The one place this could have gone wrong is the one U-55 names: broad-phase
+    query order is thread-order-dependent, and a character's contacts come from
+    a broad-phase query. Jolt sorts them for exactly that reason and says so
+    where it does — `CharacterVirtual::GetContactsAtPosition` ends in a
+    `QuickSort` over a `ContactOrderingPredicate`, above a comment reading "the
+    broadphase bounding boxes will not be deterministic … therefore we need to
+    sort the contacts to preserve determinism" (`CharacterVirtual.cpp:427`).
+    Nothing for this engine to add, and now written down rather than assumed.
   - **Cost.** Not O(n²). A registration list would have been; the inner bodies
     are indexed by the broad phase, so fifty characters cost fifty tree queries
     rather than 1,225 pair tests. Measured with fifty of them shoulder to
