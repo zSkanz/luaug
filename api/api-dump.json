@@ -7,12 +7,52 @@
       "Tags": ["Abstract"],
       "Properties": [
         {
+          "Name": "Anchored",
+          "Type": "boolean",
+          "Default": "false"
+        },
+        {
+          "Name": "AngularVelocity",
+          "Type": "vector",
+          "ReadOnly": true
+        },
+        {
           "Name": "CFrame",
           "Type": "CFrame"
         },
         {
+          "Name": "CanCollide",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
+          "Name": "CanQuery",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
+          "Name": "CollisionGroup",
+          "Type": "string",
+          "Default": "\"Default\""
+        },
+        {
           "Name": "Color",
           "Type": "Color3"
+        },
+        {
+          "Name": "Density",
+          "Type": "number",
+          "Default": "1"
+        },
+        {
+          "Name": "Friction",
+          "Type": "number",
+          "Default": "0.3"
+        },
+        {
+          "Name": "LinearVelocity",
+          "Type": "vector",
+          "ReadOnly": true
         },
         {
           "Name": "Orientation",
@@ -23,6 +63,11 @@
           "Type": "vector"
         },
         {
+          "Name": "Restitution",
+          "Type": "number",
+          "Default": "0"
+        },
+        {
           "Name": "Size",
           "Type": "vector"
         },
@@ -31,8 +76,39 @@
           "Type": "number"
         }
       ],
-      "Methods": [],
-      "Events": []
+      "Methods": [
+        {
+          "Name": "ApplyImpulse",
+          "Parameters": [
+            {
+              "Name": "impulse",
+              "Type": "vector"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Events": [
+        {
+          "Name": "TouchEnded",
+          "Parameters": [
+            {
+              "Name": "otherPart",
+              "Type": "BasePart"
+            }
+          ]
+        },
+        {
+          "Name": "Touched",
+          "Parameters": [
+            {
+              "Name": "otherPart",
+              "Type": "BasePart"
+            }
+          ]
+        }
+      ]
     },
     {
       "Name": "Camera",
@@ -58,6 +134,73 @@
       ],
       "Methods": [],
       "Events": []
+    },
+    {
+      "Name": "CharacterBody",
+      "Extends": "BasePart",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "AutoStepHeight",
+          "Type": "number",
+          "Default": "0.5"
+        },
+        {
+          "Name": "Grounded",
+          "Type": "boolean",
+          "ReadOnly": true
+        },
+        {
+          "Name": "JumpSpeed",
+          "Type": "number",
+          "Default": "8"
+        },
+        {
+          "Name": "MaxSlopeAngle",
+          "Type": "number",
+          "Default": "46"
+        },
+        {
+          "Name": "State",
+          "Type": "Enum.CharacterState",
+          "ReadOnly": true
+        },
+        {
+          "Name": "WalkSpeed",
+          "Type": "number",
+          "Default": "16"
+        }
+      ],
+      "Methods": [
+        {
+          "Name": "Jump",
+          "Parameters": [],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Move",
+          "Parameters": [
+            {
+              "Name": "direction",
+              "Type": "vector"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Events": [
+        {
+          "Name": "Landed",
+          "Parameters": [
+            {
+              "Name": "groundPart",
+              "Type": "BasePart?"
+            }
+          ]
+        }
+      ]
     },
     {
       "Name": "DataModel",
@@ -655,6 +798,10 @@
       "Tags": [],
       "Properties": [
         {
+          "Name": "CollisionFidelity",
+          "Type": "Enum.CollisionFidelity"
+        },
+        {
           "Name": "MeshContent",
           "Type": "Content"
         }
@@ -731,12 +878,48 @@
         {
           "Name": "FixedTimestep",
           "Type": "number",
-          "ReadOnly": true,
           "Default": "1/60",
           "ThreadSafety": "ReadParallel"
         }
       ],
-      "Methods": [],
+      "Methods": [
+        {
+          "Name": "CollisionGroupSetCollidable",
+          "Parameters": [
+            {
+              "Name": "a",
+              "Type": "string"
+            },
+            {
+              "Name": "b",
+              "Type": "string"
+            },
+            {
+              "Name": "collidable",
+              "Type": "boolean"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "GetRegisteredCollisionGroups",
+          "Parameters": [],
+          "Returns": ["{string}"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "RegisterCollisionGroup",
+          "Parameters": [
+            {
+              "Name": "name",
+              "Type": "string"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
       "Events": []
     },
     {
@@ -953,6 +1136,11 @@
         {
           "Name": "CurrentCamera",
           "Type": "Camera?"
+        },
+        {
+          "Name": "Gravity",
+          "Type": "vector",
+          "Default": "vector.create(0, -9.81, 0)"
         }
       ],
       "Methods": [],
@@ -1923,6 +2111,40 @@
   ],
   "Enums": [
     {
+      "Name": "CharacterState",
+      "Items": [
+        {
+          "Name": "Airborne",
+          "Value": 1
+        },
+        {
+          "Name": "Grounded",
+          "Value": 0
+        }
+      ]
+    },
+    {
+      "Name": "CollisionFidelity",
+      "Items": [
+        {
+          "Name": "Box",
+          "Value": 2
+        },
+        {
+          "Name": "Default",
+          "Value": 0
+        },
+        {
+          "Name": "Hull",
+          "Value": 1
+        },
+        {
+          "Name": "Precise",
+          "Value": 3
+        }
+      ]
+    },
+    {
       "Name": "LogLevel",
       "Items": [
         {
@@ -1969,6 +2191,19 @@
         {
           "Name": "Wedge",
           "Value": 4
+        }
+      ]
+    },
+    {
+      "Name": "RaycastFilterType",
+      "Items": [
+        {
+          "Name": "Exclude",
+          "Value": 0
+        },
+        {
+          "Name": "Include",
+          "Value": 1
         }
       ]
     },

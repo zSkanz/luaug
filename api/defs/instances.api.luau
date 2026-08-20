@@ -309,12 +309,11 @@ local Classes: { Schema.Class } = {
         },
     },
     {
-        -- The structural half only (m2-kickoff Decision 6). Anchored,
-        -- CanCollide, CanQuery, Material, CollisionGroup, Friction,
-        -- Restitution, Density, LinearVelocity, AngularVelocity,
-        -- ApplyImpulse, Touched and TouchEnded are promises about a
-        -- simulation that does not exist until M5, and a type-checked no-op
-        -- looks more like a working API than a missing member does.
+        -- The structural half arrived at M2 and the physical half at M5, when
+        -- there was a simulation to mean something by it. `Material` is still
+        -- absent: it is a surface look rather than rigidbody state, nothing
+        -- reads it, and a type-checked no-op looks more like a working API than
+        -- a missing member does (m2-kickoff Decision 6, still the rule).
         Name = "BasePart",
         Extends = "PVInstance",
         Module = "scene",
@@ -355,7 +354,105 @@ local Classes: { Schema.Class } = {
                 Type = "number",
                 Doc = "How see-through this part is, 0 fully opaque and 1 fully invisible.",
             },
-        },
+            {
+                Name = "Anchored",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether the simulation moves this part. An anchored part is immovable scenery that other "
+                    .. "parts collide with and gravity ignores -- not a very heavy part, a different kind of "
+                    .. "body -- so writing this rebuilds it in the simulation and keeps its transform.",
+            },
+            {
+                Name = "CanCollide",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether this part physically stops anything. A part with this off still reports Touched, "
+                    .. "which is what makes a checkpoint, a trigger volume or a pickup work: things pass through "
+                    .. "it and it notices.",
+            },
+            {
+                Name = "CanQuery",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether raycasts, shapecasts and box queries can see this part. Independent of CanCollide, "
+                    .. "because a part that blocks movement and a part a camera ray should ignore are different "
+                    .. "questions.",
+            },
+            {
+                Name = "CollisionGroup",
+                Type = "string",
+                Default = '"Default"',
+                Doc = "The named group deciding which other parts this one collides with, registered through "
+                    .. "`PhysicsService:RegisterCollisionGroup`. An unregistered name is an error rather than a "
+                    .. "silent fallback to Default: the failure mode of a typo here is a wall players walk "
+                    .. "through, which is expensive to find and cheap to refuse.",
+            },
+            {
+                Name = "Friction",
+                Type = "number",
+                Default = "0.3",
+                Doc = "How much this surface resists sliding, 0 frictionless and 1 very grippy. The value the "
+                    .. "solver uses for a contact combines both surfaces' -- one slippery part is enough to make "
+                    .. "a pair slide.",
+            },
+            {
+                Name = "Restitution",
+                Type = "number",
+                Default = "0",
+                Doc = "How much of an impact this surface gives back, 0 a dead stop and 1 a perfect bounce. "
+                    .. "Combined across a contact pair the same way Friction is.",
+            },
+            {
+                Name = "Density",
+                Type = "number",
+                Default = "1",
+                Doc = "Mass per cubic metre. Mass is this times the volume the Size and Shape describe, and there "
+                    .. "is no Mass property precisely so that the two cannot be set to contradict each other.",
+            },
+            {
+                Name = "LinearVelocity",
+                Type = "vector",
+                ReadOnly = true,
+                Doc = "How fast this part is moving, in metres per second, as of the last simulation tick. "
+                    .. "Read-only: a velocity assignment is an impulse with the mass divided out, and "
+                    .. "`ApplyImpulse` is that operation under a name that says what it does.",
+            },
+            {
+                Name = "AngularVelocity",
+                Type = "vector",
+                ReadOnly = true,
+                Doc = "How fast this part is spinning, in radians per second about each world axis, as of the "
+                    .. "last simulation tick.",
+            },
+        } :: { Schema.Property },
+        Methods = {
+            {
+                Name = "ApplyImpulse",
+                Parameters = { { Name = "impulse", Type = "vector" } },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Adds an instantaneous change of momentum at the part's centre of mass, in kilogram-metres "
+                    .. "per second. Applied at the next simulation tick and ignored by an anchored part, which "
+                    .. "has no momentum to change.",
+            },
+        } :: { Schema.Method },
+        Events = {
+            {
+                Name = "Touched",
+                Parameters = { { Name = "otherPart", Type = "BasePart" } },
+                Doc = "Fires once when another part begins touching this one, with the part it touched. Deferred "
+                    .. "like every signal here (ADR 0015), so it arrives at the next resumption point rather than "
+                    .. "inside the solver. A pair that stays in contact fires once, not once per tick -- including "
+                    .. "across the moment the simulation puts both parts to sleep.",
+            },
+            {
+                Name = "TouchEnded",
+                Parameters = { { Name = "otherPart", Type = "BasePart" } },
+                Doc = "Fires when a pair that was touching stops. Destroying a part does NOT fire it for that "
+                    .. "part's contacts: the instance is gone, and a signal on an instance nobody can reach is a "
+                    .. "signal nobody can handle.",
+            },
+        } :: { Schema.Event },
     },
     {
         Name = "Part",
@@ -386,7 +483,103 @@ local Classes: { Schema.Class } = {
                     .. "import leaves the previous mesh in place and reports why, because a part that silently "
                     .. "becomes invisible is harder to diagnose than one that says it could not load.",
             },
+            {
+                Name = "CollisionFidelity",
+                Type = "Enum.CollisionFidelity",
+                Doc = "How closely the collision shape follows the rendered geometry. `Precise` is accepted and "
+                    .. "collides as `Hull` in this release -- the property reads back what was written, because a "
+                    .. "value that silently became another value is worse than one that says what it did.",
+            },
         },
+    },
+    {
+        -- Module `scene` rather than `physics`, and that is layering rather
+        -- than taste: `physics` is L2 and `scene` is L3, so the physics module
+        -- cannot register a class into the scene registry at all. The class is
+        -- storage; the meaning is applied by the glue above both, exactly as
+        -- `MeshPart` holds a URN that `render` interprets.
+        Name = "CharacterBody",
+        Extends = "BasePart",
+        Module = "scene",
+        Storage = "CharacterBody",
+        Doc = "A capsule that walks: the player, or anything that should climb a ramp and step over a kerb "
+            .. "instead of tumbling. It is a controller rather than a rigid body -- it sweeps its own shape and "
+            .. "moves at the velocity you give it, which is why it does not tip over and why gravity is yours to "
+            .. "apply through Move. There is no Humanoid and no HumanoidRootPart: this is one instance (§2.7 "
+            .. "divergence 13).",
+        Properties = {
+            {
+                Name = "WalkSpeed",
+                Type = "number",
+                Default = "16",
+                Doc = "How fast Move drives the character along the ground, in metres per second. The direction "
+                    .. "passed to Move is scaled by this, so a half-length direction walks at half speed.",
+            },
+            {
+                Name = "JumpSpeed",
+                Type = "number",
+                Default = "8",
+                Doc = "The upward speed Jump imparts, in metres per second. How high that reaches depends on "
+                    .. "`Workspace.Gravity`, which is the relationship a game tunes rather than a height.",
+            },
+            {
+                Name = "MaxSlopeAngle",
+                Type = "number",
+                Default = "46",
+                Doc = "The steepest ground, in degrees from horizontal, the character can stand and walk on. "
+                    .. "Anything steeper is a wall it slides down rather than a floor it stands on.",
+            },
+            {
+                Name = "AutoStepHeight",
+                Type = "number",
+                Default = "0.5",
+                Doc = "The tallest ledge, in metres, the character walks over rather than into. This is the "
+                    .. "single number that separates a character from a capsule: at zero, a kerb stops it.",
+            },
+            {
+                Name = "Grounded",
+                Type = "boolean",
+                ReadOnly = true,
+                Doc = "Whether the character is standing on something walkable as of the last simulation tick. "
+                    .. "The same fact `State` reports, as the boolean a jump check actually wants.",
+            },
+            {
+                Name = "State",
+                Type = "Enum.CharacterState",
+                ReadOnly = true,
+                Doc = "Grounded or Airborne. Ground too steep to walk on reads as Airborne, because the question "
+                    .. "this answers is whether the character is supported.",
+            },
+        } :: { Schema.Property },
+        Methods = {
+            {
+                Name = "Move",
+                Parameters = { { Name = "direction", Type = "vector" } },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Sets the direction to walk in for the next simulation tick, in world space. Only the "
+                    .. "horizontal part is used -- vertical movement is gravity's and Jump's -- and the vector is "
+                    .. "scaled by WalkSpeed rather than normalised, so a shorter one walks slower. Call it every "
+                    .. "tick while moving; a character told nothing stops.",
+            },
+            {
+                Name = "Jump",
+                Parameters = {},
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Launches the character upward at JumpSpeed at the next simulation tick, if it is Grounded. "
+                    .. "Ignored in mid-air rather than queued: a jump that fires the moment you land is a jump "
+                    .. "you did not ask for.",
+            },
+        } :: { Schema.Method },
+        Events = {
+            {
+                Name = "Landed",
+                Parameters = { { Name = "groundPart", Type = "BasePart?" } },
+                Doc = "Fires when the character becomes Grounded after being Airborne, with the part it landed "
+                    .. "on -- nil when that is terrain no instance owns. Deferred like every signal here.",
+            },
+        } :: { Schema.Event },
     },
     {
         Name = "Camera",

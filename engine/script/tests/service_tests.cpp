@@ -148,9 +148,27 @@ TEST_CASE("FixedTimestep is the grid every timing guarantee rests on")
         assert(math.abs(physics.FixedTimestep - 1 / 60) < 1e-12)
     )") == "");
 
-    // Read-only until the physics module ships.
-    CHECK(
-        fixture.raises(R"(game:GetService("PhysicsService").FixedTimestep = 1 / 30)", "scene.err.read_only_property"));
+    // Writable from M5, and the write round-trips immediately: what it does NOT
+    // do is change the tick this frame is already running on, which is the
+    // whole reason the property has a requested value and an active one.
+    CHECK(fixture.failure(R"(
+        local physics = game:GetService("PhysicsService")
+        physics.FixedTimestep = 1 / 120
+        assert(math.abs(physics.FixedTimestep - 1 / 120) < 1e-12)
+    )") == "");
+
+    // The range architecture.md §3 states, 30 Hz to 240 Hz. Outside it the
+    // guarantees expressed against the tick stop meaning anything, so the write
+    // is refused rather than clamped -- a clamp would read back as a number
+    // nobody wrote.
+    //
+    // The key is the type's, because a setter answers the caller with a bool and
+    // the descriptor carries one key per value type. It reads as "it takes a
+    // number" for a value that IS a number, which is the honest limit of a
+    // per-type key and is recorded as D021 in `docs/defects.md`.
+    CHECK(fixture.raises(R"(game:GetService("PhysicsService").FixedTimestep = 1 / 10)", "scene.err.expected_number"));
+    CHECK(fixture.raises(R"(game:GetService("PhysicsService").FixedTimestep = 1 / 1000)", "scene.err.expected_number"));
+    CHECK(fixture.raises(R"(game:GetService("PhysicsService").FixedTimestep = 0 / 0)", "scene.err.expected_number"));
 }
 
 // --- TagService --------------------------------------------------------------

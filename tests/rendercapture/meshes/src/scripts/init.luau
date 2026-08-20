@@ -39,6 +39,7 @@ local Frames = {
 local scene = Instance.new("MeshPart")
 scene.Name = "Scene"
 scene.MeshContent = "asset://models/scene.gltf" :: Content
+scene.Anchored = true
 scene.Parent = workspace
 
 -- A second copy of the scene, far enough away that it is inside the frustum
@@ -53,6 +54,7 @@ local distant = Instance.new("MeshPart")
 distant.Name = "Distant"
 distant.MeshContent = "asset://models/scene.gltf" :: Content
 distant.CFrame = CFrame.new(0, 0, -70)
+distant.Anchored = true
 distant.Parent = workspace
 
 -- A transparent pane, so the blended pass is in the golden at all. Without it
@@ -66,6 +68,7 @@ pane.Name = "Pane"
 pane.MeshContent = "asset://models/pane.gltf" :: Content
 pane.CFrame = CFrame.new(-1.6, 1.4, 2.9)
 pane.Transparency = 0.45
+pane.Anchored = true
 pane.Parent = workspace
 
 local camera = Instance.new("Camera")
@@ -80,6 +83,7 @@ workspace.CurrentCamera = camera
 local lamp = Instance.new("Part")
 lamp.Size = Vector3.new(0.3, 0.3, 0.3)
 lamp.CFrame = CFrame.new(-2.2, 3.2, 2.4)
+lamp.Anchored = true
 lamp.Parent = workspace
 
 local lampLight = Instance.new("PointLight")

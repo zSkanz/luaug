@@ -35,6 +35,15 @@ struct BenchResult
     // The scenario's own per-tick ceiling, from `budgetMs` in its manifest. Zero
     // means the scenario reports without gating.
     f64 budgetMs = 0.0;
+
+    // The physics tick, broken into the three stages the mirror can separate
+    // (roadmap M5: one number says a budget was missed and three say which
+    // stage missed it). All zero, and `bodies` zero, for a scenario with no
+    // simulation in it -- which is every scenario before M5.
+    u64 bodies = 0;
+    f64 applyMs = 0.0;
+    f64 stepMs = 0.0;
+    f64 writebackMs = 0.0;
 };
 
 // Runs every scenario under `root` `repeats` times and reports the median.

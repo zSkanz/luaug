@@ -30,6 +30,15 @@ end
 declare extern type EnumPartShape extends EnumItem with
 end
 
+declare extern type EnumCollisionFidelity extends EnumItem with
+end
+
+declare extern type EnumRaycastFilterType extends EnumItem with
+end
+
+declare extern type EnumCharacterState extends EnumItem with
+end
+
 declare extern type EnumRotationOrder extends EnumItem with
 end
 
@@ -309,6 +318,52 @@ declare extern type BasePart extends PVInstance with
     Color: Color3
     --- How see-through this part is, 0 fully opaque and 1 fully invisible.
     Transparency: number
+    --- Whether the simulation moves this part. An anchored part is immovable scenery that other parts
+    --- collide with and gravity ignores -- not a very heavy part, a different kind of body -- so
+    --- writing this rebuilds it in the simulation and keeps its transform.
+    Anchored: boolean
+    --- Whether this part physically stops anything. A part with this off still reports Touched, which
+    --- is what makes a checkpoint, a trigger volume or a pickup work: things pass through it and it
+    --- notices.
+    CanCollide: boolean
+    --- Whether raycasts, shapecasts and box queries can see this part. Independent of CanCollide,
+    --- because a part that blocks movement and a part a camera ray should ignore are different
+    --- questions.
+    CanQuery: boolean
+    --- The named group deciding which other parts this one collides with, registered through
+    --- `PhysicsService:RegisterCollisionGroup`. An unregistered name is an error rather than a silent
+    --- fallback to Default: the failure mode of a typo here is a wall players walk through, which is
+    --- expensive to find and cheap to refuse.
+    CollisionGroup: string
+    --- How much this surface resists sliding, 0 frictionless and 1 very grippy. The value the solver
+    --- uses for a contact combines both surfaces' -- one slippery part is enough to make a pair slide.
+    Friction: number
+    --- How much of an impact this surface gives back, 0 a dead stop and 1 a perfect bounce. Combined
+    --- across a contact pair the same way Friction is.
+    Restitution: number
+    --- Mass per cubic metre. Mass is this times the volume the Size and Shape describe, and there is no
+    --- Mass property precisely so that the two cannot be set to contradict each other.
+    Density: number
+    --- How fast this part is moving, in metres per second, as of the last simulation tick. Read-only: a
+    --- velocity assignment is an impulse with the mass divided out, and `ApplyImpulse` is that
+    --- operation under a name that says what it does.
+    read LinearVelocity: vector
+    --- How fast this part is spinning, in radians per second about each world axis, as of the last
+    --- simulation tick.
+    read AngularVelocity: vector
+    --- Fires once when another part begins touching this one, with the part it touched. Deferred like
+    --- every signal here (ADR 0015), so it arrives at the next resumption point rather than inside the
+    --- solver. A pair that stays in contact fires once, not once per tick -- including across the
+    --- moment the simulation puts both parts to sleep.
+    read Touched: Signal<BasePart>
+    --- Fires when a pair that was touching stops. Destroying a part does NOT fire it for that part's
+    --- contacts: the instance is gone, and a signal on an instance nobody can reach is a signal nobody
+    --- can handle.
+    read TouchEnded: Signal<BasePart>
+    --- Adds an instantaneous change of momentum at the part's centre of mass, in kilogram-metres per
+    --- second. Applied at the next simulation tick and ignored by an anchored part, which has no
+    --- momentum to change.
+    function ApplyImpulse(self, impulse: vector): ()
 end
 
 declare extern type Part extends BasePart with
@@ -321,6 +376,43 @@ declare extern type MeshPart extends BasePart with
     --- leaves the previous mesh in place and reports why, because a part that silently becomes
     --- invisible is harder to diagnose than one that says it could not load.
     MeshContent: Content
+    --- How closely the collision shape follows the rendered geometry. `Precise` is accepted and
+    --- collides as `Hull` in this release -- the property reads back what was written, because a value
+    --- that silently became another value is worse than one that says what it did.
+    CollisionFidelity: EnumCollisionFidelity
+end
+
+declare extern type CharacterBody extends BasePart with
+    --- How fast Move drives the character along the ground, in metres per second. The direction passed
+    --- to Move is scaled by this, so a half-length direction walks at half speed.
+    WalkSpeed: number
+    --- The upward speed Jump imparts, in metres per second. How high that reaches depends on
+    --- `Workspace.Gravity`, which is the relationship a game tunes rather than a height.
+    JumpSpeed: number
+    --- The steepest ground, in degrees from horizontal, the character can stand and walk on. Anything
+    --- steeper is a wall it slides down rather than a floor it stands on.
+    MaxSlopeAngle: number
+    --- The tallest ledge, in metres, the character walks over rather than into. This is the single
+    --- number that separates a character from a capsule: at zero, a kerb stops it.
+    AutoStepHeight: number
+    --- Whether the character is standing on something walkable as of the last simulation tick. The same
+    --- fact `State` reports, as the boolean a jump check actually wants.
+    read Grounded: boolean
+    --- Grounded or Airborne. Ground too steep to walk on reads as Airborne, because the question this
+    --- answers is whether the character is supported.
+    read State: EnumCharacterState
+    --- Fires when the character becomes Grounded after being Airborne, with the part it landed on --
+    --- nil when that is terrain no instance owns. Deferred like every signal here.
+    read Landed: Signal<BasePart?>
+    --- Sets the direction to walk in for the next simulation tick, in world space. Only the horizontal
+    --- part is used -- vertical movement is gravity's and Jump's -- and the vector is scaled by
+    --- WalkSpeed rather than normalised, so a shorter one walks slower. Call it every tick while
+    --- moving; a character told nothing stops.
+    function Move(self, direction: vector): ()
+    --- Launches the character upward at JumpSpeed at the next simulation tick, if it is Grounded.
+    --- Ignored in mid-air rather than queued: a jump that fires the moment you land is a jump you did
+    --- not ask for.
+    function Jump(self): ()
 end
 
 declare extern type Camera extends PVInstance with
@@ -404,6 +496,10 @@ declare extern type DataModel extends Instance with
 end
 
 declare extern type Workspace extends Instance with
+    --- The acceleration applied to every unanchored part, in metres per second squared. SI and signed,
+    --- so the default points down; a game wanting moon gravity scales it rather than reaching for a
+    --- separate multiplier.
+    Gravity: vector
     --- The camera the world is rendered from. Nil renders nothing rather than falling back to a camera
     --- the engine invented, because a view nobody asked for is harder to debug than a black frame that
     --- says why.
@@ -565,9 +661,22 @@ declare extern type PhysicsService extends Instance with
     --- The duration of one simulation tick, in seconds, and therefore the grid every timing guarantee
     --- is expressed against: `task.wait(1)` is exactly 60 ticks at the default 1/60, on every machine
     --- and every run. Express durations as multiples of it and the same code stays correct at 30 Hz or
-    --- at 240 Hz. Read-only until the physics module ships, when a write will take effect at the next
-    --- frame start rather than mid-tick.
-    read FixedTimestep: number
+    --- at 240 Hz. Writable from M5, and a write takes effect at the next frame start rather than
+    --- mid-tick: the accumulator, the timer wheel and the solver all read it, and changing it between
+    --- two of those reads inside one frame is a class of bug worth designing out. Values outside 1/240
+    --- to 1/30 are refused.
+    FixedTimestep: number
+    --- Declares a collision group. Registering a name that already exists is a no-op rather than an
+    --- error, which is what lets a script register its groups at file scope and survive a hot reload.
+    --- The group collides with everything until told otherwise.
+    function RegisterCollisionGroup(self, name: string): ()
+    --- Sets whether parts in two groups collide with each other. Symmetric: setting a against b sets b
+    --- against a, because a one-way collision is not a thing a solver can express.
+    function CollisionGroupSetCollidable(self, a: string, b: string, collidable: boolean): ()
+    --- Every registered group name, in registration order, `Default` first. A fresh array on every
+    --- call, and ordered rather than hashed so that iterating it cannot leak a container's own order
+    --- into a simulation (R10).
+    function GetRegisteredCollisionGroups(self): {string}
 end
 
 declare Enum: {
@@ -578,6 +687,23 @@ declare Enum: {
         Capsule: EnumPartShape,
         Wedge: EnumPartShape,
         GetEnumItems: (self: any) -> { EnumPartShape },
+    },
+    CollisionFidelity: {
+        Default: EnumCollisionFidelity,
+        Hull: EnumCollisionFidelity,
+        Box: EnumCollisionFidelity,
+        Precise: EnumCollisionFidelity,
+        GetEnumItems: (self: any) -> { EnumCollisionFidelity },
+    },
+    RaycastFilterType: {
+        Exclude: EnumRaycastFilterType,
+        Include: EnumRaycastFilterType,
+        GetEnumItems: (self: any) -> { EnumRaycastFilterType },
+    },
+    CharacterState: {
+        Grounded: EnumCharacterState,
+        Airborne: EnumCharacterState,
+        GetEnumItems: (self: any) -> { EnumCharacterState },
     },
     RotationOrder: {
         XYZ: EnumRotationOrder,
@@ -663,6 +789,7 @@ declare Instance: {
         & (("Model") -> Model)
         & (("Part") -> Part)
         & (("MeshPart") -> MeshPart)
+        & (("CharacterBody") -> CharacterBody)
         & (("Camera") -> Camera)
         & (("PointLight") -> PointLight)
         & (("SpotLight") -> SpotLight),

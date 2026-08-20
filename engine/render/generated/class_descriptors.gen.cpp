@@ -43,7 +43,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     const scene::ClassId instanceClass = classes.findId(atoms.intern("Instance"));
 
     // --- MeshPart ---
-    static std::array<scene::PropertyDesc, 1> meshPartProperties;
+    static std::array<scene::PropertyDesc, 2> meshPartProperties;
     meshPartProperties = {{
         scene::PropertyDesc{
             .name = atoms.intern("MeshContent"),
@@ -55,6 +55,17 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
             .get = native::getMeshPartMeshContent,
             .set = native::setMeshPartMeshContent,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("CollisionFidelity"),
+            .type = scene::ValueType::EnumItem,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
+            .get = native::getMeshPartCollisionFidelity,
+            .set = native::setMeshPartCollisionFidelity,
         },
     }};
     scene::ClassDescriptor meshPartDesc;

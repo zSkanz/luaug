@@ -40,6 +40,51 @@ local Definition: Schema.Definition = {
             },
         },
         {
+            Name = "CollisionFidelity",
+            Doc = "How closely a `MeshPart`'s collision shape follows the geometry it renders (§2.2). The pairing "
+                .. "is a trade: the closer the shape, the more the solver pays for every contact against it.",
+            Items = {
+                {
+                    Name = "Default",
+                    Value = 0,
+                    Doc = "The engine chooses. In this release that is `Hull`, and the property reports `Default` "
+                        .. "rather than what it resolved to, because the point of the item is that the choice is "
+                        .. "the engine's to change.",
+                },
+                { Name = "Hull", Value = 1, Doc = "One convex hull around the whole mesh." },
+                {
+                    Name = "Box",
+                    Value = 2,
+                    Doc = "The mesh's bounding box, which is the cheapest shape there is and the least faithful.",
+                },
+                {
+                    Name = "Precise",
+                    Value = 3,
+                    Doc = "The triangles themselves. Accepted and not yet implemented: this release collides "
+                        .. "against a hull and says so through this property reading back `Precise` while "
+                        .. "behaving as `Hull`. A triangle-mesh collider is asset-pipeline work (M7).",
+                },
+            },
+        },
+        {
+            Name = "RaycastFilterType",
+            Doc = "Whether a `RaycastParams` filter list names what a cast may hit or what it must ignore (§2.3).",
+            Items = {
+                { Name = "Exclude", Value = 0, Doc = "Everything except the listed instances and their descendants." },
+                { Name = "Include", Value = 1, Doc = "Only the listed instances and their descendants." },
+            },
+        },
+        {
+            Name = "CharacterState",
+            Doc = "Whether a `CharacterBody` is standing on something (§2.2). Two items and not three: ground too "
+                .. "steep to walk on reads as `Airborne`, because the question a script asks this property is "
+                .. "whether it may jump.",
+            Items = {
+                { Name = "Grounded", Value = 0 },
+                { Name = "Airborne", Value = 1 },
+            },
+        },
+        {
             Name = "RotationOrder",
             Doc = "The order `CFrame.fromEuler` applies its three angles, and `CFrame:ToEuler` recovers them: "
                 .. "intrinsic rotations, each about the axes the previous one produced, read left to right. "

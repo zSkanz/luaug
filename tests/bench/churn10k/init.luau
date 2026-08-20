@@ -37,6 +37,14 @@ for index = 1, PartCount do
     part.Name = `P{index}`
     part.Size = vector.create(1, 1, 1)
     part.CFrame = CFrame.new(vector.create(Rng:NextNumber(-200, 200), 0, Rng:NextNumber(-200, 200)))
+    -- Anchored, from M5 on, and this is what keeps the measurement comparable
+    -- across milestones. What this benchmark measures is the quiet-write path
+    -- with ten thousand instances and a thousand listeners (M2 Decision 6);
+    -- leaving the parts unanchored would silently turn it into a
+    -- ten-thousand-body physics benchmark and compare its number against six
+    -- milestones of a different measurement. The physics budget the M5 gate
+    -- wants is its own scenario, next door.
+    part.Anchored = true
     part.Parent = Root
     Parts[index] = part
 end

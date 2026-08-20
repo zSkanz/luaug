@@ -52,9 +52,14 @@ local OrbitHeight = 5.5
 --- so the camera and the sun do not fall into a repeating pair.
 local OrbitPeriodSeconds = 47
 
+-- Anchored, from M5 on, and this line is the whole difference between a scene
+-- and a pile: an unanchored part is a rigid body, and a rigid body under
+-- gravity falls. Everything in this example is scenery a camera orbits, so
+-- everything in it says so.
 local scene = Instance.new("MeshPart")
 scene.Name = "Scene"
 scene.MeshContent = SceneContent
+scene.Anchored = true
 scene.Parent = workspace
 
 -- The pane, upright behind the cubes, so what shows through it is geometry
@@ -63,6 +68,7 @@ local pane = Instance.new("MeshPart")
 pane.Name = "Pane"
 pane.MeshContent = PaneContent
 pane.CFrame = CFrame.new(-1.6, 1.4, 2.9)
+pane.Anchored = true
 pane.Parent = workspace
 
 local camera = Instance.new("Camera")
@@ -81,6 +87,7 @@ local lamp = Instance.new("Part")
 lamp.Name = "Lamp"
 lamp.Size = Vector3.new(0.3, 0.3, 0.3)
 lamp.CFrame = CFrame.new(-2.2, 3.2, 2.4)
+lamp.Anchored = true
 lamp.Parent = workspace
 
 local lampLight = Instance.new("PointLight")

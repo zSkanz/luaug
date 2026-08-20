@@ -13,6 +13,7 @@
 
 #include <cmath>
 #include <string>
+#include <string_view>
 
 #include "../generated/class_descriptors.gen.h"
 
@@ -30,6 +31,34 @@ constexpr f64 DegreesToRadians = 0.017453292519943295;
 [[nodiscard]] PartComponent* writePart(World& world, core::InstanceId id) noexcept
 {
     return world.parts().find(id);
+}
+
+[[nodiscard]] const RigidBodyComponent* readBody(const World& world, core::InstanceId id) noexcept
+{
+    return world.rigidBodies().find(id);
+}
+
+[[nodiscard]] RigidBodyComponent* writeBody(World& world, core::InstanceId id) noexcept
+{
+    return world.rigidBodies().find(id);
+}
+
+// Every physics scalar a script writes is finite and in a stated range. A NaN
+// reaching the solver is not a wrong number, it is a body that leaves the world
+// and takes its contact island with it -- so the refusal happens here, where it
+// becomes a keyed error, rather than three layers down where it becomes a
+// missing part.
+[[nodiscard]] bool finite(f64 value) noexcept
+{
+    return std::isfinite(value);
+}
+
+// An overload rather than one function taking f64: a `vector` component is f32,
+// and letting it promote is a warning Clang treats as an error here -- correctly,
+// because a silent widening is how a precision decision stops being one.
+[[nodiscard]] bool finite(f32 value) noexcept
+{
+    return std::isfinite(value);
 }
 
 } // namespace
@@ -54,11 +83,27 @@ void detachPVComponents(World& world, core::InstanceId id)
 void attachPartComponents(World& world, core::InstanceId id)
 {
     world.parts().add(id, PartComponent{});
+    // A `BasePart` has both or neither: the two halves are split by who reads
+    // them, not by which parts have them.
+    RigidBodyComponent body;
+    body.collisionGroup = world.collisionGroups().nameAt(CollisionGroups::kDefault);
+    world.rigidBodies().add(id, body);
 }
 
 void detachPartComponents(World& world, core::InstanceId id)
 {
     world.parts().remove(id);
+    world.rigidBodies().remove(id);
+}
+
+void attachCharacterBodyComponents(World& world, core::InstanceId id)
+{
+    world.characterBodies().add(id, CharacterBodyComponent{});
+}
+
+void detachCharacterBodyComponents(World& world, core::InstanceId id)
+{
+    world.characterBodies().remove(id);
 }
 
 void attachModelComponents(World& world, core::InstanceId id)
@@ -163,6 +208,24 @@ bool setWorkspaceCurrentCamera(World& world, core::InstanceId id, const Value& v
     // Nil renders nothing rather than falling back to a camera the engine
     // invented: a view nobody asked for is harder to debug than a black frame.
     workspace->currentCamera = core::InstanceId{};
+    return true;
+}
+
+Value getWorkspaceGravity(const World& world, core::InstanceId id)
+{
+    const WorkspaceComponent* workspace = world.workspaces().find(id);
+    return workspace == nullptr ? Value{} : Value{workspace->gravity};
+}
+
+bool setWorkspaceGravity(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* gravity = std::get_if<core::Vec3>(&value);
+    WorkspaceComponent* workspace = world.workspaces().find(id);
+    if (gravity == nullptr || workspace == nullptr)
+        return false;
+    if (!finite(gravity->x) || !finite(gravity->y) || !finite(gravity->z))
+        return false;
+    workspace->gravity = *gravity;
     return true;
 }
 
@@ -375,6 +438,225 @@ bool setPartShape(World& world, core::InstanceId id, const Value& value)
     return true;
 }
 
+// --- BasePart, the physical half (M5) ---------------------------------------
+
+Value getBasePartAnchored(const World& world, core::InstanceId id)
+{
+    const RigidBodyComponent* body = readBody(world, id);
+    return body == nullptr ? Value{} : Value{body->anchored};
+}
+
+bool setBasePartAnchored(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* flag = std::get_if<bool>(&value);
+    RigidBodyComponent* body = writeBody(world, id);
+    if (flag == nullptr || body == nullptr)
+        return false;
+    body->anchored = *flag;
+    return true;
+}
+
+Value getBasePartCanCollide(const World& world, core::InstanceId id)
+{
+    const RigidBodyComponent* body = readBody(world, id);
+    return body == nullptr ? Value{} : Value{body->canCollide};
+}
+
+bool setBasePartCanCollide(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* flag = std::get_if<bool>(&value);
+    RigidBodyComponent* body = writeBody(world, id);
+    if (flag == nullptr || body == nullptr)
+        return false;
+    body->canCollide = *flag;
+    return true;
+}
+
+Value getBasePartCanQuery(const World& world, core::InstanceId id)
+{
+    const RigidBodyComponent* body = readBody(world, id);
+    return body == nullptr ? Value{} : Value{body->canQuery};
+}
+
+bool setBasePartCanQuery(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* flag = std::get_if<bool>(&value);
+    RigidBodyComponent* body = writeBody(world, id);
+    if (flag == nullptr || body == nullptr)
+        return false;
+    body->canQuery = *flag;
+    return true;
+}
+
+Value getBasePartCollisionGroup(const World& world, core::InstanceId id)
+{
+    const RigidBodyComponent* body = readBody(world, id);
+    if (body == nullptr)
+        return Value{};
+    return Value{std::string{world.atoms().text(body->collisionGroup)}};
+}
+
+bool setBasePartCollisionGroup(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* name = std::get_if<std::string>(&value);
+    RigidBodyComponent* body = writeBody(world, id);
+    if (name == nullptr || body == nullptr)
+        return false;
+
+    // An unregistered name is refused rather than folded into Default. The
+    // failure mode of a typo here is a wall players walk through, which is
+    // expensive to find and cheap to refuse -- and the property's Doc says so.
+    const core::NameAtom atom = world.atoms().lookup(*name);
+    if (!atom.valid() || world.collisionGroups().find(atom) == CollisionGroups::kInvalid)
+        return false;
+    body->collisionGroup = atom;
+    return true;
+}
+
+Value getBasePartFriction(const World& world, core::InstanceId id)
+{
+    const RigidBodyComponent* body = readBody(world, id);
+    return body == nullptr ? Value{} : Value{static_cast<f64>(body->friction)};
+}
+
+bool setBasePartFriction(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* number = std::get_if<f64>(&value);
+    RigidBodyComponent* body = writeBody(world, id);
+    if (number == nullptr || body == nullptr || !finite(*number) || *number < 0.0)
+        return false;
+    body->friction = static_cast<f32>(*number);
+    return true;
+}
+
+Value getBasePartRestitution(const World& world, core::InstanceId id)
+{
+    const RigidBodyComponent* body = readBody(world, id);
+    return body == nullptr ? Value{} : Value{static_cast<f64>(body->restitution)};
+}
+
+bool setBasePartRestitution(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* number = std::get_if<f64>(&value);
+    RigidBodyComponent* body = writeBody(world, id);
+    if (number == nullptr || body == nullptr || !finite(*number) || *number < 0.0 || *number > 1.0)
+        return false;
+    body->restitution = static_cast<f32>(*number);
+    return true;
+}
+
+Value getBasePartDensity(const World& world, core::InstanceId id)
+{
+    const RigidBodyComponent* body = readBody(world, id);
+    return body == nullptr ? Value{} : Value{static_cast<f64>(body->density)};
+}
+
+bool setBasePartDensity(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* number = std::get_if<f64>(&value);
+    RigidBodyComponent* body = writeBody(world, id);
+    // Zero is refused rather than clamped: a massless body is not a light one,
+    // it is a division the solver cannot do.
+    if (number == nullptr || body == nullptr || !finite(*number) || *number <= 0.0)
+        return false;
+    body->density = static_cast<f32>(*number);
+    return true;
+}
+
+Value getBasePartLinearVelocity(const World& world, core::InstanceId id)
+{
+    const RigidBodyComponent* body = readBody(world, id);
+    return body == nullptr ? Value{} : Value{body->linearVelocity};
+}
+
+Value getBasePartAngularVelocity(const World& world, core::InstanceId id)
+{
+    const RigidBodyComponent* body = readBody(world, id);
+    return body == nullptr ? Value{} : Value{body->angularVelocity};
+}
+
+// --- CharacterBody ----------------------------------------------------------
+
+Value getCharacterBodyWalkSpeed(const World& world, core::InstanceId id)
+{
+    const CharacterBodyComponent* character = world.characterBodies().find(id);
+    return character == nullptr ? Value{} : Value{static_cast<f64>(character->walkSpeed)};
+}
+
+bool setCharacterBodyWalkSpeed(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* number = std::get_if<f64>(&value);
+    CharacterBodyComponent* character = world.characterBodies().find(id);
+    if (number == nullptr || character == nullptr || !finite(*number) || *number < 0.0)
+        return false;
+    character->walkSpeed = static_cast<f32>(*number);
+    return true;
+}
+
+Value getCharacterBodyJumpSpeed(const World& world, core::InstanceId id)
+{
+    const CharacterBodyComponent* character = world.characterBodies().find(id);
+    return character == nullptr ? Value{} : Value{static_cast<f64>(character->jumpSpeed)};
+}
+
+bool setCharacterBodyJumpSpeed(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* number = std::get_if<f64>(&value);
+    CharacterBodyComponent* character = world.characterBodies().find(id);
+    if (number == nullptr || character == nullptr || !finite(*number) || *number < 0.0)
+        return false;
+    character->jumpSpeed = static_cast<f32>(*number);
+    return true;
+}
+
+Value getCharacterBodyMaxSlopeAngle(const World& world, core::InstanceId id)
+{
+    const CharacterBodyComponent* character = world.characterBodies().find(id);
+    return character == nullptr ? Value{} : Value{static_cast<f64>(character->maxSlopeAngle)};
+}
+
+bool setCharacterBodyMaxSlopeAngle(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* number = std::get_if<f64>(&value);
+    CharacterBodyComponent* character = world.characterBodies().find(id);
+    // Ninety degrees is a wall; past it the word "slope" stops meaning
+    // anything, and the controller would treat every surface as ground.
+    if (number == nullptr || character == nullptr || !finite(*number) || *number < 0.0 || *number >= 90.0)
+        return false;
+    character->maxSlopeAngle = static_cast<f32>(*number);
+    return true;
+}
+
+Value getCharacterBodyAutoStepHeight(const World& world, core::InstanceId id)
+{
+    const CharacterBodyComponent* character = world.characterBodies().find(id);
+    return character == nullptr ? Value{} : Value{static_cast<f64>(character->autoStepHeight)};
+}
+
+bool setCharacterBodyAutoStepHeight(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* number = std::get_if<f64>(&value);
+    CharacterBodyComponent* character = world.characterBodies().find(id);
+    if (number == nullptr || character == nullptr || !finite(*number) || *number < 0.0)
+        return false;
+    character->autoStepHeight = static_cast<f32>(*number);
+    return true;
+}
+
+Value getCharacterBodyGrounded(const World& world, core::InstanceId id)
+{
+    const CharacterBodyComponent* character = world.characterBodies().find(id);
+    return character == nullptr ? Value{} : Value{character->grounded};
+}
+
+Value getCharacterBodyState(const World& world, core::InstanceId id)
+{
+    const CharacterBodyComponent* character = world.characterBodies().find(id);
+    if (character == nullptr)
+        return Value{};
+    return Value{EnumValue{generated::CharacterStateEnumId, character->state}};
+}
+
 // --- Services ---------------------------------------------------------------
 
 Value getDataModelEngineVersion(const World& world, core::InstanceId)
@@ -394,7 +676,27 @@ Value getRunServiceSimTime(const World& world, core::InstanceId)
 
 Value getPhysicsServiceFixedTimestep(const World& world, core::InstanceId)
 {
-    return world.engineState().fixedTimestep;
+    // The REQUESTED value, so a write round-trips immediately. What the
+    // scheduler is running on is `fixedTimestep`, which it copies from here at
+    // the next safe point -- see the property's Doc and `EngineState`.
+    return world.engineState().requestedFixedTimestep;
+}
+
+bool setPhysicsServiceFixedTimestep(World& world, core::InstanceId, const Value& value)
+{
+    const auto* number = std::get_if<f64>(&value);
+    if (number == nullptr || !finite(*number))
+        return false;
+    // 30 Hz to 240 Hz, the range architecture.md §3 states. Outside it the
+    // guarantees expressed against the tick stop meaning anything: at 10 Hz a
+    // falling part passes through a floor, and at 1000 Hz the accumulator's
+    // four-step clamp turns real time into slow motion.
+    constexpr f64 Fastest = 1.0 / 240.0;
+    constexpr f64 Slowest = 1.0 / 30.0;
+    if (*number < Fastest || *number > Slowest)
+        return false;
+    world.engineState().requestedFixedTimestep = *number;
+    return true;
 }
 
 Value getDebugServiceOverlayVisible(const World& world, core::InstanceId)

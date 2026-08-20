@@ -486,6 +486,66 @@ int hotReloadIsReload(lua_State* L)
     return 1;
 }
 
+// --- PhysicsService (M5) -----------------------------------------------------
+//
+// The group table is world state (`scene::CollisionGroups`) rather than the
+// backend's, so these are ordinary scene writes: the mirror pushes the table
+// down at the next tick, and a script reading it back gets what it wrote
+// whether or not a backend exists.
+
+int physicsRegisterCollisionGroup(lua_State* L)
+{
+    (void)checkInstance(L, 1);
+    size_t length = 0;
+    const char* text = luaL_checklstring(L, 2, &length);
+
+    World& w = world(L);
+    const core::NameAtom name = w.atoms().intern(std::string_view{text, length});
+    if (w.collisionGroups().add(name) == scene::CollisionGroups::kInvalid)
+        raise(L, LUAUG_TR("scene.err.collision_groups_full"));
+    w.collisionGroups().bumpRevision();
+    return 0;
+}
+
+int physicsCollisionGroupSetCollidable(lua_State* L)
+{
+    (void)checkInstance(L, 1);
+    size_t firstLength = 0;
+    const char* first = luaL_checklstring(L, 2, &firstLength);
+    size_t secondLength = 0;
+    const char* second = luaL_checklstring(L, 3, &secondLength);
+    luaL_checktype(L, 4, LUA_TBOOLEAN);
+    const bool collidable = lua_toboolean(L, 4) != 0;
+
+    World& w = world(L);
+    const u16 a = w.collisionGroups().find(w.atoms().lookup(std::string_view{first, firstLength}));
+    const u16 b = w.collisionGroups().find(w.atoms().lookup(std::string_view{second, secondLength}));
+    if (a == scene::CollisionGroups::kInvalid || b == scene::CollisionGroups::kInvalid)
+        raise(L, LUAUG_TR("scene.err.unknown_collision_group"));
+
+    w.collisionGroups().setCollidable(a, b, collidable);
+    w.collisionGroups().bumpRevision();
+    return 0;
+}
+
+int physicsGetRegisteredCollisionGroups(lua_State* L)
+{
+    (void)checkInstance(L, 1);
+    World& w = world(L);
+    const scene::CollisionGroups& groups = w.collisionGroups();
+
+    // A fresh array every call, in registration order. Fresh so a caller may
+    // sort it; ordered because R10 forbids a container's own order reaching a
+    // script.
+    lua_createtable(L, static_cast<int>(groups.count()), 0);
+    for (u32 index = 0; index < groups.count(); ++index) {
+        const std::string_view name = w.atoms().text(groups.nameAt(static_cast<u16>(index)));
+        lua_pushlstring(L, name.data(), name.size());
+        lua_rawseti(L, -2, static_cast<int>(index) + 1);
+    }
+    return 1;
+}
+
 // `WaitForChild` is here rather than in `instance_binding.cpp` because it parks
 // on a tree state and only the resumption phase this file owns can wake it.
 constexpr InstanceMethodBinding ServiceMethods[] = {
@@ -515,6 +575,10 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"HotReloadService", "SaveState", hotReloadSaveState},
     {"HotReloadService", "LoadState", hotReloadLoadState},
     {"HotReloadService", "IsReload", hotReloadIsReload},
+
+    {"PhysicsService", "RegisterCollisionGroup", physicsRegisterCollisionGroup},
+    {"PhysicsService", "CollisionGroupSetCollidable", physicsCollisionGroupSetCollidable},
+    {"PhysicsService", "GetRegisteredCollisionGroups", physicsGetRegisteredCollisionGroups},
 };
 
 } // namespace

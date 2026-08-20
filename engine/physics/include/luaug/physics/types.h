@@ -90,7 +90,7 @@ struct ShapeDesc
 
     // Box and Wedge: the full box. Sphere: `size.x` is the diameter. Capsule
     // and Cylinder: `size.x` is the diameter and `size.y` the full height,
-    // caps included, which is how a Roblox-shaped capsule is authored.
+    // caps included, which is how `BasePart.Size` describes one.
     core::Vec3 size{1.0f, 1.0f, 1.0f};
 
     // ConvexHull only. Points are in the part's local space and the span must

@@ -33,6 +33,7 @@
   "engine.replay.err.no_scenarios": "No scenarios under {path}. An empty determinism gate passes forever.",
   "engine.replay.err.diverged": "Determinism broken at tick {tick}: {expectedLabel} hashed {expected}, {actualLabel} hashed {actual}.",
   "engine.replay.err.length_mismatch": "Trace lengths differ: {expectedLabel} has {expected} checkpoints, {actualLabel} has {actual}.",
+  "engine.bench.info.physics": "Bench {name} physics: {bodies} bodies, {apply} ms apply, {step} ms step, {writeback} ms writeback (per tick).",
   "engine.bench.info.result": "Bench {name}: {instances} instances, {ticks} ticks, {mean} ms/tick mean, {max} ms worst.",
   "engine.bench.err.over_budget": "Bench {name} took {mean} ms/tick, over its {budget} ms budget.",
   "engine.project.warn.no_scripts": "No entry scripts under {path}; the project will boot and do nothing. A project mounts src/scripts/**/*.luau.",
@@ -60,6 +61,8 @@
   "engine.frame.info.stats": "{frames} measured frames: median {median} ms, worst {worst} ms, {draws} draws, {triangles} triangles.",
   "engine.frame.info.summary": "Ran {frames} frames, {ticks} simulation ticks.",
 
+  "scene.err.collision_groups_full": "There is no room for another collision group; a world holds at most 1024.",
+  "scene.err.unknown_collision_group": "No collision group by that name is registered.",
   "physics.jolt.err.assert": "Jolt reported a broken assumption at {file}:{line} -- {expression} {message}",
   "asset.image.err.decode_failed": "Could not decode the image.",
   "asset.image.err.bad_pixels": "The image data does not match the requested size.",

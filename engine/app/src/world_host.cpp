@@ -208,6 +208,9 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
     m_world->engineState().engineVersion = LUAUG_VERSION_STRING;
     m_world->engineState().luauVersion = LUAUG_LUAU_VERSION;
     m_world->engineState().fixedTimestep = options.fixedTimestep;
+    // Both, so a read before any write gives what the scheduler is running on
+    // rather than the struct's default.
+    m_world->engineState().requestedFixedTimestep = options.fixedTimestep;
 
     m_runtime.emplace(*m_world);
     if (std::optional<core::EngineError> error = m_runtime->boot(); error.has_value())
@@ -249,6 +252,23 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
     // all, and this stays invalid -- which `extract` reads as "no environment
     // state" and answers with the defaults, rather than as an error.
     m_lighting = m_world->findFirstChildOfClass(m_runtime->dataModel(), m_classes.findId(m_atoms.lookup("Lighting")));
+
+#if LUAUG_PHYSICS_JOLT
+    // The one hand-written switch over what the build compiled in (ADR 0023),
+    // the same shape the RHI backend is chosen with. A build with no physics
+    // backend leaves the mirror null and every part stays where a script put
+    // it -- which is what M0 through M4 were.
+    m_backend = physics::createJoltPhysics();
+    if (m_backend != nullptr) {
+        m_physics.emplace(*m_world, *m_backend);
+        // Handed over rather than looked up inside the mirror: `scene` has no
+        // notion of the DataModel root. This assignment is the step M4.5's
+        // lesson says to test -- an id resolved here and not there is exactly
+        // how a renderer spent four milestones lighting scenes with defaults --
+        // so `world_host_tests.cpp` asserts it on a world no script touched.
+        m_physics->setWorkspace(m_workspace);
+    }
+#endif
 
     if (!options.projectPath.empty()) {
         if (std::optional<core::EngineError> error = mountProject(options.projectPath); error.has_value())
@@ -484,11 +504,22 @@ void WorldHost::tick()
     // Each resumption point runs its engine phase, then drains (api-design.md
     // §3.1). `task` timers resume in their own phase between `PostSimulation`
     // and `Heartbeat`, and anything they defer drains at `Heartbeat`.
-    for (const core::Phase phase :
-         {core::Phase::PreAnimation, core::Phase::PreSimulation, core::Phase::PostSimulation}) {
+    //
+    // The simulation sits between `PreSimulation` and `PostSimulation`, which is
+    // architecture.md §3's order and not an arrangement of convenience: a script
+    // pushes a part in `PreSimulation` and reads where it ended up in
+    // `PostSimulation`, and the contacts the step produced are drained by the
+    // `PostSimulation` drain rather than a frame later.
+    for (const core::Phase phase : {core::Phase::PreAnimation, core::Phase::PreSimulation}) {
         m_runtime->firePhase(phase, state.fixedTimestep);
         m_runtime->drain(phase);
     }
+
+    if (m_physics.has_value())
+        m_physics->step(state.fixedTimestep);
+
+    m_runtime->firePhase(core::Phase::PostSimulation, state.fixedTimestep);
+    m_runtime->drain(core::Phase::PostSimulation);
 
     m_runtime->resumeTimers();
     m_runtime->firePhase(core::Phase::Heartbeat, state.fixedTimestep);

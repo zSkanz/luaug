@@ -31,7 +31,8 @@ namespace {
 } // namespace
 
 World::World(ClassRegistry& classes, EnumRegistry& enums, core::AtomTable& atoms, u64 seed)
-    : m_classes(classes), m_enums(enums), m_atoms(atoms), m_rng(seed), m_parentProperty(atoms.intern("Parent"))
+    : m_classes(classes), m_enums(enums), m_atoms(atoms), m_rng(seed), m_parentProperty(atoms.intern("Parent")),
+      m_collisionGroups(atoms.intern("Default"))
 {}
 
 // --- Lifetime ---------------------------------------------------------------

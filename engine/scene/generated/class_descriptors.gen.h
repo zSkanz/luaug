@@ -39,9 +39,12 @@ void registerEnums(EnumRegistry& enums, core::AtomTable& atoms);
 // carries. A registry lookup by name would answer the same question and
 // would do it with a hash probe on a property write.
 inline constexpr EnumId PartShapeEnumId = 1;
-inline constexpr EnumId RotationOrderEnumId = 2;
-inline constexpr EnumId LogLevelEnumId = 3;
-inline constexpr EnumId RunContextEnumId = 4;
+inline constexpr EnumId CollisionFidelityEnumId = 2;
+inline constexpr EnumId RaycastFilterTypeEnumId = 3;
+inline constexpr EnumId CharacterStateEnumId = 4;
+inline constexpr EnumId RotationOrderEnumId = 5;
+inline constexpr EnumId LogLevelEnumId = 6;
+inline constexpr EnumId RunContextEnumId = 7;
 
 } // namespace generated
 
@@ -94,6 +97,22 @@ Value getBasePartColor(const World& world, core::InstanceId id);
 bool setBasePartColor(World& world, core::InstanceId id, const Value& value);
 Value getBasePartTransparency(const World& world, core::InstanceId id);
 bool setBasePartTransparency(World& world, core::InstanceId id, const Value& value);
+Value getBasePartAnchored(const World& world, core::InstanceId id);
+bool setBasePartAnchored(World& world, core::InstanceId id, const Value& value);
+Value getBasePartCanCollide(const World& world, core::InstanceId id);
+bool setBasePartCanCollide(World& world, core::InstanceId id, const Value& value);
+Value getBasePartCanQuery(const World& world, core::InstanceId id);
+bool setBasePartCanQuery(World& world, core::InstanceId id, const Value& value);
+Value getBasePartCollisionGroup(const World& world, core::InstanceId id);
+bool setBasePartCollisionGroup(World& world, core::InstanceId id, const Value& value);
+Value getBasePartFriction(const World& world, core::InstanceId id);
+bool setBasePartFriction(World& world, core::InstanceId id, const Value& value);
+Value getBasePartRestitution(const World& world, core::InstanceId id);
+bool setBasePartRestitution(World& world, core::InstanceId id, const Value& value);
+Value getBasePartDensity(const World& world, core::InstanceId id);
+bool setBasePartDensity(World& world, core::InstanceId id, const Value& value);
+Value getBasePartLinearVelocity(const World& world, core::InstanceId id);
+Value getBasePartAngularVelocity(const World& world, core::InstanceId id);
 void attachPartComponents(World& world, core::InstanceId id);
 void detachPartComponents(World& world, core::InstanceId id);
 
@@ -101,11 +120,27 @@ void detachPartComponents(World& world, core::InstanceId id);
 Value getPartShape(const World& world, core::InstanceId id);
 bool setPartShape(World& world, core::InstanceId id, const Value& value);
 
+// CharacterBody
+Value getCharacterBodyWalkSpeed(const World& world, core::InstanceId id);
+bool setCharacterBodyWalkSpeed(World& world, core::InstanceId id, const Value& value);
+Value getCharacterBodyJumpSpeed(const World& world, core::InstanceId id);
+bool setCharacterBodyJumpSpeed(World& world, core::InstanceId id, const Value& value);
+Value getCharacterBodyMaxSlopeAngle(const World& world, core::InstanceId id);
+bool setCharacterBodyMaxSlopeAngle(World& world, core::InstanceId id, const Value& value);
+Value getCharacterBodyAutoStepHeight(const World& world, core::InstanceId id);
+bool setCharacterBodyAutoStepHeight(World& world, core::InstanceId id, const Value& value);
+Value getCharacterBodyGrounded(const World& world, core::InstanceId id);
+Value getCharacterBodyState(const World& world, core::InstanceId id);
+void attachCharacterBodyComponents(World& world, core::InstanceId id);
+void detachCharacterBodyComponents(World& world, core::InstanceId id);
+
 // DataModel
 Value getDataModelEngineVersion(const World& world, core::InstanceId id);
 Value getDataModelLuauVersion(const World& world, core::InstanceId id);
 
 // Workspace
+Value getWorkspaceGravity(const World& world, core::InstanceId id);
+bool setWorkspaceGravity(World& world, core::InstanceId id, const Value& value);
 Value getWorkspaceCurrentCamera(const World& world, core::InstanceId id);
 bool setWorkspaceCurrentCamera(World& world, core::InstanceId id, const Value& value);
 void attachWorkspaceComponents(World& world, core::InstanceId id);
@@ -120,6 +155,7 @@ bool setDebugServiceOverlayVisible(World& world, core::InstanceId id, const Valu
 
 // PhysicsService
 Value getPhysicsServiceFixedTimestep(const World& world, core::InstanceId id);
+bool setPhysicsServiceFixedTimestep(World& world, core::InstanceId id, const Value& value);
 
 } // namespace native
 

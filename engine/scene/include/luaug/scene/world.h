@@ -21,6 +21,7 @@
 #include "luaug/core/text_key.h"
 #include "luaug/scene/change_queue.h"
 #include "luaug/scene/class_registry.h"
+#include "luaug/scene/collision_groups.h"
 #include "luaug/scene/component_pool.h"
 #include "luaug/scene/components.h"
 #include "luaug/scene/enum_registry.h"
@@ -93,7 +94,16 @@ struct EngineState
     // from that float is a `task.wait(1)` that lasts 61 ticks (api-design.md
     // §3.2).
     u64 tick = 0;
+    // The tick the scheduler is running on. Changed only at a FrameStart safe
+    // point, never mid-frame: the accumulator, the timer wheel and the solver
+    // all read it, and a value that changed between two of those reads inside
+    // one frame is a class of bug worth designing out (api-design.md §2.1).
     f64 fixedTimestep = 1.0 / 60.0;
+    // What `PhysicsService.FixedTimestep` was last written to, and what reading
+    // it gives back. The scheduler copies this into `fixedTimestep` at the next
+    // safe point, so a write round-trips immediately and takes effect one frame
+    // later -- which is what the property's Doc promises.
+    f64 requestedFixedTimestep = 1.0 / 60.0;
     bool paused = false;
     bool overlayVisible = false;
     std::string engineVersion;
@@ -247,6 +257,14 @@ public:
     [[nodiscard]] EngineState& engineState() noexcept { return m_engineState; }
     [[nodiscard]] const EngineState& engineState() const noexcept { return m_engineState; }
 
+    // The collision-group table (api-design.md §2.1). World state rather than
+    // the physics backend's, because a script writes it, reads it back and
+    // replays it -- and because `BasePart.CollisionGroup` is validated against
+    // it on every write, which a scene-level accessor cannot do if the table
+    // lives below the seam.
+    [[nodiscard]] CollisionGroups& collisionGroups() noexcept { return m_collisionGroups; }
+    [[nodiscard]] const CollisionGroups& collisionGroups() const noexcept { return m_collisionGroups; }
+
     [[nodiscard]] core::AtomTable& atoms() noexcept { return m_atoms; }
     // A property getter takes a `const World&`, and resolving an atom to text
     // is the one thing it routinely needs the table for.
@@ -268,6 +286,13 @@ public:
     // guess at now.
     [[nodiscard]] ComponentPool<PartComponent>& parts() noexcept { return m_parts; }
     [[nodiscard]] const ComponentPool<PartComponent>& parts() const noexcept { return m_parts; }
+    [[nodiscard]] ComponentPool<RigidBodyComponent>& rigidBodies() noexcept { return m_rigidBodies; }
+    [[nodiscard]] const ComponentPool<RigidBodyComponent>& rigidBodies() const noexcept { return m_rigidBodies; }
+    [[nodiscard]] ComponentPool<CharacterBodyComponent>& characterBodies() noexcept { return m_characterBodies; }
+    [[nodiscard]] const ComponentPool<CharacterBodyComponent>& characterBodies() const noexcept
+    {
+        return m_characterBodies;
+    }
     [[nodiscard]] ComponentPool<WorkspaceComponent>& workspaces() noexcept { return m_workspaces; }
     [[nodiscard]] const ComponentPool<WorkspaceComponent>& workspaces() const noexcept { return m_workspaces; }
     [[nodiscard]] ComponentPool<PVComponent>& pvInstances() noexcept { return m_pvInstances; }
@@ -310,10 +335,15 @@ private:
     // Declared after `m_atoms` because it is initialised from it, and the
     // initialiser list has to run in declaration order (-Wreorder-ctor).
     core::NameAtom m_parentProperty;
+    // Declared after `m_atoms` for the same reason: its one group is named
+    // "Default" and the atom for it comes from the table.
+    CollisionGroups m_collisionGroups;
 
     core::SlotMap<InstanceRecord> m_instances;
     ComponentPool<PVComponent> m_pvInstances;
     ComponentPool<PartComponent> m_parts;
+    ComponentPool<RigidBodyComponent> m_rigidBodies;
+    ComponentPool<CharacterBodyComponent> m_characterBodies;
     ComponentPool<WorkspaceComponent> m_workspaces;
     ComponentPool<ModelComponent> m_models;
     ComponentPool<ScriptComponent> m_scripts;

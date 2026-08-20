@@ -198,6 +198,27 @@ u64 World::worldHash() const
             hasher.pod(u64{0});
         }
 
+        // Simulation state that is NOT a property, and therefore not covered by
+        // the walk below (architecture.md §9: the hash is over sim-relevant
+        // components AND physics state).
+        //
+        // Every field here is something the next tick's evolution depends on
+        // and no script can read: an impulse queued for a tick that has not run,
+        // the command a character was given, the vertical velocity a controller
+        // carries, and which bodies the solver has put to sleep. Two runs
+        // agreeing on every visible number while disagreeing on one of these are
+        // one tick from disagreeing on all of them.
+        if (const RigidBodyComponent* body = m_rigidBodies.find(id); body != nullptr) {
+            hasher.vec3(body->pendingImpulse);
+            hasher.flag(body->active);
+        }
+        if (const CharacterBodyComponent* character = m_characterBodies.find(id); character != nullptr) {
+            hasher.vec3(character->moveDirection);
+            hasher.flag(character->jumpRequested);
+            hasher.number(character->verticalVelocity);
+            hasher.pod(character->groundPart);
+        }
+
         // Class-specific state, reached through the same generated accessors a
         // script would use. Hashing the components directly would be faster and
         // would silently stop covering a property whose storage moved.

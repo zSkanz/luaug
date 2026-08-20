@@ -131,6 +131,29 @@ bool setMeshPartMeshContent(scene::World& world, core::InstanceId id, const Valu
     return true;
 }
 
+Value getMeshPartCollisionFidelity(const scene::World& world, core::InstanceId id)
+{
+    const scene::MeshPartComponent* mesh = readMeshPart(world, id);
+    if (mesh == nullptr)
+        return Value{};
+    return Value{scene::EnumValue{generated::CollisionFidelityEnumId, mesh->collisionFidelity}};
+}
+
+bool setMeshPartCollisionFidelity(scene::World& world, core::InstanceId id, const Value& value)
+{
+    const auto* item = std::get_if<scene::EnumValue>(&value);
+    scene::MeshPartComponent* mesh = writeMeshPart(world, id);
+    if (item == nullptr || mesh == nullptr || item->enumId != generated::CollisionFidelityEnumId)
+        return false;
+    if (world.enums().findValue(item->enumId, item->value) == nullptr)
+        return false;
+    // Stored as written, including `Precise`, which this release collides as a
+    // hull. A value that silently became another value is worse than one that
+    // reads back what was asked for and says what it did (the property's Doc).
+    mesh->collisionFidelity = item->value;
+    return true;
+}
+
 void attachMeshPartComponents(scene::World& world, core::InstanceId id)
 {
     world.meshParts().add(id, scene::MeshPartComponent{});

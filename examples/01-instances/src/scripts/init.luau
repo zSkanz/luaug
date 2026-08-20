@@ -74,6 +74,10 @@ for modelIndex = 1, ModelCount do
         cube.Name = `Cube{index}`
         cube.Size = CubeSize
         cube.Color = ModelColors[modelIndex]
+        -- Anchored, from M5 on. These cubes are moved by the script below, not
+        -- by the simulation, and an unanchored part is a rigid body that falls
+        -- out from under whatever the script was doing to it.
+        cube.Anchored = true
         cube.Parent = model
         table.insert(Cubes, cube)
     end

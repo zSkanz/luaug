@@ -797,6 +797,43 @@ int instanceNew(lua_State* L)
     return 1;
 }
 
+// --- Physics (M5) ------------------------------------------------------------
+
+int methodApplyImpulse(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const core::Vec3 impulse = checkVector3(L, 2);
+
+    // Accumulated into the component and applied by the mirror at the start of
+    // the next tick. A script may run at any point in the frame and the solver
+    // may not be interrupted -- and summing impulses is exactly what applying
+    // them one after another would do anyway.
+    if (scene::RigidBodyComponent* body = world(L).rigidBodies().find(id); body != nullptr)
+        body->pendingImpulse = body->pendingImpulse + impulse;
+    return 0;
+}
+
+int methodCharacterMove(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const core::Vec3 direction = checkVector3(L, 2);
+
+    if (scene::CharacterBodyComponent* character = world(L).characterBodies().find(id); character != nullptr)
+        character->moveDirection = direction;
+    return 0;
+}
+
+int methodCharacterJump(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+
+    // A request rather than an impulse: whether it becomes one is the
+    // controller's answer at the next tick, and it is no in mid-air.
+    if (scene::CharacterBodyComponent* character = world(L).characterBodies().find(id); character != nullptr)
+        character->jumpRequested = true;
+    return 0;
+}
+
 // --- Registration ------------------------------------------------------------
 
 // What `Instance` and `Model` declare. `WaitForChild` is absent on purpose: it
@@ -827,6 +864,9 @@ constexpr InstanceMethodBinding InstanceMethods[] = {
     {"PVInstance", "GetPivot", methodGetPivot},
     {"PVInstance", "PivotTo", methodPivotTo},
     {"Model", "GetExtentsSize", methodGetExtentsSize},
+    {"BasePart", "ApplyImpulse", methodApplyImpulse},
+    {"CharacterBody", "Move", methodCharacterMove},
+    {"CharacterBody", "Jump", methodCharacterJump},
 };
 
 } // namespace

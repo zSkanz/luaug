@@ -1,9 +1,10 @@
 # L3 -- the ECS and the Instance facade (architecture.md §2, §4).
 #
-# `core` is the only dependency, and that is the whole design rather than a
-# stage it is passing through. architecture.md §2 allows scene `jobs` and
-# `physics_api` as well; neither has a consumer yet, and a dependency with no
-# consumer is speculative.
+# `core` and `physics_api`. The physics mirror lives here -- architecture.md's
+# own words are "physics sync via an injected `IPhysics3D*`" -- and what it
+# links is the seam headers only: no backend, no Jolt, and nothing that could
+# reach one. `jobs` is still allowed and still has no consumer, and a
+# dependency with no consumer is speculative.
 #
 # What it must NOT have is Luau. Signal arguments are arbitrary script values
 # and connections hold script functions, so the queue this module produces
@@ -20,9 +21,11 @@ luaug_add_module(scene
         src/world.cpp
         src/world_hash.cpp
         src/native_accessors.cpp
+        src/physics_sync.cpp
         generated/class_descriptors.gen.cpp
     DEPS
         core
+        physics_api
 )
 
 # The generated reflection tables (architecture.md §4). Checked in and
@@ -48,4 +51,5 @@ luaug_add_module_tests(scene
         tests/class_registry_tests.cpp
         tests/enum_registry_tests.cpp
         tests/world_tests.cpp
+        tests/physics_sync_tests.cpp
 )

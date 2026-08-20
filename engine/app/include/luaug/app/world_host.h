@@ -14,8 +14,10 @@
 #include "luaug/app/preserved.h"
 #include "luaug/core/error.h"
 #include "luaug/core/name_atom.h"
+#include "luaug/physics/backends.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/enum_registry.h"
+#include "luaug/scene/physics_sync.h"
 #include "luaug/scene/world.h"
 #include "luaug/script/modules.h"
 #include "luaug/script/runtime.h"
@@ -141,6 +143,13 @@ public:
     // The `Lighting` service, which carries the environment `extract` reads.
     // Invalid in a build with no render module, which is not an error.
     [[nodiscard]] core::InstanceId lighting() const noexcept { return m_lighting; }
+
+    // The physics mirror, or null in a build with no physics backend. The world
+    // owns it because a hot reload rebuilds the world, and a simulation that
+    // outlived the tree it mirrors would be holding bodies for parts that no
+    // longer exist.
+    [[nodiscard]] scene::PhysicsSync* physics() noexcept { return m_physics ? &*m_physics : nullptr; }
+    [[nodiscard]] const scene::PhysicsSync* physics() const noexcept { return m_physics ? &*m_physics : nullptr; }
     [[nodiscard]] script::ScriptRuntime& runtime() noexcept { return *m_runtime; }
     [[nodiscard]] bool shutdownRequested();
 
@@ -175,6 +184,10 @@ private:
     // and a `World` holds references to them.
     std::optional<scene::World> m_world;
     std::optional<script::ScriptRuntime> m_runtime;
+    // Declared before the mirror, and destroyed after it: the mirror holds a
+    // reference to this and tears its world down in its own destructor.
+    physics::PhysicsResult m_backend;
+    std::optional<scene::PhysicsSync> m_physics;
 
     std::filesystem::path m_root;
     core::InstanceId m_workspace;

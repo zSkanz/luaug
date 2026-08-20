@@ -29,6 +29,13 @@ struct Sample
     f64 meanTickMs = 0.0;
     f64 maxTickMs = 0.0;
     u64 instances = 0;
+    // The three stages the physics mirror can separate, accumulated over the
+    // run and reported as a per-tick mean. Zero for a scenario with no bodies,
+    // which is most of them.
+    f64 applyMs = 0.0;
+    f64 stepMs = 0.0;
+    f64 writebackMs = 0.0;
+    u64 bodies = 0;
 };
 
 // Reads the one field a benchmark manifest has that a replay manifest does not.
@@ -69,15 +76,34 @@ struct Sample
     // thing.
     u64 totalNs = 0;
     u64 worstNs = 0;
+    f64 applySeconds = 0.0;
+    f64 stepSeconds = 0.0;
+    f64 writebackSeconds = 0.0;
     for (u64 tick = 0; tick < scenario.ticks; ++tick) {
         const u64 before = platform::nowNs();
         host.tick();
         const u64 elapsed = platform::nowNs() - before;
         totalNs += elapsed;
         worstNs = std::max(worstNs, elapsed);
+
+        // Read after the tick rather than measured here: the mirror is the only
+        // party that knows where its own stages begin and end, and a harness
+        // timing them from outside would be timing the call, not the stage.
+        if (const scene::PhysicsSync* physics = host.physics(); physics != nullptr) {
+            applySeconds += physics->timings().apply;
+            stepSeconds += physics->timings().step;
+            writebackSeconds += physics->timings().writeback;
+        }
     }
 
     out.instances = static_cast<u64>(host.world().instanceCount());
+    if (const scene::PhysicsSync* physics = host.physics(); physics != nullptr) {
+        const auto ticks = static_cast<f64>(scenario.ticks == 0 ? 1 : scenario.ticks);
+        out.applyMs = applySeconds * 1000.0 / ticks;
+        out.stepMs = stepSeconds * 1000.0 / ticks;
+        out.writebackMs = writebackSeconds * 1000.0 / ticks;
+        out.bodies = static_cast<u64>(physics->bodyCount());
+    }
     out.meanTickMs =
         scenario.ticks == 0 ? 0.0 : static_cast<f64>(totalNs) / static_cast<f64>(scenario.ticks) / kNanosPerMs;
     out.maxTickMs = static_cast<f64>(worstNs) / kNanosPerMs;
@@ -137,6 +163,9 @@ std::optional<core::EngineError> runBenchmarks(const std::filesystem::path& root
 
         std::vector<f64> means;
         std::vector<f64> maxima;
+        std::vector<f64> applies;
+        std::vector<f64> steps;
+        std::vector<f64> writebacks;
         BenchResult result;
         result.name = scenario.name;
         result.ticks = scenario.ticks;
@@ -149,10 +178,17 @@ std::optional<core::EngineError> runBenchmarks(const std::filesystem::path& root
             means.push_back(sample.meanTickMs);
             maxima.push_back(sample.maxTickMs);
             result.instances = sample.instances;
+            applies.push_back(sample.applyMs);
+            steps.push_back(sample.stepMs);
+            writebacks.push_back(sample.writebackMs);
+            result.bodies = sample.bodies;
         }
 
         result.meanTickMs = median(means);
         result.maxTickMs = median(maxima);
+        result.applyMs = median(applies);
+        result.stepMs = median(steps);
+        result.writebackMs = median(writebacks);
 
         const std::array<I18nArg, 5> args{
             I18nArg{"name", result.name},
@@ -162,6 +198,22 @@ std::optional<core::EngineError> runBenchmarks(const std::filesystem::path& root
             I18nArg{"max", milliseconds(result.maxTickMs)},
         };
         core::log(LogLevel::Info, LUAUG_TR("engine.bench.info.result"), args);
+
+        // The M5 gate's second item wants the physics budget "broken down"
+        // (roadmap M5). These are the three stages this seam can separate, and
+        // the line is emitted only for a scenario that has bodies -- a
+        // breakdown of zeroes beside every other benchmark would be noise the
+        // eye learns to skip.
+        if (result.bodies > 0) {
+            const std::array<I18nArg, 5> stageArgs{
+                I18nArg{"name", result.name},
+                I18nArg{"bodies", static_cast<core::i64>(result.bodies)},
+                I18nArg{"apply", milliseconds(result.applyMs)},
+                I18nArg{"step", milliseconds(result.stepMs)},
+                I18nArg{"writeback", milliseconds(result.writebackMs)},
+            };
+            core::log(LogLevel::Info, LUAUG_TR("engine.bench.info.physics"), stageArgs);
+        }
 
         // Recorded before the failure is raised, and every scenario runs even
         // after one blows its budget: the point of a run is the whole table, and

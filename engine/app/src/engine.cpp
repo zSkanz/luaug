@@ -377,12 +377,25 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     };
 
     render::RenderWorld snapshot;
-    const auto headlessStepNs = static_cast<u64>(std::ceil(scheduler.timing().fixedDt * kNanosPerSecond));
+    auto headlessStepNs = static_cast<u64>(std::ceil(scheduler.timing().fixedDt * kNanosPerSecond));
     bool quit = false;
 
     while (!quit) {
         if (options.frames != 0 && scheduler.totalFrames() >= options.frames)
             break;
+
+        // The FrameStart safe point for `PhysicsService.FixedTimestep`
+        // (api-design.md §2.1). Here and nowhere else: the accumulator below,
+        // the `task` timer wheel and the solver all read the tick, and a value
+        // that changed between two of those reads inside one frame is a class of
+        // bug worth designing out rather than debugging. A script's write lands
+        // in `requestedFixedTimestep` and takes effect on the frame after it.
+        if (const f64 requested = host->world().engineState().requestedFixedTimestep;
+            requested != scheduler.timing().fixedDt) {
+            scheduler.setFixedDt(requested);
+            host->world().engineState().fixedTimestep = requested;
+            headlessStepNs = static_cast<u64>(std::ceil(requested * kNanosPerSecond));
+        }
 
         // A headless run drives a synthetic clock: exactly one fixed step per
         // frame, as fast as the machine goes. Real time would make the tick

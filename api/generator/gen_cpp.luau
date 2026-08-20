@@ -694,9 +694,9 @@ local function generate(target: Module)
     emitHeader(`#include "luaug/core/id.h"`)
     emitHeader(`#include "luaug/core/name_atom.h"`)
     emitHeader(`#include "luaug/scene/class_registry.h"`)
-    if ownsRegistries then
-        emitHeader(`#include "luaug/scene/enum_registry.h"`)
-    end
+    -- Unconditional: every module's header now names `EnumId` for the id
+    -- constants below, whether or not it owns the registry.
+    emitHeader(`#include "luaug/scene/enum_registry.h"`)
     emitHeader(`#include "luaug/scene/value.h"`)
     emitHeader("")
     emitHeader("namespace luaug::scene")
@@ -725,15 +725,22 @@ local function generate(target: Module)
         emitHeader("")
         emitHeader("// Registers every enum in the IDL, in declaration order.")
         emitHeader("void registerEnums(EnumRegistry& enums, core::AtomTable& atoms);")
-        emitHeader("")
-        emitHeader("// The id `registerEnums` assigns each enum, so that a hand-written accessor")
-        emitHeader("// validating an enum property names the same number a stored `EnumValue`")
-        emitHeader("// carries. A registry lookup by name would answer the same question and")
-        emitHeader("// would do it with a hash probe on a property write.")
+    end
 
-        for index, enumeration in Enums do
-            emitHeader(`inline constexpr EnumId {enumeration.Name}EnumId = {index};`)
-        end
+    -- The id constants go in EVERY module's header, not just the one that owns
+    -- the registry. Any module may declare a property of an enum type -- M5's
+    -- `MeshPart.CollisionFidelity` is the first that is not scene's -- and its
+    -- accessor has to name the same number a stored `EnumValue` carries. The
+    -- alternative is a hash probe per property write, or a cross-module include
+    -- of another module's generated header.
+    emitHeader("")
+    emitHeader("// The id `registerEnums` assigns each enum, so that a hand-written accessor")
+    emitHeader("// validating an enum property names the same number a stored `EnumValue`")
+    emitHeader("// carries. A registry lookup by name would answer the same question and")
+    emitHeader("// would do it with a hash probe on a property write.")
+
+    for index, enumeration in Enums do
+        emitHeader(`inline constexpr {scope}EnumId {enumeration.Name}EnumId = {index};`)
     end
 
     emitHeader("")

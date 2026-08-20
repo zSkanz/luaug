@@ -369,7 +369,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(scriptDesc);
 
     // --- BasePart ---
-    static std::array<PropertyDesc, 6> basePartProperties;
+    static std::array<PropertyDesc, 15> basePartProperties;
     basePartProperties = {{
         PropertyDesc{
             .name = atoms.intern("CFrame"),
@@ -437,6 +437,127 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .get = native::getBasePartTransparency,
             .set = native::setBasePartTransparency,
         },
+        PropertyDesc{
+            .name = atoms.intern("Anchored"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getBasePartAnchored,
+            .set = native::setBasePartAnchored,
+        },
+        PropertyDesc{
+            .name = atoms.intern("CanCollide"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getBasePartCanCollide,
+            .set = native::setBasePartCanCollide,
+        },
+        PropertyDesc{
+            .name = atoms.intern("CanQuery"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getBasePartCanQuery,
+            .set = native::setBasePartCanQuery,
+        },
+        PropertyDesc{
+            .name = atoms.intern("CollisionGroup"),
+            .type = ValueType::String,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getBasePartCollisionGroup,
+            .set = native::setBasePartCollisionGroup,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Friction"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getBasePartFriction,
+            .set = native::setBasePartFriction,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Restitution"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getBasePartRestitution,
+            .set = native::setBasePartRestitution,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Density"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getBasePartDensity,
+            .set = native::setBasePartDensity,
+        },
+        PropertyDesc{
+            .name = atoms.intern("LinearVelocity"),
+            .type = ValueType::Vector3,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = true,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector"),
+            .get = native::getBasePartLinearVelocity,
+            .set = nullptr,
+        },
+        PropertyDesc{
+            .name = atoms.intern("AngularVelocity"),
+            .type = ValueType::Vector3,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = true,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector"),
+            .get = native::getBasePartAngularVelocity,
+            .set = nullptr,
+        },
+    }};
+    static std::array<MethodDesc, 1> basePartMethods;
+    basePartMethods = {{
+        MethodDesc{
+            .name = atoms.intern("ApplyImpulse"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .docKey = {},
+        },
+    }};
+    static std::array<EventDesc, 2> basePartEvents;
+    basePartEvents = {{
+        EventDesc{
+            .name = atoms.intern("Touched"),
+            .slot = 7,
+            .docKey = {},
+        },
+        EventDesc{
+            .name = atoms.intern("TouchEnded"),
+            .slot = 8,
+            .docKey = {},
+        },
     }};
     ClassDescriptor basePartDesc;
     basePartDesc.name = atoms.intern("BasePart");
@@ -445,6 +566,8 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     basePartDesc.defaultName = atoms.intern("BasePart");
     basePartDesc.docKey = {};
     basePartDesc.properties = basePartProperties;
+    basePartDesc.methods = basePartMethods;
+    basePartDesc.events = basePartEvents;
     basePartDesc.attachComponents = native::attachPartComponents;
     basePartDesc.detachComponents = native::detachPartComponents;
     const ClassId basePartClass = classes.registerClass(basePartDesc);
@@ -472,6 +595,112 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     partDesc.docKey = {};
     partDesc.properties = partProperties;
     classes.registerClass(partDesc);
+
+    // --- CharacterBody ---
+    static std::array<PropertyDesc, 6> characterBodyProperties;
+    characterBodyProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("WalkSpeed"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getCharacterBodyWalkSpeed,
+            .set = native::setCharacterBodyWalkSpeed,
+        },
+        PropertyDesc{
+            .name = atoms.intern("JumpSpeed"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getCharacterBodyJumpSpeed,
+            .set = native::setCharacterBodyJumpSpeed,
+        },
+        PropertyDesc{
+            .name = atoms.intern("MaxSlopeAngle"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getCharacterBodyMaxSlopeAngle,
+            .set = native::setCharacterBodyMaxSlopeAngle,
+        },
+        PropertyDesc{
+            .name = atoms.intern("AutoStepHeight"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getCharacterBodyAutoStepHeight,
+            .set = native::setCharacterBodyAutoStepHeight,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Grounded"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = true,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getCharacterBodyGrounded,
+            .set = nullptr,
+        },
+        PropertyDesc{
+            .name = atoms.intern("State"),
+            .type = ValueType::EnumItem,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = true,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
+            .get = native::getCharacterBodyState,
+            .set = nullptr,
+        },
+    }};
+    static std::array<MethodDesc, 2> characterBodyMethods;
+    characterBodyMethods = {{
+        MethodDesc{
+            .name = atoms.intern("Move"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .docKey = {},
+        },
+        MethodDesc{
+            .name = atoms.intern("Jump"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .docKey = {},
+        },
+    }};
+    static std::array<EventDesc, 1> characterBodyEvents;
+    characterBodyEvents = {{
+        EventDesc{
+            .name = atoms.intern("Landed"),
+            .slot = 9,
+            .docKey = {},
+        },
+    }};
+    ClassDescriptor characterBodyDesc;
+    characterBodyDesc.name = atoms.intern("CharacterBody");
+    characterBodyDesc.super = basePartClass;
+    characterBodyDesc.flags = ClassFlags::None;
+    characterBodyDesc.defaultName = atoms.intern("CharacterBody");
+    characterBodyDesc.docKey = {};
+    characterBodyDesc.properties = characterBodyProperties;
+    characterBodyDesc.methods = characterBodyMethods;
+    characterBodyDesc.events = characterBodyEvents;
+    characterBodyDesc.attachComponents = native::attachCharacterBodyComponents;
+    characterBodyDesc.detachComponents = native::detachCharacterBodyComponents;
+    classes.registerClass(characterBodyDesc);
 
     // --- DataModel ---
     static std::array<PropertyDesc, 2> dataModelProperties;
@@ -546,8 +775,19 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(dataModelDesc);
 
     // --- Workspace ---
-    static std::array<PropertyDesc, 1> workspaceProperties;
+    static std::array<PropertyDesc, 2> workspaceProperties;
     workspaceProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("Gravity"),
+            .type = ValueType::Vector3,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector"),
+            .get = native::getWorkspaceGravity,
+            .set = native::setWorkspaceGravity,
+        },
         PropertyDesc{
             .name = atoms.intern("CurrentCamera"),
             .type = ValueType::Instance,
@@ -823,12 +1063,33 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("FixedTimestep"),
             .type = ValueType::Number,
             .threadSafety = ThreadSafety::ReadParallel,
-            .readOnly = true,
+            .readOnly = false,
             .inert = false,
             .docKey = {},
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getPhysicsServiceFixedTimestep,
-            .set = nullptr,
+            .set = native::setPhysicsServiceFixedTimestep,
+        },
+    }};
+    static std::array<MethodDesc, 3> physicsServiceMethods;
+    physicsServiceMethods = {{
+        MethodDesc{
+            .name = atoms.intern("RegisterCollisionGroup"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .docKey = {},
+        },
+        MethodDesc{
+            .name = atoms.intern("CollisionGroupSetCollidable"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .docKey = {},
+        },
+        MethodDesc{
+            .name = atoms.intern("GetRegisteredCollisionGroups"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .docKey = {},
         },
     }};
     ClassDescriptor physicsServiceDesc;
@@ -838,6 +1099,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     physicsServiceDesc.defaultName = atoms.intern("PhysicsService");
     physicsServiceDesc.docKey = {};
     physicsServiceDesc.properties = physicsServiceProperties;
+    physicsServiceDesc.methods = physicsServiceMethods;
     classes.registerClass(physicsServiceDesc);
 }
 
@@ -881,6 +1143,76 @@ void registerEnums(EnumRegistry& enums, core::AtomTable& atoms)
     partShapeDesc.docKey = {};
     partShapeDesc.items = partShapeItems;
     enums.registerEnum(partShapeDesc);
+
+    // --- CollisionFidelity ---
+    static std::array<EnumItemDesc, 4> collisionFidelityItems;
+    collisionFidelityItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Default"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Hull"),
+            .value = 1,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Box"),
+            .value = 2,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Precise"),
+            .value = 3,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor collisionFidelityDesc;
+    collisionFidelityDesc.name = atoms.intern("CollisionFidelity");
+    collisionFidelityDesc.docKey = {};
+    collisionFidelityDesc.items = collisionFidelityItems;
+    enums.registerEnum(collisionFidelityDesc);
+
+    // --- RaycastFilterType ---
+    static std::array<EnumItemDesc, 2> raycastFilterTypeItems;
+    raycastFilterTypeItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Exclude"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Include"),
+            .value = 1,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor raycastFilterTypeDesc;
+    raycastFilterTypeDesc.name = atoms.intern("RaycastFilterType");
+    raycastFilterTypeDesc.docKey = {};
+    raycastFilterTypeDesc.items = raycastFilterTypeItems;
+    enums.registerEnum(raycastFilterTypeDesc);
+
+    // --- CharacterState ---
+    static std::array<EnumItemDesc, 2> characterStateItems;
+    characterStateItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Grounded"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Airborne"),
+            .value = 1,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor characterStateDesc;
+    characterStateDesc.name = atoms.intern("CharacterState");
+    characterStateDesc.docKey = {};
+    characterStateDesc.items = characterStateItems;
+    enums.registerEnum(characterStateDesc);
 
     // --- RotationOrder ---
     static std::array<EnumItemDesc, 6> rotationOrderItems;

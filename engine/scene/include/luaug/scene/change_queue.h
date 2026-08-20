@@ -49,6 +49,16 @@ enum class ChangeKind : u8
 
     TagAdded,
     TagRemoved,
+
+    // `subject`'s event named by `name` fired, carrying `other` as its single
+    // Instance argument -- nil when `other` is invalid.
+    //
+    // Generic rather than one kind per signal, because the three physics
+    // signals M5 adds (`Touched`, `TouchEnded`, `Landed`) all have exactly this
+    // shape, and a kind per event would grow this enum with every milestone
+    // that has one. The event's name is data here rather than an enumerator for
+    // the same reason a property's name is.
+    InstanceEvent,
 };
 
 // 16 bytes, trivially copyable, and deliberately not a variant: one shape means

@@ -57,6 +57,12 @@ public:
     // the tick schedule should depend on being able to reproduce a stall.
     [[nodiscard]] Frame beginFrame(u64 nowNs) noexcept;
 
+    // Applied at a FrameStart safe point and nowhere else
+    // (`PhysicsService.FixedTimestep`, api-design.md §2.1). The accumulator is
+    // deliberately NOT rescaled: it holds real time owed to the simulation, and
+    // that debt is the same number of seconds whatever the tick becomes.
+    void setFixedDt(f64 seconds) noexcept { timing_.fixedDt = seconds; }
+
     [[nodiscard]] u64 totalTicks() const noexcept { return totalTicks_; }
     [[nodiscard]] u64 totalFrames() const noexcept { return totalFrames_; }
     [[nodiscard]] const FrameTiming& timing() const noexcept { return timing_; }

@@ -119,13 +119,19 @@ local Classes: { Schema.Class } = {
         Module = "scene",
         Storage = "Workspace",
         Tags = { "Service", "NotCreatable" } :: { Schema.ClassTag },
-        -- `Gravity` and the cast queries are still physics (M5). `CurrentCamera`
-        -- arrived with the renderer at M4, as the note here always said it
-        -- would.
+        -- `CurrentCamera` arrived with the renderer at M4 and `Gravity` with
+        -- the simulation at M5, as the note here always said they would.
         Doc = "The root of the 3D scene, reached through the `workspace` global as well as through "
-            .. "`game:GetService`. Whatever is parented under it is in the world and whatever is not, is not. "
-            .. "Gravity and the cast queries arrive with the physics module.",
+            .. "`game:GetService`. Whatever is parented under it is in the world and whatever is not, is not.",
         Properties = {
+            {
+                Name = "Gravity",
+                Type = "vector",
+                Default = "vector.create(0, -9.81, 0)",
+                Doc = "The acceleration applied to every unanchored part, in metres per second squared. SI and "
+                    .. "signed, so the default points down; a game wanting moon gravity scales it rather than "
+                    .. "reaching for a separate multiplier.",
+            },
             {
                 Name = "CurrentCamera",
                 Type = "Camera?",
@@ -535,19 +541,52 @@ local Classes: { Schema.Class } = {
             {
                 Name = "FixedTimestep",
                 Type = "number",
-                ReadOnly = true,
                 Default = "1/60",
                 ThreadSafety = "ReadParallel",
                 Doc = "The duration of one simulation tick, in seconds, and therefore the grid every timing "
                     .. "guarantee is expressed against: `task.wait(1)` is exactly 60 ticks at the default 1/60, on "
                     .. "every machine and every run. Express durations as multiples of it and the same code stays "
-                    .. "correct at 30 Hz or at 240 Hz. Read-only until the physics module ships, when a write will "
-                    .. "take effect at the next frame start rather than mid-tick.",
+                    .. "correct at 30 Hz or at 240 Hz. Writable from M5, and a write takes effect at the next "
+                    .. "frame start rather than mid-tick: the accumulator, the timer wheel and the solver all "
+                    .. "read it, and changing it between two of those reads inside one frame is a class of bug "
+                    .. "worth designing out. Values outside 1/240 to 1/30 are refused.",
             },
         } :: { Schema.Property },
-        Doc = "The simulation tick grid, and in time the physics controls that do not belong on an individual "
-            .. "part. It ships before any physics does because `FixedTimestep` is a scheduler property that physics "
-            .. "merely names, and everything about scheduling and timing is already expressed against it.",
+        Methods = {
+            {
+                Name = "RegisterCollisionGroup",
+                Parameters = { { Name = "name", Type = "string" } },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Declares a collision group. Registering a name that already exists is a no-op rather than "
+                    .. "an error, which is what lets a script register its groups at file scope and survive a hot "
+                    .. "reload. The group collides with everything until told otherwise.",
+            },
+            {
+                Name = "CollisionGroupSetCollidable",
+                Parameters = {
+                    { Name = "a", Type = "string" },
+                    { Name = "b", Type = "string" },
+                    { Name = "collidable", Type = "boolean" },
+                },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Sets whether parts in two groups collide with each other. Symmetric: setting a against b "
+                    .. "sets b against a, because a one-way collision is not a thing a solver can express.",
+            },
+            {
+                Name = "GetRegisteredCollisionGroups",
+                Parameters = {},
+                Returns = { "{string}" },
+                ThreadSafety = "Unsafe",
+                Doc = "Every registered group name, in registration order, `Default` first. A fresh array on "
+                    .. "every call, and ordered rather than hashed so that iterating it cannot leak a container's "
+                    .. "own order into a simulation (R10).",
+            },
+        } :: { Schema.Method },
+        Doc = "The simulation tick grid and the physics controls that do not belong on an individual part. It "
+            .. "shipped before any physics did because `FixedTimestep` is a scheduler property that physics merely "
+            .. "names, and everything about scheduling and timing is expressed against it.",
     },
 }
 

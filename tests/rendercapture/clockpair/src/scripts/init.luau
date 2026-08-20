@@ -31,6 +31,7 @@ local Evening = 17.0
 local scene = Instance.new("MeshPart")
 scene.Name = "Scene"
 scene.MeshContent = "asset://models/scene.gltf" :: Content
+scene.Anchored = true
 scene.Parent = workspace
 
 local camera = Instance.new("Camera")

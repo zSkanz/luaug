@@ -24,6 +24,7 @@ luaug_add_module(app
         platform
         rhi_api
         net_api
+        physics_api
         render
         scene
         script
@@ -43,6 +44,13 @@ if(LUAUG_RHI_CAPTURE)
 endif()
 if(LUAUG_RHI_NULL)
     target_link_libraries(luaug_app PRIVATE luaug::rhi_null)
+endif()
+
+# The physics backend, for the same reason and by the same rule (ADR 0023): the
+# seam is what `scene` and everything else sees, and the implementation is
+# linked here alone.
+if(LUAUG_PHYSICS_JOLT)
+    target_link_libraries(luaug_app PRIVATE luaug::physics_jolt)
 endif()
 
 # The debug overlay (ADR 0011). Dev builds only: the option lives beside the

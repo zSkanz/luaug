@@ -865,6 +865,22 @@ void enqueueSceneChanges(lua_State* L, std::span<const scene::Change> changes)
             lua_pop(L, 1);
             break;
         }
+
+        case scene::ChangeKind::InstanceEvent: {
+            // The generic one-Instance-argument event: `Touched`, `TouchEnded`,
+            // `Landed`. The name is in the change rather than in the enumerator,
+            // so a milestone that adds another signal of this shape adds no code
+            // here at all.
+            const SignalId id = eventSignal(change.name);
+            if (!id.valid())
+                break;
+            // Invalid means nil, which is what `Landed` carries when the ground
+            // belongs to no instance.
+            pushInstance(L, change.other);
+            enqueueFire(L, id, lua_gettop(L), 1);
+            lua_pop(L, 1);
+            break;
+        }
         }
     }
 }

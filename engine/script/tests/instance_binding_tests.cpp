@@ -519,9 +519,11 @@ TEST_CASE("the boot-time method cross-check reports both directions")
     CHECK(coverage.boundWithoutDeclaration == 0);
     // Pinned rather than merely compared, so that a class added to the IDL
     // shows up here as a number that changed. 43 at the M2 gate; 46 once
-    // `HotReloadService` brought `SaveState`, `LoadState` and `IsReload`.
-    CHECK(coverage.declared == 46);
-    CHECK(coverage.bound == 46);
+    // `HotReloadService` brought `SaveState`, `LoadState` and `IsReload`; 52
+    // once M5 brought `ApplyImpulse`, `CharacterBody:Move`/`Jump` and the three
+    // `PhysicsService` collision-group calls.
+    CHECK(coverage.declared == 52);
+    CHECK(coverage.bound == 52);
     CHECK(coverage.declaredWithoutBinding == 0);
 }
 

@@ -15,6 +15,7 @@
 #include "luaug/core/id.h"
 #include "luaug/core/name_atom.h"
 #include "luaug/scene/class_registry.h"
+#include "luaug/scene/enum_registry.h"
 #include "luaug/scene/value.h"
 
 namespace luaug::scene
@@ -35,6 +36,18 @@ namespace generated
 // so the table handed in is the one the descriptors speak.
 void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms);
 
+// The id `registerEnums` assigns each enum, so that a hand-written accessor
+// validating an enum property names the same number a stored `EnumValue`
+// carries. A registry lookup by name would answer the same question and
+// would do it with a hash probe on a property write.
+inline constexpr scene::EnumId PartShapeEnumId = 1;
+inline constexpr scene::EnumId CollisionFidelityEnumId = 2;
+inline constexpr scene::EnumId RaycastFilterTypeEnumId = 3;
+inline constexpr scene::EnumId CharacterStateEnumId = 4;
+inline constexpr scene::EnumId RotationOrderEnumId = 5;
+inline constexpr scene::EnumId LogLevelEnumId = 6;
+inline constexpr scene::EnumId RunContextEnumId = 7;
+
 } // namespace generated
 
 // One accessor pair per property -- `get<Class><Property>` and
@@ -51,6 +64,8 @@ namespace native
 // MeshPart
 scene::Value getMeshPartMeshContent(const scene::World& world, core::InstanceId id);
 bool setMeshPartMeshContent(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getMeshPartCollisionFidelity(const scene::World& world, core::InstanceId id);
+bool setMeshPartCollisionFidelity(scene::World& world, core::InstanceId id, const scene::Value& value);
 void attachMeshPartComponents(scene::World& world, core::InstanceId id);
 void detachMeshPartComponents(scene::World& world, core::InstanceId id);
 

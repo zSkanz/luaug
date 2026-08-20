@@ -1,0 +1,7 @@
+{
+  "name": "physics1k",
+  "script": "init.luau",
+  "seed": 1000,
+  "ticks": 300,
+  "budgetMs": 16.0
+}
