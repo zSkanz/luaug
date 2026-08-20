@@ -880,11 +880,15 @@ from `Heartbeat` on the same tick come due on the same tick.
 - **Code change → fast world restart:** tear down the game VM, rebuild the
   DataModel, re-run scripts. GPU resources, imported assets, streamed chunks,
   and the window survive → target **< 500 ms** (a hard perf requirement).
-- **State bag:** `HotReloadService` (dev-only): `BeforeReload: Signal`,
-  `AfterReload: Signal`, `SaveState(key: string, value: any)` (json-able or
-  buffer), `LoadState(key) → any?`, `IsReload: boolean`. The engine
+- **State bag:** `HotReloadService` (dev-only): `PreReload: Signal`,
+  `PostReload: Signal`, `SaveState(key: string, value: any)` (json-able or
+  buffer), `LoadState(key) → any?`, `IsReload(): boolean`. The engine
   auto-preserves `Workspace.CurrentCamera.CFrame` and any instance tagged
   `"PreserveOnReload"` (so the character just stays put in the demo).
+  The two event names are `Pre*`/`Post*` and `IsReload` is a **method** because
+  §9's own lints rejected the alternatives: a boolean property may not carry an
+  `Is` prefix, and an event must be a past-tense fact or a `Pre*`/`Post*` phase.
+  The rules were right and the first spelling was not.
 - **Asset change → in-place swap:** textures/meshes/audio hot-swap without a
   VM restart (content-hash change pushed over the dev WebSocket).
 - Transport (ADR 0035): the dev server (Lute, `@lute/fs.watch` + an `@std/net`

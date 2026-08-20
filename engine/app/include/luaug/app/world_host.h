@@ -50,6 +50,15 @@ struct WorldHostOptions
 
     f64 fixedTimestep = 1.0 / 60.0;
 
+    // The hot-reload bag, owned by whoever outlives this host -- which is the
+    // point of it (ADR 0024). Null runs the world with the runtime's own bag,
+    // which dies with the VM and is right for a world nobody will reload.
+    script::ReloadState* reloadState = nullptr;
+
+    // Whether this world is the product of a reload, which is the whole of what
+    // `HotReloadService:IsReload` answers.
+    bool isReload = false;
+
     // Every `*.spec.luau` under this directory is mounted as an entry `Script`
     // alongside the project's own, and one more synthesized entry runs the
     // suite once `game.Loaded` has fired (api-design.md §3). Empty means an
@@ -125,6 +134,12 @@ public:
 
     // Runs the `BindToClose` callbacks. The host calls it once, on the way out.
     void close();
+
+    // `HotReloadService.PreReload` on the outgoing world and `PostReload` on
+    // the incoming one, each fired and then drained -- the drain is the point,
+    // because a handler that has not run yet has not saved anything yet.
+    void firePreReload();
+    void firePostReload();
 
 private:
     // Reads `@luaug/*` out of the content directory and registers each. They are

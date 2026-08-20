@@ -162,6 +162,7 @@ declare extern type DataModel extends Instance with
     function GetService(self, name: "ScriptService"): ScriptService
     function GetService(self, name: "TagService"): TagService
     function GetService(self, name: "DebugService"): DebugService
+    function GetService(self, name: "HotReloadService"): HotReloadService
     function GetService(self, name: "PhysicsService"): PhysicsService
     function GetService(self, name: string): Instance
     function FindService(self, name: string): Instance?
@@ -204,6 +205,14 @@ declare extern type DebugService extends Instance with
     function SetCustomStat(self, name: string, value: number): ()
     function ShowPanel(self, name: string): ()
     function HidePanel(self, name: string): ()
+end
+
+declare extern type HotReloadService extends Instance with
+    read PreReload: Signal<()>
+    read PostReload: Signal<()>
+    function SaveState(self, key: string, value: any): ()
+    function LoadState(self, key: string): any
+    function IsReload(self): boolean
 end
 
 declare extern type PhysicsService extends Instance with

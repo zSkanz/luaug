@@ -159,6 +159,8 @@ std::optional<core::EngineError> runScenario(const ReplayScenario& scenario, Rep
             .projectPath = scenario.scriptPath,
             .seed = scenario.seed,
             .fixedTimestep = kReplayTimestep,
+            .reloadState = nullptr,
+            .isReload = false,
             .conformanceRoot = {},
         });
         error.has_value())

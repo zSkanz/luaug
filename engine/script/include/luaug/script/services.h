@@ -24,6 +24,7 @@
 #include "luaug/core/name_atom.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/script/binding.h"
+#include "luaug/script/reload_state.h"
 
 struct lua_State;
 
@@ -125,9 +126,18 @@ public:
     // is a cost with no reason to exist.
     core::NameAtom messageOut;
     core::NameAtom loaded;
+    core::NameAtom preReload;
+    core::NameAtom postReload;
     scene::ClassId runServiceClass = 0;
     scene::ClassId tagServiceClass = 0;
     scene::ClassId debugServiceClass = 0;
+    scene::ClassId hotReloadServiceClass = 0;
+
+    // The hot-reload bag (ADR 0024). Never null: `ScriptRuntime` owns one so
+    // that `SaveState` is never a silent no-op, and the host substitutes its
+    // own -- which outlives `WorldHost` -- when it intends the values to
+    // survive a reload.
+    ReloadState* reload = nullptr;
 };
 
 // Creates `game` and the two services that exist from boot, installs the
@@ -152,6 +162,15 @@ void fireRunServiceEvent(lua_State* L, core::NameAtom event, f64 delta);
 // Enqueues `game.Loaded`. Fires once, after every entry script has had its first
 // resumption (api-design.md §3).
 void fireDataModelLoaded(lua_State* L);
+
+// Enqueues `HotReloadService.PreReload` on the outgoing world, or `PostReload`
+// on the world a reload built. A no-op when no script ever asked for the
+// service, because then there is no instance and nothing can have connected.
+void fireHotReloadEvent(lua_State* L, bool before);
+
+// Points the bindings at the bag the host owns. Called before any script runs;
+// the runtime's own bag is what they use until it is.
+void setReloadState(lua_State* L, ReloadState* state);
 
 // Wakes every `WaitForChild` whose awaited child now exists, and expires the
 // ones whose timeout has passed. Called from the task-resume phase, because a

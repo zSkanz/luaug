@@ -265,6 +265,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             .projectPath = options.scriptPath,
             .seed = options.worldSeed,
             .fixedTimestep = scheduler.timing().fixedDt,
+            .reloadState = nullptr,
+            .isReload = false,
             .conformanceRoot = options.conformanceRoot,
         });
         bootError.has_value())

@@ -226,6 +226,12 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
         .read = &WorldHostLoader::read,
     });
 
+    // Before any script runs, because a script's file scope may call
+    // `SaveState` and the bag it reaches has to be the host's by then.
+    m_runtime->setReloadState(options.reloadState);
+    if (options.reloadState != nullptr)
+        options.reloadState->setIsReload(options.isReload);
+
     if (std::optional<core::EngineError> error = registerRuntimeModules(); error.has_value())
         return error;
 
@@ -412,6 +418,20 @@ std::optional<core::EngineError> WorldHost::mountConformance(const std::filesyst
 
     script::mountScripts(m_runtime->state(), entries);
     return std::nullopt;
+}
+
+void WorldHost::firePreReload()
+{
+    m_runtime->fireHotReload(true);
+    m_runtime->drain(core::Phase::FrameStart);
+    m_world->retireDestroyed();
+}
+
+void WorldHost::firePostReload()
+{
+    m_runtime->fireHotReload(false);
+    m_runtime->drain(core::Phase::FrameStart);
+    m_world->retireDestroyed();
 }
 
 core::u64 WorldHost::mountedScriptCount() const

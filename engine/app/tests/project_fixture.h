@@ -85,12 +85,23 @@ struct Captured
 // default member initializer -- and warnings are errors here. One helper rather
 // than fourteen braces also means the next option `WorldHostOptions` grows is
 // one edit instead of fourteen.
+// Whether `workspace` has a child of this name. The scripts in these tests
+// encode what they observed into a folder name, because a name is the cheapest
+// thing a script can say that a test can read without a second channel.
+[[nodiscard]] inline bool hasChildNamed(luaug::app::WorldHost& host, std::string_view name)
+{
+    const luaug::core::NameAtom atom = host.world().atoms().lookup(name);
+    return host.world().findFirstChild(host.workspace(), atom).valid();
+}
+
 [[nodiscard]] inline luaug::app::WorldHostOptions bootOptions(const std::filesystem::path& path, core::u64 seed = 1)
 {
     return luaug::app::WorldHostOptions{
         .projectPath = path,
         .seed = seed,
         .fixedTimestep = 1.0 / 60.0,
+        .reloadState = nullptr,
+        .isReload = false,
         .conformanceRoot = {},
     };
 }

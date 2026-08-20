@@ -708,6 +708,51 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     debugServiceDesc.events = debugServiceEvents;
     classes.registerClass(debugServiceDesc);
 
+    // --- HotReloadService ---
+    static std::array<MethodDesc, 3> hotReloadServiceMethods;
+    hotReloadServiceMethods = {{
+        MethodDesc{
+            .name = atoms.intern("SaveState"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .docKey = {},
+        },
+        MethodDesc{
+            .name = atoms.intern("LoadState"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .docKey = {},
+        },
+        MethodDesc{
+            .name = atoms.intern("IsReload"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Safe,
+            .docKey = {},
+        },
+    }};
+    static std::array<EventDesc, 2> hotReloadServiceEvents;
+    hotReloadServiceEvents = {{
+        EventDesc{
+            .name = atoms.intern("PreReload"),
+            .slot = 7,
+            .docKey = {},
+        },
+        EventDesc{
+            .name = atoms.intern("PostReload"),
+            .slot = 8,
+            .docKey = {},
+        },
+    }};
+    ClassDescriptor hotReloadServiceDesc;
+    hotReloadServiceDesc.name = atoms.intern("HotReloadService");
+    hotReloadServiceDesc.super = instanceClass;
+    hotReloadServiceDesc.flags = ClassFlags::Service | ClassFlags::NotCreatable | ClassFlags::DevOnly;
+    hotReloadServiceDesc.defaultName = atoms.intern("HotReloadService");
+    hotReloadServiceDesc.docKey = {};
+    hotReloadServiceDesc.methods = hotReloadServiceMethods;
+    hotReloadServiceDesc.events = hotReloadServiceEvents;
+    classes.registerClass(hotReloadServiceDesc);
+
     // --- PhysicsService ---
     static std::array<PropertyDesc, 1> physicsServiceProperties;
     physicsServiceProperties = {{

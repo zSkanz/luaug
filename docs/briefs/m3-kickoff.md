@@ -513,19 +513,32 @@ brief had predicted it would. A reload now refuses on any compile failure,
 because unlike a boot it has the world that was already running to fall back on.
 The asymmetry is written into `reload.h` so the next reader does not "fix" it.
 
-**4. A digest test failed and the code was right.** The 55-byte SHA-1 vector had
+**4. `api-design.md` §3.2 named three members that the API definition's own
+lints reject.** `BeforeReload` and `AfterReload` are neither past-tense facts nor
+`Pre*`/`Post*` phases; `IsReload: boolean` is a boolean property carrying the
+`Is` prefix that §9 reserves for boolean *methods*. All three were caught by
+`apicheck` the moment the service was declared, before a line of C++ existed.
+
+The rules were right and the names were not. The surface is `PreReload`,
+`PostReload` and `IsReload()`, and making the third a method also removed the
+service's only property and the scene component that would have backed it — the
+implementation got smaller by obeying the naming rule. The alternative was to
+grow the two exception lists for names nobody had argued for, and those lists
+carry a comment saying not to.
+
+**5. A digest test failed and the code was right.** The 55-byte SHA-1 vector had
 been written from memory; FIPS publishes none at that length. The expectation now
 carries what Windows CNG computes and says so in the comment. MASTER_PROMPT §9
 says never guess an API signature; this is the same rule one level down — never
 guess a *value* either, and if no published one exists, cross-check against an
 implementation you did not write.
 
-**5. A test that waited for bytes the client had no reason to send hung the whole
+**6. A test that waited for bytes the client had no reason to send hung the whole
 suite instead of failing it.** The loopback helper takes a read deadline now. A
 hang costs a CI runner its entire timeout to say nothing, which is strictly worse
 than a red test with a message — and the mistake is easy enough to make twice.
 
-**6. Clang caught a `socklen_t` MSVC did not.** The address length is `int` on
+**7. Clang caught a `socklen_t` MSVC did not.** The address length is `int` on
 Winsock and unsigned on POSIX, so one cast was a `-Wsign-conversion` error on
 exactly one tier. That is now the third time in this project's life that the
 Linux stage was the only thing between an implicit conversion and `main`, which

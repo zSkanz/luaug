@@ -455,6 +455,56 @@ int instanceWaitForChild(lua_State* L)
 
 // --- Registration ------------------------------------------------------------
 
+// --- HotReloadService --------------------------------------------------------
+
+int hotReloadSaveState(lua_State* L)
+{
+    (void)checkInstance(L, 1);
+    size_t length = 0;
+    const char* text = luaL_checklstring(L, 2, &length);
+    // Present but nil is a legal value to save -- it is how a script clears a
+    // key -- so this checks that the argument exists rather than what it is.
+    luaL_checkany(L, 3);
+
+    std::string reason;
+    std::optional<BagValue> value = toBagValue(L, 3, reason);
+    if (!value.has_value())
+    {
+        // Raising rather than dropping. A reload that quietly loses state is
+        // worse than one that says which value it could not keep, because the
+        // first is discovered a save later and blamed on the reload.
+        const core::I18nArg args[] = {{"key", std::string_view{text, length}}, {"reason", std::string_view{reason}}};
+        raise(L, LUAUG_TR("script.err.unsavable_state"), args);
+    }
+
+    services(L).reload->save(std::string_view{text, length}, std::move(*value));
+    return 0;
+}
+
+int hotReloadLoadState(lua_State* L)
+{
+    (void)checkInstance(L, 1);
+    size_t length = 0;
+    const char* text = luaL_checklstring(L, 2, &length);
+
+    const BagValue* stored = services(L).reload->load(std::string_view{text, length});
+    if (stored == nullptr)
+    {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    pushBagValue(L, *stored);
+    return 1;
+}
+
+int hotReloadIsReload(lua_State* L)
+{
+    (void)checkInstance(L, 1);
+    lua_pushboolean(L, services(L).reload->isReload() ? 1 : 0);
+    return 1;
+}
+
 // `WaitForChild` is here rather than in `instance_binding.cpp` because it parks
 // on a tree state and only the resumption phase this file owns can wake it.
 constexpr InstanceMethodBinding ServiceMethods[] = {
@@ -481,6 +531,9 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"DebugService", "SetCustomStat", debugServiceSetCustomStat},
     {"DebugService", "ShowPanel", debugServiceShowPanel},
     {"DebugService", "HidePanel", debugServiceHidePanel},
+    {"HotReloadService", "SaveState", hotReloadSaveState},
+    {"HotReloadService", "LoadState", hotReloadLoadState},
+    {"HotReloadService", "IsReload", hotReloadIsReload},
 };
 
 } // namespace
@@ -497,6 +550,9 @@ void registerServices(lua_State* L)
     state.runServiceClass = w.classes().findId(atoms.intern("RunService"));
     state.tagServiceClass = w.classes().findId(atoms.intern("TagService"));
     state.debugServiceClass = w.classes().findId(atoms.intern("DebugService"));
+    state.hotReloadServiceClass = w.classes().findId(atoms.intern("HotReloadService"));
+    state.preReload = atoms.intern("PreReload");
+    state.postReload = atoms.intern("PostReload");
 
     bindInstanceMethods(L, ServiceMethods);
 
@@ -559,6 +615,29 @@ void fireRunServiceEvent(lua_State* L, core::NameAtom event, f64 delta)
     lua_pushnumber(L, delta);
     fireInstanceEvent(L, runService, descriptor->slot, lua_gettop(L), 1);
     lua_pop(L, 1);
+}
+
+void fireHotReloadEvent(lua_State* L, bool before)
+{
+    ServiceState& state = services(L);
+    const core::InstanceId service = findServiceOfClass(L, state.hotReloadServiceClass);
+    // No instance means no script ever asked for the service, so nothing can
+    // have connected to it. Not an error, and not worth a log line every save.
+    if (!service.valid())
+        return;
+
+    const core::NameAtom event = before ? state.preReload : state.postReload;
+    const scene::EventDesc* descriptor = world(L).classes().findEvent(world(L).classOf(service), event);
+    if (descriptor == nullptr)
+        return;
+
+    fireInstanceEvent(L, service, descriptor->slot, 0, 0);
+}
+
+void setReloadState(lua_State* L, ReloadState* state)
+{
+    if (state != nullptr)
+        services(L).reload = state;
 }
 
 void fireDataModelLoaded(lua_State* L)

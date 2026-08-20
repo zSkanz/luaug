@@ -391,6 +391,71 @@ local Classes: { Schema.Class } = {
             .. "at all in a headless run.",
     },
     {
+        Name = "HotReloadService",
+        Extends = "Instance",
+        Module = "scene",
+        -- `DevOnly`: api-design.md §2.1 keeps this service out of shipped
+        -- builds entirely, which is the one honest answer for a service whose
+        -- whole subject is a development loop.
+        Tags = { "Service", "NotCreatable", "DevOnly" } :: { Schema.ClassTag },
+        Methods = {
+            {
+                Name = "SaveState",
+                Parameters = {
+                    { Name = "key", Type = "string" },
+                    { Name = "value", Type = "any" },
+                },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Stores a value under `key` so the world built by the next reload can read it back. The value "
+                    .. "is converted to an engine-side copy at the moment of the call, because the VM holding the "
+                    .. "original is what a reload destroys -- so nil, booleans, numbers, strings, buffers, and "
+                    .. "tables of those are accepted, while a function, a thread, an Instance or a cyclic table "
+                    .. "raises `script.err.unsavable_state`. Raising beats dropping: a reload that quietly loses "
+                    .. "state is worse than one that says what it could not keep.",
+            },
+            {
+                Name = "LoadState",
+                Parameters = { { Name = "key", Type = "string" } },
+                Returns = { "any" },
+                ThreadSafety = "Unsafe",
+                Doc = "Reads back what `SaveState` stored under `key` before the reload, or nil if nothing did. "
+                    .. "The value is a fresh copy built in this VM; mutating it changes nothing that a later "
+                    .. "reload will see, and only another `SaveState` does.",
+            },
+            {
+                Name = "IsReload",
+                Parameters = {},
+                Returns = { "boolean" },
+                ThreadSafety = "Safe",
+                Doc = "Whether this world was built by a hot reload rather than by starting the engine. It is how "
+                    .. "a script knows to look for what it left behind instead of building it again -- the "
+                    .. "instances tagged `PreserveOnReload` are already in the tree by the time any entry script "
+                    .. "runs.",
+            },
+        } :: { Schema.Method },
+        Events = {
+            {
+                Name = "PreReload",
+                Parameters = {},
+                Doc = "Fires on the outgoing world when a reload has been requested and before anything is torn "
+                    .. "down, which is the last moment `SaveState` can be called and have the value survive. Its "
+                    .. "handlers are drained before the new world is built, so the reload waits for them.",
+            },
+            {
+                Name = "PostReload",
+                Parameters = {},
+                Doc = "Fires on the world a reload just built, after every entry script has had its first "
+                    .. "resumption and the preserved state is already in place. A handler connected at file scope "
+                    .. "therefore sees a world that is finished rather than one still being assembled.",
+            },
+        } :: { Schema.Event },
+        Doc = "The hot-reload loop as a script can see it (ADR 0024). Present in development builds only: a "
+            .. "shipped game has no reload to observe, and a service that existed there and never fired would be "
+            .. "a documented no-op. A reload rebuilds the world from source and keeps nothing by default -- what "
+            .. "survives is what `SaveState` stored and what was tagged `PreserveOnReload`.",
+    },
+    {
         Name = "PhysicsService",
         Extends = "Instance",
         -- `scene` rather than a physics module, because in this release the one

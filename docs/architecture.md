@@ -606,12 +606,12 @@ error signal (in-game console/DebugShell), and the CI reporter in headless
 mode. Engine-raised errors into Luau always originate from `TextKey`s;
 script-authored `error("…")` strings pass through verbatim.
 
-**Hot reload — canonical model: fast world restart** (ADR 0024). Watcher
-events batch → FrameStart safe point → `BeforeReload` → capture the explicit
-state bag + `PreserveOnReload`-tagged instances → the per-script janitor
-cancels tasks and disconnects script-owned connections → destroy the game VM →
-fresh VM + API remount → re-run scripts → restore preserved state →
-`AfterReload`. Window, GPU resources, imported assets, and engine-materialized
+**Hot reload — canonical model: fast world restart** (ADR 0024 and its
+2026-08-20 addendum). Watcher events batch → FrameStart safe point →
+`PreReload`, drained → capture the explicit state bag + `PreserveOnReload`-tagged
+instances → **build the fresh world alongside the old one** → re-run scripts →
+restore preserved state → swap → destroy the old VM → `PostReload`. A world that
+fails to build leaves the previous one running. Window, GPU resources, imported assets, and engine-materialized
 streamed chunks survive; target **< 500 ms** (perf-gated from M3). Shader file
 changes re-run shadercross and invalidate pipelines; asset source changes
 re-import → content-hash swap through `asset::onAssetInvalidated` — both

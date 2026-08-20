@@ -22,6 +22,7 @@ luaug_add_module(script
         src/signals.cpp
         src/tasks.cpp
         src/sandbox.cpp
+        src/reload_state.cpp
         src/runtime.cpp
     DEPS
         core

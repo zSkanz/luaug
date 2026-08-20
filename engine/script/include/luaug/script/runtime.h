@@ -84,6 +84,16 @@ public:
     // those calls are documented no-ops there rather than errors.
     void setGizmoSink(const GizmoSink& sink);
 
+    // Points `HotReloadService`'s bag at storage the host owns -- storage that
+    // outlives this runtime, which is the whole reason the bag is not a Luau
+    // table. Until it is called the runtime's own bag is used, so `SaveState`
+    // works and simply does not survive anything.
+    void setReloadState(ReloadState* state);
+
+    // Enqueues `PreReload` on the way out or `PostReload` on the way in
+    // (ADR 0024). The caller drains: the handlers are what a reload waits for.
+    void fireHotReload(bool before);
+
     // Where `require` gets file-backed module source. Unset means only the
     // registered `@luaug/…` modules resolve, which is what a test wants.
     void setModuleLoader(const ModuleLoader& loader);

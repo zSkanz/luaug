@@ -74,6 +74,8 @@
   "rhi.err.target_create_failed": "Could not create the offscreen render target.",
   "rhi.err.upload_inside_pass": "Cannot upload while a render pass is open; upload before beginRenderPass.",
 
+  "script.err.unsavable_state": "SaveState(\"{key}\") cannot keep that value across a reload: {reason}.",
+
   "engine.reload.err.script_failed": "Reload refused: {count} entry script(s) would not compile. The previous world is still running.",
   "engine.reload.err.no_scripts": "Reload refused: no entry scripts were found under {path}. The previous world is still running.",
 

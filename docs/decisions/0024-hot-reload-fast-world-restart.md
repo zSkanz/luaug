@@ -29,6 +29,20 @@ if the restart budget proves insufficient.
 A reload model with zero stale-state classes of bugs, simple to implement and
 reason about. The <500 ms target is enforced as a perf gate from M3.
 
+## Addendum — 2026-08-20 (M3): the member names the lints chose
+
+The Decision above names the two signals `BeforeReload` and `AfterReload`, and
+api-design.md gave the service an `IsReload: boolean` property. All three
+spellings fail the API definition's own §9 lints: an event must be a past-tense
+fact or a `Pre*`/`Post*` phase, and a boolean property may not carry an `Is`
+prefix while a boolean *method* is expected to.
+
+The rules are right and the spellings were not, so the surface is
+`PreReload` / `PostReload` and `IsReload()` — a method, which also drops the
+service's only property and the component behind it. Nothing had shipped; the
+alternative was to grow the exception list for names that had never been
+argued for, which is exactly what that list's own comment warns against.
+
 ## Addendum — 2026-08-20 (M3): build before destroy
 
 The Decision above reads as a straight line, and one step of that order is

@@ -114,6 +114,12 @@ struct ScriptRuntime::Impl
     TaskScheduler tasks;
     ServiceState services;
     ModuleRegistry modules;
+
+    // The bag a host has not replaced. It dies with the VM, which is exactly
+    // right for a world nobody is going to reload -- and it means `SaveState`
+    // is never a documented no-op, which is the failure `DebugService` taught
+    // us to design out (M2 Finding 15).
+    ReloadState ownReload;
 };
 
 ScriptRuntime::ScriptRuntime(scene::World& world) : m_world(world), m_impl(std::make_unique<Impl>())
@@ -123,6 +129,7 @@ ScriptRuntime::ScriptRuntime(scene::World& world) : m_world(world), m_impl(std::
     m_impl->context.tasks = &m_impl->tasks;
     m_impl->context.services = &m_impl->services;
     m_impl->context.modules = &m_impl->modules;
+    m_impl->services.reload = &m_impl->ownReload;
 }
 
 ScriptRuntime::~ScriptRuntime()
@@ -191,6 +198,19 @@ std::optional<core::EngineError> ScriptRuntime::boot()
 void ScriptRuntime::setGizmoSink(const GizmoSink& sink)
 {
     m_impl->services.gizmos = sink;
+}
+
+void ScriptRuntime::setReloadState(ReloadState* state)
+{
+    if (state != nullptr)
+        m_impl->services.reload = state;
+}
+
+void ScriptRuntime::fireHotReload(bool before)
+{
+    if (m_impl->state == nullptr)
+        return;
+    fireHotReloadEvent(m_impl->state, before);
 }
 
 void ScriptRuntime::setModuleLoader(const ModuleLoader& loader)

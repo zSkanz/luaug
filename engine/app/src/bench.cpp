@@ -58,6 +58,8 @@ struct Sample
             .projectPath = scenario.scriptPath,
             .seed = scenario.seed,
             .fixedTimestep = kBenchTimestep,
+            .reloadState = nullptr,
+            .isReload = false,
             .conformanceRoot = {},
         });
         error.has_value())

@@ -24,8 +24,18 @@ ReloadReport reloadWorld(std::unique_ptr<WorldHost>& host, const WorldHostOption
 
     ReloadReport report;
 
+    // On the outgoing world, and drained, because a `PreReload` handler that
+    // has not run yet has not called `SaveState` yet. This is the last moment
+    // anything in the old VM can put a value where the new one will find it.
+    if (host)
+        host->firePreReload();
+
+    // The incoming world is a reload by construction; nothing else calls this.
+    WorldHostOptions freshOptions = options;
+    freshOptions.isReload = true;
+
     auto fresh = std::make_unique<WorldHost>();
-    if (std::optional<core::EngineError> error = fresh->boot(options); error.has_value())
+    if (std::optional<core::EngineError> error = fresh->boot(freshOptions); error.has_value())
     {
         report.error = std::move(error);
         report.spanMs = elapsedMs(started);
@@ -62,6 +72,11 @@ ReloadReport reloadWorld(std::unique_ptr<WorldHost>& host, const WorldHostOption
     // Only now is the old world unreachable. Everything above `WorldHost` --
     // the window, the device, the renderer -- never knew this happened.
     host = std::move(fresh);
+
+    // After the swap and after boot's own drain, so a `PostReload` handler
+    // connected at file scope sees a world that is finished rather than one
+    // still being assembled.
+    host->firePostReload();
 
     report.ok = true;
     report.spanMs = elapsedMs(started);

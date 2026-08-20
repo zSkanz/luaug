@@ -520,8 +520,9 @@ TEST_CASE("the boot-time method cross-check reports both directions")
     // entry: nothing generated that surface, so nothing else knows about it.
     CHECK(coverage.boundWithoutDeclaration == 0);
     // Pinned rather than merely compared, so that a class added to the IDL
-    // shows up here as a number that changed.
-    CHECK(coverage.declared == 43);
-    CHECK(coverage.bound == 43);
+    // shows up here as a number that changed. 43 at the M2 gate; 46 once
+    // `HotReloadService` brought `SaveState`, `LoadState` and `IsReload`.
+    CHECK(coverage.declared == 46);
+    CHECK(coverage.bound == 46);
     CHECK(coverage.declaredWithoutBinding == 0);
 }
