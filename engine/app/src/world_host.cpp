@@ -36,19 +36,11 @@ constexpr std::string_view RuntimeModules[] = {"testing"};
 // machinery, because everything it does -- `game.Loaded`, attributes,
 // `Shutdown` -- is something a project could do, and a runner with a private
 // channel into the host would be testing a world no game will ever run in.
-constexpr std::string_view ConformanceRunnerSource = R"LUAU(
-local testing = require("@luaug/testing")
-
-game.Loaded:Connect(function()
-    local report = testing.run()
-    print(testing.format(report))
-
-    game:SetAttribute("ConformanceTotal", report.Total)
-    game:SetAttribute("ConformancePassed", report.Passed)
-    game:SetAttribute("ConformanceFailed", report.Failed)
-    game:Shutdown()
-end)
-)LUAU";
+// The conformance runner is a real file staged with the rest of the runtime
+// content, not a string literal here. It was written as a literal first, and
+// the escaping alone made it unreadable -- as a file it is analysed by the gate
+// and formatted like everything else.
+constexpr std::string_view ConformanceRunnerPath = "runtime/conformance/runner.luau";
 
 [[nodiscard]] bool readFile(const std::filesystem::path& path, std::string& out)
 {
@@ -416,10 +408,18 @@ std::optional<core::EngineError> WorldHost::mountConformance(const std::filesyst
     // The runner's own path sorts wherever it sorts, and it does not matter: it
     // hangs off `game.Loaded`, which is raised after every entry script has had
     // its first resumption whatever order they ran in.
+    std::string runnerSource;
+    const std::filesystem::path runnerPath = platform::paths().contentDir / ConformanceRunnerPath;
+    if (!readFile(runnerPath, runnerSource))
+    {
+        const std::array<I18nArg, 1> args{I18nArg{"path", runnerPath.string()}};
+        return core::makeError(LUAUG_TR("engine.cli.err.script_missing"), args);
+    }
+
     entries.push_back(script::MountedScript{
         "__conformance_runner.luau",
         "__conformance_runner.luau",
-        std::string(ConformanceRunnerSource),
+        std::move(runnerSource),
     });
 
     script::mountScripts(m_runtime->state(), entries);
@@ -465,6 +465,11 @@ ConformanceReport WorldHost::conformanceReport() const
     report.passed = attribute("ConformancePassed");
     report.failed = attribute("ConformanceFailed");
     report.ran = report.total >= 0;
+
+    const scene::Value json = m_world->getAttribute(root, m_world->atoms().lookup("ConformanceReport"));
+    if (const auto* text = std::get_if<std::string>(&json); text != nullptr)
+        report.json = *text;
+
     return report;
 }
 

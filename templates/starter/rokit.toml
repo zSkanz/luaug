@@ -1,0 +1,7 @@
+# Pinned toolchain. `rokit install` gets exactly these versions; an upgrade is a
+# deliberate edit here rather than whatever happened to be latest.
+
+[tools]
+lute = "luau-lang/lute@1.0.0"
+luau-lsp = "JohnnyMorganz/luau-lsp@1.69.0"
+stylua = "JohnnyMorganz/StyLua@2.5.2"

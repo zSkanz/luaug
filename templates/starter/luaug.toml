@@ -1,0 +1,19 @@
+# The project file (api-design.md §4). TOML because it is what rokit.toml and
+# pesde.toml already are, it carries comments, and it is static.
+
+[project]
+name = "{{name}}"
+# Reverse-DNS, so two games with the same name are still two games.
+id = "dev.local.{{name}}"
+version = "0.1.0"
+# The engine series this project targets. `luaug doctor` compares it.
+engine = "0.1"
+
+[window]
+title = "{{name}}"
+size = [1280, 720]
+
+[dev]
+# The port `luaug dev` listens on. The engine dials out to it and never listens
+# itself (ADR 0035).
+port = 4560

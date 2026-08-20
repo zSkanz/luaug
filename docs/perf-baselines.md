@@ -22,6 +22,17 @@ regression vs the previous milestone until M8; absolute targets bind at M8).
   another build are not numbers.
 - **Storage:** one table per milestone, appended — never rewrite history.
   The CI perf smoke reads the latest table for its thresholds.
+- **A quiet machine should be enforced, not requested.** The paragraph above is
+  discipline written down, and the error it describes (73%) is larger than any
+  regression worth recording. Sampling machine load before and after a run and
+  marking a row suspect when the two disagree turns that discipline into
+  something a bad baseline cannot slip past — the same move this repository
+  already made with generated-file freshness and declared-vs-bound coverage.
+- **Record a reduced-CPU row beside the reference one.** Every number here comes
+  from a fast desktop, and a factor of 30 to budget there can be a factor of 3
+  on a modest target — which is the scenario R16 exists for, since iOS has no
+  JIT. Re-running the same benchmark pinned to a subset of cores costs a flag
+  and gives the absolute targets that bind at M8 somewhere to fail early.
 
 ## Reference machine
 

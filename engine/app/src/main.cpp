@@ -153,6 +153,21 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
             options.exitAfterFrames = true;
             continue;
         }
+        if (arg.starts_with("--test-report="))
+        {
+            options.testReportPath = std::filesystem::path(arg.substr(14));
+            continue;
+        }
+        if (arg.starts_with("--dev-control="))
+        {
+            options.devControlUrl = std::string(arg.substr(14));
+            continue;
+        }
+        if (arg.starts_with("--dev-token="))
+        {
+            options.devControlToken = std::string(arg.substr(12));
+            continue;
+        }
         if (arg.starts_with("--replay="))
         {
             options.replayRoot = std::filesystem::path(arg.substr(9));
@@ -209,6 +224,13 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
     // suite that hangs fails rather than running until CI gives up.
     if (!options.conformanceRoot.empty() && options.frames == 0)
         options.frames = 100000;
+
+    // A dev session is driven by its dev server and ends when that server says
+    // so, so a frame budget would be a timer on a loop nobody asked to time.
+    // Requiring one for `--headless --dev-control` -- which is what the E2E
+    // gate runs -- would mean guessing how long a test needs.
+    if (!options.devControlUrl.empty() && options.headless && options.frames == 0)
+        return kExitOk;
 
     // A headless run with no frame budget would never terminate and nothing
     // could tell you why, since there is no window to close. Saying so beats

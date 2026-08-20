@@ -3,6 +3,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <string>
 
 #include "luaug/core/error.h"
 #include "luaug/core/types.h"
@@ -69,6 +70,19 @@ struct EngineOptions
     // on a swapchain would be the finding rather than the measurement.
     std::filesystem::path benchRoot;
     u64 benchRepeats = 3;
+
+    // Where a conformance run writes its machine-readable per-case report.
+    // Empty writes none. `luaug test` reads this rather than the console,
+    // because every console line is catalog-resolved (M3 brief, Decision 6).
+    std::filesystem::path testReportPath;
+
+    // `ws://127.0.0.1:<port>/<path>` -- the dev server this engine dials out to
+    // (ADR 0035). Empty means no watcher is attached and no control code runs
+    // at all. The engine never listens, in any profile.
+    std::string devControlUrl;
+    // Proves this connection is the engine `luaug dev` launched: a loopback
+    // listener is reachable by every process on the machine.
+    std::string devControlToken;
 
     rhi::BackendId backend = rhi::BackendId::SdlGpu;
 

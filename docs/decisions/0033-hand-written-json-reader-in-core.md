@@ -76,3 +76,18 @@ we would also have had to keep pinned, audited and patched.
 If a future need genuinely exceeds this (streaming multi-megabyte documents,
 say), that is when a library becomes the right answer, and it gets its own ADR
 with a real workload behind it rather than a guess.
+
+## Addendum — 2026-08-20 (M3): the writer this said would have no caller
+
+`json.h`'s header says a writer would be surface with no caller, and that was
+true for as long as nothing in the engine produced bytes another program parses.
+M3 gives it two callers: the dev control channel sends JSON messages over its
+WebSocket (ADR 0035), and `luaug test` writes a machine-readable report the CLI
+turns into TAP or JUnit — deliberately a file rather than the console, because
+every line the engine prints is catalog-resolved and parsing it would break the
+first time a locale is added.
+
+`core::JsonWriter` is therefore added beside the reader, on the same terms: hand
+written, in `core`, no dependency. It is a *writer* and not a DOM — nothing needs
+to build a document, mutate it and then serialise it — which keeps field order
+identical to call order and the output stable to compare without sorting (R10).

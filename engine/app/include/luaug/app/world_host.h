@@ -82,6 +82,12 @@ struct ConformanceReport
     core::i64 total = 0;
     core::i64 passed = 0;
     core::i64 failed = 0;
+
+    // The per-case results, already JSON, as the runner produced them. Written
+    // verbatim to `--test-report=PATH`; `luaug test` turns it into TAP or JUnit
+    // rather than parsing a console whose every line is catalog-resolved
+    // (M3 brief, Decision 6).
+    std::string json;
 };
 
 class WorldHost

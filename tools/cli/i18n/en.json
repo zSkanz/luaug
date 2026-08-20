@@ -1,0 +1,44 @@
+{
+  "$comment": "CLI catalog — English (the only launch locale, ADR 0019). Separate from the engine's i18n/en.json because the CLI and the engine ship and translate separately (api-design.md §6). Keys are cli.*. tools/repo/i18nlint.luau checks that every key the CLI names exists here, and that no user-facing string is written at a call site (rule R3).",
+
+  "cli.usage": "Usage: luaug <command> [options]\n\n  dev [path]       run the project with a watcher attached; a saved file rebuilds the world\n  test [path]      run the conformance suite on the headless engine\n  check [path]     luau-analyze, StyLua and the i18n lint\n  fmt [path]       format every Luau file with StyLua\n  new <name>       scaffold a project from the starter template\n\n  --help           this text\n  --version        the CLI and engine versions",
+  "cli.err.unknown_command": "Unknown command \"{command}\". Run luaug --help for the list.",
+  "cli.err.no_command": "No command given. Run luaug --help for the list.",
+  "cli.err.unknown_option": "Unknown option \"{option}\" for luaug {command}.",
+  "cli.err.no_engine": "Could not find luaug-host. Build the engine, or set LUAUG_HOST to its path.",
+  "cli.err.not_a_project": "{path} is not a LuauG project: no luaug.toml and no src/scripts.",
+  "cli.version": "luaug {version} (Lute {lute})",
+
+  "cli.dev.watching": "Watching {count} director(ies) under {path}. Save a file to reload.",
+  "cli.dev.listening": "Dev server on ws://127.0.0.1:{port}. Waiting for the engine to attach.",
+  "cli.dev.attached": "Engine attached ({engine}).",
+  "cli.dev.reloading": "Changed: {files}. Reloading.",
+  "cli.dev.reloaded": "Reloaded in {ms} ms — {scripts} script(s), {preserved} instance(s) preserved.",
+  "cli.dev.reload_failed": "Reload refused; the previous world is still running. {detail}",
+  "cli.dev.reload_slow": "Reloaded in {ms} ms, over the {budget} ms budget ADR 0024 sets.",
+  "cli.dev.engine_exited": "The engine exited with code {code}.",
+  "cli.dev.stopped": "Dev server stopped.",
+  "cli.dev.err.no_scripts": "{path} mounts no entry scripts, so there would be nothing to reload. A project mounts src/scripts/**/*.luau.",
+  "cli.dev.err.port_in_use": "Port {port} is already in use. Set [dev] port in luaug.toml, or stop whatever is holding it.",
+
+  "cli.test.running": "Running the suite from {path}.",
+  "cli.test.summary": "{total} case(s), {passed} passed, {failed} failed.",
+  "cli.test.err.no_report": "The engine wrote no report at {path}, so nothing was measured. An empty suite passes forever.",
+  "cli.test.err.no_cases": "The suite at {path} contains no cases. An empty suite passes forever.",
+  "cli.test.err.failed": "{failed} of {total} case(s) failed.",
+  "cli.test.wrote_junit": "Wrote the JUnit report to {path}.",
+
+  "cli.check.running": "Checking {count} Luau file(s).",
+  "cli.check.ok": "check: ok — {count} file(s), no diagnostics.",
+  "cli.check.err.analyze": "luau-analyze reported errors.",
+  "cli.check.err.stylua": "StyLua reported unformatted files. Run luaug fmt.",
+  "cli.check.err.i18n": "The i18n lint failed.",
+  "cli.check.err.missing_tool": "{tool} is not on PATH. Run rokit install.",
+
+  "cli.fmt.formatted": "Formatted {count} file(s).",
+
+  "cli.new.created": "Created {path}. Next: cd {name} && rokit install && luaug dev",
+  "cli.new.err.exists": "{path} already exists.",
+  "cli.new.err.unknown_template": "No template named \"{name}\". The v1 template is \"starter\".",
+  "cli.new.err.bad_name": "\"{name}\" is not a usable project name: use letters, digits, dashes and underscores."
+}

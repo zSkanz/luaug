@@ -177,6 +177,32 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   material handling per api-design.md; frustum culling; render pass list kept
   behind the `IRenderer` contract. **End of M4 = RHI interface freeze**; the
   human Android-device checkpoint must have happened by now.
+- **Design constraints (not scope).** Three seams must stay open. None is
+  built here — M4 is glTF in, lit PBR out — but both are nearly free while the
+  render module is being designed and cost a refactor to reopen afterwards.
+  ADR 0014 is the precedent: `CFrame` carries f64 from its first commit because
+  widening a type after four milestones of code has consumed it is a different
+  project from starting wide.
+  - **Engine-generated geometry must be able to reach the renderer.** The mesh
+    path cannot assume "a mesh is a handle to an imported asset". Known callers:
+    procedural and voxel meshing, which produce vertices in memory and never
+    touch a file. Geometry that changes every frame also needs an upload path
+    that does not allocate every frame — a persistent or ring buffer, decided
+    here rather than retrofitted.
+  - **A material must be able to name a shader that is not the default PBR
+    one.** The HLSL toolchain from M1 (`cmake/luaug_shaders.cmake`, ADR 0006)
+    already compiles one source to three backends; what does not exist is any
+    way for a material to point at a shader other than the built-in. Known
+    caller: vertex-displaced water, where the ocean is a static grid displaced
+    in the vertex shader rather than a mesh edited per frame.
+  - **Draw order and batching belong to `extract`, not to a backend.**
+    `RenderWorld` is a POD snapshot, so grouping by pipeline and material there
+    is inherited by every backend; doing it inside `rhi_sdlgpu` is work bgfx
+    would have to repeat.
+- **Performance recording.** The frame-time baseline this gate records is a
+  *what*, not a *why*: record submitted draw calls and triangles beside it.
+  The capture stream has counted commands deterministically and without a GPU
+  since M1, so this costs a column rather than a harness.
 - **Deliverable:** `examples/02-meshes` — a small glTF scene
   (permissively-licensed sample assets, licenses recorded in
   `THIRD_PARTY_NOTICES.md`), orbit camera, ImGui sun-angle slider previewing
@@ -198,6 +224,13 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   third-person follow camera; minimal direct keyboard polling — deliberately
   replaced in M6 by the Input Action System (that migration is an API-quality
   test).
+- **Performance and determinism notes.** The tick budget this gate records
+  should be broken down — broadphase, narrowphase, solver — because one number
+  says a budget was missed and three say which stage missed it. And the
+  determinism gate becomes *blocking* here while Jolt is single-threaded, but
+  M7 wires it to the job system: whether recorded hashes survive that is a
+  question for the grounding pass that vendors Jolt (§9, `UNCONFIRMED.md`),
+  answered before the gate hardens rather than after it breaks.
 - **Deliverable:** `examples/03-physics-playground` — stacks, ramps, seesaw,
   third-person character walking/jumping through it.
 - **Gate:** **determinism becomes blocking**: recorded 60 s input replay →
@@ -220,6 +253,12 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   playback + linear blending (AnimationPlayer/AnimationTrack per
   api-design.md) — no state machines, no IK; enough for idle/walk/jump.
   *(Roadmap-gap fix: the API defines AnimationPlayer; this is where it ships.)*
+- **Performance notes.** Tweens are property churn and must write through the
+  same quiet-write path the 10k-parts benchmark measures — a second write route
+  would silently forfeit the equality filter that is worth roughly a third of
+  that measurement (M2 Decision 6). UI cost is relayout rather than draw, so
+  measure the two separately and keep a static-UI case whose relayout cost is
+  expected to be ~zero.
 - **Deliverable:** `examples/04-obby` — main menu (tweened), HUD, checkpoints,
   moving platforms (tweens on physics-kinematic parts — a deliberate
   integration stressor), sounds, an animated character, fully playable
@@ -247,6 +286,10 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   exposed as the minimal socket/HTTP surface via `@std/net` (loopback echo
   example only — replication is post-v1); Recast/Detour: vendored, seam
   defined, **no integration** (explicit non-goal, ADR 0022).
+- **Performance note.** The per-frame materialization budget is denominated in
+  *time*, not in a count of chunks: chunk cost varies with content, and the gate
+  is stated as "zero hitches >33 ms attributable to streaming" — budget and gate
+  should measure the same thing.
 - **Deliverable:** `examples/05-streaming` — a procedurally generated large
   world (no giant binary assets in the repo), fly-cam, ImGui chunk-state
   overlay, memory graph.

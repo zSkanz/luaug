@@ -46,11 +46,22 @@ export type Failure = {
     Traceback: string?,
 }
 
+--- One case's outcome, in the order the cases ran. `Failures` carries the same
+--- information for the ones that failed; this carries every case, because a
+--- runner that reports only failures cannot say what it *did* -- and TAP, which
+--- `luaug test` emits, is a line per case rather than a line per problem.
+export type CaseResult = {
+    Path: { string },
+    Ok: boolean,
+    Message: string?,
+}
+
 export type Report = {
     Total: number,
     Passed: number,
     Failed: number,
     Failures: { Failure },
+    Cases: { CaseResult },
 }
 
 type Case = {
@@ -333,8 +344,10 @@ local function runSuite(suite: Suite, path: { string }, report: Report): ()
         if failure then
             report.Failed += 1
             table.insert(report.Failures, failure)
+            table.insert(report.Cases, { Path = casePath, Ok = false, Message = (failure :: Failure).Message })
         else
             report.Passed += 1
+            table.insert(report.Cases, { Path = casePath, Ok = true })
         end
     end
 
@@ -348,7 +361,7 @@ end
 --- Runs everything registered so far and clears the registry, so a runner that
 --- loads spec files one at a time gets one report per file.
 function Testing.run(): Report
-    local report: Report = { Total = 0, Passed = 0, Failed = 0, Failures = {} }
+    local report: Report = { Total = 0, Passed = 0, Failed = 0, Failures = {}, Cases = {} }
     runSuite(Root, {}, report)
     Root = newSuite("")
     Current = Root

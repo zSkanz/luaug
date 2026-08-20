@@ -16,10 +16,12 @@ luaug_add_module(app
         src/bench.cpp
         src/screenshot.cpp
         src/debug_overlay.cpp
+        src/dev_control.cpp
     DEPS
         core
         platform
         rhi_api
+        net_api
         render
         scene
         script
@@ -81,7 +83,12 @@ add_custom_command(TARGET luaug_host POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_SOURCE_DIR}/runtime/luaug"
         "$<TARGET_FILE_DIR:luaug_host>/content/runtime/luaug"
-    COMMENT "Staging the engine message catalog and the @luaug modules")
+    # The conformance runner, for the same reason again: it is an entry script
+    # the headless runner mounts, and a real file is one the gate can analyse.
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/runtime/conformance"
+        "$<TARGET_FILE_DIR:luaug_host>/content/runtime/conformance"
+    COMMENT "Staging the engine message catalog, the @luaug modules and the conformance runner")
 
 luaug_add_module_tests(app
     SOURCES

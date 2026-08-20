@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <optional>
@@ -13,10 +14,13 @@
 
 #include "luaug/app/backends.h"
 #include "luaug/app/debug_overlay.h"
+#include "luaug/app/dev_control.h"
 #include "luaug/app/frame_scheduler.h"
+#include "luaug/app/reload.h"
 #include "luaug/app/screenshot.h"
 #include "luaug/app/world_host.h"
 #include "luaug/core/build_info.h"
+#include "luaug/core/json_writer.h"
 #include "luaug/core/log.h"
 #include "luaug/core/text_key.h"
 #include "luaug/platform/event.h"
@@ -260,18 +264,62 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // wholesale (ADR 0024, `reload.h`): everything above this line -- the
     // window, the device, the renderer, the shader cache -- outlives the swap,
     // and that is what "engine-side content survives" means in C++.
+    //
+    // The bag outlives the host by construction: it is what a reload carries
+    // across, and the host is what a reload destroys (ADR 0024).
+    script::ReloadState reloadState;
+
+    WorldHostOptions worldOptions{
+        .projectPath = options.scriptPath,
+        .seed = options.worldSeed,
+        .fixedTimestep = scheduler.timing().fixedDt,
+        .reloadState = &reloadState,
+        .isReload = false,
+        .preserved = nullptr,
+        .conformanceRoot = options.conformanceRoot,
+    };
+
     auto host = std::make_unique<WorldHost>();
-    if (std::optional<core::EngineError> bootError = host->boot({
-            .projectPath = options.scriptPath,
-            .seed = options.worldSeed,
-            .fixedTimestep = scheduler.timing().fixedDt,
-            .reloadState = nullptr,
-            .isReload = false,
-            .preserved = nullptr,
-            .conformanceRoot = options.conformanceRoot,
-        });
-        bootError.has_value())
+    if (std::optional<core::EngineError> bootError = host->boot(worldOptions); bootError.has_value())
         return bootError;
+
+    // The dev-server connection, if `luaug dev` started this process. Nothing
+    // listens here: the engine dials out (ADR 0035), and the whole path is
+    // absent when the flag is.
+    DevControl control;
+    std::vector<DevCommand> commands;
+    // `sample` answers once the world has advanced, so the request outlives the
+    // frame that received it.
+    struct PendingSample
+    {
+        u64 id = 0;
+        u64 tick = 0;
+    };
+    std::vector<PendingSample> pendingSamples;
+
+    if (!options.devControlUrl.empty())
+    {
+        if (std::optional<core::EngineError> attachError = control.start({
+                .url = options.devControlUrl,
+                .token = options.devControlToken,
+            });
+            attachError.has_value())
+            return attachError;
+
+        const std::array<I18nArg, 1> attached{I18nArg{"url", options.devControlUrl}};
+        core::log(LogLevel::Info, LUAUG_TR("engine.dev.info.attached"), attached);
+    }
+
+    const auto replyOk = [&control](std::string_view type, u64 id, const auto& fill)
+    {
+        core::JsonWriter writer;
+        writer.beginObject();
+        writer.field("type", type);
+        writer.field("id", id);
+        fill(writer);
+        writer.endObject();
+        control.post(writer.text());
+    };
 
     render::RenderWorld snapshot;
     const auto headlessStepNs
@@ -317,10 +365,90 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             .luaMemoryKb = static_cast<f64>(lua_totalbytes(host->runtime().state(), 0)) / 1024.0,
         });
 
+        // The FrameStart safe point, and the only place a reload happens: a
+        // world swapped mid-tick would break within-run determinism, which is
+        // the rule architecture.md §4 states (and the reason the connection
+        // hands its messages over here rather than acting on them itself).
+        if (!options.devControlUrl.empty())
+        {
+            control.takeCommands(commands);
+            for (const DevCommand& command : commands)
+            {
+                switch (command.kind)
+                {
+                case DevCommand::Kind::Reload:
+                {
+                    const ReloadReport reloaded = reloadWorld(host, worldOptions);
+                    host->setGizmoTarget(&debugDraw);
+                    replyOk(
+                        "reloaded",
+                        command.id,
+                        [&reloaded, &host](core::JsonWriter& writer)
+                        {
+                            writer.field("ok", reloaded.ok);
+                            writer.field("ms", reloaded.spanMs);
+                            writer.field("scripts", reloaded.mountedScripts);
+                            writer.field("preserved", reloaded.preserve.restored);
+                            writer.field("tick", host->world().engineState().tick);
+                            writer.field("hash", host->world().worldHash());
+                            if (!reloaded.ok && reloaded.error.has_value())
+                                writer.field("detail", reloaded.error->message);
+                        });
+                    break;
+                }
+                case DevCommand::Kind::Sample:
+                    pendingSamples.push_back(
+                        PendingSample{command.id, host->world().engineState().tick + command.afterTicks});
+                    break;
+                case DevCommand::Kind::Ping:
+                    replyOk("pong", command.id, [](core::JsonWriter&) {});
+                    break;
+                case DevCommand::Kind::Shutdown:
+                    quit = true;
+                    break;
+                case DevCommand::Kind::Unsupported:
+                    // Answered rather than ignored: `asset-changed` and `eval`
+                    // are reserved by the protocol and a caller that gets
+                    // silence cannot tell "not yet" from "lost".
+                    replyOk(
+                        "error",
+                        command.id,
+                        [&command](core::JsonWriter& writer)
+                        {
+                            writer.field("key", "dev.err.not_implemented");
+                            writer.field("of", command.type);
+                        });
+                    break;
+                }
+            }
+        }
+
         // The simulation, before anything is drawn: rendering shows the state a
         // tick settled on, never one being written.
         for (u32 step = 0; step < frame.simTicks; ++step)
             host->tick();
+
+        if (!pendingSamples.empty())
+        {
+            const u64 tick = host->world().engineState().tick;
+            const u64 hash = host->world().worldHash();
+            std::erase_if(
+                pendingSamples,
+                [&](const PendingSample& sample)
+                {
+                    if (sample.tick > tick)
+                        return false;
+                    replyOk(
+                        "sample",
+                        sample.id,
+                        [tick, hash](core::JsonWriter& writer)
+                        {
+                            writer.field("tick", tick);
+                            writer.field("hash", hash);
+                        });
+                    return true;
+                });
+        }
 
         if (host->shutdownRequested())
             quit = true;
@@ -419,6 +547,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             quit = true;
     }
 
+    control.stop();
     host->close();
     device->waitIdle();
 
@@ -459,6 +588,23 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             I18nArg{"passed", report.passed},
             I18nArg{"failed", report.failed}};
         core::log(LogLevel::Info, LUAUG_TR("engine.tests.info.summary"), args);
+
+        // Written before the failure check, because a run that failed is
+        // exactly the one whose per-case detail somebody wants.
+        if (!options.testReportPath.empty())
+        {
+            std::error_code ec;
+            if (options.testReportPath.has_parent_path())
+                std::filesystem::create_directories(options.testReportPath.parent_path(), ec);
+
+            std::ofstream file(options.testReportPath, std::ios::binary | std::ios::trunc);
+            if (!file)
+            {
+                const std::array<I18nArg, 1> path{I18nArg{"path", options.testReportPath.string()}};
+                return core::makeError(LUAUG_TR("engine.tests.err.report_failed"), path);
+            }
+            file << report.json;
+        }
 
         if (report.failed != 0)
             return core::makeError(LUAUG_TR("engine.tests.err.failed"), args);

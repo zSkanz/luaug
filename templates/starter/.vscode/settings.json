@@ -1,0 +1,43 @@
+{
+    "$comment": [
+        "Written by `luaug new` so that opening this folder gives you completion, hover",
+        "documentation and strict analysis with nothing else to install. `luaug setup`",
+        "regenerates it, and .luaug/types/, for whatever engine version is pinned."
+    ],
+
+    "luau-lsp.platform.type": "standard",
+
+    "$comment.platform": [
+        "This engine is not Roblox. The extension's default platform downloads Roblox's",
+        "API dump, which would both disagree with the definitions below and pull in a",
+        "surface this engine does not have."
+    ],
+
+    "luau-lsp.sourcemap.enabled": false,
+
+    "luau-lsp.fflags.enableByDefault": true,
+    "luau-lsp.fflags.sync": false,
+
+    "$comment.fflags": [
+        "The new type solver is on by default and is not synced from a remote endpoint,",
+        "so the editor's solver does not change under you between sessions."
+    ],
+
+    "luau-lsp.types.definitionFiles": [".luaug/types/engine.d.luau"],
+    "luau-lsp.types.documentationFiles": [".luaug/types/engine-docs.json"],
+
+    "luau-lsp.require.directoryAliases": {
+        "@shared/": "src/shared/",
+        "@luaug/": ".luaug/types/luaug/",
+        "@std/": ".luaug/types/std/"
+    },
+
+    "[luau]": {
+        "editor.defaultFormatter": "JohnnyMorganz.stylua",
+        "editor.formatOnSave": true
+    },
+
+    "files.encoding": "utf8",
+    "files.insertFinalNewline": true,
+    "files.trimTrailingWhitespace": true
+}

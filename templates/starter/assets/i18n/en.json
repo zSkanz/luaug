@@ -1,0 +1,5 @@
+{
+  "$comment": "This game's message catalog. Values are template strings with {param} placeholders; adding a locale is adding a sibling file (pt-BR.json) and zero code changes. Reached from a script through LocalizationService:Translate.",
+
+  "game.hud.score": "Score: {score}"
+}

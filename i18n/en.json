@@ -15,6 +15,7 @@
 
   "engine.tests.info.summary": "Conformance: {total} cases, {passed} passed, {failed} failed.",
   "engine.tests.err.failed": "Conformance failed: {failed} of {total} cases.",
+  "engine.tests.err.report_failed": "Could not write the test report to {path}.",
   "engine.tests.err.never_ran": "The conformance suite never reported. Either nothing was mounted, or game.Loaded never fired.",
   "engine.replay.info.recorded": "Recorded {name} to {path}.",
   "engine.replay.info.scenario_ok": "Replay {name}: {ticks} ticks, hash {hash}, reproduced.",
@@ -75,6 +76,10 @@
   "rhi.err.upload_inside_pass": "Cannot upload while a render pass is open; upload before beginRenderPass.",
 
   "script.err.unsavable_state": "SaveState(\"{key}\") cannot keep that value across a reload: {reason}.",
+
+  "engine.dev.info.attached": "Attached to the dev server at {url}; saved files will reload this world.",
+  "engine.dev.err.bad_url": "--dev-control needs ws://host:port/path; got {url}.",
+  "engine.dev.warn.bad_message": "Ignored a dev-server message: {detail}.",
 
   "engine.reload.err.script_failed": "Reload refused: {count} entry script(s) would not compile. The previous world is still running.",
   "engine.reload.err.no_scripts": "Reload refused: no entry scripts were found under {path}. The previous world is still running.",

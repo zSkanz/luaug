@@ -470,6 +470,22 @@ zero spec files and exits 0; a hot-reload test whose file mutation does not
 change behaviour, so the assertion holds vacuously. Each of the three is
 enumerated here so that each gets an emptiness check by construction.
 
+## Performance notes
+
+Small, and all three are cheaper decided than retrofitted.
+
+1. **Break the reload span down rather than only totalling it** — compile,
+   world construction, preserved-instance restore. Entering risk 3 says the
+   500 ms budget has no bytecode cache behind it; a single number says the
+   budget was missed, three say whether a cache is the answer.
+2. **Decide whether `luaug test` reuses the process and the world between spec
+   files.** 903 cases across 46 files is a command run dozens of times a day; a
+   world boot per file is an architecture choice made once, at the start.
+3. **Surface the frame budget in the F3 overlay.** The instrumentation has
+   existed since M2, and from this milestone on every later one is developed
+   inside the reload loop — seeing the cost while editing is what stops a
+   regression accumulating quietly across milestones.
+
 ## Attempted / abandoned
 
 (append during the milestone; §12 of the master prompt)
