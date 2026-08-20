@@ -75,3 +75,4 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0032](0032-binary-toolchain-artifacts-fetched-not-vendored.md) | Binary toolchain artifacts are fetched and hash-pinned, never vendored |
 | [0033](0033-hand-written-json-reader-in-core.md) | One hand-written JSON reader in `core`, not a dependency |
 | [0034](0034-luau-casing-objects-modules-files.md) | Luau casing: objects vs modules, and the file-level rule |
+| [0035](0035-dev-control-channel-stdio-to-the-engine.md) | Dev control channel: stdio to the engine, WebSocket in the dev server |

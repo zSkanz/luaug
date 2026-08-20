@@ -887,9 +887,18 @@ from `Heartbeat` on the same tick come due on the same tick.
   `"PreserveOnReload"` (so the character just stays put in the demo).
 - **Asset change → in-place swap:** textures/meshes/audio hot-swap without a
   VM restart (content-hash change pushed over the dev WebSocket).
-- Transport: the dev server (Lute, `@lute/fs.watch` + `@std/net` WebSocket)
-  pushes `{script-changed | asset-changed | eval}` messages to the runtime on
-  a localhost port; `eval` powers the dev console in the overlay.
+- Transport (ADR 0035): the dev server (Lute, `@lute/fs.watch` + `@std/net`
+  WebSocket) pushes `{script-changed | asset-changed | eval}` messages to the
+  runtime, which it runs as a child process, over a line-delimited JSON protocol
+  on stdin/stdout. The WebSocket is the dev server's channel to *its* clients —
+  the hot-reload gate test, the overlay console, a future editor — and it relays
+  in both directions; the engine itself never opens a socket. `eval` powers the
+  dev console in the overlay.
+- **Reload ordering:** the state bag and the `PreserveOnReload` instances are
+  captured before the VM is destroyed and restored into the fresh world
+  **before** the new entry scripts are deferred, so a script that looks for what
+  it left behind finds it already there. `IsReload` is how it knows to look
+  rather than re-create.
 
 ---
 
