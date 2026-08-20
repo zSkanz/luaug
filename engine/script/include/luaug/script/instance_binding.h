@@ -14,6 +14,8 @@
 // the component store.
 #pragma once
 
+#include <span>
+
 #include "luaug/core/id.h"
 #include "luaug/script/binding.h"
 
@@ -22,15 +24,39 @@ struct lua_State;
 namespace luaug::script
 {
 
-// Installs the Instance metatable, the method implementations, and the
-// `Instance` global. Runs during boot, after the class registry is populated
-// and before the sandbox.
+// One method implementation, named by the class that DECLARES it. Binding it to
+// the declaring class is what makes inheritance work for free: the registry
+// resolves `part:Destroy()` to `Instance`'s descriptor, and the implementation
+// table is keyed by descriptor.
+struct InstanceMethodBinding
+{
+    const char* className = nullptr;
+    const char* methodName = nullptr;
+    lua_CFunction fn = nullptr;
+};
+
+// Installs the Instance metatable, the `Instance` global, and the methods
+// `Instance` and `Model` declare. Runs during boot, after the class registry is
+// populated and before the sandbox.
+void registerInstanceBinding(lua_State* L);
+
+// Binds a batch of implementations. Split from the registration above so that a
+// class's methods live beside the rest of that class's binding -- the services
+// implement their own in `services.cpp` -- rather than in one table that every
+// module has to reach into.
 //
-// Reports the two halves of the method cross-check: `declaredWithoutBinding` is
-// how many methods the IDL declares that this build does not implement, and
-// those raise `script.err.not_implemented` rather than reading as a missing
-// member. `boundWithoutDeclaration` should always be zero -- a binding for a
-// method no definition declares is a surface nothing generated.
+// A binding whose method no definition declares is counted and skipped: nothing
+// generated that surface, so it is a stale hand-written entry rather than a new
+// feature.
+void bindInstanceMethods(lua_State* L, std::span<const InstanceMethodBinding> bindings);
+
+// The two halves of the cross-check `MethodDesc` exists for.
+// `declaredWithoutBinding` is how many methods the IDL declares that this build
+// does not implement, and those raise `script.err.not_implemented` rather than
+// reading as a missing member. `boundWithoutDeclaration` should always be zero.
+//
+// Computed at the end of boot rather than during it, because a method declared
+// on one class may be bound by another module later in the sequence.
 struct MethodCoverage
 {
     usize declared = 0;
@@ -39,7 +65,7 @@ struct MethodCoverage
     usize boundWithoutDeclaration = 0;
 };
 
-MethodCoverage registerInstanceBinding(lua_State* L);
+[[nodiscard]] MethodCoverage methodCoverage(lua_State* L);
 
 // Pushes nil for an invalid id, and otherwise the ONE userdata this VM uses for
 // that instance -- the weak-valued cache is what makes `a == b` true for two

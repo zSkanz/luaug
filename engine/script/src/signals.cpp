@@ -10,6 +10,7 @@
 #include "luaug/core/log.h"
 #include "luaug/scene/world.h"
 #include "luaug/script/instance_binding.h"
+#include "luaug/script/services.h"
 
 namespace luaug::script
 {
@@ -721,6 +722,20 @@ void flushSceneChanges(lua_State* L)
     enqueueSceneChanges(L, w.changes().take());
 }
 
+void fireInstanceEvent(lua_State* L, core::InstanceId owner, u16 slot, int first, int count)
+{
+    const SignalId id = findOwnedSignal(L, owner, SignalKind::Event, slot);
+    // Nothing has ever connected, so there is no signal object and nothing to
+    // fire into. That is the whole cost of `Heartbeat` in an empty world.
+    if (id.valid())
+        enqueueFire(L, id, first, count);
+}
+
+void pushTagSignal(lua_State* L, core::InstanceId owner, SignalKind kind, core::NameAtom tag)
+{
+    pushSignal(L, ownedSignal(L, owner, kind, tag.id));
+}
+
 void enqueueSceneChanges(lua_State* L, std::span<const scene::Change> changes)
 {
     SignalSystem& sys = system(L);
@@ -818,12 +833,27 @@ void enqueueSceneChanges(lua_State* L, std::span<const scene::Change> changes)
 
         case scene::ChangeKind::TagAdded:
         case scene::ChangeKind::TagRemoved:
-            // `TagService:GetInstanceAddedSignal` is the listener for these, and
-            // the service does not exist yet. Consumed rather than queued: a
-            // fact nobody can subscribe to is a fact with no observer, and
-            // holding it would make the first `TagService` connection fire for
-            // history.
+        {
+            // The listener is `TagService:GetInstanceAddedSignal(tag)`, owned by
+            // the TagService instance and keyed by the tag. Nothing fires until
+            // the service exists, which is correct: a service nobody asked for
+            // has no subscribers.
+            const core::InstanceId tagService =
+                w.findFirstChildOfClass(context(L).services->dataModel, context(L).services->tagServiceClass);
+            if (!tagService.valid())
+                break;
+
+            const SignalKind kind =
+                change.kind == scene::ChangeKind::TagAdded ? SignalKind::TagAdded : SignalKind::TagRemoved;
+            const SignalId id = findOwnedSignal(L, tagService, kind, change.name.id);
+            if (!id.valid())
+                break;
+
+            pushInstance(L, change.subject);
+            enqueueFire(L, id, lua_gettop(L), 1);
+            lua_pop(L, 1);
             break;
+        }
         }
     }
 }

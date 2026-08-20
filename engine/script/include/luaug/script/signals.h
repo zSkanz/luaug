@@ -81,6 +81,12 @@ enum class SignalKind : u8
     Event,
     PropertyChanged,
     AttributeChanged,
+    // `TagService:GetInstanceAddedSignal(tag)` and its removed twin. Owned by
+    // the TagService instance and keyed by the tag's atom, so the pair behaves
+    // like any other instance signal -- one object per tag, closed with its
+    // owner.
+    TagAdded,
+    TagRemoved,
 };
 
 struct ConnectionRecord
@@ -213,6 +219,10 @@ void pushInstanceEvent(lua_State* L, core::InstanceId owner, u16 slot);
 void pushPropertyChangedSignal(lua_State* L, core::InstanceId owner, core::NameAtom property);
 void pushAttributeChangedSignal(lua_State* L, core::InstanceId owner, core::NameAtom attribute);
 
+// `TagService`'s per-tag signals. `owner` is the TagService instance, which is
+// what closes them if it is ever destroyed.
+void pushTagSignal(lua_State* L, core::InstanceId owner, SignalKind kind, core::NameAtom tag);
+
 // Closes every signal `owner` has except `Destroying`, disconnecting everything
 // connected to them. Called **synchronously from `Instance:Destroy`**, not from
 // the drain, because api-design.md §3.1 says `Destroy` enqueues `Destroying` and
@@ -220,6 +230,12 @@ void pushAttributeChangedSignal(lua_State* L, core::InstanceId owner, core::Name
 // finds no live connections when the drain reaches it. `Destroying` is the one
 // exception: its own fire has already been queued and its handlers must run.
 void closeInstanceSignalsExceptDestroying(lua_State* L, core::InstanceId owner);
+
+// Enqueues a fire on an instance's event signal with `count` arguments starting
+// at stack index `first`. Does nothing when nothing has ever connected: an
+// engine-raised event costs a hash probe on an unwatched instance, which is what
+// lets `Heartbeat` fire sixty times a second into an empty world for free.
+void fireInstanceEvent(lua_State* L, core::InstanceId owner, u16 slot, int first, int count);
 
 // Turns `scene`'s POD change facts into fires, in queue order. This is the whole
 // of the scene->script direction: `scene` holds no Luau value and never will

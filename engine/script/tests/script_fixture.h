@@ -10,6 +10,8 @@
 // question these files exist to answer (M2 brief, ruling R-D).
 #pragma once
 
+#include <cstddef>
+#include <initializer_list>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -118,6 +120,18 @@ struct Fixture
         return out;
     }
 
+    [[nodiscard]] std::size_t logCount(std::string_view needle) const
+    {
+        std::size_t count = 0;
+        for (const auto& [level, text] : logged)
+        {
+            (void)level;
+            if (text.find(needle) != std::string::npos)
+                ++count;
+        }
+        return count;
+    }
+
     [[nodiscard]] bool logContains(std::string_view needle) const
     {
         for (const auto& [level, text] : logged)
@@ -143,8 +157,19 @@ struct Fixture
             state.tick += 1;
             state.simTime = static_cast<core::f64>(state.tick) * state.fixedTimestep;
 
-            runtime->drain(core::Phase::PreSimulation);
+            // Each resumption point runs its engine phase, then drains
+            // (api-design.md §3.1). `PreRender` is render-rate and never fires
+            // headless -- headless is the same scheduler minus the render steps.
+            const core::f64 delta = state.fixedTimestep;
+            for (const core::Phase phase :
+                 {core::Phase::PreAnimation, core::Phase::PreSimulation, core::Phase::PostSimulation})
+            {
+                runtime->firePhase(phase, delta);
+                runtime->drain(phase);
+            }
+
             runtime->resumeTimers();
+            runtime->firePhase(core::Phase::Heartbeat, delta);
             runtime->drain(core::Phase::Heartbeat);
         }
     }

@@ -50,30 +50,39 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   a declared-but-unimplemented member raises `script.err.not_implemented` rather
   than reading as missing.
 
+- **Every method the IDL declares is implemented**: `MethodCoverage` reports
+  43 declared, 43 bound, 0 unbacked, and `instance_binding_tests.cpp` pins all
+  three — so a method added to `api/defs` without a binding fails at boot rather
+  than the first time a script calls it. `game` and `workspace` are globals,
+  services are created on demand and singleton thereafter, the five phase
+  signals fire from the scheduler, and `WaitForChild` parks on a tree state.
+
 ### M2: what does NOT exist yet
 
-No `require`. No service wiring, so `game`/`workspace`/`script` do not exist and
-the DataModel, RunService, TagService and DebugService methods are unbound — 19
-of 43, every one of them a service's. `WaitForChild` is the twentieth: it parks
-until a child appears, which needs the mounted-script lifecycle rather than just
-`task`. No `examples/01-instances`; no replay harness, frame-budget
+No `require`, and no script lifecycle — nothing mounts `src/scripts/**`, so the
+`script` global does not exist and `ScriptService` is an empty mount point. The
+frame scheduler in `app` does not yet drive any of this: `script_fixture.h::tick`
+is the only thing that calls `firePhase`/`resumeTimers`/`drain` in the documented
+order. No `examples/01-instances`; no replay harness, frame-budget
 instrumentation or 10k/1k benchmark; the 932 staged conformance specs are still
 staged.
 
-**The M2 gate is 0 of 4.** Integrating the conformance suite is the next lever
-on it, and the harness it needs is the service wiring.
+**The M2 gate is 0 of 4.** Integrating the conformance suite is the lever on it,
+and what that needs is `require` plus the mounted-script lifecycle.
 
 ## Now / Next
 
-- **Next: the `app` wiring** — build the DataModel and its services in the
-  world, bind `game`/`workspace`/`script`, and drive `drain` / `resumeTimers` /
-  `retireDestroyed` from `FrameScheduler` in the order
-  `engine/script/tests/script_fixture.h::tick` already models. That unblocks
-  `WaitForChild`, the 19 service methods, and -- with `require` -- the
-  conformance runner the gate is measured by.
-- **`MethodCoverage` is the ledger for that work**: 43 declared, 24 bound, and
-  `instance_binding_tests.cpp` pins both numbers so the next batch that lands is
-  a visible change rather than a silent one.
+- **Next: `require` and the script lifecycle** — mount `src/scripts/**/*.luau`
+  as `Script` instances under `ScriptService`, bind the `script` global, start
+  each on its own coroutine in path-sorted order, and fire `game.Loaded` after
+  the first resumption. `docs/research/luau-c-api-2026.md` §3 is the grounding,
+  and it is unfriendly: `Luau.Require` has no filesystem knowledge, cyclic
+  requires do not exist at this pin, and failures are never cached (U-35…U-43).
+- **Then `app`'s `FrameScheduler`** drives what `script_fixture.h::tick` models:
+  `firePhase` + `drain` per resumption point, `resumeTimers` between
+  `PostSimulation` and `Heartbeat`, `retireDestroyed` after the drain. Moving
+  that sequence out of the test fixture is the point at which `examples/01-instances`
+  becomes possible.
 - **The scene->script conversion is synchronous, not batched.** A fire captures
   its connection list when it is *raised*, so every mutating binding calls
   `flushSceneChanges` immediately and `ScriptRuntime::drain` flushes again only

@@ -63,6 +63,17 @@ public:
     // other phase signals. Enqueues; the drain is what runs the handlers.
     void fireEvent(core::InstanceId instance, core::NameAtom event, f64 argument);
 
+    // `RunService`'s phase signal for this resumption point, carrying `delta` in
+    // seconds -- the fixed tick duration for the four sim phases, and the
+    // variable time since the last render for `PreRender`. A phase with no
+    // signal of its own is a no-op, so the scheduler can call this at every
+    // resumption point without a table of which ones have one.
+    void firePhase(core::Phase phase, f64 delta);
+
+    // Fires `game.Loaded`, once, after every entry script has had its first
+    // resumption (api-design.md §3).
+    void fireLoaded();
+
     // How deep the current drain has gone. Exposed for the tests that pin the
     // re-entrancy cap, which is otherwise only observable through a log line.
     [[nodiscard]] u32 deferredDepth() const noexcept;

@@ -56,6 +56,7 @@ namespace luaug::script
 
 class SignalSystem;
 class TaskScheduler;
+class ServiceState;
 
 using core::f32;
 using core::f64;
@@ -162,6 +163,7 @@ struct VmContext
     // every binding includes -- does not have to carry the queue's definition.
     SignalSystem* signals = nullptr;
     TaskScheduler* tasks = nullptr;
+    ServiceState* services = nullptr;
 
     // Indexed by Luau atom; holds the engine `NameAtom` id for the same text.
     // Grown by `useratom` as the VM interns each name, and never shrunk: an
@@ -186,6 +188,11 @@ struct VmContext
     // reported, so a surface that ships ahead of its implementation is a number
     // at startup rather than a nil discovered by a script.
     std::unordered_map<const scene::MethodDesc*, lua_CFunction> instanceMethods;
+
+    // Hand-written bindings whose method no definition declares. Counted as the
+    // batches land rather than walked for afterwards, because a stale entry has
+    // no descriptor for a walk to find it by.
+    usize unboundDeclarations = 0;
 
     // Registry ref of the weak-valued table that gives `a == b` for two handles
     // to the same instance. Keyed by the id's `index`, which is dense from the

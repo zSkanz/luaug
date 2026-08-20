@@ -17,6 +17,7 @@ luaug_add_module(script
         src/binding.cpp
         src/datatypes.cpp
         src/instance_binding.cpp
+        src/services.cpp
         src/signals.cpp
         src/tasks.cpp
         src/sandbox.cpp
@@ -33,6 +34,7 @@ luaug_add_module_tests(script
         tests/sandbox_tests.cpp
         tests/datatype_tests.cpp
         tests/instance_binding_tests.cpp
+        tests/service_tests.cpp
         tests/signal_tests.cpp
         tests/task_tests.cpp
 )

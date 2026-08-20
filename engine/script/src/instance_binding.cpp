@@ -711,22 +711,10 @@ int instanceNew(lua_State* L)
 
 // --- Registration ------------------------------------------------------------
 
-struct MethodBinding
-{
-    const char* className = nullptr;
-    const char* methodName = nullptr;
-    lua_CFunction fn = nullptr;
-};
-
-// Every method this build implements, by the class that DECLARES it. Binding it
-// to the declaring class is what makes inheritance work for free: the registry
-// resolves `part:Destroy()` to `Instance`'s descriptor, and this table is keyed
-// by descriptor.
-//
-// `WaitForChild` is absent because it yields and there is no scheduler to park
-// it on yet. It is reported by the coverage count rather than left to be
-// discovered.
-constexpr MethodBinding InstanceMethods[] = {
+// What `Instance` and `Model` declare. `WaitForChild` is absent on purpose: it
+// parks on a tree state rather than on a value this file can produce, so it is
+// implemented beside the services that make the tree move.
+constexpr InstanceMethodBinding InstanceMethods[] = {
     {"Instance", "FindFirstChild", methodFindFirstChild},
     {"Instance", "FindFirstChildOfClass", methodFindFirstChildOfClass},
     {"Instance", "FindFirstChildWhichIsA", methodFindFirstChildWhichIsA},
@@ -800,10 +788,54 @@ core::InstanceId checkInstance(lua_State* L, int index)
     return liveInstance(L, index);
 }
 
-MethodCoverage registerInstanceBinding(lua_State* L)
+void bindInstanceMethods(lua_State* L, std::span<const InstanceMethodBinding> bindings)
 {
     VmContext& ctx = context(L);
     World& w = *ctx.world;
+
+    for (const InstanceMethodBinding& binding : bindings)
+    {
+        const ClassId classId = w.classes().findId(w.atoms().lookup(binding.className));
+        const scene::MethodDesc* descriptor = w.classes().findMethod(classId, w.atoms().lookup(binding.methodName));
+        if (descriptor == nullptr)
+        {
+            ++ctx.unboundDeclarations;
+            continue;
+        }
+        ctx.instanceMethods.emplace(descriptor, binding.fn);
+    }
+}
+
+MethodCoverage methodCoverage(lua_State* L)
+{
+    const VmContext& ctx = context(L);
+    const World& w = *ctx.world;
+
+    MethodCoverage coverage;
+    coverage.bound = ctx.instanceMethods.size();
+    coverage.boundWithoutDeclaration = ctx.unboundDeclarations;
+
+    // Walks every class the registry holds and counts the declared methods with
+    // no implementation. The other direction is counted as the bindings land,
+    // because a stale entry has no descriptor to be found by.
+    for (ClassId classId = 1; classId < static_cast<ClassId>(w.classes().classCount()); ++classId)
+    {
+        const scene::ClassDescriptor* descriptor = w.classes().find(classId);
+        if (descriptor == nullptr)
+            continue;
+        for (const scene::MethodDesc& method : descriptor->methods)
+        {
+            ++coverage.declared;
+            if (ctx.instanceMethods.find(&method) == ctx.instanceMethods.end())
+                ++coverage.declaredWithoutBinding;
+        }
+    }
+    return coverage;
+}
+
+void registerInstanceBinding(lua_State* L)
+{
+    VmContext& ctx = context(L);
 
     // Weak values, so a userdata nothing holds is collected and the cache does
     // not turn every instance a script has ever touched into a permanent one.
@@ -840,45 +872,12 @@ MethodCoverage registerInstanceBinding(lua_State* L)
     lua_setreadonly(L, -1, true);
     lua_pop(L, 1);
 
-    MethodCoverage coverage;
-    for (const MethodBinding& binding : InstanceMethods)
-    {
-        const ClassId classId = w.classes().findId(w.atoms().lookup(binding.className));
-        const scene::MethodDesc* descriptor =
-            w.classes().findMethod(classId, w.atoms().lookup(binding.methodName));
-        if (descriptor == nullptr)
-        {
-            // A binding for a method no definition declares. Nothing generated
-            // this surface, so nothing else knows about it -- which makes it a
-            // stale hand-written entry rather than a new feature.
-            ++coverage.boundWithoutDeclaration;
-            continue;
-        }
-        ctx.instanceMethods.emplace(descriptor, binding.fn);
-        ++coverage.bound;
-    }
-
-    // The other half of the cross-check `MethodDesc` exists for: walk every
-    // class the registry holds and count the declared methods with no binding.
-    for (ClassId classId = 1; classId < static_cast<ClassId>(w.classes().classCount()); ++classId)
-    {
-        const scene::ClassDescriptor* descriptor = w.classes().find(classId);
-        if (descriptor == nullptr)
-            continue;
-        for (const scene::MethodDesc& method : descriptor->methods)
-        {
-            ++coverage.declared;
-            if (ctx.instanceMethods.find(&method) == ctx.instanceMethods.end())
-                ++coverage.declaredWithoutBinding;
-        }
-    }
+    bindInstanceMethods(L, InstanceMethods);
 
     const luaL_Reg constructors[] = {{"new", instanceNew}, {nullptr, nullptr}};
     luaL_register(L, "Instance", constructors);
     lua_setreadonly(L, -1, true);
     lua_pop(L, 1);
-
-    return coverage;
 }
 
 } // namespace luaug::script

@@ -28,8 +28,9 @@ M6. So this brief spends its length on the seams and on what is deliberately
 - [x] Instance facade: `Instance.new`, properties, `Parent`/children,
       `FindFirstChild` with duplicate-name support (ADR 0026), attributes, tags
       — reachable from Luau; `WaitForChild` waits on `task`
-- [ ] DataModel + services skeleton (`game:GetService`) — the next step, and
-      what `WaitForChild` and the 19 unbound service methods are waiting on
+- [x] DataModel + services skeleton (`game:GetService`) — `game` and
+      `workspace` globals, services created on demand and singleton thereafter,
+      and every declared service method implemented
 - [x] Deferred-only signal implementation with **documented** ordering semantics
       — api-design §3.1 written first, then implemented against it
 - [x] `task` library (`spawn`/`defer`/`delay`/`wait`/`cancel`) on the fixed-tick
@@ -539,7 +540,20 @@ signal test asserts. The fixture installs a `LogSink` and every timing test ends
 with `CHECK(fixture.errors() == "")`. Without it the whole signal suite would
 have been green and meaningless.
 
-**15. A comment of mine broke R7 within an hour of the rule being re-read.** The
+**15. `DebugService` was going to be deferred, and deferring it would have been
+the worse choice.** The plan was to leave its seven methods and `MessageOut`
+unbound with the rest of the services. But `__index` on an event pushes a signal
+object unconditionally, so `DebugService.MessageOut:Connect(fn)` would have
+succeeded and never fired — the exact type-checked no-op Decision 6 exists to
+prevent, and one that `script.err.not_implemented` cannot cover because an event
+is a value rather than a call. What made it cheap in the end is that the
+documented behaviour of most of it is already modest: the gizmos are *specified*
+as silent no-ops headless, so a `GizmoSink` the host fills is the whole
+implementation; `GetStat` is specified to raise on an unpublished name, so a
+table plus a live `InstanceCount` is the whole implementation. Reading the
+document again turned "defer this" into an afternoon.
+
+**16. A comment of mine broke R7 within an hour of the rule being re-read.** The
 legal sweep caught "Roblox" in `engine/core/include/luaug/core/phase.h` — in a
 sentence explaining a divergence, which is exactly the well-intentioned use the
 rule exists to stop from spreading outside the docs set.

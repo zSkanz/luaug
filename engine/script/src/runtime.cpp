@@ -14,6 +14,7 @@
 #include "luaug/script/datatypes.h"
 #include "luaug/script/instance_binding.h"
 #include "luaug/script/sandbox.h"
+#include "luaug/script/services.h"
 #include "luaug/script/signals.h"
 #include "luaug/script/tasks.h"
 
@@ -72,13 +73,19 @@ std::string concatArguments(lua_State* L)
 // not what a game says.
 int scriptWarn(lua_State* L)
 {
-    core::logText(core::LogLevel::Warn, concatArguments(L));
+    const std::string line = concatArguments(L);
+    core::logText(core::LogLevel::Warn, line);
+    // Exactly ONE deferred fire per call, carrying the text verbatim
+    // (api-design.md §2.1). Not per argument, and not per log line.
+    publishMessage(L, core::LogLevel::Warn, line);
     return 0;
 }
 
 int scriptPrint(lua_State* L)
 {
-    core::logText(core::LogLevel::Info, concatArguments(L));
+    const std::string line = concatArguments(L);
+    core::logText(core::LogLevel::Info, line);
+    publishMessage(L, core::LogLevel::Info, line);
     return 0;
 }
 
@@ -104,7 +111,7 @@ struct ScriptRuntime::Impl
     // reach through `lua_callbacks`.
     SignalSystem signals;
     TaskScheduler tasks;
-    MethodCoverage coverage;
+    ServiceState services;
 };
 
 ScriptRuntime::ScriptRuntime(scene::World& world) : m_world(world), m_impl(std::make_unique<Impl>())
@@ -112,6 +119,7 @@ ScriptRuntime::ScriptRuntime(scene::World& world) : m_world(world), m_impl(std::
     m_impl->context.world = &world;
     m_impl->context.signals = &m_impl->signals;
     m_impl->context.tasks = &m_impl->tasks;
+    m_impl->context.services = &m_impl->services;
 }
 
 ScriptRuntime::~ScriptRuntime()
@@ -162,11 +170,15 @@ std::optional<core::EngineError> ScriptRuntime::boot()
     // Every tag metatable, then every global that constructs one. All of it
     // before the first `luau_load`: the fast dispatch opcodes are chosen once
     // per `Proto` at load time and a deopt is permanent (binding.h, rule 2).
-    m_impl->coverage = registerInstanceBinding(L);
+    registerInstanceBinding(L);
     registerDatatypes(L);
     registerSignals(L);
     registerTasks(L);
     registerEnums(L);
+    // Last of the registrations, because it creates the DataModel and its two
+    // boot services -- which needs `pushInstance`, and therefore the Instance
+    // metatable, to already exist.
+    registerServices(L);
 
     sealGlobals(L);
     return std::nullopt;
@@ -174,7 +186,7 @@ std::optional<core::EngineError> ScriptRuntime::boot()
 
 MethodCoverage ScriptRuntime::methodCoverage() const noexcept
 {
-    return m_impl->coverage;
+    return m_impl->state == nullptr ? MethodCoverage{} : script::methodCoverage(m_impl->state);
 }
 
 std::optional<core::EngineError> ScriptRuntime::runSource(std::string_view source, std::string_view chunkName)
@@ -271,10 +283,63 @@ void ScriptRuntime::resumeTimers()
     // these resumptions defer drains at `Heartbeat`, which is the drain that
     // follows this call.
     resumeDueTimers(m_impl->state, m_world.engineState().tick);
+    // A `WaitForChild` is a pending resumption too, but keyed on a tree state
+    // rather than on a deadline -- so it cannot live in the timer list and is
+    // woken beside it.
+    resumeChildWaiters(m_impl->state);
 }
 
-void ScriptRuntime::fireEvent(core::InstanceId, core::NameAtom, f64)
+void ScriptRuntime::firePhase(core::Phase phase, f64 delta)
 {
+    if (m_impl->state == nullptr)
+        return;
+
+    // Only five of the phases have a signal. The rest are engine-internal
+    // resumption points and always will be: `FrameStart` is where a hot reload
+    // lands and the parallel windows are the checker's, not a script's.
+    const char* name = nullptr;
+    switch (phase)
+    {
+    case core::Phase::PreRender:
+        name = "PreRender";
+        break;
+    case core::Phase::PreAnimation:
+        name = "PreAnimation";
+        break;
+    case core::Phase::PreSimulation:
+        name = "PreSimulation";
+        break;
+    case core::Phase::PostSimulation:
+        name = "PostSimulation";
+        break;
+    case core::Phase::Heartbeat:
+        name = "Heartbeat";
+        break;
+    default:
+        return;
+    }
+
+    fireRunServiceEvent(m_impl->state, m_world.atoms().intern(name), delta);
+}
+
+void ScriptRuntime::fireLoaded()
+{
+    if (m_impl->state != nullptr)
+        fireDataModelLoaded(m_impl->state);
+}
+
+void ScriptRuntime::fireEvent(core::InstanceId instance, core::NameAtom event, f64 argument)
+{
+    if (m_impl->state == nullptr)
+        return;
+
+    const scene::EventDesc* descriptor = m_world.classes().findEvent(m_world.classOf(instance), event);
+    if (descriptor == nullptr)
+        return;
+
+    lua_pushnumber(m_impl->state, argument);
+    fireInstanceEvent(m_impl->state, instance, descriptor->slot, lua_gettop(m_impl->state), 1);
+    lua_pop(m_impl->state, 1);
 }
 
 u32 ScriptRuntime::deferredDepth() const noexcept

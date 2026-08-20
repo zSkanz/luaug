@@ -500,21 +500,15 @@ TEST_CASE("Model pivots move every descendant part by the same transform")
     )") == "");
 }
 
-TEST_CASE("a declared method with no implementation says so rather than reading as missing")
+TEST_CASE("every method the IDL declares is implemented")
 {
     Fixture fixture;
+    const luaug::script::MethodCoverage coverage = fixture.runtime->methodCoverage();
 
-    // `WaitForChild` parks the caller until a child appears, and the only thing
-    // that can satisfy it is a tree mutation between two resumption points --
-    // which needs `game` and the mounted-script lifecycle, not just `task`. A
-    // script that got `unknown_member` for it would be told something false
-    // about the API, so the gap has a key of its own.
-    CHECK(fixture.raises("Instance.new('Part'):WaitForChild('x')", "script.err.not_implemented"));
-
-    // The services are the rest of it -- their methods are declared and unbound
-    // until the DataModel exists -- but none of their classes is reachable from
-    // a script yet, so `WaitForChild` is the only one a script can call. The
-    // coverage numbers below are what keeps the other 28 accounted for.
+    // `script.err.not_implemented` now has no subject on the method surface,
+    // and this is what keeps it that way: a method added to `api/defs` without
+    // a binding fails here rather than the first time a script calls it.
+    CHECK(coverage.declaredWithoutBinding == 0);
 }
 
 TEST_CASE("the boot-time method cross-check reports both directions")
@@ -525,11 +519,9 @@ TEST_CASE("the boot-time method cross-check reports both directions")
     // A binding for a method no definition declares is a stale hand-written
     // entry: nothing generated that surface, so nothing else knows about it.
     CHECK(coverage.boundWithoutDeclaration == 0);
-    CHECK(coverage.bound > 0);
-    // The other direction is a number rather than zero on purpose -- the
-    // service methods arrive with the DataModel -- and pinning it here is what
-    // makes the next batch that lands a visible change rather than a silent one.
+    // Pinned rather than merely compared, so that a class added to the IDL
+    // shows up here as a number that changed.
     CHECK(coverage.declared == 43);
-    CHECK(coverage.bound == 24);
-    CHECK(coverage.declaredWithoutBinding == coverage.declared - coverage.bound);
+    CHECK(coverage.bound == 43);
+    CHECK(coverage.declaredWithoutBinding == 0);
 }

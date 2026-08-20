@@ -659,7 +659,7 @@ void pushEnumObject(lua_State* L, scene::EnumId id)
     pushTagged(L, UserdataTag::Enum, id);
 }
 
-void pushEnumItem(lua_State* L, scene::EnumValue value)
+void pushEnumItemImpl(lua_State* L, scene::EnumValue value)
 {
     pushTagged(L, UserdataTag::EnumItem, value);
 }
@@ -735,7 +735,7 @@ int enumObjectIndex(lua_State* L)
     {
         if (const scene::EnumItemDesc* item = enums(L).findItem(id, context(L).resolve(atom)))
         {
-            pushEnumItem(L, scene::EnumValue{id, item->value});
+            pushEnumItemImpl(L, scene::EnumValue{id, item->value});
             return 1;
         }
     }
@@ -755,7 +755,7 @@ int enumObjectGetEnumItems(lua_State* L)
     lua_createtable(L, static_cast<int>(count), 0);
     for (usize index = 0; index < count; ++index)
     {
-        pushEnumItem(L, scene::EnumValue{id, descriptor->items[index].value});
+        pushEnumItemImpl(L, scene::EnumValue{id, descriptor->items[index].value});
         lua_rawseti(L, -2, static_cast<int>(index) + 1);
     }
     return 1;
@@ -1188,6 +1188,11 @@ void pushVector3(lua_State* L, core::Vec3 value)
     pushVec3(L, value);
 }
 
+void pushEnumItem(lua_State* L, scene::EnumValue value)
+{
+    pushEnumItemImpl(L, value);
+}
+
 core::Vec3 checkVector3(lua_State* L, int index)
 {
     return checkVec3(L, index);
@@ -1225,7 +1230,7 @@ void pushValue(lua_State* L, const scene::Value& value)
         pushInstance(L, std::get<core::InstanceId>(value));
         return;
     case scene::ValueType::EnumItem:
-        pushEnumItem(L, std::get<scene::EnumValue>(value));
+        pushEnumItemImpl(L, std::get<scene::EnumValue>(value));
         return;
     }
     lua_pushnil(L);

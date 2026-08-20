@@ -14,6 +14,7 @@
 
 #include "luaug/core/id.h"
 #include "luaug/core/math.h"
+#include "luaug/scene/enum_registry.h"
 #include "luaug/scene/value.h"
 #include "luaug/script/binding.h"
 
@@ -44,6 +45,11 @@ void pushColor3(lua_State* L, core::Color3 value);
 
 void pushVector3(lua_State* L, core::Vec3 value);
 [[nodiscard]] core::Vec3 checkVector3(lua_State* L, int index);
+
+// An enum item by id and value. Exported because an engine-raised fire carries
+// one -- `DebugService.MessageOut` hands its handler an `Enum.LogLevel` -- and
+// the registry lookup that turns it back into a name is this module's.
+void pushEnumItem(lua_State* L, scene::EnumValue value);
 
 // The bridge between a `scene::Value` and a Luau value. It lives here rather
 // than beside the Instance bindings because this file owns every userdata type
