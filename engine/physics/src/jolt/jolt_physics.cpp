@@ -1,0 +1,1585 @@
+// The Jolt backend (ADR 0007, ADR 0023).
+//
+// The whole backend is one translation unit and it has no public header, which
+// is what keeps R17 mechanical rather than aspirational: no module above L2 can
+// include a JPH type because there is no file of ours to include that names
+// one.
+//
+// Three things in here exist because of R10 rather than because Jolt needs
+// them, and upstream's own documentation is why (Docs/Architecture.md:804-807):
+// contact callbacks arrive in a non-deterministic order, the active-body list
+// is in a non-deterministic order, and a query's hits arrive in a
+// non-deterministic order. All three are true today only in the sense that they
+// WILL be true when M7 wires a multi-threaded job system -- with the
+// single-threaded one they happen to be stable. Writing the sorts now is what
+// stops M7 from being the milestone that discovers a thousand recorded traces
+// are worthless.
+//
+// Jolt requires Jolt.h before any other Jolt header -- its own headers say so
+// and none of them include it -- so this block is exempt from include sorting.
+// clang-format off
+#include <Jolt/Jolt.h>
+
+#include <Jolt/Core/Factory.h>
+#include <Jolt/Core/JobSystemSingleThreaded.h>
+#include <Jolt/Core/TempAllocator.h>
+#include <Jolt/Physics/Body/BodyCreationSettings.h>
+#include <Jolt/Physics/Body/BodyLock.h>
+#include <Jolt/Physics/Body/BodyManager.h>
+#include <Jolt/Physics/Character/CharacterVirtual.h>
+#include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/CollidePointResult.h>
+#include <Jolt/Physics/Collision/CollisionCollector.h>
+#include <Jolt/Physics/Collision/RayCast.h>
+#include <Jolt/Physics/Collision/ShapeCast.h>
+#include <Jolt/Physics/Collision/Shape/BoxShape.h>
+#include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
+#include <Jolt/Physics/Collision/Shape/CylinderShape.h>
+#include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
+#include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/PhysicsSettings.h>
+#include <Jolt/Physics/PhysicsSystem.h>
+#include <Jolt/RegisterTypes.h>
+#ifdef JPH_DEBUG_RENDERER
+#include <Jolt/Renderer/DebugRendererSimple.h>
+#endif
+// clang-format on
+
+#include "luaug/core/error.h"
+#include "luaug/core/i18n.h"
+#include "luaug/core/log.h"
+#include "luaug/core/text_key.h"
+#include "luaug/physics/backends.h"
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cmath>
+#include <cstdarg>
+#include <cstdio>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
+
+namespace luaug::physics {
+namespace {
+
+using core::f32;
+using core::f64;
+using core::u16;
+using core::u32;
+using core::u64;
+using core::u8;
+using core::usize;
+
+// --- Layer encoding ---------------------------------------------------------
+//
+// One object layer per (collision group, moving) pair: `layer = group * 2 +
+// moving`. Ten bits of group and one of motion fit inside the 16-bit object
+// layer Jolt is built with, which is what caps a world at
+// `kMaxCollisionGroups`.
+//
+// The split by motion is not ours; it is what lets the broad phase keep static
+// geometry in a tree it never rebuilds. Everything else about which pairs
+// collide is a runtime matrix, because `PhysicsService:RegisterCollisionGroup`
+// is a call a script makes after the world exists.
+
+constexpr JPH::BroadPhaseLayer kBroadPhaseNonMoving(0);
+constexpr JPH::BroadPhaseLayer kBroadPhaseMoving(1);
+constexpr JPH::uint kBroadPhaseLayerCount = 2;
+
+[[nodiscard]] JPH::ObjectLayer encodeLayer(CollisionGroup group, bool moving) noexcept
+{
+    return static_cast<JPH::ObjectLayer>((static_cast<u32>(group) << 1) | (moving ? 1u : 0u));
+}
+
+[[nodiscard]] CollisionGroup decodeGroup(JPH::ObjectLayer layer) noexcept
+{
+    return static_cast<CollisionGroup>(static_cast<u32>(layer) >> 1);
+}
+
+[[nodiscard]] bool decodeMoving(JPH::ObjectLayer layer) noexcept
+{
+    return (static_cast<u32>(layer) & 1u) != 0u;
+}
+
+// The collidability matrix, dense and square, one byte per pair. A world with
+// the four groups a game actually registers costs sixteen bytes; the bound is
+// what stops a script from asking for a megabyte by looping.
+class CollisionMatrix
+{
+public:
+    CollisionMatrix()
+    {
+        m_names.emplace_back("Default");
+        m_collidable.assign(1, 1);
+    }
+
+    [[nodiscard]] u32 count() const noexcept { return static_cast<u32>(m_names.size()); }
+
+    [[nodiscard]] CollisionGroup find(std::string_view name) const noexcept
+    {
+        for (usize i = 0; i < m_names.size(); ++i) {
+            if (m_names[i] == name) {
+                return static_cast<CollisionGroup>(i);
+            }
+        }
+        return kInvalidGroup;
+    }
+
+    [[nodiscard]] CollisionGroup add(std::string_view name)
+    {
+        const CollisionGroup existing = find(name);
+        if (existing != kInvalidGroup) {
+            return existing;
+        }
+        if (m_names.size() >= kMaxCollisionGroups) {
+            return kInvalidGroup;
+        }
+
+        const u32 previous = count();
+        const u32 next = previous + 1;
+        std::vector<u8> grown(static_cast<usize>(next) * next, 1);
+        for (u32 row = 0; row < previous; ++row) {
+            for (u32 column = 0; column < previous; ++column) {
+                grown[static_cast<usize>(row) * next + column] =
+                    m_collidable[static_cast<usize>(row) * previous + column];
+            }
+        }
+        m_collidable.swap(grown);
+        m_names.emplace_back(name);
+        return static_cast<CollisionGroup>(previous);
+    }
+
+    void setCollidable(CollisionGroup a, CollisionGroup b, bool collidable) noexcept
+    {
+        if (a >= count() || b >= count()) {
+            return;
+        }
+        m_collidable[static_cast<usize>(a) * count() + b] = collidable ? 1u : 0u;
+        m_collidable[static_cast<usize>(b) * count() + a] = collidable ? 1u : 0u;
+    }
+
+    [[nodiscard]] bool collidable(CollisionGroup a, CollisionGroup b) const noexcept
+    {
+        if (a >= count() || b >= count()) {
+            return false;
+        }
+        return m_collidable[static_cast<usize>(a) * count() + b] != 0u;
+    }
+
+    void collectNames(std::vector<std::string_view>& out) const
+    {
+        for (const std::string& name : m_names) {
+            out.emplace_back(name);
+        }
+    }
+
+    static constexpr CollisionGroup kInvalidGroup = 0xffffu;
+
+private:
+    std::vector<std::string> m_names;
+    std::vector<u8> m_collidable;
+};
+
+class BroadPhaseLayers final : public JPH::BroadPhaseLayerInterface
+{
+public:
+    [[nodiscard]] JPH::uint GetNumBroadPhaseLayers() const override { return kBroadPhaseLayerCount; }
+
+    [[nodiscard]] JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer layer) const override
+    {
+        return decodeMoving(layer) ? kBroadPhaseMoving : kBroadPhaseNonMoving;
+    }
+
+#if defined(JPH_EXTERNAL_PROFILE) || defined(JPH_PROFILE_ENABLED)
+    [[nodiscard]] const char* GetBroadPhaseLayerName(JPH::BroadPhaseLayer layer) const override
+    {
+        return layer == kBroadPhaseMoving ? "moving" : "static";
+    }
+#endif
+};
+
+class ObjectVsBroadPhaseFilter final : public JPH::ObjectVsBroadPhaseLayerFilter
+{
+public:
+    [[nodiscard]] bool ShouldCollide(JPH::ObjectLayer layer, JPH::BroadPhaseLayer broadPhase) const override
+    {
+        // Static against static is the pair the broad-phase split exists to
+        // skip: two things that never move cannot begin to overlap.
+        return decodeMoving(layer) || broadPhase == kBroadPhaseMoving;
+    }
+};
+
+class ObjectPairFilter final : public JPH::ObjectLayerPairFilter
+{
+public:
+    explicit ObjectPairFilter(const CollisionMatrix& matrix) : m_matrix(matrix) {}
+
+    [[nodiscard]] bool ShouldCollide(JPH::ObjectLayer a, JPH::ObjectLayer b) const override
+    {
+        if (!decodeMoving(a) && !decodeMoving(b)) {
+            return false;
+        }
+        return m_matrix.collidable(decodeGroup(a), decodeGroup(b));
+    }
+
+private:
+    const CollisionMatrix& m_matrix;
+};
+
+// --- Records ----------------------------------------------------------------
+
+struct BodyRecord
+{
+    JPH::BodyID id;
+    u32 generation = 0;
+    bool alive = false;
+    bool collidable = true;
+    bool queryable = true;
+    MotionType motion = MotionType::Dynamic;
+    CollisionGroup group = kDefaultCollisionGroup;
+    u64 userData = 0;
+};
+
+struct CharacterRecord
+{
+    JPH::Ref<JPH::CharacterVirtual> character;
+    u32 generation = 0;
+    bool alive = false;
+    f32 stepHeight = 0.5f;
+    u64 userData = 0;
+};
+
+// A contacting pair, keyed by our own handles rather than by Jolt's body ids.
+// Packed so a pair is one comparison and one sort key -- and so the ordering is
+// ours, which is what makes it survive a job system that reports the same pair
+// in either order (Docs/Architecture.md:806).
+struct ContactPair
+{
+    u64 first = 0;
+    u64 second = 0;
+
+    [[nodiscard]] constexpr bool operator==(const ContactPair&) const noexcept = default;
+    [[nodiscard]] constexpr bool operator<(const ContactPair& other) const noexcept
+    {
+        return first != other.first ? first < other.first : second < other.second;
+    }
+};
+
+[[nodiscard]] constexpr u64 packHandle(BodyHandle handle) noexcept
+{
+    return (static_cast<u64>(handle.generation) << 32) | handle.index;
+}
+
+[[nodiscard]] constexpr BodyHandle unpackHandle(u64 packed) noexcept
+{
+    return BodyHandle{static_cast<u32>(packed & 0xffffffffu), static_cast<u32>(packed >> 32)};
+}
+
+// --- Conversions ------------------------------------------------------------
+//
+// f64 in, f32 out. This is architecture.md §10's split and not a shortcut:
+// world precision is f64 in `scene` plus a floating origin, and physics runs in
+// the rebased f32 space. Until M7 rebases anything the origin is zero, so the
+// narrowing is the whole conversion -- and the day it is not, it is one
+// function.
+
+[[nodiscard]] JPH::Vec3 toJolt(core::Vec3 v) noexcept
+{
+    return JPH::Vec3(v.x, v.y, v.z);
+}
+
+[[nodiscard]] JPH::RVec3 toJoltPosition(core::DVec3 v) noexcept
+{
+    return JPH::RVec3(static_cast<f32>(v.x), static_cast<f32>(v.y), static_cast<f32>(v.z));
+}
+
+[[nodiscard]] core::Vec3 fromJolt(JPH::Vec3Arg v) noexcept
+{
+    return core::Vec3{v.GetX(), v.GetY(), v.GetZ()};
+}
+
+[[nodiscard]] core::DVec3 fromJoltPosition(JPH::RVec3Arg v) noexcept
+{
+    return core::DVec3{static_cast<f64>(v.GetX()), static_cast<f64>(v.GetY()), static_cast<f64>(v.GetZ())};
+}
+
+[[nodiscard]] JPH::Quat toJolt(const core::Mat3& rotation) noexcept
+{
+    f32 x = 0.0f;
+    f32 y = 0.0f;
+    f32 z = 0.0f;
+    f32 w = 1.0f;
+    core::toQuaternion(rotation, x, y, z, w);
+    return JPH::Quat(x, y, z, w).Normalized();
+}
+
+[[nodiscard]] core::Mat3 fromJolt(JPH::QuatArg q) noexcept
+{
+    return core::fromQuaternion(q.GetX(), q.GetY(), q.GetZ(), q.GetW());
+}
+
+// --- Shapes -----------------------------------------------------------------
+
+[[nodiscard]] JPH::ShapeRefC buildShape(const ShapeDesc& desc)
+{
+    // Half-extents, because `size` is the full extent everywhere in this engine
+    // and Jolt takes halves. Clamped away from zero: a zero-sized shape is a
+    // degenerate hull Jolt refuses, and a script writing `Size = Vector3.zero`
+    // must produce a very small part rather than an error the frame cannot
+    // recover from.
+    constexpr f32 kMinHalfExtent = 0.005f;
+    const f32 hx = std::max(desc.size.x * 0.5f, kMinHalfExtent);
+    const f32 hy = std::max(desc.size.y * 0.5f, kMinHalfExtent);
+    const f32 hz = std::max(desc.size.z * 0.5f, kMinHalfExtent);
+
+    switch (desc.type) {
+    case ShapeType::Box: {
+        // Jolt's box carries a convex radius that must fit inside the box; the
+        // default 0.05 makes a part thinner than 10 cm fail to build.
+        const f32 convexRadius = std::min({hx, hy, hz, JPH::cDefaultConvexRadius});
+        return JPH::ShapeRefC(new JPH::BoxShape(JPH::Vec3(hx, hy, hz), convexRadius));
+    }
+    case ShapeType::Sphere:
+        return JPH::ShapeRefC(new JPH::SphereShape(std::max({hx, hy, hz})));
+    case ShapeType::Capsule: {
+        const f32 radius = std::max(hx, hz);
+        // The cylindrical part only: Jolt's half-height excludes the caps,
+        // while `Size.y` includes them.
+        const f32 halfCylinder = std::max(hy - radius, kMinHalfExtent);
+        return JPH::ShapeRefC(new JPH::CapsuleShape(halfCylinder, radius));
+    }
+    case ShapeType::Cylinder: {
+        const f32 radius = std::max(hx, hz);
+        const f32 convexRadius = std::min({radius, hy, JPH::cDefaultConvexRadius});
+        return JPH::ShapeRefC(new JPH::CylinderShape(hy, radius, convexRadius));
+    }
+    case ShapeType::ConvexHull: {
+        if (desc.points.size() < 4) {
+            return {};
+        }
+        JPH::Array<JPH::Vec3> points;
+        points.reserve(desc.points.size());
+        for (const core::Vec3& point : desc.points) {
+            points.push_back(toJolt(point));
+        }
+        JPH::ConvexHullShapeSettings settings(points);
+        settings.SetEmbedded();
+        const JPH::ShapeSettings::ShapeResult result = settings.Create();
+        if (result.HasError()) {
+            return {};
+        }
+        return result.Get();
+    }
+    }
+    return {};
+}
+
+// --- Deterministic collectors -----------------------------------------------
+//
+// Jolt's own closest-hit collector keeps the FIRST of two hits at an equal
+// fraction, and which one arrives first is traversal order. These keep the one
+// with the lower body id instead, so a tie -- two coincident surfaces, a ray
+// down a seam -- answers the same way on every run (R10).
+
+class ClosestRayCollector final : public JPH::CastRayCollector
+{
+public:
+    void AddHit(const JPH::RayCastResult& result) override
+    {
+        if (!has || result.mFraction < hit.mFraction ||
+            (result.mFraction == hit.mFraction &&
+             result.mBodyID.GetIndexAndSequenceNumber() < hit.mBodyID.GetIndexAndSequenceNumber())) {
+            hit = result;
+            has = true;
+            UpdateEarlyOutFraction(result.mFraction);
+        }
+    }
+
+    JPH::RayCastResult hit;
+    bool has = false;
+};
+
+class ClosestShapeCollector final : public JPH::CastShapeCollector
+{
+public:
+    void AddHit(const JPH::ShapeCastResult& result) override
+    {
+        if (!has || result.mFraction < hit.mFraction ||
+            (result.mFraction == hit.mFraction &&
+             result.mBodyID2.GetIndexAndSequenceNumber() < hit.mBodyID2.GetIndexAndSequenceNumber())) {
+            hit = result;
+            has = true;
+            UpdateEarlyOutFraction(result.mFraction);
+        }
+    }
+
+    JPH::ShapeCastResult hit;
+    bool has = false;
+};
+
+class OverlapCollector final : public JPH::CollideShapeCollector
+{
+public:
+    void AddHit(const JPH::CollideShapeResult& result) override { bodies.push_back(result.mBodyID2); }
+
+    JPH::Array<JPH::BodyID> bodies;
+};
+
+// --- The world --------------------------------------------------------------
+
+class JoltWorld;
+
+// Appends to the world's per-step pair buffer and does nothing else. Runs
+// inside `PhysicsSystem::Update`, and from M7 on a worker thread -- so it may
+// not touch the scene, allocate a script value, or decide an order.
+class ContactRecorder final : public JPH::ContactListener
+{
+public:
+    void OnContactAdded(const JPH::Body& first, const JPH::Body& second, const JPH::ContactManifold&,
+                        JPH::ContactSettings&) override
+    {
+        record(first, second);
+    }
+
+    void OnContactPersisted(const JPH::Body& first, const JPH::Body& second, const JPH::ContactManifold&,
+                            JPH::ContactSettings&) override
+    {
+        record(first, second);
+    }
+
+    void clear()
+    {
+        // No lock: called between steps, from the simulation thread.
+        m_pairs.clear();
+    }
+
+    [[nodiscard]] std::vector<ContactPair>& pairs() noexcept { return m_pairs; }
+
+private:
+    void record(const JPH::Body& first, const JPH::Body& second)
+    {
+        ContactPair pair{first.GetUserData(), second.GetUserData()};
+        if (pair.second < pair.first) {
+            std::swap(pair.first, pair.second);
+        }
+        const std::lock_guard<std::mutex> guard(m_mutex);
+        m_pairs.push_back(pair);
+    }
+
+    std::mutex m_mutex;
+    std::vector<ContactPair> m_pairs;
+};
+
+#ifdef JPH_DEBUG_RENDERER
+// Jolt's simple debug renderer draws everything as triangles and lines; we take
+// the lines and turn the triangles into their three edges, because the engine's
+// debug draw is a wireframe and a filled physics shape would hide the render
+// mesh it is there to be compared against.
+class DebugBridge final : public JPH::DebugRendererSimple
+{
+public:
+    explicit DebugBridge(IDebugDrawSink& sink) : m_sink(sink) {}
+
+    void DrawLine(JPH::RVec3Arg from, JPH::RVec3Arg to, JPH::ColorArg color) override
+    {
+        m_sink.line(fromJoltPosition(from), fromJoltPosition(to), toRgb(color));
+    }
+
+    void DrawTriangle(JPH::RVec3Arg v1, JPH::RVec3Arg v2, JPH::RVec3Arg v3, JPH::ColorArg color, ECastShadow) override
+    {
+        const u32 rgb = toRgb(color);
+        m_sink.line(fromJoltPosition(v1), fromJoltPosition(v2), rgb);
+        m_sink.line(fromJoltPosition(v2), fromJoltPosition(v3), rgb);
+        m_sink.line(fromJoltPosition(v3), fromJoltPosition(v1), rgb);
+    }
+
+    void DrawText3D(JPH::RVec3Arg, const JPH::string_view&, JPH::ColorArg, float) override {}
+
+private:
+    [[nodiscard]] static u32 toRgb(JPH::ColorArg color) noexcept
+    {
+        return (static_cast<u32>(color.r) << 16) | (static_cast<u32>(color.g) << 8) | static_cast<u32>(color.b);
+    }
+
+    IDebugDrawSink& m_sink;
+};
+#endif
+
+// The three budgets a world is sized by, all derived from the body count so
+// that one number in `WorldDesc` decides them together.
+//
+// A stack of a thousand crates produces far more contacts than bodies, and a
+// buffer that overflows drops contacts -- which reads as parts sinking through
+// each other rather than as an error. The temp allocator is derived from the
+// same numbers because Jolt allocates its per-step working set from it in ONE
+// request: sized independently, the first integration here asked for 30 MB from
+// a 16 MB allocator and the process aborted with no message.
+[[nodiscard]] JPH::uint bodyBudget(const WorldDesc& desc) noexcept
+{
+    return std::max<JPH::uint>(desc.maxBodies, 1024);
+}
+
+[[nodiscard]] JPH::uint contactBudget(const WorldDesc& desc) noexcept
+{
+    return bodyBudget(desc) * 2;
+}
+
+[[nodiscard]] JPH::uint tempBytes(const WorldDesc& desc) noexcept
+{
+    return 8u * 1024u * 1024u + contactBudget(desc) * 64u + contactBudget(desc) * 512u;
+}
+
+class JoltWorld
+{
+public:
+    explicit JoltWorld(const WorldDesc& desc)
+        : m_pairFilter(m_matrix), m_temp(tempBytes(desc)), m_jobs(JPH::cMaxPhysicsJobs), m_gravity(desc.gravity)
+    {
+        m_system.Init(bodyBudget(desc), 0, contactBudget(desc), contactBudget(desc), m_broadPhaseLayers,
+                      m_objectVsBroadPhase, m_pairFilter);
+        m_system.SetGravity(toJolt(desc.gravity));
+        m_system.SetContactListener(&m_contacts);
+    }
+
+    ~JoltWorld()
+    {
+        JPH::BodyInterface& bodies = m_system.GetBodyInterface();
+        for (const BodyRecord& record : m_bodies) {
+            if (record.alive) {
+                bodies.RemoveBody(record.id);
+                bodies.DestroyBody(record.id);
+            }
+        }
+    }
+
+    JoltWorld(const JoltWorld&) = delete;
+    JoltWorld& operator=(const JoltWorld&) = delete;
+
+    void setGravity(core::Vec3 gravity)
+    {
+        m_gravity = gravity;
+        m_system.SetGravity(toJolt(gravity));
+    }
+
+    [[nodiscard]] core::Vec3 gravity() const noexcept { return m_gravity; }
+
+    // --- Bodies ---------------------------------------------------------------
+
+    [[nodiscard]] BodyHandle createBody(const BodyDesc& desc)
+    {
+        const JPH::ShapeRefC shape = buildShape(desc.shape);
+        if (shape == nullptr) {
+            return {};
+        }
+
+        u32 slot = 0;
+        if (!m_freeBodies.empty()) {
+            slot = m_freeBodies.back();
+            m_freeBodies.pop_back();
+        }
+        else {
+            slot = static_cast<u32>(m_bodies.size());
+            m_bodies.emplace_back();
+        }
+
+        BodyRecord& record = m_bodies[slot];
+        // Generations start at one so a default-constructed handle is invalid,
+        // and never wrap to zero for the same reason.
+        record.generation = record.generation + 1 == 0 ? 1 : record.generation + 1;
+
+        const BodyHandle handle{slot, record.generation};
+        if (!instantiate(record, handle, desc, shape)) {
+            record.alive = false;
+            m_freeBodies.push_back(slot);
+            return {};
+        }
+        return handle;
+    }
+
+    // A shape or motion-type change is a recreate on Jolt's side, and the
+    // handle survives it: everything above holds one, and the caller asked for
+    // the body to change rather than to be replaced. Velocity is carried across
+    // so that resizing a falling part does not stop it in mid-air.
+    void updateBody(BodyHandle handle, const BodyDesc& desc)
+    {
+        BodyRecord* record = resolve(handle);
+        if (record == nullptr) {
+            return;
+        }
+        const JPH::ShapeRefC shape = buildShape(desc.shape);
+        if (shape == nullptr) {
+            return;
+        }
+
+        const BodyState previous = bodyState(handle);
+        forgetPairs(packHandle(handle));
+
+        JPH::BodyInterface& bodies = m_system.GetBodyInterface();
+        bodies.RemoveBody(record->id);
+        bodies.DestroyBody(record->id);
+        record->id = JPH::BodyID();
+
+        if (!instantiate(*record, handle, desc, shape)) {
+            record->alive = false;
+            m_freeBodies.push_back(handle.index);
+            return;
+        }
+        if (desc.motion != MotionType::Static) {
+            bodies.SetLinearAndAngularVelocity(record->id, toJolt(previous.linearVelocity),
+                                               toJolt(previous.angularVelocity));
+        }
+    }
+
+    void destroyBody(BodyHandle handle)
+    {
+        BodyRecord* record = resolve(handle);
+        if (record == nullptr) {
+            return;
+        }
+
+        // A destroyed part does not fire TouchEnded -- the instance is gone,
+        // and a signal on an instance nobody can reach is a signal nobody can
+        // handle. Dropping its pairs here is what makes that true rather than
+        // leaving an event referring to a body that no longer exists.
+        forgetPairs(packHandle(handle));
+
+        JPH::BodyInterface& bodies = m_system.GetBodyInterface();
+        bodies.RemoveBody(record->id);
+        bodies.DestroyBody(record->id);
+        record->alive = false;
+        record->id = JPH::BodyID();
+        m_freeBodies.push_back(handle.index);
+    }
+
+    void setBodyTransform(BodyHandle handle, const core::CFrameD& transform)
+    {
+        BodyRecord* record = resolve(handle);
+        if (record == nullptr) {
+            return;
+        }
+        m_system.GetBodyInterface().SetPositionAndRotation(
+            record->id, toJoltPosition(transform.position), toJolt(transform.rotation),
+            record->motion == MotionType::Static ? JPH::EActivation::DontActivate : JPH::EActivation::Activate);
+    }
+
+    void setBodyVelocity(BodyHandle handle, core::Vec3 linear, core::Vec3 angular)
+    {
+        BodyRecord* record = resolve(handle);
+        if (record == nullptr || record->motion == MotionType::Static) {
+            return;
+        }
+        m_system.GetBodyInterface().SetLinearAndAngularVelocity(record->id, toJolt(linear), toJolt(angular));
+    }
+
+    void applyImpulse(BodyHandle handle, core::Vec3 impulse)
+    {
+        BodyRecord* record = resolve(handle);
+        if (record == nullptr || record->motion != MotionType::Dynamic) {
+            return;
+        }
+        m_system.GetBodyInterface().AddImpulse(record->id, toJolt(impulse));
+    }
+
+    void setBodyMaterial(BodyHandle handle, f32 friction, f32 restitution)
+    {
+        BodyRecord* record = resolve(handle);
+        if (record == nullptr) {
+            return;
+        }
+        JPH::BodyInterface& bodies = m_system.GetBodyInterface();
+        bodies.SetFriction(record->id, friction);
+        bodies.SetRestitution(record->id, restitution);
+    }
+
+    void setBodyFlags(BodyHandle handle, bool collidable, bool queryable)
+    {
+        BodyRecord* record = resolve(handle);
+        if (record == nullptr) {
+            return;
+        }
+        record->queryable = queryable;
+        if (record->collidable != collidable) {
+            record->collidable = collidable;
+            m_system.GetBodyInterface().SetIsSensor(record->id, !collidable);
+        }
+    }
+
+    void setBodyGroup(BodyHandle handle, CollisionGroup group)
+    {
+        BodyRecord* record = resolve(handle);
+        if (record == nullptr || record->group == group) {
+            return;
+        }
+        record->group = group;
+        m_system.GetBodyInterface().SetObjectLayer(record->id,
+                                                   encodeLayer(group, record->motion != MotionType::Static));
+    }
+
+    [[nodiscard]] BodyState bodyState(BodyHandle handle) const
+    {
+        const BodyRecord* record = resolve(handle);
+        BodyState state;
+        if (record == nullptr) {
+            return state;
+        }
+        const JPH::BodyInterface& bodies = m_system.GetBodyInterface();
+        JPH::RVec3 position;
+        JPH::Quat rotation;
+        bodies.GetPositionAndRotation(record->id, position, rotation);
+        state.transform.position = fromJoltPosition(position);
+        state.transform.rotation = fromJolt(rotation);
+        JPH::Vec3 linear;
+        JPH::Vec3 angular;
+        bodies.GetLinearAndAngularVelocity(record->id, linear, angular);
+        state.linearVelocity = fromJolt(linear);
+        state.angularVelocity = fromJolt(angular);
+        state.active = bodies.IsActive(record->id);
+        return state;
+    }
+
+    void collectActiveBodies(std::vector<ActiveBody>& out) const
+    {
+        JPH::BodyIDVector active;
+        m_system.GetActiveBodies(JPH::EBodyType::RigidBody, active);
+
+        const usize first = out.size();
+        for (const JPH::BodyID& id : active) {
+            const u64 packed = m_system.GetBodyInterface().GetUserData(id);
+            const BodyHandle handle = unpackHandle(packed);
+            const BodyRecord* record = resolve(handle);
+            if (record == nullptr) {
+                continue;
+            }
+            out.push_back(ActiveBody{handle, record->userData, bodyState(handle)});
+        }
+
+        // Jolt documents this list as unordered under a multi-threaded job
+        // system (Docs/Architecture.md:807). Sorting by our own handle makes
+        // the order a property of when the caller created the body, which is
+        // the scene's deterministic walk.
+        std::sort(out.begin() + static_cast<std::ptrdiff_t>(first), out.end(),
+                  [](const ActiveBody& a, const ActiveBody& b) { return packHandle(a.body) < packHandle(b.body); });
+    }
+
+    // --- Simulation -----------------------------------------------------------
+
+    void step(f32 fixedDt)
+    {
+        m_contacts.clear();
+
+        const auto begin = std::chrono::steady_clock::now();
+        // One collision step per tick. Jolt allows several sub-steps per call;
+        // the sim tick already IS the substep grid, and a second, hidden one
+        // would make `FixedTimestep` mean two different things.
+        m_system.Update(fixedDt, 1, &m_temp, &m_jobs);
+        const auto end = std::chrono::steady_clock::now();
+        m_timings.step = std::chrono::duration<f64>(end - begin).count();
+
+        buildContactEvents();
+    }
+
+    [[nodiscard]] std::span<const ContactEvent> contacts() const noexcept { return m_events; }
+    [[nodiscard]] StepTimings timings() const noexcept { return m_timings; }
+
+    // --- Queries --------------------------------------------------------------
+
+    [[nodiscard]] bool raycast(const RayD& ray, const QueryFilter& filter, RayHit& outHit) const
+    {
+        const JPH::RRayCast cast{toJoltPosition(ray.origin), toJolt(ray.direction)};
+        const BodyFilterAdapter bodyFilter(*this, filter);
+        const LayerFilterAdapter layerFilter(filter);
+
+        ClosestRayCollector collector;
+        m_system.GetNarrowPhaseQuery().CastRay(cast, JPH::RayCastSettings{}, collector, JPH::BroadPhaseLayerFilter{},
+                                               layerFilter, bodyFilter);
+        if (!collector.has) {
+            return false;
+        }
+
+        const BodyHandle handle = unpackHandle(m_system.GetBodyInterface().GetUserData(collector.hit.mBodyID));
+        const BodyRecord* record = resolve(handle);
+        if (record == nullptr) {
+            return false;
+        }
+
+        const JPH::RVec3 point = cast.GetPointOnRay(collector.hit.mFraction);
+        outHit.body = handle;
+        outHit.userData = record->userData;
+        outHit.position = fromJoltPosition(point);
+        // The fraction is along the ray as given, and the ray's length is the
+        // direction's magnitude -- `Workspace:Raycast(origin, direction)` takes
+        // an unnormalised direction whose length IS the range.
+        outHit.distance = collector.hit.mFraction * core::length(ray.direction);
+        outHit.normal = surfaceNormal(collector.hit.mBodyID, collector.hit.mSubShapeID2, point);
+        return true;
+    }
+
+    [[nodiscard]] bool spherecast(const RayD& ray, f32 radius, const QueryFilter& filter, RayHit& outHit) const
+    {
+        const JPH::SphereShape sphere(std::max(radius, 0.005f));
+        const JPH::RShapeCast cast(&sphere, JPH::Vec3::sOne(), JPH::RMat44::sTranslation(toJoltPosition(ray.origin)),
+                                   toJolt(ray.direction));
+        const BodyFilterAdapter bodyFilter(*this, filter);
+        const LayerFilterAdapter layerFilter(filter);
+
+        ClosestShapeCollector collector;
+        m_system.GetNarrowPhaseQuery().CastShape(cast, JPH::ShapeCastSettings{}, JPH::RVec3::sZero(), collector,
+                                                 JPH::BroadPhaseLayerFilter{}, layerFilter, bodyFilter);
+        if (!collector.has) {
+            return false;
+        }
+
+        const BodyHandle handle = unpackHandle(m_system.GetBodyInterface().GetUserData(collector.hit.mBodyID2));
+        const BodyRecord* record = resolve(handle);
+        if (record == nullptr) {
+            return false;
+        }
+
+        outHit.body = handle;
+        outHit.userData = record->userData;
+        outHit.position = fromJoltPosition(JPH::RVec3(collector.hit.mContactPointOn2));
+        outHit.distance = collector.hit.mFraction * core::length(ray.direction);
+        const JPH::Vec3 axis = collector.hit.mPenetrationAxis;
+        outHit.normal = axis.IsNearZero() ? core::Vec3{0.0f, 1.0f, 0.0f} : fromJolt(-axis.Normalized());
+        return true;
+    }
+
+    void overlapBox(const core::CFrameD& transform, core::Vec3 size, const QueryFilter& filter,
+                    std::vector<u64>& out) const
+    {
+        const JPH::BoxShape box(JPH::Vec3(std::max(size.x * 0.5f, 0.005f), std::max(size.y * 0.5f, 0.005f),
+                                          std::max(size.z * 0.5f, 0.005f)),
+                                0.0f);
+        const JPH::RMat44 centerOfMass =
+            JPH::RMat44::sRotationTranslation(toJolt(transform.rotation), toJoltPosition(transform.position));
+        const BodyFilterAdapter bodyFilter(*this, filter);
+        const LayerFilterAdapter layerFilter(filter);
+
+        OverlapCollector collector;
+        m_system.GetNarrowPhaseQuery().CollideShape(&box, JPH::Vec3::sOne(), centerOfMass, JPH::CollideShapeSettings{},
+                                                    JPH::RVec3::sZero(), collector, JPH::BroadPhaseLayerFilter{},
+                                                    layerFilter, bodyFilter);
+
+        const usize first = out.size();
+        for (const JPH::BodyID& id : collector.bodies) {
+            const BodyHandle handle = unpackHandle(m_system.GetBodyInterface().GetUserData(id));
+            const BodyRecord* record = resolve(handle);
+            if (record != nullptr) {
+                out.push_back(record->userData);
+            }
+        }
+        // One entry per body, in an order the caller can rely on: a collide
+        // query reports one hit per sub-shape, and its traversal order is
+        // explicitly not deterministic (Docs/Architecture.md:805).
+        std::sort(out.begin() + static_cast<std::ptrdiff_t>(first), out.end());
+        out.erase(std::unique(out.begin() + static_cast<std::ptrdiff_t>(first), out.end()), out.end());
+    }
+
+    // --- Characters -----------------------------------------------------------
+
+    [[nodiscard]] CharacterHandle createCharacter(const CharacterDesc& desc)
+    {
+        const f32 radius = std::max(desc.diameter * 0.5f, 0.01f);
+        const f32 halfCylinder = std::max(desc.height * 0.5f - radius, 0.01f);
+
+        JPH::CharacterVirtualSettings settings;
+        settings.mShape = JPH::ShapeRefC(new JPH::CapsuleShape(halfCylinder, radius));
+        settings.mMaxSlopeAngle = JPH::DegreesToRadians(desc.maxSlopeAngle);
+        settings.mMass = desc.mass;
+        // A character with no inner body is invisible to the simulation: other
+        // bodies pass through it, which is not what "a capsule standing on a
+        // seesaw" means. The inner body is what makes the character push and be
+        // pushed against, and it is why a crate the capsule walks into moves.
+        settings.mInnerBodyShape = settings.mShape;
+        settings.mInnerBodyLayer = encodeLayer(desc.group, true);
+        // Jolt's capsule is centred; a character's position is its feet, which
+        // is what a script setting `CFrame` on a CharacterBody means.
+        settings.mShapeOffset = JPH::Vec3(0.0f, desc.height * 0.5f, 0.0f);
+
+        u32 slot = 0;
+        if (!m_freeCharacters.empty()) {
+            slot = m_freeCharacters.back();
+            m_freeCharacters.pop_back();
+        }
+        else {
+            slot = static_cast<u32>(m_characters.size());
+            m_characters.emplace_back();
+        }
+
+        CharacterRecord& record = m_characters[slot];
+        record.generation = record.generation + 1 == 0 ? 1 : record.generation + 1;
+        record.alive = true;
+        record.stepHeight = desc.stepHeight;
+        record.userData = desc.userData;
+        record.character = new JPH::CharacterVirtual(&settings, toJoltPosition(desc.transform.position),
+                                                     toJolt(desc.transform.rotation), desc.userData, &m_system);
+        return CharacterHandle{slot, record.generation};
+    }
+
+    void destroyCharacter(CharacterHandle handle)
+    {
+        CharacterRecord* record = resolve(handle);
+        if (record == nullptr) {
+            return;
+        }
+        record->character = nullptr;
+        record->alive = false;
+        m_freeCharacters.push_back(handle.index);
+    }
+
+    void moveCharacter(CharacterHandle handle, core::Vec3 velocity, f32 fixedDt)
+    {
+        CharacterRecord* record = resolve(handle);
+        if (record == nullptr) {
+            return;
+        }
+
+        record->character->SetLinearVelocity(toJolt(velocity));
+
+        JPH::CharacterVirtual::ExtendedUpdateSettings settings;
+        settings.mWalkStairsStepUp = JPH::Vec3(0.0f, record->stepHeight, 0.0f);
+        settings.mStickToFloorStepDown = JPH::Vec3(0.0f, -record->stepHeight, 0.0f);
+
+        record->character->ExtendedUpdate(fixedDt, toJolt(m_gravity), settings, JPH::BroadPhaseLayerFilter{},
+                                          JPH::ObjectLayerFilter{}, JPH::BodyFilter{}, JPH::ShapeFilter{}, m_temp);
+    }
+
+    void setCharacterTransform(CharacterHandle handle, const core::CFrameD& transform)
+    {
+        CharacterRecord* record = resolve(handle);
+        if (record == nullptr) {
+            return;
+        }
+        record->character->SetPosition(toJoltPosition(transform.position));
+        record->character->SetRotation(toJolt(transform.rotation));
+    }
+
+    [[nodiscard]] CharacterState characterState(CharacterHandle handle) const
+    {
+        CharacterState state;
+        const CharacterRecord* record = resolve(handle);
+        if (record == nullptr) {
+            return state;
+        }
+
+        state.transform.position = fromJoltPosition(record->character->GetPosition());
+        state.transform.rotation = fromJolt(record->character->GetRotation());
+        state.linearVelocity = fromJolt(record->character->GetLinearVelocity());
+
+        // `Enum.CharacterState` has two items, and Jolt has three: standing on
+        // ground too steep to walk on is `OnSteepGround`, which is airborne as
+        // far as a jump is concerned and grounded as far as a fall is. It reads
+        // as Airborne here, because the property a script branches on is "may I
+        // jump".
+        const JPH::CharacterBase::EGroundState ground = record->character->GetGroundState();
+        state.ground = ground == JPH::CharacterBase::EGroundState::OnGround ? CharacterGround::Grounded
+                                                                            : CharacterGround::Airborne;
+        state.groundNormal = fromJolt(record->character->GetGroundNormal());
+
+        const JPH::BodyID groundId = record->character->GetGroundBodyID();
+        if (!groundId.IsInvalid()) {
+            const BodyHandle body = unpackHandle(m_system.GetBodyInterface().GetUserData(groundId));
+            const BodyRecord* groundRecord = resolve(body);
+            if (groundRecord != nullptr) {
+                state.groundBody = body;
+                state.groundUserData = groundRecord->userData;
+            }
+        }
+        return state;
+    }
+
+    // --- Collision groups -----------------------------------------------------
+
+    [[nodiscard]] CollisionMatrix& matrix() noexcept { return m_matrix; }
+    [[nodiscard]] const CollisionMatrix& matrix() const noexcept { return m_matrix; }
+
+    void debugDraw([[maybe_unused]] IDebugDrawSink& sink)
+    {
+#ifdef JPH_DEBUG_RENDERER
+        DebugBridge bridge(sink);
+        JPH::BodyManager::DrawSettings settings;
+        settings.mDrawShape = true;
+        settings.mDrawShapeWireframe = true;
+        settings.mDrawVelocity = false;
+        m_system.DrawBodies(settings, &bridge);
+#endif
+    }
+
+    [[nodiscard]] const BodyRecord* resolve(BodyHandle handle) const noexcept
+    {
+        if (handle.index >= m_bodies.size()) {
+            return nullptr;
+        }
+        const BodyRecord& record = m_bodies[handle.index];
+        return record.alive && record.generation == handle.generation ? &record : nullptr;
+    }
+
+private:
+    [[nodiscard]] BodyRecord* resolve(BodyHandle handle) noexcept
+    {
+        return const_cast<BodyRecord*>(static_cast<const JoltWorld*>(this)->resolve(handle));
+    }
+
+    [[nodiscard]] const CharacterRecord* resolve(CharacterHandle handle) const noexcept
+    {
+        if (handle.index >= m_characters.size()) {
+            return nullptr;
+        }
+        const CharacterRecord& record = m_characters[handle.index];
+        return record.alive && record.generation == handle.generation ? &record : nullptr;
+    }
+
+    [[nodiscard]] CharacterRecord* resolve(CharacterHandle handle) noexcept
+    {
+        return const_cast<CharacterRecord*>(static_cast<const JoltWorld*>(this)->resolve(handle));
+    }
+
+    // The half of body creation that both `createBody` and `updateBody` need:
+    // everything from the desc onto the record and into Jolt, with the handle
+    // already decided.
+    [[nodiscard]] bool instantiate(BodyRecord& record, BodyHandle handle, const BodyDesc& desc,
+                                   const JPH::ShapeRefC& shape)
+    {
+        record.alive = true;
+        record.collidable = desc.collidable;
+        record.queryable = desc.queryable;
+        record.motion = desc.motion;
+        record.group = desc.group;
+        record.userData = desc.userData;
+
+        JPH::BodyCreationSettings settings(shape, toJoltPosition(desc.transform.position),
+                                           toJolt(desc.transform.rotation), toJoltMotion(desc.motion),
+                                           encodeLayer(desc.group, desc.motion != MotionType::Static));
+        settings.mFriction = desc.friction;
+        settings.mRestitution = desc.restitution;
+        settings.mIsSensor = !desc.collidable;
+        settings.mUserData = packHandle(handle);
+        // Mass is volume times `BasePart.Density`, and there is no `Mass`
+        // property precisely so that the two cannot disagree. `CalculateInertia`
+        // takes the mass from here and derives the inertia tensor from the
+        // shape, which is the only combination that keeps a dense small part
+        // and a light large one behaving differently under a torque.
+        settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
+        settings.mMassPropertiesOverride.mMass = std::max(shape->GetVolume() * std::max(desc.density, 0.0001f), 0.001f);
+
+        JPH::BodyInterface& bodies = m_system.GetBodyInterface();
+        record.id = bodies.CreateAndAddBody(settings, desc.motion == MotionType::Static ? JPH::EActivation::DontActivate
+                                                                                        : JPH::EActivation::Activate);
+        return !record.id.IsInvalid();
+    }
+
+    [[nodiscard]] static JPH::EMotionType toJoltMotion(MotionType motion) noexcept
+    {
+        switch (motion) {
+        case MotionType::Static:
+            return JPH::EMotionType::Static;
+        case MotionType::Kinematic:
+            return JPH::EMotionType::Kinematic;
+        case MotionType::Dynamic:
+            break;
+        }
+        return JPH::EMotionType::Dynamic;
+    }
+
+    [[nodiscard]] core::Vec3 surfaceNormal(const JPH::BodyID& id, const JPH::SubShapeID& subShape,
+                                           JPH::RVec3Arg point) const
+    {
+        const JPH::BodyLockRead lock(m_system.GetBodyLockInterface(), id);
+        if (!lock.Succeeded()) {
+            return core::Vec3{0.0f, 1.0f, 0.0f};
+        }
+        return fromJolt(lock.GetBody().GetWorldSpaceSurfaceNormal(subShape, point));
+    }
+
+    void forgetPairs(u64 packed)
+    {
+        const auto drop = [packed](const ContactPair& pair) { return pair.first == packed || pair.second == packed; };
+        m_previousPairs.erase(std::remove_if(m_previousPairs.begin(), m_previousPairs.end(), drop),
+                              m_previousPairs.end());
+    }
+
+    // The whole of `Touched`/`TouchEnded`: this tick's contacting pairs against
+    // last tick's. A pair that appears fires Began, one that disappears fires
+    // Ended, one that stays fires nothing. Built from a diff rather than from
+    // Jolt's OnContactRemoved because that callback can arrive for a body the
+    // caller has already destroyed, and because the diff is what makes the
+    // event order ours.
+    void buildContactEvents()
+    {
+        m_events.clear();
+
+        std::vector<ContactPair>& current = m_contacts.pairs();
+        std::sort(current.begin(), current.end());
+        current.erase(std::unique(current.begin(), current.end()), current.end());
+
+        m_carried.clear();
+        usize i = 0;
+        usize j = 0;
+        while (i < current.size() || j < m_previousPairs.size()) {
+            if (j == m_previousPairs.size() || (i < current.size() && current[i] < m_previousPairs[j])) {
+                m_carried.push_back(current[i]);
+                emit(ContactPhase::Began, current[i]);
+                ++i;
+            }
+            else if (i == current.size() || m_previousPairs[j] < current[i]) {
+                // A pair that stops being reported has not necessarily
+                // separated: Jolt stops calling the listener for an island it
+                // has put to sleep, so a crate that settles on the floor and
+                // dozes off would otherwise fire TouchEnded while still visibly
+                // resting on it -- and Touched again the moment anything nudged
+                // it. Both bodies asleep means the contact is still there and
+                // nobody is looking at it.
+                if (asleep(m_previousPairs[j])) {
+                    m_carried.push_back(m_previousPairs[j]);
+                }
+                else {
+                    emit(ContactPhase::Ended, m_previousPairs[j]);
+                }
+                ++j;
+            }
+            else {
+                m_carried.push_back(current[i]);
+                ++i;
+                ++j;
+            }
+        }
+
+        m_previousPairs = m_carried;
+    }
+
+    // True when neither body of the pair is being simulated -- a static body is
+    // never active, and a dynamic one stops being active when the solver puts
+    // its island to sleep.
+    [[nodiscard]] bool asleep(const ContactPair& pair) const
+    {
+        const BodyRecord* first = resolve(unpackHandle(pair.first));
+        const BodyRecord* second = resolve(unpackHandle(pair.second));
+        if (first == nullptr || second == nullptr) {
+            return false;
+        }
+        const JPH::BodyInterface& bodies = m_system.GetBodyInterface();
+        return !bodies.IsActive(first->id) && !bodies.IsActive(second->id);
+    }
+
+    void emit(ContactPhase phase, const ContactPair& pair)
+    {
+        const BodyHandle first = unpackHandle(pair.first);
+        const BodyHandle second = unpackHandle(pair.second);
+        const BodyRecord* firstRecord = resolve(first);
+        const BodyRecord* secondRecord = resolve(second);
+        if (firstRecord == nullptr || secondRecord == nullptr) {
+            return;
+        }
+        m_events.push_back(ContactEvent{phase, first, second, firstRecord->userData, secondRecord->userData});
+    }
+
+    // Filters translating a `QueryFilter` into the two things Jolt asks for.
+    // Both are stack objects living for the duration of one query.
+    class BodyFilterAdapter final : public JPH::BodyFilter
+    {
+    public:
+        BodyFilterAdapter(const JoltWorld& world, const QueryFilter& filter) : m_world(world), m_filter(filter) {}
+
+        [[nodiscard]] bool ShouldCollideLocked(const JPH::Body& body) const override
+        {
+            const BodyHandle handle = unpackHandle(body.GetUserData());
+            const BodyRecord* record = m_world.resolve(handle);
+            if (record == nullptr || !record->queryable) {
+                return false;
+            }
+
+            const bool listed = std::find(m_filter.userData.begin(), m_filter.userData.end(), record->userData) !=
+                                m_filter.userData.end();
+            return m_filter.mode == QueryFilter::Mode::Exclude ? !listed : listed;
+        }
+
+    private:
+        const JoltWorld& m_world;
+        const QueryFilter& m_filter;
+    };
+
+    class LayerFilterAdapter final : public JPH::ObjectLayerFilter
+    {
+    public:
+        explicit LayerFilterAdapter(const QueryFilter& filter) : m_filter(filter) {}
+
+        [[nodiscard]] bool ShouldCollide(JPH::ObjectLayer layer) const override
+        {
+            return !m_filter.filterGroup || decodeGroup(layer) == m_filter.group;
+        }
+
+    private:
+        const QueryFilter& m_filter;
+    };
+
+    CollisionMatrix m_matrix;
+    BroadPhaseLayers m_broadPhaseLayers;
+    ObjectVsBroadPhaseFilter m_objectVsBroadPhase;
+    ObjectPairFilter m_pairFilter;
+    JPH::TempAllocatorImpl m_temp;
+    JPH::JobSystemSingleThreaded m_jobs;
+    JPH::PhysicsSystem m_system;
+    ContactRecorder m_contacts;
+
+    std::vector<BodyRecord> m_bodies;
+    std::vector<u32> m_freeBodies;
+    std::vector<CharacterRecord> m_characters;
+    std::vector<u32> m_freeCharacters;
+
+    std::vector<ContactPair> m_previousPairs;
+    // Scratch for the diff, kept as a member so a tick with ten thousand
+    // contacts does not allocate one.
+    std::vector<ContactPair> m_carried;
+    std::vector<ContactEvent> m_events;
+    StepTimings m_timings;
+    core::Vec3 m_gravity{0.0f, -9.81f, 0.0f};
+};
+
+// --- Process-wide Jolt state ------------------------------------------------
+//
+// Jolt has three globals that must be set up before any of its types exist and
+// torn down after the last of them is gone: the allocator, the factory and the
+// type registry. Reference-counted here rather than initialised at static
+// construction time, because a static initialiser would run in a test binary
+// that never creates a physics world and would leak the factory in a process
+// that creates one and destroys it.
+// Jolt's own diagnostics, routed through the engine log rather than to a
+// console nobody is reading. The text is upstream's and is not translated --
+// what carries the i18n key (R3) is the line around it, exactly as the catalog
+// reader's own developer diagnostics do.
+// The attribute is what lets Clang see that `format` reaches `vsnprintf` from a
+// printf-like parameter rather than from a runtime string: without it,
+// -Wformat-nonliteral is an error on the Tier-2 build and MSVC says nothing at
+// all. The Linux tier found this.
+#if defined(__clang__) || defined(__GNUC__)
+void traceImpl(const char* format, ...) __attribute__((format(printf, 1, 2)));
+#endif
+
+void traceImpl(const char* format, ...)
+{
+    va_list list;
+    va_start(list, format);
+    char buffer[1024];
+    std::vsnprintf(buffer, sizeof(buffer), format, list);
+    va_end(list);
+    // `logText` rather than a keyed line: this string is upstream's, and R3's
+    // rule is that engine-AUTHORED prose goes through the catalog. Wrapping
+    // somebody else's diagnostic in a translated sentence would translate the
+    // half nobody reads and leave the half that matters in English.
+    core::logText(core::LogLevel::Debug, std::string_view(buffer));
+}
+
+#ifdef JPH_ENABLE_ASSERTS
+// Returning false means "do not break". An assert here is Jolt telling us we
+// misused it -- a degenerate shape, a velocity set on a static body -- and the
+// engine that reports it and keeps running is more useful than the one that
+// dies, because the report names the call site and the crash would not.
+bool assertFailedImpl(const char* expression, const char* message, const char* file, JPH::uint line)
+{
+    const std::string_view text = message != nullptr ? std::string_view(message) : std::string_view{};
+    const std::array<core::I18nArg, 4> args{
+        core::I18nArg{"file", std::string_view(file)},
+        core::I18nArg{"line", static_cast<core::i64>(line)},
+        core::I18nArg{"expression", std::string_view(expression)},
+        core::I18nArg{"message", text},
+    };
+    core::log(core::LogLevel::Error, LUAUG_TR("physics.jolt.err.assert"), args);
+    return false;
+}
+#endif
+
+class JoltRuntime
+{
+public:
+    static void acquire()
+    {
+        if (s_refs++ == 0) {
+            JPH::RegisterDefaultAllocator();
+            JPH::Trace = traceImpl;
+            JPH_IF_ENABLE_ASSERTS(JPH::AssertFailed = assertFailedImpl;)
+            JPH::Factory::sInstance = new JPH::Factory();
+            JPH::RegisterTypes();
+        }
+    }
+
+    static void release()
+    {
+        if (--s_refs == 0) {
+            JPH::UnregisterTypes();
+            delete JPH::Factory::sInstance;
+            JPH::Factory::sInstance = nullptr;
+        }
+    }
+
+private:
+    static inline int s_refs = 0;
+};
+
+class JoltPhysics final : public IPhysics3D
+{
+public:
+    JoltPhysics() { JoltRuntime::acquire(); }
+    ~JoltPhysics() override
+    {
+        m_worlds.clear();
+        JoltRuntime::release();
+    }
+
+    [[nodiscard]] WorldHandle createWorld(const WorldDesc& desc) override
+    {
+        u32 slot = 0;
+        if (!m_free.empty()) {
+            slot = m_free.back();
+            m_free.pop_back();
+        }
+        else {
+            slot = static_cast<u32>(m_worlds.size());
+            m_worlds.emplace_back();
+            m_generations.push_back(0);
+        }
+
+        m_generations[slot] = m_generations[slot] + 1 == 0 ? 1 : m_generations[slot] + 1;
+        m_worlds[slot] = std::make_unique<JoltWorld>(desc);
+        return WorldHandle{slot, m_generations[slot]};
+    }
+
+    void destroyWorld(WorldHandle handle) override
+    {
+        if (JoltWorld* world = resolve(handle); world != nullptr) {
+            m_worlds[handle.index].reset();
+            m_free.push_back(handle.index);
+        }
+    }
+
+    void setGravity(WorldHandle handle, core::Vec3 gravity) override
+    {
+        if (JoltWorld* world = resolve(handle); world != nullptr) {
+            world->setGravity(gravity);
+        }
+    }
+
+    [[nodiscard]] BodyHandle createBody(WorldHandle handle, const BodyDesc& desc) override
+    {
+        JoltWorld* world = resolve(handle);
+        return world != nullptr ? world->createBody(desc) : BodyHandle{};
+    }
+
+    void destroyBody(WorldHandle handle, BodyHandle body) override
+    {
+        if (JoltWorld* world = resolve(handle); world != nullptr) {
+            world->destroyBody(body);
+        }
+    }
+
+    void setBodyTransform(WorldHandle handle, BodyHandle body, const core::CFrameD& transform) override
+    {
+        if (JoltWorld* world = resolve(handle); world != nullptr) {
+            world->setBodyTransform(body, transform);
+        }
+    }
+
+    void setBodyVelocity(WorldHandle handle, BodyHandle body, core::Vec3 linear, core::Vec3 angular) override
+    {
+        if (JoltWorld* world = resolve(handle); world != nullptr) {
+            world->setBodyVelocity(body, linear, angular);
+        }
+    }
+
+    void applyImpulse(WorldHandle handle, BodyHandle body, core::Vec3 impulse) override
+    {
+        if (JoltWorld* world = resolve(handle); world != nullptr) {
+            world->applyImpulse(body, impulse);
+        }
+    }
+
+    void updateBody(WorldHandle handle, BodyHandle body, const BodyDesc& desc) override
+    {
+        if (JoltWorld* world = resolve(handle); world != nullptr) {
+            world->updateBody(body, desc);
+        }
+    }
+
+    void setBodyMaterial(WorldHandle handle, BodyHandle body, f32 friction, f32 restitution) override
+    {
+        if (JoltWorld* world = resolve(handle); world != nullptr) {
+            world->setBodyMaterial(body, friction, restitution);
+        }
+    }
+
+    void setBodyFlags(WorldHandle handle, BodyHandle body, bool collidable, bool queryable) override
+    {
+        if (JoltWorld* world = resolve(handle); world != nullptr) {
+            world->setBodyFlags(body, collidable, queryable);
+        }
+    }
+
+    void setBodyGroup(WorldHandle handle, BodyHandle body, CollisionGroup group) override
+    {
+        if (JoltWorld* world = resolve(handle); world != nullptr) {
+            world->setBodyGroup(body, group);
+        }
+    }
+
+    [[nodiscard]] BodyState bodyState(WorldHandle handle, BodyHandle body) const override
+    {
+        const JoltWorld* world = resolve(handle);
+        return world != nullptr ? world->bodyState(body) : BodyState{};
+    }
+
+    void collectActiveBodies(WorldHandle handle, std::vector<ActiveBody>& out) const override
+    {
+        if (const JoltWorld* world = resolve(handle); world != nullptr) {
+            world->collectActiveBodies(out);
+        }
+    }
+
+    void step(WorldHandle handle, f32 fixedDt) override
+    {
+        if (JoltWorld* world = resolve(handle); world != nullptr) {
+            world->step(fixedDt);
+        }
+    }
+
+    [[nodiscard]] std::span<const ContactEvent> drainContacts(WorldHandle handle) override
+    {
+        const JoltWorld* world = resolve(handle);
+        return world != nullptr ? world->contacts() : std::span<const ContactEvent>{};
+    }
+
+    [[nodiscard]] StepTimings lastStepTimings(WorldHandle handle) const override
+    {
+        const JoltWorld* world = resolve(handle);
+        return world != nullptr ? world->timings() : StepTimings{};
+    }
+
+    [[nodiscard]] bool raycast(WorldHandle handle, const RayD& ray, const QueryFilter& filter,
+                               RayHit& outHit) const override
+    {
+        const JoltWorld* world = resolve(handle);
+        return world != nullptr && world->raycast(ray, filter, outHit);
+    }
+
+    [[nodiscard]] bool spherecast(WorldHandle handle, const RayD& ray, f32 radius, const QueryFilter& filter,
+                                  RayHit& outHit) const override
+    {
+        const JoltWorld* world = resolve(handle);
+        return world != nullptr && world->spherecast(ray, radius, filter, outHit);
+    }
+
+    void overlapBox(WorldHandle handle, const core::CFrameD& transform, core::Vec3 size, const QueryFilter& filter,
+                    std::vector<u64>& out) const override
+    {
+        if (const JoltWorld* world = resolve(handle); world != nullptr) {
+            world->overlapBox(transform, size, filter, out);
+        }
+    }
+
+    [[nodiscard]] CharacterHandle createCharacter(WorldHandle handle, const CharacterDesc& desc) override
+    {
+        JoltWorld* world = resolve(handle);
+        return world != nullptr ? world->createCharacter(desc) : CharacterHandle{};
+    }
+
+    void destroyCharacter(WorldHandle handle, CharacterHandle character) override
+    {
+        if (JoltWorld* world = resolve(handle); world != nullptr) {
+            world->destroyCharacter(character);
+        }
+    }
+
+    void moveCharacter(WorldHandle handle, CharacterHandle character, core::Vec3 velocity, f32 fixedDt) override
+    {
+        if (JoltWorld* world = resolve(handle); world != nullptr) {
+            world->moveCharacter(character, velocity, fixedDt);
+        }
+    }
+
+    void setCharacterTransform(WorldHandle handle, CharacterHandle character, const core::CFrameD& transform) override
+    {
+        if (JoltWorld* world = resolve(handle); world != nullptr) {
+            world->setCharacterTransform(character, transform);
+        }
+    }
+
+    [[nodiscard]] CharacterState characterState(WorldHandle handle, CharacterHandle character) const override
+    {
+        const JoltWorld* world = resolve(handle);
+        return world != nullptr ? world->characterState(character) : CharacterState{};
+    }
+
+    [[nodiscard]] CollisionGroup registerCollisionGroup(WorldHandle handle, std::string_view name) override
+    {
+        JoltWorld* world = resolve(handle);
+        return world != nullptr ? world->matrix().add(name) : CollisionMatrix::kInvalidGroup;
+    }
+
+    [[nodiscard]] CollisionGroup findCollisionGroup(WorldHandle handle, std::string_view name) const override
+    {
+        const JoltWorld* world = resolve(handle);
+        return world != nullptr ? world->matrix().find(name) : CollisionMatrix::kInvalidGroup;
+    }
+
+    void setGroupsCollidable(WorldHandle handle, CollisionGroup a, CollisionGroup b, bool collidable) override
+    {
+        if (JoltWorld* world = resolve(handle); world != nullptr) {
+            world->matrix().setCollidable(a, b, collidable);
+        }
+    }
+
+    [[nodiscard]] bool groupsCollidable(WorldHandle handle, CollisionGroup a, CollisionGroup b) const override
+    {
+        const JoltWorld* world = resolve(handle);
+        return world != nullptr && world->matrix().collidable(a, b);
+    }
+
+    void collectCollisionGroups(WorldHandle handle, std::vector<std::string_view>& out) const override
+    {
+        if (const JoltWorld* world = resolve(handle); world != nullptr) {
+            world->matrix().collectNames(out);
+        }
+    }
+
+    [[nodiscard]] bool saveState(WorldHandle, std::vector<u8>&) const override { return false; }
+    [[nodiscard]] bool restoreState(WorldHandle, std::span<const u8>) override { return false; }
+
+    void debugDraw(WorldHandle handle, IDebugDrawSink& sink) override
+    {
+        if (JoltWorld* world = resolve(handle); world != nullptr) {
+            world->debugDraw(sink);
+        }
+    }
+
+private:
+    [[nodiscard]] JoltWorld* resolve(WorldHandle handle) noexcept
+    {
+        if (handle.index >= m_worlds.size() || m_generations[handle.index] != handle.generation) {
+            return nullptr;
+        }
+        return m_worlds[handle.index].get();
+    }
+
+    [[nodiscard]] const JoltWorld* resolve(WorldHandle handle) const noexcept
+    {
+        if (handle.index >= m_worlds.size() || m_generations[handle.index] != handle.generation) {
+            return nullptr;
+        }
+        return m_worlds[handle.index].get();
+    }
+
+    std::vector<std::unique_ptr<JoltWorld>> m_worlds;
+    std::vector<u32> m_generations;
+    std::vector<u32> m_free;
+};
+
+} // namespace
+
+PhysicsResult createJoltPhysics(core::EngineError*)
+{
+    return std::make_unique<JoltPhysics>();
+}
+
+} // namespace luaug::physics

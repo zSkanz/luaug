@@ -60,6 +60,7 @@
   "engine.frame.info.stats": "{frames} measured frames: median {median} ms, worst {worst} ms, {draws} draws, {triangles} triangles.",
   "engine.frame.info.summary": "Ran {frames} frames, {ticks} simulation ticks.",
 
+  "physics.jolt.err.assert": "Jolt reported a broken assumption at {file}:{line} -- {expression} {message}",
   "asset.image.err.decode_failed": "Could not decode the image.",
   "asset.image.err.bad_pixels": "The image data does not match the requested size.",
   "asset.image.err.encode_failed": "Could not encode the image as PNG.",
