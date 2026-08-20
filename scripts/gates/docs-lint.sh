@@ -93,6 +93,22 @@ for heading in "## State" "## Now / Next" "## Blocked" "## Session Log"; do
     fi
 done
 
+# --- Every example carries its launcher (examples/README.md) ----------------
+#
+# The README states this as a convention and a convention in prose is a
+# convention the next example forgets -- which is exactly what happened when
+# `02-meshes` shipped without one. A launcher nothing depends on still has to
+# exist, because its whole job is that a human does not have to remember where
+# an out-of-tree build put the binary (R14).
+echo "== every example has a launcher =="
+for example in examples/*/; do
+    [[ -f "$example/README.md" || -d "$example/src" || -f "$example/init.luau" ]] || continue
+    if [[ ! -f "$example/run.bat" ]]; then
+        err "$example has no run.bat (examples/README.md: every example folder carries one)"
+        status=1
+    fi
+done
+
 if [[ $status -eq 0 ]]; then
     echo "docs-lint: ok"
 fi

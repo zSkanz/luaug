@@ -23,8 +23,8 @@
 --     lighting follows -- so a replay at the same tick lights identically
 --     (R10). The orbit below drives it from the SimClock for the same reason.
 --   * **Point lights are children of parts.** A light with no `BasePart`
---     ancestor lights nothing, which is the Roblox attach model and is what
---     makes "move the lamp" mean "move the part".
+--     ancestor lights nothing, which is the attach model `api-design.md` §2.2
+--     specifies and is what makes "move the lamp" mean "move the part".
 
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")

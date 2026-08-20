@@ -1051,6 +1051,40 @@ of bytes -- is a change to the capture backend on the eve of the RHI freeze.
 Recorded so the next person to see a golden fail after a toolchain bump knows
 where to look.
 
+**20. I broke `main` by committing a file two of us were editing.** The
+orchestrator's rule is that fan-out happens on interfaces that are already
+frozen and that file sets do not overlap (§7). `engine/app/src/engine.cpp` was
+outside the DebugShell agent's brief and it edited it anyway -- correctly, since
+the drain call has to live in the frame loop -- and I committed that file as
+part of my own render wiring, capturing an `#include "luaug/app/inspector.h"`
+and four call sites **without** the files they name. That commit alone does not
+compile.
+
+Found by the agent's own report rather than by the gate, and that is the part
+worth keeping: my local tree was green because its untracked files were present.
+**A green working tree is not a green commit**, and the only thing that would
+have caught it is building what was actually staged.
+
+The general form is the same one this milestone keeps producing: an assertion
+made against the wrong artifact. A build directory holding yesterday's outputs,
+a handle that reveals nothing about destruction, a working tree that includes
+what the commit omits.
+
+**21. A convention that lives only in prose is a convention the next thing
+forgets.** `examples/README.md` says "every example folder carries a `run.bat`"
+and `02-meshes` shipped without one, which the human caught rather than the
+gate. The docs lint now checks it, and the check was verified by deleting the
+file and watching it fail.
+
+**22. Six Clang-only build failures in one milestone, and this family is now the
+majority of them.** `-Wmissing-field-initializers` rejects a designated
+initializer that omits any member without a default -- and `ClassDescriptor`,
+`PropertyDesc`, `MethodDesc` and `EventDesc` each had several. MSVC says
+nothing. Writing a descriptor by hand was therefore a Linux-only failure for
+anyone who tried, which is why the fix is defaults on the struct rather than
+nine more lines in one fixture: it removes the trap instead of stepping around
+it.
+
 ## Gate Record
 
 *Filled at milestone end, before human review.*

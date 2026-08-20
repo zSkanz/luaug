@@ -73,16 +73,16 @@ enum class ThreadSafety : u8
 // architecture risk #1.
 struct PropertyDesc
 {
-    core::NameAtom name;
+    core::NameAtom name{};
     ValueType type = ValueType::Nil;
     ThreadSafety threadSafety = ThreadSafety::Unsafe;
     bool readOnly = false;
 
     // The doc text from the IDL, resolved through the catalog (ADR 0019).
-    core::TextKey docKey;
+    core::TextKey docKey{};
     // Raised when `set` rejects the value. Generated from the property's type,
     // so every rejection names something specific rather than "invalid value".
-    core::TextKey errKeyOnInvalidSet;
+    core::TextKey errKeyOnInvalidSet{};
 
     Value (*get)(const World&, core::InstanceId) = nullptr;
 
@@ -101,38 +101,38 @@ struct PropertyDesc
 // at startup rather than the first time a script calls it.
 struct MethodDesc
 {
-    core::NameAtom name;
+    core::NameAtom name{};
     bool yields = false;
     ThreadSafety threadSafety = ThreadSafety::Unsafe;
-    core::TextKey docKey;
+    core::TextKey docKey{};
 };
 
 struct EventDesc
 {
-    core::NameAtom name;
+    core::NameAtom name{};
     // Index into the instance's signal slots, assigned by the generator so that
     // a fire is an array offset rather than a name lookup.
     u16 slot = 0;
-    core::TextKey docKey;
+    core::TextKey docKey{};
 };
 
 struct ClassDescriptor
 {
-    core::NameAtom name;
+    core::NameAtom name{};
     // `InvalidClass` only for `Instance` itself.
     ClassId super = InvalidClass;
     ClassFlags flags = ClassFlags::None;
     // The `Name` a fresh instance carries; the class name unless the IDL says
     // otherwise.
-    core::NameAtom defaultName;
-    core::TextKey docKey;
+    core::NameAtom defaultName{};
+    core::TextKey docKey{};
 
     // Views into generated static storage, which outlives the registry. The
     // arrays hold only what the class *declares*; inherited members are found
     // by walking `super`, and the registry caches that walk.
-    std::span<const PropertyDesc> properties;
-    std::span<const MethodDesc> methods;
-    std::span<const EventDesc> events;
+    std::span<const PropertyDesc> properties{};
+    std::span<const MethodDesc> methods{};
+    std::span<const EventDesc> events{};
 
     // Attaches and detaches the components this class *declares*, and only
     // those. `World::create` walks the ancestry root-first and calls each, so a
