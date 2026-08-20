@@ -77,6 +77,30 @@ it, and building it on speculation is what §5 rejects.
 
 ## Now / Next
 
+- **The sun's shadow flickers in `examples/02-meshes`, reported by the human on
+  2026-08-20.** Not anchoring: there is no physics before M5 and nothing in that
+  scene moves itself. What moves is the sun, a pure function of `ClockTime` on
+  the SimClock, and the 47-second camera orbit.
+
+  `renderer_default` fixed the shadow extent deliberately, against the crawl a
+  camera-fitted box produces. Nothing addresses the other half: a directional
+  light that *rotates* turns its own texel grid every tick, so a world point
+  lands on a different texel each frame, and `sampleSunShadow` resolves each tap
+  with a binary `reference <= occluder`. A point sitting near the bias threshold
+  therefore flips between lit and shadowed frame to frame. Texel snapping — the
+  usual answer — fixes translation and not rotation, so it would not help here.
+
+  **Check first, because it is one line if true:** whether the shadow pass and
+  the forward pass read the *same* sun. The map is built from one direction and
+  sampled with another if either takes the tick value while the other takes the
+  interpolated one, and that flickers at exactly the tick rate.
+
+  If the sun is consistent, the fix is a **normal-offset bias** — displacing the
+  sample along the surface normal rather than only in depth is what survives a
+  moving texel grid — with a hardware comparison sampler
+  (`SampleCmpLevelZero`) so a tap degrades instead of switching. Resolution
+  alone only moves the threshold.
+
 - **The inspector crashes on "go" from `RunService.Parent`, reported by the human
   on 2026-08-20.** Following the reference from a service to the DataModel takes
   the whole host down. Reading the code did not settle which of the two paths
