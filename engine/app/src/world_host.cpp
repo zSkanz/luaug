@@ -253,6 +253,12 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
             return error;
     }
 
+    // After the mount, so the tree is complete, and before the scripts are
+    // deferred, so the first thing any of them can observe already includes
+    // what the previous world was carrying (M3 brief Decision 5).
+    if (options.preserved != nullptr)
+        restorePreserved(*m_world, m_runtime->dataModel(), *options.preserved, m_preserveReport);
+
     script::startScripts(m_runtime->state());
 
     // The boot drain. api-design.md §3's lifecycle reads "start each Script on

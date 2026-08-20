@@ -59,15 +59,32 @@ struct Captured
 {
     std::vector<std::string> lines;
 
+    // Errors are kept apart from the rest because a script error is CONTAINED
+    // by design (api-design.md §3.1): it goes to the log and never to a return
+    // value. A test that cannot see one passes for everything the script did
+    // not get to do -- M2 Finding 14, which cost that milestone a whole signal
+    // suite that was green and meaningless.
+    std::vector<std::string> errors;
+
     Captured()
     {
         core::engineCatalog().loadFromFile(LUAUG_TEST_CATALOG);
-        core::setLogSink([this](core::LogLevel, std::string_view text) { lines.emplace_back(text); });
+        core::setLogSink(
+            [this](core::LogLevel level, std::string_view text)
+            {
+                lines.emplace_back(text);
+                if (level == core::LogLevel::Error)
+                    errors.emplace_back(text);
+            });
     }
     ~Captured() { core::resetLogSink(); }
 
     Captured(const Captured&) = delete;
     Captured& operator=(const Captured&) = delete;
+
+    // The first error a script logged, or empty. Assert on this after booting
+    // anything whose script is supposed to run cleanly.
+    [[nodiscard]] std::string firstError() const { return errors.empty() ? std::string{} : errors.front(); }
 
     [[nodiscard]] bool contains(std::string_view needle) const
     {
@@ -102,6 +119,7 @@ struct Captured
         .fixedTimestep = 1.0 / 60.0,
         .reloadState = nullptr,
         .isReload = false,
+        .preserved = nullptr,
         .conformanceRoot = {},
     };
 }

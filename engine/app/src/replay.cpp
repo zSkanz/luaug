@@ -161,6 +161,7 @@ std::optional<core::EngineError> runScenario(const ReplayScenario& scenario, Rep
             .fixedTimestep = kReplayTimestep,
             .reloadState = nullptr,
             .isReload = false,
+            .preserved = nullptr,
             .conformanceRoot = {},
         });
         error.has_value())

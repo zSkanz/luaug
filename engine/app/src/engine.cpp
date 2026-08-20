@@ -267,6 +267,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             .fixedTimestep = scheduler.timing().fixedDt,
             .reloadState = nullptr,
             .isReload = false,
+            .preserved = nullptr,
             .conformanceRoot = options.conformanceRoot,
         });
         bootError.has_value())

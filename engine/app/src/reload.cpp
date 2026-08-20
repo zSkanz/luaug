@@ -1,3 +1,4 @@
+#include "luaug/app/preserved.h"
 #include "luaug/app/reload.h"
 
 #include <array>
@@ -30,9 +31,16 @@ ReloadReport reloadWorld(std::unique_ptr<WorldHost>& host, const WorldHostOption
     if (host)
         host->firePreReload();
 
+    // Captured after `PreReload` has been drained, so a handler that moved or
+    // tagged something did it before this reads the tree.
+    std::vector<PreservedTree> preserved;
+    if (host)
+        preserved = capturePreserved(host->world(), host->runtime().dataModel(), report.preserve);
+
     // The incoming world is a reload by construction; nothing else calls this.
     WorldHostOptions freshOptions = options;
     freshOptions.isReload = true;
+    freshOptions.preserved = &preserved;
 
     auto fresh = std::make_unique<WorldHost>();
     if (std::optional<core::EngineError> error = fresh->boot(freshOptions); error.has_value())
@@ -44,6 +52,8 @@ ReloadReport reloadWorld(std::unique_ptr<WorldHost>& host, const WorldHostOption
 
     report.mountedScripts = fresh->mountedScriptCount();
     report.loadFailures = fresh->scriptLoadFailures();
+    report.preserve.restored = fresh->preserveReport().restored;
+    report.preserve.skipped += fresh->preserveReport().skipped;
 
     // An empty project path is an empty world on purpose -- it is what the
     // render gates and `--version` boot -- so the check is about a project

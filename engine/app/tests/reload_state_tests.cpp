@@ -33,7 +33,7 @@ struct Session
     app::WorldHostOptions options;
     std::unique_ptr<app::WorldHost> host;
 
-    explicit Session(const Project& project) : options(bootOptions(project.root))
+    Session(const Project& project, Captured& capturedLog) : options(bootOptions(project.root)), log(capturedLog)
     {
         options.reloadState = &bag;
         host = std::make_unique<app::WorldHost>();
@@ -41,6 +41,8 @@ struct Session
         if (error.has_value())
             FAIL(error->message);
     }
+
+    Captured& log;
 
     void reload()
     {
@@ -70,7 +72,7 @@ TEST_CASE("what PreReload saved is what the next world reads back")
         end)
     )");
 
-    Session session(project);
+    Session session(project, log);
     CHECK(hasChildNamed(*session.host, "cold"));
     CHECK(session.bag.size() == 0);
 
@@ -93,7 +95,7 @@ TEST_CASE("IsReload is false on a cold boot and true on the world a reload built
         marker.Parent = workspace
     )");
 
-    Session session(project);
+    Session session(project, log);
     CHECK(hasChildNamed(*session.host, "started"));
 
     session.reload();
@@ -113,7 +115,7 @@ TEST_CASE("PostReload fires on the world that was just built, inside the reload"
         end)
     )");
 
-    Session session(project);
+    Session session(project, log);
     // A cold boot is not a reload, so nothing fires.
     CHECK_FALSE(hasChildNamed(*session.host, "after"));
 
@@ -170,7 +172,7 @@ TEST_CASE("every value the bag accepts survives the round trip unchanged")
         end)
     )");
 
-    Session session(project);
+    Session session(project, log);
     session.reload();
 
     CHECK(hasChildNamed(*session.host, "intact"));
@@ -199,7 +201,7 @@ TEST_CASE("a value that cannot cross raises rather than being dropped")
                 marker.Parent = workspace
             )");
 
-        Session session(project);
+        Session session(project, log);
         CHECK(hasChildNamed(*session.host, "refused"));
         CHECK_FALSE(hasChildNamed(*session.host, "accepted"));
         CHECK(session.bag.size() == 0);
@@ -246,7 +248,7 @@ TEST_CASE("saving the same key twice replaces the value and keeps its place")
         end)
     )");
 
-    Session session(project);
+    Session session(project, log);
     session.reload();
 
     CHECK(session.bag.size() == 2);

@@ -15,6 +15,7 @@
 #include <memory>
 #include <optional>
 
+#include "luaug/app/preserved.h"
 #include "luaug/app/world_host.h"
 #include "luaug/core/error.h"
 #include "luaug/core/types.h"
@@ -40,6 +41,9 @@ struct ReloadReport
     // a gate that passes while doing nothing (M2 Finding 19).
     core::u64 mountedScripts = 0;
     core::u64 loadFailures = 0;
+
+    // What `PreserveOnReload` carried over, and what it could not.
+    PreserveReport preserve;
 
     std::optional<core::EngineError> error;
 };

@@ -19,6 +19,7 @@
 
 #include "luaug/core/error.h"
 #include "luaug/core/name_atom.h"
+#include "luaug/app/preserved.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/enum_registry.h"
 #include "luaug/scene/world.h"
@@ -58,6 +59,12 @@ struct WorldHostOptions
     // Whether this world is the product of a reload, which is the whole of what
     // `HotReloadService:IsReload` answers.
     bool isReload = false;
+
+    // The `PreserveOnReload` instances the outgoing world was carrying. They go
+    // into the tree after the project is mounted and **before** the entry
+    // scripts are deferred, so a script that looks for what it left behind
+    // finds it already there (M3 brief Decision 5). Null for a cold boot.
+    const std::vector<PreservedTree>* preserved = nullptr;
 
     // Every `*.spec.luau` under this directory is mounted as an entry `Script`
     // alongside the project's own, and one more synthesized entry runs the
@@ -115,6 +122,9 @@ public:
     // compile. The reload reads both: a reload that mounted nothing, or that
     // mounted something it could not compile, is a gate passing while doing
     // nothing (M2 Finding 19).
+    // What the restore did, filled during `boot`. Zeroes on a cold boot.
+    [[nodiscard]] const PreserveReport& preserveReport() const noexcept { return m_preserveReport; }
+
     [[nodiscard]] core::u64 mountedScriptCount() const;
     [[nodiscard]] core::u64 scriptLoadFailures() const;
 
@@ -160,6 +170,7 @@ private:
 
     std::filesystem::path m_root;
     core::InstanceId m_workspace;
+    PreserveReport m_preserveReport;
     render::DebugDraw* m_gizmos = nullptr;
 
     // Aliases from the project's `.luaurc`, read once at boot. Parsed with

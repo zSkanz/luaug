@@ -60,6 +60,7 @@ struct Sample
             .fixedTimestep = kBenchTimestep,
             .reloadState = nullptr,
             .isReload = false,
+            .preserved = nullptr,
             .conformanceRoot = {},
         });
         error.has_value())
