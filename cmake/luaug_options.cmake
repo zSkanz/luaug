@@ -71,6 +71,24 @@ cmake_dependent_option(LUAUG_DEBUG_UI
     "Build the Dear ImGui debug overlay (ADR 0011: dev builds only)" ON
     "NOT LUAUG_PROFILE STREQUAL \"shipping\";LUAUG_RHI_SDLGPU" OFF)
 
+# --- Physics backend selection (ADR 0007, ADR 0023) --------------------------
+# The same shape as the RHI options above: `physics_api` is the seam every
+# module above L2 sees, and a backend is a build-time choice `app` resolves.
+# One backend exists in v1 and the option still exists, because "swappable" is
+# a claim the build has to be able to make rather than a promise in an ADR.
+option(LUAUG_PHYSICS_JOLT "Build the Jolt physics backend (the v1 default)" ON)
+
+# Jolt's own wireframe output, bridged to the engine's debug draw (roadmap M5).
+#
+# It is a dependent option and not a plain one because the thing it turns on is
+# a chunk of Jolt compiled into the binary: JPH_DEBUG_RENDERER adds virtual
+# draw calls to shapes and a renderer base class. A shipping build has no
+# business carrying either -- ADR 0011's argument for gating the ImGui TARGET
+# rather than its call sites, applied to the same kind of debt.
+cmake_dependent_option(LUAUG_PHYSICS_DEBUG_DRAW
+    "Bridge Jolt's debug renderer to the engine debug draw (dev builds only)" ON
+    "NOT LUAUG_PROFILE STREQUAL \"shipping\";LUAUG_PHYSICS_JOLT" OFF)
+
 set(LUAUG_SANITIZE "" CACHE STRING
     "Comma-separated sanitizer list passed to -fsanitize (e.g. address,undefined)")
 

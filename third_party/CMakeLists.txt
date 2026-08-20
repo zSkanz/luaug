@@ -357,6 +357,149 @@ set(MESHOPT_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(MESHOPT_INSTALL        OFF CACHE BOOL "" FORCE)
 add_subdirectory(meshoptimizer ${CMAKE_BINARY_DIR}/third_party/meshoptimizer SYSTEM)
 
+# ---------------------------------------------------------------------------
+# Jolt (ADR 0007), wired from M5 -- the milestone whose `physics` module links
+# it. Every option below is a decision; the ones that are merely upstream's
+# default are not repeated here.
+#
+# Jolt's own `Build/CMakeLists.txt` is the entry point (upstream's documented
+# one) and it rewrites CMAKE_CXX_FLAGS. That is survivable because a
+# subdirectory's variables do not escape upwards -- but two of its defaults
+# would reach us anyway and both are turned off below.
+if(LUAUG_PHYSICS_JOLT)
+    #   USE_STATIC_MSVC_RUNTIME_LIBRARY
+    #     -- ON upstream, which sets CMAKE_MSVC_RUNTIME_LIBRARY to /MT for
+    #        Jolt's targets while every other target here uses CMake's default
+    #        /MD. Mixing the two in one binary is a link failure, and a
+    #        confusing one.
+    #   OVERRIDE_CXX_FLAGS
+    #     -- ON upstream, and it replaces CMAKE_CXX_FLAGS_DEBUG/RELEASE
+    #        wholesale with its own. Our presets choose those flags.
+    set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "" FORCE)
+    set(OVERRIDE_CXX_FLAGS              OFF CACHE BOOL "" FORCE)
+
+    #   ENABLE_ALL_WARNINGS
+    #     -- upstream compiles itself with /Wall /WX. A vendored tree failing
+    #        OUR build on a warning upstream's CI does not see on our compiler
+    #        version is a break we cannot fix without editing it (R13).
+    #   ENABLE_INSTALL / ENABLE_OBJECT_STREAM
+    #     -- nothing here installs, and ObjectStream is Jolt's own text
+    #        serialization format, which no part of this engine reads or writes:
+    #        our persistence is the scene's, and the rollback seam (ADR 0016) is
+    #        binary state, not ObjectStream.
+    #   CPP_RTTI_ENABLED -- ON, against upstream's default, and it is an ABI
+    #     decision rather than a preference. Jolt has its own reflection and
+    #     needs no C++ RTTI, but `physics_jolt` derives a debug-draw bridge from
+    #     `JPH::DebugRendererSimple`, and our translation units are compiled
+    #     with RTTI on like the rest of the engine. A polymorphic base compiled
+    #     -fno-rtti emits no typeinfo, so the derived class fails to link --
+    #     which MSVC hides, because it emits RTTI data per translation unit, and
+    #     which the Tier-2 build found in one line.
+    set(CPP_RTTI_ENABLED      ON  CACHE BOOL "" FORCE)
+    set(ENABLE_ALL_WARNINGS   OFF CACHE BOOL "" FORCE)
+    set(ENABLE_INSTALL        OFF CACHE BOOL "" FORCE)
+    set(ENABLE_OBJECT_STREAM  OFF CACHE BOOL "" FORCE)
+    set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
+
+    #   DOUBLE_PRECISION -- OFF, and this is ADR 0014 rather than a shortcut.
+    #     World precision here is f64 in `scene` plus a floating origin;
+    #     physics runs in the f32 rebased local space architecture.md §10
+    #     describes. Turning this on would buy a second, parallel answer to a
+    #     question the engine has already answered, and would double the size of
+    #     every position Jolt stores.
+    #
+    #   CROSS_PLATFORM_DETERMINISTIC -- OFF, and this is ADR 0025's level B.
+    #     Upstream's own documentation (Docs/Architecture.md:792) says this
+    #     switch makes the simulation deterministic across compiler, OS,
+    #     architecture and word size at roughly 8% of the library's speed. That
+    #     is precisely the level C guarantee ADR 0025 declines for v1, where the
+    #     win<->linux comparison is a tracked non-blocking job rather than a
+    #     promise. It is therefore the one line that would change that answer,
+    #     and turning it on is a human decision with a perf bill attached, not a
+    #     default to drift into.
+    set(DOUBLE_PRECISION             OFF CACHE BOOL "" FORCE)
+    set(CROSS_PLATFORM_DETERMINISTIC OFF CACHE BOOL "" FORCE)
+
+    #   USE_ASSERTS -- on outside shipping. Jolt's asserts are its contract with
+    #     its caller ("this body is not dynamic", "this shape is degenerate"),
+    #     and the backend installs a handler that reports them through the
+    #     engine's own error path. Off, a misuse is a silent wrong answer or a
+    #     crash with no message, which is what the first run of this integration
+    #     produced.
+    if(LUAUG_PROFILE STREQUAL "shipping")
+        set(USE_ASSERTS OFF CACHE BOOL "" FORCE)
+    else()
+        set(USE_ASSERTS ON CACHE BOOL "" FORCE)
+    endif()
+
+    #   FLOATING_POINT_EXCEPTIONS_ENABLED -- OFF.
+    #     Upstream enables hardware FP traps around its own update to catch its
+    #     own bugs. Our contact listener runs INSIDE that update, and the data
+    #     reaching the solver comes from user scripts: a part sized zero, a
+    #     velocity set to a value that overflows. Trapping turns "a script did
+    #     something odd" into a process death with no i18n key and no log line,
+    #     which is the opposite of how everything else here reports a bad value.
+    set(FLOATING_POINT_EXCEPTIONS_ENABLED OFF CACHE BOOL "" FORCE)
+
+    #   The instruction-set baseline. Upstream defaults to AVX2 + FMA + F16C +
+    #   LZCNT/TZCNT, which would make the physics library require a 2013
+    #   Haswell while every other object file in this binary is built at the
+    #   compiler's default baseline. An engine whose physics faults on a CPU the
+    #   rest of it runs on is not a portability decision anybody made on
+    #   purpose, so the baseline is stated here: x86-64-v2 (SSE4.1/4.2), which
+    #   is 2008 hardware and matches what the rest of the build assumes.
+    #
+    #   Raising it is a one-line change with a measurable win if the 1,000-body
+    #   budget ever needs one -- and it would then be a decision, recorded, with
+    #   a stated minimum CPU.
+    set(USE_SSE4_1 ON  CACHE BOOL "" FORCE)
+    set(USE_SSE4_2 ON  CACHE BOOL "" FORCE)
+    set(USE_AVX    OFF CACHE BOOL "" FORCE)
+    set(USE_AVX2   OFF CACHE BOOL "" FORCE)
+    set(USE_AVX512 OFF CACHE BOOL "" FORCE)
+    set(USE_LZCNT  OFF CACHE BOOL "" FORCE)
+    set(USE_TZCNT  OFF CACHE BOOL "" FORCE)
+    set(USE_F16C   OFF CACHE BOOL "" FORCE)
+    set(USE_FMADD  OFF CACHE BOOL "" FORCE)
+
+    #   Jolt 5.6 grew a GPU ComputeSystem with DirectX 12, Vulkan and Metal
+    #   backends, all defaulting ON. Every one of them is a graphics API
+    #   reaching into the physics library -- which R17 forbids from surfacing
+    #   anywhere near the public API, ADR 0005 says is the RHI's job, and which
+    #   would additionally make `physics_jolt` link against a Vulkan SDK it has
+    #   no business knowing about. The CPU fallback stays.
+    set(JPH_USE_DX12        OFF CACHE BOOL "" FORCE)
+    set(JPH_USE_VK          OFF CACHE BOOL "" FORCE)
+    set(JPH_USE_MTL         OFF CACHE BOOL "" FORCE)
+    set(JPH_USE_CPU_COMPUTE ON  CACHE BOOL "" FORCE)
+
+    #   The profiler allocates per-thread sample buffers and expects a
+    #   NextFrame() nobody here calls. The per-phase timing the M5 gate wants is
+    #   taken at the seam instead, where it can be reported through the engine's
+    #   own bench output.
+    set(PROFILER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
+    set(PROFILER_IN_DISTRIBUTION      OFF CACHE BOOL "" FORCE)
+    set(JPH_USE_EXTERNAL_PROFILE      OFF CACHE BOOL "" FORCE)
+
+    #   The debug renderer, and the reason the option is named the way it is.
+    #   Upstream ties JPH_DEBUG_RENDERER to the configuration names it knows --
+    #   Debug, Release, Distribution -- and our dev profile builds
+    #   RelWithDebInfo, which is none of them, while our SHIPPING profile builds
+    #   Release, which is one of them. Left at the default, the wireframe would
+    #   be compiled out of exactly the build that wants it and into exactly the
+    #   build that must not have it. `IN_DISTRIBUTION` means "in every
+    #   configuration", which is what makes it the correct switch here: the
+    #   gating that matters is ours, and it is LUAUG_PHYSICS_DEBUG_DRAW.
+    if(LUAUG_PHYSICS_DEBUG_DRAW)
+        set(DEBUG_RENDERER_IN_DISTRIBUTION ON CACHE BOOL "" FORCE)
+    else()
+        set(DEBUG_RENDERER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
+        set(DEBUG_RENDERER_IN_DISTRIBUTION      OFF CACHE BOOL "" FORCE)
+    endif()
+
+    add_subdirectory(jolt/Build ${CMAKE_BINARY_DIR}/third_party/jolt SYSTEM)
+endif()
+
 # Restored so nothing above this directory inherits the ceiling. Our own build
 # does not shell out to git during configure today, and this is what keeps that
 # from becoming a silent dependency if it ever does.

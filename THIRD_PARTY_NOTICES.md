@@ -19,7 +19,7 @@ vendored yet; the roadmap allows lazy vendoring so long as the row exists.
 | sdl3 | 3.4.14 | `147a8ee32dbf` | zlib | https://github.com/libsdl-org/SDL | `third_party/sdl3/` |
 | sdl_shadercross | main-2026-06-26 | `e55cf5e31ced` | zlib | https://github.com/libsdl-org/SDL_shadercross | `third_party/sdl_shadercross/` |
 | spirv_cross | sdl-shadercross-pin | `1a6169566c73` | Apache-2.0 | https://github.com/KhronosGroup/SPIRV-Cross | `third_party/spirv_cross/` |
-| jolt | 5.6.0 | _not vendored yet_ | MIT | https://github.com/jrouwe/JoltPhysics | `third_party/jolt/` |
+| jolt | 5.6.0 | `e77f175595e6` | MIT | https://github.com/jrouwe/JoltPhysics | `third_party/jolt/` |
 | box2d | 3.1.1 | _not vendored yet_ | MIT | https://github.com/erincatto/box2d | `third_party/box2d/` |
 | miniaudio | 0.11.25 | _not vendored yet_ | MIT-0 OR Unlicense | https://github.com/mackron/miniaudio | `third_party/miniaudio/` |
 | fastgltf | 0.9.0 | `0d1b67a28c49` | MIT | https://github.com/spnda/fastgltf | `third_party/fastgltf/` |
