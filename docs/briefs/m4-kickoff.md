@@ -70,6 +70,21 @@ explorer and properties"):
       descriptors, honouring `readOnly` and going through the same setters a
       script goes through — never a second write path
 
+Carried debt, scheduled into M4 by the same decision:
+
+- [ ] **Trim `Luau.Analysis`** (carried from M0) — a patch under
+      `third_party/patches/luau/`, which only became possible this milestone
+      (Findings 2 and 3)
+- [ ] **`api-dump.json`** (carried from M3) — generated and diff-checked in CI
+- [ ] **`luaug --version`** — advertised by `--help`, answered with "Unknown
+      command"
+
+The roadmap's reasoning on the api-dump is the one worth restating, because it
+is the only carried item that *loses value by waiting*: it is the gate that
+notices the public surface changing, and M4 is the milestone that grows that
+surface the most. Shipped now it guards M5 through M8; shipped at M8 it guarded
+nothing.
+
 ## The decisions this brief makes
 
 Each names the alternative it rejects, because the alternative is what a future
@@ -359,6 +374,24 @@ And, for the `DebugShell` half, the exclusions the roadmap's own addition names:
 19. **No "reset to default" button** — the descriptors carry no per-property
     default to reset to (Decision 16).
 
+And three carried items that were considered for M4 and given a named
+destination instead, because a debt scheduled where it does harm is not
+scheduled — it is moved:
+
+20. **The shipping profile still does not configure.** It also needs a
+    bytecode-loading path that does not exist, so it belongs with `luaug build`
+    at **M8**.
+21. **DXIL signing on Linux stays unverified.** It has no consumer until a Linux
+    job produces a Windows shader pack, which is packaging — **M8**.
+22. **The clang-format gate is not turned on here.** It requires reformatting
+    the whole C++ tree and pinning a toolchain version; doing that while the
+    renderer is being written buys a milestone of diff noise, so it lands at the
+    **start of M5**, on a quiet tree.
+
+The remaining M3 artifacts — the `@std`/`@luaug` typed stubs and
+`docs/reference/**` — stay carried. Both are DX surface with no gate behind
+them, and neither degrades by waiting the way the api-dump does.
+
 ## Build order
 
 Interfaces before implementations, and the freeze last:
@@ -386,7 +419,12 @@ Interfaces before implementations, and the freeze last:
    Deliberately after the new classes exist, so its first run is against a
    `Camera`, a `MeshPart` and a `PointLight` rather than against `Part` alone —
    a generic sweep that has only ever swept one class has not been tested.
-10. Goldens, screenshots, perf, the freeze, the gate.
+10. The three carried-debt items. `luaug --version` and the `Luau.Analysis`
+    patch are independent of everything above and can be taken whenever the
+    tree is quiet; **`api-dump.json` must land before step 7's IDL edits**, or
+    its first diff is the whole of M4's new surface arriving at once and it
+    guards nothing.
+11. Goldens, screenshots, perf, the freeze, the gate.
 
 ## Subagent plan
 

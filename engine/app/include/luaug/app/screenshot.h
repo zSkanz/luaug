@@ -5,8 +5,10 @@
 // gets them onto disk in a format `tools/imgcmp` can compare against a
 // reference. Everything from M4 onward gates on that comparison.
 //
-// It lives in `app` because the host is what takes screenshots. When `asset`
-// arrives (M4) and image IO becomes a real subsystem, this moves there.
+// The encoding and the file moved to `asset::writePng` at M4, as this note used
+// to promise they would. What is left here is the name the host calls, kept
+// because `--screenshot` is the host's feature and its callers should not have
+// to know which module owns a PNG encoder.
 #pragma once
 
 #include <cstddef>

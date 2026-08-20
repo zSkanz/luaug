@@ -12,12 +12,14 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   plus ADR 0024's own <500 ms requirement.
 - **M4 — Seeing the World: Meshes, Materials, Camera, Lighting — OPEN** since
   2026-08-20 (brief: [`docs/briefs/m4-kickoff.md`](docs/briefs/m4-kickoff.md) —
-  sixteen decisions, nineteen NOT-in-scope items, seven entering risks, and a
-  ten-step build order). The M3 gate was re-run green on both tiers before it
+  sixteen decisions, twenty-two NOT-in-scope items, seven entering risks, and
+  an eleven-step build order). The M3 gate was re-run green on both tiers before it
   opened. **Scope was extended by human decision the same day**: the
   `DebugShell`'s explorer and properties panel land here, because ADR 0017
   declines a visual editor on the grounds that an in-game shell stands in for
-  inspection, and four milestones in that shell did not exist. Still needing the
+  inspection, and four milestones in that shell did not exist; and three carried
+  debts got scheduled into it — `Luau.Analysis`, `api-dump.json` and
+  `luaug --version` — while three more got a named destination instead. Still needing the
   human: the **Android device checkpoint**, which blocks the RHI freeze at the
   end of the milestone.
 - **M2 — Kernel — signed off 2026-08-20**, tagged `milestone/m2`; **M1** signed

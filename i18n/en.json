@@ -40,10 +40,6 @@
 
   "engine.screenshot.info.written": "Wrote {path}.",
   "engine.screenshot.err.readback_failed": "Could not read the rendered image back from the GPU.",
-  "engine.screenshot.err.bad_pixels": "The image data does not match the requested size.",
-  "engine.screenshot.err.encode_failed": "Could not encode the image as PNG.",
-  "engine.screenshot.err.open_failed": "Could not open {path} for writing.",
-  "engine.screenshot.err.write_failed": "Could not finish writing {path}.",
   "engine.overlay.warn.init_failed": "The debug overlay could not start; F3 will do nothing.",
   "engine.overlay.warn.window_not_claimed": "The debug overlay needs a window the graphics device has already claimed.",
   "engine.overlay.warn.already_running": "A debug overlay is already running; only one can exist at a time.",
@@ -59,6 +55,12 @@
 
   "engine.frame.warn.catch_up_clamped": "Frame took {ms} ms; dropped simulated time after {ticks} catch-up ticks.",
   "engine.frame.info.summary": "Ran {frames} frames, {ticks} simulation ticks.",
+
+  "asset.image.err.decode_failed": "Could not decode the image.",
+  "asset.image.err.bad_pixels": "The image data does not match the requested size.",
+  "asset.image.err.encode_failed": "Could not encode the image as PNG.",
+  "asset.image.err.open_failed": "Could not open {path} for writing.",
+  "asset.image.err.write_failed": "Could not finish writing {path}.",
 
   "render.err.shader_format_unknown": "The graphics device reports no shader format, so no shaders can be loaded.",
   "render.err.shader_manifest_missing": "No shader manifest at {path}. Build the shaders, or check that content shipped beside the executable.",

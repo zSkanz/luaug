@@ -18,6 +18,7 @@ luaug_add_module(app
         src/debug_overlay.cpp
         src/dev_control.cpp
     DEPS
+        asset
         core
         platform
         rhi_api
@@ -62,9 +63,6 @@ endif()
 # every profile, which is what keeps the frame loop free of #ifdefs.
 target_compile_definitions(luaug_app PUBLIC LUAUG_DEBUG_UI=$<BOOL:${LUAUG_DEBUG_UI}>)
 
-# stb_image_write, for --screenshot. Header-only and SYSTEM, so its warnings are
-# not ours. Moves to `asset` when image IO becomes a subsystem (M4).
-target_include_directories(luaug_app SYSTEM PRIVATE "${LUAUG_THIRD_PARTY_DIR}/stb")
 
 add_executable(luaug_host src/main.cpp)
 set_target_properties(luaug_host PROPERTIES OUTPUT_NAME luaug-host)
