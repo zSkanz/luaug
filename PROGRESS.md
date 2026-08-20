@@ -106,7 +106,16 @@ it, and building it on speculation is what §5 rejects.
   engine by hand is this project's verification model, and it currently asks
   that human to report from memory.
 
-  Two pieces, and the first is small enough to land alone:
+  **Amended the same day, by evidence.** The human captured a crash to a file and
+  it held two lines — the two an ordinary successful run prints. `core::log`
+  already `fflush`es after every line, so nothing was lost to buffering: the
+  process died silently, without reaching any C++ error path, which is the
+  signature of an access violation. **A file sink would not have helped at all
+  here.** The ordering below is therefore backwards for this class of crash: the
+  handler is the piece that matters, because it is the only one that runs after
+  the fault and before the process is gone.
+
+  Two pieces:
 
   - **A file sink for `core::log`.** With a layering constraint: `core` is L0 and
     `platform::paths()` is L1, so the path is *injected by `app` at boot* rather
