@@ -64,7 +64,8 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
 | M1 | Window, RHI, Frame Loop, Agent Eyes | M (10%) | `examples/00-clear`: pulsing clear + debug cubes driven by Luau; screenshot harness |
 | M2 | Kernel: Instances/ECS, Scheduler, Signals, task | XL (18%) | `examples/01-instances`: 500 scripted spinning debug cubes, services, deferred signals |
 | M3 | Tooling Loop: CLI, Hot Reload, Types, Tests | M (9%) | `luaug dev` — edit script, behavior changes <1 s; `luaug test` runs conformance suite |
-| M4 | Seeing the World: Meshes, Materials, Lighting | L (13%) | `examples/02-meshes`: glTF scene, PBR, shadows, day/night slider |
+| M4 | Seeing the World: Meshes, Materials, Lighting | L (11%) | `examples/02-meshes`: glTF scene, PBR, shadows, day/night slider |
+| M4.5 | Correcting the World: the environment the renderer never read | S (2%) | `examples/02-meshes` rendering the scene its own script describes: the sun crosses the sky, shadows lengthen, the day/night slider works |
 | M5 | Feeling the World: Jolt + Character | L (12%) | `examples/03-physics-playground`: third-person capsule on ramps/stacks |
 | M6 | Playing the World: Input Actions, UI, Tween, Audio, Minimal Animation | L (13%) | `examples/04-obby`: menus, HUD, checkpoints, tweens, sound, rebindable input, animated character |
 | M7 | Scaling the World: Assets, Streaming, Floating Origin | L (13%) | `examples/05-streaming`: fly-cam over large chunked world, bounded memory |
@@ -275,6 +276,116 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   (blocking); Tier-2 lavapipe image goldens attempted (non-blocking); frame
   time baseline at 1080p recorded; GPU validation clean; Tier-3 compile gate
   becomes blocking.
+
+### M4.5 — Correcting the World: the Environment the Renderer Never Read (S)
+
+- **Why this milestone exists.** M4 shipped a renderer that never reads
+  `Lighting`. Proven by observation, not by argument: `examples/02-meshes` with
+  `Lighting.Ambient` set to pure red renders byte-identical to the ambient the
+  example ships. Every M4 image — the capture goldens, the lavapipe screenshots,
+  the 1080p frame-time baseline — was recorded against a sun pinned straight up,
+  a brightness of 2.0 and fog switched off, none of which is what the example
+  asks for. The milestone's own deliverable is a day/night slider that has never
+  done anything.
+
+  It is numbered 4.5 rather than folded into M5 because M5 opens on the
+  assumption that what M4 draws is what M4's scene describes, and every physics
+  demo after it is looked at through that renderer.
+
+- **Weight.** Two of M4's thirteen points, not a new allocation: M4 is
+  reassessed at 11% delivered and the remainder moves here. The roadmap's total
+  is unchanged, because no new scope is being added — this is M4's own scope,
+  finished.
+
+- **Sign-off, by human decision on 2026-08-20.** **This milestone may be marked
+  complete only by explicit human approval.** Not by a green gate, and not by
+  the agent's own reading of the checklist. No `milestone/m4.5` tag and no
+  "COMPLETE" in `PROGRESS.md` before the human says so in words. The same is
+  true of `milestone/m4`, which is tagged today over the defect above: whether
+  that tag stands is the human's call.
+
+- **Scope — the defects, each with the evidence that found it.**
+  - [ ] **`Lighting` is unreachable from the renderer.** `WorldHost::start`
+        caches `findFirstChildOfClass(dataModel, Lighting)` before any script
+        runs, under a comment claiming the service exists by then. `services.cpp`
+        states the rule one line from where it is broken: `Workspace` and
+        `ScriptService` exist from boot, every other service is created by its
+        first `GetService`. The fix is boot order — `Lighting` joins those two,
+        for the identical reason: `extract` reads it every frame whether or not
+        a script ever asks for it. Resolving lazily on each miss is smaller and
+        leaves the same trap one refactor away.
+  - [ ] **A host-level test for it.** `render_world_tests.cpp` builds a
+        `Lighting` instance itself and hands its id straight to `extract`, so
+        every environment assertion passes against an id the host never
+        produces. The untested step is the one that was broken. The test belongs
+        at the host, and it must fail if the id is resolved before the service
+        exists.
+  - [ ] **Re-record every M4 gate artifact afterwards.** The goldens, the
+        lavapipe attempt and the 1080p baseline all describe a scene lit by the
+        wrong sun. A number recorded against a defect is not a baseline, and
+        M5's "no >10% regression" clause would be measured against it.
+  - [ ] **`BasePart.Transparency` — alpha cutout.** Decided at M4 (human,
+        2026-08-20): a threshold here, the sorted blended pass at M6. The value
+        reaches nothing today — `DrawItem` has no field for it, and the material
+        block cannot hold it because materials are deduplicated per frame.
+        `GpuObjectUniforms` is already per draw and needs no RHI call, which is
+        what makes this possible after the ADR 0037 freeze.
+  - [ ] **The shadow grid crawls.** The ortho box is centred on the camera (the
+        snapshot is camera-relative and `sunViewProjection` looks at the
+        origin), so an orbiting camera slides the texel grid 0.42 of a texel per
+        frame at the example's speed. Snap the box centre to texel increments in
+        light space; extent and resolution are both compile-time constants, so
+        the increment is one too. The rotational half — a moving sun turning its
+        own grid — is a separate problem needing normal-offset bias; it is
+        visible only while `ClockTime` moves and is not required here.
+  - [ ] **`PointLight.Shadows` and `SpotLight.Shadows` accept a write and change
+        nothing.** Stored, extracted, never read: one cascade from the sun is
+        all this release has. The M4 brief names it as deliberate, in a C++
+        comment and a NOT-in-scope list — neither of which is where the person
+        clicking the inspector reads. Decide it the way Transparency was
+        decided: honour it, or remove the property until the milestone that
+        renders it.
+  - [ ] **`Model.PrimaryPart` has no consumer.** The same shape, less visible,
+        and the same decision required.
+  - [ ] **The crash handler and the log file sink.** `architecture.md` §app
+        promises "crash handler (minidump + log)" and neither exists. A human
+        running the engine by hand is this project's verification model, and has
+        now reported five defects from memory. The handler is the half that
+        matters — a captured crash held two lines, because `core::log` already
+        flushes per line and the process died without reaching any C++ path.
+        `core` is L0 and `platform::paths()` is L1, so `app` injects the path at
+        boot.
+
+- **Scope — so this class of defect stops being found by clicking.**
+  - [ ] **The inspector marks a property with no consumer.** All three of the
+        unbacked properties above were found by a human changing a value and
+        watching nothing happen. The descriptor table already knows each
+        property's backing; what it cannot say today is whether anything reads
+        it. Whatever the mechanism, the requirement is that the panel
+        distinguishes "written and acted on" from "written and stored" — that
+        distinction is the only defence `instances.api.luau`'s own rule has.
+  - [ ] **Read `architecture.md` §app against reality, once, as a list.** Four
+        items so far had no milestone owner and each was discovered separately:
+        the `DebugShell`, the api-dump, the triangle sample, and now the crash
+        handler. The point is to find the fifth before a human does.
+  - [ ] **A milestone-close rewrite must not drop open defects.** Three
+        human-reported items were removed from `PROGRESS.md` — not archived —
+        while it was being rewritten to close M4, on the day the human is asked
+        to sign it off. Whatever enforces it, the ledger's open items have to
+        survive a close.
+
+- **Deliverable:** `examples/02-meshes`, unchanged as source, rendering what its
+  script actually describes — the sun crossing the sky over the ninety-second
+  day, shadows that lengthen towards evening, the fog and brightness the example
+  sets, and a `Transparency` that does something. Shown as a strip of frames
+  across one full day from a fixed camera, so the sun's motion is the only
+  variable in the strip.
+- **Gate:** the M4 gate re-run in full and re-recorded, plus three additions
+  that would have caught this — an assertion that the environment reaching the
+  renderer is the one the world holds; a golden pair at two different
+  `ClockTime` values that must differ; and `Lighting` resolution tested at the
+  host rather than at the extractor. **None of it counts as complete without the
+  human's explicit approval.**
 
 ### M5 — Feeling the World: Jolt Physics + Character (L)
 

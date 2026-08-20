@@ -5,13 +5,21 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- **M4 — Seeing the World: Meshes, Materials, Camera, Lighting — COMPLETE, all
-  five gate items green plus the three non-gate obligations**, awaiting human
-  sign-off. Brief:
+- **M4.5 — Correcting the World: the Environment the Renderer Never Read — OPEN**
+  since 2026-08-20, created by human decision the same day (roadmap: M4.5).
+  **It may be marked complete only by explicit human approval** — not by a green
+  gate and not by the agent's own reading of its checklist. No `milestone/m4.5`
+  tag and no "COMPLETE" here before the human says so in words.
+- **M4 — Seeing the World — NOT complete.** It was written up as complete and
+  tagged `milestone/m4` on 2026-08-20, and the defect below was found hours
+  later: the renderer never reads `Lighting`, so every image the gate recorded
+  describes a scene lit by a sun pinned straight up rather than by the scene's
+  own. Five of its gate items are green against those images. Its build order,
+  its module work, the RHI freeze and the Android checkpoint all stand; what
+  does not stand is the claim that what it draws is what its scene describes.
+  Whether the tag stays is the human's call. Brief:
   [`docs/briefs/m4-kickoff.md`](docs/briefs/m4-kickoff.md), which carries the
-  Gate Record and twenty-five Findings. The Android device checkpoint passed:
-  the human ran the APK on a real device and reports it functional, which is the
-  question ADR 0005 left open and the reason the RHI could be frozen (ADR 0037).
+  Gate Record and twenty-five Findings.
 - **M3 — Tooling Loop — signed off 2026-08-20**, tagged `milestone/m3`;
   **M2 — Kernel — signed off 2026-08-20** (`milestone/m2`); **M1** signed off
   2026-08-19 (`milestone/m1`); **M0** signed off 2026-08-19 (`milestone/m0`).
@@ -76,6 +84,15 @@ while nothing acts on it.
   the example ships (md5 `170446b8…` both). A property the shader multiplies
   into every pixel cannot change and leave the image identical. Nothing from
   `Lighting` reaches the frame.
+
+  **Reproduce it in thirty seconds**, and it needs no build: copy
+  `examples/02-meshes` anywhere, change one line of its script to
+  `Lighting.Ambient = Color3.fromRGB(255, 0, 0)`, and render the same frame from
+  both copies —
+
+      luaug-host <copy> --headless --frames=10 --exit --screenshot=red.png
+
+  The two PNGs hash identically. Do this again after the fix and they must not.
 
   **The cause.** `WorldHost::start` caches
   `findFirstChildOfClass(dataModel, Lighting)` into `m_lighting` before any
@@ -244,8 +261,12 @@ while nothing acts on it.
   this shipped, which says the fixture builds a world the panel is then pointed
   at from below -- and the human clicked the one edge that walks the other way.
 
-- **Next: stop for M4 human review** (MASTER_PROMPT §6). `milestone/m4` is
-  tagged. Do not open M5 in the session that closed M4.
+- **Next: M4.5, first action — make `Lighting` reachable.** `WorldHost::start`
+  resolves the service before it exists; the fix is boot order, and the test
+  that proves it belongs at the host rather than at the extractor. Everything
+  else in M4.5 is downstream of it, including re-recording the gate artifacts.
+- **M5 does not open until a human approves M4.5.** Not when its gate is green
+  — when the human says so.
 - **When M5 opens, its first act is the clang-format gate**, on a quiet tree.
   M4's brief moved it there deliberately: turning it on requires reformatting the
   whole C++ tree and pinning a toolchain version, and doing that while the
