@@ -77,6 +77,30 @@ it, and building it on speculation is what §5 rejects.
 
 ## Now / Next
 
+- **There is no crash artifact, and the human has now reported four defects
+  without one (2026-08-20).** `architecture.md` §app promises a "crash handler
+  (minidump + log)"; it does not exist, and `core::log` has no file sink either
+  — every line the engine prints dies with the window. A human running the
+  engine by hand is this project's verification model, and it currently asks
+  that human to report from memory.
+
+  Two pieces, and the first is small enough to land alone:
+
+  - **A file sink for `core::log`.** With a layering constraint: `core` is L0 and
+    `platform::paths()` is L1, so the path is *injected by `app` at boot* rather
+    than resolved downward. The console sink stays exactly as it is — every gate
+    and the conformance runner read it — and the file is an addition, not a
+    replacement. Print its path at startup, or the log nobody can find is the log
+    nobody sends.
+  - **The handler proper.** `SetUnhandledExceptionFilter` plus a minidump on
+    Windows, a signal handler elsewhere. Platform work, and it belongs in
+    `platform` for the same reason the SDL seam does.
+
+  Fourth thing `architecture.md` §app named that no milestone had imported —
+  after the `DebugShell`, the api-dump and the triangle sample. That list is
+  worth reading against reality once, rather than one entry at a time as each is
+  discovered missing.
+
 - **The sun's shadow flickers in `examples/02-meshes`, reported by the human on
   2026-08-20.** Not anchoring: there is no physics before M5 and nothing in that
   scene moves itself. What moves is the sun, a pure function of `ClockTime` on
