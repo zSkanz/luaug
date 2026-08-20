@@ -158,6 +158,15 @@ struct DrawItem
     // Index into `RenderWorld::materials`, deduplicated across the frame so the
     // sort key groups draws that share a bind set.
     u32 material = 0;
+    // `1 - BasePart.Transparency` times the material's own base-colour alpha.
+    // The product, because both are real sources of see-through and honouring
+    // one leaves the other rendering wrong.
+    f32 alpha = 1.0f;
+    // Whether this draw belongs to the blended pass. Derived from `alpha` and
+    // stored rather than recomputed, because the sort key was built from it and
+    // a submission that re-derived the answer could disagree with the order it
+    // is walking.
+    bool transparent = false;
     // Whether the camera can see it. False items are still in the list because
     // **a caster outside the view still casts into it**: dropping them from the
     // snapshot removed the shadows of everything behind the camera, which is a
@@ -205,6 +214,18 @@ struct RenderWorld
 // so that a sub-millimetre wobble in a camera position cannot reorder two draws
 // and change a golden command stream.
 [[nodiscard]] u64 drawSortKey(u32 pass, u32 pipeline, u32 material, f32 depth) noexcept;
+
+// The two passes a draw can belong to, and the values `drawSortKey`'s `pass`
+// argument takes. Opaque first because a `u64` compare orders the frame and the
+// opaque pass must fill depth before anything blends against it.
+inline constexpr u32 kOpaquePass = 0;
+inline constexpr u32 kTransparentPass = 1;
+
+// The largest depth `drawSortKey` can distinguish, in metres. Exposed because
+// the transparent pass sorts back-to-front and does it by subtracting from this
+// -- an inversion at extraction rather than a reversed walk at submission, so
+// "walk the list in order" stays true in every backend.
+inline constexpr f32 kMaxSortDepth = 655.0f;
 
 // The mesh a `MeshPart` renders, and where the renderer keeps that mapping.
 //

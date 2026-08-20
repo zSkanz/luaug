@@ -55,6 +55,19 @@ distant.MeshContent = "asset://models/scene.gltf" :: Content
 distant.CFrame = CFrame.new(0, 0, -70)
 distant.Parent = workspace
 
+-- A transparent pane, so the blended pass is in the golden at all. Without it
+-- the transparent pipeline is created, never bound, and a regression in it
+-- would be invisible to the one render gate that blocks a merge.
+--
+-- 0.45 rather than 0 or 1: a value that is neither end of the range is the only
+-- one an alpha cutout could not have produced, which is what M4.5 changed.
+local pane = Instance.new("MeshPart")
+pane.Name = "Pane"
+pane.MeshContent = "asset://models/pane.gltf" :: Content
+pane.CFrame = CFrame.new(-1.6, 1.4, 2.9)
+pane.Transparency = 0.45
+pane.Parent = workspace
+
 local camera = Instance.new("Camera")
 camera.FieldOfView = 55
 camera.NearPlane = 0.1

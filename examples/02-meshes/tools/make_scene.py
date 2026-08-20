@@ -1,9 +1,15 @@
-"""Generates examples/02-meshes/content/models/scene.gltf.
+"""Generates examples/02-meshes/content/models/{scene,pane}.gltf.
 
 Checked in as the .gltf it produces rather than run at build time: a text glTF
 diffs line by line, and a generator in the build would make the example's own
 content depend on Python. This script lives beside it so the next person can see
 how the numbers were arrived at rather than guessing.
+
+Two files rather than one, and the reason is a property rather than a picture:
+`BasePart.Transparency` is per INSTANCE, so demonstrating a fade needs a second
+`MeshPart` for the script to set it on. A fifth node inside `scene.gltf` would be
+a fifth section of one part and would carry no per-instance property at all --
+which is exactly why M4's deliverable could not have shown the defect.
 """
 import base64
 import json
@@ -118,25 +124,56 @@ nodes = [
     {"name": "CubeGlossy", "mesh": 3, "translation": [2.4, 1.6, 1.2], "scale": [0.8, 2.4, 0.8]},
 ]
 
-document = {
-    "asset": {"version": "2.0", "generator": "LuauG examples/02-meshes scene generator"},
-    "scene": 0,
-    "scenes": [{"name": "Scene", "nodes": [0, 1, 2, 3]}],
-    "nodes": nodes,
-    "meshes": meshes,
-    "materials": materials,
-    "accessors": accessors,
-    "bufferViews": views,
-    "buffers": [{
-        "byteLength": len(buffer),
-        "uri": "data:application/octet-stream;base64," + base64.b64encode(buffer).decode("ascii"),
-    }],
+encoded_buffer = {
+    "byteLength": len(buffer),
+    "uri": "data:application/octet-stream;base64," + base64.b64encode(buffer).decode("ascii"),
 }
+
+
+def document(name, doc_nodes, doc_meshes, doc_materials):
+    return {
+        "asset": {"version": "2.0", "generator": "LuauG examples/02-meshes scene generator"},
+        "scene": 0,
+        "scenes": [{"name": name, "nodes": list(range(len(doc_nodes)))}],
+        "nodes": doc_nodes,
+        "meshes": doc_meshes,
+        "materials": doc_materials,
+        "accessors": accessors,
+        "bufferViews": views,
+        "buffers": [encoded_buffer],
+    }
+
+
+scene_document = document("Scene", nodes, meshes, materials)
+
+# The pane: one thin slab of a smooth dielectric, in its own file so the example
+# can hold it as its own `MeshPart` and animate `Transparency` on it.
+#
+# `alphaMode` is deliberately NOT set to BLEND. The material is opaque as far as
+# glTF is concerned, so every bit of the fade comes from the instance property,
+# which is the thing under test. A material that was already see-through would
+# hide a `Transparency` that did nothing -- and hiding exactly that is how the
+# defect survived a milestone.
+pane_materials = [{
+    "name": "PaneGlass",
+    "pbrMetallicRoughness": {
+        "baseColorFactor": [0.72, 0.86, 0.92, 1.0], "metallicFactor": 0.0, "roughnessFactor": 0.08},
+}]
+pane_meshes = [cube("Pane", 0, 0)]
+pane_nodes = [{"name": "Pane", "mesh": 0, "scale": [2.8, 2.0, 0.08]}]
+pane_document = document("Pane", pane_nodes, pane_meshes, pane_materials)
 
 import io
 import sys
 
-with io.open(sys.argv[1], "w", encoding="utf-8", newline="\n") as handle:
-    json.dump(document, handle, indent=2)
-    handle.write("\n")
-print("wrote", sys.argv[1], len(buffer), "bytes of geometry")
+
+def write(path, doc):
+    with io.open(path, "w", encoding="utf-8", newline="\n") as handle:
+        json.dump(doc, handle, indent=2)
+        handle.write("\n")
+    print("wrote", path)
+
+
+write(sys.argv[1], scene_document)
+write(sys.argv[2], pane_document)
+print(len(buffer), "bytes of geometry, shared by both")

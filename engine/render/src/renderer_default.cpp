@@ -83,14 +83,28 @@ public:
 
 private:
     [[nodiscard]] std::optional<core::EngineError> ensureTargets(rhi::IDevice& device, u32 width, u32 height);
+    // Which draws one call submits. `Shadow` takes every item in the list --
+    // a caster outside the view still casts into it -- while the two forward
+    // selectors take only what the camera can see, each from its own pass.
+    enum class Selection
+    {
+        Shadow,
+        Opaque,
+        Transparent,
+    };
+
     void drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world, const MeshCache& meshes, const Mat4& viewProjection,
-        bool shadowPass);
+        Selection selection);
 
     bool valid_ = false;
     rhi::TextureFormat colorFormat_ = rhi::TextureFormat::Undefined;
 
     rhi::PipelineHandle shadowPipeline_{};
     rhi::PipelineHandle pbrPipeline_{};
+    // The same shader as `pbrPipeline_`, differing only in state: source-alpha
+    // blending and no depth write. A fragment's colour does not depend on which
+    // pass drew it; only the order and the state do.
+    rhi::PipelineHandle pbrBlendPipeline_{};
     rhi::PipelineHandle skyPipeline_{};
     rhi::PipelineHandle tonemapPipeline_{};
 
@@ -224,6 +238,27 @@ std::optional<core::EngineError> DefaultRenderer::create(
         .debugName = "pbr",
     });
 
+    // The blended pass. Depth-tested against what the opaque pass wrote, and
+    // depth-write OFF -- two transparent surfaces must both contribute, so
+    // neither may occlude the other. Source-alpha over, which is
+    // `BlendState`'s own default and is why nothing in `rhi/descs.h` had to
+    // change for this (ADR 0037's freeze holds).
+    const std::array<rhi::ColorTargetDesc, 1> hdrBlendTarget{rhi::ColorTargetDesc{
+        .format = kHdrFormat,
+        .blend = {.enabled = true},
+    }};
+    pbrBlendPipeline_ = device.createGraphicsPipeline({
+        .vertexShader = pbrVertex,
+        .fragmentShader = pbrFragment,
+        .vertexBuffers = buffers,
+        .vertexAttributes = attributes,
+        .rasterizer = {.cullMode = rhi::CullMode::Back},
+        .depthStencil = {.depthTest = true, .depthWrite = false, .depthCompare = rhi::CompareOp::LessOrEqual},
+        .colorTargets = hdrBlendTarget,
+        .depthStencilFormat = kDepthFormat,
+        .debugName = "pbr_blend",
+    });
+
     // The sky writes no depth and tests none: it is drawn first and everything
     // else covers it. Testing would need a depth value for a triangle that has
     // no position in the world.
@@ -245,7 +280,8 @@ std::optional<core::EngineError> DefaultRenderer::create(
         .debugName = "tonemap",
     });
 
-    if (!shadowPipeline_.valid() || !pbrPipeline_.valid() || !skyPipeline_.valid() || !tonemapPipeline_.valid())
+    if (!shadowPipeline_.valid() || !pbrPipeline_.valid() || !pbrBlendPipeline_.valid() || !skyPipeline_.valid()
+        || !tonemapPipeline_.valid())
     {
         destroy(device);
         return core::makeError(LUAUG_TR("render.err.pipeline_create_failed"));
@@ -344,7 +380,8 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
         device.destroy(shaders_[index]);
     shaderCount_ = 0;
 
-    for (rhi::PipelineHandle* pipeline : {&shadowPipeline_, &pbrPipeline_, &skyPipeline_, &tonemapPipeline_})
+    for (rhi::PipelineHandle* pipeline :
+        {&shadowPipeline_, &pbrPipeline_, &pbrBlendPipeline_, &skyPipeline_, &tonemapPipeline_})
     {
         if (pipeline->valid())
             device.destroy(*pipeline);
@@ -371,8 +408,9 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
 }
 
 void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world, const MeshCache& meshes,
-    const Mat4& viewProjection, bool shadowPass)
+    const Mat4& viewProjection, Selection selection)
 {
+    const bool shadowPass = selection == Selection::Shadow;
     // The draws arrive sorted (Decision 7), so this walks them in order and
     // never reorders. Grouping is `extract`'s job and re-deriving it here would
     // be the backend doing work bgfx would have to repeat.
@@ -380,9 +418,16 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
 
     for (const DrawItem& draw : world.draws)
     {
-        // The shadow pass takes everything; the forward pass takes only what the
-        // camera can see. A caster behind the camera still casts into the frame.
+        // The shadow pass takes everything; the forward passes take only what
+        // the camera can see. A caster behind the camera still casts into the
+        // frame -- including a half-transparent one, which still occludes. The
+        // roadmap leaves whether it *should* as a separate question, and this
+        // milestone does not open it.
         if (!shadowPass && !draw.inCameraFrustum)
+            continue;
+        if (selection == Selection::Opaque && draw.transparent)
+            continue;
+        if (selection == Selection::Transparent && !draw.transparent)
             continue;
 
         const MeshCache::Resolved* resolved = meshes.resolve(draw.mesh);
@@ -399,7 +444,8 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
         }
         else
         {
-            const GpuObjectUniforms uniforms{viewProjection, draw.transform, normalMatrixOf(draw.transform)};
+            GpuObjectUniforms uniforms{viewProjection, draw.transform, normalMatrixOf(draw.transform)};
+            uniforms.instanceAlphaUnused[0] = draw.alpha;
             cmd.bindUniforms(rhi::ShaderStage::Vertex, 0, asBytes(&uniforms, sizeof(uniforms)));
 
             if (draw.material != boundMaterial && draw.material < world.materials.size())
@@ -469,7 +515,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     cmd.setViewport({.width = static_cast<f32>(kShadowResolution), .height = static_cast<f32>(kShadowResolution)});
     cmd.setScissor({.width = static_cast<core::i32>(kShadowResolution), .height = static_cast<core::i32>(kShadowResolution)});
     if (world.camera.valid)
-        drawGeometry(cmd, world, meshes, sunMatrix, true);
+        drawGeometry(cmd, world, meshes, sunMatrix, Selection::Shadow);
     cmd.endRenderPass();
     cmd.popDebugGroup();
 
@@ -550,7 +596,18 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
 
         cmd.setPipeline(pbrPipeline_);
         cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&frame, sizeof(frame)));
-        drawGeometry(cmd, world, meshes, world.camera.viewProjection, false);
+        drawGeometry(cmd, world, meshes, world.camera.viewProjection, Selection::Opaque);
+
+        // Blended, after the opaque pass has filled depth, back to front. The
+        // frame uniforms are still bound -- same block, same slot, same values
+        // -- so only the pipeline changes.
+        //
+        // What this does NOT buy, and the deliverable should not imply
+        // otherwise: sorting is per draw, so two transparent surfaces that
+        // intersect each other sort wrongly at the pixels where they cross.
+        // Order-independent transparency is not on the v1 list.
+        cmd.setPipeline(pbrBlendPipeline_);
+        drawGeometry(cmd, world, meshes, world.camera.viewProjection, Selection::Transparent);
     }
 
     cmd.endRenderPass();

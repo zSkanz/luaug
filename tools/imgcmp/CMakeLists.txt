@@ -48,6 +48,14 @@ target_link_libraries(luaug_imgcmp_lib PRIVATE luaug::warnings luaug_imgcmp_stb)
 add_executable(imgcmp src/main.cpp)
 target_link_libraries(imgcmp PRIVATE luaug::warnings luaug_imgcmp_lib)
 
+# `imgstrip` lays several screenshots side by side into one image, which is how a
+# claim about change over time -- a sun crossing the sky, a part fading -- gets
+# shown as one thing a reviewer can look at. Same library, same independence from
+# `engine/`, and no test target of its own: it is fifty lines of copying pixels
+# and the library underneath it is already covered.
+add_executable(imgstrip src/strip_main.cpp)
+target_link_libraries(imgstrip PRIVATE luaug::warnings luaug_imgcmp_lib)
+
 if(LUAUG_BUILD_TESTS)
     add_executable(luaug_imgcmp_tests
         tests/command_line_tests.cpp

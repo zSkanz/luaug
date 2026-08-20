@@ -76,6 +76,30 @@ public:
     // Three axis-aligned rings. `segments` is per ring.
     void wireSphere(Vec3 center, f32 radius, DebugColor color, u32 segments = 24);
 
+    // Subtracts `origin` from every vertex recorded so far, turning a buffer of
+    // world positions into the camera-relative space the renderer works in
+    // (ADR 0014, `render_world.h`).
+    //
+    // It exists because the two halves of this buffer are filled at different
+    // moments. `DebugService:DrawLine` records during the tick, before anything
+    // has decided where the camera is; the wire boxes are appended after
+    // extraction, when it is known. Converting each at its own call site means
+    // one of them is always guessing, so both are recorded in world space and
+    // the whole buffer is rebased once.
+    //
+    // **This was wrong for the whole of M4** in the other direction: the debug
+    // pass drew world coordinates through the renderer's camera-relative
+    // view-projection, so every wire box and every scripted line was displaced
+    // by the camera's distance from the origin. The debug path is what a person
+    // reaches for when the real one is not working, so it lying is worse than
+    // most bugs of the same size.
+    //
+    // The subtraction is f32, because a `DebugVertex` is. That is the existing
+    // limit of this buffer rather than one introduced here -- the M7 floating
+    // origin is what changes it, and until then a debug line a few kilometres
+    // from the origin loses precision the same way it always has.
+    void rebaseTo(core::DVec3 origin) noexcept;
+
     // A short RGB triad: X red, Y green, Z blue. The fastest way to see whether
     // a transform is doing what you think.
     void axes(const Mat4& transform, f32 length);

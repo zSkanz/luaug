@@ -2,6 +2,11 @@
 // `kMaxForwardLights` punctual lights, then distance fog. It is the default
 // shader every material names unless it names another (`MaterialDef::shader`).
 //
+// **One shader, two pipelines.** The opaque and the blended passes compile the
+// same code and differ only in their pipeline state -- depth-write and blending
+// -- because a fragment's colour does not depend on which pass drew it. What
+// differs is the order, and `extract` owns that (M4's third design constraint).
+//
 // It writes **linear HDR** into an `Rgba16Float` target. Nothing here tonemaps
 // and nothing here encodes sRGB -- `tonemap.hlsl` does both, once, on the way to
 // the swapchain.
@@ -59,6 +64,10 @@ struct Interpolants
     float3 Normal : TEXCOORD1;
     float4 Tangent : TEXCOORD2;
     float2 Uv : TEXCOORD3;
+    // `1 - BasePart.Transparency`, carried down because `GpuObjectUniforms` is
+    // a vertex-stage block (b0 space1) and the fragment stage cannot see it.
+    // Constant across a triangle, so the interpolation is a formality.
+    float InstanceAlpha : TEXCOORD4;
     float4 Position : SV_Position;
 };
 
@@ -79,6 +88,7 @@ Interpolants VertexMain(VertexInput input)
     // carried through untouched.
     output.Tangent = float4(mul((float3x3)Model, input.Tangent.xyz), input.Tangent.w);
     output.Uv = input.Uv;
+    output.InstanceAlpha = InstanceAlphaUnused.x;
 
     return output;
 }
@@ -109,6 +119,12 @@ float4 FragmentMain(Interpolants input) : SV_Target0
     float4 baseColor = BaseColorFactor;
     const float4 sampledBase = BaseColorTexture.Sample(BaseColorSampler, input.Uv);
     baseColor *= lerp(float4(1.0f, 1.0f, 1.0f, 1.0f), sampledBase, TextureFlags.x);
+    // The two sources of transparency multiply: a glTF material can be
+    // see-through on its own, and a script can make an otherwise opaque mesh
+    // see-through with `BasePart.Transparency`. Honouring only one leaves a case
+    // that renders wrong, and the alpha is what `extract` sorted the draw by, so
+    // the two have to agree on this product.
+    baseColor.a *= input.InstanceAlpha;
 
     // The cutoff doubles as the alpha mode: the renderer writes 0 for Opaque and
     // Blend materials and the real cutoff for Mask ones, because the frozen

@@ -76,9 +76,23 @@ struct GpuObjectUniforms
     // float3x3 in a constant buffer is three float4 rows anyway, and spelling
     // that out is how the two sides stop disagreeing about the padding.
     core::Mat4 normalMatrix;
+    // x is `1 - BasePart.Transparency` for this draw, and it is HERE rather than
+    // in `GpuMaterialUniforms` for a reason the material block's own comment
+    // gives: materials are deduplicated per frame precisely so the sort key can
+    // group draws that share a bind set, and a per-instance alpha written there
+    // would split one material into as many as there are distinct values.
+    //
+    // This block is per draw and already bound per draw, so carrying it costs
+    // one more 16-byte row and no RHI call -- which is what keeps it possible
+    // after ADR 0037 froze the interface.
+    //
+    // The fragment stage cannot read this block (SDL_GPU gives the vertex stage
+    // space1 and the fragment stage space3), so the vertex shader passes it down
+    // as an interpolant. That is not an optimization, it is the only route.
+    f32 instanceAlphaUnused[4]{1.0f, 0.0f, 0.0f, 0.0f};
 };
 
-static_assert(sizeof(GpuObjectUniforms) == 192, "GpuObjectUniforms is a cbuffer layout");
+static_assert(sizeof(GpuObjectUniforms) == 208, "GpuObjectUniforms is a cbuffer layout");
 
 // Fragment stage, `b0 space3`.
 struct GpuFrameUniforms

@@ -50,7 +50,7 @@ struct GpuLight
 };
 
 #if defined(LUAUG_UNIFORMS_OBJECT)
-// `render::GpuObjectUniforms`, 192 bytes.
+// `render::GpuObjectUniforms`, 208 bytes.
 cbuffer GpuObjectUniforms : register(b0, space1)
 {
     column_major float4x4 ViewProjection;
@@ -59,6 +59,10 @@ cbuffer GpuObjectUniforms : register(b0, space1)
     // a non-uniform scale. A float4x4 because a float3x3 in a constant buffer
     // occupies three float4 rows anyway.
     column_major float4x4 NormalMatrix;
+    // x is 1 - BasePart.Transparency for this draw. Per draw rather than per
+    // material: see the C++ header. This block is vertex-stage only, so a
+    // fragment shader that needs it takes it through an interpolant.
+    float4 InstanceAlphaUnused;
 };
 #endif
 

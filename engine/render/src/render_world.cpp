@@ -166,11 +166,24 @@ void extract(
     // Still here, and not culled: the debug path is how anything is seen when
     // the real one is not working, so a bug in the culler must not be able to
     // hide it.
+    //
+    // A `MeshPart` whose mesh HAS loaded is the exception, and it is the one
+    // case where the wire box says something untrue. `BasePart.Size` does not
+    // scale a mesh -- the file's own bounds do -- so the box drawn from it is a
+    // unit cube at the mesh's origin, describing nothing about what is on
+    // screen. When the mesh has not loaded it is the opposite: the only sign
+    // the part exists at all, which is exactly what the debug path is for.
     world.parts().forEach(
         [&](core::InstanceId id, const scene::PartComponent& part)
         {
             if (!inWorld(world, id, root))
                 return;
+            if (const scene::MeshPartComponent* mesh = world.meshParts().find(id); mesh != nullptr)
+            {
+                const MeshLibrary::Entry* loaded = meshes.find(mesh->meshContent);
+                if (loaded != nullptr && loaded->mesh.valid())
+                    return;
+            }
             out.parts.push_back(RenderPart{
                 .cframe = part.cframe,
                 .size = part.size,
@@ -197,7 +210,9 @@ void extract(
                 .color = light.color,
                 .brightness = light.brightness,
                 .range = light.range,
-                .spotCosHalfAngle = 1.0f,
+                // -1 admits every direction; 1 would be the narrowest cone
+                // expressible, which is the opposite of what a point light is.
+                .spotCosHalfAngle = -1.0f,
                 .shadows = light.shadows,
             });
         });
@@ -315,14 +330,36 @@ void extract(
                     resolved.push_back(ResolvedMaterial{meshPart.meshContent, localMaterial, materialSlot});
                 }
 
+                // The two sources of see-through, multiplied: the part's own
+                // `Transparency` and whatever alpha the material arrived with.
+                // The shader computes the same product, and it has to -- this is
+                // what the draw was sorted by.
+                const f32 alpha = (1.0f - part->transparency) * out.materials[materialSlot].uniforms.baseColor[3];
+                // Fully invisible draws nothing at all, in either pass. That is
+                // the debug path's existing rule (`submitWorld` skips a part at
+                // `transparency >= 1`), and consistency with it matters more
+                // here than the shadow question the roadmap left closed: a
+                // shadow cast by something nobody can see is a defect whoever
+                // sees it will report.
+                if (alpha <= 0.0f)
+                    continue;
+
+                const bool transparent = alpha < 1.0f;
                 const Vec3 centre = core::center(worldBounds);
                 const f32 depth = core::length(centre);
+                // Back-to-front for the blended pass, and the inversion happens
+                // HERE rather than as a reversed walk in a backend -- that is
+                // M4's third design constraint, and a reversed walk is work
+                // every future backend would repeat.
+                const f32 sortDepth = transparent ? kMaxSortDepth - depth : depth;
                 out.draws.push_back(DrawItem{
-                    .sortKey = drawSortKey(0, 0, materialSlot, depth),
+                    .sortKey = drawSortKey(transparent ? kTransparentPass : kOpaquePass, 0, materialSlot, sortDepth),
                     .transform = transform,
                     .mesh = entry->mesh,
                     .section = section,
                     .material = materialSlot,
+                    .alpha = alpha,
+                    .transparent = transparent,
                     .inCameraFrustum = visible,
                 });
             }

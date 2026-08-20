@@ -660,6 +660,17 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
             submitWorld(snapshot, debugDraw);
 
+            // Everything in the buffer is in world coordinates until here: the
+            // wire boxes above, and whatever `DebugService` recorded during the
+            // tick, which happened before extraction had decided where the
+            // camera was. The overlay is drawn with the renderer's
+            // camera-relative view-projection, so the buffer has to be moved
+            // into that space -- and for the whole of M4 it was not, which put
+            // every debug line the camera's own distance away from where it
+            // belonged. `origin` is zero when no camera resolved, which is
+            // exactly the M1 path this must not disturb.
+            debugDraw.rebaseTo(snapshot.camera.origin);
+
             // Uploaded before the render pass opens, because a copy cannot run
             // inside one -- the seam says so and the backend enforces it. The
             // mesh loader is here for the same reason and one more: it is the

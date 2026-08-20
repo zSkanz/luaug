@@ -395,3 +395,142 @@ TEST_CASE("extraction reads the environment from Lighting, and defaults without 
     render::extract(fixture.world, workspace, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, without);
     CHECK(nearly(without.environment.sunDirection.y, 1.0f));
 }
+
+TEST_CASE("Transparency reaches the draw, picks the pass, and reverses the sort")
+{
+    Fixture fixture;
+    fixture.registerRenderClasses();
+    const core::InstanceId workspace = fixture.world.create(fixture.workspaceClass);
+    (void)fixture.cameraLookingDownNegativeZ(workspace);
+
+    const core::NameAtom content = fixture.atoms.intern("asset://models/box.glb");
+    render::MeshLibrary meshes;
+    render::MeshLibrary::Entry entry;
+    entry.mesh = render::MeshHandle{0, 1};
+    entry.bounds = core::AABB::fromCenterSize(core::Vec3{}, core::Vec3{1.0f, 1.0f, 1.0f});
+    entry.sectionCount = 1;
+    meshes.set(content, entry);
+
+    render::RenderWorld snapshot;
+
+    SUBCASE("an opaque part is in the opaque pass with alpha one")
+    {
+        (void)fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -10.0}, content);
+        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, snapshot);
+        REQUIRE(snapshot.draws.size() == 1);
+        CHECK_FALSE(snapshot.draws[0].transparent);
+        CHECK(nearly(snapshot.draws[0].alpha, 1.0f));
+        CHECK((snapshot.draws[0].sortKey >> 56) == render::kOpaquePass);
+    }
+
+    SUBCASE("Transparency reaches the draw as one minus itself")
+    {
+        const core::InstanceId id = fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -10.0}, content);
+        fixture.world.parts().find(id)->transparency = 0.25f;
+        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, snapshot);
+        REQUIRE(snapshot.draws.size() == 1);
+        CHECK(snapshot.draws[0].transparent);
+        CHECK(nearly(snapshot.draws[0].alpha, 0.75f));
+        CHECK((snapshot.draws[0].sortKey >> 56) == render::kTransparentPass);
+    }
+
+    SUBCASE("the material's own alpha multiplies with the part's")
+    {
+        render::MeshLibrary::Entry translucent = entry;
+        translucent.sectionMaterial = {0};
+        render::RenderMaterial material;
+        material.uniforms.baseColor[3] = 0.5f;
+        translucent.materials = {material};
+        render::MeshLibrary library;
+        library.set(content, translucent);
+
+        const core::InstanceId id = fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -10.0}, content);
+        fixture.world.parts().find(id)->transparency = 0.5f;
+        render::extract(fixture.world, workspace, core::InstanceId{}, library, 1.0f, 0.0f, snapshot);
+        REQUIRE(snapshot.draws.size() == 1);
+        // A glTF material can be see-through on its own and a script can make an
+        // opaque mesh see-through; honouring one and not the other leaves a case
+        // that renders wrong, so the two multiply.
+        CHECK(nearly(snapshot.draws[0].alpha, 0.25f));
+        CHECK(snapshot.draws[0].transparent);
+    }
+
+    SUBCASE("a fully transparent part is not drawn at all")
+    {
+        const core::InstanceId id = fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -10.0}, content);
+        fixture.world.parts().find(id)->transparency = 1.0f;
+        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, snapshot);
+        // Neither pass, and the debug path's existing rule: `submitWorld` skips
+        // a part at `transparency >= 1`. A shadow cast by something nobody can
+        // see is a defect whoever sees it reports.
+        CHECK(snapshot.draws.empty());
+    }
+
+    SUBCASE("the transparent pass runs after the opaque one and sorts far to near")
+    {
+        (void)fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -40.0}, content);
+        const core::InstanceId near = fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -10.0}, content);
+        const core::InstanceId far = fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -30.0}, content);
+        fixture.world.parts().find(near)->transparency = 0.4f;
+        fixture.world.parts().find(far)->transparency = 0.6f;
+
+        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, snapshot);
+        REQUIRE(snapshot.draws.size() == 3);
+
+        // Opaque first, because the blended pass tests against the depth the
+        // opaque one wrote.
+        CHECK_FALSE(snapshot.draws[0].transparent);
+        CHECK(snapshot.draws[1].transparent);
+        CHECK(snapshot.draws[2].transparent);
+
+        // And back to front within it, which is the opposite of the opaque
+        // order. Read off the transform rather than off the key, so this fails
+        // if the inversion is dropped even though the keys stay ordered.
+        CHECK(nearly(snapshot.draws[1].transform.m[3][2], -30.0f));
+        CHECK(nearly(snapshot.draws[2].transform.m[3][2], -10.0f));
+    }
+}
+
+TEST_CASE("a MeshPart's wire box appears only while its mesh has not loaded")
+{
+    Fixture fixture;
+    fixture.registerRenderClasses();
+    const core::InstanceId workspace = fixture.world.create(fixture.workspaceClass);
+    (void)fixture.cameraLookingDownNegativeZ(workspace);
+
+    const core::NameAtom content = fixture.atoms.intern("asset://models/box.glb");
+    (void)fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -10.0}, content);
+
+    render::RenderWorld snapshot;
+
+    SUBCASE("nothing loaded: the box is the only sign the part exists")
+    {
+        render::extract(fixture.world, workspace, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, snapshot);
+        CHECK(snapshot.parts.size() == 1);
+        CHECK(snapshot.draws.empty());
+    }
+
+    SUBCASE("loaded: the real geometry replaces it")
+    {
+        render::MeshLibrary meshes;
+        render::MeshLibrary::Entry entry;
+        entry.mesh = render::MeshHandle{0, 1};
+        entry.bounds = core::AABB::fromCenterSize(core::Vec3{}, core::Vec3{1.0f, 1.0f, 1.0f});
+        entry.sectionCount = 1;
+        meshes.set(content, entry);
+
+        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, snapshot);
+        // `Size` does not scale a mesh -- the file's bounds do -- so a wire box
+        // built from it would be a unit cube describing nothing on screen.
+        CHECK(snapshot.parts.empty());
+        CHECK(snapshot.draws.size() == 1);
+    }
+
+    SUBCASE("an ordinary Part still gets its box either way")
+    {
+        const core::InstanceId plain = fixture.world.create(fixture.partClass);
+        (void)fixture.world.setParent(plain, workspace);
+        render::extract(fixture.world, workspace, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, snapshot);
+        CHECK(snapshot.parts.size() == 2);
+    }
+}

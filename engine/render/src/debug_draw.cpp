@@ -75,6 +75,20 @@ void DebugDraw::clear() noexcept
     vertices_.clear();
 }
 
+void DebugDraw::rebaseTo(core::DVec3 origin) noexcept
+{
+    if (origin.x == 0.0 && origin.y == 0.0 && origin.z == 0.0)
+        return;
+
+    const Vec3 offset{
+        static_cast<f32>(origin.x),
+        static_cast<f32>(origin.y),
+        static_cast<f32>(origin.z),
+    };
+    for (DebugVertex& vertex : vertices_)
+        vertex.position = vertex.position - offset;
+}
+
 void DebugDraw::line(Vec3 from, Vec3 to, DebugColor color)
 {
     vertices_.push_back({from, color});
