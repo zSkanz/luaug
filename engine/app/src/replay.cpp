@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <system_error>
@@ -118,6 +119,51 @@ std::optional<core::EngineError> loadScenario(const std::filesystem::path& direc
         const std::array<I18nArg, 1> args{I18nArg{"path", out.scriptPath.string()}};
         return core::makeError(LUAUG_TR("engine.replay.err.open_failed"), args);
     }
+
+    // The input stream, optional and text. Text for the same reason the trace
+    // is: a recording is reviewed as a diff when it changes, and
+    // `900 + Space` is a line a person can read and edit.
+    const std::filesystem::path inputPath = directory / "inputs.txt";
+    if (std::filesystem::exists(inputPath, ec)) {
+        std::string inputSource;
+        if (auto error = readFile(inputPath, inputSource); error.has_value())
+            return error;
+
+        std::istringstream lines(inputSource);
+        std::string line;
+        u64 lineNumber = 0;
+        while (std::getline(lines, line)) {
+            ++lineNumber;
+            std::istringstream fields(line);
+            std::string tickText;
+            std::string edge;
+            std::string keyName;
+            if (!(fields >> tickText >> edge >> keyName))
+                continue; // Blank lines and trailing newlines.
+            if (!tickText.empty() && tickText[0] == '#')
+                continue; // A comment, so a recording can say what it is doing.
+
+            ReplayInput input;
+            input.tick = static_cast<u64>(std::strtoull(tickText.c_str(), nullptr, 10));
+            input.down = edge == "+";
+            input.key = platform::keyFromName(keyName);
+            if (input.key == platform::Key::Unknown || (edge != "+" && edge != "-")) {
+                // Refused rather than skipped. A recording with a typo in it
+                // would otherwise replay as a different recording and still
+                // pass, which is the failure mode this whole harness exists to
+                // rule out.
+                const std::array<I18nArg, 2> args{I18nArg{"path", inputPath.string()},
+                                                  I18nArg{"line", static_cast<core::i64>(lineNumber)}};
+                return core::makeError(LUAUG_TR("engine.replay.err.bad_input"), args);
+            }
+            out.inputs.push_back(input);
+        }
+
+        // Stable within a tick: the order two keys change in on the same tick is
+        // part of the recording, so the sort must not reorder them (R10).
+        std::stable_sort(out.inputs.begin(), out.inputs.end(),
+                         [](const ReplayInput& a, const ReplayInput& b) { return a.tick < b.tick; });
+    }
     return std::nullopt;
 }
 
@@ -164,7 +210,20 @@ std::optional<core::EngineError> runScenario(const ReplayScenario& scenario, Rep
     // "the scenario simulated it differently", and those have different causes.
     out.checkpoints.push_back({0, host.world().worldHash()});
 
+    // The recorded keyboard, applied before each tick and held between them --
+    // a key stays down until the recording says it came up.
+    std::array<bool, static_cast<usize>(platform::Key::Count)> keyboard{};
+    usize nextInput = 0;
+
     for (u64 tick = 1; tick <= scenario.ticks; ++tick) {
+        while (nextInput < scenario.inputs.size() && scenario.inputs[nextInput].tick <= tick) {
+            const ReplayInput& input = scenario.inputs[nextInput];
+            keyboard[static_cast<usize>(input.key)] = input.down;
+            ++nextInput;
+        }
+        if (!scenario.inputs.empty())
+            host.setKeyboard(keyboard);
+
         host.tick();
         if (tick % scenario.checkpointEvery == 0 || tick == scenario.ticks)
             out.checkpoints.push_back({tick, host.world().worldHash()});

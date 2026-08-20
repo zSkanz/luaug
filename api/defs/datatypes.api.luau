@@ -755,7 +755,13 @@ local Datatypes: { Schema.Datatype } = {
         Constructors = {
             {
                 Name = "new",
-                Parameters = { { Name = "options", Type = "{ Filter: { Instance }?, FilterType: Enum.RaycastFilterType?, CollisionGroup: string? }?", Default = "nil" } },
+                Parameters = {
+                    {
+                        Name = "options",
+                        Type = "{ Filter: { Instance }?, FilterType: Enum.RaycastFilterType?, CollisionGroup: string? }?",
+                        Default = "nil",
+                    },
+                },
                 Returns = { "RaycastParams" },
                 ThreadSafety = "Safe",
                 Doc = "Filter defaults to empty, FilterType to Exclude and CollisionGroup to the empty string, "
@@ -783,7 +789,7 @@ local Datatypes: { Schema.Datatype } = {
                 Type = "string",
                 ReadOnly = true,
                 Doc = "The group a hit must be in, or the empty string for any group. A camera ray asking for "
-                    .. "\"Terrain\" is cheaper than one that hits everything and filters afterwards.",
+                    .. '"Terrain" is cheaper than one that hits everything and filters afterwards.',
             },
         } :: { Schema.Property },
     },
@@ -791,7 +797,7 @@ local Datatypes: { Schema.Datatype } = {
         Name = "RaycastResult",
         Module = "script",
         Doc = "What a cast hit. Returned by `Workspace:Raycast` and `:Spherecast`, and nil when nothing was "
-            .. "hit -- there is no \"empty result\" to check a field on, because a result that exists and "
+            .. 'hit -- there is no "empty result" to check a field on, because a result that exists and '
             .. "means nothing is the shape of every nil-check somebody forgets.",
         Properties = {
             {

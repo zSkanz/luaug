@@ -25,6 +25,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -148,6 +149,12 @@ public:
     // owns it because a hot reload rebuilds the world, and a simulation that
     // outlived the tree it mirrors would be holding bodies for parts that no
     // longer exist.
+    // The keyboard the next tick reads (M5's scaffold). The host owns the
+    // snapshot because it owns the event pump; the replay harness hands in a
+    // recorded one instead, which is the whole reason this is a setter rather
+    // than a device read inside the binding.
+    void setKeyboard(std::span<const bool> down);
+
     [[nodiscard]] scene::PhysicsSync* physics() noexcept { return m_physics ? &*m_physics : nullptr; }
     [[nodiscard]] const scene::PhysicsSync* physics() const noexcept { return m_physics ? &*m_physics : nullptr; }
     [[nodiscard]] script::ScriptRuntime& runtime() noexcept { return *m_runtime; }
@@ -159,8 +166,19 @@ public:
     // project could do.
     [[nodiscard]] ConformanceReport conformanceReport() const;
 
-    // Runs the `BindToClose` callbacks. The host calls it once, on the way out.
-    void close();
+    // Runs the `BindToClose` callbacks and WAITS for them, up to
+    // `graceSeconds` of wall clock (`architecture.md` §app: "wait <= 30 s
+    // (configurable)").
+    //
+    // Waiting means advancing the world: a handler that yields on `task.wait`
+    // resumes on the SimClock, so a shutdown that drained once and left would
+    // cut off every handler that saved anything asynchronously -- which is
+    // exactly what it did until M5 (D016).
+    //
+    // The cap is wall clock rather than sim time, because its job is to stop a
+    // handler that never finishes from holding the process open, and a handler
+    // that never finishes never advances sim time either.
+    void close(core::f64 graceSeconds = 30.0);
 
     // `HotReloadService.PreReload` on the outgoing world and `PostReload` on
     // the incoming one, each fired and then drained -- the drain is the point,

@@ -5,6 +5,7 @@
 #include "luaug/render/lighting.h"
 #include "luaug/render/render_world.h"
 #include "luaug/scene/components.h"
+#include "luaug/scene/physics_sync.h"
 
 #include <array>
 #include <doctest/doctest.h>
@@ -13,6 +14,7 @@
 #include <limits>
 #include <ostream>
 #include <string>
+#include <variant>
 
 #include "luaug_test_nearly.h"
 #include "project_fixture.h"
@@ -135,6 +137,112 @@ TEST_CASE("two clock times give the renderer two different suns")
     const core::Vec3 morning = sunAt("7.5");
     const core::Vec3 afternoon = sunAt("15.5");
     CHECK(core::length(morning - afternoon) > 0.5f);
+}
+
+// --- The M5 gate additions: the mirror at the HOST, and a close that waits ---
+
+TEST_CASE("the host hands the physics mirror a Workspace on a world no script touched")
+{
+    Captured log;
+    app::WorldHost host;
+    REQUIRE_FALSE(host.boot({}).has_value());
+
+    // M4.5's whole defect in the physics module's shape. `PhysicsSync` cannot
+    // resolve `Workspace` itself -- `scene` has no notion of the DataModel root
+    // -- so the host hands it over, and an id that never arrived would make
+    // every part in every world weightless while nothing anywhere errored.
+    //
+    // A build with no physics backend has no mirror at all, which is a
+    // different and honest state; this asserts the wiring where there is one.
+    REQUIRE(host.physics() != nullptr);
+    CHECK(host.physics()->workspace() == host.workspace());
+    CHECK(host.physics()->workspace().valid());
+}
+
+TEST_CASE("a part in a world nobody scripted still falls, because the mirror is wired")
+{
+    Captured log;
+    Project project;
+    project.write("src/scripts/init.luau", R"(
+        local crate = Instance.new("Part")
+        crate.Name = "Crate"
+        crate.Position = vector.create(0, 40, 0)
+        crate.Parent = workspace
+    )");
+
+    app::WorldHost host;
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
+    for (int tick = 0; tick < 60; ++tick)
+        host.tick();
+
+    const core::InstanceId crate = host.world().findFirstChild(host.workspace(), host.world().atoms().lookup("Crate"));
+    REQUIRE(crate.valid());
+    const scene::PartComponent* part = host.world().parts().find(crate);
+    REQUIRE(part != nullptr);
+    // A second of falling is about five metres. The assertion is that it moved
+    // at all: a mirror that was never given a Workspace produces a world where
+    // nothing does, and every test that only checks the API would still pass.
+    CHECK(part->cframe.position.y < 39.0);
+}
+
+TEST_CASE("a BindToClose handler that yields is waited for")
+{
+    Captured log;
+    Project project;
+    project.write("src/scripts/init.luau", R"(
+        game:BindToClose(function()
+            -- A tenth of a second of sim time. Before M5 this handler was cut
+            -- off at the first drain after the shutdown and the attribute below
+            -- was never written (D016).
+            task.wait(0.1)
+            game:SetAttribute("ClosedCleanly", true)
+        end)
+    )");
+
+    app::WorldHost host;
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
+    host.tick();
+
+    host.close();
+
+    const scene::Value closed =
+        host.world().getAttribute(host.runtime().dataModel(), host.world().atoms().lookup("ClosedCleanly"));
+    const auto* flag = std::get_if<bool>(&closed);
+    REQUIRE(flag != nullptr);
+    CHECK(*flag);
+}
+
+TEST_CASE("a BindToClose handler that never finishes is cut off at the grace period")
+{
+    Captured log;
+    Project project;
+    project.write("src/scripts/init.luau", R"(
+        game:BindToClose(function()
+            while true do
+                task.wait()
+            end
+        end)
+    )");
+
+    app::WorldHost host;
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
+    host.tick();
+
+    // A tenth of a second of WALL clock rather than the thirty-second default:
+    // the cap exists so a handler that never finishes cannot hold the process
+    // open, and a test for it must not hold the suite open either.
+    host.close(0.1);
+
+    // The point is that it returned. What it also does is say so, because a
+    // shutdown that dropped somebody's save silently would be worse than one
+    // that took thirty seconds.
+    //
+    // Matched on the catalog's TEXT rather than on the key: `core::log` formats
+    // through the catalog, so a line only carries its key when the catalog does
+    // not have one. The `[script.err.…]` checks elsewhere in this file match a
+    // key because a script error's message is key-prefixed by `EngineError`,
+    // which is a different path.
+    CHECK(log.contains("still running after"));
 }
 
 TEST_CASE("a single file mounts as one entry Script and runs at the first tick")

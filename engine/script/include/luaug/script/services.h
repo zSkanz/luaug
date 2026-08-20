@@ -18,11 +18,13 @@
 #include "luaug/core/log.h"
 #include "luaug/core/math.h"
 #include "luaug/core/name_atom.h"
+#include "luaug/platform/event.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/physics_sync.h"
 #include "luaug/script/binding.h"
 #include "luaug/script/reload_state.h"
 
+#include <array>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -117,6 +119,10 @@ public:
 
     // `BindToClose` callbacks, by registry ref, in registration order.
     std::vector<int> closeHandlers;
+
+    // The close handlers that yielded and are still parked, as thread refs.
+    // Held only between `runCloseHandlers` and the end of the grace period.
+    std::vector<int> closePending;
     bool shutdown = false;
 
     std::vector<ChildWaiter> childWaiters;
@@ -147,6 +153,15 @@ public:
     // which is the same answer an empty world gives -- so every reader checks
     // rather than assuming.
     scene::PhysicsSync* physics = nullptr;
+
+    // The keyboard as of the current simulation tick (M5's scaffold; see
+    // `KeyboardService` in api-design.md §2.1). A SNAPSHOT rather than a live
+    // device read: two polls inside one tick must agree, and a replay must be
+    // able to hand the same answer back without a keyboard attached.
+    //
+    // Indexed by `platform::Key`. Sized from the enum's own `Count`, so adding
+    // a key does not leave an array somebody has to remember to grow.
+    std::array<bool, static_cast<usize>(platform::Key::Count)> keyboard{};
 };
 
 // Creates `game` and the two services that exist from boot, installs the
@@ -195,5 +210,21 @@ void resumeChildWaiters(lua_State* L);
 // the host and the shutdown proceeds when it expires, finished or not: a close
 // handler is a chance to finish, never a veto.
 void runCloseHandlers(lua_State* L);
+
+// Whether any close handler is still parked. The host polls this while it
+// spends the grace period `architecture.md` §app promises -- before M5 a
+// handler that yielded was simply cut off at the next drain (D016).
+[[nodiscard]] bool closeHandlersPending(lua_State* L);
+
+// Whether a script has asked for an overlay panel by name
+// (`DebugService:ShowPanel`). The host reads it to decide what to draw; M5's
+// first reader is the physics wireframe, which is expensive enough that
+// drawing it unasked would be a frame cost nobody chose.
+[[nodiscard]] bool panelOpen(lua_State* L, std::string_view name);
+
+// Lets go of whatever is still parked when the grace period runs out. The
+// process is going away; what this releases is the reference, so the VM can be
+// torn down without a live thread rooted in the registry.
+void abandonCloseHandlers(lua_State* L);
 
 } // namespace luaug::script

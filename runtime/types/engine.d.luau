@@ -530,6 +530,7 @@ declare extern type DataModel extends Instance with
     function GetService(self, name: "TagService"): TagService
     function GetService(self, name: "DebugService"): DebugService
     function GetService(self, name: "HotReloadService"): HotReloadService
+    function GetService(self, name: "KeyboardService"): KeyboardService
     function GetService(self, name: "PhysicsService"): PhysicsService
     --- Returns the service of this name, creating it on the first request. Services are singletons:
     --- every later call returns the same instance, and it is an ordinary child of `game` once created.
@@ -724,6 +725,14 @@ declare extern type HotReloadService extends Instance with
     function IsReload(self): boolean
 end
 
+declare extern type KeyboardService extends Instance with
+    --- Whether a key is held right now, named by its US-layout legend: "W", "Space", "LeftShift". A
+    --- name no key carries is false rather than an error, because a scaffold that raises on a typo
+    --- teaches nothing the IAS will not re-teach. Reads the snapshot the current simulation tick was
+    --- given, so two reads inside one tick agree and a replay reproduces both.
+    function IsKeyDown(self, key: string): boolean
+end
+
 declare extern type PhysicsService extends Instance with
     --- The duration of one simulation tick, in seconds, and therefore the grid every timing guarantee
     --- is expressed against: `task.wait(1)` is exactly 60 ticks at the default 1/60, on every machine
@@ -838,7 +847,7 @@ declare Random: {
 }
 
 declare RaycastParams: {
-    new: ((options: { Filter: { Instance }?, FilterType: Enum.RaycastFilterType?, CollisionGroup: string? }?) -> RaycastParams),
+    new: ((options: { Filter: { Instance }?, FilterType: EnumRaycastFilterType?, CollisionGroup: string? }?) -> RaycastParams),
 }
 
 declare Signal: {

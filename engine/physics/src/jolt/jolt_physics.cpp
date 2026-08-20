@@ -896,9 +896,15 @@ public:
         // pushed against, and it is why a crate the capsule walks into moves.
         settings.mInnerBodyShape = settings.mShape;
         settings.mInnerBodyLayer = encodeLayer(desc.group, true);
-        // Jolt's capsule is centred; a character's position is its feet, which
-        // is what a script setting `CFrame` on a CharacterBody means.
-        settings.mShapeOffset = JPH::Vec3(0.0f, desc.height * 0.5f, 0.0f);
+        // No shape offset: `transform` is the character's CENTRE, like every
+        // other `BasePart`'s, so Jolt's position and the capsule's centre are
+        // the same point.
+        //
+        // The first version put the origin at the feet, on the reasoning that a
+        // character stands somewhere. It made `CharacterBody` the one BasePart
+        // whose `Position` did not mean the middle of its `Size`, and the
+        // debug-draw bridge showed it the first frame it drew: the collider
+        // capsule floated a half-height above the part's own box.
 
         u32 slot = 0;
         if (!m_freeCharacters.empty()) {

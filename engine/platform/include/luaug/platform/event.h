@@ -3,6 +3,7 @@
 #include "luaug/core/types.h"
 
 #include <span>
+#include <string_view>
 
 namespace luaug::platform {
 
@@ -22,11 +23,14 @@ enum class EventType : u8
 
 // Physical keys, named by the US-layout legend the way scancodes are.
 //
-// Deliberately tiny: this is every key the engine itself reacts to today.
-// General keyboard input belongs to the Input Action System (ADR 0029, M6),
-// which maps device-level input to named actions -- growing a full keycode
-// table here first would build the wrong half of that, and would have to be
-// re-derived against the IAS anyway.
+// It was tiny through M4 -- the F-keys and Escape, which was every key the
+// engine itself reacted to -- and M5 grows it to a keyboard, because the
+// milestone ships a character somebody has to be able to steer.
+//
+// It is still not a full keycode table, and that is deliberate: mouse buttons
+// and gamepad inputs belong to the Input Action System (ADR 0029, M6), which
+// maps device-level input to named actions. Growing them here first would build
+// the wrong half of that and would have to be re-derived against it anyway.
 enum class Key : u16
 {
     Unknown = 0,
@@ -43,7 +47,73 @@ enum class Key : u16
     F10,
     F11,
     F12,
+
+    A,
+    B,
+    C,
+    D,
+    E,
+    F,
+    G,
+    H,
+    I,
+    J,
+    K,
+    L,
+    M,
+    N,
+    O,
+    P,
+    Q,
+    R,
+    S,
+    T,
+    U,
+    V,
+    W,
+    X,
+    Y,
+    Z,
+
+    Digit0,
+    Digit1,
+    Digit2,
+    Digit3,
+    Digit4,
+    Digit5,
+    Digit6,
+    Digit7,
+    Digit8,
+    Digit9,
+
+    Space,
+    Return,
+    Tab,
+    Backspace,
+    LeftShift,
+    RightShift,
+    LeftControl,
+    RightControl,
+    LeftAlt,
+    RightAlt,
+
+    Left,
+    Right,
+    Up,
+    Down,
+
+    // Not a key. The count is what sizes a keyboard snapshot, and having it
+    // here is what stops that array from being a number somebody has to keep in
+    // step by hand.
+    Count,
 };
+
+// The US-layout legend, which is the name a script uses and the name this enum
+// is written in. Empty for `Unknown` and for `Count`.
+[[nodiscard]] std::string_view keyName(Key key) noexcept;
+
+// The reverse, case-sensitive. `Key::Unknown` for a name no key carries.
+[[nodiscard]] Key keyFromName(std::string_view name) noexcept;
 
 // One flat record rather than a tagged union: at five event types the union
 // machinery would cost more to read than the unused fields cost to carry.

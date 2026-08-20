@@ -529,6 +529,11 @@ void WorldHost::tick()
     m_runtime->drain(core::Phase::Heartbeat);
 }
 
+void WorldHost::setKeyboard(std::span<const bool> down)
+{
+    m_runtime->setKeyboard(down);
+}
+
 void WorldHost::publishStats(const script::FrameStats& stats)
 {
     script::publishFrameStats(m_runtime->state(), stats);
@@ -577,12 +582,28 @@ bool WorldHost::shutdownRequested()
     return script::shutdownRequested(m_runtime->state());
 }
 
-void WorldHost::close()
+void WorldHost::close(core::f64 graceSeconds)
 {
     script::runCloseHandlers(m_runtime->state());
-    // One last drain, so anything a close handler deferred still runs. After
-    // this the VM is going away and nothing else will.
+    // One drain, so anything a close handler deferred already runs.
     m_runtime->drain(core::Phase::Heartbeat);
+
+    // Then the grace period: keep ticking while a handler is still parked. A
+    // handler that yields is the whole reason `BindToClose` takes a function
+    // rather than being a signal, and cutting it off at the first drain made
+    // the promise `architecture.md` §app carries untrue for five milestones
+    // (D016).
+    const auto graceNs = static_cast<core::u64>(std::max(0.0, graceSeconds) * 1'000'000'000.0);
+    const core::u64 started = platform::nowNs();
+    while (script::closeHandlersPending(m_runtime->state())) {
+        if (platform::nowNs() - started >= graceNs) {
+            const std::array<core::I18nArg, 1> args{core::I18nArg{"seconds", static_cast<core::i64>(graceSeconds)}};
+            core::log(core::LogLevel::Warn, LUAUG_TR("engine.close.warn.grace_expired"), args);
+            script::abandonCloseHandlers(m_runtime->state());
+            break;
+        }
+        tick();
+    }
 }
 
 } // namespace luaug::app

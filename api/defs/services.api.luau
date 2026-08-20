@@ -574,6 +574,42 @@ local Classes: { Schema.Class } = {
             .. "survives is what `SaveState` stored and what was tagged `PreserveOnReload`.",
     },
     {
+        -- **A scaffold, and tagged so that it cannot outlive its milestone.**
+        -- The roadmap asks M5 for "minimal direct keyboard polling,
+        -- deliberately replaced in M6 by the Input Action System", and ADR 0029
+        -- says the IAS is the ONLY input model. Both are true at once only if
+        -- this is visibly temporary, so it is `DevOnly` -- compiled out of a
+        -- shipping build -- which makes its removal structural rather than a
+        -- promise in a comment.
+        --
+        -- The key is a STRING rather than an `Enum.KeyCode`. `Enum.KeyCode` is
+        -- a v1 enum whose full list (keys, mouse, gamepad) belongs to the IAS
+        -- at M6, where it is designed once with the whole list in front of it;
+        -- shipping a third of it here would fix item values for a surface that
+        -- has not been designed. A stringly-typed scaffold also cannot be
+        -- mistaken for the real API.
+        Name = "KeyboardService",
+        Extends = "Instance",
+        Module = "scene",
+        Tags = { "Service", "NotCreatable", "DevOnly" } :: { Schema.ClassTag },
+        Methods = {
+            {
+                Name = "IsKeyDown",
+                Parameters = { { Name = "key", Type = "string" } },
+                Returns = { "boolean" },
+                ThreadSafety = "Unsafe",
+                Doc = 'Whether a key is held right now, named by its US-layout legend: "W", "Space", '
+                    .. '"LeftShift". A name no key carries is false rather than an error, because a scaffold '
+                    .. "that raises on a typo teaches nothing the IAS will not re-teach. Reads the snapshot the "
+                    .. "current simulation tick was given, so two reads inside one tick agree and a replay "
+                    .. "reproduces both.",
+            },
+        } :: { Schema.Method },
+        Doc = "Direct keyboard polling, for M5 and M5 only. It exists because a character has to be steerable "
+            .. "before the Input Action System lands, and it is gone the moment it does (M6). Nothing built on "
+            .. "it survives; that is the point of the migration being a gate item.",
+    },
+    {
         Name = "PhysicsService",
         Extends = "Instance",
         -- `scene` rather than a physics module, because in this release the one

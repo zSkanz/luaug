@@ -106,7 +106,7 @@ physics::BodyDesc PhysicsSync::descOf(core::InstanceId id, const PartComponent& 
     // A part an active weld drives is Kinematic: it still collides and still
     // pushes what it runs into, and the solver does not move it -- which is what
     // "driven, not simulated" means (roadmap M5).
-    desc.motion = isDriven(id)   ? physics::MotionType::Kinematic
+    desc.motion = isDriven(id)    ? physics::MotionType::Kinematic
                   : body.anchored ? physics::MotionType::Static
                                   : physics::MotionType::Dynamic;
     desc.friction = body.friction;

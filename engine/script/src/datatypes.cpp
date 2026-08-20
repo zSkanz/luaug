@@ -1080,8 +1080,8 @@ int raycastParamsNew(lua_State* L)
         lua_pop(L, 1);
     }
 
-    void* memory = lua_newuserdatataggedwithmetatable(L, sizeof(RaycastParamsData),
-                                                      static_cast<int>(UserdataTag::RaycastParams));
+    void* memory =
+        lua_newuserdatataggedwithmetatable(L, sizeof(RaycastParamsData), static_cast<int>(UserdataTag::RaycastParams));
     new (memory) RaycastParamsData(std::move(data));
     return 1;
 }
@@ -1251,8 +1251,8 @@ RaycastQuery checkRaycastParams(lua_State* L, int index)
 
 void pushRaycastResult(lua_State* L, core::InstanceId instance, core::DVec3 position, Vec3 normal, float distance)
 {
-    void* memory = lua_newuserdatataggedwithmetatable(L, sizeof(RaycastResultData),
-                                                      static_cast<int>(UserdataTag::RaycastResult));
+    void* memory =
+        lua_newuserdatataggedwithmetatable(L, sizeof(RaycastResultData), static_cast<int>(UserdataTag::RaycastResult));
     new (memory) RaycastResultData{instance, position, normal, distance};
 }
 

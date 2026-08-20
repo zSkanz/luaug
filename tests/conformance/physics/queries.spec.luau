@@ -106,7 +106,7 @@ describe("RaycastParams", function()
     it("reads back what it was given", function()
         local part = block("Filtered", vector.create(0, 0, 0), vector.create(2, 2, 2))
         local params = RaycastParams.new({
-            Filter = { part },
+            Filter = { part } :: { Instance },
             FilterType = Enum.RaycastFilterType.Include,
         })
         expect(#params.Filter):ToBe(1)
@@ -116,7 +116,7 @@ describe("RaycastParams", function()
 
     it("returns a fresh Filter array on every read", function()
         local part = block("Filtered", vector.create(0, 0, 0), vector.create(2, 2, 2))
-        local params = RaycastParams.new({ Filter = { part } })
+        local params = RaycastParams.new({ Filter = { part } :: { Instance } })
         expect(params.Filter == params.Filter):ToBe(false)
     end)
 
@@ -125,7 +125,7 @@ describe("RaycastParams", function()
         local below = block("Below", vector.create(0, 0, 0), vector.create(10, 2, 10))
         task.wait()
 
-        local params = RaycastParams.new({ Filter = { top } })
+        local params = RaycastParams.new({ Filter = { top } :: { Instance } })
         local result = workspace:Raycast(vector.create(0, 20, 0), vector.create(0, -30, 0), params)
         assert(result, "expected a hit")
         expect(result.Instance):ToBe(below)
@@ -137,7 +137,7 @@ describe("RaycastParams", function()
         task.wait()
 
         local params = RaycastParams.new({
-            Filter = { below },
+            Filter = { below } :: { Instance },
             FilterType = Enum.RaycastFilterType.Include,
         })
         local result = workspace:Raycast(vector.create(0, 20, 0), vector.create(0, -30, 0), params)
@@ -163,7 +163,7 @@ describe("RaycastParams", function()
         local below = block("Below", vector.create(0, 0, 0), vector.create(10, 2, 10))
         task.wait()
 
-        local params = RaycastParams.new({ Filter = { model } })
+        local params = RaycastParams.new({ Filter = { model } :: { Instance } })
         local result = workspace:Raycast(vector.create(0, 20, 0), vector.create(0, -30, 0), params)
         assert(result, "expected a hit")
         expect(result.Instance):ToBe(below)

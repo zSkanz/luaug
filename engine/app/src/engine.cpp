@@ -60,6 +60,34 @@ constexpr f64 kNanosPerSecond = 1'000'000'000.0;
 // and the texture cannot disagree.
 constexpr rhi::TextureFormat kOffscreenFormat = rhi::TextureFormat::Rgba8Unorm;
 
+// The physics backend's wireframe, forwarded into the engine's debug draw
+// (roadmap M5, "Jolt debug-draw bridge").
+//
+// A sink rather than a returned buffer, and the seam is the reason: the backend
+// walks shapes it already holds, and copying that into a vector so this could
+// walk it again would double the cost of a view whose whole job is to be cheap
+// enough to leave on.
+class PhysicsWireframe final : public physics::IDebugDrawSink
+{
+public:
+    explicit PhysicsWireframe(render::DebugDraw& draw) noexcept : m_draw(draw) {}
+
+    void line(core::DVec3 from, core::DVec3 to, core::u32 color) override
+    {
+        // Rebased the same way every other debug line is: `DebugDraw` holds
+        // camera-relative f32, and a world-space line drawn through a
+        // camera-relative view-projection is displaced by the camera's distance
+        // from the origin -- which is D011, found by looking at a screenshot.
+        m_draw.line(core::toVec3(from), core::toVec3(to),
+                    render::DebugColor::fromLinear(static_cast<f32>((color >> 16) & 0xff) / 255.0f,
+                                                   static_cast<f32>((color >> 8) & 0xff) / 255.0f,
+                                                   static_cast<f32>(color & 0xff) / 255.0f));
+    }
+
+private:
+    render::DebugDraw& m_draw;
+};
+
 // A fixed camera looking at the origin from slightly above. Fixed on purpose:
 // M1 has no camera Instance -- that is M4 -- and a moving camera would put a
 // second source of change into a golden image whose whole value is that only
@@ -377,6 +405,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     };
 
     render::RenderWorld snapshot;
+
+    // The keyboard the sim ticks read (M5's scaffold; api-design.md §2.1's
+    // `KeyboardService`). Held across frames because a key stays down between
+    // the event that pressed it and the one that released it, and handed to the
+    // host BEFORE the ticks so that every tick this frame reads one snapshot.
+    std::array<bool, static_cast<usize>(platform::Key::Count)> keyboard{};
+
     auto headlessStepNs = static_cast<u64>(std::ceil(scheduler.timing().fixedDt * kNanosPerSecond));
     bool quit = false;
 
@@ -434,7 +469,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             .fps = frame.renderDt > 0.0 ? 1.0 / frame.renderDt : 0.0,
             .frameTimeMs = frame.renderDt * 1000.0,
             .drawCalls = static_cast<f64>(frameDrawCalls),
-            .physicsBodies = 0.0,
+            // Real from M5. It read zero for four milestones because there
+            // were no bodies to count; a stat that says zero when it means
+            // "not implemented" is the shape of every unbacked property this
+            // repository has had to find later.
+            .physicsBodies = host->physics() != nullptr ? static_cast<f64>(host->physics()->bodyCount()) : 0.0,
             .luaMemoryKb = static_cast<f64>(lua_totalbytes(host->runtime().state(), 0)) / 1024.0,
         });
 
@@ -529,6 +568,21 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         for (u32 step = 0; step < frame.simTicks; ++step)
             host->tick();
 
+        // The physics wireframe (roadmap M5, "Jolt debug-draw bridge"): what the
+        // SOLVER thinks the world looks like, which is the only picture that can
+        // disagree with the rendered one and therefore the only one worth
+        // having. Drawn after the ticks, because it describes the state the
+        // frame is about to show.
+        //
+        // Behind `DebugService:ShowPanel("Physics")` rather than always on: it
+        // is a line per shape edge for every body in the world, which is a frame
+        // cost nobody should pay without asking.
+        if (scene::PhysicsSync* physics = host->physics();
+            physics != nullptr && script::panelOpen(host->runtime().state(), "Physics")) {
+            PhysicsWireframe sink(debugDraw);
+            physics->backend().debugDraw(physics->worldHandle(), sink);
+        }
+
         if (!pendingSamples.empty()) {
             const u64 tick = host->world().engineState().tick;
             const u64 hash = host->world().worldHash();
@@ -560,7 +614,17 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             for (const platform::Event& event : events) {
                 if (event.type == platform::EventType::Quit || event.type == platform::EventType::WindowCloseRequested)
                     quit = true;
+
+                // Accumulated rather than replaced: a key stays down between
+                // the press and the release, and the snapshot the next frame's
+                // ticks read is the accumulated state rather than this frame's
+                // events.
+                if (event.key != platform::Key::Unknown &&
+                    (event.type == platform::EventType::KeyDown || event.type == platform::EventType::KeyUp)) {
+                    keyboard[static_cast<usize>(event.key)] = event.type == platform::EventType::KeyDown;
+                }
             }
+            host->setKeyboard(keyboard);
 
             // After the pump and with the span it returned: the overlay reads
             // the untranslated stream behind these, which is only valid until

@@ -328,7 +328,10 @@ TEST_CASE("a character walks up a step it could not climb as a rigid body")
     fixture.spawn(step);
 
     CharacterDesc desc;
-    desc.transform.position = core::DVec3{0.0, 0.0, 0.0};
+    // The centre of a five-metre capsule standing on a floor whose top face is
+    // at zero. Placed at zero it would start half buried, which is a different
+    // test about how the controller recovers.
+    desc.transform.position = core::DVec3{0.0, 2.5, 0.0};
     desc.stepHeight = 0.6f;
     desc.userData = 9;
     const CharacterHandle character = fixture.physics->createCharacter(fixture.world, desc);
@@ -352,7 +355,9 @@ TEST_CASE("a character walks up a step it could not climb as a rigid body")
     const CharacterState state = fixture.physics->characterState(fixture.world, character);
     CHECK(state.transform.position.z > 5.0);
     CHECK(state.transform.position.z < 8.0);
-    CHECK(state.transform.position.y == doctest::Approx(0.4).epsilon(0.2));
+    // The transform is the capsule's CENTRE, so a five-metre character standing
+    // on a 0.4 m ledge has its centre at 2.9.
+    CHECK(state.transform.position.y == doctest::Approx(2.9).epsilon(0.2));
     CHECK(state.ground == CharacterGround::Grounded);
     // On the ledge, and it says which ledge -- what a moving platform needs at
     // M6 and what a `Landed` signal names.
@@ -378,7 +383,7 @@ TEST_CASE("a character falls, lands, and names what it landed on")
 
     const CharacterState state = fixture.physics->characterState(fixture.world, character);
     CHECK(state.ground == CharacterGround::Grounded);
-    CHECK(state.transform.position.y == doctest::Approx(0.0).epsilon(0.05));
+    CHECK(state.transform.position.y == doctest::Approx(2.5).epsilon(0.05));
     CHECK(state.groundUserData == 1);
 }
 

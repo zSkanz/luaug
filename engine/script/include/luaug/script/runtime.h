@@ -20,6 +20,7 @@
 
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -91,6 +92,12 @@ public:
     // siblings). Null in a build with no backend, which those bindings answer
     // as an empty world rather than as an error.
     void setPhysics(scene::PhysicsSync* physics);
+
+    // The keyboard snapshot the next simulation tick reads (M5's scaffold).
+    // A snapshot handed in rather than a device polled, so that two reads
+    // inside one tick agree and a replay can hand the same answer back with no
+    // keyboard attached.
+    void setKeyboard(std::span<const bool> down);
 
     void setReloadState(ReloadState* state);
 

@@ -1,5 +1,6 @@
 #include "luaug/script/services.h"
 
+#include "luaug/platform/event.h"
 #include "luaug/scene/world.h"
 #include "luaug/script/datatypes.h"
 #include "luaug/script/instance_binding.h"
@@ -683,6 +684,25 @@ int workspaceGetBodiesInBox(lua_State* L)
     return 1;
 }
 
+// --- KeyboardService (M5 scaffold) -------------------------------------------
+
+int keyboardIsKeyDown(lua_State* L)
+{
+    (void)checkInstance(L, 1);
+    size_t length = 0;
+    const char* text = luaL_checklstring(L, 2, &length);
+
+    const platform::Key key = platform::keyFromName(std::string_view{text, length});
+    if (key == platform::Key::Unknown) {
+        // A name no key carries is false rather than an error: a scaffold that
+        // raises on a typo teaches a lesson the IAS will re-teach differently.
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    lua_pushboolean(L, services(L).keyboard[static_cast<usize>(key)] ? 1 : 0);
+    return 1;
+}
+
 // `WaitForChild` is here rather than in `instance_binding.cpp` because it parks
 // on a tree state and only the resumption phase this file owns can wake it.
 constexpr InstanceMethodBinding ServiceMethods[] = {
@@ -712,6 +732,8 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"HotReloadService", "SaveState", hotReloadSaveState},
     {"HotReloadService", "LoadState", hotReloadLoadState},
     {"HotReloadService", "IsReload", hotReloadIsReload},
+
+    {"KeyboardService", "IsKeyDown", keyboardIsKeyDown},
 
     {"Workspace", "Raycast", workspaceRaycast},
     {"Workspace", "Spherecast", workspaceSpherecast},
@@ -930,10 +952,60 @@ void runCloseHandlers(lua_State* L)
         lua_State* co = lua_newthread(L);
         lua_getref(L, ref);
         lua_xmove(L, co, 1);
-        (void)resumeScheduled(L, co, 0);
+        const bool finished = resumeScheduled(L, co, 0);
+        if (!finished) {
+            // Parked, which is the case D016 was about: before this, a handler
+            // that yielded was cut off at the next drain rather than waited
+            // for, and `architecture.md` §app promises a capped grace period.
+            // Kept referenced so the host can ask whether it is still running.
+            lua_pushvalue(L, -1);
+            state.closePending.push_back(lua_ref(L, -1));
+            lua_pop(L, 1);
+        }
         lua_pop(L, 1);
         (void)lua_unref(L, ref);
     }
+}
+
+bool panelOpen(lua_State* L, std::string_view name)
+{
+    const core::NameAtom atom = world(L).atoms().lookup(name);
+    if (!atom.valid())
+        return false;
+    const std::vector<core::NameAtom>& open = services(L).openPanels;
+    return std::find(open.begin(), open.end(), atom) != open.end();
+}
+
+bool closeHandlersPending(lua_State* L)
+{
+    ServiceState& state = services(L);
+
+    // Compacted as it goes, so a long grace period does not re-check threads
+    // that finished on its first pass.
+    std::vector<int> stillRunning;
+    for (const int ref : state.closePending) {
+        lua_getref(L, ref);
+        lua_State* co = lua_tothread(L, -1);
+        const int status = co == nullptr ? LUA_COFIN : lua_costatus(L, co);
+        lua_pop(L, 1);
+
+        if (status == LUA_COSUS || status == LUA_CONOR) {
+            stillRunning.push_back(ref);
+        }
+        else {
+            (void)lua_unref(L, ref);
+        }
+    }
+    state.closePending.swap(stillRunning);
+    return !state.closePending.empty();
+}
+
+void abandonCloseHandlers(lua_State* L)
+{
+    ServiceState& state = services(L);
+    for (const int ref : state.closePending)
+        (void)lua_unref(L, ref);
+    state.closePending.clear();
 }
 
 } // namespace luaug::script

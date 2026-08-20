@@ -10,6 +10,7 @@
 
 #include "luaug/core/error.h"
 #include "luaug/core/types.h"
+#include "luaug/platform/event.h"
 
 #include <filesystem>
 #include <optional>
@@ -23,6 +24,21 @@ using core::u64;
 // The whole of a scenario's input. ADR 0025's claim is that this is *all* of it:
 // if a run depends on anything not written here, that is the defect the harness
 // exists to find.
+// One key changing state at one tick. The whole of a scenario's INPUT, as
+// opposed to its script -- which is the distinction that makes "input replay"
+// mean anything (roadmap M5's first gate item).
+//
+// Before M5 a scenario's script WAS its input, which was honest while nothing
+// could be steered. A bot that calls `Move` directly proves the simulation is
+// deterministic and proves nothing about the path a keystroke takes to reach
+// it; this replays the keystroke.
+struct ReplayInput
+{
+    u64 tick = 0;
+    platform::Key key = platform::Key::Unknown;
+    bool down = false;
+};
+
 struct ReplayScenario
 {
     // Absolute, so a trace does not encode where the repository was checked out.
@@ -34,6 +50,11 @@ struct ReplayScenario
     // full walk of the world, so this is a real dial rather than a formality:
     // the gate's 10,000 ticks at every 500 is 20 samples.
     u64 checkpointEvery = 1;
+
+    // Read from `inputs.txt` beside the manifest, and empty when there is none.
+    // Sorted by tick, and stable within a tick: the order two keys change in on
+    // the same tick is part of the recording (R10).
+    std::vector<ReplayInput> inputs;
 };
 
 struct ReplayCheckpoint

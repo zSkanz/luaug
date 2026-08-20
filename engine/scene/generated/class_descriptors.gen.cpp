@@ -1207,6 +1207,25 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     hotReloadServiceDesc.events = hotReloadServiceEvents;
     classes.registerClass(hotReloadServiceDesc);
 
+    // --- KeyboardService ---
+    static std::array<MethodDesc, 1> keyboardServiceMethods;
+    keyboardServiceMethods = {{
+        MethodDesc{
+            .name = atoms.intern("IsKeyDown"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .docKey = {},
+        },
+    }};
+    ClassDescriptor keyboardServiceDesc;
+    keyboardServiceDesc.name = atoms.intern("KeyboardService");
+    keyboardServiceDesc.super = instanceClass;
+    keyboardServiceDesc.flags = ClassFlags::Service | ClassFlags::NotCreatable | ClassFlags::DevOnly;
+    keyboardServiceDesc.defaultName = atoms.intern("KeyboardService");
+    keyboardServiceDesc.docKey = {};
+    keyboardServiceDesc.methods = keyboardServiceMethods;
+    classes.registerClass(keyboardServiceDesc);
+
     // --- PhysicsService ---
     static std::array<PropertyDesc, 1> physicsServiceProperties;
     physicsServiceProperties = {{

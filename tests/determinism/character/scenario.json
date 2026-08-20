@@ -1,0 +1,7 @@
+{
+  "name": "character",
+  "script": ".",
+  "seed": 5,
+  "ticks": 3600,
+  "checkpointEvery": 200
+}

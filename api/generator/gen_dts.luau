@@ -46,7 +46,19 @@ local function translateType(typeName: string): string
     if optionalEnum ~= nil then
         return `{enumTypeName(optionalEnum)}?`
     end
-    return typeName
+    -- A COMPOSITE type may mention an enum inside itself: M5's
+    -- `RaycastParams.new` takes a table with a `FilterType` field. Left
+    -- untranslated, `Enum.RaycastFilterType` reaches the definitions verbatim,
+    -- where `Enum` is a value rather than a namespace of types -- and luau-lsp
+    -- answers by refusing to read the whole file, so every global in the
+    -- repository becomes unknown at once. That is what it did.
+    --
+    -- Substituted rather than matched whole, and only where the name is not
+    -- already part of a longer identifier.
+    local rewritten = string.gsub(typeName, "Enum%.([%w_]+)", function(name: string): string
+        return enumTypeName(name)
+    end)
+    return rewritten
 end
 
 local function parameterList(parameters: { Schema.Parameter }): string

@@ -69,7 +69,7 @@ describe("CharacterBody", function()
     end)
 
     it("has the defaults api-design states", function()
-        local body = character(vector.create(0, 1, 0))
+        local body = character(vector.create(0, 2.6, 0))
         expect(body.WalkSpeed):ToBe(16)
         expect(body.JumpSpeed):ToBe(8)
         expect(body.MaxSlopeAngle):ToBe(46)
@@ -79,7 +79,7 @@ describe("CharacterBody", function()
     end)
 
     it("is a BasePart, and there is no Humanoid", function()
-        local body = character(vector.create(0, 1, 0))
+        local body = character(vector.create(0, 2.6, 0))
         expect(body:IsA("BasePart")):ToBe(true)
         expect(body:IsA("PVInstance")):ToBe(true)
         expect(function()
@@ -103,14 +103,15 @@ describe("CharacterBody", function()
         expect(body.State):ToBe(Enum.CharacterState.Grounded)
         expect(landings):ToBe(1)
         expect(landedOn):ToBe(floor)
-        -- Its position is its feet, so a landed character stands on the floor's
-        -- top face rather than sinking half its height into it.
-        expect(body.Position.y):ToBeCloseTo(0, 0.2)
+        -- Its Position is the CENTRE of its Size, like every other BasePart's,
+        -- so a five-metre character standing on a floor whose top face is at
+        -- zero has its centre at two and a half.
+        expect(body.Position.y):ToBeCloseTo(2.5, 0.2)
     end)
 
     it("stops when it is told nothing", function()
         ground()
-        local body = character(vector.create(0, 1, 0))
+        local body = character(vector.create(0, 2.6, 0))
         task.wait(1)
 
         walk(body, vector.create(0, 0, 1), 0.5)
@@ -124,8 +125,8 @@ describe("CharacterBody", function()
 
     it("scales the direction by WalkSpeed rather than normalising it", function()
         ground()
-        local fast = character(vector.create(-8, 1, 0))
-        local slow = character(vector.create(8, 1, 0))
+        local fast = character(vector.create(-8, 2.6, 0))
+        local slow = character(vector.create(8, 2.6, 0))
         slow.WalkSpeed = 4
 
         task.wait(1)
@@ -144,13 +145,13 @@ describe("CharacterBody", function()
 
     it("jumps when grounded and ignores a jump in mid-air", function()
         ground()
-        local body = character(vector.create(0, 1, 0))
+        local body = character(vector.create(0, 2.6, 0))
         task.wait(1)
         expect(body.Grounded):ToBe(true)
 
         body:Jump()
         task.wait(0.25)
-        expect(body.Position.y > 0.5):ToBe(true)
+        expect(body.Position.y > 3):ToBe(true)
         expect(body.Grounded):ToBe(false)
 
         -- A second jump in mid-air changes nothing: it is ignored rather than
@@ -166,7 +167,7 @@ describe("CharacterBody", function()
         -- A 0.4 m ledge: the box is 0.8 tall and centred on the floor plane,
         -- and it spans z from five to eleven.
         block("Ledge", vector.create(0, 0, 8), vector.create(10, 0.8, 6))
-        local body = character(vector.create(0, 1, 0))
+        local body = character(vector.create(0, 2.6, 0))
         -- Slowed to four metres a second so that a second and a half leaves the
         -- character ON the ledge. At the default sixteen it walks twenty-four
         -- metres, crosses the ledge, comes down the far side and reports
@@ -175,16 +176,21 @@ describe("CharacterBody", function()
         body.WalkSpeed = 4
         task.wait(0.5)
 
-        walk(body, vector.create(0, 0, 1), 1.5)
-        expect(body.Position.y):ToBeCloseTo(0.4, 0.25)
-        expect(body.Position.z > 5):ToBe(true)
+        -- Two and a half seconds at four metres a second puts the character ten
+        -- metres in, which is the MIDDLE of a ledge spanning five to eleven.
+        -- The first version walked six metres and measured the character with
+        -- one metre of ledge under a capsule two metres wide -- mid-climb, at
+        -- the edge, reading as "never climbed".
+        walk(body, vector.create(0, 0, 1), 2.5)
+        expect(body.Position.y):ToBeCloseTo(2.9, 0.25)
+        expect(body.Position.z > 7):ToBe(true)
         expect(body.Position.z < 11):ToBe(true)
     end)
 
     it("is stopped by a wall taller than it can step onto", function()
         ground()
         block("Wall", vector.create(0, 2, 8), vector.create(10, 4, 2))
-        local body = character(vector.create(0, 1, 0))
+        local body = character(vector.create(0, 2.6, 0))
         task.wait(0.5)
 
         walk(body, vector.create(0, 0, 1), 1.5)
@@ -194,7 +200,7 @@ describe("CharacterBody", function()
     end)
 
     it("refuses a MaxSlopeAngle of ninety degrees or more, because then nothing is a wall", function()
-        local body = character(vector.create(0, 1, 0))
+        local body = character(vector.create(0, 2.6, 0))
         expect(function()
             body.MaxSlopeAngle = 90
         end):ToThrow()

@@ -1,0 +1,33 @@
+# The M5 gate's recorded input, sixty seconds of it (roadmap M5: "recorded 60 s
+# input replay -> identical final world hash across 3 runs").
+#
+# One line per key transition: <tick> <+ down | - up> <Key>, named by its
+# US-layout legend. Held between transitions, exactly as a real key is.
+#
+# Authored rather than captured from a session, and that is deliberate: a
+# capture of somebody walking about is sixty seconds of noise nobody can review,
+# while this is a script of intent whose every line says what it is for. It is
+# still a recording -- the engine cannot tell, which is the point.
+
+# Settle: the character falls from four metres and the crates stack.
+# (nothing held)
+
+# Walk north into the kerb and on into the wall behind it.
+121 + W
+320 - W
+
+# Jump from where the wall stopped it.
+361 + Space
+380 - Space
+
+# Walk back south, down off the kerb.
+421 + S
+620 - S
+
+# Walk east, up the twenty-degree ramp.
+661 + D
+940 - D
+
+# And stand still for the remaining forty seconds, so the run also covers a
+# world settling, sleeping, and staying asleep -- which is the half of physics
+# state a position cannot show and a hash can.

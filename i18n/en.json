@@ -28,6 +28,7 @@
   "engine.replay.err.write_failed": "Cannot write {path}.",
   "engine.replay.err.bad_manifest": "{path} is not a valid scenario manifest: {reason}",
   "engine.replay.err.bad_trace": "{path} is not a valid trace; this line is: {reason}",
+  "engine.replay.err.bad_input": "{path}:{line} is not a recorded input; a line reads \"<tick> <+|-> <Key>\".",
   "engine.replay.err.no_ticks": "{path} runs zero ticks, so it proves nothing. Set \"ticks\".",
   "engine.replay.err.script_errors": "Scenario {name} logged {count} errors, so its world is not the one it describes.",
   "engine.replay.err.no_trace_for_platform": "No recorded trace at {path}. Traces are per-platform (see tests/determinism/README.md); record this one on {platform} with --record-replay.",
@@ -60,6 +61,7 @@
 
   "engine.frame.warn.catch_up_clamped": "Frame took {ms} ms; dropped simulated time after {ticks} catch-up ticks.",
   "engine.frame.info.stats": "{frames} measured frames: median {median} ms, worst {worst} ms, {draws} draws, {triangles} triangles.",
+  "engine.close.warn.grace_expired": "A BindToClose handler was still running after {seconds} s; the shutdown is going ahead without it.",
   "engine.frame.info.summary": "Ran {frames} frames, {ticks} simulation ticks.",
 
   "scene.err.collision_groups_full": "There is no room for another collision group; a world holds at most 1024.",
