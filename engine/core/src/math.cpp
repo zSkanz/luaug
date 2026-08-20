@@ -395,6 +395,150 @@ Mat4 toRenderMatrix(const CFrameD& cf, DVec3 origin) noexcept
     return result;
 }
 
+// --- Bounds and culling ------------------------------------------------------
+
+AABB AABB::fromCenterSize(Vec3 center, Vec3 size) noexcept
+{
+    const Vec3 half{size.x * 0.5f, size.y * 0.5f, size.z * 0.5f};
+    return AABB{
+        Vec3{center.x - half.x, center.y - half.y, center.z - half.z},
+        Vec3{center.x + half.x, center.y + half.y, center.z + half.z},
+    };
+}
+
+void expand(AABB& box, Vec3 point) noexcept
+{
+    box.min.x = std::min(box.min.x, point.x);
+    box.min.y = std::min(box.min.y, point.y);
+    box.min.z = std::min(box.min.z, point.z);
+    box.max.x = std::max(box.max.x, point.x);
+    box.max.y = std::max(box.max.y, point.y);
+    box.max.z = std::max(box.max.z, point.z);
+}
+
+void expand(AABB& box, const AABB& other) noexcept
+{
+    // Guarded rather than merged blindly: an empty box's bounds are infinities,
+    // and merging them in would leave `box` empty forever.
+    if (isEmpty(other))
+    {
+        return;
+    }
+    expand(box, other.min);
+    expand(box, other.max);
+}
+
+bool contains(const AABB& box, Vec3 point) noexcept
+{
+    return point.x >= box.min.x && point.x <= box.max.x && point.y >= box.min.y && point.y <= box.max.y
+        && point.z >= box.min.z && point.z <= box.max.z;
+}
+
+bool intersects(const AABB& a, const AABB& b) noexcept
+{
+    if (isEmpty(a) || isEmpty(b))
+    {
+        return false;
+    }
+    return a.min.x <= b.max.x && a.max.x >= b.min.x && a.min.y <= b.max.y && a.max.y >= b.min.y && a.min.z <= b.max.z
+        && a.max.z >= b.min.z;
+}
+
+AABB transformed(const Mat4& m, const AABB& box) noexcept
+{
+    if (isEmpty(box))
+    {
+        return AABB{};
+    }
+
+    // Arvo's method: the transformed extent along each output axis is the sum
+    // of |row entry| * half-extent, which is the eight-corner answer without
+    // transforming eight corners.
+    const Vec3 c = center(box);
+    const Vec3 e = size(box);
+    const Vec3 half{e.x * 0.5f, e.y * 0.5f, e.z * 0.5f};
+
+    const Vec3 newCenter = transformPoint(m, c);
+
+    Vec3 newHalf{};
+    newHalf.x = std::fabs(m.m[0][0]) * half.x + std::fabs(m.m[1][0]) * half.y + std::fabs(m.m[2][0]) * half.z;
+    newHalf.y = std::fabs(m.m[0][1]) * half.x + std::fabs(m.m[1][1]) * half.y + std::fabs(m.m[2][1]) * half.z;
+    newHalf.z = std::fabs(m.m[0][2]) * half.x + std::fabs(m.m[1][2]) * half.y + std::fabs(m.m[2][2]) * half.z;
+
+    return AABB{
+        Vec3{newCenter.x - newHalf.x, newCenter.y - newHalf.y, newCenter.z - newHalf.z},
+        Vec3{newCenter.x + newHalf.x, newCenter.y + newHalf.y, newCenter.z + newHalf.z},
+    };
+}
+
+namespace
+{
+
+// A plane straight out of the matrix has a normal whose length is arbitrary, so
+// `signedDistance` would return a scaled value rather than a distance. Every
+// caller either wants metres or wants a comparison against zero that behaves the
+// same for all six planes, so normalization is not optional here.
+Plane normalizedPlane(f32 a, f32 b, f32 c, f32 d) noexcept
+{
+    const f32 length = std::sqrt(a * a + b * b + c * c);
+    if (length <= 0.0f)
+    {
+        return Plane{Vec3{0.0f, 1.0f, 0.0f}, 0.0f};
+    }
+    const f32 inverse = 1.0f / length;
+    return Plane{Vec3{a * inverse, b * inverse, c * inverse}, d * inverse};
+}
+
+} // namespace
+
+Frustum frustumFromViewProjection(const Mat4& vp) noexcept
+{
+    // Row `i` of a column-major matrix is (m[0][i], m[1][i], m[2][i], m[3][i]).
+    // Naming the four rows is worth the lines: every sign error in this function
+    // comes from indexing a column while thinking of a row.
+    const f32 r0[4]{vp.m[0][0], vp.m[1][0], vp.m[2][0], vp.m[3][0]};
+    const f32 r1[4]{vp.m[0][1], vp.m[1][1], vp.m[2][1], vp.m[3][1]};
+    const f32 r2[4]{vp.m[0][2], vp.m[1][2], vp.m[2][2], vp.m[3][2]};
+    const f32 r3[4]{vp.m[0][3], vp.m[1][3], vp.m[2][3], vp.m[3][3]};
+
+    Frustum frustum;
+    frustum.planes[Frustum::Left] = normalizedPlane(r3[0] + r0[0], r3[1] + r0[1], r3[2] + r0[2], r3[3] + r0[3]);
+    frustum.planes[Frustum::Right] = normalizedPlane(r3[0] - r0[0], r3[1] - r0[1], r3[2] - r0[2], r3[3] - r0[3]);
+    frustum.planes[Frustum::Bottom] = normalizedPlane(r3[0] + r1[0], r3[1] + r1[1], r3[2] + r1[2], r3[3] + r1[3]);
+    frustum.planes[Frustum::Top] = normalizedPlane(r3[0] - r1[0], r3[1] - r1[1], r3[2] - r1[2], r3[3] - r1[3]);
+    // Depth is [0, 1], so the near plane is `z >= 0` -- row 2 alone. Under
+    // OpenGL's [-1, 1] it would be `row3 + row2`, and the difference is
+    // geometry clipped at the wrong distance rather than an error.
+    frustum.planes[Frustum::Near] = normalizedPlane(r2[0], r2[1], r2[2], r2[3]);
+    frustum.planes[Frustum::Far] = normalizedPlane(r3[0] - r2[0], r3[1] - r2[1], r3[2] - r2[2], r3[3] - r2[3]);
+    return frustum;
+}
+
+bool intersects(const Frustum& frustum, const AABB& box) noexcept
+{
+    if (isEmpty(box))
+    {
+        return false;
+    }
+
+    for (const Plane& plane : frustum.planes)
+    {
+        // The corner furthest along the plane's normal. If even that one is on
+        // the negative side, every corner is, and the box is outside this plane
+        // -- which is enough to reject it entirely.
+        const Vec3 positive{
+            plane.normal.x >= 0.0f ? box.max.x : box.min.x,
+            plane.normal.y >= 0.0f ? box.max.y : box.min.y,
+            plane.normal.z >= 0.0f ? box.max.z : box.min.z,
+        };
+        if (signedDistance(plane, positive) < 0.0f)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 // --- Colour ------------------------------------------------------------------
 
 Color3 lerp(Color3 a, Color3 b, f32 alpha) noexcept

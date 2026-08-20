@@ -1,8 +1,9 @@
 // Engine math (architecture.md §2, ADR 0013).
 //
 // The list grows with its consumers: a vector type nobody constructs is a
-// vector type nobody has checked the sign conventions of. `Vec2`, `AABB` and
-// `Frustum` are still absent for that reason.
+// vector type nobody has checked the sign conventions of. `Vec2` is still absent
+// for that reason. `AABB` and `Frustum` arrived at M4, which is the milestone
+// that culls.
 //
 // **Conventions, stated once because getting them wrong is silent.** Matrices
 // are column-major in storage and column-vector in use: a transform applies as
@@ -12,10 +13,17 @@
 // Vulkan, D3D12 and Metal all want -- and what SDL_GPU therefore expects.
 #pragma once
 
+#include <limits>
+
 #include "luaug/core/types.h"
 
 namespace luaug::core
 {
+
+// The empty `AABB` below is a default member initializer, so this has to be a
+// compile-time constant rather than a call.
+static_assert(std::numeric_limits<f32>::has_infinity, "the empty AABB is built from an f32 infinity");
+inline constexpr f32 kInfinity = std::numeric_limits<f32>::infinity();
 
 // Bit-identical to the Luau `vector` primitive, which IS Vector3 (ADR 0013):
 // three contiguous f32, no padding, no fourth lane. `lua_tovector` hands back a
@@ -288,6 +296,124 @@ struct CFrameD
 // operate in (architecture.md §10). Floating origin itself is M7; this is the
 // one operation it will be built out of.
 [[nodiscard]] Mat4 toRenderMatrix(const CFrameD& cf, DVec3 origin) noexcept;
+
+// --- Bounds and culling ------------------------------------------------------
+//
+// Both live in the f32 space `render::extract` produces -- camera-relative, so
+// the coordinates are small whatever the world position was (ADR 0014). Neither
+// has an f64 counterpart, and that is the point: a bound is an extent, and an
+// extent is exactly what f32 is still good at eight kilometres out.
+
+// Half-open in neither direction: `min` and `max` are both inside. The default
+// is the *empty* box rather than a zero-sized one at the origin, so `expand`
+// starting from a default is correct and a box nobody filled cannot be mistaken
+// for a point at the origin -- which would sit inside every frustum and be
+// drawn.
+struct AABB
+{
+    Vec3 min{kInfinity, kInfinity, kInfinity};
+    Vec3 max{-kInfinity, -kInfinity, -kInfinity};
+
+    [[nodiscard]] static constexpr AABB fromMinMax(Vec3 min, Vec3 max) noexcept { return AABB{min, max}; }
+
+    // `size` is the full extent, matching `BasePart.Size` (api-design.md §2.2),
+    // not a half-extent. Getting that wrong is a factor of two that looks
+    // plausible in every screenshot.
+    [[nodiscard]] static AABB fromCenterSize(Vec3 center, Vec3 size) noexcept;
+
+    [[nodiscard]] constexpr bool operator==(const AABB&) const noexcept = default;
+};
+
+// True when the box holds nothing at all, which is what a default-constructed
+// one is. Any inverted axis counts: a box cannot be half-empty.
+[[nodiscard]] constexpr bool isEmpty(const AABB& box) noexcept
+{
+    return box.max.x < box.min.x || box.max.y < box.min.y || box.max.z < box.min.z;
+}
+
+// Undefined on an empty box in the sense that the answers are meaningless, not
+// in the language sense -- they are computed from the infinities and produce
+// NaN. Callers that can see an empty box must check first.
+[[nodiscard]] constexpr Vec3 center(const AABB& box) noexcept
+{
+    return Vec3{(box.min.x + box.max.x) * 0.5f, (box.min.y + box.max.y) * 0.5f, (box.min.z + box.max.z) * 0.5f};
+}
+
+// The full extent, so it pairs with `fromCenterSize`.
+[[nodiscard]] constexpr Vec3 size(const AABB& box) noexcept
+{
+    return Vec3{box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z};
+}
+
+void expand(AABB& box, Vec3 point) noexcept;
+void expand(AABB& box, const AABB& other) noexcept;
+
+[[nodiscard]] bool contains(const AABB& box, Vec3 point) noexcept;
+[[nodiscard]] bool intersects(const AABB& a, const AABB& b) noexcept;
+
+// The axis-aligned bound of the transformed box -- which is a bound of the
+// rotated box and not the rotated box itself, so it grows under rotation and
+// never shrinks. Transforming an already-transformed bound therefore loses
+// tightness each time; transform the local bound, once.
+//
+// An empty box transforms to an empty box rather than to a point at the
+// matrix's translation.
+[[nodiscard]] AABB transformed(const Mat4& m, const AABB& box) noexcept;
+
+// `dot(normal, p) + distance` is signed, positive on the side the normal points
+// at, and metric -- the plane is normalized on construction, so the value is a
+// distance in world units rather than an arbitrary scale.
+//
+// Metric to about **1e-5 relative**, not absolute, and the far plane is the
+// worst of the six: extracted as `row3 - row2`, its coefficients are a
+// difference of two nearly equal numbers whose magnitude falls as far/near
+// grows, and normalizing divides the f32 error back up by the same factor. Fine
+// for culling, which only compares against zero; check the error budget before
+// using a far-plane distance for anything that must be exact.
+struct Plane
+{
+    Vec3 normal{0.0f, 1.0f, 0.0f};
+    f32 distance = 0.0f;
+};
+
+[[nodiscard]] constexpr f32 signedDistance(const Plane& plane, Vec3 point) noexcept
+{
+    return plane.normal.x * point.x + plane.normal.y * point.y + plane.normal.z * point.z + plane.distance;
+}
+
+// Six planes, all pointing **inward**: a point is inside the frustum when it is
+// on the positive side of every one. Stated because the opposite convention is
+// equally common and the difference is a renderer that draws nothing.
+struct Frustum
+{
+    enum Side : u32
+    {
+        Left = 0,
+        Right,
+        Bottom,
+        Top,
+        Near,
+        Far,
+        SideCount,
+    };
+
+    Plane planes[SideCount]{};
+};
+
+// Gribb-Hartmann extraction from a combined view-projection, for this file's
+// conventions: column-major storage, column-vector transforms, depth in [0, 1].
+// The depth range is why `Near` is a row on its own rather than a difference --
+// with OpenGL's [-1, 1] it would be `row3 + row2`, and the mistake shows up as
+// geometry clipped at the wrong distance rather than as an error.
+[[nodiscard]] Frustum frustumFromViewProjection(const Mat4& viewProjection) noexcept;
+
+// Conservative: false means the box is certainly outside, true means it may be
+// inside. The false positives are boxes near a corner that no plane rejects on
+// its own, which cost a draw call and never a wrong image -- the trade every
+// culler makes, named here so nobody "fixes" it.
+//
+// An empty box is outside.
+[[nodiscard]] bool intersects(const Frustum& frustum, const AABB& box) noexcept;
 
 // --- Colour ------------------------------------------------------------------
 

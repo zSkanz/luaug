@@ -31,6 +31,14 @@ They are not features of M4 and nothing is built *for* them; they are shapes the
 render module takes now because taking them later is a refactor. Decisions 4, 5,
 6 and 8 below are those seams, and each says what reopening it would have cost.
 
+A third thing was added to the milestone by human decision on 2026-08-20, after
+this brief was first written: **the `DebugShell`'s explorer and properties
+panel**. It is not a rendering feature, and it belongs here for the reason the
+roadmap gives — ADR 0017 declines a visual editor for v1 *on the grounds that an
+in-game ImGui shell stands in for inspection*, and four milestones in, that
+shell does not exist. The compensating control the no-editor decision rests on
+has been a promise. Decisions 14 and 15 are how it lands.
+
 The dogfooding claim from M3 binds here for the first time, and honestly: the
 *scene* is developed inside `luaug dev` — camera, sun angle, what is in the
 world, which material goes on what — while the renderer itself is C++ and needs
@@ -53,6 +61,14 @@ so the claim ends the milestone either true with evidence or as a finding.
 - [ ] render pass list kept behind the `IRenderer` contract
 - [ ] **End of M4 = RHI interface freeze**
 - [ ] the human Android-device checkpoint must have happened by now
+
+Added to M4 by human decision on 2026-08-20 (roadmap § M4, "The `DebugShell` —
+explorer and properties"):
+
+- [ ] `DebugShell` tree explorer
+- [ ] properties panel that reads **and writes** through the generated
+      descriptors, honouring `readOnly` and going through the same setters a
+      script goes through — never a second write path
 
 ## The decisions this brief makes
 
@@ -235,6 +251,61 @@ scene iterations went through a reload versus a rebuild. If the answer is that
 the loop was not usable for this kind of work, that is the finding, and it is
 worth more than any feature it blocks.
 
+### 14. The properties panel writes through `World::setProperty`, and nowhere else
+
+`scene::World::setProperty` already returns a `SetResult` that distinguishes
+`Changed`, `Unchanged`, `UnknownProperty`, `ReadOnly` and `InvalidValue`
+(`world.h:190-201`), and `PropertyDesc::set` already returns false rather than
+raising, so the caller owns the error. The panel is one more caller of that, and
+it reports the same five outcomes.
+
+This is what the roadmap means by "never a second write path". A panel that
+poked components directly would bypass the change queue, so `Changed` would not
+enqueue the property-changed fire, a `readOnly` property would be writable from
+the overlay and not from a script, and the world hash would move without anything
+in the log saying why.
+
+*Rejected:* a component-level write with a comment saying it is only for
+debugging. Every editor that ever diverged from its runtime started there.
+
+### 15. Overlay writes are applied at the FrameStart safe point, like every other external mutation
+
+The overlay draws at frame step 8 — after the sim ticks and after `extract`. A
+write applied there would mutate the world after the tick that the frame it is
+being drawn over came from, which is exactly the mid-frame mutation the
+scheduler already refuses for hot reload (architecture § 3, "the watcher thread
+only enqueues"). So the panel enqueues, and the queue drains at the next
+FrameStart.
+
+The cost is one frame of latency on a value the developer typed. The benefit is
+that a replay is still a replay: an overlay edit is an external input arriving at
+a tick boundary, the same shape as a reload, and R10's within-run determinism
+survives having an inspector open.
+
+*Rejected:* writing immediately because "it is only the debug overlay". M3
+Finding 3 is the precedent — a path that is exempt from the rules is a path that
+produces a world nobody can reproduce.
+
+### 16. The panel is one generic sweep, and it is the first spend of ADR 0017's promise
+
+`ClassDescriptor::properties` is a view over generated static storage, and each
+`PropertyDesc` carries `name`, `type`, `threadSafety`, `readOnly`, `docKey` and
+the `get`/`set` function pointers (`class_registry.h:71-95`). So the panel is a
+loop over that view with one editor widget per `ValueType` — around eight — and
+**no code per class**. A class added in M5 or M6 appears in the inspector with
+nothing written for it.
+
+That is precisely the "reflection layer editor-ready by construction" ADR 0017
+promises in exchange for having no editor, spent for the first time. If it turns
+out *not* to be one generic sweep, the promise was wrong and that is a finding
+worth more than the panel.
+
+**One precision on the roadmap's wording:** it says the descriptor tables carry
+"per-property type, `readOnly` and default". Type and `readOnly` are there;
+there is **no per-property default** — `ClassDescriptor` carries a `defaultName`
+for the instance, which is a different thing. A "reset to default" button would
+need the IDL to start emitting one, so the panel does not offer one in M4.
+
 ## The three seams, and what reopening each would have cost
 
 | Roadmap constraint | Where it lands | Cost if deferred |
@@ -275,6 +346,19 @@ oversight:
     meshlet data (ADR 0010 wants it from day one); nothing reads it in M4.
 15. **No render thread.** `RenderWorld` is the seam for one; M4 does not open it.
 
+And, for the `DebugShell` half, the exclusions the roadmap's own addition names:
+
+16. **No log/REPL panel.** `eval` is deferred by M3's protocol decision —
+    running arbitrary source in a live world touches R4 and needs its own
+    design.
+17. **No streaming map** (arrives with streaming, M7) and **no physics
+    wireframe** (arrives with Jolt, M5).
+18. **No instance creation, deletion or reparenting from the panel**, and no
+    multi-select. It reads the tree and edits property values; building a world
+    by mouse is the editor ADR 0017 declines.
+19. **No "reset to default" button** — the descriptors carry no per-property
+    default to reset to (Decision 16).
+
 ## Build order
 
 Interfaces before implementations, and the freeze last:
@@ -298,7 +382,11 @@ Interfaces before implementations, and the freeze last:
    defs, then the scene components behind them. M3 Finding 4 says the lints will
    have opinions about the names before any C++ exists; let them.
 8. `examples/02-meshes` + the ImGui sun slider.
-9. Goldens, screenshots, perf, the freeze, the gate.
+9. `DebugShell`: the explorer, then the properties panel (Decisions 14–16).
+   Deliberately after the new classes exist, so its first run is against a
+   `Camera`, a `MeshPart` and a `PointLight` rather than against `Part` alone —
+   a generic sweep that has only ever swept one class has not been tested.
+10. Goldens, screenshots, perf, the freeze, the gate.
 
 ## Subagent plan
 
@@ -314,7 +402,8 @@ it later does not require re-deriving the split:
   implementation.
 - **Orchestrator-only, always:** the `rhi_api` additions and the freeze,
   `extract`'s ordering and culling, the pass list, anything touching the
-  scene ⇄ render seam, and every gate run.
+  scene ⇄ render seam, the `DebugShell`'s write path (it crosses app ⇄ scene and
+  Decision 15 puts it in the scheduler), and every gate run.
 
 ## Gate checklist (verbatim from roadmap)
 
@@ -368,7 +457,15 @@ frozen is the expensive order.
    § Methodology is explicit that a busy machine invalidates a number by more
    than any regression is worth; the same now applies to a busy GPU. Record the
    reduced-CPU row the methodology asks for.
-6. **Tier-3 becomes blocking this milestone and has not compiled since M1.**
+6. **A generic sweep that has only ever swept one class is not generic.** The
+   properties panel is one loop over the descriptor tables (Decision 16), and
+   the way that claim fails is quietly: a `ValueType` with no editor widget
+   renders as nothing, and nobody notices until the class that uses it ships.
+   Build-order step 9 puts the panel after `Camera`, `MeshPart` and
+   `PointLight` exist for exactly that reason, and the panel must render
+   *something* — a disabled read-only field — for every `ValueType` the registry
+   can hold, rather than skipping the ones it has no widget for.
+7. **Tier-3 becomes blocking this milestone and has not compiled since M1.**
    macOS builds only on a `milestone/*` tag or a manual dispatch, and it is the
    one tier that cannot be reproduced locally. Dispatch it early — after the
    asset module lands, not at the gate — so a macOS-only break is found while its
@@ -491,6 +588,29 @@ The trees vendored this milestone are correct as of this commit. **The
 historical trees are not, and re-vendoring them is a ~20,000-file mechanical
 rewrite** — recorded in the ledger as a decision for the human rather than done
 on the way past.
+
+**4. The far plane is the least accurate of the six, and by a factor that grows
+with the depth range.** `signedDistance` is documented as metric, and it is —
+to about **1e-5 relative**, not to 1e-5 absolute. The first frustum test
+asserted 90.0 with the file's existing absolute epsilon and got 90.0005.
+
+The sign convention was right; the tolerance was the bug. Gribb-Hartmann
+extracts the far plane as `row3 - row2`, a difference of two nearly equal
+numbers whose magnitude falls as far/near grows — about 0.01 for a 1-to-100
+range — and normalizing then divides the f32 error back up by that same factor.
+Culling only compares against zero, so it does not care; anything that wants a
+far-plane distance to be exact does, and the header now says so.
+
+Recorded because the instinct on seeing 90.0005 is to widen the epsilon and move
+on, and the number is telling you something about the algorithm rather than
+about the test.
+
+**5. The Linux tier caught a `-Wdouble-promotion` that MSVC did not, for the
+fourth time in this family of milestones.** `doctest::Approx(90.0f)` takes a
+`double`, so the float literal promotes, and `-Wdouble-promotion -Werror` is a
+Clang-only combination here. The check is written in f32 throughout now, which
+also states "relative" in the expression rather than in a comment. CLAUDE.md's
+rule about not skipping the Linux stage keeps paying for itself.
 
 ## Gate Record
 

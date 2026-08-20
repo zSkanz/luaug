@@ -1014,3 +1014,145 @@ TEST_CASE("CFrameD lerp interpolates the translation in f64")
     CHECK(lerp(start, end, 0.0).position == start.position);
     CHECK(lerp(start, end, 1.0).position == end.position);
 }
+TEST_CASE("AABB: a default box is empty, and empty is not a point at the origin")
+{
+    const AABB fresh;
+    CHECK(isEmpty(fresh));
+
+    // The distinction that matters: an unfilled box must not pass a frustum
+    // test, or every drawable whose bounds nobody computed gets drawn.
+    CHECK_FALSE(contains(fresh, Vec3{0.0f, 0.0f, 0.0f}));
+    CHECK_FALSE(intersects(fresh, AABB::fromCenterSize(Vec3{}, Vec3{10.0f, 10.0f, 10.0f})));
+
+    AABB grown;
+    expand(grown, Vec3{1.0f, 2.0f, 3.0f});
+    CHECK_FALSE(isEmpty(grown));
+    CHECK(near(grown.min, Vec3{1.0f, 2.0f, 3.0f}));
+    CHECK(near(grown.max, Vec3{1.0f, 2.0f, 3.0f}));
+    CHECK(contains(grown, Vec3{1.0f, 2.0f, 3.0f}));
+}
+
+TEST_CASE("AABB: fromCenterSize takes a full extent, not a half extent")
+{
+    const AABB box = AABB::fromCenterSize(Vec3{10.0f, 0.0f, 0.0f}, Vec3{2.0f, 4.0f, 6.0f});
+    CHECK(near(box.min, Vec3{9.0f, -2.0f, -3.0f}));
+    CHECK(near(box.max, Vec3{11.0f, 2.0f, 3.0f}));
+    CHECK(near(size(box), Vec3{2.0f, 4.0f, 6.0f}));
+    CHECK(near(center(box), Vec3{10.0f, 0.0f, 0.0f}));
+
+    // Both bounds are inside: a point exactly on a face is contained.
+    CHECK(contains(box, Vec3{11.0f, 2.0f, 3.0f}));
+    CHECK_FALSE(contains(box, Vec3{11.001f, 0.0f, 0.0f}));
+}
+
+TEST_CASE("AABB: merging with an empty box changes nothing")
+{
+    AABB box = AABB::fromCenterSize(Vec3{}, Vec3{2.0f, 2.0f, 2.0f});
+    const AABB before = box;
+
+    expand(box, AABB{});
+    CHECK(box == before);
+
+    expand(box, AABB::fromMinMax(Vec3{5.0f, 0.0f, 0.0f}, Vec3{6.0f, 0.0f, 0.0f}));
+    CHECK(near(box.min, Vec3{-1.0f, -1.0f, -1.0f}));
+    CHECK(near(box.max, Vec3{6.0f, 1.0f, 1.0f}));
+}
+
+TEST_CASE("AABB: touching boxes intersect, separated ones do not")
+{
+    const AABB a = AABB::fromMinMax(Vec3{0.0f, 0.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f});
+    CHECK(intersects(a, AABB::fromMinMax(Vec3{1.0f, 0.0f, 0.0f}, Vec3{2.0f, 1.0f, 1.0f})));
+    CHECK_FALSE(intersects(a, AABB::fromMinMax(Vec3{1.001f, 0.0f, 0.0f}, Vec3{2.0f, 1.0f, 1.0f})));
+
+    // Separated on one axis only is still separated.
+    CHECK_FALSE(intersects(a, AABB::fromMinMax(Vec3{0.0f, 5.0f, 0.0f}, Vec3{1.0f, 6.0f, 1.0f})));
+}
+
+TEST_CASE("AABB: a rotated box grows, and translation moves it exactly")
+{
+    const AABB unit = AABB::fromCenterSize(Vec3{}, Vec3{2.0f, 2.0f, 2.0f});
+
+    const AABB moved = transformed(translation(Vec3{5.0f, 0.0f, 0.0f}), unit);
+    CHECK(near(moved.min, Vec3{4.0f, -1.0f, -1.0f}));
+    CHECK(near(moved.max, Vec3{6.0f, 1.0f, 1.0f}));
+
+    // A 45-degree turn about Y makes the axis-aligned bound of a unit cube
+    // sqrt(2) wide on X and Z, and leaves Y alone. That is the bound of the
+    // rotated box, not the rotated box -- which is the contract.
+    Mat4 spin;
+    const f32 c = std::cos(kHalfPi * 0.5f);
+    const f32 sn = std::sin(kHalfPi * 0.5f);
+    spin.m[0][0] = c;
+    spin.m[0][2] = -sn;
+    spin.m[2][0] = sn;
+    spin.m[2][2] = c;
+
+    const AABB turned = transformed(spin, unit);
+    CHECK(near(size(turned).x, 2.0f * std::sqrt(2.0f)));
+    CHECK(near(size(turned).y, 2.0f));
+    CHECK(near(size(turned).z, 2.0f * std::sqrt(2.0f)));
+
+    CHECK(isEmpty(transformed(translation(Vec3{5.0f, 0.0f, 0.0f}), AABB{})));
+}
+
+TEST_CASE("Frustum: the planes point inward, and the camera looks down -Z")
+{
+    // A camera at the origin looking at -Z, 90 degrees vertical, square aspect:
+    // the side planes are then at 45 degrees, which makes every expectation
+    // below arithmetic rather than a number read off a run.
+    const Mat4 view = lookAt(Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f});
+    const Mat4 projection = perspective(kHalfPi, 1.0f, 1.0f, 100.0f);
+    const Frustum frustum = frustumFromViewProjection(projection * view);
+
+    // Inward: a point well inside is on the positive side of all six.
+    const Vec3 inside{0.0f, 0.0f, -10.0f};
+    for (const Plane& plane : frustum.planes)
+    {
+        CHECK(signedDistance(plane, inside) > 0.0f);
+    }
+
+    // The near plane sits at z = -1 and faces -Z, so its distance is metric:
+    // a point ten units in front of the camera is nine units past near.
+    CHECK(near(signedDistance(frustum.planes[Frustum::Near], inside), 9.0f));
+    // Relative, and the far plane is the reason. Its coefficients are `row3 -
+    // row2`, a difference of two nearly equal numbers whose magnitude shrinks as
+    // far/near grows -- here to about 0.01 before normalization, which divides
+    // the f32 error back up by a hundred. The measured value is 90.0005, so the
+    // plane is metric to roughly 1e-5 relative and not to 1e-5 absolute.
+    const f32 farDistance = signedDistance(frustum.planes[Frustum::Far], inside);
+    CHECK(std::fabs(farDistance - 90.0f) <= 90.0f * 1e-4f);
+
+    // Behind the camera fails the near plane and nothing else is needed.
+    CHECK(signedDistance(frustum.planes[Frustum::Near], Vec3{0.0f, 0.0f, 1.0f}) < 0.0f);
+}
+
+TEST_CASE("Frustum: culling accepts what is in front and rejects what is not")
+{
+    const Mat4 view = lookAt(Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f});
+    const Mat4 projection = perspective(kHalfPi, 1.0f, 1.0f, 100.0f);
+    const Frustum frustum = frustumFromViewProjection(projection * view);
+
+    const Vec3 unit{1.0f, 1.0f, 1.0f};
+    CHECK(intersects(frustum, AABB::fromCenterSize(Vec3{0.0f, 0.0f, -10.0f}, unit)));
+
+    // Behind the camera.
+    CHECK_FALSE(intersects(frustum, AABB::fromCenterSize(Vec3{0.0f, 0.0f, 10.0f}, unit)));
+    // Past the far plane.
+    CHECK_FALSE(intersects(frustum, AABB::fromCenterSize(Vec3{0.0f, 0.0f, -200.0f}, unit)));
+    // Nearer than the near plane.
+    CHECK_FALSE(intersects(frustum, AABB::fromCenterSize(Vec3{0.0f, 0.0f, -0.4f}, unit)));
+    // Off to the side: at 45 degrees the frustum's half-width at z = -10 is 10,
+    // so a small box centred at x = 40 is well clear of it.
+    CHECK_FALSE(intersects(frustum, AABB::fromCenterSize(Vec3{40.0f, 0.0f, -10.0f}, unit)));
+
+    // A box that straddles the near plane is inside: culling is conservative in
+    // the direction that never drops geometry.
+    CHECK(intersects(frustum, AABB::fromCenterSize(Vec3{0.0f, 0.0f, -1.0f}, Vec3{1.0f, 1.0f, 4.0f})));
+
+    // A box far larger than the frustum, containing it entirely, must not be
+    // culled -- the positive-vertex test is what gets this right, and a
+    // centre-point test would get it wrong.
+    CHECK(intersects(frustum, AABB::fromCenterSize(Vec3{}, Vec3{1000.0f, 1000.0f, 1000.0f})));
+
+    CHECK_FALSE(intersects(frustum, AABB{}));
+}

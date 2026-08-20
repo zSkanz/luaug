@@ -12,12 +12,14 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   plus ADR 0024's own <500 ms requirement.
 - **M4 — Seeing the World: Meshes, Materials, Camera, Lighting — OPEN** since
   2026-08-20 (brief: [`docs/briefs/m4-kickoff.md`](docs/briefs/m4-kickoff.md) —
-  thirteen decisions, fifteen NOT-in-scope items, six entering risks, and a
-  nine-step build order). The M3 gate was re-run green on both tiers before it
-  opened. Two things in it need the human and are named there: the **Android
-  device checkpoint**, which blocks the RHI freeze at the end of the milestone,
-  and **which glTF sample asset the repository carries**, which would be its
-  first binary content.
+  sixteen decisions, nineteen NOT-in-scope items, seven entering risks, and a
+  ten-step build order). The M3 gate was re-run green on both tiers before it
+  opened. **Scope was extended by human decision the same day**: the
+  `DebugShell`'s explorer and properties panel land here, because ADR 0017
+  declines a visual editor on the grounds that an in-game shell stands in for
+  inspection, and four milestones in that shell did not exist. Still needing the
+  human: the **Android device checkpoint**, which blocks the RHI freeze at the
+  end of the milestone.
 - **M2 — Kernel — signed off 2026-08-20**, tagged `milestone/m2`; **M1** signed
   off 2026-08-19 (`milestone/m1`); **M0** signed off 2026-08-19
   (`milestone/m0`).
@@ -70,10 +72,15 @@ it, and building it on speculation is what §5 rejects.
 
 ## Now / Next
 
-- **Next: build-order step 2 — `core::AABB` and `core::Frustum`** with their
-  plane/box tests. Both are absent today for a stated reason (`math.h`'s header
-  comment: the sign conventions had not been checked), and M4 is the milestone
-  that checks them, because `extract` cannot cull without them.
+- **Next: build-order step 3 — `engine/asset` (L2)**: mount, `asset://` URN
+  resolution, `MeshData`/`MaterialDef`/`TextureData`, the load-state machine,
+  and the glTF importer behind it, tested against a checked-in `.gltf` fixture
+  before any of it draws. This is the commit that first wires fastgltf,
+  meshoptimizer and simdjson into the build.
+- **Step 2 is done.** `core::AABB` and `core::Frustum` exist with the sign
+  conventions pinned by tests rather than by comment: planes point **inward**,
+  the near plane is `row2` alone because depth is [0, 1], and culling is the
+  conservative positive-vertex test. Both tiers green.
 - **Step 1 is done.** fastgltf 0.9.0, meshoptimizer 1.2 and simdjson 3.12.3 are
   vendored and pinned, the notices are regenerated, and fastgltf carries the
   first patch this repository has ever applied (ADR 0036). Nothing is wired into
