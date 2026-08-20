@@ -324,8 +324,14 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
         lavapipe attempt and the 1080p baseline all describe a scene lit by the
         wrong sun. A number recorded against a defect is not a baseline, and
         M5's "no >10% regression" clause would be measured against it.
-  - [ ] **`BasePart.Transparency` — alpha cutout.** Decided at M4 (human,
-        2026-08-20): a threshold here, the sorted blended pass at M6. The value
+  - [ ] **`BasePart.Transparency` must do something, by human instruction on
+        2026-08-20.** Alpha cutout, as decided the same day: a threshold here,
+        the sorted blended pass at M6. **Say plainly what that means, because it
+        is half of what the word promises** — at a cutoff of 0.5, `Transparency`
+        of 0.4 stays fully opaque and 0.6 disappears entirely. Nothing fades.
+        If the human wants a real fade in this milestone, the blended pass moves
+        here from M6 and this item grows by roughly its own size again; that is
+        a one-word decision and it has not been asked for yet. The value
         reaches nothing today — `DrawItem` has no field for it, and the material
         block cannot hold it because materials are deduplicated per frame.
         `GpuObjectUniforms` is already per draw and needs no RHI call, which is
@@ -355,6 +361,38 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
         flushes per line and the process died without reaching any C++ path.
         `core` is L0 and `platform::paths()` is L1, so `app` injects the path at
         boot.
+
+  - [ ] **A crash while editing `Size` and `CFrame` in the inspector, still
+        undiagnosed.** Reported by the human on 2026-08-20, separately from the
+        `Parent` crash and not explained by it: that one was an uncaught
+        `std::bad_variant_access` from a property editor trusting a declared type
+        over an absent value, and it is fixed (`a0e41ac1`). This one took the
+        host down while values were being dragged, and the human's own note is
+        that it may have coincided with the window losing focus. The captured
+        `crash.log` held two lines — the two an ordinary run prints — and
+        `core::log` flushes after every line, so nothing was lost to buffering:
+        the process died without reaching any C++ error path. That is why the
+        handler above is listed as a prerequisite rather than beside this. It is
+        the one reported defect with no reproduction, so the first work on it is
+        earning one: the write path goes through the scheduler's FrameStart safe
+        point (Decision 15), a defocus tears down and reclaims swapchain
+        resources, and either is a place a stale pointer would survive testing.
+
+- **Everything the human reported, and where each one is.** The list exists
+  because eight of these arrived over one afternoon of a person using the
+  engine, and a defect that is fixed silently gets re-reported.
+
+  | Reported | State |
+  |---|---|
+  | `Transparency` changes nothing | **M4.5**, alpha cutout |
+  | The sun never moves; shadows never lengthen | **M4.5**, the `Lighting` defect above |
+  | The sun's shadow flickers | **M4.5**, texel snapping |
+  | A crash while editing `Size`/`CFrame`, no log | **M4.5**, above — and the handler with it |
+  | The F3 panel is unreadable while running | Fixed, `e7aa645f` — sampled at 4 Hz and held, worst frame beside the mean |
+  | "go" on `RunService.Parent` crashes the host | Fixed, `a0e41ac1` — an editor trusted the declared type over an absent value |
+  | F5 in the editor launched an unrelated extension | Fixed — `.vscode/launch.json`, four configurations against the real binaries |
+  | Type errors on `engine.d.luau` in the editor | Not ours: `selene` from an extension outside this project's toolchain. `.vscode/settings.json` did also point `luau-lsp` at a deleted file, and that is fixed |
+  | The Android triangle is stretched in portrait | Not a defect: the sample's vertices are in NDC, so it fills whatever aspect the device has. Recorded at the checkpoint |
 
 - **Scope — so this class of defect stops being found by clicking.**
   - [ ] **The inspector marks a property with no consumer.** All three of the
