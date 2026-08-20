@@ -380,8 +380,34 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
         clicking the inspector reads. Decide it the way Transparency was
         decided: honour it, or remove the property until the milestone that
         renders it.
-  - [ ] **`Model.PrimaryPart` has no consumer.** The same shape, less visible,
-        and the same decision required.
+  - [ ] **The pivot is a `Model` concept, and in the reference API it is not.**
+        Replaces an item that said `Model.PrimaryPart` has no consumer, which
+        was wrong: `modelPivot` reads it, and the sweep that "found" it searched
+        `engine/render` alone for a value consumed in `engine/script`. A
+        property audit scoped to one module is not an audit, and the retraction
+        is left visible rather than deleted.
+
+        What the check should have found is next to it. `PVInstance` is the
+        reference hierarchy's abstract base for **`BasePart`, `Model` and
+        `Camera`**, carrying `GetPivot()`, `PivotTo()` and `PivotOffset`; here
+        `GetPivot`/`PivotTo` exist on `Model` only and `PivotOffset` does not
+        exist at all. Three consequences, in order of sharpness:
+
+        - **`PivotOffset` is what gives `PivotTo` its meaning.** Without it,
+          `Model:PivotTo(cf)` is `PrimaryPart.CFrame = cf` — which is the
+          deprecated call the pivot API was introduced to replace. The new name
+          is implemented with the old semantics: it passes its tests and cannot
+          hinge a door.
+        - **The no-primary-part fallback differs in kind, not in formula.** The
+          reference stores an explicit `WorldPivot`; `modelPivot` computes a
+          centroid. And its own comment says "the centre of the extents box"
+          while the code averages part positions, which is a different point
+          whenever parts differ in size — `GetExtentsSize` in the same file
+          already computes the box.
+        - **Generic code has to branch on class**, where the reference lets
+          anything positional take `obj:PivotTo(cf)`. That cost grows with every
+          milestone that writes such code, which is the argument for taking it
+          before M5 rather than after.
   - [ ] **The crash handler and the log file sink.** `architecture.md` §app
         promises "crash handler (minidump + log)" and neither exists. A human
         running the engine by hand is this project's verification model, and has
