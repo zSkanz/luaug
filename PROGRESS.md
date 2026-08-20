@@ -5,323 +5,147 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- **M4.5 — Correcting the World: the Environment the Renderer Never Read — OPEN**
-  since 2026-08-20, created by human decision the same day (roadmap: M4.5).
-  **It may be marked complete only by explicit human approval** — not by a green
-  gate and not by the agent's own reading of its checklist. No `milestone/m4.5`
-  tag and no "COMPLETE" here before the human says so in words.
-- **M4 — Seeing the World — NOT complete.** It was written up as complete and
-  tagged `milestone/m4` on 2026-08-20, and the defect below was found hours
-  later: the renderer never reads `Lighting`, so every image the gate recorded
-  describes a scene lit by a sun pinned straight up rather than by the scene's
-  own. Five of its gate items are green against those images. Its build order,
-  its module work, the RHI freeze and the Android checkpoint all stand; what
-  does not stand is the claim that what it draws is what its scene describes.
-  Whether the tag stays is the human's call. Brief:
-  [`docs/briefs/m4-kickoff.md`](docs/briefs/m4-kickoff.md), which carries the
-  Gate Record and twenty-five Findings.
+- **M4.5 — Correcting the World: the Environment the Renderer Never Read —
+  AWAITING HUMAN REVIEW** since 2026-08-20. The gate is green and that is
+  evidence, not a decision: the roadmap and MASTER_PROMPT §6 both say this
+  milestone may be marked complete only by explicit human approval. **No
+  `milestone/m4.5` tag exists and none will before the human says so in words.**
+  Brief, with the Gate Record, the §app audit and seventeen Findings:
+  [`docs/briefs/m4.5-kickoff.md`](docs/briefs/m4.5-kickoff.md).
+- **M4 — Seeing the World — NOT complete**, tagged `milestone/m4` on 2026-08-20
+  over the defect M4.5 exists to fix. Whether that tag stands is the human's
+  call. Its build order, module work, RHI freeze and Android checkpoint all
+  stand; what did not was the claim that what it drew was what its scene
+  described. Every image it recorded has now been re-recorded.
 - **M3 — Tooling Loop — signed off 2026-08-20**, tagged `milestone/m3`;
   **M2 — Kernel — signed off 2026-08-20** (`milestone/m2`); **M1** signed off
   2026-08-19 (`milestone/m1`); **M0** signed off 2026-08-19 (`milestone/m0`).
-- **CI is green on `main`**, and the three steps M3 added to the workflow — the
-  toolchain install, `luaug test` and the hot-reload suite — have run on hosted
-  runners on both tiers. macOS is now blocking on every code push, which is M4's
-  own gate item, and has not yet been observed under that trigger.
+- **CI is green on `main`.** macOS is blocking on every code push.
 
-### M4: what exists
+### M4.5: what changed
 
-- **glTF in, lit PBR out.** `examples/02-meshes` renders a generated scene
-  through a real pass list — sun shadow map, sky, forward PBR into an
-  `Rgba16Float` target, tonemap — with four materials, a point light on a part,
-  distance fog and a day/night slider that writes `Lighting.ClockTime`.
-- **`engine/asset` (L2)**, born as a loader rather than a streaming system:
-  image encode/decode moved in from `app` as its own header promised at M1, and
-  a fastgltf importer whose tests were mutation-tested with twenty-two planted
-  defects.
-- **The render module grew a renderer.** `MeshCache` (static buffers and a
-  per-frame ring), `MeshLoader`, `RenderWorld` v2 with a camera, an environment,
-  lights and pre-sorted draws, and `renderer_default` behind the `IRenderer`
-  contract.
-- **Five new classes with real backing** — `Camera`, `MeshPart`, `PointLight`,
-  `SpotLight` and the `Lighting` service — declared only as far as they are
-  implemented, which cost `Sky`, `Camera.ViewportSize` and
-  `MeshPart.CollisionFidelity` their place in this milestone.
-- **The `DebugShell`**: a tree explorer and a properties panel that is one
-  generic sweep over the generated descriptors, writing through
-  `World::setProperty` and applying at the FrameStart safe point. ADR 0017's
-  compensating control, four milestones after the ADR leaned on it.
-- **The triangle sample and its Android package**, which is the artifact the
-  device checkpoint was passed with.
-- **The RHI is frozen** (ADR 0037): 32 calls, exercised by a real pass list, with
-  the one addition the renderer wanted declined.
-- **Three carried debts paid**: `Luau.Analysis` out of the build (53.9 s → 34.8 s
-  cold), `api-dump.json` generated and freshness-gated, and `luaug --version`.
+- **`Lighting` exists from boot**, beside `Workspace` and `ScriptService`. It was
+  created by its first `GetService`, which is after `WorldHost::start` cached its
+  id, so `extract` answered every frame with `RenderEnvironment`'s defaults and
+  no scene's environment ever reached a pixel. api-design.md §1.2 corrected in
+  the same commit.
+- **Four checks now catch that**, and all four were verified by reintroducing it:
+  the host resolves the service on a world no script touched; the snapshot's
+  environment equals what the world holds, field by field; `determinism` moves;
+  and `clock_differential` renders one scene at two clock times and requires the
+  frames to differ. The last is deliberately not a golden — a golden compares a
+  recording against a recording, which is what certified this defect six times.
+- **The capture backend records uniform CONTENTS**, by a digest of the block's
+  floats quantized onto the same four-decimal grid the rest of the stream uses.
+  It recorded the byte count before, so the blocking render gate could see the
+  shape of a frame and nothing in it. Byte-identical across MSVC and Clang.
+- **`Transparency` fades**, through a sorted back-to-front blended pass:
+  `GpuObjectUniforms` carries the per-draw alpha, the order is `extract`'s, and
+  no RHI call was added — ADR 0037's freeze is untouched.
+- **The shadow grid moves in whole texels**, so an orbiting camera no longer
+  slides it 0.42 of a texel per frame. The rotational half is named and out of
+  scope.
+- **`PVInstance` is a real class** carrying `PivotOffset`, `GetPivot` and
+  `PivotTo` for `BasePart`, `Model` and `Camera`. Without the offset,
+  `Model:PivotTo(cf)` was `PrimaryPart.CFrame = cf` — the deprecated call under
+  the new name, passing its tests and unable to hinge a door.
+- **A crash handler and a log file**, four milestones after `architecture.md`
+  §app promised them. The handler is tested by a process that faults on purpose.
+- **`Property.Inert`** in the IDL and "(stored)" in the inspector, so a property
+  that is backed and unread says so.
+- **`docs/defects.md`**, append-only and gate-enforced, so a milestone-close
+  rewrite cannot quietly empty the open list again.
+- **Every M4 artifact re-recorded**: both capture goldens, the lavapipe
+  screenshot, the determinism traces on both tiers, and the 1080p baseline —
+  whose median did not move and whose worst frame improved by a factor of four
+  on two cores.
 
-### M4: the gate
+### M4.5: what does NOT exist yet
 
-**5 of 5, plus the three obligations.** The Gate Record in the brief carries the
-numbers, the commands and the screenshot.
-
-### M4: what does NOT exist yet
-
-The brief's twenty-two NOT-in-scope items, of which the ones most likely to be
-mistaken for bugs: no IBL (so a metal is lit only by punctual lights and by the
-flat ambient), one shadow cascade and shadows from the sun alone, no clustered
-light culling with a bound of eight lights per draw, no skinning or animation,
-and no `Sky` class. `PointLight.Shadows` is stored and read back faithfully
-while nothing acts on it.
+The brief's fifteen NOT-in-scope items. The ones most likely to be mistaken for
+bugs: no order-independent transparency (two transparent surfaces that intersect
+sort per draw, not per pixel); a half-transparent part still casts a full
+shadow; the shadow flicker caused by a *rotating* sun is unfixed and visible only
+while `ClockTime` moves; still no IBL, one shadow cascade, eight lights per draw
+and no `Sky`.
 
 ## Now / Next
 
-- **`Lighting` is never read by the renderer. The whole environment has been the
-  struct defaults since M4 shipped it** — found 2026-08-20 by the human saying
-  the shadow did not seem to move, and confirmed by observation rather than by
-  reading. **This is urgent: it changes every rendered image, and the M4 render
-  goldens and lavapipe screenshots are being recorded against it.**
-
-  **The proof, before the cause.** `examples/02-meshes` with `Lighting.Ambient`
-  set to pure red renders **byte-identical** to the same frame with the ambient
-  the example ships (md5 `170446b8…` both). A property the shader multiplies
-  into every pixel cannot change and leave the image identical. Nothing from
-  `Lighting` reaches the frame.
-
-  **Reproduce it in thirty seconds**, and it needs no build: copy
-  `examples/02-meshes` anywhere, change one line of its script to
-  `Lighting.Ambient = Color3.fromRGB(255, 0, 0)`, and render the same frame from
-  both copies —
-
-      luaug-host <copy> --headless --frames=10 --exit --screenshot=red.png
-
-  The two PNGs hash identically. Do this again after the fix and they must not.
-
-  **The cause.** `WorldHost::start` caches
-  `findFirstChildOfClass(dataModel, Lighting)` into `m_lighting` before any
-  script runs, and its comment says "Created by `registerServices` during the
-  boot above, so this is a lookup rather than a creation". That is true of
-  `Workspace` and false of `Lighting`: `services.cpp` states the rule one line
-  from where it is broken — "`Workspace` and `ScriptService` exist from boot;
-  every other service is created by its first `GetService`". So the lookup finds
-  nothing, `m_lighting` stays invalid for the life of the world, and
-  `extract`'s `world.lighting().find(lightingHost)` returns null every frame.
-  The environment then keeps `RenderWorld`'s defaults: sun straight up
-  (`Vec3{0, 1, 0}`), brightness 2.0, the default ambient, and fog off because
-  the default `fogEnd <= fogStart`.
-
-  **Which is exactly what the human saw, and explains three reports as one.**
-  A sun pinned to straight up casts shadows that are the object's own footprint
-  and never lengthen, whatever `ClockTime` says — confirmed at a 12-degree sun
-  where a three-metre pillar's shadow should cross the floor and is instead a
-  patch at its foot. The lit faces are the tops rather than the sides facing
-  the sunrise. And the flicker reported separately is the only thing left that
-  moves: the shadow box is centred on the camera (the snapshot is
-  camera-relative and `sunViewProjection` looks at the origin), the camera orbits
-  at 1.47 m/s, and one shadow texel is 0.059 m — so the grid slides 0.42 of a
-  texel per frame and the edges crawl. The day/night slider ADR 0025 and the
-  deliverable both advertise has never done anything.
-
-  **The fix is a boot-order question, not a renderer one.** `Lighting` should
-  exist from boot as `Workspace` does, and for the identical reason: `extract`
-  reads it every frame whether or not a script ever asks for it, so "created on
-  first `GetService`" cannot be true of it. That also makes the cached id correct
-  by construction rather than by timing. Resolving lazily on each miss is the
-  smaller change and leaves the same trap one refactor away.
-
-  **And the sixth gate this milestone that passes while doing nothing.**
-  `render_world_tests.cpp` creates a `Lighting` instance itself and hands its id
-  straight to `extract`, so every environment assertion passes against a
-  hand-made id the host never produces. The untested step is the one that
-  resolves the id — which is the step that is broken. The test to add is the
-  host's, not the extractor's.
-
-- **Three human-reported defects were dropped from this file when it was
-  rewritten to close M4, and are restored below.** Not archived -- removed. A
-  milestone-close rewrite is the moment a ledger is least able to afford losing
-  its open items, because the next reader is the human deciding whether to sign
-  it off. They are listed after the entry above, unchanged except where reality
-  corrected them.
-
-- **`BasePart.Transparency` is decided: the sorted blended pass, in M4.5**
-  (human decision, 2026-08-20, on the report from the same day). It is declared
-  in the IDL and `render_world.cpp` extracts it, and every value still renders
-  opaque.
-
-  **The first diagnosis here said `renderer_default` "never reads it", and that
-  is true but too kind.** The value cannot reach it. There are two draw paths
-  and Transparency exists in only one:
-
-  - `RenderPart` — a `BasePart` as a debug wire box — carries `transparency`,
-    and `submitWorld` honours it (`engine.cpp`: `if (part.transparency >= 1.0f)
-    continue;`). This is the path that works, and it is the one the human's
-    observation exercised: setting the orbiting lamp `Part` to 1 made it vanish
-    while the scene did not.
-  - `DrawItem` — the real renderer's unit of work — **has no such field**. Not
-    an unread value: an absent one.
-
-  That observation is also what settled the scope call, because the scene did
-  not change for a second reason worth writing down: `examples/02-meshes` is one
-  `MeshPart`, so the boxes and floor are sections of a single glTF file and have
-  no per-instance property to set at all.
-
-  **The obvious place to put it is wrong.** `GpuMaterialUniforms` already
-  carries an alpha cutoff, but its own comment states why it cannot hold this:
-  "per material rather than per frame, because it changes with the bind set and
-  the sort key already groups draws by material". Materials are deduplicated
-  across the frame; a per-instance alpha written there splits one material into
-  as many as there are distinct transparencies and fights the grouping the sort
-  key was built for.
-
-  **The shape that fits, and it needs nothing the freeze closed.**
-  `GpuObjectUniforms` is already per draw (`b0 space1`, vertex stage). Widen it,
-  carry the alpha through an interpolant, and let the fragment stage use it. No
-  new bind, no new RHI call — ADR 0037 froze the calls, and this adds none — and
-  `DrawItem` gains the field it is missing. The `static_assert` on the struct
-  size moves with it, which is the layout check doing its job rather than an
-  obstacle. That half is the same whether the alpha ends in a `clip()` or in a
-  blend, which is why it is written down separately from the pass.
-
-  The rest is the pass: after the opaque one, depth-test on and depth-write off,
-  source-alpha blending, sorted back-to-front in `extract` rather than in a
-  backend — M4's third design constraint, and `sortKey` already carries the
-  quantized depth the transparent pass would read descending. The shadow pass
-  keeps drawing everything; whether a half-transparent part should cast a
-  lighter shadow is a separate question and this should not open it.
-
-  The first decision was alpha cutout here and the blended pass at M6; the
-  human moved the blended pass into **M4.5** the same day, on being told what
-  cutout does not do — at a 0.5 cutoff, 0.4 is fully opaque and 0.6 is gone, and
-  nothing fades. The property is named for the thing cutout cannot do. M6 now
-  inherits the pass instead of building it, which is the better trade in both
-  directions: UI's first blended draw arrives already tested against world
-  geometry.
-
-- **There is no crash artifact, and the human has now reported four defects
-  without one (2026-08-20).** `architecture.md` §app promises a "crash handler
-  (minidump + log)"; it does not exist, and `core::log` has no file sink either
-  — every line the engine prints dies with the window. A human running the
-  engine by hand is this project's verification model, and it currently asks
-  that human to report from memory.
-
-  **Amended the same day, by evidence.** The human captured a crash to a file and
-  it held two lines — the two an ordinary successful run prints. `core::log`
-  already `fflush`es after every line, so nothing was lost to buffering: the
-  process died silently, without reaching any C++ error path, which is the
-  signature of an access violation. **A file sink would not have helped at all
-  here.** The ordering below is therefore backwards for this class of crash: the
-  handler is the piece that matters, because it is the only one that runs after
-  the fault and before the process is gone.
-
-  Two pieces:
-
-  - **A file sink for `core::log`.** With a layering constraint: `core` is L0 and
-    `platform::paths()` is L1, so the path is *injected by `app` at boot* rather
-    than resolved downward. The console sink stays exactly as it is — every gate
-    and the conformance runner read it — and the file is an addition, not a
-    replacement. Print its path at startup, or the log nobody can find is the log
-    nobody sends.
-  - **The handler proper.** `SetUnhandledExceptionFilter` plus a minidump on
-    Windows, a signal handler elsewhere. Platform work, and it belongs in
-    `platform` for the same reason the SDL seam does.
-
-  Fourth thing `architecture.md` §app named that no milestone had imported —
-  after the `DebugShell`, the api-dump and the triangle sample. That list is
-  worth reading against reality once, rather than one entry at a time as each is
-  discovered missing.
-
-- **The sun's shadow flickers in `examples/02-meshes`, reported by the human on
-  2026-08-20.** Not anchoring: there is no physics before M5 and nothing in that
-  scene moves itself. What moves is the sun, a pure function of `ClockTime` on
-  the SimClock, and the 47-second camera orbit.
-
-  `renderer_default` fixed the shadow extent deliberately, against the crawl a
-  camera-fitted box produces. Nothing addresses the other half: a directional
-  light that *rotates* turns its own texel grid every tick, so a world point
-  lands on a different texel each frame, and `sampleSunShadow` resolves each tap
-  with a binary `reference <= occluder`. A point sitting near the bias threshold
-  therefore flips between lit and shadowed frame to frame. Texel snapping — the
-  usual answer — fixes translation and not rotation, so it would not help here.
-
-  **Check first, because it is one line if true:** whether the shadow pass and
-  the forward pass read the *same* sun. The map is built from one direction and
-  sampled with another if either takes the tick value while the other takes the
-  interpolated one, and that flickers at exactly the tick rate.
-
-  If the sun is consistent, the fix is a **normal-offset bias** — displacing the
-  sample along the surface normal rather than only in depth is what survives a
-  moving texel grid — with a hardware comparison sampler
-  (`SampleCmpLevelZero`) so a tap degrades instead of switching. Resolution
-  alone only moves the threshold.
-
-- **The inspector crashes on "go" from `RunService.Parent`, reported by the human
-  on 2026-08-20.** Following the reference from a service to the DataModel takes
-  the whole host down. Reading the code did not settle which of the two paths
-  does it, and both are worth checking with a debugger rather than by eye:
-
-  - **The button's guard is on the reference, not on what follows.** `go` checks
-    `reference.valid() && world.alive(reference)` and then selects. Everything
-    after that -- `world.classOf(game)`, the ancestry walk in
-    `collectProperties`, the per-property getter, `formatValue` -- runs against
-    the DataModel, which is the one instance in the world that no test selects.
-  - **The explorer is rooted at `root`, and the selection just went above it.**
-    `drawExplorer` walks from the root it was handed; selecting an ancestor of
-    that root leaves `selection()` outside every row the tree produces. Anything
-    that assumes the selection is reachable from the root breaks exactly here.
-
-  Whatever it turns out to be, the fix is not only the crash: **the DataModel
-  deserves a case in `inspector_tests.cpp`**. 618 lines of tests passed while
-  this shipped, which says the fixture builds a world the panel is then pointed
-  at from below -- and the human clicked the one edge that walks the other way.
-
-- **Next: M4.5, first action — make `Lighting` reachable.** `WorldHost::start`
-  resolves the service before it exists; the fix is boot order, and the test
-  that proves it belongs at the host rather than at the extractor. Everything
-  else in M4.5 is downstream of it, including re-recording the gate artifacts.
-- **M5 does not open until a human approves M4.5.** Not when its gate is green
-  — when the human says so.
+- **Every open defect is in [`docs/defects.md`](docs/defects.md)**, which is
+  append-only and checked by the docs gate for gaps, states and dangling
+  citations. That file exists because three human-reported defects were removed
+  from this one while it was being rewritten to close M4. **A close rewrites this
+  file wholesale; it can no longer take the open list with it.**
+- **D004 — the inspector crash while dragging `Size`/`CFrame` — is still open and
+  still not reproduced.** Two halves are ruled out: the write path driven through
+  zero, negative, 1e30 and infinity with a render extraction every frame, and 25
+  minimize/restore cycles over 900 windowed frames. What remains is the ImGui
+  half, and the crash handler is now in place for the next occurrence — the next
+  report should carry `luaug-crash-<pid>.dmp` and `luaug.log` from beside
+  whatever was being run.
+- **D016 — `BindToClose` has no capped grace period.** A close handler that
+  yields is cut off at the next drain rather than waited for. Scheduled with M5,
+  where shutdown ordering has physics state to care about.
+- **D017 — the `DebugShell` has no memory-category table and no log/REPL pane**,
+  both named by `architecture.md` §app. Scheduled with M6.
+- **D018 — `luaug_net_tests` hung once** on Windows and passed on a re-run. §12
+  quarantines on the second occurrence; this is the entry that makes a second
+  one countable.
+- **M5 does not open until a human approves M4.5.** Not when the gate is green —
+  when the human says so. And not in this session either way (§6).
 - **When M5 opens, its first act is the clang-format gate**, on a quiet tree.
-  M4's brief moved it there deliberately: turning it on requires reformatting the
-  whole C++ tree and pinning a toolchain version, and doing that while the
-  renderer was being written would have bought a milestone of diff noise.
+- **When M5 wires physics: `PivotOffset` is not a centre of mass.** Jolt has its
+  own notion of where a body turns about, and joining them would make hinging a
+  door change how it falls. Said in `components.h` where the field is.
+- **A golden cannot detect a defect that was present when it was recorded.** It
+  asserts stability, not correctness, and it *feels* like the other one. The
+  shape that catches this is a differential: change one input the output must
+  depend on, and require the output to change.
+- **Test the step that resolves, not the step that computes.** M4's environment
+  assertions all passed against a `Lighting` id the test made itself, so the one
+  broken step was the one nothing covered — because covering it needs a host and
+  constructing a component does not.
+- **A plausible default hides a defect for a milestone.** An unresolved
+  `Lighting` looked like a lit scene rather than a black one, so nothing ever
+  asked.
+- **The tail carries what the median cannot see.** Re-measuring at 1080p moved
+  the median not at all and the worst frame by a factor of four on two cores.
+- **An audit scoped to one module is not an audit.** The sweep that "found"
+  `Model.PrimaryPart` unread searched `engine/render` for a value consumed in
+  `engine/script`.
 - **A build directory is evidence of what was built once, never of what would be
   built now** — and a failed link is worse: LNK1168 moves the executable's
   timestamp before failing, so Ninja considers it current and CTest runs the old
-  binary. It cost four cycles and one wrong measurement in M4. `localgate.ps1`
-  clears orphaned hosts now; the discipline that remains is to never measure
-  without watching the build succeed first.
-- **A gate that can pass while doing nothing keeps being built by accident.**
-  Nine instances in five milestones, three of them in M4 and two of those mine.
-  The reliable test is to break the thing the check names and watch it fail.
+  binary.
+- **A gate that can pass while doing nothing keeps being built by accident.** Ten
+  instances in six milestones, and the tenth certified a whole milestone.
 - **The Linux tier is the only thing between this repository and a whole family
-  of defects.** Six Clang-only build failures in M4 —
-  `-Wmissing-field-initializers` and `-Wdouble-promotion` — none of which MSVC
-  mentions.
-- **Read the vendored `CMakeLists.txt`, not the library's documentation.** M4's
-  first three findings came from doing that at kickoff, and each would have cost
-  a milestone at the gate instead of an hour at the start.
+  of defects** MSVC does not mention.
 - **`fs.watch` cannot be trusted on either platform, and Linux is the worse
   one** — a change below the watched directory produces no event at all there.
-  Anything that watches files in a later milestone watches every directory and
-  rescans.
 - Carried forward, none blocking:
   - **Two of the five generated artifacts api-design.md §5 lists do not exist**:
-    the typed `@std`/`@luaug` stubs and `docs/reference/**`. Both are DX surface
-    with no gate behind them.
-  - **The shipping profile does not configure**, and also needs a
-    bytecode-loading path that does not exist. Scheduled with `luaug build` at
-    M8.
-  - **DXIL produced on Linux is never verified as signed.** No consumer until a
-    Linux job produces a Windows shader pack — M8.
+    the typed `@std`/`@luaug` stubs and `docs/reference/**`.
+  - **The shipping profile does not configure**, and needs a bytecode-loading
+    path that does not exist. Scheduled with `luaug build` at M8.
+  - **DXIL produced on Linux is never verified as signed.** M8.
   - **The message catalog does not load inside the APK.** `Catalog::loadFromFile`
-    uses `std::filesystem`; on a phone an engine error prints as a key hash plus
-    its `detail`, which for a device failure is the `SDL_GetError()` that answers
-    the question. `loadFromJson` plus `platform::readTextFile` is the fix.
+    uses `std::filesystem`; `loadFromJson` plus `platform::readTextFile` is the
+    fix.
   - **`architecture.md` §9 lists a clang-format gate that does not exist** —
     scheduled at the start of M5, above.
 
 ## Blocked — needs human
 
-- **M4 sign-off.** All five gate items are green plus the three non-gate
-  obligations, the Gate Record is in the brief, and `milestone/m4` is tagged.
-  The Android device checkpoint passed on 2026-08-20.
+- **M4.5 sign-off.** The gate is green on both tiers, the Gate Record is in the
+  brief, and the three additions the roadmap asked for were each verified by
+  reintroducing the defect they exist to catch. **Nothing here is marked
+  complete and nothing is tagged**, per the roadmap's own instruction and
+  MASTER_PROMPT §6. The deliverable to look at is
+  [`docs/images/daystrip.png`](docs/images/daystrip.png): one day, fixed camera,
+  the sun crossing and the pane fading.
+- **M4 sign-off, and whether `milestone/m4` stands.** Its five gate items are now
+  green against re-recorded artifacts rather than against the defective ones.
 
 ## Decisions pending ADR
 
@@ -332,6 +156,44 @@ while nothing acts on it.
 Entries for the planning session and for M0, M1, M2 and M3 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
+
+- **2026-08-20 (session 9, Claude Opus): M4.5, awaiting sign-off.** Ran the §2
+  boot sequence, found the repo green, wrote `docs/briefs/m4.5-kickoff.md`, and
+  worked its build order. `Lighting` became a boot service; the capture backend
+  learned to record what a uniform block CONTAINS rather than how big it is;
+  `clock_differential` renders one scene at two clock times and requires the
+  frames to differ; the shadow grid moves in whole texels; `Transparency` fades
+  through a sorted blended pass; `PVInstance` arrived with a pivot that can
+  hinge; the crash handler and log file `architecture.md` §app promised at M0
+  exist and are tested by a process that faults on purpose; `Property.Inert`
+  makes a stored-and-unread property say so; `docs/defects.md` is append-only and
+  gate-enforced. Every M4 artifact re-recorded. The human amended the scope twice
+  mid-session (the `PrimaryPart` retraction, then `PVInstance`); both are in the
+  brief, the second appended with the note that it arrived after the brief was
+  written.
+  Learned, and the one to keep: **the blocking render gate recorded the SIZE of
+  every uniform block and never its contents.** Every matrix, light and material
+  colour a frame carries goes through that one call, so six goldens across three
+  camera angles and two lighting states were green for a whole milestone while
+  the sun stood still. Behind it sits the more general thing: **a golden asserts
+  stability, not correctness, and it feels like the other one.** Re-record it
+  against a defect and it certifies the defect. What catches that is a
+  differential -- change one input the output must depend on, require the output
+  to change -- and it costs one CTest.
+  Also learned: **the test was at the level that was easy to write.** M4's
+  environment assertions all passed against a `Lighting` id the test built
+  itself, so the resolving step -- the broken one -- was the only step nothing
+  covered. **A plausible default hides a defect for a milestone**: an unresolved
+  `Lighting` renders a lit scene rather than a black one. **The tail carries what
+  the median cannot see** -- re-measuring moved the median not at all and the
+  worst frame by a factor of four on two cores. **The debug path had been drawing
+  in the wrong space since M4**, found by looking at a screenshot rather than by
+  any test, because the boxes were present and a test that counts them passes.
+  And **an audit scoped to one module is not an audit**: the sweep that "found"
+  `Model.PrimaryPart` unread searched `engine/render` for a value consumed in
+  `engine/script`.
+  Next: **stop for M4.5 human review** (§6, and the roadmap says it again for
+  this milestone). Do not tag, do not write COMPLETE, do not open M5.
 
 - **2026-08-20 (session 8, Claude Opus): M4 complete, awaiting sign-off.** The
   renderer, from a content URN to a lit pixel: `engine/asset` with a glTF

@@ -61,9 +61,15 @@ compared against: `examples/02-meshes` at 960x540, thirty frames, rendered in th
 Tier-2 container on Mesa's software Vulkan device (`llvmpipe (LLVM 20.1.2, 256
 bits)`).
 
-It carries the whole pass list -- shadow map, sky, forward PBR, tonemap -- and
-the image agrees with the Tier-1 one on everything that matters: lit ground,
-cast shadows, the four materials reading as the metals and dielectrics they are.
+It carries the whole pass list -- shadow map, sky, forward PBR, the blended pass
+and tonemap -- and the image agrees with the Tier-1 one on everything that
+matters: lit ground, cast shadows, the four materials reading as the metals and
+dielectrics they are, and the pane fading rather than switching.
+
+**Re-recorded at M4.5**, with the rest of M4's artifacts, for the reason that
+milestone exists: the first one was rendered by a renderer that never read
+`Lighting`, so it showed a scene lit by a sun standing straight up rather than
+by the one its script describes.
 
 **Nothing compares it, deliberately.** A software rasterizer's output is not
 bit-identical to a discrete GPU's, and the pixel gate's own note above explains
@@ -79,3 +85,19 @@ failures, which is how it emerged that `-LE gpu-golden` -- written into
 `engine/app/CMakeLists.txt` as the thing that must happen to these tests -- had
 never actually been applied on the Linux tier. The absence of a device had been
 doing that job by accident.
+
+## `daystrip/` — the M4.5 deliverable, as one image
+
+A copy of `examples/02-meshes`'s scene with the orbit taken out, so the camera
+holds still and `ClockTime` is the only thing that changes. `scripts/daystrip.ps1`
+renders it once per hour of the day and lays the frames side by side with
+`imgstrip`, producing `docs/images/daystrip.png`.
+
+The strip exists because the milestone's claim is about change over time -- the
+sun crossing, shadows lengthening, `Transparency` passing through every value --
+and no single screenshot can carry that. A fixed camera is what makes it
+readable: with an orbit in it, nobody can say which variable moved the shadow.
+
+`ClockTime` there is a function of the tick count, so `--frames=N` selects the
+hour and the host's exit screenshot is that hour's frame. That is why one frame
+needs one run and why no new flag was added to get it.

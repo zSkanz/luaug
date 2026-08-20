@@ -64,11 +64,12 @@ Captured with `luaug-host --bench=tests/bench --bench-repeats=5`, median of
 | M3 | `tests/hotreload` 500-instance project (5 models × 100 parts, all moving) | `win-msvc-dev` | reload span, worst of 3 | **1.6 ms** | 500 ms |
 | M3 | `tests/hotreload` 500-instance project | `linux-clang-dev` (container) | reload span, worst of 3 | 0.7 ms | 500 ms |
 
-### M4 — the renderer
+### M4.5 — the renderer, re-measured against a scene it actually reads
 
 Captured with `luaug-host <project> --headless --width=1920 --height=1080
---frames=400 --exit --frame-stats`, median of the 390 frames after ten warm-up
-frames, three runs. The spread across the three runs was under 5%.
+--frames=400 --exit --frame-stats`, median of the 389 frames after ten warm-up
+frames, three runs. The spread across the three runs was under 4% (0.4530,
+0.4578 and 0.4682 ms).
 
 **Headless, and it matters for reading these numbers.** A windowed run presents
 through the swapchain and is pinned to the refresh rate, which would report
@@ -81,14 +82,39 @@ present, vsync, and swapchain acquisition.
 asks for the *why* next to the *what*: a frame that got slower with the same
 draw count is a different problem from one that got slower because it drew more.
 
+**The M4 rows below are superseded and kept.** Every one of them was measured
+against a renderer that never read `Lighting`: the sun stood straight up, fog was
+off, and the shadow map was built from a direction nothing in the scene had
+asked for. A number recorded against a defect is not a baseline, and M5's "no
+regression greater than 10%" clause would have been measured against it. They
+stay visible rather than being edited in place, because a superseded measurement
+that quietly becomes the current one is how a baseline stops meaning anything.
+
 | Milestone | Scene | Preset | Metric | Value | Budget/Gate |
 |---|---|---|---|---|---|
-| M4 | `examples/02-meshes` (4 meshes, 4 materials, sun + 1 point light, shadow map, HDR + tonemap) | `win-msvc-dev` | median frame, 1080p | **0.46 ms** | 16.7 ms — a 60 fps frame |
-| M4 | `examples/02-meshes` | `win-msvc-dev` | worst frame | 2.06 ms | — |
-| M4 | `examples/02-meshes` | `win-msvc-dev` | draws / triangles | 8 / 48 | — |
-| M4 | `examples/02-meshes`, **pinned to 2 cores** | `win-msvc-dev` | median frame, 1080p | 0.42 ms | — |
-| M4 | `examples/02-meshes`, pinned to 2 cores | `win-msvc-dev` | worst frame | 6.65 ms | — |
-| M4 | `tests/rendercapture/meshes` (the gate scene, 2 mesh parts) | `win-msvc-dev` | median frame, 1080p | 0.46 ms | — |
+| **M4.5** | `examples/02-meshes` (4 meshes + a transparent pane, 5 materials, sun + 1 point light, shadow map, opaque and blended passes, HDR + tonemap) | `win-msvc-dev` | median frame, 1080p | **0.46 ms** | 16.7 ms — a 60 fps frame |
+| M4.5 | `examples/02-meshes` | `win-msvc-dev` | worst frame | 1.79 ms | — |
+| M4.5 | `examples/02-meshes` | `win-msvc-dev` | draws / triangles | 10 / 60 | — |
+| M4.5 | `examples/02-meshes`, **pinned to 2 cores** | `win-msvc-dev` | median frame, 1080p | 0.42 ms | — |
+| M4.5 | `examples/02-meshes`, pinned to 2 cores | `win-msvc-dev` | worst frame | 1.77 ms | — |
+| M4.5 | `tests/rendercapture/meshes` (the gate scene) | `win-msvc-dev` | median frame, 1080p | 0.48 ms | — |
+| ~~M4~~ | `examples/02-meshes` (4 meshes, 4 materials, sun + 1 point light, shadow map, HDR + tonemap) | `win-msvc-dev` | median frame, 1080p | 0.46 ms | superseded — measured with `Lighting` unreachable |
+| ~~M4~~ | `examples/02-meshes` | `win-msvc-dev` | worst frame | 2.06 ms | superseded |
+| ~~M4~~ | `examples/02-meshes` | `win-msvc-dev` | draws / triangles | 8 / 48 | superseded |
+| ~~M4~~ | `examples/02-meshes`, pinned to 2 cores | `win-msvc-dev` | median frame, 1080p | 0.42 ms | superseded |
+| ~~M4~~ | `examples/02-meshes`, pinned to 2 cores | `win-msvc-dev` | worst frame | 6.65 ms | superseded |
+| ~~M4~~ | `tests/rendercapture/meshes` (the gate scene, 2 mesh parts) | `win-msvc-dev` | median frame, 1080p | 0.46 ms | superseded |
+
+**What re-measuring actually changed, and it is worth reading before the next
+one.** The median did not move: 0.46 ms then, 0.46 ms now, with a whole second
+pass and two more draws added. What moved is the **worst frame, from 2.06 ms to
+1.79 ms** — and on two cores from 6.65 ms to 1.77 ms, which is a factor of four.
+Nothing in this milestone made a frame cheaper; what changed is that the shadow
+map's texel grid no longer slides every frame, so the shadow pass's memory
+traffic stopped varying with the camera. The lesson is the one the M4 row already
+half-stated: at this scene size the median measures fixed cost and the tail
+measures whether something is thrashing. **The tail was the number carrying the
+defect, and the median never noticed.**
 
 **What the numbers say, and what they do not.** 0.46 ms is 2.8% of a 60 Hz
 frame for a scene with a shadow pass, a sky, a forward PBR pass and a tonemap.
