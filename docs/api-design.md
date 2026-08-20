@@ -718,6 +718,14 @@ Leaving is fully observed before arriving, and the subtree is told last, once
 its new ancestry is already true of it. Steps 1–2 are absent when there was no
 old parent and steps 3–4 when there is no new one.
 
+A `SetAttribute` that changes something raises two fires, and they are ordered
+too: the signal from `GetAttributeChangedSignal(name)` first, then the class's
+own `AttributeChanged`. The named signal is the narrower subscription — it asked
+about *this* attribute — while the catch-all is what routes, and routing after
+the specific fact has been observed is the order that composes. A property write
+raises one fire, because there is no catch-all `Changed` to pair it with
+(divergence #8).
+
 **A write enqueues only when something changed.** Assigning a property or an
 attribute the value it already holds enqueues nothing.
 `GetPropertyChangedSignal` and `AttributeChanged` are past-tense facts about a

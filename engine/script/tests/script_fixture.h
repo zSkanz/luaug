@@ -13,9 +13,13 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "class_descriptors.gen.h"
 #include "luaug/core/i18n.h"
+#include "luaug/core/log.h"
+#include "luaug/core/phase.h"
 #include "luaug/core/name_atom.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/enum_registry.h"
@@ -24,6 +28,8 @@
 
 namespace luaug::script::testing
 {
+
+using core::usize;
 
 struct Fixture
 {
@@ -44,10 +50,26 @@ struct Fixture
         world.emplace(classes, enums, atoms, 1234u);
         runtime.emplace(*world);
         booted = !runtime->boot().has_value();
+
+        // A script that yields and fails *after* being resumed reports through
+        // the log rather than through a return value -- an error in a handler or
+        // a task is contained by design (api-design.md §3.1). Capturing the log
+        // is the only way a test can see one, and a test that could not see one
+        // would pass for every assertion made after the first `task.wait`.
+        //
+        // The sink is process-global, so two live fixtures fight over it and the
+        // younger wins. No test below keeps two alive while asserting on output.
+        core::setLogSink([this](core::LogLevel level, std::string_view text) {
+            logged.emplace_back(level, std::string(text));
+        });
     }
+
+    ~Fixture() { core::resetLogSink(); }
 
     Fixture(const Fixture&) = delete;
     Fixture& operator=(const Fixture&) = delete;
+
+    std::vector<std::pair<core::LogLevel, std::string>> logged;
 
     // Constructed after the registries are populated, because
     // `registerInstanceBinding` resolves every method against them at boot.
@@ -78,6 +100,53 @@ struct Fixture
         if (!error.has_value())
             return false;
         return error->message.find(std::string("[").append(key).append("]")) != std::string::npos;
+    }
+
+    // Everything logged at `Error`, joined. Empty is the assertion that nothing
+    // a handler or a task did after resuming went wrong.
+    [[nodiscard]] std::string errors() const
+    {
+        std::string out;
+        for (const auto& [level, text] : logged)
+        {
+            if (level != core::LogLevel::Error)
+                continue;
+            if (!out.empty())
+                out.push_back('\n');
+            out.append(text);
+        }
+        return out;
+    }
+
+    [[nodiscard]] bool logContains(std::string_view needle) const
+    {
+        for (const auto& [level, text] : logged)
+        {
+            (void)level;
+            if (text.find(needle) != std::string::npos)
+                return true;
+        }
+        return false;
+    }
+
+    // One frame, in the shape architecture.md §3 describes: the sim clock
+    // advances, a resumption point drains, the task-resume phase runs between
+    // `PostSimulation` and `Heartbeat`, and whatever it deferred drains at
+    // `Heartbeat`. The scheduler in `app` will drive exactly this; until it
+    // exists the tests are the only driver, and driving it by hand is what makes
+    // `task.wait` observable from a C++ test at all.
+    void tick(usize count = 1)
+    {
+        for (usize index = 0; index < count; ++index)
+        {
+            scene::EngineState& state = world->engineState();
+            state.tick += 1;
+            state.simTime = static_cast<core::f64>(state.tick) * state.fixedTimestep;
+
+            runtime->drain(core::Phase::PreSimulation);
+            runtime->resumeTimers();
+            runtime->drain(core::Phase::Heartbeat);
+        }
     }
 };
 

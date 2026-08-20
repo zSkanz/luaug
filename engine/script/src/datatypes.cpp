@@ -76,60 +76,6 @@ void pushNumber(lua_State* L, f32 value)
     lua_pushnumber(L, static_cast<f64>(value));
 }
 
-// The shared `__index` and `__namecall` every datatype tag uses. The tag is the
-// closure's upvalue rather than a template parameter so that there is one copy
-// of the dispatch and not one per type -- the tables it scans are what differ.
-[[nodiscard]] UserdataTag closureTag(lua_State* L)
-{
-    return static_cast<UserdataTag>(lua_tointeger(L, lua_upvalueindex(1)));
-}
-
-int memberIndex(lua_State* L)
-{
-    const UserdataTag tag = closureTag(L);
-
-    int atom = -1;
-    // No number-to-string coercion, so it never allocates and never invalidates
-    // the stack -- which is what makes it safe in a generic C `__index`
-    // (`lapi.cpp:516`). A non-string key returns null and falls through to the
-    // unknown-member raise, which is the right answer for `cf[1]`.
-    const char* key = lua_tostringatom(L, 2, &atom);
-    if (key != nullptr)
-    {
-        const VmContext& ctx = context(L);
-        if (const MemberEntry* entry = findMember(ctx.getters[static_cast<usize>(tag)], ctx.resolve(atom)))
-            return entry->fn(L);
-    }
-
-    raiseUnknownMember(L, tag, key);
-}
-
-int memberNamecall(lua_State* L)
-{
-    const UserdataTag tag = closureTag(L);
-
-    int atom = -1;
-    const char* method = lua_namecallatom(L, &atom);
-    if (method != nullptr)
-    {
-        const VmContext& ctx = context(L);
-        if (const MemberEntry* entry = findMember(ctx.methods[static_cast<usize>(tag)], ctx.resolve(atom)))
-            return entry->fn(L);
-    }
-
-    raiseUnknownMember(L, tag, method);
-}
-
-int refuseWrite(lua_State* L)
-{
-    // Every datatype in the v1 surface is immutable: `cf.Position = v` is not a
-    // slow way of moving a part, it is a mistake, and the value it would write
-    // to is a copy the caller is about to drop.
-    int atom = -1;
-    const char* key = lua_tostringatom(L, 2, &atom);
-    raiseUnknownMember(L, closureTag(L), key);
-}
-
 // --- CFrame ------------------------------------------------------------------
 
 int cframeGetPosition(lua_State* L)
@@ -1021,39 +967,6 @@ void addMember(MemberTable& table, core::AtomTable& atoms, const char* name, lua
     table.push_back(MemberEntry{atoms.intern(name), fn});
 }
 
-// Creates the tag's metatable, installs it, and leaves it on the stack for the
-// caller to populate. Registration first and population second is what the
-// vendored conformance suite does, and it works because the metatable is stored
-// by pointer -- later mutation is visible (`lapi.cpp:1583`).
-void beginMetatable(lua_State* L, UserdataTag tag)
-{
-    lua_createtable(L, 0, 8);
-    lua_pushstring(L, typeName(tag));
-    lua_setfield(L, -2, "__type");
-
-    lua_pushvalue(L, -1);
-    lua_setuserdatametatable(L, static_cast<int>(tag));
-}
-
-void setMetamethod(lua_State* L, const char* event, lua_CFunction fn, UserdataTag tag)
-{
-    // The tag rides along as an upvalue so that one `__index` serves every
-    // datatype: what differs between them is the member table it scans, and
-    // that is keyed by tag.
-    lua_pushinteger(L, static_cast<int>(tag));
-    lua_pushcclosure(L, fn, event, 1);
-    lua_setfield(L, -2, event);
-}
-
-// `lua_setreadonly` after populating, because `luaL_sandbox` never touches a tag
-// metatable (`Conformance.test.cpp:910`) -- a datatype's metatable is otherwise
-// writable from a script that can reach it through `getmetatable`.
-void endMetatable(lua_State* L)
-{
-    lua_setreadonly(L, -1, true);
-    lua_pop(L, 1);
-}
-
 void registerCFrame(lua_State* L, VmContext& ctx, core::AtomTable& atoms)
 {
     MemberTable& getters = ctx.getters[static_cast<usize>(UserdataTag::CFrame)];
@@ -1077,17 +990,14 @@ void registerCFrame(lua_State* L, VmContext& ctx, core::AtomTable& atoms)
     addMember(methods, atoms, "ToAxisAngle", cframeToAxisAngle);
     addMember(methods, atoms, "ToQuaternion", cframeToQuaternion);
 
-    beginMetatable(L, UserdataTag::CFrame);
-    setMetamethod(L, "__index", memberIndex, UserdataTag::CFrame);
-    setMetamethod(L, "__newindex", refuseWrite, UserdataTag::CFrame);
-    setMetamethod(L, "__namecall", memberNamecall, UserdataTag::CFrame);
+    beginTagMetatable(L, UserdataTag::CFrame);
     lua_pushcfunction(L, cframeMul, "__mul");
     lua_setfield(L, -2, "__mul");
     lua_pushcfunction(L, cframeEq, "__eq");
     lua_setfield(L, -2, "__eq");
     lua_pushcfunction(L, cframeTostring, "__tostring");
     lua_setfield(L, -2, "__tostring");
-    endMetatable(L);
+    endTagMetatable(L);
 
     const luaL_Reg constructors[] = {
         {"new", cframeNew},
@@ -1117,15 +1027,7 @@ void registerColor3(lua_State* L, VmContext& ctx, core::AtomTable& atoms)
     addMember(methods, atoms, "ToHSV", color3ToHsv);
     addMember(methods, atoms, "ToHex", color3ToHex);
 
-    beginMetatable(L, UserdataTag::Color3);
-    setMetamethod(L, "__index", memberIndex, UserdataTag::Color3);
-    setMetamethod(L, "__newindex", refuseWrite, UserdataTag::Color3);
-    setMetamethod(L, "__namecall", memberNamecall, UserdataTag::Color3);
-    lua_pushcfunction(L, color3Eq, "__eq");
-    lua_setfield(L, -2, "__eq");
-    lua_pushcfunction(L, color3Tostring, "__tostring");
-    lua_setfield(L, -2, "__tostring");
-    endMetatable(L);
+    installTagMetatable(L, UserdataTag::Color3, color3Eq, color3Tostring);
 
     const luaL_Reg constructors[] = {
         {"new", color3New},
@@ -1147,14 +1049,10 @@ void registerRandom(lua_State* L, VmContext& ctx, core::AtomTable& atoms)
     addMember(methods, atoms, "NextUnitVector", randomNextUnitVector);
     addMember(methods, atoms, "Clone", randomClone);
 
-    beginMetatable(L, UserdataTag::Random);
-    // No `__index` getters and no `__eq`: a generator has no readable fields and
-    // no value equality -- two generators at the same point in the same stream
-    // are still two generators, and a script comparing them wants identity.
-    setMetamethod(L, "__index", memberIndex, UserdataTag::Random);
-    setMetamethod(L, "__newindex", refuseWrite, UserdataTag::Random);
-    setMetamethod(L, "__namecall", memberNamecall, UserdataTag::Random);
-    endMetatable(L);
+    // No getters and no `__eq`: a generator has no readable fields and no value
+    // equality -- two generators at the same point in the same stream are still
+    // two generators, and a script comparing them wants identity.
+    installTagMetatable(L, UserdataTag::Random, nullptr, nullptr);
 
     const luaL_Reg constructors[] = {{"new", randomNew}, {nullptr, nullptr}};
     luaL_register(L, "Random", constructors);
@@ -1171,34 +1069,29 @@ void registerEnumTypes(lua_State* L, VmContext& ctx, core::AtomTable& atoms)
 
     addMember(ctx.methods[static_cast<usize>(UserdataTag::Enum)], atoms, "GetEnumItems", enumObjectGetEnumItems);
 
-    beginMetatable(L, UserdataTag::EnumItem);
-    setMetamethod(L, "__index", memberIndex, UserdataTag::EnumItem);
-    setMetamethod(L, "__newindex", refuseWrite, UserdataTag::EnumItem);
-    lua_pushcfunction(L, enumItemEq, "__eq");
-    lua_setfield(L, -2, "__eq");
-    lua_pushcfunction(L, enumItemTostring, "__tostring");
-    lua_setfield(L, -2, "__tostring");
-    endMetatable(L);
+    installTagMetatable(L, UserdataTag::EnumItem, enumItemEq, enumItemTostring);
 
-    beginMetatable(L, UserdataTag::Enum);
-    // Its own `__index` rather than the shared one: an enum object's members are
-    // its items, which come from the registry rather than from a member table.
+    // An enum object overrides the shared `__index`: its members are its items,
+    // which come from the registry rather than from a member table. `__namecall`
+    // stays shared in spirit but is written out here for the same reason -- the
+    // shared one would look the method up in the tag's table, which is where
+    // `GetEnumItems` in fact lives, so this override exists only to keep the
+    // unknown-member message naming `Enum`.
+    beginTagMetatable(L, UserdataTag::Enum);
     lua_pushcfunction(L, enumObjectIndex, "__index");
     lua_setfield(L, -2, "__index");
-    setMetamethod(L, "__newindex", refuseWrite, UserdataTag::Enum);
     lua_pushcfunction(L, enumObjectNamecall, "__namecall");
     lua_setfield(L, -2, "__namecall");
     lua_pushcfunction(L, enumObjectEq, "__eq");
     lua_setfield(L, -2, "__eq");
     lua_pushcfunction(L, enumObjectTostring, "__tostring");
     lua_setfield(L, -2, "__tostring");
-    endMetatable(L);
+    endTagMetatable(L);
 
-    beginMetatable(L, UserdataTag::Enums);
+    beginTagMetatable(L, UserdataTag::Enums);
     lua_pushcfunction(L, enumsIndex, "__index");
     lua_setfield(L, -2, "__index");
-    setMetamethod(L, "__newindex", refuseWrite, UserdataTag::Enums);
-    endMetatable(L);
+    endTagMetatable(L);
 }
 
 void registerVector(lua_State* L)

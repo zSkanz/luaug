@@ -88,6 +88,12 @@ struct EngineState
     // Seconds, constant for the whole tick and advanced by the scheduler
     // (api-design.md §2.1).
     f64 simTime = 0.0;
+    // The tick index `simTime` corresponds to. Held as an integer because every
+    // `task` deadline is computed in whole ticks and never by comparing floats:
+    // at dt = 1/60, `1 / (1/60)` is 60.000000000000007, and a deadline derived
+    // from that float is a `task.wait(1)` that lasts 61 ticks (api-design.md
+    // §3.2).
+    u64 tick = 0;
     f64 fixedTimestep = 1.0 / 60.0;
     bool paused = false;
     bool overlayVisible = false;

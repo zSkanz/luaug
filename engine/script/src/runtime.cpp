@@ -14,6 +14,8 @@
 #include "luaug/script/datatypes.h"
 #include "luaug/script/instance_binding.h"
 #include "luaug/script/sandbox.h"
+#include "luaug/script/signals.h"
+#include "luaug/script/tasks.h"
 
 namespace luaug::script
 {
@@ -97,13 +99,19 @@ struct ScriptRuntime::Impl
     // here, and by a stable address: the callbacks hold a pointer to it for the
     // life of the state.
     VmContext context;
+    // Owned here rather than by the context, because this is the object whose
+    // lifetime brackets the `lua_State` -- the context is a view the bindings
+    // reach through `lua_callbacks`.
+    SignalSystem signals;
+    TaskScheduler tasks;
     MethodCoverage coverage;
-    u32 drainDepth = 0;
 };
 
 ScriptRuntime::ScriptRuntime(scene::World& world) : m_world(world), m_impl(std::make_unique<Impl>())
 {
     m_impl->context.world = &world;
+    m_impl->context.signals = &m_impl->signals;
+    m_impl->context.tasks = &m_impl->tasks;
 }
 
 ScriptRuntime::~ScriptRuntime()
@@ -156,6 +164,8 @@ std::optional<core::EngineError> ScriptRuntime::boot()
     // per `Proto` at load time and a deopt is permanent (binding.h, rule 2).
     m_impl->coverage = registerInstanceBinding(L);
     registerDatatypes(L);
+    registerSignals(L);
+    registerTasks(L);
     registerEnums(L);
 
     sealGlobals(L);
@@ -237,17 +247,30 @@ std::optional<core::EngineError> ScriptRuntime::runSource(std::string_view sourc
 
 void ScriptRuntime::drain(core::Phase)
 {
-    // The scene's POD facts become signal fires here, and the queue then drains
-    // to fixpoint (api-design.md §3.1). Nothing is connected yet -- the Instance
-    // bindings that create connections are the next step -- so this currently
-    // consumes the facts and runs no handlers, which is what an unwatched world
-    // should cost.
-    (void)m_world.changes().take();
+    if (m_impl->state == nullptr)
+        return;
+
+    // Anything the ENGINE raised outside a binding -- a scheduler write, a
+    // future physics step. A script's own mutations were converted the moment
+    // they happened, because a fire captures its connection list when it is
+    // raised and not when it is drained (api-design.md §3.1).
+    flushSceneChanges(m_impl->state);
+    (void)drainDeferred(m_impl->state);
+
+    // After the drain, which is what gives a `Destroying` handler a live handle
+    // to work with and what makes every handle to the corpse stop resolving
+    // afterwards (divergence #25).
     m_world.retireDestroyed();
 }
 
-void ScriptRuntime::resumeTimers(f64)
+void ScriptRuntime::resumeTimers()
 {
+    if (m_impl->state == nullptr)
+        return;
+    // Between `PostSimulation` and `Heartbeat` (architecture.md §3). Anything
+    // these resumptions defer drains at `Heartbeat`, which is the drain that
+    // follows this call.
+    resumeDueTimers(m_impl->state, m_world.engineState().tick);
 }
 
 void ScriptRuntime::fireEvent(core::InstanceId, core::NameAtom, f64)
@@ -256,7 +279,7 @@ void ScriptRuntime::fireEvent(core::InstanceId, core::NameAtom, f64)
 
 u32 ScriptRuntime::deferredDepth() const noexcept
 {
-    return m_impl->drainDepth;
+    return m_impl->state == nullptr ? 0u : currentDepth(m_impl->state);
 }
 
 lua_State* ScriptRuntime::state() const noexcept

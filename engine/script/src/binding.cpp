@@ -89,4 +89,110 @@ void raiseUnknownMember(lua_State* L, UserdataTag tag, const char* member)
     raise(L, LUAUG_TR("script.err.unknown_member"), args);
 }
 
+namespace
+{
+
+// The tag rides along as an upvalue rather than as a template parameter, so
+// there is one copy of each dispatch function and not one per type: what differs
+// between the datatypes is the member table each scans, and that is keyed by tag.
+[[nodiscard]] UserdataTag closureTag(lua_State* L)
+{
+    return static_cast<UserdataTag>(lua_tointeger(L, lua_upvalueindex(1)));
+}
+
+int memberIndex(lua_State* L)
+{
+    const UserdataTag tag = closureTag(L);
+
+    int atom = -1;
+    // No number-to-string coercion, so it never allocates and never invalidates
+    // the stack -- which is what makes it safe in a generic C `__index`
+    // (`lapi.cpp:516`). A non-string key returns null and falls through to the
+    // unknown-member raise, which is the right answer for `cf[1]`.
+    const char* key = lua_tostringatom(L, 2, &atom);
+    if (key != nullptr)
+    {
+        const VmContext& ctx = context(L);
+        if (const MemberEntry* entry = findMember(ctx.getters[static_cast<usize>(tag)], ctx.resolve(atom)))
+            return entry->fn(L);
+    }
+
+    raiseUnknownMember(L, tag, key);
+}
+
+int memberNamecall(lua_State* L)
+{
+    const UserdataTag tag = closureTag(L);
+
+    int atom = -1;
+    const char* method = lua_namecallatom(L, &atom);
+    if (method != nullptr)
+    {
+        const VmContext& ctx = context(L);
+        if (const MemberEntry* entry = findMember(ctx.methods[static_cast<usize>(tag)], ctx.resolve(atom)))
+            return entry->fn(L);
+    }
+
+    raiseUnknownMember(L, tag, method);
+}
+
+int refuseWrite(lua_State* L)
+{
+    // Every value type in the v1 surface is immutable: `cf.Position = v` is not
+    // a slow way of moving a part, it is a mistake, and the value it would write
+    // to is a copy the caller is about to drop.
+    int atom = -1;
+    const char* key = lua_tostringatom(L, 2, &atom);
+    raiseUnknownMember(L, closureTag(L), key);
+}
+
+void setDispatch(lua_State* L, const char* event, lua_CFunction fn, UserdataTag tag)
+{
+    lua_pushinteger(L, static_cast<int>(tag));
+    lua_pushcclosure(L, fn, event, 1);
+    lua_setfield(L, -2, event);
+}
+
+} // namespace
+
+void beginTagMetatable(lua_State* L, UserdataTag tag)
+{
+    lua_createtable(L, 0, 8);
+    lua_pushstring(L, typeName(tag));
+    lua_setfield(L, -2, "__type");
+
+    lua_pushvalue(L, -1);
+    lua_setuserdatametatable(L, static_cast<int>(tag));
+
+    setDispatch(L, "__index", memberIndex, tag);
+    setDispatch(L, "__newindex", refuseWrite, tag);
+    // Named `__namecall` on purpose: `laux.cpp:42` special-cases exactly this
+    // debug name so an argument error reports the *method* rather than the
+    // metamethod. It is free, and it is the difference between a usable message
+    // and a confusing one.
+    setDispatch(L, "__namecall", memberNamecall, tag);
+}
+
+void endTagMetatable(lua_State* L)
+{
+    lua_setreadonly(L, -1, true);
+    lua_pop(L, 1);
+}
+
+void installTagMetatable(lua_State* L, UserdataTag tag, lua_CFunction equals, lua_CFunction tostring)
+{
+    beginTagMetatable(L, tag);
+    if (equals != nullptr)
+    {
+        lua_pushcfunction(L, equals, "__eq");
+        lua_setfield(L, -2, "__eq");
+    }
+    if (tostring != nullptr)
+    {
+        lua_pushcfunction(L, tostring, "__tostring");
+        lua_setfield(L, -2, "__tostring");
+    }
+    endTagMetatable(L);
+}
+
 } // namespace luaug::script

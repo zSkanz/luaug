@@ -54,6 +54,9 @@ class World;
 namespace luaug::script
 {
 
+class SignalSystem;
+class TaskScheduler;
+
 using core::f32;
 using core::f64;
 using core::i16;
@@ -154,6 +157,12 @@ struct VmContext
 {
     scene::World* world = nullptr;
 
+    // Owned by `ScriptRuntime`, whose lifetime is the only one that brackets the
+    // `lua_State`. Pointers rather than values so that `binding.h` -- which
+    // every binding includes -- does not have to carry the queue's definition.
+    SignalSystem* signals = nullptr;
+    TaskScheduler* tasks = nullptr;
+
     // Indexed by Luau atom; holds the engine `NameAtom` id for the same text.
     // Grown by `useratom` as the VM interns each name, and never shrunk: an
     // atom is assigned once per string for the life of the state.
@@ -209,6 +218,23 @@ struct VmContext
 [[nodiscard]] VmContext& context(lua_State* L) noexcept;
 
 [[nodiscard]] const MemberEntry* findMember(const MemberTable& table, core::NameAtom name) noexcept;
+
+// Creates the tag's metatable, registers it, and installs the shared
+// `__index`/`__newindex`/`__namecall` that dispatch through the tables above.
+// The metatable is left on the stack for the caller to add its own metamethods
+// to; `endTagMetatable` freezes and pops it.
+//
+// Registration first and population second, because the metatable is stored by
+// pointer and later mutation is visible (`lapi.cpp:1583`) -- the vendored
+// conformance suite does exactly this. The freeze at the end is ours to do:
+// `luaL_sandbox` never touches a tag metatable, so without it a script that
+// reaches one through `getmetatable` could rewrite the type.
+void beginTagMetatable(lua_State* L, UserdataTag tag);
+void endTagMetatable(lua_State* L);
+
+// The common case: no metamethods beyond the shared three plus whichever of
+// `__eq` and `__tostring` the type wants. Either may be null.
+void installTagMetatable(lua_State* L, UserdataTag tag, lua_CFunction equals, lua_CFunction tostring);
 
 // Raises a Luau error carrying the key-prefixed catalog text, which is what
 // lets a conformance spec match on a stable identifier while the prose stays

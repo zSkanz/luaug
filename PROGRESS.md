@@ -21,11 +21,12 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ### M2: what exists
 
-- **A script reaches the engine.** `Instance.new("Part")` builds a real
-  instance, properties round-trip through their components, the tree walks in
-  document order, `a == b` holds for two handles to one instance, and every
-  datatype except `Signal`/`Connection` is bound. 50 cases over the bindings,
-  all asserting from inside the VM.
+- **A script reaches the engine, and the engine answers back.**
+  `Instance.new("Part")` builds a real instance, properties round-trip through
+  their components, `a == b` holds for two handles to one instance, every
+  datatype is bound, signals deliver deferred in one queue with the ordering
+  §3.1 specifies, and `task` runs on the SimClock in integer ticks. 90 cases
+  over the bindings, all asserting from inside the VM.
 - **`core`** — `SlotMap`, `AtomTable`, `Pcg32`, `Phase`, `CFrameD`/`Mat3`/
   `Color3`, all six euler orders both ways, axis-angle, quaternions, slerp.
   Heavily tested and mutation-checked (102 cases).
@@ -42,36 +43,43 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   generated declarations name for name.
 - **`script` (L5)** — the VM boots in the one order that works, with the sandbox
   curation R4 actually requires; `VmContext` (reached through
-  `lua_callbacks(L)->userdata`) carries the world, the atom bridge and the
-  per-tag member tables; `instance_binding.cpp` and `datatypes.cpp` are the
+  `lua_callbacks(L)->userdata`) carries the world, the atom bridge, the per-tag
+  member tables, the signal system and the task scheduler.
+  `instance_binding.cpp`, `datatypes.cpp`, `signals.cpp` and `tasks.cpp` are the
   surface itself. The boot-time method cross-check reports both directions, and
   a declared-but-unimplemented member raises `script.err.not_implemented` rather
   than reading as missing.
 
 ### M2: what does NOT exist yet
 
-No signals — `part.ChildAdded` and `GetPropertyChangedSignal` are declared and
-raise `not_implemented`; no `task`, so `WaitForChild` does too. No `require`;
-no service wiring, so `game`/`workspace`/`script` do not exist and the
-DataModel, RunService, TagService and DebugService methods are unimplemented
-(30 of 43 declared methods). No `examples/01-instances`; no replay harness,
-frame-budget instrumentation or 10k/1k benchmark.
+No `require`. No service wiring, so `game`/`workspace`/`script` do not exist and
+the DataModel, RunService, TagService and DebugService methods are unbound — 19
+of 43, every one of them a service's. `WaitForChild` is the twentieth: it parks
+until a child appears, which needs the mounted-script lifecycle rather than just
+`task`. No `examples/01-instances`; no replay harness, frame-budget
+instrumentation or 10k/1k benchmark; the 932 staged conformance specs are still
+staged.
 
-**The M2 gate is 0 of 4.** The conformance suite is the next lever on it.
+**The M2 gate is 0 of 4.** Integrating the conformance suite is the next lever
+on it, and the harness it needs is the service wiring.
 
 ## Now / Next
 
-- **Next: signals** — `Signal`/`Connection` on tags 5 and 6, the drain in
-  `ScriptRuntime::drain` that turns `scene`'s POD `Change` facts into fires, and
-  the instance event objects `__index` currently refuses. api-design §3.1 is the
-  written contract and the conformance specs under `tests/conformance/signals/`
-  were authored against it. Then `task`, then `require`, then the `app` wiring
-  that creates the DataModel and its services.
-- **The service methods are the other half of the cross-check.**
-  `MethodCoverage` reports 43 declared / 13 bound; every unbound one raises
-  `script.err.not_implemented`, and `instance_binding_tests.cpp` pins the
-  numbers so the next batch that lands is a visible change rather than a silent
-  one.
+- **Next: the `app` wiring** — build the DataModel and its services in the
+  world, bind `game`/`workspace`/`script`, and drive `drain` / `resumeTimers` /
+  `retireDestroyed` from `FrameScheduler` in the order
+  `engine/script/tests/script_fixture.h::tick` already models. That unblocks
+  `WaitForChild`, the 19 service methods, and -- with `require` -- the
+  conformance runner the gate is measured by.
+- **`MethodCoverage` is the ledger for that work**: 43 declared, 24 bound, and
+  `instance_binding_tests.cpp` pins both numbers so the next batch that lands is
+  a visible change rather than a silent one.
+- **The scene->script conversion is synchronous, not batched.** A fire captures
+  its connection list when it is *raised*, so every mutating binding calls
+  `flushSceneChanges` immediately and `ScriptRuntime::drain` flushes again only
+  to catch what the engine itself raised. Batching at the drain would let a
+  connection made after a mutation run for it, which §3.1 forbids in two places
+  and the conformance specs test in both.
 - **The 932 conformance cases now live in `tests/conformance/`** with a
   `.spec.luau.staged` extension so the analyzer's glob skips them.
   `tests/conformance/README.md` lists exactly what integrating them needs: a

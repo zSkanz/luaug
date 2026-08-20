@@ -11,6 +11,7 @@
 
 #include "luaug/scene/world.h"
 #include "luaug/script/datatypes.h"
+#include "luaug/script/signals.h"
 
 namespace luaug::script
 {
@@ -125,15 +126,10 @@ int instanceIndex(lua_State* L)
 
     if (const scene::EventDesc* event = w.classes().findEvent(classId, name))
     {
-        // Declared and real; the signal objects that carry it arrive with the
-        // drain. A distinct key rather than "no such member", because a script
-        // that gets `unknown_member` for `ChildAdded` would be told something
-        // false about the API.
-        const core::I18nArg args[] = {
-            {"className", className(L, id)},
-            {"property", w.atoms().text(event->name)},
-        };
-        raise(L, LUAUG_TR("script.err.not_implemented"), args);
+        // The same object every time, which a script that connects in one place
+        // and disconnects in another depends on.
+        pushInstanceEvent(L, id, event->slot);
+        return 1;
     }
 
     raiseUnknownInstanceMember(L, id, key);
@@ -177,12 +173,15 @@ int instanceNewIndex(lua_State* L)
             const core::I18nArg args[] = {{"instance", w.atoms().text(w.name(id))}};
             raise(L, *refusal, args);
         }
+        flushSceneChanges(L);
         return 0;
     }
 
     switch (w.setProperty(id, name, *value))
     {
     case World::SetResult::Changed:
+        flushSceneChanges(L);
+        return 0;
     case World::SetResult::Unchanged:
         return 0;
     case World::SetResult::ReadOnly:
@@ -357,16 +356,32 @@ int methodIsDescendantOf(lua_State* L)
 int methodClone(lua_State* L)
 {
     pushInstance(L, world(L).clone(liveInstance(L, 1)));
+    flushSceneChanges(L);
     return 1;
 }
 
 int methodDestroy(lua_State* L)
 {
-    // Synchronous: the subtree is out of the tree when this returns. What waits
-    // for the drain is the telling, not the doing -- and the handle keeps
-    // resolving until that drain ends, which is what gives a `Destroying`
-    // handler something to work with.
-    world(L).destroy(liveInstance(L, 1));
+    const core::InstanceId id = liveInstance(L, 1);
+    World& w = world(L);
+
+    // The subtree first, because `destroy` is synchronous and the descendants
+    // are gone from the tree by the time it returns -- there is no walking down
+    // to them afterwards.
+    std::vector<core::InstanceId> subtree;
+    subtree.push_back(id);
+    w.collectDescendants(id, subtree);
+
+    if (!w.destroy(id))
+        return 0;
+
+    // Enqueue `Destroying` FIRST -- which is what capturing the connection list
+    // now means -- and only then close the other signals. api-design.md §3.1
+    // spells the order out, and it is what makes a `ChildAdded` queued earlier
+    // in the same frame invoke nothing while `Destroying` still runs.
+    flushSceneChanges(L);
+    for (const core::InstanceId member : subtree)
+        closeInstanceSignalsExceptDestroying(L, member);
     return 0;
 }
 
@@ -438,7 +453,40 @@ int methodSetAttribute(lua_State* L)
         };
         raise(L, LUAUG_TR("scene.err.attribute_type"), args);
     }
+    flushSceneChanges(L);
     return 0;
+}
+
+int methodGetPropertyChangedSignal(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    World& w = world(L);
+    const core::NameAtom name = lookupAtom(L, 2);
+
+    // A name the class does not have raises, and the key says where attributes
+    // are watched instead -- which is the mistake this call actually attracts.
+    if (w.classes().findProperty(w.classOf(id), name) == nullptr)
+    {
+        size_t length = 0;
+        const char* text = luaL_checklstring(L, 2, &length);
+        const core::I18nArg args[] = {
+            {"className", className(L, id)},
+            {"property", std::string_view{text, length}},
+        };
+        raise(L, LUAUG_TR("scene.err.unknown_property"), args);
+    }
+
+    pushPropertyChangedSignal(L, id, name);
+    return 1;
+}
+
+int methodGetAttributeChangedSignal(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    // Any name is accepted: an attribute that has never been set is a reasonable
+    // thing to wait for, so this interns rather than looking up.
+    pushAttributeChangedSignal(L, id, checkAttributeName(L, 2));
+    return 1;
 }
 
 int methodGetAttributes(lua_State* L)
@@ -467,6 +515,7 @@ int methodAddTag(lua_State* L)
 {
     const core::InstanceId id = liveInstance(L, 1);
     world(L).addTag(id, checkTagName(L, 2));
+    flushSceneChanges(L);
     return 0;
 }
 
@@ -474,6 +523,7 @@ int methodRemoveTag(lua_State* L)
 {
     const core::InstanceId id = liveInstance(L, 1);
     world(L).removeTag(id, checkTagName(L, 2));
+    flushSceneChanges(L);
     return 0;
 }
 
@@ -564,6 +614,7 @@ int methodPivotTo(lua_State* L)
         // change is enqueued for anything watching `CFrame`.
         w.setProperty(descendant, cframeProperty, scene::Value{delta * part->cframe});
     }
+    flushSceneChanges(L);
     return 0;
 }
 
@@ -673,8 +724,8 @@ struct MethodBinding
 // by descriptor.
 //
 // `WaitForChild` is absent because it yields and there is no scheduler to park
-// it on yet; the signal-returning pair is absent for the same kind of reason.
-// Both are reported by the coverage count rather than left to be discovered.
+// it on yet. It is reported by the coverage count rather than left to be
+// discovered.
 constexpr MethodBinding InstanceMethods[] = {
     {"Instance", "FindFirstChild", methodFindFirstChild},
     {"Instance", "FindFirstChildOfClass", methodFindFirstChildOfClass},
@@ -691,6 +742,8 @@ constexpr MethodBinding InstanceMethods[] = {
     {"Instance", "GetAttribute", methodGetAttribute},
     {"Instance", "SetAttribute", methodSetAttribute},
     {"Instance", "GetAttributes", methodGetAttributes},
+    {"Instance", "GetPropertyChangedSignal", methodGetPropertyChangedSignal},
+    {"Instance", "GetAttributeChangedSignal", methodGetAttributeChangedSignal},
     {"Instance", "AddTag", methodAddTag},
     {"Instance", "RemoveTag", methodRemoveTag},
     {"Instance", "HasTag", methodHasTag},

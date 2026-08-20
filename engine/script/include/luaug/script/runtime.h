@@ -52,9 +52,12 @@ public:
     // §3.1). Every resumption point calls this.
     void drain(core::Phase phase);
 
-    // Resumes whatever `task.wait` and `task.delay` are due at this SimClock
-    // time. Between `PostSimulation` and `Heartbeat`, per architecture.md §3.
-    void resumeTimers(f64 simTime);
+    // Resumes whatever `task.wait` and `task.delay` are due at the world's
+    // current tick. Between `PostSimulation` and `Heartbeat`, per
+    // architecture.md §3. Takes no time argument: a deadline is a tick index and
+    // the tick lives on `EngineState`, so passing seconds here would be handing
+    // the scheduler a float to re-derive an integer from.
+    void resumeTimers();
 
     // Fires an engine-raised event on a service instance -- `Heartbeat` and the
     // other phase signals. Enqueues; the drain is what runs the handlers.

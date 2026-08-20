@@ -17,6 +17,8 @@ luaug_add_module(script
         src/binding.cpp
         src/datatypes.cpp
         src/instance_binding.cpp
+        src/signals.cpp
+        src/tasks.cpp
         src/sandbox.cpp
         src/runtime.cpp
     DEPS
@@ -31,6 +33,8 @@ luaug_add_module_tests(script
         tests/sandbox_tests.cpp
         tests/datatype_tests.cpp
         tests/instance_binding_tests.cpp
+        tests/signal_tests.cpp
+        tests/task_tests.cpp
 )
 
 # The sandbox tests boot a VM directly rather than through `ScriptRuntime`, so

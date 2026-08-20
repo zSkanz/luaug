@@ -26,11 +26,19 @@
 namespace luaug::core
 {
 
-template <class T>
+// `Handle` is the id type this map hands out: any aggregate with a `u32 index`,
+// a `u32 generation` and a `valid()`. It is a parameter rather than always
+// `InstanceId` so that a map of something else -- signals, connections -- cannot
+// hand out a value the Instance bindings would accept. Two handle types with
+// identical layout still refuse to convert, which is the only thing standing
+// between a slot number and the wrong container.
+template <class T, class Handle = InstanceId>
 class SlotMap
 {
 public:
-    [[nodiscard]] InstanceId insert(T value)
+    using HandleType = Handle;
+
+    [[nodiscard]] Handle insert(T value)
     {
         if (m_freeHead != FreeListEnd)
         {
@@ -52,15 +60,15 @@ public:
         return {static_cast<u32>(m_slots.size() - 1), 1};
     }
 
-    [[nodiscard]] bool contains(InstanceId id) const noexcept { return resolve(id) != nullptr; }
+    [[nodiscard]] bool contains(Handle id) const noexcept { return resolve(id) != nullptr; }
 
-    [[nodiscard]] T* find(InstanceId id) noexcept { return const_cast<T*>(resolve(id)); }
+    [[nodiscard]] T* find(Handle id) noexcept { return const_cast<T*>(resolve(id)); }
 
-    [[nodiscard]] const T* find(InstanceId id) const noexcept { return resolve(id); }
+    [[nodiscard]] const T* find(Handle id) const noexcept { return resolve(id); }
 
     // Returns false for a handle that was already stale, so a double free is a
     // reportable condition at the call site rather than silently idempotent.
-    bool erase(InstanceId id) noexcept
+    bool erase(Handle id) noexcept
     {
         if (resolve(id) == nullptr)
             return false;
@@ -105,7 +113,7 @@ public:
         for (usize index = 0; index < m_slots.size(); ++index)
         {
             if (m_slots[index].has_value())
-                fn(InstanceId{static_cast<u32>(index), m_generations[index]}, *m_slots[index]);
+                fn(Handle{static_cast<u32>(index), m_generations[index]}, *m_slots[index]);
         }
     }
 
@@ -115,14 +123,14 @@ public:
         for (usize index = 0; index < m_slots.size(); ++index)
         {
             if (m_slots[index].has_value())
-                fn(InstanceId{static_cast<u32>(index), m_generations[index]}, *m_slots[index]);
+                fn(Handle{static_cast<u32>(index), m_generations[index]}, *m_slots[index]);
         }
     }
 
 private:
     static constexpr u32 FreeListEnd = 0xFFFFFFFFu;
 
-    [[nodiscard]] const T* resolve(InstanceId id) const noexcept
+    [[nodiscard]] const T* resolve(Handle id) const noexcept
     {
         if (!id.valid() || id.index >= m_slots.size())
             return nullptr;

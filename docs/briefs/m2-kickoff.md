@@ -28,10 +28,13 @@ M6. So this brief spends its length on the seams and on what is deliberately
 - [x] Instance facade: `Instance.new`, properties, `Parent`/children,
       `FindFirstChild` with duplicate-name support (ADR 0026), attributes, tags
       — reachable from Luau; `WaitForChild` waits on `task`
-- [ ] DataModel + services skeleton (`game:GetService`)
-- [ ] Deferred-only signal implementation with **documented** ordering semantics
-- [ ] `task` library (`spawn`/`defer`/`delay`/`wait`/`cancel`) on the fixed-tick
-      scheduler with documented resumption points
+- [ ] DataModel + services skeleton (`game:GetService`) — the next step, and
+      what `WaitForChild` and the 19 unbound service methods are waiting on
+- [x] Deferred-only signal implementation with **documented** ordering semantics
+      — api-design §3.1 written first, then implemented against it
+- [x] `task` library (`spawn`/`defer`/`delay`/`wait`/`cancel`) on the fixed-tick
+      scheduler with documented resumption points — deadlines in integer ticks,
+      one `(deadline, sequence)` FIFO
 - [ ] Script host: lifecycle, `require` resolution per `.luaurc`, per-script
       sandboxing
 - [x] Seeded deterministic RNG service — the `Random` datatype (Decision 4),
@@ -502,7 +505,41 @@ identified by the `[key]` prefix `core::makeError` writes, and the prefix is the
 nothing — fourteen tests failed at once for one reason, which is at least a
 legible failure mode.
 
-**12. A comment of mine broke R7 within an hour of the rule being re-read.** The
+**12. The scene→script conversion cannot be batched at the drain, and the
+conformance authors are what proved it.** The obvious design is `drain()` calling
+`enqueueSceneChanges(world.changes().take())` once per resumption point: `scene`
+accumulates POD facts, `script` turns them into fires. It is wrong, and §3.1
+already said so twice — "a connection made **after** the fire does not run for
+it", and "`Destroy` enqueues `Destroying`, **then** closes the instance's other
+signals". A fire captures its connection list at the moment it is *raised*, so a
+batch converted at drain time would hand every fire the connection list as it
+stood at the end of the frame. `destroy_signals.spec.luau` tests both directions
+of that, written from the document by an author who had never seen the code.
+
+So every mutating binding calls `flushSceneChanges` the instant it returns from
+`World`, and `ScriptRuntime::drain` flushes only to catch what the *engine*
+raised outside a script. `Instance:Destroy` additionally closes the subtree's
+signals — every one except `Destroying`, whose own fire has just been queued and
+whose handlers must still run.
+
+**13. `lua_unref` before `lua_getref` reads the free list, not the value.** The
+first `:Once` handler to run came back as "attempt to call a number value". The
+cause is in the research report and I wrote the code anyway: freed registry slots
+hold the next free index *as a number* (`lapi.cpp:1814`), so disconnecting a
+one-shot before fetching its handler makes `lua_getref` return an integer. The
+fix is ordering — fetch onto the coroutine, then disconnect — and the same
+ordering saves the `:Wait()` path, where the parked thread would otherwise be
+unrooted across its own resume.
+
+**14. A test that cannot see a contained error passes for everything after the
+first `task.wait`.** §3.1 contains handler and task errors by design: they go to
+the log, not to a return value. A `runSource` that returns `nullopt` therefore
+says nothing about what the chunk did after it yielded — which is most of what a
+signal test asserts. The fixture installs a `LogSink` and every timing test ends
+with `CHECK(fixture.errors() == "")`. Without it the whole signal suite would
+have been green and meaningless.
+
+**15. A comment of mine broke R7 within an hour of the rule being re-read.** The
 legal sweep caught "Roblox" in `engine/core/include/luaug/core/phase.h` — in a
 sentence explaining a divergence, which is exactly the well-intentioned use the
 rule exists to stop from spreading outside the docs set.
