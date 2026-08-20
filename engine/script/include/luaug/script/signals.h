@@ -31,21 +31,20 @@
 //      a self-deferring callback a hang rather than a wrong number.
 #pragma once
 
-#include <deque>
-#include <span>
-#include <unordered_map>
-#include <vector>
-
 #include "luaug/core/id.h"
 #include "luaug/core/name_atom.h"
 #include "luaug/core/slotmap.h"
 #include "luaug/scene/change_queue.h"
 #include "luaug/script/binding.h"
 
+#include <deque>
+#include <span>
+#include <unordered_map>
+#include <vector>
+
 struct lua_State;
 
-namespace luaug::script
-{
+namespace luaug::script {
 
 // A generation-checked handle, distinct from `core::InstanceId` so that a signal
 // slot cannot be handed to a binding that wants an instance. Same layout, no

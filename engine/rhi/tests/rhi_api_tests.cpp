@@ -1,7 +1,7 @@
-#include <doctest/doctest.h>
-
 #include "luaug/rhi/descs.h"
 #include "luaug/rhi/types.h"
+
+#include <doctest/doctest.h>
 
 using namespace luaug::rhi;
 

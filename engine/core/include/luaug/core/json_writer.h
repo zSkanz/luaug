@@ -13,13 +13,12 @@
 // enough to compare (R10) without sorting anything.
 #pragma once
 
+#include "luaug/core/types.h"
+
 #include <string>
 #include <string_view>
 
-#include "luaug/core/types.h"
-
-namespace luaug::core
-{
+namespace luaug::core {
 
 class JsonWriter
 {

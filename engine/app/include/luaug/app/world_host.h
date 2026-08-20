@@ -11,29 +11,27 @@
 // mount a project that exists only in memory.
 #pragma once
 
+#include "luaug/app/preserved.h"
+#include "luaug/core/error.h"
+#include "luaug/core/name_atom.h"
+#include "luaug/scene/class_registry.h"
+#include "luaug/scene/enum_registry.h"
+#include "luaug/scene/world.h"
+#include "luaug/script/modules.h"
+#include "luaug/script/runtime.h"
+#include "luaug/script/services.h"
+
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-#include "luaug/core/error.h"
-#include "luaug/core/name_atom.h"
-#include "luaug/app/preserved.h"
-#include "luaug/scene/class_registry.h"
-#include "luaug/scene/enum_registry.h"
-#include "luaug/scene/world.h"
-#include "luaug/script/modules.h"
-#include "luaug/script/services.h"
-#include "luaug/script/runtime.h"
-
-namespace luaug::render
-{
+namespace luaug::render {
 class DebugDraw;
 }
 
-namespace luaug::app
-{
+namespace luaug::app {
 
 using core::f32;
 using core::f64;

@@ -3,8 +3,7 @@
 #include <lua.h>
 #include <lualib.h>
 
-namespace luaug::script
-{
+namespace luaug::script {
 
 // api-design.md §1.1's removal list, verbatim and in its order. The list lives
 // here and nowhere else so that the document and the code cannot drift.
@@ -22,25 +21,13 @@ namespace luaug::script
 // codegen gives up on any function that touches them. Leaving them reachable
 // would quietly invalidate every performance number measured after this point.
 const char* const RemovedGlobals[] = {
-    "wait",
-    "spawn",
-    "delay",
-    "tick",
-    "time",
-    "elapsedTime",
-    "loadstring",
-    "getfenv",
-    "setfenv",
-    "newproxy",
-    "shared",
-    "io",
-    nullptr,
+    "wait",    "spawn",   "delay",    "tick",   "time", "elapsedTime", "loadstring",
+    "getfenv", "setfenv", "newproxy", "shared", "io",   nullptr,
 };
 
 void removeUnsafeGlobals(lua_State* L)
 {
-    for (const char* const* name = RemovedGlobals; *name != nullptr; ++name)
-    {
+    for (const char* const* name = RemovedGlobals; *name != nullptr; ++name) {
         lua_pushnil(L);
         lua_setglobal(L, *name);
     }
@@ -51,8 +38,7 @@ void removeUnsafeGlobals(lua_State* L)
     // goes because the surface is defined by what the document lists, not by
     // what happens to be cheap to leave.
     lua_getglobal(L, "os");
-    if (lua_istable(L, -1))
-    {
+    if (lua_istable(L, -1)) {
         lua_pushnil(L);
         lua_setfield(L, -2, "difftime");
     }

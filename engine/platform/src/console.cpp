@@ -9,10 +9,8 @@
 #include <windows.h>
 #endif
 
-namespace luaug::platform
-{
-namespace
-{
+namespace luaug::platform {
+namespace {
 
 void writeBytes(ConsoleStream stream, std::string_view utf8)
 {
@@ -50,15 +48,12 @@ void writeConsole(ConsoleStream stream, std::string_view utf8)
 
 #ifdef _WIN32
     HANDLE handle = nullptr;
-    if (consoleHandle(stream, handle))
-    {
+    if (consoleHandle(stream, handle)) {
         const int utf8Length = static_cast<int>(utf8.size());
         const int wideLength = MultiByteToWideChar(CP_UTF8, 0, utf8.data(), utf8Length, nullptr, 0);
-        if (wideLength > 0)
-        {
+        if (wideLength > 0) {
             std::wstring wide(static_cast<std::size_t>(wideLength), L'\0');
-            if (MultiByteToWideChar(CP_UTF8, 0, utf8.data(), utf8Length, wide.data(), wideLength) == wideLength)
-            {
+            if (MultiByteToWideChar(CP_UTF8, 0, utf8.data(), utf8Length, wide.data(), wideLength) == wideLength) {
                 WriteConsoleW(handle, wide.data(), static_cast<DWORD>(wideLength), nullptr, nullptr);
                 return;
             }

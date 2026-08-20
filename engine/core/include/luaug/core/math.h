@@ -13,12 +13,11 @@
 // Vulkan, D3D12 and Metal all want -- and what SDL_GPU therefore expects.
 #pragma once
 
-#include <limits>
-
 #include "luaug/core/types.h"
 
-namespace luaug::core
-{
+#include <limits>
+
+namespace luaug::core {
 
 // The empty `AABB` below is a default member initializer, so this has to be a
 // compile-time constant rather than a call.

@@ -13,17 +13,16 @@
 // the whole point is that neither world is the other.
 #pragma once
 
-#include <string>
-#include <utility>
-#include <vector>
-
 #include "luaug/core/id.h"
 #include "luaug/core/types.h"
 #include "luaug/scene/value.h"
 #include "luaug/scene/world.h"
 
-namespace luaug::app
-{
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace luaug::app {
 
 // One instance and its subtree.
 struct PreservedInstance
@@ -78,15 +77,12 @@ struct PreserveReport
 // Everything tagged `PreserveOnReload`, outermost first and each with its
 // subtree. A tag on a descendant of an already-tagged instance is redundant and
 // is not captured twice.
-[[nodiscard]] std::vector<PreservedTree> capturePreserved(
-    const scene::World& world, core::InstanceId dataModel, PreserveReport& report);
+[[nodiscard]] std::vector<PreservedTree> capturePreserved(const scene::World& world, core::InstanceId dataModel,
+                                                          PreserveReport& report);
 
 // Re-creates them under the paths they were captured from. Call after the tree
 // exists and before the entry scripts are deferred.
-void restorePreserved(
-    scene::World& world,
-    core::InstanceId dataModel,
-    const std::vector<PreservedTree>& trees,
-    PreserveReport& report);
+void restorePreserved(scene::World& world, core::InstanceId dataModel, const std::vector<PreservedTree>& trees,
+                      PreserveReport& report);
 
 } // namespace luaug::app

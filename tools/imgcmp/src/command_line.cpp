@@ -5,16 +5,14 @@
 #include <system_error>
 #include <vector>
 
-namespace luaug::imgcmp
-{
-namespace
-{
+namespace luaug::imgcmp {
+namespace {
 
 // A tolerance above the channel range would accept every possible image, which
 // is a mistake worth catching at the command line rather than in a green gate.
 constexpr int kMaxTolerance = 255;
 
-template<typename Number>
+template <typename Number>
 [[nodiscard]] bool parseWholeNumber(std::string_view text, Number& out)
 {
     if (text.empty())
@@ -41,12 +39,10 @@ Command parseCommandLine(std::span<const std::string_view> args)
     Command command;
     std::vector<std::string_view> positional;
 
-    for (std::size_t index = 0; index < args.size(); ++index)
-    {
+    for (std::size_t index = 0; index < args.size(); ++index) {
         const std::string_view arg = args[index];
 
-        if (arg == "-h" || arg == "--help")
-        {
+        if (arg == "-h" || arg == "--help") {
             command.status = CommandStatus::HelpRequested;
             return command;
         }
@@ -54,14 +50,12 @@ Command parseCommandLine(std::span<const std::string_view> args)
         // Anything else beginning with '-' is an option, never a path: silently
         // treating a misspelled `-tolerance` as a filename is how a comparator
         // ends up running with defaults nobody asked for.
-        if (arg.size() > 1 && arg.front() == '-')
-        {
+        if (arg.size() > 1 && arg.front() == '-') {
             std::string_view name = arg;
             std::string_view value;
             bool hasValue = false;
 
-            if (const std::size_t equals = arg.find('='); equals != std::string_view::npos)
-            {
+            if (const std::size_t equals = arg.find('='); equals != std::string_view::npos) {
                 name = arg.substr(0, equals);
                 value = arg.substr(equals + 1);
                 hasValue = true;
@@ -70,21 +64,18 @@ Command parseCommandLine(std::span<const std::string_view> args)
             if (name != "--tolerance" && name != "--max-different-pixels" && name != "--diff")
                 return usageError("unknown option \"" + std::string{name} + "\"");
 
-            if (!hasValue)
-            {
+            if (!hasValue) {
                 if (index + 1 >= args.size())
                     return usageError(std::string{name} + " requires a value");
                 value = args[++index];
             }
 
-            if (name == "--diff")
-            {
+            if (name == "--diff") {
                 if (value.empty())
                     return usageError("--diff requires a path");
                 command.diffPath = std::string{value};
             }
-            else if (name == "--tolerance")
-            {
+            else if (name == "--tolerance") {
                 int tolerance = 0;
                 if (!parseWholeNumber(value, tolerance))
                     return usageError("--tolerance: \"" + std::string{value} + "\" is not a whole number");
@@ -92,8 +83,7 @@ Command parseCommandLine(std::span<const std::string_view> args)
                     return usageError("--tolerance must be between 0 and 255");
                 command.options.tolerance = tolerance;
             }
-            else
-            {
+            else {
                 std::size_t limit = 0;
                 if (!parseWholeNumber(value, limit))
                     return usageError("--max-different-pixels: \"" + std::string{value} + "\" is not a whole number");

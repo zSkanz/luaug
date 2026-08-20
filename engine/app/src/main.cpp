@@ -1,19 +1,6 @@
 // luaug-host -- the M0 engine host: boot a sandboxed Luau VM, run one script,
 // report failures as structured, key-identified engine errors.
 
-#include <array>
-#include <charconv>
-#include <cstdio>
-#include <filesystem>
-#include <optional>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
-
-#include <Luau/Bytecode.h>
-#include <lua.h>
-
 #include "luaug/app/backends.h"
 #include "luaug/app/bench.h"
 #include "luaug/app/engine.h"
@@ -26,8 +13,20 @@
 #include "luaug/platform/crash.h"
 #include "luaug/platform/platform.h"
 
-namespace
-{
+#include <Luau/Bytecode.h>
+#include <lua.h>
+
+#include <array>
+#include <charconv>
+#include <cstdio>
+#include <filesystem>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace {
 
 using luaug::core::I18nArg;
 using luaug::core::LogLevel;
@@ -49,16 +48,13 @@ constexpr int kExitNoGraphicsDevice = 4;
 // how every engine message gets it.
 void installConsoleLogSink()
 {
-    luaug::core::setLogSink(
-        [](LogLevel level, std::string_view text)
-        {
-            // Warnings and errors go to stderr so a headless CI run can
-            // separate them from ordinary output without parsing.
-            const auto stream = (level == LogLevel::Warn || level == LogLevel::Error)
-                ? luaug::platform::ConsoleStream::Err
-                : luaug::platform::ConsoleStream::Out;
-            luaug::platform::writeConsole(stream, luaug::core::formatLogLine(level, text));
-        });
+    luaug::core::setLogSink([](LogLevel level, std::string_view text) {
+        // Warnings and errors go to stderr so a headless CI run can
+        // separate them from ordinary output without parsing.
+        const auto stream = (level == LogLevel::Warn || level == LogLevel::Error) ? luaug::platform::ConsoleStream::Err
+                                                                                  : luaug::platform::ConsoleStream::Out;
+        luaug::platform::writeConsole(stream, luaug::core::formatLogLine(level, text));
+    });
 }
 
 // The one place a user-facing string may be hardcoded: if the catalog itself
@@ -71,14 +67,13 @@ void reportCatalogFailure(const std::string& diagnostic)
 
 void printVersion()
 {
-    const std::array<I18nArg, 2> engineArgs{
-        I18nArg{"version", LUAUG_VERSION_STRING}, I18nArg{"profile", LUAUG_PROFILE_NAME}};
+    const std::array<I18nArg, 2> engineArgs{I18nArg{"version", LUAUG_VERSION_STRING},
+                                            I18nArg{"profile", LUAUG_PROFILE_NAME}};
     luaug::core::log(LogLevel::Info, LUAUG_TR("engine.cli.version.engine"), engineArgs);
 
     // Version and commit come from third_party/manifest.json via the generated
     // provenance header (ADR 0031) -- Luau itself ships no version constant.
-    const std::array<I18nArg, 2> luauArgs{
-        I18nArg{"version", LUAUG_LUAU_VERSION}, I18nArg{"commit", LUAUG_LUAU_COMMIT}};
+    const std::array<I18nArg, 2> luauArgs{I18nArg{"version", LUAUG_LUAU_VERSION}, I18nArg{"commit", LUAUG_LUAU_COMMIT}};
     luaug::core::log(LogLevel::Info, LUAUG_TR("engine.cli.version.luau"), luauArgs);
 
     // These come from the vendored headers at compile time, so they describe
@@ -100,47 +95,39 @@ void printVersion()
 // This is the host's own switchboard.
 int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptions& options)
 {
-    const auto numericValue = [](std::string_view text, luaug::core::u64& out)
-    {
+    const auto numericValue = [](std::string_view text, luaug::core::u64& out) {
         const auto result = std::from_chars(text.data(), text.data() + text.size(), out);
         return result.ec == std::errc{} && result.ptr == text.data() + text.size();
     };
 
-    for (const std::string_view arg : args)
-    {
-        if (!arg.empty() && arg.front() != '-')
-        {
+    for (const std::string_view arg : args) {
+        if (!arg.empty() && arg.front() != '-') {
             options.scriptPath = std::filesystem::path(arg);
             continue;
         }
 
-        if (arg == "--headless")
-        {
+        if (arg == "--headless") {
             options.headless = true;
             continue;
         }
-        if (arg == "--exit")
-        {
+        if (arg == "--exit") {
             options.exitAfterFrames = true;
             continue;
         }
-        if (arg == "--frame-stats")
-        {
+        if (arg == "--frame-stats") {
             options.frameStats = true;
             continue;
         }
         // The render target's size. Windowed it is the window; headless it is the
         // offscreen texture. The M4 gate records a frame-time baseline at 1080p
         // and the host had no way to be asked for one.
-        if (arg.starts_with("--width=") || arg.starts_with("--height="))
-        {
+        if (arg.starts_with("--width=") || arg.starts_with("--height=")) {
             const std::string_view value = arg.substr(arg.find('=') + 1);
             luaug::core::u64 parsed = 0;
             // Bounded rather than merely positive: a target larger than any GPU
             // will allocate fails inside the backend with a message about
             // memory, which is a long way from "you typed a silly number".
-            if (!numericValue(value, parsed) || parsed == 0 || parsed > 16384)
-            {
+            if (!numericValue(value, parsed) || parsed == 0 || parsed > 16384) {
                 const std::array<I18nArg, 2> badValue{I18nArg{"option", arg}, I18nArg{"value", value}};
                 luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.bad_value"), badValue);
                 return kExitUsage;
@@ -148,28 +135,23 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
             (arg.starts_with("--width=") ? options.width : options.height) = static_cast<luaug::core::i32>(parsed);
             continue;
         }
-        if (arg.starts_with("--frames="))
-        {
-            if (!numericValue(arg.substr(9), options.frames))
-            {
+        if (arg.starts_with("--frames=")) {
+            if (!numericValue(arg.substr(9), options.frames)) {
                 const std::array<I18nArg, 1> badValue{I18nArg{"option", arg}};
                 luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.bad_value"), badValue);
                 return kExitUsage;
             }
             continue;
         }
-        if (arg.starts_with("--screenshot="))
-        {
+        if (arg.starts_with("--screenshot=")) {
             options.screenshotPath = std::filesystem::path(arg.substr(13));
             continue;
         }
-        if (arg.starts_with("--capture-out="))
-        {
+        if (arg.starts_with("--capture-out=")) {
             options.capturePath = std::filesystem::path(arg.substr(14));
             continue;
         }
-        if (arg.starts_with("--run-tests="))
-        {
+        if (arg.starts_with("--run-tests=")) {
             options.conformanceRoot = std::filesystem::path(arg.substr(12));
             // A conformance run has no window and ends when the suite does, so
             // the two flags a headless run needs are implied rather than typed
@@ -178,53 +160,43 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
             options.exitAfterFrames = true;
             continue;
         }
-        if (arg.starts_with("--test-report="))
-        {
+        if (arg.starts_with("--test-report=")) {
             options.testReportPath = std::filesystem::path(arg.substr(14));
             continue;
         }
-        if (arg.starts_with("--dev-control="))
-        {
+        if (arg.starts_with("--dev-control=")) {
             options.devControlUrl = std::string(arg.substr(14));
             continue;
         }
-        if (arg.starts_with("--dev-token="))
-        {
+        if (arg.starts_with("--dev-token=")) {
             options.devControlToken = std::string(arg.substr(12));
             continue;
         }
-        if (arg.starts_with("--replay="))
-        {
+        if (arg.starts_with("--replay=")) {
             options.replayRoot = std::filesystem::path(arg.substr(9));
             continue;
         }
-        if (arg == "--record-replay")
-        {
+        if (arg == "--record-replay") {
             options.replayRecord = true;
             continue;
         }
-        if (arg.starts_with("--bench="))
-        {
+        if (arg.starts_with("--bench=")) {
             options.benchRoot = std::filesystem::path(arg.substr(8));
             continue;
         }
-        if (arg.starts_with("--bench-repeats="))
-        {
-            if (!numericValue(arg.substr(16), options.benchRepeats))
-            {
+        if (arg.starts_with("--bench-repeats=")) {
+            if (!numericValue(arg.substr(16), options.benchRepeats)) {
                 const std::array<I18nArg, 1> badValue{I18nArg{"option", arg}};
                 luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.bad_value"), badValue);
                 return kExitUsage;
             }
             continue;
         }
-        if (arg.starts_with("--rhi="))
-        {
+        if (arg.starts_with("--rhi=")) {
             const std::optional<luaug::rhi::BackendId> backend = luaug::app::parseBackendId(arg.substr(6));
-            if (!backend.has_value())
-            {
-                const std::array<I18nArg, 2> unknownBackend{
-                    I18nArg{"name", arg.substr(6)}, I18nArg{"available", luaug::app::availableBackendNames()}};
+            if (!backend.has_value()) {
+                const std::array<I18nArg, 2> unknownBackend{I18nArg{"name", arg.substr(6)},
+                                                            I18nArg{"available", luaug::app::availableBackendNames()}};
                 luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.unknown_backend"), unknownBackend);
                 return kExitUsage;
             }
@@ -260,8 +232,7 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
     // A headless run with no frame budget would never terminate and nothing
     // could tell you why, since there is no window to close. Saying so beats
     // hanging a CI job until its timeout.
-    if (options.headless && options.frames == 0)
-    {
+    if (options.headless && options.frames == 0) {
         luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.headless_needs_frames"));
         return kExitUsage;
     }
@@ -269,16 +240,14 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
     // A windowed frame renders into the swapchain, which has been presented and
     // is gone before anything could read it back. Headless renders into a
     // target the engine owns, which is why the harness uses it.
-    if (!options.screenshotPath.empty() && !options.headless)
-    {
+    if (!options.screenshotPath.empty() && !options.headless) {
         luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.screenshot_needs_headless"));
         return kExitUsage;
     }
 
     // Only the capture backend records a stream. Asking any other one for it
     // would produce an empty file, and an empty golden matches forever.
-    if (!options.capturePath.empty() && options.backend != luaug::rhi::BackendId::Capture)
-    {
+    if (!options.capturePath.empty() && options.backend != luaug::rhi::BackendId::Capture) {
         luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.capture_needs_backend"));
         return kExitUsage;
     }
@@ -294,8 +263,7 @@ int main(int argc, char** argv)
 
     const auto& paths = luaug::platform::paths();
     const auto catalogLoad = luaug::core::engineCatalog().loadFromFile(paths.contentDir / "i18n" / "en.json");
-    if (!catalogLoad)
-    {
+    if (!catalogLoad) {
         reportCatalogFailure(catalogLoad.diagnostic);
         return kExitNoCatalog;
     }
@@ -305,20 +273,17 @@ int main(int argc, char** argv)
     for (int i = 1; i < argc; ++i)
         args.emplace_back(argv[i]);
 
-    if (args.empty())
-    {
+    if (args.empty()) {
         luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.no_script"));
         return kExitUsage;
     }
 
-    if (args[0] == "--version")
-    {
+    if (args[0] == "--version") {
         printVersion();
         return kExitOk;
     }
 
-    if (args[0] == "--help")
-    {
+    if (args[0] == "--help") {
         luaug::core::log(LogLevel::Info, LUAUG_TR("engine.cli.usage"));
         return kExitOk;
     }
@@ -349,48 +314,39 @@ int main(int argc, char** argv)
     // sends. It goes out at Info so it is in the log file as well -- the first
     // line of which then says where the log file is, which sounds circular and
     // is not: the copy in the terminal is the one a person reads.
-    if (logOpened)
-    {
+    if (logOpened) {
         const std::array<I18nArg, 1> logArgs{I18nArg{"path", logPath.string()}};
         luaug::core::log(LogLevel::Info, LUAUG_TR("engine.boot.info.log_file"), logArgs);
     }
-    else
-    {
+    else {
         const std::array<I18nArg, 1> logArgs{I18nArg{"path", logPath.string()}};
         luaug::core::log(LogLevel::Warn, LUAUG_TR("engine.boot.warn.log_file_failed"), logArgs);
     }
-    if (handlerInstalled)
-    {
-        const std::array<I18nArg, 1> crashArgs{
-            I18nArg{"path", luaug::platform::crashArtifactPath().string()}};
+    if (handlerInstalled) {
+        const std::array<I18nArg, 1> crashArgs{I18nArg{"path", luaug::platform::crashArtifactPath().string()}};
         luaug::core::log(LogLevel::Info, LUAUG_TR("engine.boot.info.crash_artifact"), crashArgs);
     }
 
-    if (!options.benchRoot.empty())
-    {
+    if (!options.benchRoot.empty()) {
         std::vector<luaug::app::BenchResult> results;
-        if (const std::optional<luaug::core::EngineError> error
-            = luaug::app::runBenchmarks(options.benchRoot, options.benchRepeats, results))
-        {
+        if (const std::optional<luaug::core::EngineError> error =
+                luaug::app::runBenchmarks(options.benchRoot, options.benchRepeats, results)) {
             luaug::core::logText(LogLevel::Error, error->message);
             return kExitScriptError;
         }
         return kExitOk;
     }
 
-    if (!options.replayRoot.empty())
-    {
-        if (const std::optional<luaug::core::EngineError> error
-            = luaug::app::runReplayGate(options.replayRoot, options.replayRecord))
-        {
+    if (!options.replayRoot.empty()) {
+        if (const std::optional<luaug::core::EngineError> error =
+                luaug::app::runReplayGate(options.replayRoot, options.replayRecord)) {
             luaug::core::logText(LogLevel::Error, error->message);
             return kExitScriptError;
         }
         return kExitOk;
     }
 
-    if (const std::optional<luaug::core::EngineError> error = luaug::app::run(options))
-    {
+    if (const std::optional<luaug::core::EngineError> error = luaug::app::run(options)) {
         luaug::core::logText(LogLevel::Error, error->message);
         if (!error->detail.empty())
             luaug::core::logText(LogLevel::Error, error->detail);

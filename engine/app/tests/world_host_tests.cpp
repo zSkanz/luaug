@@ -1,16 +1,3 @@
-#include <doctest/doctest.h>
-
-#include <ostream>
-
-#include <array>
-#include <filesystem>
-#include <limits>
-#include <fstream>
-#include <string>
-
-#include "luaug_test_nearly.h"
-#include "project_fixture.h"
-
 #include "luaug/app/inspector.h"
 #include "luaug/app/world_host.h"
 #include "luaug/core/i18n.h"
@@ -19,12 +6,22 @@
 #include "luaug/render/render_world.h"
 #include "luaug/scene/components.h"
 
+#include <array>
+#include <doctest/doctest.h>
+#include <filesystem>
+#include <fstream>
+#include <limits>
+#include <ostream>
+#include <string>
+
+#include "luaug_test_nearly.h"
+#include "project_fixture.h"
+
 using namespace luaug;
 using luaug::app::testing::bootOptions;
 using luaug::app::testing::Captured;
 using luaug::app::testing::Project;
 using luaug::testing::nearly;
-
 
 TEST_CASE("an empty world still boots, with game and its two services")
 {
@@ -184,8 +181,8 @@ TEST_CASE("a directory mounts src/scripts as a tree, with subdirectories as Fold
     REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
 
     scene::World& world = host.world();
-    const core::InstanceId scriptService =
-        world.findFirstChildOfClass(host.runtime().dataModel(), world.classes().findId(world.atoms().lookup("ScriptService")));
+    const core::InstanceId scriptService = world.findFirstChildOfClass(
+        host.runtime().dataModel(), world.classes().findId(world.atoms().lookup("ScriptService")));
     REQUIRE(scriptService.valid());
 
     CHECK(world.findFirstChild(scriptService, world.atoms().lookup("boot")).valid());
@@ -401,8 +398,8 @@ TEST_CASE("a Script whose Enabled is false at boot never starts")
     REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
 
     scene::World& world = host.world();
-    const core::InstanceId scriptService =
-        world.findFirstChildOfClass(host.runtime().dataModel(), world.classes().findId(world.atoms().lookup("ScriptService")));
+    const core::InstanceId scriptService = world.findFirstChildOfClass(
+        host.runtime().dataModel(), world.classes().findId(world.atoms().lookup("ScriptService")));
     const core::InstanceId entry = world.findFirstChild(scriptService, world.atoms().lookup("main"));
     REQUIRE(entry.valid());
 
@@ -519,8 +516,7 @@ TEST_CASE("the two lights' Shadows properties are the ones marked")
     const scene::ClassRegistry& classes = host.world().classes();
     const core::AtomTable& atoms = host.world().atoms();
 
-    for (const char* className : {"PointLight", "SpotLight"})
-    {
+    for (const char* className : {"PointLight", "SpotLight"}) {
         const scene::ClassId id = classes.findId(atoms.lookup(className));
         REQUIRE(id != scene::InvalidClass);
         const scene::PropertyDesc* shadows = classes.findProperty(id, atoms.lookup("Shadows"));
@@ -620,15 +616,14 @@ TEST_CASE("dragging Size and CFrame through their extremes does not take the hos
     // overshoots into. Infinity and NaN are here because `DragScalar` with a
     // speed and no bounds will reach them, and because a NaN in a transform is
     // how a renderer stops being a renderer.
-    const std::array<core::f32, 8> sweep{1.0f, 0.5f, 0.0f, -1.0f, -0.0f, 1e6f, 1e30f,
-        std::numeric_limits<core::f32>::infinity()};
+    const std::array<core::f32, 8> sweep{1.0f,  0.5f, 0.0f,  -1.0f,
+                                         -0.0f, 1e6f, 1e30f, std::numeric_limits<core::f32>::infinity()};
 
     app::Inspector inspector;
     inspector.select(target);
 
     render::RenderWorld snapshot;
-    for (std::size_t frame = 0; frame < sweep.size() * 4; ++frame)
-    {
+    for (std::size_t frame = 0; frame < sweep.size() * 4; ++frame) {
         const core::f32 value = sweep[frame % sweep.size()];
         // Read back first, exactly as the widget does: a drag edits the value
         // the panel is showing, not a value it remembers.

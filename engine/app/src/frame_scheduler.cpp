@@ -1,20 +1,18 @@
 #include "luaug/app/frame_scheduler.h"
 
-#include <array>
-
 #include "luaug/core/log.h"
 #include "luaug/core/text_key.h"
 
-namespace luaug::app
-{
+#include <array>
+
+namespace luaug::app {
 
 Frame FrameScheduler::beginFrame(u64 nowNs) noexcept
 {
     Frame frame;
     frame.index = totalFrames_;
 
-    if (!started_)
-    {
+    if (!started_) {
         // The first frame has no previous one to measure from. Reporting zero
         // beats reporting however long the process took to start, which is what
         // a naive `now - 0` would give and what would make the first frame look
@@ -35,14 +33,12 @@ Frame FrameScheduler::beginFrame(u64 nowNs) noexcept
     accumulator_ += frame.renderDt;
 
     const f64 maxAccumulated = timing_.fixedDt * static_cast<f64>(timing_.maxCatchUpTicks);
-    if (accumulator_ > maxAccumulated)
-    {
+    if (accumulator_ > maxAccumulated) {
         frame.clamped = true;
         accumulator_ = maxAccumulated;
     }
 
-    while (accumulator_ >= timing_.fixedDt)
-    {
+    while (accumulator_ >= timing_.fixedDt) {
         accumulator_ -= timing_.fixedDt;
         ++frame.simTicks;
     }
@@ -50,11 +46,9 @@ Frame FrameScheduler::beginFrame(u64 nowNs) noexcept
     totalTicks_ += frame.simTicks;
     frame.alpha = static_cast<f32>(accumulator_ / timing_.fixedDt);
 
-    if (frame.clamped)
-    {
-        const std::array<core::I18nArg, 2> args{
-            core::I18nArg{"ticks", static_cast<core::i64>(frame.simTicks)},
-            core::I18nArg{"ms", frame.renderDt * 1000.0}};
+    if (frame.clamped) {
+        const std::array<core::I18nArg, 2> args{core::I18nArg{"ticks", static_cast<core::i64>(frame.simTicks)},
+                                                core::I18nArg{"ms", frame.renderDt * 1000.0}};
         core::log(core::LogLevel::Warn, LUAUG_TR("engine.frame.warn.catch_up_clamped"), args);
     }
 

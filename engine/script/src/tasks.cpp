@@ -1,18 +1,16 @@
 #include "luaug/script/tasks.h"
 
+#include "luaug/scene/world.h"
+#include "luaug/script/signals.h"
+
 #include <lua.h>
 #include <lualib.h>
 
 #include <algorithm>
 #include <cmath>
 
-#include "luaug/scene/world.h"
-#include "luaug/script/signals.h"
-
-namespace luaug::script
-{
-namespace
-{
+namespace luaug::script {
+namespace {
 
 [[nodiscard]] TaskScheduler& scheduler(lua_State* L) noexcept
 {
@@ -54,11 +52,8 @@ void insertTimer(TaskScheduler& tasks, TimerEntry entry)
     // Kept sorted by `(deadline, sequence)` at insert rather than sorted at
     // resume: §3.2 makes the order a rule, and a rule maintained in one place is
     // one that cannot be forgotten at the other.
-    const auto position = std::upper_bound(
-        tasks.timers.begin(),
-        tasks.timers.end(),
-        entry,
-        [](const TimerEntry& a, const TimerEntry& b) {
+    const auto position =
+        std::upper_bound(tasks.timers.begin(), tasks.timers.end(), entry, [](const TimerEntry& a, const TimerEntry& b) {
             return a.deadlineTick != b.deadlineTick ? a.deadlineTick < b.deadlineTick : a.sequence < b.sequence;
         });
     tasks.timers.insert(position, entry);
@@ -182,8 +177,7 @@ int taskCancel(lua_State* L)
     // Scanned rather than indexed by thread: `cancel` is rare, the lists are
     // short, and a pointer-keyed map would be a container whose order R10 would
     // then have to be argued about.
-    for (usize index = 0; index < tasks.timers.size(); ++index)
-    {
+    for (usize index = 0; index < tasks.timers.size(); ++index) {
         lua_getref(L, tasks.timers[index].threadRef);
         const bool match = lua_tothread(L, -1) == target;
         lua_pop(L, 1);
@@ -200,8 +194,7 @@ int taskCancel(lua_State* L)
 
     // A queued `task.defer` entry counts as a pending resumption, so cancelling
     // the thread `task.defer` returned stops its callback from running (§3.2).
-    for (auto it = signals.queue.begin(); it != signals.queue.end(); ++it)
-    {
+    for (auto it = signals.queue.begin(); it != signals.queue.end(); ++it) {
         if (it->kind != EntryKind::TaskCallback)
             continue;
         lua_getref(L, it->threadRef);
@@ -231,12 +224,8 @@ int taskCancel(lua_State* L)
 void registerTasks(lua_State* L)
 {
     const luaL_Reg entries[] = {
-        {"spawn", taskSpawn},
-        {"defer", taskDefer},
-        {"delay", taskDelay},
-        {"wait", taskWait},
-        {"cancel", taskCancel},
-        {nullptr, nullptr},
+        {"spawn", taskSpawn}, {"defer", taskDefer},   {"delay", taskDelay},
+        {"wait", taskWait},   {"cancel", taskCancel}, {nullptr, nullptr},
     };
     luaL_register(L, "task", entries);
     lua_setreadonly(L, -1, true);
@@ -259,20 +248,17 @@ void resumeDueTimers(lua_State* L, u64 tick)
     due.assign(tasks.timers.begin(), tasks.timers.begin() + static_cast<std::ptrdiff_t>(count));
     tasks.timers.erase(tasks.timers.begin(), tasks.timers.begin() + static_cast<std::ptrdiff_t>(count));
 
-    for (const TimerEntry& entry : due)
-    {
+    for (const TimerEntry& entry : due) {
         lua_getref(L, entry.threadRef);
         lua_State* co = lua_tothread(L, -1);
-        if (co == nullptr)
-        {
+        if (co == nullptr) {
             lua_pop(L, 1);
             (void)lua_unref(L, entry.threadRef);
             continue;
         }
 
         int resumeCount = 0;
-        if (entry.wait)
-        {
+        if (entry.wait) {
             // The elapsed sim time, as a product of whole ticks and the timestep
             // rather than a running sum of per-tick values -- so an exact
             // multiple of the timestep comes back exact and a long wait carries
@@ -280,8 +266,7 @@ void resumeDueTimers(lua_State* L, u64 tick)
             lua_pushnumber(co, static_cast<f64>(tick - entry.scheduledTick) * timestep);
             resumeCount = 1;
         }
-        else if (entry.argCount > 0)
-        {
+        else if (entry.argCount > 0) {
             // Already on `co`, pushed when the timer was created.
             resumeCount = static_cast<int>(entry.argCount);
         }

@@ -5,16 +5,15 @@
 // is being destroyed. Everything here is about that one sentence: what crosses,
 // what refuses to, and what the world on the far side sees.
 
-#include <doctest/doctest.h>
+#include "luaug/app/reload.h"
+#include "luaug/core/i18n.h"
+#include "luaug/script/reload_state.h"
 
+#include <doctest/doctest.h>
 #include <memory>
 #include <string>
 
 #include "project_fixture.h"
-
-#include "luaug/app/reload.h"
-#include "luaug/core/i18n.h"
-#include "luaug/script/reload_state.h"
 
 using namespace luaug;
 using luaug::app::testing::bootOptions;
@@ -22,8 +21,7 @@ using luaug::app::testing::Captured;
 using luaug::app::testing::hasChildNamed;
 using luaug::app::testing::Project;
 
-namespace
-{
+namespace {
 
 // The bag is owned by the test, which is the whole point of it: it has to
 // outlive the `WorldHost` a reload destroys.
@@ -184,17 +182,14 @@ TEST_CASE("a value that cannot cross raises rather than being dropped")
     // Each of these is a handle into something a reload destroys, or a shape
     // with no finite copy. Raising is what keeps the loss from being discovered
     // one save later and blamed on the reload.
-    const auto refuses = [](std::string_view expression)
-    {
+    const auto refuses = [](std::string_view expression) {
         Captured log;
         Project project;
-        project.write(
-            "src/scripts/main.luau",
-            std::string(R"(
+        project.write("src/scripts/main.luau", std::string(R"(
                 local hot = game:GetService("HotReloadService")
                 local ok = pcall(function()
-                    hot:SaveState("bad", )")
-                + std::string(expression) + R"()
+                    hot:SaveState("bad", )") + std::string(expression) +
+                                                   R"()
                 end)
                 local marker = Instance.new("Folder")
                 marker.Name = if ok then "accepted" else "refused"

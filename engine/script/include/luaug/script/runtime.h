@@ -10,12 +10,6 @@
 // that constrain it.
 #pragma once
 
-#include <memory>
-#include <optional>
-#include <string>
-#include <string_view>
-#include <vector>
-
 #include "luaug/core/error.h"
 #include "luaug/core/phase.h"
 #include "luaug/scene/world.h"
@@ -24,10 +18,15 @@
 #include "luaug/script/modules.h"
 #include "luaug/script/services.h"
 
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
 struct lua_State;
 
-namespace luaug::script
-{
+namespace luaug::script {
 
 class ScriptRuntime
 {

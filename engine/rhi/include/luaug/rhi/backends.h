@@ -8,13 +8,12 @@
 // startup.
 #pragma once
 
-#include <memory>
-
 #include "luaug/core/error.h"
 #include "luaug/rhi/device.h"
 
-namespace luaug::rhi
-{
+#include <memory>
+
+namespace luaug::rhi {
 
 // Null on failure, with `outError` filled when it is not null.
 using DeviceResult = std::unique_ptr<IDevice>;

@@ -1,7 +1,6 @@
 #include "luaug/core/name_atom.h"
 
-namespace luaug::core
-{
+namespace luaug::core {
 
 AtomTable::AtomTable()
 {

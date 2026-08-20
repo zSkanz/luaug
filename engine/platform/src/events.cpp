@@ -1,13 +1,10 @@
 #include "luaug/platform/event.h"
+#include "luaug/platform/sdl_interop.h"
 
 #include <vector>
 
-#include "luaug/platform/sdl_interop.h"
-
-namespace luaug::platform
-{
-namespace
-{
+namespace luaug::platform {
+namespace {
 
 // Main-thread only, like SDL's own event queue. The buffers are kept between
 // frames so a steady-state frame does no allocation.
@@ -19,46 +16,55 @@ std::vector<Event> g_events;
 // would turn a pin bump into a wrong-key bug that nothing would catch.
 Key translateScancode(SDL_Scancode scancode) noexcept
 {
-    switch (scancode)
-    {
-    case SDL_SCANCODE_ESCAPE: return Key::Escape;
-    case SDL_SCANCODE_F1: return Key::F1;
-    case SDL_SCANCODE_F2: return Key::F2;
-    case SDL_SCANCODE_F3: return Key::F3;
-    case SDL_SCANCODE_F4: return Key::F4;
-    case SDL_SCANCODE_F5: return Key::F5;
-    case SDL_SCANCODE_F6: return Key::F6;
-    case SDL_SCANCODE_F7: return Key::F7;
-    case SDL_SCANCODE_F8: return Key::F8;
-    case SDL_SCANCODE_F9: return Key::F9;
-    case SDL_SCANCODE_F10: return Key::F10;
-    case SDL_SCANCODE_F11: return Key::F11;
-    case SDL_SCANCODE_F12: return Key::F12;
-    default: return Key::Unknown;
+    switch (scancode) {
+    case SDL_SCANCODE_ESCAPE:
+        return Key::Escape;
+    case SDL_SCANCODE_F1:
+        return Key::F1;
+    case SDL_SCANCODE_F2:
+        return Key::F2;
+    case SDL_SCANCODE_F3:
+        return Key::F3;
+    case SDL_SCANCODE_F4:
+        return Key::F4;
+    case SDL_SCANCODE_F5:
+        return Key::F5;
+    case SDL_SCANCODE_F6:
+        return Key::F6;
+    case SDL_SCANCODE_F7:
+        return Key::F7;
+    case SDL_SCANCODE_F8:
+        return Key::F8;
+    case SDL_SCANCODE_F9:
+        return Key::F9;
+    case SDL_SCANCODE_F10:
+        return Key::F10;
+    case SDL_SCANCODE_F11:
+        return Key::F11;
+    case SDL_SCANCODE_F12:
+        return Key::F12;
+    default:
+        return Key::Unknown;
     }
 }
 
 void translate(const SDL_Event& raw, std::vector<Event>& out)
 {
-    switch (raw.type)
-    {
-    case SDL_EVENT_QUIT:
-    {
+    switch (raw.type) {
+    case SDL_EVENT_QUIT: {
         Event event;
         event.type = EventType::Quit;
         out.push_back(event);
         break;
     }
-    case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
-    {
+    case SDL_EVENT_WINDOW_CLOSE_REQUESTED: {
         Event event;
         event.type = EventType::WindowCloseRequested;
         event.windowId = raw.window.windowID;
         out.push_back(event);
         break;
     }
-    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-    {
+    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
         // Pixels rather than the logical size, because the consumer that
         // matters is the swapchain.
         Event event;
@@ -70,8 +76,7 @@ void translate(const SDL_Event& raw, std::vector<Event>& out)
         break;
     }
     case SDL_EVENT_KEY_DOWN:
-    case SDL_EVENT_KEY_UP:
-    {
+    case SDL_EVENT_KEY_UP: {
         const Key key = translateScancode(raw.key.scancode);
         if (key == Key::Unknown)
             break;
@@ -100,8 +105,7 @@ std::span<const Event> pumpEvents()
     g_events.clear();
 
     SDL_Event raw;
-    while (SDL_PollEvent(&raw))
-    {
+    while (SDL_PollEvent(&raw)) {
         g_rawEvents.push_back(raw);
         translate(raw, g_events);
     }

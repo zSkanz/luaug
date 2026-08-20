@@ -9,16 +9,15 @@
 // allocation on the read path beyond what a `Value` costs -- because these are
 // the innermost frames of the Instance facade, and architecture risk #1 is the
 // facade's overhead eating the ECS's win.
+#include "luaug/scene/world.h"
+
 #include <cmath>
 #include <string>
 
 #include "../generated/class_descriptors.gen.h"
-#include "luaug/scene/world.h"
 
-namespace luaug::scene::native
-{
-namespace
-{
+namespace luaug::scene::native {
+namespace {
 
 constexpr f64 RadiansToDegrees = 57.29577951308232;
 constexpr f64 DegreesToRadians = 0.017453292519943295;
@@ -143,8 +142,7 @@ bool setWorkspaceCurrentCamera(World& world, core::InstanceId id, const Value& v
     WorkspaceComponent* workspace = world.workspaces().find(id);
     if (workspace == nullptr)
         return false;
-    if (const auto* reference = std::get_if<core::InstanceId>(&value); reference != nullptr)
-    {
+    if (const auto* reference = std::get_if<core::InstanceId>(&value); reference != nullptr) {
         // The property is typed `Camera?`, and the type definitions enforce that
         // for anyone who runs the analyzer. This is the runtime half, because a
         // Part assigned here would otherwise be a camera that renders a view
@@ -193,8 +191,7 @@ bool setModelPrimaryPart(World& world, core::InstanceId id, const Value& value)
     ModelComponent* model = world.models().find(id);
     if (model == nullptr)
         return false;
-    if (const auto* reference = std::get_if<core::InstanceId>(&value); reference != nullptr)
-    {
+    if (const auto* reference = std::get_if<core::InstanceId>(&value); reference != nullptr) {
         model->primaryPart = *reference;
         return true;
     }
@@ -286,10 +283,9 @@ Value getBasePartOrientation(const World& world, core::InstanceId id)
         return Value{};
     const core::Vec3 radians = core::toEulerYxz(part->cframe.rotation);
     // Degrees, YXZ, matching api-design.md §2.2's Orientation.
-    return Value{core::Vec3{
-        static_cast<f32>(static_cast<f64>(radians.x) * RadiansToDegrees),
-        static_cast<f32>(static_cast<f64>(radians.y) * RadiansToDegrees),
-        static_cast<f32>(static_cast<f64>(radians.z) * RadiansToDegrees)}};
+    return Value{core::Vec3{static_cast<f32>(static_cast<f64>(radians.x) * RadiansToDegrees),
+                            static_cast<f32>(static_cast<f64>(radians.y) * RadiansToDegrees),
+                            static_cast<f32>(static_cast<f64>(radians.z) * RadiansToDegrees)}};
 }
 
 bool setBasePartOrientation(World& world, core::InstanceId id, const Value& value)
@@ -298,10 +294,10 @@ bool setBasePartOrientation(World& world, core::InstanceId id, const Value& valu
     PartComponent* part = writePart(world, id);
     if (degrees == nullptr || part == nullptr)
         return false;
-    part->cframe.rotation = core::fromEulerYxz(core::Vec3{
-        static_cast<f32>(static_cast<f64>(degrees->x) * DegreesToRadians),
-        static_cast<f32>(static_cast<f64>(degrees->y) * DegreesToRadians),
-        static_cast<f32>(static_cast<f64>(degrees->z) * DegreesToRadians)});
+    part->cframe.rotation =
+        core::fromEulerYxz(core::Vec3{static_cast<f32>(static_cast<f64>(degrees->x) * DegreesToRadians),
+                                      static_cast<f32>(static_cast<f64>(degrees->y) * DegreesToRadians),
+                                      static_cast<f32>(static_cast<f64>(degrees->z) * DegreesToRadians)});
     return true;
 }
 

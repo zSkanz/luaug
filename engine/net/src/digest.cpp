@@ -3,10 +3,8 @@
 #include <cstring>
 #include <vector>
 
-namespace luaug::net::detail
-{
-namespace
-{
+namespace luaug::net::detail {
+namespace {
 
 using core::u32;
 using core::u64;
@@ -22,10 +20,9 @@ void processBlock(const u8* block, std::array<u32, 5>& state)
 {
     std::array<u32, 80> w{};
 
-    for (usize i = 0; i < 16; ++i)
-    {
-        w[i] = static_cast<u32>(block[i * 4]) << 24 | static_cast<u32>(block[i * 4 + 1]) << 16
-            | static_cast<u32>(block[i * 4 + 2]) << 8 | static_cast<u32>(block[i * 4 + 3]);
+    for (usize i = 0; i < 16; ++i) {
+        w[i] = static_cast<u32>(block[i * 4]) << 24 | static_cast<u32>(block[i * 4 + 1]) << 16 |
+               static_cast<u32>(block[i * 4 + 2]) << 8 | static_cast<u32>(block[i * 4 + 3]);
     }
     for (usize i = 16; i < 80; ++i)
         w[i] = rotateLeft(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
@@ -36,27 +33,22 @@ void processBlock(const u8* block, std::array<u32, 5>& state)
     u32 d = state[3];
     u32 e = state[4];
 
-    for (usize i = 0; i < 80; ++i)
-    {
+    for (usize i = 0; i < 80; ++i) {
         u32 f = 0;
         u32 k = 0;
-        if (i < 20)
-        {
+        if (i < 20) {
             f = (b & c) | (~b & d);
             k = 0x5A827999u;
         }
-        else if (i < 40)
-        {
+        else if (i < 40) {
             f = b ^ c ^ d;
             k = 0x6ED9EBA1u;
         }
-        else if (i < 60)
-        {
+        else if (i < 60) {
             f = (b & c) | (b & d) | (c & d);
             k = 0x8F1BBCDCu;
         }
-        else
-        {
+        else {
             f = b ^ c ^ d;
             k = 0xCA62C1D6u;
         }
@@ -103,8 +95,7 @@ Sha1Digest sha1(std::span<const u8> data)
         processBlock(tail.data() + i * 64, state);
 
     Sha1Digest digest{};
-    for (usize i = 0; i < 5; ++i)
-    {
+    for (usize i = 0; i < 5; ++i) {
         digest[i * 4] = static_cast<u8>((state[i] >> 24) & 0xFFu);
         digest[i * 4 + 1] = static_cast<u8>((state[i] >> 16) & 0xFFu);
         digest[i * 4 + 2] = static_cast<u8>((state[i] >> 8) & 0xFFu);
@@ -126,10 +117,9 @@ std::string base64Encode(std::span<const u8> data)
     out.reserve(((data.size() + 2) / 3) * 4);
 
     usize i = 0;
-    for (; i + 3 <= data.size(); i += 3)
-    {
-        const u32 triple = static_cast<u32>(data[i]) << 16 | static_cast<u32>(data[i + 1]) << 8
-            | static_cast<u32>(data[i + 2]);
+    for (; i + 3 <= data.size(); i += 3) {
+        const u32 triple =
+            static_cast<u32>(data[i]) << 16 | static_cast<u32>(data[i + 1]) << 8 | static_cast<u32>(data[i + 2]);
         out.push_back(kAlphabet[(triple >> 18) & 0x3Fu]);
         out.push_back(kAlphabet[(triple >> 12) & 0x3Fu]);
         out.push_back(kAlphabet[(triple >> 6) & 0x3Fu]);
@@ -137,16 +127,14 @@ std::string base64Encode(std::span<const u8> data)
     }
 
     const usize remaining = data.size() - i;
-    if (remaining == 1)
-    {
+    if (remaining == 1) {
         const u32 triple = static_cast<u32>(data[i]) << 16;
         out.push_back(kAlphabet[(triple >> 18) & 0x3Fu]);
         out.push_back(kAlphabet[(triple >> 12) & 0x3Fu]);
         out.push_back('=');
         out.push_back('=');
     }
-    else if (remaining == 2)
-    {
+    else if (remaining == 2) {
         const u32 triple = static_cast<u32>(data[i]) << 16 | static_cast<u32>(data[i + 1]) << 8;
         out.push_back(kAlphabet[(triple >> 18) & 0x3Fu]);
         out.push_back(kAlphabet[(triple >> 12) & 0x3Fu]);

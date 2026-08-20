@@ -7,8 +7,7 @@
 #include <string_view>
 #include <vector>
 
-namespace
-{
+namespace {
 
 // CI has to tell "the images differ" apart from "the screenshot was never
 // written". Three codes, never overloaded.
@@ -33,36 +32,31 @@ int main(int argc, char** argv)
         args.emplace_back(argv[i]);
 
     const Command command = parseCommandLine(args);
-    if (command.status == CommandStatus::HelpRequested)
-    {
+    if (command.status == CommandStatus::HelpRequested) {
         std::cout << usageText();
         return kExitMatch;
     }
-    if (command.status == CommandStatus::UsageError)
-    {
+    if (command.status == CommandStatus::UsageError) {
         reportError(command.error);
         std::cerr << usageText();
         return kExitError;
     }
 
     const LoadResult actual = loadPngFile(command.actualPath);
-    if (!actual.ok)
-    {
+    if (!actual.ok) {
         reportError(actual.error);
         return kExitError;
     }
 
     const LoadResult expected = loadPngFile(command.expectedPath);
-    if (!expected.ok)
-    {
+    if (!expected.ok) {
         reportError(expected.error);
         return kExitError;
     }
 
     const CompareResult result = compare(actual.image, expected.image, command.options);
 
-    if (result.status == CompareStatus::SizeMismatch)
-    {
+    if (result.status == CompareStatus::SizeMismatch) {
         std::cout << "imgcmp: size mismatch: actual " << actual.image.width << "x" << actual.image.height
                   << ", expected " << expected.image.width << "x" << expected.image.height << ": FAIL\n";
         if (!command.diffPath.empty())
@@ -75,12 +69,10 @@ int main(int argc, char** argv)
               << result.maxChannelDelta << ", tolerance " << command.options.tolerance << ", allowed "
               << command.options.maxDifferentPixels << "): " << (result.passed() ? "OK" : "FAIL") << '\n';
 
-    if (!command.diffPath.empty())
-    {
+    if (!command.diffPath.empty()) {
         const Image diff = renderDiff(actual.image, expected.image, command.options);
         const WriteResult written = writePngFile(command.diffPath, diff);
-        if (!written.ok)
-        {
+        if (!written.ok) {
             // Failing to produce a requested artifact is an I/O failure even
             // when the comparison itself reached a verdict.
             reportError(written.error);

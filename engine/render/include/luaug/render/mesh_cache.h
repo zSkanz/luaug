@@ -14,17 +14,16 @@
 // downstream can resolve an asset, and nothing downstream needs to.
 #pragma once
 
-#include <optional>
-#include <span>
-#include <vector>
-
 #include "luaug/asset/model.h"
 #include "luaug/core/error.h"
 #include "luaug/core/math.h"
 #include "luaug/rhi/device.h"
 
-namespace luaug::render
-{
+#include <optional>
+#include <span>
+#include <vector>
+
+namespace luaug::render {
 
 using core::AABB;
 using core::u32;
@@ -82,8 +81,8 @@ public:
     // first allocation. It grows when a frame asks for more than it holds and
     // is never shrunk, because a frame's dynamic geometry swings wildly and
     // reallocating to match costs far more than the high-water mark does.
-    [[nodiscard]] std::optional<core::EngineError> create(
-        rhi::IDevice& device, u32 ringVertexCapacity = 4096, u32 ringIndexCapacity = 8192);
+    [[nodiscard]] std::optional<core::EngineError> create(rhi::IDevice& device, u32 ringVertexCapacity = 4096,
+                                                          u32 ringIndexCapacity = 8192);
 
     void destroy(rhi::IDevice& device);
 
@@ -101,9 +100,8 @@ public:
     // generation. Holding a dynamic handle across frames yields nothing rather
     // than geometry from another frame -- which is the mistake this enum exists
     // to make nameable.
-    [[nodiscard]] MeshHandle create(
-        rhi::IDevice& device, rhi::ICmdList& cmd, const asset::Mesh& mesh, MeshUsage usage,
-        core::EngineError* outError = nullptr);
+    [[nodiscard]] MeshHandle create(rhi::IDevice& device, rhi::ICmdList& cmd, const asset::Mesh& mesh, MeshUsage usage,
+                                    core::EngineError* outError = nullptr);
 
     // Releases a static mesh's buffers. A dynamic handle is not released here;
     // the ring reclaims it at the next `beginFrame`.

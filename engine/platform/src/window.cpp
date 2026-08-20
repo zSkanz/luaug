@@ -1,15 +1,15 @@
 #include "luaug/platform/window.h"
 
-#include <string>
-
 #include "luaug/core/i18n.h"
 #include "luaug/core/text_key.h"
 #include "luaug/platform/platform.h"
 #include "luaug/platform/sdl_interop.h"
+
+#include <string>
+
 #include "window_impl.h"
 
-namespace luaug::platform
-{
+namespace luaug::platform {
 
 void WindowDeleter::operator()(Window* window) const noexcept
 {
@@ -18,8 +18,7 @@ void WindowDeleter::operator()(Window* window) const noexcept
 
 WindowPtr createWindow(const WindowDesc& desc, core::EngineError* outError)
 {
-    if (!isInitialized())
-    {
+    if (!isInitialized()) {
         if (outError != nullptr)
             *outError = core::makeError(LUAUG_TR("platform.err.window_failed"), {}, "platform::init() has not run");
         return {};
@@ -34,8 +33,7 @@ WindowPtr createWindow(const WindowDesc& desc, core::EngineError* outError)
     const std::string title = core::engineCatalog().format(desc.titleKey, desc.titleArgs);
 
     SDL_Window* handle = SDL_CreateWindow(title.c_str(), desc.width, desc.height, flags);
-    if (handle == nullptr)
-    {
+    if (handle == nullptr) {
         if (outError != nullptr)
             *outError = core::makeError(LUAUG_TR("platform.err.window_failed"), {}, SDL_GetError());
         return {};

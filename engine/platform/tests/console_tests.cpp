@@ -1,6 +1,5 @@
-#include <doctest/doctest.h>
-
 #include <cstdio>
+#include <doctest/doctest.h>
 #include <filesystem>
 #include <string>
 
@@ -15,8 +14,7 @@
 using luaug::platform::ConsoleStream;
 using luaug::platform::writeConsole;
 
-namespace
-{
+namespace {
 
 // MSVC rejects the plain CRT forms under warnings-as-errors, so both are
 // wrapped once here rather than relaxing the bar for the whole target.
@@ -85,8 +83,7 @@ std::string captureStdout(void (*body)())
     std::clearerr(stdout);
 
     std::string captured;
-    if (std::FILE* file = openFile(pathText.c_str(), "rb"); file != nullptr)
-    {
+    if (std::FILE* file = openFile(pathText.c_str(), "rb"); file != nullptr) {
         char buffer[256];
         while (const std::size_t read = std::fread(buffer, 1, sizeof(buffer), file))
             captured.append(buffer, read);

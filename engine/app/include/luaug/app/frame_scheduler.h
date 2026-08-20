@@ -11,8 +11,7 @@
 
 #include "luaug/core/types.h"
 
-namespace luaug::app
-{
+namespace luaug::app {
 
 using core::f32;
 using core::f64;

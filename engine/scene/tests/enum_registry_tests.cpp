@@ -1,17 +1,16 @@
-#include <doctest/doctest.h>
+#include "luaug/core/name_atom.h"
+#include "luaug/scene/enum_registry.h"
 
 #include <array>
+#include <doctest/doctest.h>
 #include <string>
 
 #include "class_descriptors.gen.h"
-#include "luaug/core/name_atom.h"
-#include "luaug/scene/enum_registry.h"
 
 using namespace luaug::scene;
 using luaug::core::AtomTable;
 
-namespace
-{
+namespace {
 
 // Two items with non-contiguous values, because the registry must never be
 // tempted to treat a value as an index -- `enums.api.luau` calls the value

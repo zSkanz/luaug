@@ -8,8 +8,7 @@
 // reaches its own the same way.
 #include "../generated/class_descriptors.gen.h"
 
-namespace luaug::render
-{
+namespace luaug::render {
 
 void registerSceneTypes(scene::ClassRegistry& classes, core::AtomTable& atoms)
 {

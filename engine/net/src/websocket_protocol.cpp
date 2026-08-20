@@ -1,14 +1,12 @@
 #include "luaug/net/websocket_protocol.h"
 
+#include "luaug/net/detail/digest.h"
+
 #include <array>
 #include <string>
 
-#include "luaug/net/detail/digest.h"
-
-namespace luaug::net::ws
-{
-namespace
-{
+namespace luaug::net::ws {
+namespace {
 
 using core::I18nArg;
 using core::u64;
@@ -35,8 +33,7 @@ constexpr bool isKnownOpcode(u8 opcode)
 {
     if (a.size() != b.size())
         return false;
-    for (usize i = 0; i < a.size(); ++i)
-    {
+    for (usize i = 0; i < a.size(); ++i) {
         if (lowerAscii(a[i]) != lowerAscii(b[i]))
             return false;
     }
@@ -47,8 +44,7 @@ constexpr bool isKnownOpcode(u8 opcode)
 {
     if (needle.size() > haystack.size())
         return false;
-    for (usize i = 0; i + needle.size() <= haystack.size(); ++i)
-    {
+    for (usize i = 0; i + needle.size() <= haystack.size(); ++i) {
         if (equalsIgnoreCase(haystack.substr(i, needle.size()), needle))
             return true;
     }
@@ -72,8 +68,7 @@ constexpr bool isKnownOpcode(u8 opcode)
         return std::nullopt;
     lineStart += 2;
 
-    while (lineStart < response.size())
-    {
+    while (lineStart < response.size()) {
         usize lineEnd = response.find("\r\n", lineStart);
         if (lineEnd == std::string_view::npos)
             lineEnd = response.size();
@@ -97,29 +92,23 @@ void encodeFrame(std::vector<u8>& out, Opcode opcode, bool fin, std::span<const 
     out.push_back(static_cast<u8>((fin ? 0x80u : 0x00u) | static_cast<u8>(opcode)));
 
     const usize length = payload.size();
-    if (length <= 125)
-    {
+    if (length <= 125) {
         out.push_back(static_cast<u8>(0x80u | length));
     }
-    else if (length <= 0xFFFFu)
-    {
+    else if (length <= 0xFFFFu) {
         out.push_back(static_cast<u8>(0x80u | 126u));
         out.push_back(static_cast<u8>((length >> 8) & 0xFFu));
         out.push_back(static_cast<u8>(length & 0xFFu));
     }
-    else
-    {
+    else {
         out.push_back(static_cast<u8>(0x80u | 127u));
         const u64 wide = static_cast<u64>(length);
         for (usize i = 0; i < 8; ++i)
             out.push_back(static_cast<u8>((wide >> ((7 - i) * 8)) & 0xFFu));
     }
 
-    const std::array<u8, 4> mask{
-        static_cast<u8>((maskKey >> 24) & 0xFFu),
-        static_cast<u8>((maskKey >> 16) & 0xFFu),
-        static_cast<u8>((maskKey >> 8) & 0xFFu),
-        static_cast<u8>(maskKey & 0xFFu)};
+    const std::array<u8, 4> mask{static_cast<u8>((maskKey >> 24) & 0xFFu), static_cast<u8>((maskKey >> 16) & 0xFFu),
+                                 static_cast<u8>((maskKey >> 8) & 0xFFu), static_cast<u8>(maskKey & 0xFFu)};
     for (const u8 byte : mask)
         out.push_back(byte);
 
@@ -139,15 +128,13 @@ DecodeResult decodeFrame(std::span<const u8> input, usize maxPayload)
 
     // RSV1..3 are reserved and must be zero: no extension is negotiated, so a
     // peer setting one is describing a frame we cannot interpret.
-    if ((byte0 & 0x70u) != 0u)
-    {
+    if ((byte0 & 0x70u) != 0u) {
         result.status = DecodeStatus::Malformed;
         return result;
     }
 
     const u8 opcode = static_cast<u8>(byte0 & 0x0Fu);
-    if (!isKnownOpcode(opcode))
-    {
+    if (!isKnownOpcode(opcode)) {
         result.status = DecodeStatus::Malformed;
         return result;
     }
@@ -157,8 +144,7 @@ DecodeResult decodeFrame(std::span<const u8> input, usize maxPayload)
     const u8 shortLength = static_cast<u8>(byte1 & 0x7Fu);
 
     // §5.5: a control frame carries at most 125 bytes and is never fragmented.
-    if (isControlOpcode(opcode) && (shortLength > 125u || !fin))
-    {
+    if (isControlOpcode(opcode) && (shortLength > 125u || !fin)) {
         result.status = DecodeStatus::Malformed;
         return result;
     }
@@ -166,8 +152,7 @@ DecodeResult decodeFrame(std::span<const u8> input, usize maxPayload)
     usize cursor = 2;
     u64 payloadLength = shortLength;
 
-    if (shortLength == 126u)
-    {
+    if (shortLength == 126u) {
         if (input.size() < cursor + 2)
             return result;
         payloadLength = static_cast<u64>(input[cursor]) << 8 | static_cast<u64>(input[cursor + 1]);
@@ -175,14 +160,12 @@ DecodeResult decodeFrame(std::span<const u8> input, usize maxPayload)
 
         // §5.2 requires the minimal encoding, so a 16-bit field naming a length
         // the 7-bit field could hold is not the frame it claims to be.
-        if (payloadLength < 126u)
-        {
+        if (payloadLength < 126u) {
             result.status = DecodeStatus::Malformed;
             return result;
         }
     }
-    else if (shortLength == 127u)
-    {
+    else if (shortLength == 127u) {
         if (input.size() < cursor + 8)
             return result;
 
@@ -192,21 +175,18 @@ DecodeResult decodeFrame(std::span<const u8> input, usize maxPayload)
         cursor += 8;
 
         // §5.2: the high bit must be zero, and the minimal-encoding rule again.
-        if ((payloadLength >> 63) != 0u || payloadLength <= 0xFFFFu)
-        {
+        if ((payloadLength >> 63) != 0u || payloadLength <= 0xFFFFu) {
             result.status = DecodeStatus::Malformed;
             return result;
         }
     }
 
-    if (payloadLength > static_cast<u64>(maxPayload))
-    {
+    if (payloadLength > static_cast<u64>(maxPayload)) {
         result.status = DecodeStatus::Malformed;
         return result;
     }
 
-    if (masked)
-    {
+    if (masked) {
         if (input.size() < cursor + 4)
             return result;
         cursor += 4;
@@ -219,12 +199,10 @@ DecodeResult decodeFrame(std::span<const u8> input, usize maxPayload)
     result.frame.opcode = static_cast<Opcode>(opcode);
     result.frame.fin = fin;
     result.frame.masked = masked;
-    result.frame.payload.assign(
-        input.begin() + static_cast<std::ptrdiff_t>(cursor),
-        input.begin() + static_cast<std::ptrdiff_t>(cursor + payloadSize));
+    result.frame.payload.assign(input.begin() + static_cast<std::ptrdiff_t>(cursor),
+                                input.begin() + static_cast<std::ptrdiff_t>(cursor + payloadSize));
 
-    if (masked)
-    {
+    if (masked) {
         const usize maskAt = cursor - 4;
         for (usize i = 0; i < payloadSize; ++i)
             result.frame.payload[i] = static_cast<u8>(result.frame.payload[i] ^ input[maskAt + (i % 4)]);
@@ -246,8 +224,8 @@ std::string computeAccept(std::string_view clientKeyBase64)
     return detail::base64Encode(std::span<const u8>(digest.data(), digest.size()));
 }
 
-ClientHandshake buildClientHandshake(
-    std::string_view host, u16 port, std::string_view path, std::span<const u8, 16> nonce)
+ClientHandshake buildClientHandshake(std::string_view host, u16 port, std::string_view path,
+                                     std::span<const u8, 16> nonce)
 {
     ClientHandshake handshake;
 
@@ -284,8 +262,7 @@ std::optional<core::EngineError> validateServerHandshake(std::string_view respon
         return core::makeError(LUAUG_TR("net.err.handshake_no_status"));
 
     const std::string_view status = response.substr(0, statusEnd);
-    if (!status.starts_with("HTTP/1.1 101") && !status.starts_with("HTTP/1.0 101"))
-    {
+    if (!status.starts_with("HTTP/1.1 101") && !status.starts_with("HTTP/1.0 101")) {
         const std::array<I18nArg, 1> args{I18nArg{"status", status}};
         return core::makeError(LUAUG_TR("net.err.handshake_bad_status"), args);
     }

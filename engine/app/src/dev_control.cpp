@@ -1,21 +1,19 @@
 #include "luaug/app/dev_control.h"
 
-#include <array>
-#include <atomic>
-#include <chrono>
-#include <mutex>
-#include <thread>
-
 #include "luaug/core/build_info.h"
 #include "luaug/core/json.h"
 #include "luaug/core/json_writer.h"
 #include "luaug/core/log.h"
 #include "luaug/net/websocket.h"
 
-namespace luaug::app
-{
-namespace
-{
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <mutex>
+#include <thread>
+
+namespace luaug::app {
+namespace {
 
 using core::I18nArg;
 
@@ -59,8 +57,7 @@ constexpr core::u32 kPollMs = 20;
         return false;
 
     core::u32 value = 0;
-    for (const char digit : portText)
-    {
+    for (const char digit : portText) {
         if (digit < '0' || digit > '9')
             return false;
         value = value * 10 + static_cast<core::u32>(digit - '0');
@@ -93,8 +90,7 @@ struct DevControl::Impl
 void DevControl::Impl::ingest(const std::string& text)
 {
     core::JsonDocument document;
-    if (!document.parse(text))
-    {
+    if (!document.parse(text)) {
         // Not fatal on its own: the connection is still framed correctly, and
         // one unreadable message is the dev server's bug to fix. Saying so is
         // the difference between that and a reload that never arrives.
@@ -121,8 +117,7 @@ void DevControl::Impl::ingest(const std::string& text)
 
 void DevControl::Impl::run()
 {
-    while (running.load(std::memory_order_relaxed))
-    {
+    while (running.load(std::memory_order_relaxed)) {
         // Replies first: a `reloaded` the frame loop posted should not wait a
         // poll interval behind an idle read.
         std::vector<std::string> pending;
@@ -130,10 +125,8 @@ void DevControl::Impl::run()
             const std::lock_guard<std::mutex> guard(outboundLock);
             pending.swap(outbound);
         }
-        for (const std::string& message : pending)
-        {
-            if (auto error = socket.sendText(message))
-            {
+        for (const std::string& message : pending) {
+            if (auto error = socket.sendText(message)) {
                 core::logText(core::LogLevel::Warn, error->message);
                 live.store(false, std::memory_order_relaxed);
                 running.store(false, std::memory_order_relaxed);
@@ -143,8 +136,7 @@ void DevControl::Impl::run()
 
         std::string received;
         bool got = false;
-        if (auto error = socket.receiveText(received, got, kPollMs))
-        {
+        if (auto error = socket.receiveText(received, got, kPollMs)) {
             // Includes the orderly close: `luaug dev` going away ends the
             // connection and the engine keeps running, windowed, with no
             // watcher. Ending the process instead would make closing the dev
@@ -159,7 +151,8 @@ void DevControl::Impl::run()
     }
 }
 
-DevControl::DevControl() : m_impl(std::make_unique<Impl>()) {}
+DevControl::DevControl() : m_impl(std::make_unique<Impl>())
+{}
 
 DevControl::~DevControl()
 {
@@ -169,15 +162,13 @@ DevControl::~DevControl()
 std::optional<core::EngineError> DevControl::start(const DevControlOptions& options)
 {
     net::WebSocketClientOptions socketOptions;
-    if (!parseUrl(options.url, socketOptions.host, socketOptions.port, socketOptions.path))
-    {
+    if (!parseUrl(options.url, socketOptions.host, socketOptions.port, socketOptions.path)) {
         const std::array<I18nArg, 1> args{I18nArg{"url", options.url}};
         return core::makeError(LUAUG_TR("engine.dev.err.bad_url"), args);
     }
 
     std::optional<core::EngineError> lastError;
-    for (core::u32 attempt = 0; attempt < options.connectAttempts; ++attempt)
-    {
+    for (core::u32 attempt = 0; attempt < options.connectAttempts; ++attempt) {
         lastError = m_impl->socket.connect(socketOptions);
         if (!lastError.has_value())
             break;

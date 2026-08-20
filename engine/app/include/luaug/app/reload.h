@@ -12,16 +12,15 @@
 // running and reports why.
 #pragma once
 
-#include <memory>
-#include <optional>
-
 #include "luaug/app/preserved.h"
 #include "luaug/app/world_host.h"
 #include "luaug/core/error.h"
 #include "luaug/core/types.h"
 
-namespace luaug::app
-{
+#include <memory>
+#include <optional>
+
+namespace luaug::app {
 
 struct ReloadReport
 {

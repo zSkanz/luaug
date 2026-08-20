@@ -1,16 +1,14 @@
-#include <doctest/doctest.h>
-
-#include <array>
-#include <cstddef>
-#include <string>
-
 #include "luaug/rhi/backends.h"
 #include "luaug/rhi/capture.h"
 
+#include <array>
+#include <cstddef>
+#include <doctest/doctest.h>
+#include <string>
+
 using namespace luaug::rhi;
 
-namespace
-{
+namespace {
 
 // One small frame, recorded twice, to prove the stream depends on the calls and
 // on nothing else.
@@ -26,8 +24,8 @@ std::string recordFrame()
         .height = 64,
         .debugName = "scene-color",
     });
-    const BufferHandle vertices
-        = device->createBuffer({.usage = BufferUsage::Vertex, .sizeBytes = 48, .debugName = "cube"});
+    const BufferHandle vertices =
+        device->createBuffer({.usage = BufferUsage::Vertex, .sizeBytes = 48, .debugName = "cube"});
 
     const std::array<ColorAttachment, 1> colors{ColorAttachment{
         .texture = target,

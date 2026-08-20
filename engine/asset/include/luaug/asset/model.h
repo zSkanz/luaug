@@ -13,15 +13,14 @@
 // different materials is normal and becomes several submeshes below.
 #pragma once
 
-#include <string>
-#include <vector>
-
 #include "luaug/asset/image.h"
 #include "luaug/core/math.h"
 #include "luaug/core/types.h"
 
-namespace luaug::asset
-{
+#include <string>
+#include <vector>
+
+namespace luaug::asset {
 
 using core::AABB;
 using core::Color3;

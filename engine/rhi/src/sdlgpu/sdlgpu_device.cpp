@@ -12,25 +12,23 @@
 //   and the release all happen here, because a caller that had to know about
 //   them would be writing SDL_GPU code through a wrapper.
 
-#include <cstddef>
-#include <cstring>
-#include <string>
-#include <vector>
-
-#include <SDL3/SDL_error.h>
-#include <SDL3/SDL_gpu.h>
-
 #include "luaug/core/log.h"
 #include "luaug/core/text_key.h"
 #include "luaug/platform/sdl_interop.h"
 #include "luaug/rhi/backends.h"
 #include "luaug/rhi/sdlgpu_interop.h"
+
+#include <SDL3/SDL_error.h>
+#include <SDL3/SDL_gpu.h>
+#include <cstddef>
+#include <cstring>
+#include <string>
+#include <vector>
+
 #include "sdlgpu_enums.h"
 
-namespace luaug::rhi
-{
-namespace
-{
+namespace luaug::rhi {
+namespace {
 
 using sdlgpu::bytesPerPixel;
 using sdlgpu::fromSdl;
@@ -117,11 +115,8 @@ class SdlGpuDevice final : public IDevice
 {
 public:
     SdlGpuDevice(SDL_GPUDevice* device, ShaderFormat shaderFormat) noexcept
-        : device_(device)
-        , shaderFormat_(shaderFormat)
-        , cmdList_(*this)
-    {
-    }
+        : device_(device), shaderFormat_(shaderFormat), cmdList_(*this)
+    {}
 
     ~SdlGpuDevice() override
     {
@@ -179,8 +174,7 @@ public:
     void releaseWindow(platform::Window& window) override
     {
         SDL_Window* native = platform::nativeWindow(window);
-        for (usize i = 0; i < windows_.size(); ++i)
-        {
+        for (usize i = 0; i < windows_.size(); ++i) {
             if (windows_[i].window != native)
                 continue;
 
@@ -230,14 +224,13 @@ public:
         if (!desc.debugName.empty())
             SDL_SetGPUTextureName(device_, texture, std::string(desc.debugName).c_str());
 
-        return {addSlot(textures_,
-            TextureEntry{
-                .texture = texture,
-                .format = desc.format,
-                .width = desc.width,
-                .height = desc.height,
-                .owned = true,
-            })};
+        return {addSlot(textures_, TextureEntry{
+                                       .texture = texture,
+                                       .format = desc.format,
+                                       .width = desc.width,
+                                       .height = desc.height,
+                                       .owned = true,
+                                   })};
     }
 
     [[nodiscard]] SamplerHandle createSampler(const SamplerDesc& desc) override
@@ -287,8 +280,7 @@ public:
 
     void destroy(BufferHandle handle) override
     {
-        if (SDL_GPUBuffer** entry = slot(buffers_, handle.id); entry != nullptr && *entry != nullptr)
-        {
+        if (SDL_GPUBuffer** entry = slot(buffers_, handle.id); entry != nullptr && *entry != nullptr) {
             SDL_ReleaseGPUBuffer(device_, *entry);
             *entry = nullptr;
         }
@@ -296,8 +288,7 @@ public:
 
     void destroy(TextureHandle handle) override
     {
-        if (TextureEntry* entry = slot(textures_, handle.id); entry != nullptr && entry->texture != nullptr)
-        {
+        if (TextureEntry* entry = slot(textures_, handle.id); entry != nullptr && entry->texture != nullptr) {
             if (entry->owned)
                 SDL_ReleaseGPUTexture(device_, entry->texture);
             *entry = TextureEntry{};
@@ -306,8 +297,7 @@ public:
 
     void destroy(SamplerHandle handle) override
     {
-        if (SDL_GPUSampler** entry = slot(samplers_, handle.id); entry != nullptr && *entry != nullptr)
-        {
+        if (SDL_GPUSampler** entry = slot(samplers_, handle.id); entry != nullptr && *entry != nullptr) {
             SDL_ReleaseGPUSampler(device_, *entry);
             *entry = nullptr;
         }
@@ -315,8 +305,7 @@ public:
 
     void destroy(ShaderHandle handle) override
     {
-        if (SDL_GPUShader** entry = slot(shaders_, handle.id); entry != nullptr && *entry != nullptr)
-        {
+        if (SDL_GPUShader** entry = slot(shaders_, handle.id); entry != nullptr && *entry != nullptr) {
             SDL_ReleaseGPUShader(device_, *entry);
             *entry = nullptr;
         }
@@ -324,8 +313,7 @@ public:
 
     void destroy(PipelineHandle handle) override
     {
-        if (SDL_GPUGraphicsPipeline** entry = slot(pipelines_, handle.id); entry != nullptr && *entry != nullptr)
-        {
+        if (SDL_GPUGraphicsPipeline** entry = slot(pipelines_, handle.id); entry != nullptr && *entry != nullptr) {
             SDL_ReleaseGPUGraphicsPipeline(device_, *entry);
             *entry = nullptr;
         }
@@ -405,8 +393,7 @@ PipelineHandle SdlGpuDevice::createGraphicsPipeline(const GraphicsPipelineDesc& 
 {
     std::vector<SDL_GPUVertexBufferDescription> vertexBuffers;
     vertexBuffers.reserve(desc.vertexBuffers.size());
-    for (const VertexBufferLayout& layout : desc.vertexBuffers)
-    {
+    for (const VertexBufferLayout& layout : desc.vertexBuffers) {
         vertexBuffers.push_back({
             .slot = layout.slot,
             .pitch = layout.strideBytes,
@@ -417,8 +404,7 @@ PipelineHandle SdlGpuDevice::createGraphicsPipeline(const GraphicsPipelineDesc& 
 
     std::vector<SDL_GPUVertexAttribute> attributes;
     attributes.reserve(desc.vertexAttributes.size());
-    for (const VertexAttribute& attribute : desc.vertexAttributes)
-    {
+    for (const VertexAttribute& attribute : desc.vertexAttributes) {
         attributes.push_back({
             .location = attribute.location,
             .buffer_slot = attribute.bufferSlot,
@@ -429,23 +415,23 @@ PipelineHandle SdlGpuDevice::createGraphicsPipeline(const GraphicsPipelineDesc& 
 
     std::vector<SDL_GPUColorTargetDescription> colorTargets;
     colorTargets.reserve(desc.colorTargets.size());
-    for (const ColorTargetDesc& target : desc.colorTargets)
-    {
+    for (const ColorTargetDesc& target : desc.colorTargets) {
         colorTargets.push_back({
             .format = toSdl(target.format),
-            .blend_state = {
-                .src_color_blendfactor = toSdl(target.blend.srcColor),
-                .dst_color_blendfactor = toSdl(target.blend.dstColor),
-                .color_blend_op = toSdl(target.blend.colorOp),
-                .src_alpha_blendfactor = toSdl(target.blend.srcAlpha),
-                .dst_alpha_blendfactor = toSdl(target.blend.dstAlpha),
-                .alpha_blend_op = toSdl(target.blend.alphaOp),
-                .color_write_mask = 0xF,
-                .enable_blend = target.blend.enabled,
-                .enable_color_write_mask = false,
-                .padding1 = 0,
-                .padding2 = 0,
-            },
+            .blend_state =
+                {
+                    .src_color_blendfactor = toSdl(target.blend.srcColor),
+                    .dst_color_blendfactor = toSdl(target.blend.dstColor),
+                    .color_blend_op = toSdl(target.blend.colorOp),
+                    .src_alpha_blendfactor = toSdl(target.blend.srcAlpha),
+                    .dst_alpha_blendfactor = toSdl(target.blend.dstAlpha),
+                    .alpha_blend_op = toSdl(target.blend.alphaOp),
+                    .color_write_mask = 0xF,
+                    .enable_blend = target.blend.enabled,
+                    .enable_color_write_mask = false,
+                    .padding1 = 0,
+                    .padding2 = 0,
+                },
         });
     }
 
@@ -490,10 +476,8 @@ Swapchain SdlGpuDevice::acquireSwapchain(platform::Window& window)
 
     SDL_Window* native = platform::nativeWindow(window);
     u32 textureId = 0;
-    for (const ClaimedWindow& claimed : windows_)
-    {
-        if (claimed.window == native)
-        {
+    for (const ClaimedWindow& claimed : windows_) {
+        if (claimed.window == native) {
             textureId = claimed.textureId;
             break;
         }
@@ -504,9 +488,8 @@ Swapchain SdlGpuDevice::acquireSwapchain(platform::Window& window)
     SDL_GPUTexture* swapchainTexture = nullptr;
     Uint32 width = 0;
     Uint32 height = 0;
-    if (!SDL_WaitAndAcquireGPUSwapchainTexture(buffer, native, &swapchainTexture, &width, &height)
-        || swapchainTexture == nullptr)
-    {
+    if (!SDL_WaitAndAcquireGPUSwapchainTexture(buffer, native, &swapchainTexture, &width, &height) ||
+        swapchainTexture == nullptr) {
         // A minimized or occluded window has no backbuffer this frame. Normal,
         // not an error -- the seam says so and every caller has to handle it.
         return {};
@@ -573,8 +556,7 @@ bool SdlGpuDevice::readTexture(TextureHandle texture, std::span<std::byte> out)
 
     // Blocking by design: this is the screenshot path, and the caller was told.
     SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(buffer);
-    if (fence == nullptr)
-    {
+    if (fence == nullptr) {
         SDL_ReleaseGPUTransferBuffer(device_, transfer);
         return false;
     }
@@ -582,8 +564,7 @@ bool SdlGpuDevice::readTexture(TextureHandle texture, std::span<std::byte> out)
     SDL_ReleaseGPUFence(device_, fence);
 
     bool ok = false;
-    if (const void* mapped = SDL_MapGPUTransferBuffer(device_, transfer, false); mapped != nullptr)
-    {
+    if (const void* mapped = SDL_MapGPUTransferBuffer(device_, transfer, false); mapped != nullptr) {
         std::memcpy(out.data(), mapped, needed);
         SDL_UnmapGPUTransferBuffer(device_, transfer);
         ok = true;
@@ -597,13 +578,11 @@ bool SdlGpuDevice::readTexture(TextureHandle texture, std::span<std::byte> out)
 
 void SdlGpuCmdList::endOpenPass() noexcept
 {
-    if (renderPass_ != nullptr)
-    {
+    if (renderPass_ != nullptr) {
         SDL_EndGPURenderPass(renderPass_);
         renderPass_ = nullptr;
     }
-    if (copyPass_ != nullptr)
-    {
+    if (copyPass_ != nullptr) {
         SDL_EndGPUCopyPass(copyPass_);
         copyPass_ = nullptr;
     }
@@ -611,8 +590,7 @@ void SdlGpuCmdList::endOpenPass() noexcept
 
 SDL_GPUCopyPass* SdlGpuCmdList::ensureCopyPass() noexcept
 {
-    if (renderPass_ != nullptr)
-    {
+    if (renderPass_ != nullptr) {
         // Uploading mid-pass is not something the backend can paper over: the
         // GPU is rasterizing into the target right now. Saying so beats a
         // driver-level crash three frames later.
@@ -632,16 +610,15 @@ void SdlGpuCmdList::beginRenderPass(const RenderPassDesc& desc)
 
     std::vector<SDL_GPUColorTargetInfo> colors;
     colors.reserve(desc.colorAttachments.size());
-    for (const ColorAttachment& attachment : desc.colorAttachments)
-    {
+    for (const ColorAttachment& attachment : desc.colorAttachments) {
         TextureEntry* entry = device_.texture(attachment.texture);
         if (entry == nullptr || entry->texture == nullptr)
             continue;
 
         SDL_GPUColorTargetInfo info{};
         info.texture = entry->texture;
-        info.clear_color = {
-            attachment.clearColor.r, attachment.clearColor.g, attachment.clearColor.b, attachment.clearColor.a};
+        info.clear_color = {attachment.clearColor.r, attachment.clearColor.g, attachment.clearColor.b,
+                            attachment.clearColor.a};
         info.load_op = toSdl(attachment.loadOp);
         info.store_op = toSdl(attachment.storeOp);
         colors.push_back(info);
@@ -650,8 +627,7 @@ void SdlGpuCmdList::beginRenderPass(const RenderPassDesc& desc)
     SDL_GPUDepthStencilTargetInfo depth{};
     const TextureEntry* depthEntry = device_.texture(desc.depthStencil.texture);
     const bool hasDepth = depthEntry != nullptr && depthEntry->texture != nullptr;
-    if (hasDepth)
-    {
+    if (hasDepth) {
         depth.texture = depthEntry->texture;
         depth.clear_depth = desc.depthStencil.clearDepth;
         depth.load_op = toSdl(desc.depthStencil.loadOp);
@@ -660,14 +636,13 @@ void SdlGpuCmdList::beginRenderPass(const RenderPassDesc& desc)
         depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
     }
 
-    renderPass_ = SDL_BeginGPURenderPass(
-        buffer_, colors.data(), static_cast<Uint32>(colors.size()), hasDepth ? &depth : nullptr);
+    renderPass_ =
+        SDL_BeginGPURenderPass(buffer_, colors.data(), static_cast<Uint32>(colors.size()), hasDepth ? &depth : nullptr);
 }
 
 void SdlGpuCmdList::endRenderPass()
 {
-    if (renderPass_ != nullptr)
-    {
+    if (renderPass_ != nullptr) {
         SDL_EndGPURenderPass(renderPass_);
         renderPass_ = nullptr;
     }
@@ -686,8 +661,8 @@ void SdlGpuCmdList::setViewport(const Viewport& viewport)
     if (renderPass_ == nullptr)
         return;
 
-    const SDL_GPUViewport native{
-        viewport.x, viewport.y, viewport.width, viewport.height, viewport.minDepth, viewport.maxDepth};
+    const SDL_GPUViewport native{viewport.x,      viewport.y,        viewport.width,
+                                 viewport.height, viewport.minDepth, viewport.maxDepth};
     SDL_SetGPUViewport(renderPass_, &native);
 }
 
@@ -727,8 +702,7 @@ void SdlGpuCmdList::bindUniforms(ShaderStage stage, u32 slotIndex, std::span<con
     if (buffer_ == nullptr)
         return;
 
-    switch (stage)
-    {
+    switch (stage) {
     case ShaderStage::Vertex:
         SDL_PushGPUVertexUniformData(buffer_, slotIndex, data.data(), static_cast<Uint32>(data.size()));
         break;
@@ -745,8 +719,7 @@ void SdlGpuCmdList::bindTextures(ShaderStage stage, u32 firstSlot, std::span<con
 
     std::vector<SDL_GPUTextureSamplerBinding> native;
     native.reserve(bindings.size());
-    for (const TextureBinding& binding : bindings)
-    {
+    for (const TextureBinding& binding : bindings) {
         const TextureEntry* entry = device_.texture(binding.texture);
         native.push_back({
             .texture = entry != nullptr ? entry->texture : nullptr,
@@ -755,10 +728,13 @@ void SdlGpuCmdList::bindTextures(ShaderStage stage, u32 firstSlot, std::span<con
     }
 
     const auto count = static_cast<Uint32>(native.size());
-    switch (stage)
-    {
-    case ShaderStage::Vertex: SDL_BindGPUVertexSamplers(renderPass_, firstSlot, native.data(), count); break;
-    case ShaderStage::Fragment: SDL_BindGPUFragmentSamplers(renderPass_, firstSlot, native.data(), count); break;
+    switch (stage) {
+    case ShaderStage::Vertex:
+        SDL_BindGPUVertexSamplers(renderPass_, firstSlot, native.data(), count);
+        break;
+    case ShaderStage::Fragment:
+        SDL_BindGPUFragmentSamplers(renderPass_, firstSlot, native.data(), count);
+        break;
     }
 }
 
@@ -768,12 +744,10 @@ void SdlGpuCmdList::draw(u32 vertexCount, u32 instanceCount, u32 firstVertex, u3
         SDL_DrawGPUPrimitives(renderPass_, vertexCount, instanceCount, firstVertex, firstInstance);
 }
 
-void SdlGpuCmdList::drawIndexed(
-    u32 indexCount, u32 instanceCount, u32 firstIndex, i32 vertexOffset, u32 firstInstance)
+void SdlGpuCmdList::drawIndexed(u32 indexCount, u32 instanceCount, u32 firstIndex, i32 vertexOffset, u32 firstInstance)
 {
     if (renderPass_ != nullptr)
-        SDL_DrawGPUIndexedPrimitives(
-            renderPass_, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
+        SDL_DrawGPUIndexedPrimitives(renderPass_, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
 }
 
 void SdlGpuCmdList::upload(BufferHandle buffer, std::span<const std::byte> data, u32 offsetBytes)
@@ -796,8 +770,7 @@ void SdlGpuCmdList::upload(BufferHandle buffer, std::span<const std::byte> data,
     if (transfer == nullptr)
         return;
 
-    if (void* mapped = SDL_MapGPUTransferBuffer(device, transfer, false); mapped != nullptr)
-    {
+    if (void* mapped = SDL_MapGPUTransferBuffer(device, transfer, false); mapped != nullptr) {
         std::memcpy(mapped, data.data(), data.size());
         SDL_UnmapGPUTransferBuffer(device, transfer);
 
@@ -833,8 +806,7 @@ void SdlGpuCmdList::uploadTexture(TextureHandle texture, std::span<const std::by
     if (transfer == nullptr)
         return;
 
-    if (void* mapped = SDL_MapGPUTransferBuffer(device, transfer, false); mapped != nullptr)
-    {
+    if (void* mapped = SDL_MapGPUTransferBuffer(device, transfer, false); mapped != nullptr) {
         std::memcpy(mapped, data.data(), data.size());
         SDL_UnmapGPUTransferBuffer(device, transfer);
 
@@ -915,13 +887,13 @@ DeviceResult createSdlGpuDevice(const DeviceDesc& desc, core::EngineError* outEr
     // device chose, rather than demanding one and failing on a machine that
     // would have worked. `caps().shaderFormat` is what the shader pack loads
     // against.
-    const SDL_GPUShaderFormat requested = desc.shaderFormat == ShaderFormat::Unknown
-        ? (SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL)
-        : toSdl(desc.shaderFormat);
+    const SDL_GPUShaderFormat requested =
+        desc.shaderFormat == ShaderFormat::Unknown
+            ? (SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL)
+            : toSdl(desc.shaderFormat);
 
     SDL_GPUDevice* device = SDL_CreateGPUDevice(requested, desc.debug, nullptr);
-    if (device == nullptr)
-    {
+    if (device == nullptr) {
         if (outError != nullptr)
             *outError = core::makeError(LUAUG_TR("rhi.err.device_create_failed"), {}, SDL_GetError());
         return nullptr;

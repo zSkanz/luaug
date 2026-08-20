@@ -15,16 +15,15 @@
 // host's business rather than the renderer's.
 #pragma once
 
-#include <optional>
-
 #include "luaug/core/error.h"
 #include "luaug/render/mesh_cache.h"
 #include "luaug/render/render_world.h"
 #include "luaug/render/shader_library.h"
 #include "luaug/rhi/device.h"
 
-namespace luaug::render
-{
+#include <optional>
+
+namespace luaug::render {
 
 struct RenderTarget
 {
@@ -45,16 +44,16 @@ public:
     // Built against one colour format, because a graphics pipeline is. A caller
     // that renders into two formats needs two renderers, which is honest: they
     // are two sets of pipelines whatever the API pretends.
-    [[nodiscard]] virtual std::optional<core::EngineError> create(
-        rhi::IDevice& device, const ShaderLibrary& shaders, rhi::TextureFormat colorFormat) = 0;
+    [[nodiscard]] virtual std::optional<core::EngineError> create(rhi::IDevice& device, const ShaderLibrary& shaders,
+                                                                  rhi::TextureFormat colorFormat) = 0;
 
     virtual void destroy(rhi::IDevice& device) = 0;
 
     // Records the frame. Must be called with no render pass open; the renderer
     // opens and closes its own, and leaves none open on return, because the
     // overlay draws after it into the same command list.
-    virtual void render(rhi::IDevice& device, rhi::ICmdList& cmd, const RenderTarget& target,
-        const RenderWorld& world, const MeshCache& meshes) = 0;
+    virtual void render(rhi::IDevice& device, rhi::ICmdList& cmd, const RenderTarget& target, const RenderWorld& world,
+                        const MeshCache& meshes) = 0;
 
     // False before `create` succeeds, and after a `create` that failed. A
     // renderer that never started must be skippable rather than fatal: a machine

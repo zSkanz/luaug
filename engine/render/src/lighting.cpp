@@ -2,10 +2,8 @@
 
 #include <cmath>
 
-namespace luaug::render
-{
-namespace
-{
+namespace luaug::render {
+namespace {
 
 using core::f32;
 

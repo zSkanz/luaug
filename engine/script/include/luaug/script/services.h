@@ -14,10 +14,6 @@
 // drain to convert and the scheduler enqueues them directly.
 #pragma once
 
-#include <string_view>
-#include <utility>
-#include <vector>
-
 #include "luaug/core/id.h"
 #include "luaug/core/log.h"
 #include "luaug/core/math.h"
@@ -26,10 +22,13 @@
 #include "luaug/script/binding.h"
 #include "luaug/script/reload_state.h"
 
+#include <string_view>
+#include <utility>
+#include <vector>
+
 struct lua_State;
 
-namespace luaug::script
-{
+namespace luaug::script {
 
 // Where a gizmo call goes. Null in a headless run, which is why
 // `DebugService:DrawLine` is a silent no-op there rather than an error --

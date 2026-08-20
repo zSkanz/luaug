@@ -1,5 +1,10 @@
 #include "luaug/script/services.h"
 
+#include "luaug/scene/world.h"
+#include "luaug/script/datatypes.h"
+#include "luaug/script/instance_binding.h"
+#include "luaug/script/signals.h"
+
 #include <lua.h>
 #include <lualib.h>
 
@@ -9,15 +14,9 @@
 #include <string>
 
 #include "class_descriptors.gen.h"
-#include "luaug/scene/world.h"
-#include "luaug/script/datatypes.h"
-#include "luaug/script/instance_binding.h"
-#include "luaug/script/signals.h"
 
-namespace luaug::script
-{
-namespace
-{
+namespace luaug::script {
+namespace {
 
 using scene::ClassId;
 using scene::World;
@@ -77,8 +76,7 @@ using scene::World;
     const World& w = world(L);
     const ClassId classId = w.classes().findId(w.atoms().lookup(name));
     const scene::ClassDescriptor* descriptor = w.classes().find(classId);
-    if (descriptor == nullptr || !hasFlag(descriptor->flags, scene::ClassFlags::Service))
-    {
+    if (descriptor == nullptr || !hasFlag(descriptor->flags, scene::ClassFlags::Service)) {
         const core::I18nArg args[] = {{"className", name}};
         raise(L, LUAUG_TR("scene.err.unknown_service"), args);
     }
@@ -168,8 +166,7 @@ int tagServiceGetTagged(lua_State* L)
     world(L).collectTagged(world(L).atoms().lookup(std::string_view{text, length}), tagged);
 
     lua_createtable(L, static_cast<int>(tagged.size()), 0);
-    for (usize index = 0; index < tagged.size(); ++index)
-    {
+    for (usize index = 0; index < tagged.size(); ++index) {
         pushInstance(L, tagged[index]);
         lua_rawseti(L, -2, static_cast<int>(index) + 1);
     }
@@ -185,8 +182,7 @@ int tagServiceGetAllTags(lua_State* L)
     world(L).collectAllTags(tags);
 
     lua_createtable(L, static_cast<int>(tags.size()), 0);
-    for (usize index = 0; index < tags.size(); ++index)
-    {
+    for (usize index = 0; index < tags.size(); ++index) {
         const std::string_view text = world(L).atoms().text(tags[index]);
         lua_pushlstring(L, text.data(), text.size());
         lua_rawseti(L, -2, static_cast<int>(index) + 1);
@@ -198,8 +194,7 @@ int tagServiceGetAllTags(lua_State* L)
 {
     size_t length = 0;
     const char* text = luaL_checklstring(L, index, &length);
-    if (length == 0)
-    {
+    if (length == 0) {
         const core::I18nArg args[] = {{"name", std::string_view{""}}};
         raise(L, LUAUG_TR("scene.err.invalid_name"), args);
     }
@@ -282,8 +277,7 @@ int debugServiceGetStat(lua_State* L)
 
     // Answered from the world rather than published per frame, because it is
     // exact at any moment and a per-frame copy could only be stale.
-    if (name == "InstanceCount")
-    {
+    if (name == "InstanceCount") {
         lua_pushnumber(L, static_cast<f64>(world(L).instanceCount()));
         return 1;
     }
@@ -291,40 +285,33 @@ int debugServiceGetStat(lua_State* L)
     // The engine's own counters, checked BEFORE the custom table so a game
     // cannot shadow one: `GetStat("FPS")` reads the engine's number or nothing.
     const FrameStats& frame = services(L).frameStats;
-    if (name == "FPS")
-    {
+    if (name == "FPS") {
         lua_pushnumber(L, frame.fps);
         return 1;
     }
-    if (name == "FrameTimeMs")
-    {
+    if (name == "FrameTimeMs") {
         lua_pushnumber(L, frame.frameTimeMs);
         return 1;
     }
-    if (name == "DrawCalls")
-    {
+    if (name == "DrawCalls") {
         lua_pushnumber(L, frame.drawCalls);
         return 1;
     }
-    if (name == "PhysicsBodies")
-    {
+    if (name == "PhysicsBodies") {
         // Zero until M5, and zero is the truthful answer: there is no physics
         // world, so nothing is in it. A raise would say the stat does not
         // exist, which is a different and false claim.
         lua_pushnumber(L, frame.physicsBodies);
         return 1;
     }
-    if (name == "LuaMemoryKB")
-    {
+    if (name == "LuaMemoryKB") {
         lua_pushnumber(L, frame.luaMemoryKb);
         return 1;
     }
 
     const core::NameAtom atom = world(L).atoms().lookup(name);
-    for (const auto& [key, value] : services(L).stats.entries)
-    {
-        if (key == atom)
-        {
+    for (const auto& [key, value] : services(L).stats.entries) {
+        if (key == atom) {
             lua_pushnumber(L, value);
             return 1;
         }
@@ -344,10 +331,8 @@ int debugServiceSetCustomStat(lua_State* L)
     const f64 value = luaL_checknumber(L, 3);
 
     StatTable& stats = services(L).stats;
-    for (auto& entry : stats.entries)
-    {
-        if (entry.first == name)
-        {
+    for (auto& entry : stats.entries) {
+        if (entry.first == name) {
             entry.second = value;
             return 0;
         }
@@ -367,8 +352,7 @@ constexpr std::string_view Panels[] = {"Stats", "Scene", "Log", "Streaming", "Ph
     const char* text = luaL_checklstring(L, index, &length);
     const std::string_view name{text, length};
 
-    for (const std::string_view panel : Panels)
-    {
+    for (const std::string_view panel : Panels) {
         if (panel == name)
             return world(L).atoms().intern(name);
     }
@@ -429,8 +413,7 @@ int instanceWaitForChild(lua_State* L)
 
     // A matching child already present returns immediately without yielding.
     // The contract is about the state, not about the event that produced it.
-    if (const core::InstanceId found = w.findFirstChild(self, atom); found.valid())
-    {
+    if (const core::InstanceId found = w.findFirstChild(self, atom); found.valid()) {
         pushInstance(L, found);
         return 1;
     }
@@ -439,10 +422,10 @@ int instanceWaitForChild(lua_State* L)
     waiter.parent = self;
     waiter.name = atom;
     waiter.scheduledTick = w.engineState().tick;
-    if (!lua_isnoneornil(L, 3))
-    {
+    if (!lua_isnoneornil(L, 3)) {
         waiter.hasTimeout = true;
-        waiter.deadlineTick = waiter.scheduledTick + timeoutTicks(luaL_checknumber(L, 3), w.engineState().fixedTimestep);
+        waiter.deadlineTick =
+            waiter.scheduledTick + timeoutTicks(luaL_checknumber(L, 3), w.engineState().fixedTimestep);
     }
 
     lua_pushthread(L);
@@ -468,8 +451,7 @@ int hotReloadSaveState(lua_State* L)
 
     std::string reason;
     std::optional<BagValue> value = toBagValue(L, 3, reason);
-    if (!value.has_value())
-    {
+    if (!value.has_value()) {
         // Raising rather than dropping. A reload that quietly loses state is
         // worse than one that says which value it could not keep, because the
         // first is discovered a save later and blamed on the reload.
@@ -488,8 +470,7 @@ int hotReloadLoadState(lua_State* L)
     const char* text = luaL_checklstring(L, 2, &length);
 
     const BagValue* stored = services(L).reload->load(std::string_view{text, length});
-    if (stored == nullptr)
-    {
+    if (stored == nullptr) {
         lua_pushnil(L);
         return 1;
     }
@@ -577,7 +558,8 @@ void registerServices(lua_State* L)
     // the class existing: `Lighting` is registered by `render`, and an engine
     // built without that module has no such class. This file is in `script` and
     // must not acquire an opinion about which modules are compiled in.
-    if (const ClassId lightingClass = w.classes().findId(atoms.intern("Lighting")); lightingClass != scene::InvalidClass)
+    if (const ClassId lightingClass = w.classes().findId(atoms.intern("Lighting"));
+        lightingClass != scene::InvalidClass)
         (void)getServiceOfClass(L, lightingClass);
 
     // Whatever the boot tree raised is consumed rather than queued: nothing can
@@ -603,8 +585,7 @@ void publishMessage(lua_State* L, core::LogLevel level, std::string_view text)
     if (!debug.valid())
         return;
 
-    const scene::EventDesc* descriptor =
-        world(L).classes().findEvent(world(L).classOf(debug), state.messageOut);
+    const scene::EventDesc* descriptor = world(L).classes().findEvent(world(L).classOf(debug), state.messageOut);
     if (descriptor == nullptr)
         return;
 
@@ -661,8 +642,7 @@ void fireDataModelLoaded(lua_State* L)
     if (!state.dataModel.valid())
         return;
 
-    const scene::EventDesc* descriptor =
-        world(L).classes().findEvent(world(L).classOf(state.dataModel), state.loaded);
+    const scene::EventDesc* descriptor = world(L).classes().findEvent(world(L).classOf(state.dataModel), state.loaded);
     if (descriptor == nullptr)
         return;
     fireInstanceEvent(L, state.dataModel, descriptor->slot, 0, 0);
@@ -678,20 +658,17 @@ void resumeChildWaiters(lua_State* L)
     // Collected first, because a resumed coroutine may park another waiter and
     // the vector it would push onto is the one being walked.
     std::vector<ChildWaiter> ready;
-    for (usize index = 0; index < state.childWaiters.size();)
-    {
+    for (usize index = 0; index < state.childWaiters.size();) {
         ChildWaiter& waiter = state.childWaiters[index];
         const bool satisfied = w.findFirstChild(waiter.parent, waiter.name).valid();
         const bool expired = waiter.hasTimeout && tick >= waiter.deadlineTick;
 
-        if (!satisfied && !expired)
-        {
+        if (!satisfied && !expired) {
             // Five sim-seconds, once, and then it keeps waiting. The timeout
             // form never warns however long its timeout: you said how long you
             // were prepared to wait.
-            if (!waiter.hasTimeout && !waiter.warned
-                && static_cast<f64>(tick - waiter.scheduledTick) * timestep >= 5.0)
-            {
+            if (!waiter.hasTimeout && !waiter.warned &&
+                static_cast<f64>(tick - waiter.scheduledTick) * timestep >= 5.0) {
                 waiter.warned = true;
                 const core::I18nArg args[] = {
                     {"name", w.atoms().text(waiter.name)},
@@ -709,12 +686,10 @@ void resumeChildWaiters(lua_State* L)
         state.childWaiters.erase(state.childWaiters.begin() + static_cast<std::ptrdiff_t>(index));
     }
 
-    for (const ChildWaiter& waiter : ready)
-    {
+    for (const ChildWaiter& waiter : ready) {
         lua_getref(L, waiter.threadRef);
         lua_State* co = lua_tothread(L, -1);
-        if (co == nullptr)
-        {
+        if (co == nullptr) {
             lua_pop(L, 1);
             (void)lua_unref(L, waiter.threadRef);
             continue;
@@ -744,8 +719,7 @@ void runCloseHandlers(lua_State* L)
     const std::vector<int> handlers = state.closeHandlers;
     state.closeHandlers.clear();
 
-    for (const int ref : handlers)
-    {
+    for (const int ref : handlers) {
         // Its own coroutine, like a signal handler: a close handler must be
         // allowed to yield, and one that errors must not stop the others.
         lua_State* co = lua_newthread(L);

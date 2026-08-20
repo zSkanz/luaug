@@ -8,8 +8,7 @@
 
 #include "luaug/core/types.h"
 
-namespace luaug::scene
-{
+namespace luaug::scene {
 
 using core::f32;
 using core::f64;

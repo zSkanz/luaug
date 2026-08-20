@@ -8,15 +8,14 @@
 // The handshake uses it as a fixed protocol constant, not as security.
 #pragma once
 
+#include "luaug/core/types.h"
+
 #include <array>
 #include <span>
 #include <string>
 #include <string_view>
 
-#include "luaug/core/types.h"
-
-namespace luaug::net::detail
-{
+namespace luaug::net::detail {
 
 using Sha1Digest = std::array<core::u8, 20>;
 

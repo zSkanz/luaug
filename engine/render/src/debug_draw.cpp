@@ -5,10 +5,8 @@
 #include <numbers>
 #include <vector>
 
-namespace luaug::render
-{
-namespace
-{
+namespace luaug::render {
+namespace {
 
 // Corners are indexed by sign bits: bit 0 is X, bit 1 is Y, bit 2 is Z, and a
 // set bit means +halfExtent while a clear bit means -halfExtent. So corner 0 is
@@ -59,8 +57,7 @@ void appendBoxEdges(std::vector<DebugVertex>& vertices, const std::array<Vec3, k
                     DebugColor color)
 {
     reserveAdditional(vertices, 2 * kBoxEdgeCount);
-    for (const auto& edge : kBoxEdges)
-    {
+    for (const auto& edge : kBoxEdges) {
         vertices.push_back({corners[edge[0]], color});
         vertices.push_back({corners[edge[1]], color});
     }
@@ -127,10 +124,8 @@ void DebugDraw::wireSphere(Vec3 center, f32 radius, DebugColor color, u32 segmen
 
     const f32 step = kTau / static_cast<f32>(segments);
 
-    const auto ring = [&](Vec3 axisU, Vec3 axisV)
-    {
-        const auto pointAt = [&](u32 index) -> Vec3
-        {
+    const auto ring = [&](Vec3 axisU, Vec3 axisV) {
+        const auto pointAt = [&](u32 index) -> Vec3 {
             const f32 angle = step * static_cast<f32>(index);
             return center + axisU * (std::cos(angle) * radius) + axisV * (std::sin(angle) * radius);
         };
@@ -140,8 +135,7 @@ void DebugDraw::wireSphere(Vec3 center, f32 radius, DebugColor color, u32 segmen
         // the difference shows up as a hairline gap in the ring.
         const Vec3 first = pointAt(0);
         Vec3 previous = first;
-        for (u32 index = 1; index <= segments; ++index)
-        {
+        for (u32 index = 1; index <= segments; ++index) {
             const Vec3 current = index == segments ? first : pointAt(index);
             vertices_.push_back({previous, color});
             vertices_.push_back({current, color});
@@ -166,8 +160,7 @@ void DebugDraw::axes(const Mat4& transform, f32 length)
     // otherwise draw a triad whose size says more about the scale than about
     // the orientation it exists to show. A degenerate axis normalizes to zero
     // and simply does not appear, which is itself the diagnosis.
-    const auto axis = [&](Vec3 direction, DebugColor color)
-    {
+    const auto axis = [&](Vec3 direction, DebugColor color) {
         const Vec3 tip = origin + core::normalize(core::transformDirection(transform, direction)) * length;
         vertices_.push_back({origin, color});
         vertices_.push_back({tip, color});

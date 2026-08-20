@@ -1,8 +1,8 @@
-#include <doctest/doctest.h>
-
 #include "luaug/core/i18n.h"
 #include "luaug/render/mesh_cache.h"
 #include "luaug/rhi/backends.h"
+
+#include <doctest/doctest.h>
 
 using luaug::asset::Mesh;
 using luaug::asset::Submesh;
@@ -12,8 +12,7 @@ using luaug::render::MeshCache;
 using luaug::render::MeshHandle;
 using luaug::render::MeshUsage;
 
-namespace
-{
+namespace {
 
 // The null device is enough here and the capture device would be worse: what
 // these cases assert is `MeshCache`'s own bookkeeping -- which handle resolves,
@@ -38,16 +37,14 @@ Mesh makeMesh(u32 vertexCount, u32 indexCount, u32 submeshCount = 1)
     Mesh mesh;
     mesh.vertices.resize(vertexCount);
     mesh.indices.resize(indexCount);
-    for (u32 index = 0; index < vertexCount; ++index)
-    {
+    for (u32 index = 0; index < vertexCount; ++index) {
         const auto value = static_cast<float>(index);
         mesh.vertices[index].position = {value, value, value};
         luaug::core::expand(mesh.bounds, mesh.vertices[index].position);
     }
 
     const u32 perSubmesh = submeshCount == 0 ? 0 : indexCount / submeshCount;
-    for (u32 slot = 0; slot < submeshCount; ++slot)
-    {
+    for (u32 slot = 0; slot < submeshCount; ++slot) {
         Submesh submesh;
         submesh.firstIndex = slot * perSubmesh;
         submesh.indexCount = perSubmesh;

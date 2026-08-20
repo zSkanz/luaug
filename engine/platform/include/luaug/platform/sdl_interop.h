@@ -12,15 +12,13 @@
 // two modules allowed to know.
 #pragma once
 
-#include <span>
+#include "luaug/platform/window.h"
 
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_video.h>
+#include <span>
 
-#include "luaug/platform/window.h"
-
-namespace luaug::platform
-{
+namespace luaug::platform {
 
 [[nodiscard]] SDL_Window* nativeWindow(const Window& window) noexcept;
 

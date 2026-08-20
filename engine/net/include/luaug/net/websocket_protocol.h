@@ -9,17 +9,16 @@
 // client to mask and forbids a server to.
 #pragma once
 
+#include "luaug/core/error.h"
+#include "luaug/core/types.h"
+
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "luaug/core/error.h"
-#include "luaug/core/types.h"
-
-namespace luaug::net::ws
-{
+namespace luaug::net::ws {
 
 using core::u16;
 using core::u32;
@@ -87,8 +86,8 @@ struct ClientHandshake
 
 // `nonce` is the 16 random bytes §4.1 requires. Passed in for the same reason
 // `maskKey` is.
-[[nodiscard]] ClientHandshake buildClientHandshake(
-    std::string_view host, u16 port, std::string_view path, std::span<const u8, 16> nonce);
+[[nodiscard]] ClientHandshake buildClientHandshake(std::string_view host, u16 port, std::string_view path,
+                                                   std::span<const u8, 16> nonce);
 
 // §4.1: base64(SHA-1(key + the protocol's fixed GUID)).
 [[nodiscard]] std::string computeAccept(std::string_view clientKeyBase64);
@@ -99,7 +98,7 @@ struct ClientHandshake
 
 // Checks the status line, the two upgrade headers and the accept value.
 // Returns the first failure; nothing means the handshake completed.
-[[nodiscard]] std::optional<core::EngineError> validateServerHandshake(
-    std::string_view response, std::string_view expectedAccept);
+[[nodiscard]] std::optional<core::EngineError> validateServerHandshake(std::string_view response,
+                                                                       std::string_view expectedAccept);
 
 } // namespace luaug::net::ws

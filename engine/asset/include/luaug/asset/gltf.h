@@ -18,15 +18,14 @@
 // core specification's PBR material is honoured.
 #pragma once
 
+#include "luaug/asset/model.h"
+#include "luaug/core/error.h"
+
 #include <filesystem>
 #include <optional>
 #include <span>
 
-#include "luaug/asset/model.h"
-#include "luaug/core/error.h"
-
-namespace luaug::asset
-{
+namespace luaug::asset {
 
 struct GltfImportOptions
 {
@@ -52,10 +51,8 @@ struct GltfImportOptions
 // Returns an error rather than a partial model: a mesh that imported half its
 // primitives draws something plausible and wrong, which is worse than a mesh
 // that says why it is missing. `out` is left empty on failure.
-[[nodiscard]] std::optional<core::EngineError> importGltf(
-    std::span<const std::byte> bytes,
-    const std::filesystem::path& baseDirectory,
-    const GltfImportOptions& options,
-    Model& out);
+[[nodiscard]] std::optional<core::EngineError> importGltf(std::span<const std::byte> bytes,
+                                                          const std::filesystem::path& baseDirectory,
+                                                          const GltfImportOptions& options, Model& out);
 
 } // namespace luaug::asset

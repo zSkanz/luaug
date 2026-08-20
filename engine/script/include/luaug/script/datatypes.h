@@ -10,18 +10,17 @@
 // `color.R`).
 #pragma once
 
-#include <optional>
-
 #include "luaug/core/id.h"
 #include "luaug/core/math.h"
 #include "luaug/scene/enum_registry.h"
 #include "luaug/scene/value.h"
 #include "luaug/script/binding.h"
 
+#include <optional>
+
 struct lua_State;
 
-namespace luaug::script
-{
+namespace luaug::script {
 
 // Installs the metatables for every datatype tag and the namespace tables that
 // construct them. Runs during boot, after the tags exist and before the

@@ -15,8 +15,7 @@
 #include <string>
 #include <vector>
 
-namespace luaug::imgcmp
-{
+namespace luaug::imgcmp {
 
 // A decoded image, always 4 channels. The comparator is a fixed-format tool, so
 // every loader forces RGBA8 and no caller ever branches on channel count.

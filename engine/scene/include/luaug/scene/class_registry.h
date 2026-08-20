@@ -10,10 +10,6 @@
 // point at, and the tree operations on `World` that the bindings call directly.
 #pragma once
 
-#include <span>
-#include <unordered_map>
-#include <vector>
-
 #include "luaug/core/id.h"
 #include "luaug/core/name_atom.h"
 #include "luaug/core/text_key.h"
@@ -21,8 +17,11 @@
 #include "luaug/scene/types.h"
 #include "luaug/scene/value.h"
 
-namespace luaug::scene
-{
+#include <span>
+#include <unordered_map>
+#include <vector>
+
+namespace luaug::scene {
 
 class World;
 

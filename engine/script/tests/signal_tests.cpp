@@ -1,5 +1,4 @@
 #include <doctest/doctest.h>
-
 #include <ostream>
 
 #include "script_fixture.h"

@@ -12,17 +12,16 @@
 // `EnumItem` binding does on the way out to Luau.
 #pragma once
 
-#include <span>
-#include <unordered_map>
-#include <vector>
-
 #include "luaug/core/name_atom.h"
 #include "luaug/core/text_key.h"
 #include "luaug/scene/types.h"
 #include "luaug/scene/value.h"
 
-namespace luaug::scene
-{
+#include <span>
+#include <unordered_map>
+#include <vector>
+
+namespace luaug::scene {
 
 // 0 is "no enum", so a zero-initialised `EnumValue` is detectably empty rather
 // than accidentally the first enum -- the same convention `ClassId`,

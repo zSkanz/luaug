@@ -4,16 +4,15 @@
 // in is what a reload destroys. What is asserted here is that it comes back
 // where it was, with what it had, and early enough for a script to find it.
 
-#include <doctest/doctest.h>
+#include "luaug/app/reload.h"
+#include "luaug/core/i18n.h"
+#include "luaug/script/reload_state.h"
 
+#include <doctest/doctest.h>
 #include <memory>
 #include <string>
 
 #include "project_fixture.h"
-
-#include "luaug/app/reload.h"
-#include "luaug/core/i18n.h"
-#include "luaug/script/reload_state.h"
 
 using namespace luaug;
 using luaug::app::testing::bootOptions;
@@ -21,8 +20,7 @@ using luaug::app::testing::Captured;
 using luaug::app::testing::hasChildNamed;
 using luaug::app::testing::Project;
 
-namespace
-{
+namespace {
 
 struct Session
 {
@@ -31,9 +29,7 @@ struct Session
     std::unique_ptr<app::WorldHost> host;
     Captured& log;
 
-    Session(const Project& project, Captured& capturedLog)
-        : options(bootOptions(project.root))
-        , log(capturedLog)
+    Session(const Project& project, Captured& capturedLog) : options(bootOptions(project.root)), log(capturedLog)
     {
         options.reloadState = &bag;
         host = std::make_unique<app::WorldHost>();

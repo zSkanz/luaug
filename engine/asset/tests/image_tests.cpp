@@ -1,20 +1,18 @@
-#include <doctest/doctest.h>
+#include "luaug/asset/image.h"
+#include "luaug/core/i18n.h"
 
+#include <doctest/doctest.h>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
-
-#include "luaug/asset/image.h"
-#include "luaug/core/i18n.h"
 
 using luaug::asset::decodeImage;
 using luaug::asset::Image;
 using luaug::asset::writePng;
 using luaug::core::u32;
 
-namespace
-{
+namespace {
 
 // The catalog has to be loaded or every error message below is a bare key, and
 // a test asserting on message text would then assert on nothing. M2's Finding

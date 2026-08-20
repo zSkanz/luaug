@@ -1,11 +1,10 @@
 #pragma once
 
-#include <span>
-
 #include "luaug/core/types.h"
 
-namespace luaug::platform
-{
+#include <span>
+
+namespace luaug::platform {
 
 using core::i32;
 using core::u16;

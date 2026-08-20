@@ -13,8 +13,7 @@
 
 #include "luaug/core/types.h"
 
-namespace luaug::testing
-{
+namespace luaug::testing {
 
 [[nodiscard]] inline bool nearly(core::f32 value, core::f32 expected, core::f32 tolerance = 1e-5f) noexcept
 {

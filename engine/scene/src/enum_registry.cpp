@@ -2,8 +2,7 @@
 
 #include <limits>
 
-namespace luaug::scene
-{
+namespace luaug::scene {
 
 EnumRegistry::EnumRegistry()
 {
@@ -46,8 +45,7 @@ const EnumItemDesc* EnumRegistry::findItem(EnumId id, core::NameAtom itemName) c
     const EnumDescriptor* descriptor = find(id);
     if (descriptor == nullptr || !itemName.valid())
         return nullptr;
-    for (const EnumItemDesc& item : descriptor->items)
-    {
+    for (const EnumItemDesc& item : descriptor->items) {
         if (item.name == itemName)
             return &item;
     }
@@ -59,8 +57,7 @@ const EnumItemDesc* EnumRegistry::findValue(EnumId id, i32 value) const noexcept
     const EnumDescriptor* descriptor = find(id);
     if (descriptor == nullptr)
         return nullptr;
-    for (const EnumItemDesc& item : descriptor->items)
-    {
+    for (const EnumItemDesc& item : descriptor->items) {
         if (item.value == value)
             return &item;
     }

@@ -3,18 +3,17 @@
 // engine-authored string, because that is exactly the hole R3 exists to close.
 #pragma once
 
+#include "luaug/core/i18n.h"
+#include "luaug/core/text_key.h"
+#include "luaug/core/types.h"
+
 #include <filesystem>
 #include <functional>
 #include <span>
 #include <string>
 #include <string_view>
 
-#include "luaug/core/i18n.h"
-#include "luaug/core/text_key.h"
-#include "luaug/core/types.h"
-
-namespace luaug::core
-{
+namespace luaug::core {
 
 enum class LogLevel : u8
 {

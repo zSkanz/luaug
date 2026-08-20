@@ -15,8 +15,7 @@
 
 struct lua_State;
 
-namespace luaug::script
-{
+namespace luaug::script {
 
 // Every name in api-design.md §1.1's removal list, in one place so that the
 // list and the code cannot drift. Null-terminated.

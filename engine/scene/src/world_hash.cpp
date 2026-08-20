@@ -35,10 +35,8 @@
 #define XXH_INLINE_ALL
 #include "xxhash.h"
 
-namespace luaug::scene
-{
-namespace
-{
+namespace luaug::scene {
+namespace {
 
 class Hasher
 {
@@ -55,7 +53,7 @@ public:
         // hashing bytes at all. It excludes anything with padding, and it
         // excludes floating point -- which is why floats have their own path.
         static_assert(std::has_unique_object_representations_v<T>,
-            "hashing a type with padding hashes uninitialised memory; hash its fields instead");
+                      "hashing a type with padding hashes uninitialised memory; hash its fields instead");
         bytes(&value, sizeof(T));
     }
 
@@ -87,8 +85,7 @@ public:
         number(value.position.x);
         number(value.position.y);
         number(value.position.z);
-        for (const auto& row : value.rotation.m)
-        {
+        for (const auto& row : value.rotation.m) {
             for (const f32 element : row)
                 number(element);
         }
@@ -115,8 +112,7 @@ void hashValue(Hasher& hasher, const Value& value)
     const auto tag = static_cast<u8>(valueType(value));
     hasher.pod(tag);
 
-    switch (valueType(value))
-    {
+    switch (valueType(value)) {
     case ValueType::Nil:
         break;
     case ValueType::Bool:
@@ -140,8 +136,7 @@ void hashValue(Hasher& hasher, const Value& value)
     case ValueType::Instance:
         hasher.pod(std::get<core::InstanceId>(value));
         break;
-    case ValueType::EnumItem:
-    {
+    case ValueType::EnumItem: {
         // Field by field: `EnumValue` is a u16 followed by an i32, and the two
         // bytes between them belong to no one.
         const EnumValue& item = std::get<EnumValue>(value);
@@ -183,41 +178,33 @@ u64 World::worldHash() const
 
         // Insertion-ordered by construction (see `AttributeMap`), so this walk
         // is stable without sorting.
-        if (const AttributeMap* attributes = m_attributes.find(id); attributes != nullptr)
-        {
+        if (const AttributeMap* attributes = m_attributes.find(id); attributes != nullptr) {
             hasher.pod(static_cast<u64>(attributes->size()));
-            for (const auto& entry : *attributes)
-            {
+            for (const auto& entry : *attributes) {
                 hasher.text(m_atoms.text(entry.first));
                 hashValue(hasher, entry.second);
             }
         }
-        else
-        {
+        else {
             hasher.pod(u64{0});
         }
 
-        if (const TagSet* tags = m_tags.find(id); tags != nullptr)
-        {
+        if (const TagSet* tags = m_tags.find(id); tags != nullptr) {
             hasher.pod(static_cast<u64>(tags->size()));
             for (const core::NameAtom tag : *tags)
                 hasher.text(m_atoms.text(tag));
         }
-        else
-        {
+        else {
             hasher.pod(u64{0});
         }
 
         // Class-specific state, reached through the same generated accessors a
         // script would use. Hashing the components directly would be faster and
         // would silently stop covering a property whose storage moved.
-        if (const ClassDescriptor* descriptor = m_classes.find(record.classId); descriptor != nullptr)
-        {
+        if (const ClassDescriptor* descriptor = m_classes.find(record.classId); descriptor != nullptr) {
             for (const ClassDescriptor* current = descriptor; current != nullptr;
-                 current = m_classes.find(current->super))
-            {
-                for (const PropertyDesc& property : current->properties)
-                {
+                 current = m_classes.find(current->super)) {
+                for (const PropertyDesc& property : current->properties) {
                     if (property.get == nullptr)
                         continue;
                     hasher.text(m_atoms.text(property.name));

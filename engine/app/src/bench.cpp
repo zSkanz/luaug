@@ -1,12 +1,5 @@
 #include "luaug/app/bench.h"
 
-#include <algorithm>
-#include <array>
-#include <cstdio>
-#include <fstream>
-#include <sstream>
-#include <system_error>
-
 #include "luaug/app/replay.h"
 #include "luaug/app/world_host.h"
 #include "luaug/core/json.h"
@@ -14,10 +7,15 @@
 #include "luaug/core/text_key.h"
 #include "luaug/platform/platform.h"
 
-namespace luaug::app
-{
-namespace
-{
+#include <algorithm>
+#include <array>
+#include <cstdio>
+#include <fstream>
+#include <sstream>
+#include <system_error>
+
+namespace luaug::app {
+namespace {
 
 using core::I18nArg;
 using core::LogLevel;
@@ -40,8 +38,7 @@ struct Sample
 {
     core::JsonDocument document;
     std::string source;
-    if (std::ifstream file(directory / "scenario.json", std::ios::binary); file)
-    {
+    if (std::ifstream file(directory / "scenario.json", std::ios::binary); file) {
         std::ostringstream buffer;
         buffer << file.rdbuf();
         source = buffer.str();
@@ -72,8 +69,7 @@ struct Sample
     // thing.
     u64 totalNs = 0;
     u64 worstNs = 0;
-    for (u64 tick = 0; tick < scenario.ticks; ++tick)
-    {
+    for (u64 tick = 0; tick < scenario.ticks; ++tick) {
         const u64 before = platform::nowNs();
         host.tick();
         const u64 elapsed = platform::nowNs() - before;
@@ -82,8 +78,8 @@ struct Sample
     }
 
     out.instances = static_cast<u64>(host.world().instanceCount());
-    out.meanTickMs = scenario.ticks == 0 ? 0.0
-                                         : static_cast<f64>(totalNs) / static_cast<f64>(scenario.ticks) / kNanosPerMs;
+    out.meanTickMs =
+        scenario.ticks == 0 ? 0.0 : static_cast<f64>(totalNs) / static_cast<f64>(scenario.ticks) / kNanosPerMs;
     out.maxTickMs = static_cast<f64>(worstNs) / kNanosPerMs;
 
     host.close();
@@ -109,36 +105,32 @@ struct Sample
 
 } // namespace
 
-std::optional<core::EngineError> runBenchmarks(
-    const std::filesystem::path& root, u64 repeats, std::vector<BenchResult>& out)
+std::optional<core::EngineError> runBenchmarks(const std::filesystem::path& root, u64 repeats,
+                                               std::vector<BenchResult>& out)
 {
     out.clear();
     repeats = std::max<u64>(1, repeats);
 
     std::error_code ec;
-    if (!std::filesystem::is_directory(root, ec))
-    {
+    if (!std::filesystem::is_directory(root, ec)) {
         const std::array<I18nArg, 1> args{I18nArg{"path", root.string()}};
         return core::makeError(LUAUG_TR("engine.replay.err.open_failed"), args);
     }
 
     std::vector<std::filesystem::path> directories;
-    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(root, ec))
-    {
+    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(root, ec)) {
         if (entry.is_directory(ec) && std::filesystem::exists(entry.path() / "scenario.json", ec))
             directories.push_back(entry.path());
     }
     std::sort(directories.begin(), directories.end());
 
-    if (directories.empty())
-    {
+    if (directories.empty()) {
         const std::array<I18nArg, 1> args{I18nArg{"path", root.string()}};
         return core::makeError(LUAUG_TR("engine.replay.err.no_scenarios"), args);
     }
 
     std::optional<core::EngineError> overBudget;
-    for (const std::filesystem::path& directory : directories)
-    {
+    for (const std::filesystem::path& directory : directories) {
         ReplayScenario scenario;
         if (auto error = loadScenario(directory, scenario); error.has_value())
             return error;
@@ -150,8 +142,7 @@ std::optional<core::EngineError> runBenchmarks(
         result.ticks = scenario.ticks;
         result.budgetMs = budgetOf(directory);
 
-        for (u64 repeat = 0; repeat < repeats; ++repeat)
-        {
+        for (u64 repeat = 0; repeat < repeats; ++repeat) {
             Sample sample;
             if (auto error = runOnce(scenario, sample); error.has_value())
                 return error;
@@ -175,8 +166,7 @@ std::optional<core::EngineError> runBenchmarks(
         // Recorded before the failure is raised, and every scenario runs even
         // after one blows its budget: the point of a run is the whole table, and
         // stopping at the first regression hides the other three.
-        if (result.budgetMs > 0.0 && result.meanTickMs > result.budgetMs && !overBudget.has_value())
-        {
+        if (result.budgetMs > 0.0 && result.meanTickMs > result.budgetMs && !overBudget.has_value()) {
             const std::array<I18nArg, 3> budgetArgs{
                 I18nArg{"name", result.name},
                 I18nArg{"mean", milliseconds(result.meanTickMs)},

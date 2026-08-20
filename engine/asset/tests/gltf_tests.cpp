@@ -1,18 +1,17 @@
-#include <doctest/doctest.h>
+#include "luaug/asset/gltf.h"
+#include "luaug/core/i18n.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <doctest/doctest.h>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "luaug/asset/gltf.h"
-#include "luaug/core/i18n.h"
 
 using luaug::asset::AlphaMode;
 using luaug::asset::GltfImportOptions;
@@ -25,8 +24,7 @@ using luaug::core::f32;
 using luaug::core::u32;
 using luaug::core::Vec3;
 
-namespace
-{
+namespace {
 
 // The catalog has to be loaded or every message below is a bare key, and a test
 // asserting on message text would then assert on nothing (M2's Finding 11).
@@ -80,8 +78,7 @@ std::size_t replaceAll(std::string& text, std::string_view from, std::string_vie
 {
     std::size_t count = 0;
     std::size_t at = text.find(from);
-    while (at != std::string::npos)
-    {
+    while (at != std::string::npos) {
         text.replace(at, from.size(), to);
         at = text.find(from, at + to.size());
         ++count;
@@ -124,8 +121,7 @@ bool before(Vec3 a, Vec3 b) noexcept
 
 bool beforeTriangle(const Triangle& a, const Triangle& b) noexcept
 {
-    for (std::size_t i = 0; i < 3; ++i)
-    {
+    for (std::size_t i = 0; i < 3; ++i) {
         if (!(a[i] == b[i]))
             return before(a[i], b[i]);
     }
@@ -137,15 +133,13 @@ bool beforeTriangle(const Triangle& a, const Triangle& b) noexcept
 std::vector<Triangle> trianglesInDrawOrder(const Mesh& mesh, const Submesh& submesh)
 {
     std::vector<Triangle> triangles;
-    for (u32 offset = 0; offset + 2 < submesh.indexCount; offset += 3)
-    {
+    for (u32 offset = 0; offset + 2 < submesh.indexCount; offset += 3) {
         Triangle triangle{mesh.vertices[mesh.indices[submesh.firstIndex + offset]].position,
-            mesh.vertices[mesh.indices[submesh.firstIndex + offset + 1]].position,
-            mesh.vertices[mesh.indices[submesh.firstIndex + offset + 2]].position};
+                          mesh.vertices[mesh.indices[submesh.firstIndex + offset + 1]].position,
+                          mesh.vertices[mesh.indices[submesh.firstIndex + offset + 2]].position};
 
         std::size_t first = 0;
-        for (std::size_t i = 1; i < 3; ++i)
-        {
+        for (std::size_t i = 1; i < 3; ++i) {
             if (before(triangle[i], triangle[first]))
                 first = i;
         }
@@ -167,8 +161,7 @@ std::vector<Triangle> trianglesOf(const Mesh& mesh, const Submesh& submesh)
 // of an index the optimizer is free to move.
 const luaug::asset::Vertex& vertexAt(const Mesh& mesh, const Submesh& submesh, Vec3 position)
 {
-    for (u32 offset = 0; offset < submesh.indexCount; ++offset)
-    {
+    for (u32 offset = 0; offset < submesh.indexCount; ++offset) {
         const luaug::asset::Vertex& vertex = mesh.vertices[mesh.indices[submesh.firstIndex + offset]];
         if (near(vertex.position, position))
             return vertex;
@@ -208,8 +201,7 @@ std::vector<std::byte> makeGlb(std::string_view json, const std::vector<std::byt
     for (const char c : paddedJson)
         glb.push_back(static_cast<std::byte>(c));
 
-    if (!paddedBin.empty())
-    {
+    if (!paddedBin.empty()) {
         appendU32(glb, static_cast<u32>(paddedBin.size()));
         appendU32(glb, 0x004E4942u); // "BIN\0"
         glb.insert(glb.end(), paddedBin.begin(), paddedBin.end());
@@ -219,8 +211,7 @@ std::vector<std::byte> makeGlb(std::string_view json, const std::vector<std::byt
 
 void appendFloats(std::vector<std::byte>& bytes, std::initializer_list<f32> values)
 {
-    for (const f32 value : values)
-    {
+    for (const f32 value : values) {
         std::array<std::byte, sizeof(f32)> raw{};
         std::memcpy(raw.data(), &value, sizeof(f32));
         bytes.insert(bytes.end(), raw.begin(), raw.end());
@@ -229,8 +220,7 @@ void appendFloats(std::vector<std::byte>& bytes, std::initializer_list<f32> valu
 
 void appendU16(std::vector<std::byte>& bytes, std::initializer_list<std::uint16_t> values)
 {
-    for (const std::uint16_t value : values)
-    {
+    for (const std::uint16_t value : values) {
         bytes.push_back(static_cast<std::byte>(value & 0xFFu));
         bytes.push_back(static_cast<std::byte>((value >> 8) & 0xFFu));
     }
@@ -255,8 +245,7 @@ constexpr std::size_t kGridQuads = (kGridSide - 1) * (kGridSide - 1);
 std::vector<std::byte> makeGridGlb()
 {
     std::vector<std::byte> bin;
-    for (std::size_t row = 0; row < kGridSide; ++row)
-    {
+    for (std::size_t row = 0; row < kGridSide; ++row) {
         for (std::size_t column = 0; column < kGridSide; ++column)
             appendFloats(bin, {static_cast<f32>(column), static_cast<f32>(row), 0.0f});
     }
@@ -266,12 +255,9 @@ std::vector<std::byte> makeGridGlb()
     // Counter-clockwise seen from +z, which is glTF's front face. The lower
     // triangles go in first and the upper ones after, as two index ranges over
     // the same vertices.
-    for (const bool upper : {false, true})
-    {
-        for (std::size_t row = 0; row + 1 < kGridSide; ++row)
-        {
-            for (std::size_t column = 0; column + 1 < kGridSide; ++column)
-            {
+    for (const bool upper : {false, true}) {
+        for (std::size_t row = 0; row + 1 < kGridSide; ++row) {
+            for (std::size_t column = 0; column + 1 < kGridSide; ++column) {
                 const auto corner = static_cast<std::uint16_t>(row * kGridSide + column);
                 const auto right = static_cast<std::uint16_t>(corner + 1);
                 const auto above = static_cast<std::uint16_t>(corner + kGridSide);
@@ -303,22 +289,28 @@ std::vector<std::byte> makeGridGlb()
         { "attributes": { "POSITION": 0, "NORMAL": 1 }, "indices": 3, "material": 1 } ] } ],
       "materials": [ { "name": "Lower" }, { "name": "Upper" } ],
       "accessors": [
-        { "bufferView": 0, "componentType": 5126, "count": )")
-        + vertexCount + R"(, "type": "VEC3", "min": [ 0.0, 0.0, 0.0 ], "max": [ )" + side + ", " + side
-        + R"(, 0.0 ] },
-        { "bufferView": 1, "componentType": 5126, "count": )" + vertexCount + R"(, "type": "VEC3" },
-        { "bufferView": 2, "componentType": 5123, "count": )" + indexCount + R"(, "type": "SCALAR" },
-        { "bufferView": 3, "componentType": 5123, "count": )" + indexCount + R"(, "type": "SCALAR" }
+        { "bufferView": 0, "componentType": 5126, "count": )") +
+                             vertexCount + R"(, "type": "VEC3", "min": [ 0.0, 0.0, 0.0 ], "max": [ )" + side + ", " +
+                             side + R"(, 0.0 ] },
+        { "bufferView": 1, "componentType": 5126, "count": )" +
+                             vertexCount + R"(, "type": "VEC3" },
+        { "bufferView": 2, "componentType": 5123, "count": )" +
+                             indexCount + R"(, "type": "SCALAR" },
+        { "bufferView": 3, "componentType": 5123, "count": )" +
+                             indexCount + R"(, "type": "SCALAR" }
       ],
       "bufferViews": [
-        { "buffer": 0, "byteOffset": 0, "byteLength": )" + positions + R"( },
-        { "buffer": 0, "byteOffset": )" + positions + R"(, "byteLength": )" + positions + R"( },
-        { "buffer": 0, "byteOffset": )" + std::to_string(positionBytes * 2) + R"(, "byteLength": )" + indices
-        + R"( },
-        { "buffer": 0, "byteOffset": )" + std::to_string(positionBytes * 2 + indexBytes) + R"(, "byteLength": )"
-        + indices + R"( }
+        { "buffer": 0, "byteOffset": 0, "byteLength": )" +
+                             positions + R"( },
+        { "buffer": 0, "byteOffset": )" +
+                             positions + R"(, "byteLength": )" + positions + R"( },
+        { "buffer": 0, "byteOffset": )" +
+                             std::to_string(positionBytes * 2) + R"(, "byteLength": )" + indices + R"( },
+        { "buffer": 0, "byteOffset": )" +
+                             std::to_string(positionBytes * 2 + indexBytes) + R"(, "byteLength": )" + indices + R"( }
       ],
-      "buffers": [ { "byteLength": )" + std::to_string(bin.size()) + R"( } ]
+      "buffers": [ { "byteLength": )" +
+                             std::to_string(bin.size()) + R"( } ]
     })";
 
     return makeGlb(json, bin);
@@ -413,8 +405,7 @@ TEST_CASE_FIXTURE(CatalogFixture, "gltf: two primitives with different materials
     // Each submesh bounds its own geometry, not the model's: the quad is at
     // z = 0 and the triangle at z = 1, so one box covering both would be the
     // bug this catches.
-    CHECK(near(model.mesh.submeshes[0].bounds,
-        AABB::fromMinMax(Vec3{-1.0f, -1.0f, 0.0f}, Vec3{1.0f, 1.0f, 0.0f})));
+    CHECK(near(model.mesh.submeshes[0].bounds, AABB::fromMinMax(Vec3{-1.0f, -1.0f, 0.0f}, Vec3{1.0f, 1.0f, 0.0f})));
     CHECK(near(model.mesh.submeshes[1].bounds, AABB::fromMinMax(Vec3{0.0f, 0.0f, 1.0f}, Vec3{1.0f, 1.0f, 1.0f})));
     CHECK(near(model.mesh.bounds, AABB::fromMinMax(Vec3{-1.0f, -1.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f})));
 }
@@ -440,8 +431,7 @@ TEST_CASE_FIXTURE(CatalogFixture, "gltf: a node transform is baked into position
     // is the same numbers with x and y swapped: the failure mode that looks
     // right on a uniformly scaled model and wrong on this one.
     const f32 fifth = 1.0f / std::sqrt(5.0f);
-    for (const luaug::asset::Vertex& vertex : model.mesh.vertices)
-    {
+    for (const luaug::asset::Vertex& vertex : model.mesh.vertices) {
         CHECK(near(vertex.normal, Vec3{fifth, 2.0f * fifth, 0.0f}));
         CHECK_FALSE(near(vertex.normal, Vec3{2.0f * fifth, fifth, 0.0f}));
 
@@ -548,8 +538,7 @@ TEST_CASE_FIXTURE(CatalogFixture, "gltf: an image two materials share is decoded
     // first material's base colour and the second's normal map are two textures
     // over one image, and it is decoded once.
     REQUIRE(model.images.size() == 2u);
-    for (const luaug::asset::Image& image : model.images)
-    {
+    for (const luaug::asset::Image& image : model.images) {
         CHECK(image.valid());
         CHECK(image.width == 2u);
         CHECK(image.height == 2u);
@@ -598,8 +587,8 @@ TEST_CASE_FIXTURE(CatalogFixture, "gltf: tangents are generated only where a nor
     bare.generateMissingTangents = false;
     Model plainModel;
     REQUIRE_FALSE(importGltf(readFixture("textured.gltf"), dataDirectory(), bare, plainModel).has_value());
-    const luaug::asset::Vertex& untouched
-        = vertexAt(plainModel.mesh, plainModel.mesh.submeshes[1], Vec3{0.0f, 0.0f, 1.0f});
+    const luaug::asset::Vertex& untouched =
+        vertexAt(plainModel.mesh, plainModel.mesh.submeshes[1], Vec3{0.0f, 0.0f, 1.0f});
     CHECK(near(untouched.tangent[0], 0.0f));
     CHECK(near(untouched.tangent[3], 1.0f));
 }
@@ -619,8 +608,7 @@ TEST_CASE_FIXTURE(CatalogFixture, "gltf: the optimizer reorders without changing
     CHECK(optimized.mesh.vertices.size() == plain.mesh.vertices.size());
     CHECK(near(optimized.mesh.bounds, plain.mesh.bounds));
 
-    for (std::size_t index = 0; index < plain.mesh.submeshes.size(); ++index)
-    {
+    for (std::size_t index = 0; index < plain.mesh.submeshes.size(); ++index) {
         // The index ranges are what the renderer draws with, and the cache and
         // overdraw passes run inside a range precisely so they stay put.
         CHECK(optimized.mesh.submeshes[index].firstIndex == plain.mesh.submeshes[index].firstIndex);
@@ -631,8 +619,7 @@ TEST_CASE_FIXTURE(CatalogFixture, "gltf: the optimizer reorders without changing
         const std::vector<Triangle> before = trianglesOf(plain.mesh, plain.mesh.submeshes[index]);
         const std::vector<Triangle> after = trianglesOf(optimized.mesh, optimized.mesh.submeshes[index]);
         REQUIRE(after.size() == before.size());
-        for (std::size_t triangle = 0; triangle < before.size(); ++triangle)
-        {
+        for (std::size_t triangle = 0; triangle < before.size(); ++triangle) {
             for (std::size_t corner = 0; corner < 3; ++corner)
                 CHECK(near(after[triangle][corner], before[triangle][corner]));
         }
@@ -665,8 +652,7 @@ TEST_CASE_FIXTURE(CatalogFixture, "gltf: the optimizer keeps every triangle insi
     // the optimized path.
     REQUIRE(optimized.mesh.indices != plain.mesh.indices);
 
-    for (std::size_t index = 0; index < 2u; ++index)
-    {
+    for (std::size_t index = 0; index < 2u; ++index) {
         const Submesh& submesh = optimized.mesh.submeshes[index];
         CHECK(submesh.firstIndex == plain.mesh.submeshes[index].firstIndex);
         CHECK(submesh.indexCount == plain.mesh.submeshes[index].indexCount);
@@ -675,15 +661,14 @@ TEST_CASE_FIXTURE(CatalogFixture, "gltf: the optimizer keeps every triangle insi
         // The cache pass changes which triangle is drawn when, which the
         // vertex-fetch pass alone would not -- without this the assertions
         // below would still hold with the reordering passes deleted.
-        REQUIRE(trianglesInDrawOrder(optimized.mesh, submesh)
-            != trianglesInDrawOrder(plain.mesh, plain.mesh.submeshes[index]));
+        REQUIRE(trianglesInDrawOrder(optimized.mesh, submesh) !=
+                trianglesInDrawOrder(plain.mesh, plain.mesh.submeshes[index]));
 
         const std::vector<Triangle> before = trianglesOf(plain.mesh, plain.mesh.submeshes[index]);
         const std::vector<Triangle> after = trianglesOf(optimized.mesh, submesh);
         REQUIRE(after.size() == before.size());
         REQUIRE(after.size() == kGridQuads);
-        for (std::size_t triangle = 0; triangle < before.size(); ++triangle)
-        {
+        for (std::size_t triangle = 0; triangle < before.size(); ++triangle) {
             for (std::size_t corner = 0; corner < 3; ++corner)
                 CHECK(near(after[triangle][corner], before[triangle][corner]));
         }
@@ -693,8 +678,7 @@ TEST_CASE_FIXTURE(CatalogFixture, "gltf: the optimizer keeps every triangle insi
         // the other draw land in this range", asked of every triangle rather
         // than of the set as a whole.
         const int expected = index == 0 ? 1 : 2;
-        for (const Triangle& triangle : after)
-        {
+        for (const Triangle& triangle : after) {
             const int rows = static_cast<int>(std::lround(triangle[0].y + triangle[1].y + triangle[2].y));
             CHECK(rows % 3 == expected);
         }
@@ -734,12 +718,10 @@ TEST_CASE_FIXTURE(CatalogFixture, "gltf: importing the same file twice gives byt
 
     REQUIRE(first.mesh.vertices.size() == second.mesh.vertices.size());
     CHECK(std::memcmp(first.mesh.vertices.data(), second.mesh.vertices.data(),
-              first.mesh.vertices.size() * sizeof(luaug::asset::Vertex))
-        == 0);
+                      first.mesh.vertices.size() * sizeof(luaug::asset::Vertex)) == 0);
     CHECK(first.mesh.indices == second.mesh.indices);
     REQUIRE(first.materials.size() == second.materials.size());
-    for (std::size_t index = 0; index < first.materials.size(); ++index)
-    {
+    for (std::size_t index = 0; index < first.materials.size(); ++index) {
         CHECK(first.materials[index].name == second.materials[index].name);
         CHECK(first.materials[index].baseColor.image == second.materials[index].baseColor.image);
         CHECK(first.materials[index].normal.image == second.materials[index].normal.image);
@@ -761,8 +743,7 @@ TEST_CASE_FIXTURE(CatalogFixture, "gltf: a GLB container reads the same document
 
     REQUIRE(fromGlb.mesh.vertices.size() == fromJson.mesh.vertices.size());
     CHECK(std::memcmp(fromGlb.mesh.vertices.data(), fromJson.mesh.vertices.data(),
-              fromJson.mesh.vertices.size() * sizeof(luaug::asset::Vertex))
-        == 0);
+                      fromJson.mesh.vertices.size() * sizeof(luaug::asset::Vertex)) == 0);
     CHECK(fromGlb.mesh.indices == fromJson.mesh.indices);
 }
 

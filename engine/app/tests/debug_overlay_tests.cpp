@@ -3,13 +3,6 @@
 // unit test's. It is the contract around it: that it is inert wherever there is
 // nothing to draw with, that being inert costs the frame loop nothing, and that
 // F3 is what turns it on where there is.
-#include <doctest/doctest.h>
-
-#include <array>
-#include <string>
-#include <vector>
-
-#include "inspector_fixture.h"
 #include "luaug/app/backends.h"
 #include "luaug/app/debug_overlay.h"
 #include "luaug/app/frame_scheduler.h"
@@ -22,13 +15,19 @@
 #include "luaug/rhi/device.h"
 #include "luaug/scene/world.h"
 
+#include <array>
+#include <doctest/doctest.h>
+#include <string>
+#include <vector>
+
+#include "inspector_fixture.h"
+
 using luaug::app::DebugOverlay;
 using luaug::app::Frame;
 using luaug::app::Inspector;
 using luaug::core::EngineError;
 
-namespace
-{
+namespace {
 
 void seedRealCatalog()
 {
@@ -87,8 +86,7 @@ TEST_CASE("the overlay is inert on a backend that draws nothing")
     // `null` is the honest stand-in for every device that rasterizes nothing:
     // capture behaves the same way, and so does a shipping build, where the
     // overlay is inert for a different reason entirely.
-    const luaug::rhi::DeviceResult device
-        = luaug::app::createDevice({.backend = luaug::rhi::BackendId::Null}, &error);
+    const luaug::rhi::DeviceResult device = luaug::app::createDevice({.backend = luaug::rhi::BackendId::Null}, &error);
     REQUIRE_MESSAGE(device != nullptr, error.detail);
 
     DebugOverlay overlay(*window, *device);
@@ -119,12 +117,11 @@ TEST_CASE("visibility is off until something asks for it")
     REQUIRE_MESSAGE(!initError.has_value(), (initError ? initError->detail : std::string{}));
 
     EngineError error;
-    const auto window = luaug::platform::createWindow(
-        {.titleKey = LUAUG_TR("platform.window.title"), .visible = false}, &error);
+    const auto window =
+        luaug::platform::createWindow({.titleKey = LUAUG_TR("platform.window.title"), .visible = false}, &error);
     REQUIRE_MESSAGE(window != nullptr, error.detail);
 
-    const luaug::rhi::DeviceResult device
-        = luaug::app::createDevice({.backend = luaug::rhi::BackendId::Null}, &error);
+    const luaug::rhi::DeviceResult device = luaug::app::createDevice({.backend = luaug::rhi::BackendId::Null}, &error);
     REQUIRE_MESSAGE(device != nullptr, error.detail);
 
     DebugOverlay overlay(*window, *device);
@@ -147,8 +144,7 @@ TEST_CASE("on a real device, F3 flips the panel")
 {
     seedRealCatalog();
 
-    if (const auto initError = luaug::platform::init({.headless = false}); initError.has_value())
-    {
+    if (const auto initError = luaug::platform::init({.headless = false}); initError.has_value()) {
         MESSAGE("no display on this machine, skipping: " << initError->detail);
         return;
     }
@@ -156,23 +152,20 @@ TEST_CASE("on a real device, F3 flips the panel")
     EngineError error;
     const auto window = luaug::platform::createWindow(
         {.titleKey = LUAUG_TR("platform.window.title"), .width = 320, .height = 200, .visible = false}, &error);
-    if (window == nullptr)
-    {
+    if (window == nullptr) {
         MESSAGE("no window on this machine, skipping: " << error.detail);
         luaug::platform::shutdown();
         return;
     }
 
-    const luaug::rhi::DeviceResult device
-        = luaug::app::createDevice({.backend = luaug::rhi::BackendId::SdlGpu, .debug = true}, &error);
-    if (device == nullptr)
-    {
+    const luaug::rhi::DeviceResult device =
+        luaug::app::createDevice({.backend = luaug::rhi::BackendId::SdlGpu, .debug = true}, &error);
+    if (device == nullptr) {
         MESSAGE("no GPU device on this machine, skipping: " << error.detail);
         luaug::platform::shutdown();
         return;
     }
-    if (!device->claimWindow(*window))
-    {
+    if (!device->claimWindow(*window)) {
         MESSAGE("the device would not claim a window on this machine, skipping");
         luaug::platform::shutdown();
         return;
@@ -211,8 +204,7 @@ TEST_CASE("on a real device, F3 flips the panel")
         luaug::rhi::ICmdList* cmd = device->beginFrame();
         REQUIRE(cmd != nullptr);
         const luaug::rhi::Swapchain swapchain = device->acquireSwapchain(*window);
-        if (swapchain.texture.valid())
-        {
+        if (swapchain.texture.valid()) {
             const std::array<luaug::rhi::ColorAttachment, 1> colors{luaug::rhi::ColorAttachment{
                 .texture = swapchain.texture,
                 .loadOp = luaug::rhi::LoadOp::Clear,
@@ -229,14 +221,12 @@ TEST_CASE("on a real device, F3 flips the panel")
             // here and nowhere else.
             std::vector<luaug::app::TreeRow> rows;
             luaug::app::collectTree(inspected.world, inspected.root, rows);
-            for (const luaug::app::TreeRow& row : rows)
-            {
+            for (const luaug::app::TreeRow& row : rows) {
                 inspector.select(row.id);
                 overlay.render(*cmd, swapchain.texture, Frame{.index = 2, .renderDt = 1.0 / 60.0});
             }
         }
-        else
-        {
+        else {
             // Said out loud rather than passing quietly: a hidden window that
             // hands out no backbuffer means the draw half of this test did not
             // run, and a silent skip would read as coverage it does not have.

@@ -11,14 +11,12 @@
 // become a second, weaker validation layer that the real backends do not share,
 // and tests would start passing here for reasons that do not transfer.
 
-#include <atomic>
-
 #include "luaug/rhi/backends.h"
 
-namespace luaug::rhi
-{
-namespace
-{
+#include <atomic>
+
+namespace luaug::rhi {
+namespace {
 
 class NullCmdList final : public ICmdList
 {

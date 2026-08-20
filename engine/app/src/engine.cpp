@@ -7,18 +7,6 @@
 // in the Tier-2 container without either include, and fails on the CI runner's
 // libstdc++, which is a different version with a different transitive graph.
 // A header a translation unit uses is a header it includes.
-#include <algorithm>
-#include <array>
-#include <cmath>
-#include <cstddef>
-#include <filesystem>
-#include <fstream>
-#include <memory>
-#include <optional>
-#include <span>
-#include <string>
-#include <vector>
-
 #include "luaug/app/backends.h"
 #include "luaug/app/debug_overlay.h"
 #include "luaug/app/dev_control.h"
@@ -42,14 +30,24 @@
 #include "luaug/render/shader_library.h"
 #include "luaug/rhi/device.h"
 
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstddef>
+#include <filesystem>
+#include <fstream>
+#include <memory>
+#include <optional>
+#include <span>
+#include <string>
+#include <vector>
+
 #if LUAUG_RHI_CAPTURE
 #include "luaug/rhi/capture.h"
 #endif
 
-namespace luaug::app
-{
-namespace
-{
+namespace luaug::app {
+namespace {
 
 using core::f32;
 using core::f64;
@@ -85,18 +83,16 @@ constexpr rhi::TextureFormat kOffscreenFormat = rhi::TextureFormat::Rgba8Unorm;
 // visualized with.
 void submitWorld(const render::RenderWorld& snapshot, render::DebugDraw& draw)
 {
-    for (const render::RenderPart& part : snapshot.parts)
-    {
+    for (const render::RenderPart& part : snapshot.parts) {
         // Fully transparent is not drawn. A debug wireframe has no blending, so
         // the alternative is a box that a script asked to be invisible and that
         // is nonetheless the most visible thing on screen.
         if (part.transparency >= 1.0f)
             continue;
 
-        draw.wireBox(
-            core::toRenderMatrix(part.cframe, {}),
-            core::Vec3{part.size.x * 0.5f, part.size.y * 0.5f, part.size.z * 0.5f},
-            render::DebugColor::fromLinear(part.color.r, part.color.g, part.color.b));
+        draw.wireBox(core::toRenderMatrix(part.cframe, {}),
+                     core::Vec3{part.size.x * 0.5f, part.size.y * 0.5f, part.size.z * 0.5f},
+                     render::DebugColor::fromLinear(part.color.r, part.color.g, part.color.b));
     }
 }
 
@@ -118,13 +114,12 @@ void submitWorld(const render::RenderWorld& snapshot, render::DebugDraw& draw)
 // Writing the recorded stream is the app's job, not the backend's: the backend
 // records into memory and knows nothing about files, which is what lets a test
 // read a capture without touching a disk.
-[[nodiscard]] std::optional<core::EngineError> writeCapture(
-    const std::filesystem::path& path, const rhi::IDevice& device)
+[[nodiscard]] std::optional<core::EngineError> writeCapture(const std::filesystem::path& path,
+                                                            const rhi::IDevice& device)
 {
 #if LUAUG_RHI_CAPTURE
     const std::string& stream = rhi::captureStream(device);
-    if (stream.empty())
-    {
+    if (stream.empty()) {
         // An empty golden would match forever. Better to fail here than to
         // check in a file that can never catch anything.
         return core::makeError(LUAUG_TR("engine.capture.err.empty"));
@@ -135,8 +130,7 @@ void submitWorld(const render::RenderWorld& snapshot, render::DebugDraw& draw)
         std::filesystem::create_directories(path.parent_path(), ec);
 
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
-    if (!file)
-    {
+    if (!file) {
         const std::array<I18nArg, 1> args{I18nArg{"path", path.string()}};
         return core::makeError(LUAUG_TR("engine.capture.err.open_failed"), args);
     }
@@ -147,8 +141,7 @@ void submitWorld(const render::RenderWorld& snapshot, render::DebugDraw& draw)
     file.write(stream.data(), static_cast<std::streamsize>(stream.size()));
     file.close();
 
-    if (!file)
-    {
+    if (!file) {
         const std::array<I18nArg, 1> args{I18nArg{"path", path.string()}};
         return core::makeError(LUAUG_TR("engine.capture.err.write_failed"), args);
     }
@@ -185,8 +178,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     if (device == nullptr)
         return error;
 
-    if (!options.headless)
-    {
+    if (!options.headless) {
         const std::array<I18nArg, 1> titleArgs{I18nArg{"version", LUAUG_VERSION_STRING}};
         window = platform::createWindow(
             {
@@ -207,8 +199,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // downstream is identical, which is the point: the harness exercises the
     // same path a windowed run does rather than a simplified one.
     rhi::TextureHandle offscreen;
-    if (options.headless)
-    {
+    if (options.headless) {
         offscreen = device->createTexture({
             .format = kOffscreenFormat,
             .usage = rhi::TextureUsage::ColorTarget,
@@ -268,8 +259,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     render::DebugDraw debugDraw;
     bool debugPassAttempted = false;
 
-    const auto ensureDebugPass = [&](rhi::TextureFormat colorFormat)
-    {
+    const auto ensureDebugPass = [&](rhi::TextureFormat colorFormat) {
         // Gated on "can this device take shaders", not on "will pixels come
         // out". They are different questions, and conflating them made the
         // capture backend -- the blocking render gate -- record a frame with no
@@ -278,9 +268,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             return;
         debugPassAttempted = true;
 
-        if (auto error = shaders.load(platform::paths().contentDir, device->caps().shaderFormat);
-            error.has_value())
-        {
+        if (auto error = shaders.load(platform::paths().contentDir, device->caps().shaderFormat); error.has_value()) {
             core::logText(LogLevel::Warn, error->message);
             return;
         }
@@ -291,8 +279,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // required. A machine whose content directory has the debug shader and
         // not the PBR set boots and draws wire boxes, which is a far better
         // failure than refusing to start.
-        if (auto error = meshCache.create(*device); error.has_value())
-        {
+        if (auto error = meshCache.create(*device); error.has_value()) {
             core::logText(LogLevel::Warn, error->message);
             return;
         }
@@ -307,12 +294,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // it is a bare script (engine.h), so a lone script gets the engine's
         // content directory -- which is right: it has no project to have one.
         std::error_code pathError;
-        const bool isProject = !options.scriptPath.empty()
-            && std::filesystem::is_directory(options.scriptPath, pathError);
+        const bool isProject =
+            !options.scriptPath.empty() && std::filesystem::is_directory(options.scriptPath, pathError);
         meshLoader.setContentRoot(isProject ? options.scriptPath / "content" : platform::paths().contentDir);
         renderer = render::createDefaultRenderer();
-        if (auto error = renderer->create(*device, shaders, colorFormat); error.has_value())
-        {
+        if (auto error = renderer->create(*device, shaders, colorFormat); error.has_value()) {
             core::logText(LogLevel::Warn, error->message);
             renderer.reset();
         }
@@ -368,8 +354,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     };
     std::vector<PendingSample> pendingSamples;
 
-    if (!options.devControlUrl.empty())
-    {
+    if (!options.devControlUrl.empty()) {
         if (std::optional<core::EngineError> attachError = control.start({
                 .url = options.devControlUrl,
                 .token = options.devControlToken,
@@ -381,8 +366,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         core::log(LogLevel::Info, LUAUG_TR("engine.dev.info.attached"), attached);
     }
 
-    const auto replyOk = [&control](std::string_view type, u64 id, const auto& fill)
-    {
+    const auto replyOk = [&control](std::string_view type, u64 id, const auto& fill) {
         core::JsonWriter writer;
         writer.beginObject();
         writer.field("type", type);
@@ -393,12 +377,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     };
 
     render::RenderWorld snapshot;
-    const auto headlessStepNs
-        = static_cast<u64>(std::ceil(scheduler.timing().fixedDt * kNanosPerSecond));
+    const auto headlessStepNs = static_cast<u64>(std::ceil(scheduler.timing().fixedDt * kNanosPerSecond));
     bool quit = false;
 
-    while (!quit)
-    {
+    while (!quit) {
         if (options.frames != 0 && scheduler.totalFrames() >= options.frames)
             break;
 
@@ -443,8 +425,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             .luaMemoryKb = static_cast<f64>(lua_totalbytes(host->runtime().state(), 0)) / 1024.0,
         });
 
-        if (options.frameStats)
-        {
+        if (options.frameStats) {
             // The WALL clock, not `frame.renderDt`. Headless drives the frame
             // loop from a synthetic 1/60 s step so a golden capture cannot
             // depend on how busy the machine was (M1 Finding 8) -- which makes
@@ -476,15 +457,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // swapped mid-tick would break within-run determinism, which is the
         // rule architecture.md §4 states (and the reason the connection hands
         // its messages over here rather than acting on them itself).
-        if (!options.devControlUrl.empty())
-        {
+        if (!options.devControlUrl.empty()) {
             control.takeCommands(commands);
-            for (const DevCommand& command : commands)
-            {
-                switch (command.kind)
-                {
-                case DevCommand::Kind::Reload:
-                {
+            for (const DevCommand& command : commands) {
+                switch (command.kind) {
+                case DevCommand::Kind::Reload: {
                     const ReloadReport reloaded = reloadWorld(host, worldOptions);
                     host->setGizmoTarget(&debugDraw);
 
@@ -497,20 +474,16 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     inspector.onWorldChanged();
                     if (overlay.has_value())
                         overlay->setInspectionTarget(&host->world(), host->runtime().dataModel(), &inspector);
-                    replyOk(
-                        "reloaded",
-                        command.id,
-                        [&reloaded, &host](core::JsonWriter& writer)
-                        {
-                            writer.field("ok", reloaded.ok);
-                            writer.field("ms", reloaded.spanMs);
-                            writer.field("scripts", reloaded.mountedScripts);
-                            writer.field("preserved", reloaded.preserve.restored);
-                            writer.field("tick", host->world().engineState().tick);
-                            writer.field("hash", host->world().worldHash());
-                            if (!reloaded.ok && reloaded.error.has_value())
-                                writer.field("detail", reloaded.error->message);
-                        });
+                    replyOk("reloaded", command.id, [&reloaded, &host](core::JsonWriter& writer) {
+                        writer.field("ok", reloaded.ok);
+                        writer.field("ms", reloaded.spanMs);
+                        writer.field("scripts", reloaded.mountedScripts);
+                        writer.field("preserved", reloaded.preserve.restored);
+                        writer.field("tick", host->world().engineState().tick);
+                        writer.field("hash", host->world().worldHash());
+                        if (!reloaded.ok && reloaded.error.has_value())
+                            writer.field("detail", reloaded.error->message);
+                    });
                     break;
                 }
                 case DevCommand::Kind::Sample:
@@ -529,14 +502,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     // Answered rather than ignored: `asset-changed` and `eval`
                     // are reserved by the protocol and a caller that gets
                     // silence cannot tell "not yet" from "lost".
-                    replyOk(
-                        "error",
-                        command.id,
-                        [&command](core::JsonWriter& writer)
-                        {
-                            writer.field("key", "dev.err.not_implemented");
-                            writer.field("of", command.type);
-                        });
+                    replyOk("error", command.id, [&command](core::JsonWriter& writer) {
+                        writer.field("key", "dev.err.not_implemented");
+                        writer.field("of", command.type);
+                    });
                     break;
                 }
             }
@@ -547,26 +516,18 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         for (u32 step = 0; step < frame.simTicks; ++step)
             host->tick();
 
-        if (!pendingSamples.empty())
-        {
+        if (!pendingSamples.empty()) {
             const u64 tick = host->world().engineState().tick;
             const u64 hash = host->world().worldHash();
-            std::erase_if(
-                pendingSamples,
-                [&](const PendingSample& sample)
-                {
-                    if (sample.tick > tick)
-                        return false;
-                    replyOk(
-                        "sample",
-                        sample.id,
-                        [tick, hash](core::JsonWriter& writer)
-                        {
-                            writer.field("tick", tick);
-                            writer.field("hash", hash);
-                        });
-                    return true;
+            std::erase_if(pendingSamples, [&](const PendingSample& sample) {
+                if (sample.tick > tick)
+                    return false;
+                replyOk("sample", sample.id, [tick, hash](core::JsonWriter& writer) {
+                    writer.field("tick", tick);
+                    writer.field("hash", hash);
                 });
+                return true;
+            });
         }
 
         if (host->shutdownRequested())
@@ -581,13 +542,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         if (!options.devControlUrl.empty() && options.headless && !control.connected())
             quit = true;
 
-        if (!options.headless)
-        {
+        if (!options.headless) {
             const std::span<const platform::Event> events = platform::pumpEvents();
-            for (const platform::Event& event : events)
-            {
-                if (event.type == platform::EventType::Quit
-                    || event.type == platform::EventType::WindowCloseRequested)
+            for (const platform::Event& event : events) {
+                if (event.type == platform::EventType::Quit || event.type == platform::EventType::WindowCloseRequested)
                     quit = true;
             }
 
@@ -610,8 +568,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         core::u32 targetWidth = static_cast<core::u32>(options.width);
         core::u32 targetHeight = static_cast<core::u32>(options.height);
 
-        if (!options.headless)
-        {
+        if (!options.headless) {
             const rhi::Swapchain swapchain = device->acquireSwapchain(*window);
             target = swapchain.texture;
             targetFormat = swapchain.format;
@@ -619,8 +576,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             targetHeight = swapchain.height;
         }
 
-        if (target.valid())
-        {
+        if (target.valid()) {
             ensureDebugPass(targetFormat);
 
             if (!options.headless)
@@ -642,17 +598,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // a `Camera` has no ViewportSize in this release (it needs a
             // Vector2, which the UI brings at M6), and the renderer is the one
             // that knows how many pixels it is filling.
-            const f32 aspect = targetHeight == 0
-                ? 1.0f
-                : static_cast<f32>(targetWidth) / static_cast<f32>(targetHeight);
-            const f32 shadowRadius =
-                renderer != nullptr && renderer->valid() ? renderer->shadowRadius() : 0.0f;
+            const f32 aspect =
+                targetHeight == 0 ? 1.0f : static_cast<f32>(targetWidth) / static_cast<f32>(targetHeight);
+            const f32 shadowRadius = renderer != nullptr && renderer->valid() ? renderer->shadowRadius() : 0.0f;
             render::extract(host->world(), host->workspace(), host->lighting(), meshLibrary, aspect, shadowRadius,
-                snapshot);
+                            snapshot);
             frameDrawCalls = 0;
             frameTriangles = 0;
-            for (const render::DrawItem& draw : snapshot.draws)
-            {
+            for (const render::DrawItem& draw : snapshot.draws) {
                 // Counted from the snapshot rather than from the backend: it is
                 // the same number, it costs nothing, and it is available on a
                 // device that rasterizes nothing.
@@ -690,17 +643,16 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // camera nobody assigned -- the M1 debug path still draws, which is
             // what keeps every earlier example and the capture golden working.
             const bool useRenderer = renderer != nullptr && renderer->valid() && snapshot.camera.valid;
-            if (useRenderer)
-            {
-                renderer->render(*device, *cmd,
+            if (useRenderer) {
+                renderer->render(
+                    *device, *cmd,
                     {.color = target, .colorFormat = targetFormat, .width = targetWidth, .height = targetHeight},
                     snapshot, meshCache);
 
                 // Debug geometry goes on top, in a pass that LOADS rather than
                 // clears: it is an overlay on the rendered frame, not a
                 // replacement for it.
-                if (debugRenderer.valid() && !debugDraw.vertices().empty())
-                {
+                if (debugRenderer.valid() && !debugDraw.vertices().empty()) {
                     const std::array<rhi::ColorAttachment, 1> overlayColors{rhi::ColorAttachment{
                         .texture = target,
                         .loadOp = rhi::LoadOp::Load,
@@ -717,30 +669,28 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     cmd->popDebugGroup();
                 }
             }
-            else
-            {
+            else {
 
-            const std::array<rhi::ColorAttachment, 1> colors{rhi::ColorAttachment{
-                .texture = target,
-                .loadOp = rhi::LoadOp::Clear,
-                .storeOp = rhi::StoreOp::Store,
-                .clearColor = pulseColor(scheduler.totalTicks(), scheduler.timing().fixedDt),
-            }};
+                const std::array<rhi::ColorAttachment, 1> colors{rhi::ColorAttachment{
+                    .texture = target,
+                    .loadOp = rhi::LoadOp::Clear,
+                    .storeOp = rhi::StoreOp::Store,
+                    .clearColor = pulseColor(scheduler.totalTicks(), scheduler.timing().fixedDt),
+                }};
 
-            cmd->pushDebugGroup("frame");
-            cmd->beginRenderPass({.colorAttachments = colors, .debugName = "clear"});
+                cmd->pushDebugGroup("frame");
+                cmd->beginRenderPass({.colorAttachments = colors, .debugName = "clear"});
 
-            if (debugRenderer.valid() && targetWidth > 0 && targetHeight > 0)
-            {
-                cmd->setViewport({
-                    .width = static_cast<f32>(targetWidth),
-                    .height = static_cast<f32>(targetHeight),
-                });
-                debugRenderer.render(*cmd, orbitCamera(targetWidth, targetHeight));
-            }
+                if (debugRenderer.valid() && targetWidth > 0 && targetHeight > 0) {
+                    cmd->setViewport({
+                        .width = static_cast<f32>(targetWidth),
+                        .height = static_cast<f32>(targetHeight),
+                    });
+                    debugRenderer.render(*cmd, orbitCamera(targetWidth, targetHeight));
+                }
 
-            cmd->endRenderPass();
-            cmd->popDebugGroup();
+                cmd->endRenderPass();
+                cmd->popDebugGroup();
             }
 
             // Its own pass, on top of the finished frame, after ours closed and
@@ -764,8 +714,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     host->close();
     device->waitIdle();
 
-    if (!options.screenshotPath.empty() && offscreen.valid())
-    {
+    if (!options.screenshotPath.empty() && offscreen.valid()) {
         const auto pixelCount = static_cast<core::usize>(options.width) * static_cast<core::usize>(options.height);
         std::vector<std::byte> pixels(pixelCount * 4u);
 
@@ -773,7 +722,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             return core::makeError(LUAUG_TR("engine.screenshot.err.readback_failed"));
 
         if (auto writeError = writePng(options.screenshotPath, pixels, static_cast<core::u32>(options.width),
-                static_cast<core::u32>(options.height));
+                                       static_cast<core::u32>(options.height));
             writeError.has_value())
             return writeError;
 
@@ -781,8 +730,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         core::log(LogLevel::Info, LUAUG_TR("engine.screenshot.info.written"), shotArgs);
     }
 
-    if (!options.capturePath.empty())
-    {
+    if (!options.capturePath.empty()) {
         if (auto captureError = writeCapture(options.capturePath, *device); captureError.has_value())
             return captureError;
 
@@ -790,29 +738,24 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         core::log(LogLevel::Info, LUAUG_TR("engine.capture.info.written"), captureArgs);
     }
 
-    if (!options.conformanceRoot.empty())
-    {
+    if (!options.conformanceRoot.empty()) {
         const ConformanceReport report = host->conformanceReport();
         if (!report.ran)
             return core::makeError(LUAUG_TR("engine.tests.err.never_ran"));
 
-        const std::array<I18nArg, 3> args{
-            I18nArg{"total", report.total},
-            I18nArg{"passed", report.passed},
-            I18nArg{"failed", report.failed}};
+        const std::array<I18nArg, 3> args{I18nArg{"total", report.total}, I18nArg{"passed", report.passed},
+                                          I18nArg{"failed", report.failed}};
         core::log(LogLevel::Info, LUAUG_TR("engine.tests.info.summary"), args);
 
         // Written before the failure check, because a run that failed is
         // exactly the one whose per-case detail somebody wants.
-        if (!options.testReportPath.empty())
-        {
+        if (!options.testReportPath.empty()) {
             std::error_code ec;
             if (options.testReportPath.has_parent_path())
                 std::filesystem::create_directories(options.testReportPath.parent_path(), ec);
 
             std::ofstream file(options.testReportPath, std::ios::binary | std::ios::trunc);
-            if (!file)
-            {
+            if (!file) {
                 const std::array<I18nArg, 1> path{I18nArg{"path", options.testReportPath.string()}};
                 return core::makeError(LUAUG_TR("engine.tests.err.report_failed"), path);
             }
@@ -823,13 +766,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             return core::makeError(LUAUG_TR("engine.tests.err.failed"), args);
     }
 
-    const std::array<I18nArg, 2> summary{
-        I18nArg{"frames", static_cast<core::i64>(scheduler.totalFrames())},
-        I18nArg{"ticks", static_cast<core::i64>(scheduler.totalTicks())}};
+    const std::array<I18nArg, 2> summary{I18nArg{"frames", static_cast<core::i64>(scheduler.totalFrames())},
+                                         I18nArg{"ticks", static_cast<core::i64>(scheduler.totalTicks())}};
     core::log(LogLevel::Info, LUAUG_TR("engine.frame.info.summary"), summary);
 
-    if (options.frameStats && !frameTimesMs.empty())
-    {
+    if (options.frameStats && !frameTimesMs.empty()) {
         // The first frames are warm-up -- shader creation, the first mesh load,
         // the swapchain settling -- and including them makes a median that
         // describes startup rather than the scene. Dropped rather than averaged

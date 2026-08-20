@@ -1,15 +1,14 @@
 #pragma once
 
-#include <memory>
-#include <span>
-
 #include "luaug/core/error.h"
 #include "luaug/core/i18n.h"
 #include "luaug/core/text_key.h"
 #include "luaug/core/types.h"
 
-namespace luaug::platform
-{
+#include <memory>
+#include <span>
+
+namespace luaug::platform {
 
 using core::i32;
 using core::u32;

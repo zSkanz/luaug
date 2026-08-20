@@ -1,17 +1,15 @@
 #include "luaug/app/inspector.h"
 
+#include "luaug/core/math.h"
+#include "luaug/scene/enum_registry.h"
+
 #include <algorithm>
 #include <cstdio>
 #include <string_view>
 #include <variant>
 
-#include "luaug/core/math.h"
-#include "luaug/scene/enum_registry.h"
-
-namespace luaug::app
-{
-namespace
-{
+namespace luaug::app {
+namespace {
 
 using core::f64;
 
@@ -48,8 +46,8 @@ struct ValueFormatter
     [[nodiscard]] std::string operator()(const core::Vec3& value) const
     {
         char buffer[FormatBufferSize]{};
-        std::snprintf(buffer, sizeof(buffer), "%.3f, %.3f, %.3f", static_cast<f64>(value.x),
-                      static_cast<f64>(value.y), static_cast<f64>(value.z));
+        std::snprintf(buffer, sizeof(buffer), "%.3f, %.3f, %.3f", static_cast<f64>(value.x), static_cast<f64>(value.y),
+                      static_cast<f64>(value.z));
         return std::string(buffer);
     }
 
@@ -84,8 +82,8 @@ struct ValueFormatter
 
         const std::string_view instanceName = world.atoms().text(world.name(value));
         const scene::ClassDescriptor* classDescriptor = world.classes().find(world.classOf(value));
-        const std::string_view className
-            = classDescriptor != nullptr ? world.atoms().text(classDescriptor->name) : std::string_view("?");
+        const std::string_view className =
+            classDescriptor != nullptr ? world.atoms().text(classDescriptor->name) : std::string_view("?");
         return std::string(instanceName) + " (" + std::string(className) + ")";
     }
 
@@ -94,8 +92,7 @@ struct ValueFormatter
         char buffer[FormatBufferSize]{};
 
         const scene::EnumDescriptor* enumDescriptor = world.enums().find(value.enumId);
-        if (enumDescriptor == nullptr)
-        {
+        if (enumDescriptor == nullptr) {
             std::snprintf(buffer, sizeof(buffer), "<enum %u>.%d", static_cast<unsigned>(value.enumId), value.value);
             return std::string(buffer);
         }
@@ -116,8 +113,7 @@ struct ValueFormatter
 
 EditorKind editorFor(scene::ValueType type) noexcept
 {
-    switch (type)
-    {
+    switch (type) {
     case scene::ValueType::Nil:
         break;
     case scene::ValueType::Bool:
@@ -173,8 +169,7 @@ void collectProperties(const scene::ClassRegistry& classes, scene::ClassId class
     // reverse, because the numbering that matters -- `propertySlot`'s -- puts
     // the root's members first.
     std::vector<scene::ClassId> ancestry;
-    for (scene::ClassId id = classId; id != scene::InvalidClass;)
-    {
+    for (scene::ClassId id = classId; id != scene::InvalidClass;) {
         const scene::ClassDescriptor* descriptor = classes.find(id);
         if (descriptor == nullptr)
             break;
@@ -182,18 +177,17 @@ void collectProperties(const scene::ClassRegistry& classes, scene::ClassId class
         id = descriptor->super;
     }
 
-    for (auto step = ancestry.rbegin(); step != ancestry.rend(); ++step)
-    {
+    for (auto step = ancestry.rbegin(); step != ancestry.rend(); ++step) {
         const scene::ClassDescriptor* descriptor = classes.find(*step);
-        for (const scene::PropertyDesc& property : descriptor->properties)
-        {
+        for (const scene::PropertyDesc& property : descriptor->properties) {
             // A class that redeclares an inherited property keeps the inherited
             // position and shows the derived descriptor -- the same rule the
             // registry follows for the slot, which a subscription made through
             // the base depends on.
-            const auto shadowed = std::find_if(out.begin(), out.end(),
-                                               [&property](const scene::PropertyDesc* candidate)
-                                               { return candidate->name == property.name; });
+            const auto shadowed =
+                std::find_if(out.begin(), out.end(), [&property](const scene::PropertyDesc* candidate) {
+                    return candidate->name == property.name;
+                });
             if (shadowed != out.end())
                 *shadowed = &property;
             else
@@ -211,8 +205,7 @@ void collectTree(const scene::World& world, core::InstanceId root, std::vector<T
     std::vector<TreeRow> stack{TreeRow{root, 0}};
     std::vector<core::InstanceId> children;
 
-    while (!stack.empty())
-    {
+    while (!stack.empty()) {
         const TreeRow row = stack.back();
         stack.pop_back();
         out.push_back(row);
@@ -235,8 +228,7 @@ std::string formatValue(const scene::World& world, const scene::Value& value)
 
 const char* setResultLabel(scene::World::SetResult result) noexcept
 {
-    switch (result)
-    {
+    switch (result) {
     case scene::World::SetResult::Changed:
         return "changed";
     case scene::World::SetResult::Unchanged:
@@ -258,8 +250,7 @@ void Inspector::enqueue(core::InstanceId target, core::NameAtom property, scene:
 
 void Inspector::applyPending(scene::World& world)
 {
-    for (const PendingWrite& write : pending_)
-    {
+    for (const PendingWrite& write : pending_) {
         // Decision 14, and the whole of it: the same call a script's assignment
         // makes, so the change queue, the `readOnly` refusal and the world hash
         // all see an overlay edit exactly as they see a scripted one.

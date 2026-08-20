@@ -9,6 +9,9 @@
 // launch (ADR 0019); ICU-grade formatting, dates and gender are reserved.
 #pragma once
 
+#include "luaug/core/text_key.h"
+#include "luaug/core/types.h"
+
 #include <filesystem>
 #include <span>
 #include <string>
@@ -16,11 +19,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "luaug/core/text_key.h"
-#include "luaug/core/types.h"
-
-namespace luaug::core
-{
+namespace luaug::core {
 
 // A named substitution for a `{param}` placeholder. Numeric overloads record
 // the value as well as its text so plural selection can use it.

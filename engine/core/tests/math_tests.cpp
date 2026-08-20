@@ -1,13 +1,11 @@
-#include <doctest/doctest.h>
+#include "luaug/core/math.h"
 
 #include <cmath>
-
-#include "luaug/core/math.h"
+#include <doctest/doctest.h>
 
 using namespace luaug::core;
 
-namespace
-{
+namespace {
 
 constexpr f32 kEpsilon = 1e-5f;
 
@@ -181,8 +179,7 @@ TEST_CASE("perspective maps the depth range to [0, 1]")
     constexpr f32 farZ = 100.0f;
     const Mat4 projection = perspective(1.0472f, 16.0f / 9.0f, nearZ, farZ);
 
-    const auto depthOf = [&projection](f32 viewZ)
-    {
+    const auto depthOf = [&projection](f32 viewZ) {
         // Manual w-divide: transformPoint drops w, and w is the whole point of
         // a projection matrix.
         const f32 clipZ = projection.m[2][2] * viewZ + projection.m[3][2];
@@ -549,8 +546,7 @@ TEST_CASE("toRenderMatrix subtracts in f64, which is the whole of ADR 0014")
 
     // The rotation is carried through unchanged and the matrix is affine: the
     // bottom row must stay (0, 0, 0, 1) or the perspective divide eats it.
-    for (int c = 0; c < 3; ++c)
-    {
+    for (int c = 0; c < 3; ++c) {
         for (int row = 0; row < 3; ++row)
             CHECK(rendered.m[c][row] == spun.rotation.m[c][row]);
         CHECK(rendered.m[c][3] == 0.0f);
@@ -590,18 +586,17 @@ TEST_CASE("HSV round-trips the saturated colours, with hue as a turn")
     // fromHSV(1/3, 1, 1) is green, which is the row that catches a degree-based
     // implementation.
     const Case cases[] = {
-        {0.0f, {1.0f, 0.0f, 0.0f}},          // red
-        {1.0f / 6.0f, {1.0f, 1.0f, 0.0f}},   // yellow
-        {1.0f / 3.0f, {0.0f, 1.0f, 0.0f}},   // green
-        {0.5f, {0.0f, 1.0f, 1.0f}},          // cyan
-        {2.0f / 3.0f, {0.0f, 0.0f, 1.0f}},   // blue
-        {5.0f / 6.0f, {1.0f, 0.0f, 1.0f}},   // magenta
-        {1.0f / 12.0f, {1.0f, 0.5f, 0.0f}},  // orange: not on a sextant boundary
-        {7.0f / 12.0f, {0.0f, 0.5f, 1.0f}},  // azure
+        {0.0f, {1.0f, 0.0f, 0.0f}},         // red
+        {1.0f / 6.0f, {1.0f, 1.0f, 0.0f}},  // yellow
+        {1.0f / 3.0f, {0.0f, 1.0f, 0.0f}},  // green
+        {0.5f, {0.0f, 1.0f, 1.0f}},         // cyan
+        {2.0f / 3.0f, {0.0f, 0.0f, 1.0f}},  // blue
+        {5.0f / 6.0f, {1.0f, 0.0f, 1.0f}},  // magenta
+        {1.0f / 12.0f, {1.0f, 0.5f, 0.0f}}, // orange: not on a sextant boundary
+        {7.0f / 12.0f, {0.0f, 0.5f, 1.0f}}, // azure
     };
 
-    for (const Case& c : cases)
-    {
+    for (const Case& c : cases) {
         CHECK(near(fromHsv(c.hue, 1.0f, 1.0f), c.rgb));
 
         f32 hue = -1.0f;
@@ -714,23 +709,19 @@ TEST_CASE("euler YXZ round-trips through the rotation it builds")
     // Pitch stays clear of the poles here; the pole is its own test below,
     // because there the pair genuinely is not recoverable.
     const f32 pitches[] = {-1.2f, -0.5f, 0.0f, 0.5f, 1.2f};
-    for (const f32 yaw : angles)
-    {
-        for (const f32 pitch : pitches)
-        {
-            for (const f32 roll : angles)
-            {
+    for (const f32 yaw : angles) {
+        for (const f32 pitch : pitches) {
+            for (const f32 roll : angles) {
                 const Mat3 built = fromEulerYxz(Vec3{pitch, yaw, roll});
                 const Vec3 recovered = toEulerYxz(built);
                 const Mat3 rebuilt = fromEulerYxz(recovered);
 
                 // The angles themselves may differ by a full turn or by the
                 // equivalent mirrored triple; the ROTATION must not.
-                for (int column = 0; column < 3; ++column)
-                {
+                for (int column = 0; column < 3; ++column) {
                     for (int row = 0; row < 3; ++row)
-                        CHECK(static_cast<f64>(built.m[column][row])
-                              == doctest::Approx(static_cast<f64>(rebuilt.m[column][row])).epsilon(1e-4));
+                        CHECK(static_cast<f64>(built.m[column][row]) ==
+                              doctest::Approx(static_cast<f64>(rebuilt.m[column][row])).epsilon(1e-4));
                 }
             }
         }
@@ -753,11 +744,10 @@ TEST_CASE("euler YXZ keeps pitch in the principal range and resolves the poles")
 
     const Mat3 built = fromEulerYxz(Vec3{1.5707963f, 0.8f, 0.6f});
     const Mat3 rebuilt = fromEulerYxz(atPole);
-    for (int column = 0; column < 3; ++column)
-    {
+    for (int column = 0; column < 3; ++column) {
         for (int row = 0; row < 3; ++row)
-            CHECK(static_cast<f64>(built.m[column][row])
-                  == doctest::Approx(static_cast<f64>(rebuilt.m[column][row])).epsilon(1e-3));
+            CHECK(static_cast<f64>(built.m[column][row]) ==
+                  doctest::Approx(static_cast<f64>(rebuilt.m[column][row])).epsilon(1e-3));
     }
 }
 
@@ -772,23 +762,15 @@ TEST_CASE("euler YXZ keeps pitch in the principal range and resolves the poles")
 TEST_CASE("every rotation order round-trips through the rotation it builds")
 {
     const RotationOrder orders[] = {
-        RotationOrder::XYZ,
-        RotationOrder::XZY,
-        RotationOrder::YXZ,
-        RotationOrder::YZX,
-        RotationOrder::ZXY,
-        RotationOrder::ZYX,
+        RotationOrder::XYZ, RotationOrder::XZY, RotationOrder::YXZ,
+        RotationOrder::YZX, RotationOrder::ZXY, RotationOrder::ZYX,
     };
     const f32 samples[] = {-2.6f, -1.3f, -0.2f, 0.0f, 0.7f, 1.4f, 2.9f};
 
-    for (const RotationOrder order : orders)
-    {
-        for (const f32 a : samples)
-        {
-            for (const f32 b : samples)
-            {
-                for (const f32 c : samples)
-                {
+    for (const RotationOrder order : orders) {
+        for (const f32 a : samples) {
+            for (const f32 b : samples) {
+                for (const f32 c : samples) {
                     const Vec3 angles{a, b, c};
                     const Mat3 built = fromEuler(angles, order);
                     const Mat3 rebuilt = fromEuler(toEuler(built, order), order);
@@ -863,8 +845,7 @@ TEST_CASE("a half turn round-trips, which is where the naive trace formula fails
         normalize(Vec3{1.0f, 1.0f, 0.0f}),
         normalize(Vec3{-0.4f, 0.2f, 0.9f}),
     };
-    for (const Vec3 axis : axes)
-    {
+    for (const Vec3 axis : axes) {
         Vec3 recoveredAxis;
         f32 recoveredAngle = 0.0f;
         toAxisAngle(fromAxisAngle(axis, pi), recoveredAxis, recoveredAngle);
@@ -924,8 +905,7 @@ TEST_CASE("every quaternion branch is exercised, because each is a separate form
         fromEuler(Vec3{2.9f, 1.4f, -2.3f}, RotationOrder::ZXY), // an awkward one
     };
 
-    for (const Mat3& rotation : rotations)
-    {
+    for (const Mat3& rotation : rotations) {
         f32 x = 0.0f;
         f32 y = 0.0f;
         f32 z = 0.0f;
@@ -984,8 +964,7 @@ TEST_CASE("slerp of two nearly identical rotations does not divide by zero")
 
     const Mat3 middle = slerp(start, end, 0.5f);
     CHECK(near(middle, start));
-    for (int column = 0; column < 3; ++column)
-    {
+    for (int column = 0; column < 3; ++column) {
         for (int row = 0; row < 3; ++row)
             CHECK(std::isfinite(middle.m[column][row]));
     }
@@ -1106,8 +1085,7 @@ TEST_CASE("Frustum: the planes point inward, and the camera looks down -Z")
 
     // Inward: a point well inside is on the positive side of all six.
     const Vec3 inside{0.0f, 0.0f, -10.0f};
-    for (const Plane& plane : frustum.planes)
-    {
+    for (const Plane& plane : frustum.planes) {
         CHECK(signedDistance(plane, inside) > 0.0f);
     }
 
@@ -1159,12 +1137,9 @@ TEST_CASE("Frustum: culling accepts what is in front and rejects what is not")
 
 TEST_CASE("Mat4 inverse: M times its inverse is the identity, for the matrices the renderer builds")
 {
-    const auto isIdentity = [](const Mat4& m)
-    {
-        for (int column = 0; column < 4; ++column)
-        {
-            for (int row = 0; row < 4; ++row)
-            {
+    const auto isIdentity = [](const Mat4& m) {
+        for (int column = 0; column < 4; ++column) {
+            for (int row = 0; row < 4; ++row) {
                 const f32 expected = column == row ? 1.0f : 0.0f;
                 if (!near(m.m[column][row], expected))
                     return false;

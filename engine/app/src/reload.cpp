@@ -1,13 +1,12 @@
-#include "luaug/app/preserved.h"
 #include "luaug/app/reload.h"
+
+#include "luaug/app/preserved.h"
 
 #include <array>
 #include <chrono>
 
-namespace luaug::app
-{
-namespace
-{
+namespace luaug::app {
+namespace {
 
 using core::I18nArg;
 
@@ -43,8 +42,7 @@ ReloadReport reloadWorld(std::unique_ptr<WorldHost>& host, const WorldHostOption
     freshOptions.preserved = &preserved;
 
     auto fresh = std::make_unique<WorldHost>();
-    if (std::optional<core::EngineError> error = fresh->boot(freshOptions); error.has_value())
-    {
+    if (std::optional<core::EngineError> error = fresh->boot(freshOptions); error.has_value()) {
         report.error = std::move(error);
         report.spanMs = elapsedMs(started);
         return report;
@@ -60,8 +58,7 @@ ReloadReport reloadWorld(std::unique_ptr<WorldHost>& host, const WorldHostOption
     // directory that stopped containing scripts, which means the developer just
     // broke or moved the whole tree. Keeping the world they had is more useful
     // than swapping in an empty one and calling it a reload.
-    if (report.mountedScripts == 0 && !options.projectPath.empty())
-    {
+    if (report.mountedScripts == 0 && !options.projectPath.empty()) {
         const std::array<I18nArg, 1> args{I18nArg{"path", options.projectPath.string()}};
         report.error = core::makeError(LUAUG_TR("engine.reload.err.no_scripts"), args);
         report.spanMs = elapsedMs(started);
@@ -71,8 +68,7 @@ ReloadReport reloadWorld(std::unique_ptr<WorldHost>& host, const WorldHostOption
     // A syntax error is the common case in a loop whose point is that you save
     // often, and the useful answer to it is the world the developer already
     // had. `startScripts` has logged which script and why.
-    if (report.loadFailures != 0)
-    {
+    if (report.loadFailures != 0) {
         const std::array<I18nArg, 1> args{I18nArg{"count", static_cast<core::i64>(report.loadFailures)}};
         report.error = core::makeError(LUAUG_TR("engine.reload.err.script_failed"), args);
         report.spanMs = elapsedMs(started);

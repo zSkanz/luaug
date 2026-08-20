@@ -4,10 +4,8 @@
 #include <cmath>
 #include <cstdio>
 
-namespace luaug::core
-{
-namespace
-{
+namespace luaug::core {
+namespace {
 
 // Enough for any double `%.17g` produces, which is the shortest form that round
 // trips. 32 leaves room for the sign, the exponent and the terminator.
@@ -23,11 +21,9 @@ std::string jsonQuote(std::string_view text)
     out.reserve(text.size() + 2);
     out.push_back('"');
 
-    for (const char raw : text)
-    {
+    for (const char raw : text) {
         const auto byte = static_cast<u8>(raw);
-        switch (raw)
-        {
+        switch (raw) {
         case '"':
             out.append("\\\"");
             break;
@@ -50,8 +46,7 @@ std::string jsonQuote(std::string_view text)
             out.append("\\f");
             break;
         default:
-            if (byte < 0x20u)
-            {
+            if (byte < 0x20u) {
                 // The only characters JSON forbids raw. Everything above is
                 // passed through as-is, which keeps UTF-8 intact byte for byte
                 // rather than re-encoding it into escapes nobody asked for.
@@ -59,8 +54,7 @@ std::string jsonQuote(std::string_view text)
                 out.push_back(kHex[(byte >> 4) & 0x0Fu]);
                 out.push_back(kHex[byte & 0x0Fu]);
             }
-            else
-            {
+            else {
                 out.push_back(raw);
             }
             break;
@@ -73,13 +67,11 @@ std::string jsonQuote(std::string_view text)
 
 void JsonWriter::separate()
 {
-    if (m_expectingValue)
-    {
+    if (m_expectingValue) {
         m_expectingValue = false;
         return;
     }
-    if (!m_populated.empty())
-    {
+    if (!m_populated.empty()) {
         if (m_populated.back() != '\0')
             m_text.push_back(',');
         m_populated.back() = '\1';
@@ -142,8 +134,7 @@ void JsonWriter::value(f64 number)
     // `nan` would produce a document nothing can read back. Null is the one
     // answer every parser accepts, and it is honest about the value being
     // outside what the format carries.
-    if (!std::isfinite(number))
-    {
+    if (!std::isfinite(number)) {
         m_text.append("null");
         return;
     }

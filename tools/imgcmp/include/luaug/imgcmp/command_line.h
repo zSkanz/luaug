@@ -5,14 +5,13 @@
 // lie. Behind a seam the flags are covered by unit tests instead of by hope.
 #pragma once
 
+#include "luaug/imgcmp/compare.h"
+
 #include <span>
 #include <string>
 #include <string_view>
 
-#include "luaug/imgcmp/compare.h"
-
-namespace luaug::imgcmp
-{
+namespace luaug::imgcmp {
 
 enum class CommandStatus
 {

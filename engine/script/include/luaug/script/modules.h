@@ -18,19 +18,18 @@
 // and a cycle is a keyed error rather than a crash.
 #pragma once
 
+#include "luaug/core/id.h"
+#include "luaug/script/binding.h"
+
 #include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
 
-#include "luaug/core/id.h"
-#include "luaug/script/binding.h"
-
 struct lua_State;
 
-namespace luaug::script
-{
+namespace luaug::script {
 
 // Where module source comes from. `script` never opens a file: the seam is what
 // keeps L5 free of a filesystem, and it is what lets a test mount a project

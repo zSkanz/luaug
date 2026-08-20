@@ -10,6 +10,8 @@
 // destroys -- and reached from a binding through `ServiceState`.
 #pragma once
 
+#include "luaug/core/types.h"
+
 #include <optional>
 #include <string>
 #include <string_view>
@@ -17,12 +19,9 @@
 #include <variant>
 #include <vector>
 
-#include "luaug/core/types.h"
-
 struct lua_State;
 
-namespace luaug::script
-{
+namespace luaug::script {
 
 using core::f64;
 using core::u8;

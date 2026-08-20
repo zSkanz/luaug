@@ -2,12 +2,11 @@
 // public header on purpose -- actually gains an SDL type.
 #pragma once
 
-#include <SDL3/SDL_video.h>
-
 #include "luaug/platform/window.h"
 
-namespace luaug::platform
-{
+#include <SDL3/SDL_video.h>
+
+namespace luaug::platform {
 
 class Window
 {

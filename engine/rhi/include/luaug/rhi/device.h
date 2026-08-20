@@ -13,19 +13,17 @@
 // not an error.
 #pragma once
 
-#include <span>
-
 #include "luaug/core/error.h"
 #include "luaug/rhi/descs.h"
 #include "luaug/rhi/types.h"
 
-namespace luaug::platform
-{
+#include <span>
+
+namespace luaug::platform {
 class Window;
 }
 
-namespace luaug::rhi
-{
+namespace luaug::rhi {
 
 struct DeviceDesc
 {
@@ -86,8 +84,8 @@ public:
     virtual void bindTextures(ShaderStage stage, u32 firstSlot, std::span<const TextureBinding> bindings) = 0;
 
     virtual void draw(u32 vertexCount, u32 instanceCount, u32 firstVertex, u32 firstInstance) = 0;
-    virtual void drawIndexed(
-        u32 indexCount, u32 instanceCount, u32 firstIndex, i32 vertexOffset, u32 firstInstance) = 0;
+    virtual void drawIndexed(u32 indexCount, u32 instanceCount, u32 firstIndex, i32 vertexOffset,
+                             u32 firstInstance) = 0;
 
     // Staging is the backend's problem: it owns the transfer buffers, the copy
     // pass, and the decision about whether the write can be seen this frame.

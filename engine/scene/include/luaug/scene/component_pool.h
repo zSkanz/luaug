@@ -16,14 +16,13 @@
 //      only at a FrameStart safe point where nothing is mid-iteration.
 #pragma once
 
-#include <vector>
-
 #include "luaug/core/id.h"
 #include "luaug/core/types.h"
 #include "luaug/scene/types.h"
 
-namespace luaug::scene
-{
+#include <vector>
+
+namespace luaug::scene {
 
 template <class T>
 class ComponentPool
@@ -43,8 +42,7 @@ public:
         // orphaned. Appending instead would leave a dead entity's component
         // reachable from `forEach` forever, which a test found by recycling a
         // slot and looking.
-        if (existing != Absent && existing < m_owners.size() && m_owners[existing].index == id.index)
-        {
+        if (existing != Absent && existing < m_owners.size() && m_owners[existing].index == id.index) {
             const bool wasLive = m_owners[existing].valid();
             m_dense[existing] = std::move(value);
             m_owners[existing] = id;
@@ -84,8 +82,7 @@ public:
     template <class Fn>
     void forEach(Fn&& fn)
     {
-        for (usize slot = 0; slot < m_dense.size(); ++slot)
-        {
+        for (usize slot = 0; slot < m_dense.size(); ++slot) {
             if (m_owners[slot].valid())
                 fn(m_owners[slot], m_dense[slot]);
         }
@@ -94,8 +91,7 @@ public:
     template <class Fn>
     void forEach(Fn&& fn) const
     {
-        for (usize slot = 0; slot < m_dense.size(); ++slot)
-        {
+        for (usize slot = 0; slot < m_dense.size(); ++slot) {
             if (m_owners[slot].valid())
                 fn(m_owners[slot], m_dense[slot]);
         }
@@ -107,12 +103,10 @@ public:
     void compact()
     {
         usize write = 0;
-        for (usize read = 0; read < m_dense.size(); ++read)
-        {
+        for (usize read = 0; read < m_dense.size(); ++read) {
             if (!m_owners[read].valid())
                 continue;
-            if (write != read)
-            {
+            if (write != read) {
                 m_dense[write] = std::move(m_dense[read]);
                 m_owners[write] = m_owners[read];
             }

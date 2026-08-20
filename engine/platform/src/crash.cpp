@@ -16,10 +16,8 @@
 #include <unistd.h>
 #endif
 
-namespace luaug::platform
-{
-namespace
-{
+namespace luaug::platform {
+namespace {
 
 // Built once at install time and never touched again, because a fault handler
 // may not allocate: the heap is one of the things that can be broken by the
@@ -46,10 +44,9 @@ LONG WINAPI writeMinidump(EXCEPTION_POINTERS* exception) noexcept
     if (alreadyHandling().exchange(true))
         return EXCEPTION_CONTINUE_SEARCH;
 
-    const HANDLE file = ::CreateFileA(artifactPath().c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file != INVALID_HANDLE_VALUE)
-    {
+    const HANDLE file =
+        ::CreateFileA(artifactPath().c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file != INVALID_HANDLE_VALUE) {
         MINIDUMP_EXCEPTION_INFORMATION information{};
         information.ThreadId = ::GetCurrentThreadId();
         information.ExceptionPointers = exception;
@@ -60,10 +57,10 @@ LONG WINAPI writeMinidump(EXCEPTION_POINTERS* exception) noexcept
         // pointer readable in a debugger, without writing the process's entire
         // address space to disk. A full dump of a host holding GPU resources is
         // hundreds of megabytes and nobody sends it.
-        const auto type = static_cast<MINIDUMP_TYPE>(
-            MiniDumpWithIndirectlyReferencedMemory | MiniDumpScanMemory | MiniDumpWithThreadInfo);
+        const auto type = static_cast<MINIDUMP_TYPE>(MiniDumpWithIndirectlyReferencedMemory | MiniDumpScanMemory |
+                                                     MiniDumpWithThreadInfo);
         (void)::MiniDumpWriteDump(::GetCurrentProcess(), ::GetCurrentProcessId(), file, type,
-            exception != nullptr ? &information : nullptr, nullptr, nullptr);
+                                  exception != nullptr ? &information : nullptr, nullptr, nullptr);
         ::CloseHandle(file);
     }
 
@@ -90,8 +87,7 @@ void writeSignalNote(int signalNumber) noexcept
         return;
 
     const int file = ::open(artifactPath().c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (file >= 0)
-    {
+    if (file >= 0) {
         const char* name = ::strsignal(signalNumber);
         static const char prefix[] = "luaug: died on signal ";
         (void)!::write(file, prefix, sizeof(prefix) - 1);
@@ -125,11 +121,11 @@ bool installCrashHandler(const std::filesystem::path& directory)
 
     const std::filesystem::path artifact = directory / ("luaug-crash-" + std::to_string(pid) +
 #ifdef _WIN32
-        ".dmp"
+                                                        ".dmp"
 #else
-        ".txt"
+                                                        ".txt"
 #endif
-    );
+                                                       );
     artifactPath() = artifact.string();
     alreadyHandling().store(false);
 

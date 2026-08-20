@@ -1,15 +1,13 @@
-#include <doctest/doctest.h>
+#include "luaug/render/lighting.h"
 
 #include <cmath>
-
-#include "luaug/render/lighting.h"
+#include <doctest/doctest.h>
 
 using luaug::core::f32;
 using luaug::core::Vec3;
 using luaug::render::sunDirection;
 
-namespace
-{
+namespace {
 
 constexpr f32 kEpsilon = 1e-5f;
 
@@ -59,12 +57,9 @@ TEST_CASE("sunDirection: always unit length, at every hour and latitude")
     // Unit by construction rather than by normalizing, so this is the assertion
     // that the construction is right. A stepped sweep rather than a spot check,
     // because the failure would be a wrong term in one octant.
-    for (int hour = 0; hour < 48; ++hour)
-    {
-        for (int latitude = -90; latitude <= 90; latitude += 15)
-        {
-            const Vec3 direction =
-                sunDirection(static_cast<f32>(hour) * 0.5f, static_cast<f32>(latitude));
+    for (int hour = 0; hour < 48; ++hour) {
+        for (int latitude = -90; latitude <= 90; latitude += 15) {
+            const Vec3 direction = sunDirection(static_cast<f32>(hour) * 0.5f, static_cast<f32>(latitude));
             const f32 length =
                 std::sqrt(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z);
             CHECK(near(length, 1.0f));
@@ -82,8 +77,7 @@ TEST_CASE("sunDirection: the clock wraps, and is a pure function of its inputs")
     // R10, and the reason SunDirection is derived rather than stored: the same
     // clock time gives the same sun in a replay as in the run it replays, with
     // no state in between to drift.
-    for (int hour = 0; hour < 24; ++hour)
-    {
+    for (int hour = 0; hour < 24; ++hour) {
         const auto value = static_cast<f32>(hour);
         CHECK(sunDirection(value, 51.5f) == sunDirection(value, 51.5f));
     }

@@ -7,10 +7,8 @@
 #include <string>
 #include <utility>
 
-namespace luaug::core
-{
-namespace
-{
+namespace luaug::core {
+namespace {
 
 LogSink& sinkSlot()
 {
@@ -52,13 +50,17 @@ void writeDefault(LogLevel level, std::string_view text)
 
 std::string_view logLevelName(LogLevel level) noexcept
 {
-    switch (level)
-    {
-    case LogLevel::Trace: return "trace";
-    case LogLevel::Debug: return "debug";
-    case LogLevel::Info: return "info";
-    case LogLevel::Warn: return "warn";
-    case LogLevel::Error: return "error";
+    switch (level) {
+    case LogLevel::Trace:
+        return "trace";
+    case LogLevel::Debug:
+        return "debug";
+    case LogLevel::Info:
+        return "info";
+    case LogLevel::Warn:
+        return "warn";
+    case LogLevel::Error:
+        return "error";
     }
     return "info";
 }
@@ -112,8 +114,7 @@ bool openLogFile(const std::filesystem::path& path)
 void closeLogFile() noexcept
 {
     std::FILE*& file = fileSlot();
-    if (file != nullptr)
-    {
+    if (file != nullptr) {
         std::fclose(file);
         file = nullptr;
     }

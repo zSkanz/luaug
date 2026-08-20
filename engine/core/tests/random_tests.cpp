@@ -1,13 +1,12 @@
-#include <doctest/doctest.h>
+#include "luaug/core/math.h"
+#include "luaug/core/random.h"
 
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <doctest/doctest.h>
 #include <limits>
 #include <vector>
-
-#include "luaug/core/math.h"
-#include "luaug/core/random.h"
 
 using luaug::core::f32;
 using luaug::core::f64;
@@ -18,8 +17,7 @@ using luaug::core::u64;
 using luaug::core::usize;
 using luaug::core::Vec3;
 
-namespace
-{
+namespace {
 
 // One place to change the shape of the "same seed, same numbers" evidence: every
 // determinism check below draws through this, so adding a call to the mix covers
@@ -33,8 +31,7 @@ std::vector<u64> drawMixedSequence(Pcg32& rng, int rounds)
     std::vector<u64> out;
     out.reserve(static_cast<usize>(rounds) * 5u);
 
-    for (int round = 0; round < rounds; ++round)
-    {
+    for (int round = 0; round < rounds; ++round) {
         out.push_back(rng.nextU32());
 
         const f64 sample = rng.nextDouble();
@@ -66,8 +63,7 @@ void checkFlat(const int* counts, usize buckets, int expected)
     // fixed seed and a fixed count either way, so this test is deterministic:
     // it always passes or always fails, never sometimes.
     const int slack = expected / 20;
-    for (usize bucket = 0; bucket < buckets; ++bucket)
-    {
+    for (usize bucket = 0; bucket < buckets; ++bucket) {
         CHECK(counts[bucket] > expected - slack);
         CHECK(counts[bucket] < expected + slack);
     }
@@ -169,8 +165,7 @@ TEST_CASE("nextInt stays inside its inclusive bounds and reaches both of them")
     i32 lowest = std::numeric_limits<i32>::max();
     i32 highest = std::numeric_limits<i32>::min();
 
-    for (int draw = 0; draw < 20000; ++draw)
-    {
+    for (int draw = 0; draw < 20000; ++draw) {
         const i32 value = rng.nextInt(-3, 4);
         lowest = value < lowest ? value : lowest;
         highest = value > highest ? value : highest;
@@ -212,8 +207,7 @@ TEST_CASE("nextInt spans the full 32-bit range without overflowing")
     bool sawNegative = false;
     bool sawPositive = false;
 
-    for (int draw = 0; draw < 4000; ++draw)
-    {
+    for (int draw = 0; draw < 4000; ++draw) {
         const i32 value = rng.nextInt(low, high);
         sawNegative = sawNegative || value < 0;
         sawPositive = sawPositive || value > 0;
@@ -233,8 +227,7 @@ TEST_CASE("nextInt is uniform across its buckets")
     i32 lowest = std::numeric_limits<i32>::max();
     i32 highest = std::numeric_limits<i32>::min();
 
-    for (int draw = 0; draw < kDraws; ++draw)
-    {
+    for (int draw = 0; draw < kDraws; ++draw) {
         const i32 value = rng.nextInt(0, static_cast<i32>(kBuckets) - 1);
         lowest = value < lowest ? value : lowest;
         highest = value > highest ? value : highest;
@@ -256,8 +249,7 @@ TEST_CASE("nextDouble stays in [0, 1) and covers it evenly")
     f64 lowest = 2.0;
     f64 highest = -1.0;
 
-    for (int draw = 0; draw < kDraws; ++draw)
-    {
+    for (int draw = 0; draw < kDraws; ++draw) {
         const f64 value = rng.nextDouble();
         lowest = value < lowest ? value : lowest;
         highest = value > highest ? value : highest;
@@ -283,8 +275,7 @@ TEST_CASE("nextDouble draws 53 bits, not 32")
     Pcg32 rng(4242, 1);
     bool sawSubU32Precision = false;
 
-    for (int draw = 0; draw < 1000 && !sawSubU32Precision; ++draw)
-    {
+    for (int draw = 0; draw < 1000 && !sawSubU32Precision; ++draw) {
         const f64 scaled = rng.nextDouble() * 4294967296.0; // 2^32
         sawSubU32Precision = scaled != std::floor(scaled);
     }
@@ -298,8 +289,7 @@ TEST_CASE("nextDouble with bounds stays inside them")
     f64 lowest = 100.0;
     f64 highest = -100.0;
 
-    for (int draw = 0; draw < 50000; ++draw)
-    {
+    for (int draw = 0; draw < 50000; ++draw) {
         const f64 value = rng.nextDouble(-2.5, 7.5);
         lowest = value < lowest ? value : lowest;
         highest = value > highest ? value : highest;
@@ -318,8 +308,7 @@ TEST_CASE("nextUnitVector returns unit-length vectors")
     Pcg32 rng(1, 1);
     f32 worst = 0.0f;
 
-    for (int draw = 0; draw < 50000; ++draw)
-    {
+    for (int draw = 0; draw < 50000; ++draw) {
         const f32 deviation = std::fabs(length(rng.nextUnitVector()) - 1.0f);
         worst = deviation > worst ? deviation : worst;
     }
@@ -340,8 +329,7 @@ TEST_CASE("nextUnitVector is uniform on the sphere, not on the cube")
     Pcg32 rng(90210, 1);
     std::array<int, kBands> zBands{};
 
-    for (int draw = 0; draw < kDraws; ++draw)
-    {
+    for (int draw = 0; draw < kDraws; ++draw) {
         const f64 z = static_cast<f64>(rng.nextUnitVector().z);
         const auto band = static_cast<usize>((z + 1.0) * 0.5 * static_cast<f64>(kBands));
         ++zBands[band < kBands ? band : kBands - 1];
@@ -361,12 +349,10 @@ TEST_CASE("nextUnitVector spreads over the azimuth too")
     Pcg32 rng(1618, 1);
     std::array<int, kSectors> sectors{};
 
-    for (int draw = 0; draw < kDraws; ++draw)
-    {
+    for (int draw = 0; draw < kDraws; ++draw) {
         const Vec3 direction = rng.nextUnitVector();
         // atan2 covers [-pi, pi]; remapped to [0, 1).
-        const f64 turn =
-            (std::atan2(static_cast<f64>(direction.y), static_cast<f64>(direction.x)) + kPi) / (2.0 * kPi);
+        const f64 turn = (std::atan2(static_cast<f64>(direction.y), static_cast<f64>(direction.x)) + kPi) / (2.0 * kPi);
         const auto sector = static_cast<usize>(turn * static_cast<f64>(kSectors));
         ++sectors[sector < kSectors ? sector : kSectors - 1];
     }

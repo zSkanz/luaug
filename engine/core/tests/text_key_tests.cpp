@@ -1,6 +1,6 @@
-#include <doctest/doctest.h>
-
 #include "luaug/core/text_key.h"
+
+#include <doctest/doctest.h>
 
 using luaug::core::hashTextKey;
 using luaug::core::TextKey;

@@ -16,20 +16,18 @@
 // queue.
 #pragma once
 
-#include <filesystem>
-
 #include "luaug/core/id.h"
 #include "luaug/render/mesh_cache.h"
 #include "luaug/render/render_world.h"
 #include "luaug/rhi/device.h"
 
-namespace luaug::scene
-{
+#include <filesystem>
+
+namespace luaug::scene {
 class World;
 }
 
-namespace luaug::render
-{
+namespace luaug::render {
 
 class MeshLoader
 {
@@ -46,13 +44,8 @@ public:
     // Returns how many meshes it loaded this call, which is zero on the frames
     // that matter -- a non-zero count every frame means something is asking for
     // a file that keeps failing, and the log will say which.
-    core::u32 sync(
-        rhi::IDevice& device,
-        rhi::ICmdList& cmd,
-        const scene::World& world,
-        core::InstanceId root,
-        MeshCache& cache,
-        MeshLibrary& library);
+    core::u32 sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world, core::InstanceId root,
+                   MeshCache& cache, MeshLibrary& library);
 
     // Releases every GPU resource this loader created. The cache's meshes are
     // the cache's to free; the textures are this one's.

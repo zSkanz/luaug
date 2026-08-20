@@ -1,5 +1,10 @@
 #include "luaug/script/signals.h"
 
+#include "luaug/core/log.h"
+#include "luaug/scene/world.h"
+#include "luaug/script/instance_binding.h"
+#include "luaug/script/services.h"
+
 #include <lua.h>
 #include <lualib.h>
 
@@ -7,15 +12,8 @@
 #include <string>
 #include <utility>
 
-#include "luaug/core/log.h"
-#include "luaug/scene/world.h"
-#include "luaug/script/instance_binding.h"
-#include "luaug/script/services.h"
-
-namespace luaug::script
-{
-namespace
-{
+namespace luaug::script {
+namespace {
 
 [[nodiscard]] SignalSystem& system(lua_State* L) noexcept
 {
@@ -59,8 +57,7 @@ void pushConnection(lua_State* L, ConnectionId id)
         luaL_checkudatatagged(L, index, static_cast<int>(UserdataTag::Signal));
 
     SignalRecord* record = system(L).signals.find(*id);
-    if (record == nullptr)
-    {
+    if (record == nullptr) {
         // The slot was freed and its generation bumped. A signal handle only
         // goes stale when its owning instance was retired, so this is the same
         // condition `Instance` reports and it gets the same key.
@@ -80,11 +77,9 @@ void syncPropertySubscription(lua_State* L, const SignalRecord& record)
         return;
 
     bool anyLive = false;
-    for (const ConnectionId id : record.connections)
-    {
+    for (const ConnectionId id : record.connections) {
         const ConnectionRecord* connection = system(L).connections.find(id);
-        if (connection != nullptr && connection->connected)
-        {
+        if (connection != nullptr && connection->connected) {
             anyLive = true;
             break;
         }
@@ -104,12 +99,9 @@ void disconnectRecord(lua_State* L, ConnectionId id)
         connection->ref = lua_unref(L, connection->ref);
 
     const SignalId signal = connection->signal;
-    if (SignalRecord* record = sys.signals.find(signal))
-    {
-        for (usize index = 0; index < record->connections.size(); ++index)
-        {
-            if (record->connections[index] == id)
-            {
+    if (SignalRecord* record = sys.signals.find(signal)) {
+        for (usize index = 0; index < record->connections.size(); ++index) {
+            if (record->connections[index] == id) {
                 record->connections.erase(record->connections.begin() + static_cast<std::ptrdiff_t>(index));
                 break;
             }
@@ -166,8 +158,7 @@ void closeSignal(lua_State* L, SignalId id)
 
     const int arena = pushArena(L);
     const u32 base = sys.argArenaTop + 1;
-    for (int index = 0; index < count; ++index)
-    {
+    for (int index = 0; index < count; ++index) {
         lua_pushvalue(L, first + index);
         lua_rawseti(L, arena, static_cast<int>(base) + index);
     }
@@ -188,8 +179,7 @@ void releaseArgumentsImpl(lua_State* L, lua_State* target, u32 base, u32 count)
         lua_rawgeti(L, arena, static_cast<int>(base + index));
     lua_xmove(L, target, static_cast<int>(count));
 
-    for (u32 index = 0; index < count; ++index)
-    {
+    for (u32 index = 0; index < count; ++index) {
         lua_pushnil(L);
         lua_rawseti(L, arena, static_cast<int>(base + index));
     }
@@ -202,8 +192,7 @@ void dropArgumentsImpl(lua_State* L, u32 base, u32 count)
         return;
 
     const int arena = pushArena(L);
-    for (u32 index = 0; index < count; ++index)
-    {
+    for (u32 index = 0; index < count; ++index) {
         lua_pushnil(L);
         lua_rawseti(L, arena, static_cast<int>(base + index));
     }
@@ -261,8 +250,7 @@ void enqueueFireAt(lua_State* L, SignalId id, int first, int count, const u32* d
         return;
 
     const u32 depth = depthOverride != nullptr ? *depthOverride : raisedDepth(sys);
-    if (depth > MaxDeferredDepth)
-    {
+    if (depth > MaxDeferredDepth) {
         // Dropped at enqueue rather than at invocation, so it never takes a
         // queue slot and the log lands while the raiser is still on the stack.
         logDepthExceeded(L);
@@ -290,7 +278,8 @@ void enqueueFire(lua_State* L, SignalId id, int first, int count)
 
 // --- Signal methods ----------------------------------------------------------
 
-[[nodiscard]] ConnectionId addConnection(lua_State* L, SignalRecord& record, SignalId id, int ref, bool once, bool waiter)
+[[nodiscard]] ConnectionId addConnection(lua_State* L, SignalRecord& record, SignalId id, int ref, bool once,
+                                         bool waiter)
 {
     SignalSystem& sys = system(L);
     ConnectionRecord connection;
@@ -374,8 +363,7 @@ int signalDestroy(lua_State* L)
 {
     SignalRecord& record = checkSignal(L, 1);
     const SignalId id = *toSignalId(L, 1);
-    if (record.kind != SignalKind::Script)
-    {
+    if (record.kind != SignalKind::Script) {
         // An instance's own signals are closed by `Instance:Destroy`, and
         // letting a script close one would leave the instance alive with a
         // member that silently stopped working.
@@ -405,8 +393,7 @@ int signalEq(lua_State* L)
 
 int connectionGetConnected(lua_State* L)
 {
-    const auto* id =
-        static_cast<ConnectionId*>(lua_touserdatatagged(L, 1, static_cast<int>(UserdataTag::Connection)));
+    const auto* id = static_cast<ConnectionId*>(lua_touserdatatagged(L, 1, static_cast<int>(UserdataTag::Connection)));
     if (id == nullptr)
         luaL_checkudatatagged(L, 1, static_cast<int>(UserdataTag::Connection));
 
@@ -417,8 +404,7 @@ int connectionGetConnected(lua_State* L)
 
 int connectionDisconnect(lua_State* L)
 {
-    const auto* id =
-        static_cast<ConnectionId*>(lua_touserdatatagged(L, 1, static_cast<int>(UserdataTag::Connection)));
+    const auto* id = static_cast<ConnectionId*>(lua_touserdatatagged(L, 1, static_cast<int>(UserdataTag::Connection)));
     if (id == nullptr)
         luaL_checkudatatagged(L, 1, static_cast<int>(UserdataTag::Connection));
 
@@ -442,8 +428,7 @@ int connectionEq(lua_State* L)
 {
     SignalSystem& sys = system(L);
     std::vector<SignalSystem::OwnedSignal>& owned = sys.byOwner[ownerKey(owner)];
-    for (const SignalSystem::OwnedSignal& entry : owned)
-    {
+    for (const SignalSystem::OwnedSignal& entry : owned) {
         if (entry.kind == kind && entry.member == member)
             return entry.id;
     }
@@ -463,8 +448,7 @@ int connectionEq(lua_State* L)
     const auto found = sys.byOwner.find(ownerKey(owner));
     if (found == sys.byOwner.end())
         return {};
-    for (const SignalSystem::OwnedSignal& entry : found->second)
-    {
+    for (const SignalSystem::OwnedSignal& entry : found->second) {
         if (entry.kind == kind && entry.member == member)
             return entry.id;
     }
@@ -480,12 +464,10 @@ void reportHandlerError(lua_State* L, lua_State* co, int status)
     // discards the original object, so inspecting the value would be reading
     // untranslatable text (U-32).
     std::string text;
-    if (status == LUA_ERRMEM)
-    {
+    if (status == LUA_ERRMEM) {
         text = "not enough memory";
     }
-    else
-    {
+    else {
         const char* message = lua_tostring(co, -1);
         text = message == nullptr ? std::string{} : std::string(message);
         // Onto the scheduler's stack, walking the coroutine's frames -- which
@@ -516,15 +498,13 @@ void reportHandlerError(lua_State* L, lua_State* co, int status)
     const int status = lua_resume(co, nullptr, argCount);
     if (status == LUA_OK)
         return true;
-    if (status == LUA_YIELD)
-    {
+    if (status == LUA_YIELD) {
         // Left parked, and the drain moves straight on. A drain that blocked
         // would let one `task.wait(5)` stall every other listener of every
         // other signal.
         return false;
     }
-    if (status == LUA_BREAK)
-    {
+    if (status == LUA_BREAK) {
         // The third outcome: a debugger break, neither error nor yield. Treated
         // like a yield -- the thread is still resumable and something else will
         // resume it.
@@ -541,15 +521,14 @@ void invokeFire(lua_State* L, const DeferredEntry& entry)
 
     // The snapshot is copied out because a handler may connect or disconnect,
     // and `snapshots` is a vector that reallocates when it does.
-    std::vector<ConnectionId> targets(
-        sys.snapshots.begin() + static_cast<std::ptrdiff_t>(entry.snapshotBase),
-        sys.snapshots.begin() + static_cast<std::ptrdiff_t>(entry.snapshotBase + entry.snapshotCount));
+    std::vector<ConnectionId> targets(sys.snapshots.begin() + static_cast<std::ptrdiff_t>(entry.snapshotBase),
+                                      sys.snapshots.begin() +
+                                          static_cast<std::ptrdiff_t>(entry.snapshotBase + entry.snapshotCount));
 
     const u32 previousDepth = sys.depth;
     sys.depth = entry.depth;
 
-    for (const ConnectionId id : targets)
-    {
+    for (const ConnectionId id : targets) {
         ConnectionRecord* connection = sys.connections.find(id);
         // Re-validated at invocation, which is what makes `:Disconnect()`
         // reliable rather than advisory -- including a disconnect performed by
@@ -570,8 +549,7 @@ void invokeFire(lua_State* L, const DeferredEntry& entry)
         // number value" from a `:Once` handler, some distance from the cause.
         lua_State* co = nullptr;
         int rooted = -1;
-        if (waiter)
-        {
+        if (waiter) {
             lua_getref(L, ref);
             rooted = lua_gettop(L);
             co = lua_tothread(L, rooted);
@@ -579,14 +557,12 @@ void invokeFire(lua_State* L, const DeferredEntry& entry)
             // the resumed coroutine may fire this very signal again. The stack
             // slot above is what keeps the thread alive across the unref.
             disconnectRecord(L, id);
-            if (co == nullptr)
-            {
+            if (co == nullptr) {
                 lua_remove(L, rooted);
                 continue;
             }
         }
-        else
-        {
+        else {
             // Its own coroutine, because a handler must be allowed to yield and
             // an error in one must not touch the others. `lua_pcall` cannot do
             // either: everything under it is non-yieldable (U-34).
@@ -603,8 +579,7 @@ void invokeFire(lua_State* L, const DeferredEntry& entry)
         // The arguments are pushed after the function, and the arena slots are
         // released as they are moved -- one fire's window is read exactly once.
         lua_State* argSource = L;
-        if (entry.argCount > 0)
-        {
+        if (entry.argCount > 0) {
             const int arena = pushArena(argSource);
             for (u32 index = 0; index < entry.argCount; ++index)
                 lua_rawgeti(argSource, arena, static_cast<int>(entry.argBase + index));
@@ -649,8 +624,7 @@ bool enqueueTaskCallback(lua_State* L, int threadRef, u32 argBase, u32 argCount)
 {
     SignalSystem& sys = system(L);
     const u32 depth = raisedDepth(sys);
-    if (depth > MaxDeferredDepth)
-    {
+    if (depth > MaxDeferredDepth) {
         // The cap counts everything on the queue, `task.defer` included: a
         // fires-only cap makes a self-deferring callback an unbounded drain,
         // which is a hang rather than a wrong number (§3.1).
@@ -735,15 +709,13 @@ void closeInstanceSignalsExceptDestroying(lua_State* L, core::InstanceId owner)
     if (found == sys.byOwner.end())
         return;
 
-    const scene::EventDesc* destroyingEvent =
-        world(L).classes().findEvent(world(L).classOf(owner), sys.destroying);
+    const scene::EventDesc* destroyingEvent = world(L).classes().findEvent(world(L).classOf(owner), sys.destroying);
 
     // Copied: closing disconnects, which touches the vector this walks.
     const std::vector<SignalSystem::OwnedSignal> owned = found->second;
-    for (const SignalSystem::OwnedSignal& signal : owned)
-    {
-        const bool isDestroying = signal.kind == SignalKind::Event && destroyingEvent != nullptr
-                                  && signal.member == destroyingEvent->slot;
+    for (const SignalSystem::OwnedSignal& signal : owned) {
+        const bool isDestroying =
+            signal.kind == SignalKind::Event && destroyingEvent != nullptr && signal.member == destroyingEvent->slot;
         if (!isDestroying)
             closeSignal(L, signal.id);
     }
@@ -789,8 +761,7 @@ void enqueueSceneChanges(lua_State* L, std::span<const scene::Change> changes)
     SignalSystem& sys = system(L);
     scene::World& w = world(L);
 
-    for (const scene::Change& change : changes)
-    {
+    for (const scene::Change& change : changes) {
         // Resolved through the class, because an event's slot is per class and
         // the descriptor is what says whether this class has the event at all.
         const auto eventSignal = [&](core::NameAtom name) -> SignalId {
@@ -800,17 +771,15 @@ void enqueueSceneChanges(lua_State* L, std::span<const scene::Change> changes)
             return findOwnedSignal(L, change.subject, SignalKind::Event, descriptor->slot);
         };
 
-        switch (change.kind)
-        {
+        switch (change.kind) {
         case scene::ChangeKind::ChildAdded:
         case scene::ChangeKind::ChildRemoved:
         case scene::ChangeKind::DescendantAdded:
-        case scene::ChangeKind::DescendantRemoving:
-        {
-            const core::NameAtom name = change.kind == scene::ChangeKind::ChildAdded          ? sys.childAdded
-                                        : change.kind == scene::ChangeKind::ChildRemoved      ? sys.childRemoved
-                                        : change.kind == scene::ChangeKind::DescendantAdded   ? sys.descendantAdded
-                                                                                              : sys.descendantRemoving;
+        case scene::ChangeKind::DescendantRemoving: {
+            const core::NameAtom name = change.kind == scene::ChangeKind::ChildAdded        ? sys.childAdded
+                                        : change.kind == scene::ChangeKind::ChildRemoved    ? sys.childRemoved
+                                        : change.kind == scene::ChangeKind::DescendantAdded ? sys.descendantAdded
+                                                                                            : sys.descendantRemoving;
             const SignalId id = eventSignal(name);
             if (!id.valid())
                 break;
@@ -820,8 +789,7 @@ void enqueueSceneChanges(lua_State* L, std::span<const scene::Change> changes)
             break;
         }
 
-        case scene::ChangeKind::AncestryChanged:
-        {
+        case scene::ChangeKind::AncestryChanged: {
             const SignalId id = eventSignal(sys.ancestryChanged);
             if (!id.valid())
                 break;
@@ -835,16 +803,14 @@ void enqueueSceneChanges(lua_State* L, std::span<const scene::Change> changes)
             break;
         }
 
-        case scene::ChangeKind::PropertyChanged:
-        {
+        case scene::ChangeKind::PropertyChanged: {
             const SignalId id = findOwnedSignal(L, change.subject, SignalKind::PropertyChanged, change.name.id);
             if (id.valid())
                 enqueueFire(L, id, 0, 0);
             break;
         }
 
-        case scene::ChangeKind::AttributeChanged:
-        {
+        case scene::ChangeKind::AttributeChanged: {
             // The named signal first, then the catch-all (§3.1): the narrow
             // subscription asked about this attribute, and the catch-all is what
             // routes.
@@ -853,8 +819,7 @@ void enqueueSceneChanges(lua_State* L, std::span<const scene::Change> changes)
                 enqueueFire(L, named, 0, 0);
 
             const SignalId general = eventSignal(sys.attributeChanged);
-            if (general.valid())
-            {
+            if (general.valid()) {
                 const std::string_view text = w.atoms().text(change.name);
                 lua_pushlstring(L, text.data(), text.size());
                 enqueueFire(L, general, lua_gettop(L), 1);
@@ -863,8 +828,7 @@ void enqueueSceneChanges(lua_State* L, std::span<const scene::Change> changes)
             break;
         }
 
-        case scene::ChangeKind::Destroying:
-        {
+        case scene::ChangeKind::Destroying: {
             const SignalId id = eventSignal(sys.destroying);
             if (id.valid())
                 enqueueFire(L, id, 0, 0);
@@ -880,8 +844,7 @@ void enqueueSceneChanges(lua_State* L, std::span<const scene::Change> changes)
         }
 
         case scene::ChangeKind::TagAdded:
-        case scene::ChangeKind::TagRemoved:
-        {
+        case scene::ChangeKind::TagRemoved: {
             // The listener is `TagService:GetInstanceAddedSignal(tag)`, owned by
             // the TagService instance and keyed by the tag. Nothing fires until
             // the service exists, which is correct: a service nobody asked for
@@ -917,32 +880,27 @@ usize drainDeferred(lua_State* L)
 
     // To fixpoint: handlers append to this same queue and the loop continues.
     // Deliberately not a snapshot of the original end.
-    while (!sys.queue.empty())
-    {
+    while (!sys.queue.empty()) {
         const DeferredEntry entry = sys.queue.front();
         sys.queue.pop_front();
         ++processed;
 
-        switch (entry.kind)
-        {
+        switch (entry.kind) {
         case EntryKind::Fire:
             invokeFire(L, entry);
             break;
 
-        case EntryKind::TaskCallback:
-        {
+        case EntryKind::TaskCallback: {
             const u32 previousDepth = sys.depth;
             sys.depth = entry.depth;
             lua_getref(L, entry.threadRef);
             lua_State* co = lua_tothread(L, -1);
-            if (co != nullptr)
-            {
+            if (co != nullptr) {
                 if (entry.argCount > 0)
                     releaseArgumentsImpl(L, co, entry.argBase, entry.argCount);
                 (void)resumeHandler(L, co, static_cast<int>(entry.argCount));
             }
-            else
-            {
+            else {
                 dropArgumentsImpl(L, entry.argBase, entry.argCount);
             }
             lua_pop(L, 1);
@@ -950,14 +908,12 @@ usize drainDeferred(lua_State* L)
             break;
         }
 
-        case EntryKind::CloseOwner:
-        {
+        case EntryKind::CloseOwner: {
             // `Instance:Destroy` closed everything but `Destroying`, whose fire
             // has just run. This finishes the job and frees the records, which
             // is what makes a `Signal` handle held past this point go stale.
             const auto found = sys.byOwner.find(ownerKey(entry.owner));
-            if (found != sys.byOwner.end())
-            {
+            if (found != sys.byOwner.end()) {
                 const std::vector<SignalSystem::OwnedSignal> owned = found->second;
                 for (const SignalSystem::OwnedSignal& signal : owned)
                     closeSignal(L, signal.id);

@@ -1,11 +1,11 @@
 #include "luaug/asset/image.h"
 
+#include "luaug/core/i18n.h"
+#include "luaug/core/text_key.h"
+
 #include <array>
 #include <cstdio>
 #include <string>
-
-#include "luaug/core/i18n.h"
-#include "luaug/core/text_key.h"
 
 // stb's two image translation units are compiled once, here. They were in `app`
 // until this module existed, which is what `screenshot.h` said would happen.
@@ -23,10 +23,8 @@
 #define STBI_WRITE_NO_STDIO
 #include <stb_image_write.h>
 
-namespace luaug::asset
-{
-namespace
-{
+namespace luaug::asset {
+namespace {
 
 // STBI_WRITE_NO_STDIO, so stb hands us the encoded bytes and we do the file
 // ourselves. That is deliberate: stb's own stdio path takes a `const char*`,
@@ -50,15 +48,13 @@ std::optional<core::EngineError> decodeImage(std::span<const std::byte> encoded,
 {
     out = Image{};
 
-    if (encoded.empty())
-    {
+    if (encoded.empty()) {
         return core::makeError(LUAUG_TR("asset.image.err.decode_failed"), {}, "empty input");
     }
     // stb takes an `int` length, and an image larger than 2 GiB would wrap it
     // into a negative -- which stb reads as a much smaller buffer and decodes
     // from happily, producing garbage rather than an error.
-    if (encoded.size() > static_cast<std::size_t>(INT32_MAX))
-    {
+    if (encoded.size() > static_cast<std::size_t>(INT32_MAX)) {
         return core::makeError(LUAUG_TR("asset.image.err.decode_failed"), {}, "input larger than 2 GiB");
     }
 
@@ -69,12 +65,10 @@ std::optional<core::EngineError> decodeImage(std::span<const std::byte> encoded,
     // own count, which is how a caller tells "opaque by design" from "opaque by
     // accident".
     stbi_uc* pixels = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(encoded.data()),
-        static_cast<int>(encoded.size()), &width, &height, &channels, 4);
-    if (pixels == nullptr)
-    {
+                                            static_cast<int>(encoded.size()), &width, &height, &channels, 4);
+    if (pixels == nullptr) {
         const char* reason = stbi_failure_reason();
-        return core::makeError(
-            LUAUG_TR("asset.image.err.decode_failed"), {}, reason != nullptr ? reason : "unknown");
+        return core::makeError(LUAUG_TR("asset.image.err.decode_failed"), {}, reason != nullptr ? reason : "unknown");
     }
 
     out.width = static_cast<u32>(width);
@@ -89,22 +83,19 @@ std::optional<core::EngineError> decodeImage(std::span<const std::byte> encoded,
     return std::nullopt;
 }
 
-std::optional<core::EngineError> writePng(
-    const std::filesystem::path& path, std::span<const std::byte> pixels, u32 width, u32 height)
+std::optional<core::EngineError> writePng(const std::filesystem::path& path, std::span<const std::byte> pixels,
+                                          u32 width, u32 height)
 {
     const auto expected = static_cast<std::size_t>(width) * height * 4u;
-    if (width == 0 || height == 0 || pixels.size() < expected)
-    {
+    if (width == 0 || height == 0 || pixels.size() < expected) {
         return core::makeError(LUAUG_TR("asset.image.err.bad_pixels"), {},
-            "expected " + std::to_string(expected) + " bytes, got " + std::to_string(pixels.size()));
+                               "expected " + std::to_string(expected) + " bytes, got " + std::to_string(pixels.size()));
     }
 
     EncodedPng encoded;
     const int stride = static_cast<int>(width) * 4;
     if (stbi_write_png_to_func(&appendEncoded, &encoded, static_cast<int>(width), static_cast<int>(height), 4,
-            pixels.data(), stride)
-        == 0)
-    {
+                               pixels.data(), stride) == 0) {
         return core::makeError(LUAUG_TR("asset.image.err.encode_failed"));
     }
 
@@ -120,8 +111,7 @@ std::optional<core::EngineError> writePng(
 #else
     file = std::fopen(path.c_str(), "wb");
 #endif
-    if (file == nullptr)
-    {
+    if (file == nullptr) {
         const std::array<core::I18nArg, 1> args{core::I18nArg{"path", path.string()}};
         return core::makeError(LUAUG_TR("asset.image.err.open_failed"), args);
     }
@@ -129,8 +119,7 @@ std::optional<core::EngineError> writePng(
     const std::size_t written = std::fwrite(encoded.bytes.data(), 1, encoded.bytes.size(), file);
     const bool closed = std::fclose(file) == 0;
 
-    if (written != encoded.bytes.size() || !closed)
-    {
+    if (written != encoded.bytes.size() || !closed) {
         const std::array<core::I18nArg, 1> args{core::I18nArg{"path", path.string()}};
         return core::makeError(LUAUG_TR("asset.image.err.write_failed"), args);
     }

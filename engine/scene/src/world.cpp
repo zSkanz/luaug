@@ -2,10 +2,8 @@
 
 #include <algorithm>
 
-namespace luaug::scene
-{
-namespace
-{
+namespace luaug::scene {
+namespace {
 
 // api-design.md §2.2: attributes hold the value datatypes and nothing else. A
 // table, a function or an Instance reference is rejected, and the caller raises
@@ -14,8 +12,7 @@ namespace
 // to serialization, and nothing in the design maintains it.
 [[nodiscard]] bool isAttributeValue(const Value& value) noexcept
 {
-    switch (valueType(value))
-    {
+    switch (valueType(value)) {
     case ValueType::Nil:
     case ValueType::Bool:
     case ValueType::Number:
@@ -34,13 +31,8 @@ namespace
 } // namespace
 
 World::World(ClassRegistry& classes, EnumRegistry& enums, core::AtomTable& atoms, u64 seed)
-    : m_classes(classes)
-    , m_enums(enums)
-    , m_atoms(atoms)
-    , m_rng(seed)
-    , m_parentProperty(atoms.intern("Parent"))
-{
-}
+    : m_classes(classes), m_enums(enums), m_atoms(atoms), m_rng(seed), m_parentProperty(atoms.intern("Parent"))
+{}
 
 // --- Lifetime ---------------------------------------------------------------
 
@@ -65,13 +57,11 @@ core::InstanceId World::create(ClassId classId)
     // the base component existing.
     const ClassDescriptor* current = descriptor;
     std::vector<const ClassDescriptor*> chain;
-    while (current != nullptr)
-    {
+    while (current != nullptr) {
         chain.push_back(current);
         current = m_classes.find(current->super);
     }
-    for (auto it = chain.rbegin(); it != chain.rend(); ++it)
-    {
+    for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
         if ((*it)->attachComponents != nullptr)
             (*it)->attachComponents(*this, id);
     }
@@ -100,8 +90,7 @@ bool World::destroy(core::InstanceId id)
     // the order within one operation unstated for `Destroying` specifically;
     // this is the order the tree reads in, and it is written down here so that
     // it is a decision rather than an artefact of the traversal.
-    for (const core::InstanceId member : subtree)
-    {
+    for (const core::InstanceId member : subtree) {
         InstanceRecord* memberRecord = m_instances.find(member);
         if (memberRecord == nullptr || memberRecord->destroyed)
             continue;
@@ -109,8 +98,7 @@ bool World::destroy(core::InstanceId id)
         // Untagged before the destroy is announced, so a
         // `GetInstanceRemovedSignal` handler and a `Destroying` handler see the
         // same world (ruling G74).
-        if (const TagSet* tags = m_tags.find(member); tags != nullptr)
-        {
+        if (const TagSet* tags = m_tags.find(member); tags != nullptr) {
             const TagSet owned = *tags;
             for (const core::NameAtom tag : owned)
                 removeTag(member, tag);
@@ -135,17 +123,14 @@ bool World::destroy(core::InstanceId id)
 
 void World::retireDestroyed()
 {
-    for (const core::InstanceId id : m_pendingRetire)
-    {
+    for (const core::InstanceId id : m_pendingRetire) {
         const InstanceRecord* record = m_instances.find(id);
         if (record == nullptr)
             continue;
 
-        if (const ClassDescriptor* descriptor = m_classes.find(record->classId); descriptor != nullptr)
-        {
+        if (const ClassDescriptor* descriptor = m_classes.find(record->classId); descriptor != nullptr) {
             const ClassDescriptor* current = descriptor;
-            while (current != nullptr)
-            {
+            while (current != nullptr) {
                 if (current->detachComponents != nullptr)
                     current->detachComponents(*this, id);
                 current = m_classes.find(current->super);
@@ -242,8 +227,7 @@ bool World::isAncestorOf(core::InstanceId id, core::InstanceId descendant) const
         return false;
 
     core::InstanceId walk = parentOf(descendant);
-    while (walk.valid())
-    {
+    while (walk.valid()) {
         if (walk == id)
             return true;
         walk = parentOf(walk);
@@ -267,8 +251,7 @@ std::optional<core::TextKey> World::setParent(core::InstanceId id, core::Instanc
     if (oldParent == newParent)
         return std::nullopt; // No reorder, no events (api-design.md §2.2).
 
-    if (newParent.valid())
-    {
+    if (newParent.valid()) {
         if (newParent == id || isAncestorOf(id, newParent))
             return LUAUG_TR("scene.err.parent_cycle");
         if (m_instances.find(newParent) == nullptr)
@@ -282,34 +265,29 @@ std::optional<core::TextKey> World::setParent(core::InstanceId id, core::Instanc
     subtree.push_back(id);
     collectDescendants(id, subtree);
 
-    if (oldParent.valid())
-    {
+    if (oldParent.valid()) {
         unindexName(oldParent, id);
         unlinkChild(id);
         m_changes.push({ChangeKind::ChildRemoved, oldParent, id, core::NameAtom{}});
         // Nearest ancestor first: a handler that walks upward sees the same
         // order the tree does.
-        for (core::InstanceId ancestor = oldParent; ancestor.valid(); ancestor = parentOf(ancestor))
-        {
+        for (core::InstanceId ancestor = oldParent; ancestor.valid(); ancestor = parentOf(ancestor)) {
             for (const core::InstanceId member : subtree)
                 m_changes.push({ChangeKind::DescendantRemoving, ancestor, member, core::NameAtom{}});
         }
     }
 
-    if (newParent.valid())
-    {
+    if (newParent.valid()) {
         InstanceRecord* parentRecord = m_instances.find(newParent);
         linkChild(*parentRecord, newParent, id);
         indexName(newParent, id);
         m_changes.push({ChangeKind::ChildAdded, newParent, id, core::NameAtom{}});
-        for (core::InstanceId ancestor = newParent; ancestor.valid(); ancestor = parentOf(ancestor))
-        {
+        for (core::InstanceId ancestor = newParent; ancestor.valid(); ancestor = parentOf(ancestor)) {
             for (const core::InstanceId member : subtree)
                 m_changes.push({ChangeKind::DescendantAdded, ancestor, member, core::NameAtom{}});
         }
     }
-    else
-    {
+    else {
         record->parent = core::InstanceId{};
     }
 
@@ -332,8 +310,7 @@ core::InstanceId World::findFirstChild(core::InstanceId parent, core::NameAtom c
 
 core::InstanceId World::findFirstChildOfClass(core::InstanceId parent, ClassId classId) const noexcept
 {
-    for (core::InstanceId child = firstChild(parent); child.valid(); child = nextSibling(child))
-    {
+    for (core::InstanceId child = firstChild(parent); child.valid(); child = nextSibling(child)) {
         if (classOf(child) == classId)
             return child;
     }
@@ -342,8 +319,7 @@ core::InstanceId World::findFirstChildOfClass(core::InstanceId parent, ClassId c
 
 core::InstanceId World::findFirstChildWhichIsA(core::InstanceId parent, ClassId base) const noexcept
 {
-    for (core::InstanceId child = firstChild(parent); child.valid(); child = nextSibling(child))
-    {
+    for (core::InstanceId child = firstChild(parent); child.valid(); child = nextSibling(child)) {
         if (m_classes.isA(classOf(child), base))
             return child;
     }
@@ -352,8 +328,7 @@ core::InstanceId World::findFirstChildWhichIsA(core::InstanceId parent, ClassId 
 
 core::InstanceId World::findFirstAncestor(core::InstanceId id, core::NameAtom ancestorName) const noexcept
 {
-    for (core::InstanceId walk = parentOf(id); walk.valid(); walk = parentOf(walk))
-    {
+    for (core::InstanceId walk = parentOf(id); walk.valid(); walk = parentOf(walk)) {
         if (name(walk) == ancestorName)
             return walk;
     }
@@ -362,8 +337,7 @@ core::InstanceId World::findFirstAncestor(core::InstanceId id, core::NameAtom an
 
 core::InstanceId World::findFirstAncestorOfClass(core::InstanceId id, ClassId classId) const noexcept
 {
-    for (core::InstanceId walk = parentOf(id); walk.valid(); walk = parentOf(walk))
-    {
+    for (core::InstanceId walk = parentOf(id); walk.valid(); walk = parentOf(walk)) {
         if (classOf(walk) == classId)
             return walk;
     }
@@ -387,8 +361,7 @@ void World::collectDescendants(core::InstanceId id, std::vector<core::InstanceId
         stack.push_back(child);
     std::reverse(stack.begin(), stack.end());
 
-    while (!stack.empty())
-    {
+    while (!stack.empty()) {
         const core::InstanceId current = stack.back();
         stack.pop_back();
         out.push_back(current);
@@ -418,8 +391,7 @@ core::InstanceId World::clone(core::InstanceId id)
         return (static_cast<u64>(value.index) << 32) | value.generation;
     };
 
-    for (const core::InstanceId original : sources)
-    {
+    for (const core::InstanceId original : sources) {
         const InstanceRecord* record = m_instances.find(original);
         const core::InstanceId copy = create(record->classId);
         if (!copy.valid())
@@ -428,25 +400,21 @@ core::InstanceId World::clone(core::InstanceId id)
         mapping[key(original)] = copy;
     }
 
-    for (const core::InstanceId original : sources)
-    {
+    for (const core::InstanceId original : sources) {
         const core::InstanceId copy = mapping[key(original)];
 
         // Parenting inside the copy, which is also what gives the clone its
         // child order: `sources` is in document order, so each child is
         // appended after its earlier siblings.
-        if (original != id)
-        {
+        if (original != id) {
             const core::InstanceId originalParent = parentOf(original);
             setParent(copy, mapping[key(originalParent)]);
         }
 
         const ClassDescriptor* descriptor = m_classes.find(classOf(original));
         for (const ClassDescriptor* current = descriptor; current != nullptr;
-             current = m_classes.find(current->super))
-        {
-            for (const PropertyDesc& property : current->properties)
-            {
+             current = m_classes.find(current->super)) {
+            for (const PropertyDesc& property : current->properties) {
                 if (property.readOnly || property.get == nullptr || property.set == nullptr)
                     continue;
                 // `Parent` is structure rather than a value, and the loop above
@@ -461,8 +429,7 @@ core::InstanceId World::clone(core::InstanceId id)
                 // rewired to the copy; one pointing outside keeps the original,
                 // which is the difference between cloning a model and cloning
                 // the world it sits in.
-                if (const auto* reference = std::get_if<core::InstanceId>(&value); reference != nullptr)
-                {
+                if (const auto* reference = std::get_if<core::InstanceId>(&value); reference != nullptr) {
                     if (const auto found = mapping.find(key(*reference)); found != mapping.end())
                         value = found->second;
                 }
@@ -472,8 +439,7 @@ core::InstanceId World::clone(core::InstanceId id)
 
         if (const AttributeMap* attributes = m_attributes.find(original); attributes != nullptr)
             m_attributes.add(copy, *attributes);
-        if (const TagSet* tags = m_tags.find(original); tags != nullptr)
-        {
+        if (const TagSet* tags = m_tags.find(original); tags != nullptr) {
             const TagSet owned = *tags;
             for (const core::NameAtom tag : owned)
                 addTag(copy, tag);
@@ -557,8 +523,7 @@ Value World::getAttribute(core::InstanceId id, core::NameAtom attribute) const
     const AttributeMap* attributes = m_attributes.find(id);
     if (attributes == nullptr)
         return Value{};
-    for (const auto& entry : *attributes)
-    {
+    for (const auto& entry : *attributes) {
         if (entry.first == attribute)
             return entry.second;
     }
@@ -576,19 +541,16 @@ bool World::setAttribute(core::InstanceId id, core::NameAtom attribute, const Va
     if (attributes == nullptr)
         attributes = &m_attributes.add(id, AttributeMap{});
 
-    const auto found = std::find_if(attributes->begin(), attributes->end(), [&](const auto& entry) {
-        return entry.first == attribute;
-    });
+    const auto found = std::find_if(attributes->begin(), attributes->end(),
+                                    [&](const auto& entry) { return entry.first == attribute; });
     const bool removing = valueType(value) == ValueType::Nil;
 
-    if (found == attributes->end())
-    {
+    if (found == attributes->end()) {
         if (removing)
             return true; // Setting an absent attribute to nil changes nothing.
         attributes->emplace_back(attribute, value);
     }
-    else
-    {
+    else {
         if (found->second == value)
             return true; // Equality-filtered like a property (api-design.md §3.1).
         if (removing)
@@ -634,8 +596,7 @@ bool World::removeTag(core::InstanceId id, core::NameAtom tag)
         return false;
 
     tags->erase(found);
-    if (const auto bucket = m_tagged.find(tag.id); bucket != m_tagged.end())
-    {
+    if (const auto bucket = m_tagged.find(tag.id); bucket != m_tagged.end()) {
         auto& members = bucket->second;
         members.erase(std::remove(members.begin(), members.end(), id), members.end());
         // A tag with no carriers stops existing, which is what makes
@@ -676,9 +637,8 @@ void World::collectAllTags(TagSet& out) const
     // observable state. Sorted by the atom's TEXT rather than by its numeric
     // value, because an atom's number depends on intern order -- which depends
     // on what the world happened to build first.
-    std::sort(out.begin(), out.end(), [this](core::NameAtom a, core::NameAtom b) {
-        return m_atoms.text(a) < m_atoms.text(b);
-    });
+    std::sort(out.begin(), out.end(),
+              [this](core::NameAtom a, core::NameAtom b) { return m_atoms.text(a) < m_atoms.text(b); });
 }
 
 // --- Private links ----------------------------------------------------------
@@ -735,8 +695,7 @@ void World::indexName(core::InstanceId parentId, core::InstanceId childId)
         index = &m_nameIndices.add(parentId, NameIndex{});
 
     const auto found = index->firstByName.find(childName.id);
-    if (found == index->firstByName.end())
-    {
+    if (found == index->firstByName.end()) {
         index->firstByName.emplace(childName.id, childId);
         return;
     }
@@ -771,8 +730,7 @@ void World::indexNameInChildOrder(core::InstanceId parentId, core::InstanceId ch
     // is the path the 10k-parts benchmark runs down -- making it O(children)
     // would make building a world O(n squared).
     core::InstanceId previous;
-    for (core::InstanceId cursor = firstChild(parentId); cursor.valid(); cursor = nextSibling(cursor))
-    {
+    for (core::InstanceId cursor = firstChild(parentId); cursor.valid(); cursor = nextSibling(cursor)) {
         if (cursor == childId)
             break;
         if (name(cursor) == childName)
@@ -780,8 +738,7 @@ void World::indexNameInChildOrder(core::InstanceId parentId, core::InstanceId ch
     }
 
     InstanceRecord* record = m_instances.find(childId);
-    if (!previous.valid())
-    {
+    if (!previous.valid()) {
         const auto head = index->firstByName.find(childName.id);
         record->nextSameName = head == index->firstByName.end() ? core::InstanceId{} : head->second;
         index->firstByName[childName.id] = childId;
@@ -805,15 +762,13 @@ void World::unindexName(core::InstanceId parentId, core::InstanceId childId)
         return;
 
     InstanceRecord* child = m_instances.find(childId);
-    if (found->second == childId)
-    {
+    if (found->second == childId) {
         if (child->nextSameName.valid())
             found->second = child->nextSameName;
         else
             index->firstByName.erase(found);
     }
-    else
-    {
+    else {
         core::InstanceId walk = found->second;
         while (walk.valid() && m_instances.find(walk)->nextSameName != childId)
             walk = m_instances.find(walk)->nextSameName;

@@ -17,23 +17,21 @@
 // makes the floating origin at M7 a change to one function.
 #pragma once
 
-#include <vector>
-
 #include "luaug/core/id.h"
-#include "luaug/core/name_atom.h"
 #include "luaug/core/math.h"
+#include "luaug/core/name_atom.h"
 #include "luaug/core/types.h"
 #include "luaug/render/mesh_cache.h"
 #include "luaug/render/shader_types.h"
 #include "luaug/rhi/types.h"
 
-namespace luaug::scene
-{
+#include <vector>
+
+namespace luaug::scene {
 class World;
 }
 
-namespace luaug::render
-{
+namespace luaug::render {
 
 using core::AABB;
 using core::CFrameD;
@@ -284,18 +282,13 @@ private:
 // extraction index as a stable tie-break. Two runs of the same world produce the
 // same command stream, which is what makes a capture golden a gate rather than a
 // coin flip (R10).
-void extract(
-    const scene::World& world,
-    core::InstanceId root,
-    core::InstanceId lightingHost,
-    const MeshLibrary& meshes,
-    f32 viewportAspect,
-    // Metres. Geometry further than this from the camera is dropped entirely --
-    // it can neither be seen nor cast into view, because the shadow map only
-    // covers a bounded region around the camera. The renderer owns the number
-    // and passes it, rather than `extract` guessing at a constant that lives in
-    // the pass list.
-    f32 shadowRadius,
-    RenderWorld& out);
+void extract(const scene::World& world, core::InstanceId root, core::InstanceId lightingHost, const MeshLibrary& meshes,
+             f32 viewportAspect,
+             // Metres. Geometry further than this from the camera is dropped entirely --
+             // it can neither be seen nor cast into view, because the shadow map only
+             // covers a bounded region around the camera. The renderer owns the number
+             // and passes it, rather than `extract` guessing at a constant that lives in
+             // the pass list.
+             f32 shadowRadius, RenderWorld& out);
 
 } // namespace luaug::render

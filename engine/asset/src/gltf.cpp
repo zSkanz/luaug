@@ -1,31 +1,27 @@
 #include "luaug/asset/gltf.h"
 
+#include "luaug/asset/image.h"
+#include "luaug/core/i18n.h"
+#include "luaug/core/text_key.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <fastgltf/core.hpp>
+#include <fastgltf/math.hpp>
+#include <fastgltf/tools.hpp>
+#include <fastgltf/types.hpp>
 #include <limits>
+#include <meshoptimizer.h>
 #include <string>
 #include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
 
-#include <fastgltf/core.hpp>
-#include <fastgltf/math.hpp>
-#include <fastgltf/tools.hpp>
-#include <fastgltf/types.hpp>
-
-#include <meshoptimizer.h>
-
-#include "luaug/asset/image.h"
-#include "luaug/core/i18n.h"
-#include "luaug/core/text_key.h"
-
-namespace luaug::asset
-{
-namespace
-{
+namespace luaug::asset {
+namespace {
 
 namespace fg = fastgltf;
 
@@ -74,8 +70,7 @@ struct Staging
     // not a transpose. Stated because the opposite assumption produces a
     // transform that looks plausible until something is off-axis.
     core::Mat4 result;
-    for (std::size_t column = 0; column < 4; ++column)
-    {
+    for (std::size_t column = 0; column < 4; ++column) {
         for (std::size_t row = 0; row < 4; ++row)
             result.m[column][row] = source[column][row];
     }
@@ -115,8 +110,7 @@ struct Staging
     Vec3 cofactor1 = core::cross(c, a);
     Vec3 cofactor2 = core::cross(a, b);
 
-    if (core::dot(a, cofactor0) < 0.0f)
-    {
+    if (core::dot(a, cofactor0) < 0.0f) {
         cofactor0 = -cofactor0;
         cofactor1 = -cofactor1;
         cofactor2 = -cofactor2;
@@ -208,8 +202,7 @@ struct Staging
 
     const std::size_t elementSize = fg::getElementByteSize(accessor.type, accessor.componentType);
 
-    if (accessor.sparse.has_value())
-    {
+    if (accessor.sparse.has_value()) {
         const fg::SparseAccessor& sparse = accessor.sparse.value();
         const std::size_t indexSize = fg::getComponentByteSize(sparse.indexComponentType);
         if (!fitsIn(sparse.indicesBufferView, indexSize, sparse.count, sparse.indicesByteOffset))
@@ -228,14 +221,13 @@ struct Staging
 
 [[nodiscard]] AlphaMode toAlphaMode(fg::AlphaMode mode) noexcept
 {
-    switch (mode)
-    {
-        case fg::AlphaMode::Mask:
-            return AlphaMode::Mask;
-        case fg::AlphaMode::Blend:
-            return AlphaMode::Blend;
-        case fg::AlphaMode::Opaque:
-            break;
+    switch (mode) {
+    case fg::AlphaMode::Mask:
+        return AlphaMode::Mask;
+    case fg::AlphaMode::Blend:
+        return AlphaMode::Blend;
+    case fg::AlphaMode::Opaque:
+        break;
     }
     return AlphaMode::Opaque;
 }
@@ -249,8 +241,7 @@ class Importer
 public:
     Importer(const fg::Asset& asset, const GltfImportOptions& options, Model& out) noexcept
         : asset_(asset), options_(options), out_(out)
-    {
-    }
+    {}
 
     [[nodiscard]] std::optional<core::EngineError> run();
 
@@ -258,10 +249,10 @@ private:
     [[nodiscard]] std::optional<core::EngineError> collectInstances();
     [[nodiscard]] std::optional<core::EngineError> visitNode(std::size_t nodeIndex, const core::Mat4& parent);
     [[nodiscard]] std::optional<core::EngineError> appendPrimitive(const fg::Primitive& primitive,
-        const core::Mat4& transform);
+                                                                   const core::Mat4& transform);
     [[nodiscard]] std::optional<core::EngineError> readAttributes(const fg::Primitive& primitive, Staging& staging);
-    [[nodiscard]] std::optional<core::EngineError> resolveMaterial(
-        const fg::Optional<std::size_t>& materialIndex, u32& slot);
+    [[nodiscard]] std::optional<core::EngineError> resolveMaterial(const fg::Optional<std::size_t>& materialIndex,
+                                                                   u32& slot);
     [[nodiscard]] std::optional<core::EngineError> resolveTexture(const fg::TextureInfo& info, TextureRef& ref);
     [[nodiscard]] std::optional<core::EngineError> resolveImage(std::size_t imageIndex, u32& slot);
 
@@ -296,11 +287,9 @@ std::optional<core::EngineError> Importer::run()
     if (auto error = collectInstances())
         return error;
 
-    for (const MeshInstance& instance : instances_)
-    {
+    for (const MeshInstance& instance : instances_) {
         const fg::Mesh& mesh = asset_.meshes[instance.meshIndex];
-        for (const fg::Primitive& primitive : mesh.primitives)
-        {
+        for (const fg::Primitive& primitive : mesh.primitives) {
             if (auto error = appendPrimitive(primitive, instance.transform))
                 return error;
         }
@@ -322,14 +311,12 @@ std::optional<core::EngineError> Importer::collectInstances()
     // The scene the file itself points at, so two importers of the same file
     // agree; `scenes[0]` is the specification's fallback when there is no
     // `scene` property.
-    if (!asset_.scenes.empty())
-    {
+    if (!asset_.scenes.empty()) {
         const std::size_t sceneIndex = asset_.defaultScene.value_or(0);
         if (sceneIndex >= asset_.scenes.size())
             return core::makeError(LUAUG_TR("asset.gltf.err.invalid_document"), {}, "default scene is out of range");
 
-        for (const std::size_t root : asset_.scenes[sceneIndex].nodeIndices)
-        {
+        for (const std::size_t root : asset_.scenes[sceneIndex].nodeIndices) {
             if (auto error = visitNode(root, core::Mat4{}))
                 return error;
         }
@@ -340,18 +327,15 @@ std::optional<core::EngineError> Importer::collectInstances()
     // Rare, but a document that is only a node tree is legal and is what a
     // stripped-down exporter emits.
     std::vector<bool> claimed(asset_.nodes.size(), false);
-    for (const fg::Node& node : asset_.nodes)
-    {
-        for (const std::size_t child : node.children)
-        {
+    for (const fg::Node& node : asset_.nodes) {
+        for (const std::size_t child : node.children) {
             if (child >= claimed.size())
                 return core::makeError(LUAUG_TR("asset.gltf.err.invalid_document"), {}, "child node is out of range");
             claimed[child] = true;
         }
     }
 
-    for (std::size_t index = 0; index < asset_.nodes.size(); ++index)
-    {
+    for (std::size_t index = 0; index < asset_.nodes.size(); ++index) {
         if (claimed[index])
             continue;
         if (auto error = visitNode(index, core::Mat4{}))
@@ -378,14 +362,12 @@ std::optional<core::EngineError> Importer::visitNode(std::size_t nodeIndex, cons
     const core::Mat4 nodeLocal = toMat4(fg::getTransformMatrix(node));
     const core::Mat4 combined = parent * nodeLocal;
 
-    if (node.meshIndex.has_value())
-    {
+    if (node.meshIndex.has_value()) {
         // `validate` has already established the index is in range.
         instances_.push_back(MeshInstance{node.meshIndex.value(), combined});
     }
 
-    for (const std::size_t child : node.children)
-    {
+    for (const std::size_t child : node.children) {
         if (auto error = visitNode(child, combined))
             return error;
     }
@@ -399,51 +381,42 @@ std::optional<core::EngineError> Importer::resolveImage(std::size_t imageIndex, 
 
     // Decoded once even when several materials sample it: the second material
     // finds the slot already claimed.
-    if (imageSlots_[imageIndex] != TextureRef::Missing)
-    {
+    if (imageSlots_[imageIndex] != TextureRef::Missing) {
         slot = imageSlots_[imageIndex];
         return std::nullopt;
     }
 
     const fg::Image& image = asset_.images[imageIndex];
     std::span<const std::byte> encoded;
-    if (const auto* view = std::get_if<fg::sources::BufferView>(&image.data); view != nullptr)
-    {
-        if (!bufferViewFits(asset_, view->bufferViewIndex))
-        {
+    if (const auto* view = std::get_if<fg::sources::BufferView>(&image.data); view != nullptr) {
+        if (!bufferViewFits(asset_, view->bufferViewIndex)) {
             return core::makeError(LUAUG_TR("asset.gltf.err.invalid_document"), {},
-                "image " + std::to_string(imageIndex) + " names a buffer view outside its buffer");
+                                   "image " + std::to_string(imageIndex) + " names a buffer view outside its buffer");
         }
         const fg::BufferView& bufferView = asset_.bufferViews[view->bufferViewIndex];
         encoded = bufferBytes(asset_, bufferView.bufferIndex).subspan(bufferView.byteOffset, bufferView.byteLength);
     }
-    else if (const auto* array = std::get_if<fg::sources::Array>(&image.data); array != nullptr)
-    {
+    else if (const auto* array = std::get_if<fg::sources::Array>(&image.data); array != nullptr) {
         encoded = std::span<const std::byte>(array->bytes.data(), array->bytes.size());
     }
-    else if (const auto* vector = std::get_if<fg::sources::Vector>(&image.data); vector != nullptr)
-    {
+    else if (const auto* vector = std::get_if<fg::sources::Vector>(&image.data); vector != nullptr) {
         encoded = std::span<const std::byte>(vector->bytes.data(), vector->bytes.size());
     }
-    else if (const auto* bytes = std::get_if<fg::sources::ByteView>(&image.data); bytes != nullptr)
-    {
+    else if (const auto* bytes = std::get_if<fg::sources::ByteView>(&image.data); bytes != nullptr) {
         encoded = std::span<const std::byte>(bytes->bytes.data(), bytes->bytes.size());
     }
-    else
-    {
+    else {
         // LoadExternalImages was asked for, so a source that is still a URI is
         // one the parser could not read -- a texture beside the file that is
         // not there.
         return core::makeError(LUAUG_TR("asset.gltf.err.image_missing"), {},
-            "image " + std::to_string(imageIndex) + " was not loaded");
+                               "image " + std::to_string(imageIndex) + " was not loaded");
     }
 
     Image decoded;
-    if (auto error = decodeImage(encoded, decoded))
-    {
-        return core::makeError(
-            LUAUG_TR("asset.gltf.err.image_decode_failed"), {}, "image " + std::to_string(imageIndex) + ": "
-                + error->message);
+    if (auto error = decodeImage(encoded, decoded)) {
+        return core::makeError(LUAUG_TR("asset.gltf.err.image_decode_failed"), {},
+                               "image " + std::to_string(imageIndex) + ": " + error->message);
     }
 
     slot = static_cast<u32>(out_.images.size());
@@ -461,10 +434,9 @@ std::optional<core::EngineError> Importer::resolveTexture(const fg::TextureInfo&
     // Only the core specification's image is honoured; the basis, DDS and WebP
     // indices belong to extensions this importer does not enable, so a texture
     // that carries only one of those has no image it can read.
-    if (!texture.imageIndex.has_value())
-    {
+    if (!texture.imageIndex.has_value()) {
         return core::makeError(LUAUG_TR("asset.gltf.err.image_missing"), {},
-            "texture " + std::to_string(info.textureIndex) + " names no core image");
+                               "texture " + std::to_string(info.textureIndex) + " names no core image");
     }
 
     u32 slot = TextureRef::Missing;
@@ -482,13 +454,11 @@ std::optional<core::EngineError> Importer::resolveTexture(const fg::TextureInfo&
 
 std::optional<core::EngineError> Importer::resolveMaterial(const fg::Optional<std::size_t>& materialIndex, u32& slot)
 {
-    if (!materialIndex.has_value())
-    {
+    if (!materialIndex.has_value()) {
         // "a draw with no material is a draw the renderer cannot make" -- one
         // default, appended once, shared by every primitive that names none.
         // Its field defaults are already glTF's default material.
-        if (defaultMaterialSlot_ == TextureRef::Missing)
-        {
+        if (defaultMaterialSlot_ == TextureRef::Missing) {
             defaultMaterialSlot_ = static_cast<u32>(out_.materials.size());
             out_.materials.emplace_back();
         }
@@ -501,8 +471,7 @@ std::optional<core::EngineError> Importer::resolveMaterial(const fg::Optional<st
     if (index >= materialSlots_.size())
         return core::makeError(LUAUG_TR("asset.gltf.err.invalid_document"), {}, "material index is out of range");
 
-    if (materialSlots_[index] != TextureRef::Missing)
-    {
+    if (materialSlots_[index] != TextureRef::Missing) {
         slot = materialSlots_[index];
         materialWantsTangents_ = out_.materials[slot].normal.present();
         return std::nullopt;
@@ -512,36 +481,34 @@ std::optional<core::EngineError> Importer::resolveMaterial(const fg::Optional<st
     MaterialDef material;
     material.name = std::string(source.name);
     material.baseColorFactor = Color3{static_cast<f32>(source.pbrData.baseColorFactor.x()),
-        static_cast<f32>(source.pbrData.baseColorFactor.y()), static_cast<f32>(source.pbrData.baseColorFactor.z())};
+                                      static_cast<f32>(source.pbrData.baseColorFactor.y()),
+                                      static_cast<f32>(source.pbrData.baseColorFactor.z())};
     material.baseColorAlpha = static_cast<f32>(source.pbrData.baseColorFactor.w());
     material.metallicFactor = static_cast<f32>(source.pbrData.metallicFactor);
     material.roughnessFactor = static_cast<f32>(source.pbrData.roughnessFactor);
-    material.emissiveFactor = Color3{static_cast<f32>(source.emissiveFactor.x()),
-        static_cast<f32>(source.emissiveFactor.y()), static_cast<f32>(source.emissiveFactor.z())};
+    material.emissiveFactor =
+        Color3{static_cast<f32>(source.emissiveFactor.x()), static_cast<f32>(source.emissiveFactor.y()),
+               static_cast<f32>(source.emissiveFactor.z())};
     material.alphaMode = toAlphaMode(source.alphaMode);
     material.alphaCutoff = static_cast<f32>(source.alphaCutoff);
     material.doubleSided = source.doubleSided;
 
     // In the file's own declaration order, so which image lands in which slot
     // is a property of the document rather than of an iteration order (R10).
-    if (source.pbrData.baseColorTexture.has_value())
-    {
+    if (source.pbrData.baseColorTexture.has_value()) {
         if (auto error = resolveTexture(source.pbrData.baseColorTexture.value(), material.baseColor))
             return error;
     }
-    if (source.pbrData.metallicRoughnessTexture.has_value())
-    {
+    if (source.pbrData.metallicRoughnessTexture.has_value()) {
         if (auto error = resolveTexture(source.pbrData.metallicRoughnessTexture.value(), material.metallicRoughness))
             return error;
     }
-    if (source.normalTexture.has_value())
-    {
+    if (source.normalTexture.has_value()) {
         if (auto error = resolveTexture(source.normalTexture.value(), material.normal))
             return error;
         material.normalScale = static_cast<f32>(source.normalTexture->scale);
     }
-    if (source.emissiveTexture.has_value())
-    {
+    if (source.emissiveTexture.has_value()) {
         if (auto error = resolveTexture(source.emissiveTexture.value(), material.emissive))
             return error;
     }
@@ -566,15 +533,14 @@ std::optional<core::EngineError> Importer::readAttributes(const fg::Primitive& p
     const std::size_t vertexCount = positionAccessor.count;
     staging.positions.resize(vertexCount);
     fg::iterateAccessorWithIndex<fg::math::fvec3>(asset_, positionAccessor,
-        [&](fg::math::fvec3 value, std::size_t index) {
-            staging.positions[index] = Vec3{value.x(), value.y(), value.z()};
-        });
+                                                  [&](fg::math::fvec3 value, std::size_t index) {
+                                                      staging.positions[index] = Vec3{value.x(), value.y(), value.z()};
+                                                  });
 
     // `validate` has already pinned each of these to the accessor type the
     // specification requires, which is why the reads below can name one element
     // type each.
-    if (const auto* normal = primitive.findAttribute("NORMAL"); normal != primitive.attributes.cend())
-    {
+    if (const auto* normal = primitive.findAttribute("NORMAL"); normal != primitive.attributes.cend()) {
         const fg::Accessor& accessor = asset_.accessors[normal->accessorIndex];
         if (accessor.count != vertexCount)
             return core::makeError(LUAUG_TR("asset.gltf.err.attribute_count_mismatch"), {}, "NORMAL");
@@ -588,8 +554,7 @@ std::optional<core::EngineError> Importer::readAttributes(const fg::Primitive& p
         staging.hasNormals = true;
     }
 
-    if (const auto* tangent = primitive.findAttribute("TANGENT"); tangent != primitive.attributes.cend())
-    {
+    if (const auto* tangent = primitive.findAttribute("TANGENT"); tangent != primitive.attributes.cend()) {
         const fg::Accessor& accessor = asset_.accessors[tangent->accessorIndex];
         if (accessor.count != vertexCount)
             return core::makeError(LUAUG_TR("asset.gltf.err.attribute_count_mismatch"), {}, "TANGENT");
@@ -605,8 +570,7 @@ std::optional<core::EngineError> Importer::readAttributes(const fg::Primitive& p
 
     // TEXCOORD_0 only: `Vertex` carries one UV set (model.h), so a second one
     // has nowhere to go.
-    if (const auto* uv = primitive.findAttribute("TEXCOORD_0"); uv != primitive.attributes.cend())
-    {
+    if (const auto* uv = primitive.findAttribute("TEXCOORD_0"); uv != primitive.attributes.cend()) {
         const fg::Accessor& accessor = asset_.accessors[uv->accessorIndex];
         if (accessor.count != vertexCount)
             return core::makeError(LUAUG_TR("asset.gltf.err.attribute_count_mismatch"), {}, "TEXCOORD_0");
@@ -620,8 +584,7 @@ std::optional<core::EngineError> Importer::readAttributes(const fg::Primitive& p
         staging.hasUvs = true;
     }
 
-    if (primitive.indicesAccessor.has_value())
-    {
+    if (primitive.indicesAccessor.has_value()) {
         const fg::Accessor& accessor = asset_.accessors[primitive.indicesAccessor.value()];
         if (!accessorFits(asset_, accessor))
             return core::makeError(LUAUG_TR("asset.gltf.err.accessor_out_of_range"), {}, "indices");
@@ -632,8 +595,7 @@ std::optional<core::EngineError> Importer::readAttributes(const fg::Primitive& p
         fg::iterateAccessorWithIndex<std::uint32_t>(
             asset_, accessor, [&](std::uint32_t value, std::size_t index) { staging.indices[index] = value; });
     }
-    else
-    {
+    else {
         // Options::GenerateMeshIndices means this should not happen, but a
         // primitive drawing its vertices in order is what it would mean.
         staging.indices.resize(vertexCount);
@@ -644,8 +606,7 @@ std::optional<core::EngineError> Importer::readAttributes(const fg::Primitive& p
     if (staging.indices.size() % 3 != 0)
         return core::makeError(LUAUG_TR("asset.gltf.err.invalid_document"), {}, "index count is not a multiple of 3");
 
-    for (const u32 index : staging.indices)
-    {
+    for (const u32 index : staging.indices) {
         if (index >= vertexCount)
             return core::makeError(LUAUG_TR("asset.gltf.err.index_out_of_range"));
     }
@@ -666,8 +627,7 @@ void Importer::generateFlatNormals(Staging& staging) const
     if (staging.hasUvs)
         uvs.resize(indexCount);
 
-    for (std::size_t slot = 0; slot < indexCount; ++slot)
-    {
+    for (std::size_t slot = 0; slot < indexCount; ++slot) {
         const std::size_t source = staging.indices[slot];
         positions[slot] = staging.positions[source];
         if (staging.hasUvs)
@@ -675,8 +635,7 @@ void Importer::generateFlatNormals(Staging& staging) const
     }
 
     std::vector<Vec3> normals(indexCount);
-    for (std::size_t triangle = 0; triangle + 2 < indexCount; triangle += 3)
-    {
+    for (std::size_t triangle = 0; triangle + 2 < indexCount; triangle += 3) {
         const Vec3 edge1 = positions[triangle + 1] - positions[triangle];
         const Vec3 edge2 = positions[triangle + 2] - positions[triangle];
         // Counter-clockwise winding, which is glTF's front face; `normalize`
@@ -711,8 +670,7 @@ void Importer::generateTangents(Staging& staging) const
     std::vector<Vec3> alongU(vertexCount, Vec3{});
     std::vector<Vec3> alongV(vertexCount, Vec3{});
 
-    for (std::size_t triangle = 0; triangle + 2 < staging.indices.size(); triangle += 3)
-    {
+    for (std::size_t triangle = 0; triangle + 2 < staging.indices.size(); triangle += 3) {
         const std::size_t i0 = staging.indices[triangle];
         const std::size_t i1 = staging.indices[triangle + 1];
         const std::size_t i2 = staging.indices[triangle + 2];
@@ -733,20 +691,17 @@ void Importer::generateTangents(Staging& staging) const
         const Vec3 gradientU = (edge1 * dv2 - edge2 * dv1) * scale;
         const Vec3 gradientV = (edge2 * du1 - edge1 * du2) * scale;
 
-        for (const std::size_t vertex : {i0, i1, i2})
-        {
+        for (const std::size_t vertex : {i0, i1, i2}) {
             alongU[vertex] = alongU[vertex] + gradientU;
             alongV[vertex] = alongV[vertex] + gradientV;
         }
     }
 
     staging.tangents.resize(vertexCount);
-    for (std::size_t vertex = 0; vertex < vertexCount; ++vertex)
-    {
+    for (std::size_t vertex = 0; vertex < vertexCount; ++vertex) {
         const Vec3 normal = staging.normals[vertex];
         Vec3 tangent = core::normalize(alongU[vertex] - normal * core::dot(normal, alongU[vertex]));
-        if (tangent == Vec3{})
-        {
+        if (tangent == Vec3{}) {
             // Nothing usable was accumulated -- an unreferenced vertex, or a
             // tangent parallel to the normal. Any perpendicular will do, and a
             // fixed choice keeps the result the same on every run.
@@ -767,10 +722,9 @@ std::optional<core::EngineError> Importer::appendPrimitive(const fg::Primitive& 
     // expanded into a list -- worth doing the day a file needs it, and worth
     // refusing loudly rather than importing something that draws nothing until
     // then.
-    if (primitive.type != fg::PrimitiveType::Triangles)
-    {
+    if (primitive.type != fg::PrimitiveType::Triangles) {
         return core::makeError(LUAUG_TR("asset.gltf.err.unsupported_topology"), {},
-            "primitive mode " + std::to_string(static_cast<int>(primitive.type)));
+                               "primitive mode " + std::to_string(static_cast<int>(primitive.type)));
     }
 
     u32 materialSlot = TextureRef::Missing;
@@ -789,37 +743,32 @@ std::optional<core::EngineError> Importer::appendPrimitive(const fg::Primitive& 
     // A mirroring node reverses the winding of every triangle under it (glTF
     // 2.0 §3.7.4). Without this the mesh renders inside out wherever an
     // exporter used a negative scale to flip a part.
-    if (determinant3(transform) < 0.0f)
-    {
+    if (determinant3(transform) < 0.0f) {
         for (std::size_t triangle = 0; triangle + 2 < staging.indices.size(); triangle += 3)
             std::swap(staging.indices[triangle + 1], staging.indices[triangle + 2]);
     }
 
-    if (!staging.hasNormals && options_.generateMissingNormals)
-    {
+    if (!staging.hasNormals && options_.generateMissingNormals) {
         generateFlatNormals(staging);
     }
-    else
-    {
+    else {
         const core::Mat4 normalTransform = normalTransformOf(transform);
         staging.normals.resize(staging.positions.size());
         for (Vec3& normal : staging.normals)
             normal = core::normalize(core::transformDirection(normalTransform, normal));
     }
 
-    for (std::array<f32, 4>& tangent : staging.tangents)
-    {
+    for (std::array<f32, 4>& tangent : staging.tangents) {
         // Tangents lie *in* the surface, so they follow the transform itself
         // rather than its inverse-transpose. `w` is a handedness, not a
         // direction, and is carried through untouched.
-        const Vec3 direction
-            = core::normalize(core::transformDirection(transform, Vec3{tangent[0], tangent[1], tangent[2]}));
+        const Vec3 direction =
+            core::normalize(core::transformDirection(transform, Vec3{tangent[0], tangent[1], tangent[2]}));
         tangent = {direction.x, direction.y, direction.z, tangent[3]};
     }
 
-    if (!staging.hasTangents && options_.generateMissingTangents && staging.hasNormals && staging.hasUvs
-        && materialWantsTangents_)
-    {
+    if (!staging.hasTangents && options_.generateMissingTangents && staging.hasNormals && staging.hasUvs &&
+        materialWantsTangents_) {
         generateTangents(staging);
     }
 
@@ -834,19 +783,16 @@ std::optional<core::EngineError> Importer::appendPrimitive(const fg::Primitive& 
     submesh.material = materialSlot;
 
     out_.mesh.vertices.reserve(baseVertex + staging.positions.size());
-    for (std::size_t slot = 0; slot < staging.positions.size(); ++slot)
-    {
+    for (std::size_t slot = 0; slot < staging.positions.size(); ++slot) {
         Vertex vertex;
         vertex.position = staging.positions[slot];
         if (staging.hasNormals)
             vertex.normal = staging.normals[slot];
-        if (staging.hasTangents)
-        {
+        if (staging.hasTangents) {
             for (std::size_t lane = 0; lane < 4; ++lane)
                 vertex.tangent[lane] = staging.tangents[slot][lane];
         }
-        if (staging.hasUvs)
-        {
+        if (staging.hasUvs) {
             vertex.uv[0] = staging.uvs[slot][0];
             vertex.uv[1] = staging.uvs[slot][1];
         }
@@ -874,8 +820,7 @@ void Importer::optimize()
     // they run per submesh -- meshoptimizer says so explicitly, and running them
     // across the whole buffer would shuffle triangles between submeshes and
     // break every index range.
-    for (const Submesh& submesh : out_.mesh.submeshes)
-    {
+    for (const Submesh& submesh : out_.mesh.submeshes) {
         if (submesh.indexCount == 0)
             continue;
 
@@ -883,21 +828,23 @@ void Importer::optimize()
         meshopt_optimizeVertexCache(range, range, submesh.indexCount, vertexCount);
         // Overdraw wants cache-optimized input, which is why it is second.
         meshopt_optimizeOverdraw(range, range, submesh.indexCount, &out_.mesh.vertices[0].position.x, vertexCount,
-            sizeof(Vertex), kOverdrawThreshold);
+                                 sizeof(Vertex), kOverdrawThreshold);
     }
 
     // Vertex fetch reorders the vertex buffer itself and rewrites index values
     // in place, so it is one pass over everything and it leaves each submesh's
     // index *range* exactly where it was.
-    const std::size_t unique = meshopt_optimizeVertexFetch(out_.mesh.vertices.data(), out_.mesh.indices.data(),
-        out_.mesh.indices.size(), out_.mesh.vertices.data(), vertexCount, sizeof(Vertex));
+    const std::size_t unique =
+        meshopt_optimizeVertexFetch(out_.mesh.vertices.data(), out_.mesh.indices.data(), out_.mesh.indices.size(),
+                                    out_.mesh.vertices.data(), vertexCount, sizeof(Vertex));
     out_.mesh.vertices.resize(unique);
 }
 
 } // namespace
 
 std::optional<core::EngineError> importGltf(std::span<const std::byte> bytes,
-    const std::filesystem::path& baseDirectory, const GltfImportOptions& options, Model& out)
+                                            const std::filesystem::path& baseDirectory,
+                                            const GltfImportOptions& options, Model& out)
 {
     out = Model{};
 
@@ -916,8 +863,8 @@ std::optional<core::EngineError> importGltf(std::span<const std::byte> bytes,
     // -- a `.gltf` beside its `.bin` and its `.png`. GenerateMeshIndices gives
     // an unindexed primitive the trivial index buffer so there is one path
     // below rather than two.
-    const fg::Options parseOptions = fg::Options::LoadExternalBuffers | fg::Options::LoadExternalImages
-        | fg::Options::GenerateMeshIndices;
+    const fg::Options parseOptions =
+        fg::Options::LoadExternalBuffers | fg::Options::LoadExternalImages | fg::Options::GenerateMeshIndices;
 
     auto parsed = parser.loadGltf(data.get(), baseDirectory, parseOptions);
     if (!parsed)
@@ -931,8 +878,7 @@ std::optional<core::EngineError> importGltf(std::span<const std::byte> bytes,
         return core::makeError(LUAUG_TR("asset.gltf.err.invalid_document"), {}, describe(error));
 
     Importer importer(parsed.get(), options, out);
-    if (auto error = importer.run())
-    {
+    if (auto error = importer.run()) {
         // "Returns an error rather than a partial model" -- whatever was built
         // before the failure is discarded, not handed back.
         out = Model{};

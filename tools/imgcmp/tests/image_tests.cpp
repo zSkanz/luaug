@@ -1,31 +1,28 @@
-#include <doctest/doctest.h>
+#include "luaug/imgcmp/image.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <doctest/doctest.h>
 #include <string_view>
 #include <vector>
 
-#include "luaug/imgcmp/image.h"
-
-using luaug::imgcmp::Image;
-using luaug::imgcmp::LoadResult;
-using luaug::imgcmp::WriteResult;
 using luaug::imgcmp::decodePng;
 using luaug::imgcmp::encodePng;
+using luaug::imgcmp::Image;
 using luaug::imgcmp::loadPngFile;
+using luaug::imgcmp::LoadResult;
 using luaug::imgcmp::makeImage;
 using luaug::imgcmp::writePngFile;
+using luaug::imgcmp::WriteResult;
 
-namespace
-{
+namespace {
 
 // Deterministic, dependency-free content: a gradient over all four channels so
 // a lost or reordered channel cannot survive the round trip unnoticed.
 Image gradient(int width, int height)
 {
     Image image = makeImage(width, height);
-    for (std::size_t pixel = 0; pixel < image.pixelCount(); ++pixel)
-    {
+    for (std::size_t pixel = 0; pixel < image.pixelCount(); ++pixel) {
         const std::size_t base = pixel * 4u;
         image.rgba[base + 0] = static_cast<std::uint8_t>(pixel * 7u);
         image.rgba[base + 1] = static_cast<std::uint8_t>(pixel * 13u);

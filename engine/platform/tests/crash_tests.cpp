@@ -7,14 +7,12 @@
 // broken. A handler that formatted its path while handling a fault would be
 // allocating in a process whose heap is one of the things that might be
 // corrupt, and would produce nothing exactly when it is needed.
-#include <doctest/doctest.h>
-
-#include <ostream>
-
-#include <filesystem>
-#include <string>
-
 #include "luaug/platform/crash.h"
+
+#include <doctest/doctest.h>
+#include <filesystem>
+#include <ostream>
+#include <string>
 
 using namespace luaug;
 

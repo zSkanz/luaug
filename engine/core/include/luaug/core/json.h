@@ -17,16 +17,15 @@
 //   Nothing is coerced. Asking a string for a number is an error, not a zero.
 #pragma once
 
+#include "luaug/core/types.h"
+
 #include <memory>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "luaug/core/types.h"
-
-namespace luaug::core
-{
+namespace luaug::core {
 
 enum class JsonType : u8
 {
@@ -116,11 +115,7 @@ private:
     friend class JsonDocument;
 
     struct Node;
-    explicit JsonValue(const Node* node, const JsonDocument::Impl* owner) noexcept
-        : node_(node)
-        , owner_(owner)
-    {
-    }
+    explicit JsonValue(const Node* node, const JsonDocument::Impl* owner) noexcept : node_(node), owner_(owner) {}
 
     const Node* node_ = nullptr;
     const JsonDocument::Impl* owner_ = nullptr;

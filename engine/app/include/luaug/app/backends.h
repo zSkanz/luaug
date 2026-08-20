@@ -6,14 +6,13 @@
 // backends.cpp, and a shipping build compiles exactly one real backend per seam.
 #pragma once
 
-#include <optional>
-#include <string_view>
-
 #include "luaug/core/error.h"
 #include "luaug/rhi/backends.h"
 
-namespace luaug::app
-{
+#include <optional>
+#include <string_view>
+
+namespace luaug::app {
 
 // Parses `--rhi=<name>`. Empty when the name is unknown OR when the backend
 // exists in the seam but was not compiled into this build -- from a user's

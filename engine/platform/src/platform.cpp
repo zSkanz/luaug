@@ -1,19 +1,16 @@
 #include "luaug/platform/platform.h"
 
-#include <chrono>
+#include "luaug/core/text_key.h"
 
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_hints.h>
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_platform_defines.h>
+#include <chrono>
 
-#include "luaug/core/text_key.h"
-
-namespace luaug::platform
-{
-namespace
-{
+namespace luaug::platform {
+namespace {
 
 bool g_initialized = false;
 
@@ -45,12 +42,10 @@ void resolvePaths()
 #else
     // Null on platforms that do not implement it; the working directory is the
     // same fallback the M0 host used, and is what CTest provides.
-    if (const char* base = SDL_GetBasePath(); base != nullptr)
-    {
+    if (const char* base = SDL_GetBasePath(); base != nullptr) {
         paths.executableDir = std::filesystem::path(base);
     }
-    else
-    {
+    else {
         std::error_code ec;
         paths.executableDir = std::filesystem::current_path(ec);
     }

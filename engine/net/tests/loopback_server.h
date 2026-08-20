@@ -32,8 +32,7 @@
 
 #include "luaug/core/types.h"
 
-namespace luaug::net::testing
-{
+namespace luaug::net::testing {
 
 using core::u16;
 using core::u8;
@@ -49,8 +48,7 @@ inline void closeRaw(RawSocket s)
 }
 inline void startupSockets()
 {
-    static bool done = []
-    {
+    static bool done = [] {
         WSADATA data{};
         WSAStartup(MAKEWORD(2, 2), &data);
         return true;
@@ -65,15 +63,15 @@ inline void closeRaw(RawSocket s)
     if (s != kInvalid)
         ::close(s);
 }
-inline void startupSockets() {}
+inline void startupSockets()
+{}
 #endif
 
 // The accepted connection, as seen by the fake server.
 class Connection
 {
 public:
-    explicit Connection(RawSocket socket)
-        : m_socket(socket)
+    explicit Connection(RawSocket socket) : m_socket(socket)
     {
         // A read deadline, because the failure mode of this helper is a test
         // that waits forever for bytes the client was never going to send --
@@ -81,8 +79,7 @@ public:
         // costing a CI runner its whole timeout to say it.
 #if defined(_WIN32)
         const DWORD timeoutMs = 10000;
-        ::setsockopt(
-            m_socket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeoutMs), sizeof(timeoutMs));
+        ::setsockopt(m_socket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeoutMs), sizeof(timeoutMs));
 #else
         timeval timeout{};
         timeout.tv_sec = 10;
@@ -121,14 +118,10 @@ public:
     void write(std::span<const u8> data)
     {
         usize sent = 0;
-        while (sent < data.size())
-        {
+        while (sent < data.size()) {
 #if defined(_WIN32)
-            const int written = ::send(
-                m_socket,
-                reinterpret_cast<const char*>(data.data() + sent),
-                static_cast<int>(data.size() - sent),
-                0);
+            const int written = ::send(m_socket, reinterpret_cast<const char*>(data.data() + sent),
+                                       static_cast<int>(data.size() - sent), 0);
 #else
             const auto written = static_cast<int>(::send(m_socket, data.data() + sent, data.size() - sent, 0));
 #endif
@@ -210,25 +203,19 @@ public:
     // back from `failure()` after `join`.
     void serve(std::function<void(Connection&)> handler)
     {
-        m_thread = std::thread(
-            [this, handler = std::move(handler)]
-            {
-                const RawSocket accepted = ::accept(m_listener, nullptr, nullptr);
-                if (accepted == kInvalid)
-                {
-                    m_failure = "loopback server: accept failed";
-                    return;
-                }
-                Connection connection(accepted);
-                try
-                {
-                    handler(connection);
-                }
-                catch (const std::exception& error)
-                {
-                    m_failure = error.what();
-                }
-            });
+        m_thread = std::thread([this, handler = std::move(handler)] {
+            const RawSocket accepted = ::accept(m_listener, nullptr, nullptr);
+            if (accepted == kInvalid) {
+                m_failure = "loopback server: accept failed";
+                return;
+            }
+            Connection connection(accepted);
+            try {
+                handler(connection);
+            } catch (const std::exception& error) {
+                m_failure = error.what();
+            }
+        });
     }
 
     void join()

@@ -1,5 +1,8 @@
 #include "luaug/script/datatypes.h"
 
+#include "luaug/scene/world.h"
+#include "luaug/script/instance_binding.h"
+
 #include <lua.h>
 #include <lualib.h>
 
@@ -11,13 +14,9 @@
 #include <string_view>
 
 #include "class_descriptors.gen.h"
-#include "luaug/scene/world.h"
-#include "luaug/script/instance_binding.h"
 
-namespace luaug::script
-{
-namespace
-{
+namespace luaug::script {
+namespace {
 
 using core::CFrameD;
 using core::Color3;
@@ -194,9 +193,8 @@ int cframeVectorToObjectSpace(lua_State* L)
     // all; what is left is an item of the WRONG enum, which the tag cannot tell
     // apart because every enum item shares one.
     const scene::EnumValue& item = checkTagged<scene::EnumValue>(L, index, UserdataTag::EnumItem);
-    if (item.enumId != scene::generated::RotationOrderEnumId || item.value < 0
-        || item.value > static_cast<i32>(core::RotationOrder::ZYX))
-    {
+    if (item.enumId != scene::generated::RotationOrderEnumId || item.value < 0 ||
+        item.value > static_cast<i32>(core::RotationOrder::ZYX)) {
         const core::I18nArg args[] = {
             {"function", std::string_view{functionName}},
             {"enumName", std::string_view{"RotationOrder"}},
@@ -250,8 +248,7 @@ int cframeToQuaternion(lua_State* L)
 int cframeMul(lua_State* L)
 {
     const CFrameD& self = checkTagged<CFrameD>(L, 1, UserdataTag::CFrame);
-    if (lua_isvector(L, 2))
-    {
+    if (lua_isvector(L, 2)) {
         // A **point**: the translation applies. `VectorToWorldSpace` is the
         // direction form, and the two differ by exactly the frame's position.
         pushVec3(L, core::toVec3(core::transformPoint(self, core::toDVec3(checkVec3(L, 2)))));
@@ -280,16 +277,9 @@ int cframeTostring(lua_State* L)
     // Position first and then the YXZ euler angles in degrees, because that is
     // what `Orientation` shows and a frame printed in nine matrix entries is not
     // something anybody reads.
-    std::snprintf(
-        text,
-        sizeof(text),
-        "%.6g, %.6g, %.6g, %.6g, %.6g, %.6g",
-        self.position.x,
-        self.position.y,
-        self.position.z,
-        static_cast<f64>(angles.x) * 57.29577951308232,
-        static_cast<f64>(angles.y) * 57.29577951308232,
-        static_cast<f64>(angles.z) * 57.29577951308232);
+    std::snprintf(text, sizeof(text), "%.6g, %.6g, %.6g, %.6g, %.6g, %.6g", self.position.x, self.position.y,
+                  self.position.z, static_cast<f64>(angles.x) * 57.29577951308232,
+                  static_cast<f64>(angles.y) * 57.29577951308232, static_cast<f64>(angles.z) * 57.29577951308232);
     lua_pushstring(L, text);
     return 1;
 }
@@ -297,14 +287,12 @@ int cframeTostring(lua_State* L)
 int cframeNew(lua_State* L)
 {
     CFrameD result;
-    if (lua_isvector(L, 1))
-    {
+    if (lua_isvector(L, 1)) {
         // The vector overload enters through f32, which is why the numeric one
         // exists: `CFrame.new(x, y, z)` keeps every bit the caller wrote.
         result.position = core::toDVec3(checkVec3(L, 1));
     }
-    else
-    {
+    else {
         result.position = core::DVec3{luaL_optnumber(L, 1, 0.0), luaL_optnumber(L, 2, 0.0), luaL_optnumber(L, 3, 0.0)};
     }
     pushTagged(L, UserdataTag::CFrame, result);
@@ -321,10 +309,8 @@ int cframeLookAt(lua_State* L)
         static_cast<float>(IdentityUp[2]),
     };
     const float* up = luaL_optvector(L, 3, defaultUp);
-    pushTagged(
-        L,
-        UserdataTag::CFrame,
-        core::lookAtCFrame(core::toDVec3(position), core::toDVec3(target), Vec3{up[0], up[1], up[2]}));
+    pushTagged(L, UserdataTag::CFrame,
+               core::lookAtCFrame(core::toDVec3(position), core::toDVec3(target), Vec3{up[0], up[1], up[2]}));
     return 1;
 }
 
@@ -353,11 +339,9 @@ int cframeFromQuaternion(lua_State* L)
 {
     CFrameD result;
     result.position = core::toDVec3(checkVec3(L, 1));
-    result.rotation = core::fromQuaternion(
-        static_cast<f32>(luaL_checknumber(L, 2)),
-        static_cast<f32>(luaL_checknumber(L, 3)),
-        static_cast<f32>(luaL_checknumber(L, 4)),
-        static_cast<f32>(luaL_checknumber(L, 5)));
+    result.rotation =
+        core::fromQuaternion(static_cast<f32>(luaL_checknumber(L, 2)), static_cast<f32>(luaL_checknumber(L, 3)),
+                             static_cast<f32>(luaL_checknumber(L, 4)), static_cast<f32>(luaL_checknumber(L, 5)));
     pushTagged(L, UserdataTag::CFrame, result);
     return 1;
 }
@@ -460,27 +444,20 @@ int color3Tostring(lua_State* L)
 {
     const Color3& self = checkTagged<Color3>(L, 1, UserdataTag::Color3);
     char text[96];
-    std::snprintf(
-        text,
-        sizeof(text),
-        "%.6g, %.6g, %.6g",
-        static_cast<f64>(self.r),
-        static_cast<f64>(self.g),
-        static_cast<f64>(self.b));
+    std::snprintf(text, sizeof(text), "%.6g, %.6g, %.6g", static_cast<f64>(self.r), static_cast<f64>(self.g),
+                  static_cast<f64>(self.b));
     lua_pushstring(L, text);
     return 1;
 }
 
 int color3New(lua_State* L)
 {
-    pushTagged(
-        L,
-        UserdataTag::Color3,
-        Color3{
-            static_cast<f32>(luaL_optnumber(L, 1, 0.0)),
-            static_cast<f32>(luaL_optnumber(L, 2, 0.0)),
-            static_cast<f32>(luaL_optnumber(L, 3, 0.0)),
-        });
+    pushTagged(L, UserdataTag::Color3,
+               Color3{
+                   static_cast<f32>(luaL_optnumber(L, 1, 0.0)),
+                   static_cast<f32>(luaL_optnumber(L, 2, 0.0)),
+                   static_cast<f32>(luaL_optnumber(L, 3, 0.0)),
+               });
     return 1;
 }
 
@@ -488,14 +465,12 @@ int color3FromRgb(lua_State* L)
 {
     // Divided and stored, not rounded to a byte: 0-255 is the range colour
     // pickers speak in, not a narrower storage format.
-    pushTagged(
-        L,
-        UserdataTag::Color3,
-        Color3{
-            static_cast<f32>(luaL_checknumber(L, 1) / 255.0),
-            static_cast<f32>(luaL_checknumber(L, 2) / 255.0),
-            static_cast<f32>(luaL_checknumber(L, 3) / 255.0),
-        });
+    pushTagged(L, UserdataTag::Color3,
+               Color3{
+                   static_cast<f32>(luaL_checknumber(L, 1) / 255.0),
+                   static_cast<f32>(luaL_checknumber(L, 2) / 255.0),
+                   static_cast<f32>(luaL_checknumber(L, 3) / 255.0),
+               });
     return 1;
 }
 
@@ -503,26 +478,20 @@ int color3FromHsv(lua_State* L)
 {
     // All three 0-1, hue included, so `fromHSV(1/3, 1, 1)` is green and not a
     // hue of one third of a degree.
-    pushTagged(
-        L,
-        UserdataTag::Color3,
-        core::fromHsv(
-            static_cast<f32>(luaL_checknumber(L, 1)),
-            static_cast<f32>(luaL_checknumber(L, 2)),
-            static_cast<f32>(luaL_checknumber(L, 3))));
+    pushTagged(L, UserdataTag::Color3,
+               core::fromHsv(static_cast<f32>(luaL_checknumber(L, 1)), static_cast<f32>(luaL_checknumber(L, 2)),
+                             static_cast<f32>(luaL_checknumber(L, 3))));
     return 1;
 }
 
 [[nodiscard]] bool hexDigit(char c, u32& out) noexcept
 {
-    if (c >= '0' && c <= '9')
-    {
+    if (c >= '0' && c <= '9') {
         out = static_cast<u32>(c - '0');
         return true;
     }
     const char lower = static_cast<char>(c | ' ');
-    if (lower >= 'a' && lower <= 'f')
-    {
+    if (lower >= 'a' && lower <= 'f') {
         out = static_cast<u32>(lower - 'a') + 10u;
         return true;
     }
@@ -542,8 +511,7 @@ int color3FromHex(lua_State* L)
     for (usize index = 0; ok && index < hex.size(); ++index)
         ok = hexDigit(hex[index], channels[index]);
 
-    if (!ok)
-    {
+    if (!ok) {
         const core::I18nArg args[] = {{"value", std::string_view{text, length}}};
         raise(L, LUAUG_TR("script.err.color_hex_invalid"), args);
     }
@@ -555,10 +523,8 @@ int color3FromHex(lua_State* L)
     const u32 g = hex.size() == 3 ? channels[1] * 17u : channels[2] * 16u + channels[3];
     const u32 b = hex.size() == 3 ? channels[2] * 17u : channels[4] * 16u + channels[5];
 
-    pushTagged(
-        L,
-        UserdataTag::Color3,
-        Color3{static_cast<f32>(r) / 255.0f, static_cast<f32>(g) / 255.0f, static_cast<f32>(b) / 255.0f});
+    pushTagged(L, UserdataTag::Color3,
+               Color3{static_cast<f32>(r) / 255.0f, static_cast<f32>(g) / 255.0f, static_cast<f32>(b) / 255.0f});
     return 1;
 }
 
@@ -567,16 +533,14 @@ int color3FromHex(lua_State* L)
 int randomNextNumber(lua_State* L)
 {
     core::Pcg32& self = checkTagged<core::Pcg32>(L, 1, UserdataTag::Random);
-    if (lua_isnoneornil(L, 2) && lua_isnoneornil(L, 3))
-    {
+    if (lua_isnoneornil(L, 2) && lua_isnoneornil(L, 3)) {
         lua_pushnumber(L, self.nextDouble());
         return 1;
     }
 
     const f64 min = luaL_optnumber(L, 2, 0.0);
     const f64 max = luaL_optnumber(L, 3, 1.0);
-    if (min > max)
-    {
+    if (min > max) {
         const core::I18nArg args[] = {{"min", min}, {"max", max}};
         raise(L, LUAUG_TR("script.err.random_range"), args);
     }
@@ -595,8 +559,7 @@ int randomNextInteger(lua_State* L)
     // cannot be drawn.
     const bool whole = std::floor(min) == min && std::floor(max) == max;
     const bool inRange = min >= -2147483648.0 && max <= 2147483647.0;
-    if (!whole || !inRange || min > max)
-    {
+    if (!whole || !inRange || min > max) {
         const core::I18nArg args[] = {{"min", min}, {"max", max}};
         raise(L, LUAUG_TR("script.err.random_range"), args);
     }
@@ -622,8 +585,7 @@ int randomClone(lua_State* L)
 
 int randomNew(lua_State* L)
 {
-    if (lua_isnoneornil(L, 1))
-    {
+    if (lua_isnoneornil(L, 1)) {
         // Unseeded. R10 forbids this in simulation code and `luaug check` flags
         // it (M3); the world's own stream is what supplies the entropy here, so
         // even the "unseeded" generator is reproducible from the recorded world
@@ -668,8 +630,7 @@ int enumItemGetName(lua_State* L)
 {
     const scene::EnumValue& self = checkTagged<scene::EnumValue>(L, 1, UserdataTag::EnumItem);
     const scene::EnumItemDesc* item = enums(L).findValue(self.enumId, self.value);
-    if (item == nullptr)
-    {
+    if (item == nullptr) {
         lua_pushstring(L, "");
         return 1;
     }
@@ -708,8 +669,7 @@ int enumItemEq(lua_State* L)
     std::string text = "Enum.";
     if (descriptor != nullptr)
         text.append(atomText(L, descriptor->name));
-    if (item.valid())
-    {
+    if (item.valid()) {
         text.push_back('.');
         text.append(atomText(L, item));
     }
@@ -731,10 +691,8 @@ int enumObjectIndex(lua_State* L)
 
     int atom = -1;
     const char* key = lua_tostringatom(L, 2, &atom);
-    if (key != nullptr)
-    {
-        if (const scene::EnumItemDesc* item = enums(L).findItem(id, context(L).resolve(atom)))
-        {
+    if (key != nullptr) {
+        if (const scene::EnumItemDesc* item = enums(L).findItem(id, context(L).resolve(atom))) {
             pushEnumItemImpl(L, scene::EnumValue{id, item->value});
             return 1;
         }
@@ -753,8 +711,7 @@ int enumObjectGetEnumItems(lua_State* L)
     // declaration order because R10 forbids a container's own order from
     // reaching observable order.
     lua_createtable(L, static_cast<int>(count), 0);
-    for (usize index = 0; index < count; ++index)
-    {
+    for (usize index = 0; index < count; ++index) {
         pushEnumItemImpl(L, scene::EnumValue{id, descriptor->items[index].value});
         lua_rawseti(L, -2, static_cast<int>(index) + 1);
     }
@@ -765,10 +722,10 @@ int enumObjectNamecall(lua_State* L)
 {
     int atom = -1;
     const char* method = lua_namecallatom(L, &atom);
-    if (method != nullptr)
-    {
+    if (method != nullptr) {
         const VmContext& ctx = context(L);
-        if (const MemberEntry* entry = findMember(ctx.methods[static_cast<usize>(UserdataTag::Enum)], ctx.resolve(atom)))
+        if (const MemberEntry* entry =
+                findMember(ctx.methods[static_cast<usize>(UserdataTag::Enum)], ctx.resolve(atom)))
             return entry->fn(L);
     }
     raiseUnknownMember(L, UserdataTag::Enum, method);
@@ -793,11 +750,9 @@ int enumsIndex(lua_State* L)
 {
     int atom = -1;
     const char* key = lua_tostringatom(L, 2, &atom);
-    if (key != nullptr)
-    {
+    if (key != nullptr) {
         const scene::EnumId id = enums(L).findId(context(L).resolve(atom));
-        if (id != scene::InvalidEnum)
-        {
+        if (id != scene::InvalidEnum) {
             pushEnumObject(L, id);
             return 1;
         }
@@ -863,8 +818,7 @@ int vectorIndex(lua_State* L)
     size_t length = 0;
     int atom = -1;
     const char* key = lua_tolstringatom(L, 2, &length, &atom);
-    if (key != nullptr)
-    {
+    if (key != nullptr) {
         // Lowercase only. `v.X` raises rather than answering, which is the whole
         // point of divergence #9: the components are the primitive's own fields
         // and there is exactly one spelling (api-design.md §2.3). Luau's own
@@ -914,8 +868,7 @@ int vectorAngle(lua_State* L)
     const Vec3 crossed = core::cross(a, b);
     const f32 angle = std::atan2(core::length(crossed), core::dot(a, b));
 
-    if (lua_isnoneornil(L, 3))
-    {
+    if (lua_isnoneornil(L, 3)) {
         pushNumber(L, angle);
         return 1;
     }
@@ -931,8 +884,7 @@ int vectorNamecall(lua_State* L)
     size_t length = 0;
     int atom = -1;
     const char* method = lua_namecallatom(L, &atom);
-    if (method != nullptr)
-    {
+    if (method != nullptr) {
         length = std::strlen(method);
         if (keyIs(method, length, "Dot"))
             return vectorDot(L);
@@ -952,11 +904,8 @@ int vectorNew(lua_State* L)
     // A missing component is 0, unlike `vector.create`, which requires x and y.
     // Bound as the compiler's `vectorCtor` (ADR 0013), so a literal call is
     // constant-folded and a dynamic one is a fastcall -- neither reaches here.
-    lua_pushvector(
-        L,
-        static_cast<float>(luaL_optnumber(L, 1, 0.0)),
-        static_cast<float>(luaL_optnumber(L, 2, 0.0)),
-        static_cast<float>(luaL_optnumber(L, 3, 0.0)));
+    lua_pushvector(L, static_cast<float>(luaL_optnumber(L, 1, 0.0)), static_cast<float>(luaL_optnumber(L, 2, 0.0)),
+                   static_cast<float>(luaL_optnumber(L, 3, 0.0)));
     return 1;
 }
 
@@ -1030,11 +979,8 @@ void registerColor3(lua_State* L, VmContext& ctx, core::AtomTable& atoms)
     installTagMetatable(L, UserdataTag::Color3, color3Eq, color3Tostring);
 
     const luaL_Reg constructors[] = {
-        {"new", color3New},
-        {"fromRGB", color3FromRgb},
-        {"fromHSV", color3FromHsv},
-        {"fromHex", color3FromHex},
-        {nullptr, nullptr},
+        {"new", color3New},         {"fromRGB", color3FromRgb}, {"fromHSV", color3FromHsv},
+        {"fromHex", color3FromHex}, {nullptr, nullptr},
     };
     luaL_register(L, "Color3", constructors);
     lua_setreadonly(L, -1, true);
@@ -1120,11 +1066,9 @@ void registerVector(lua_State* L)
     // No table identity is promised, and this is why -- they are two tables.
     lua_createtable(L, 0, 17);
     lua_getglobal(L, "vector");
-    if (lua_istable(L, -1))
-    {
+    if (lua_istable(L, -1)) {
         lua_pushnil(L);
-        while (lua_next(L, -2) != 0)
-        {
+        while (lua_next(L, -2) != 0) {
             // key at -2, value at -1; `lua_rawset` pops both, and the key copy
             // is what keeps `lua_next` able to continue from it.
             lua_pushvalue(L, -2);
@@ -1200,8 +1144,7 @@ core::Vec3 checkVector3(lua_State* L, int index)
 
 void pushValue(lua_State* L, const scene::Value& value)
 {
-    switch (scene::valueType(value))
-    {
+    switch (scene::valueType(value)) {
     case scene::ValueType::Nil:
         lua_pushnil(L);
         return;
@@ -1211,8 +1154,7 @@ void pushValue(lua_State* L, const scene::Value& value)
     case scene::ValueType::Number:
         lua_pushnumber(L, std::get<f64>(value));
         return;
-    case scene::ValueType::String:
-    {
+    case scene::ValueType::String: {
         const std::string& text = std::get<std::string>(value);
         lua_pushlstring(L, text.data(), text.size());
         return;
@@ -1238,8 +1180,7 @@ void pushValue(lua_State* L, const scene::Value& value)
 
 std::optional<scene::Value> toValue(lua_State* L, int index, scene::ValueType expected)
 {
-    switch (expected)
-    {
+    switch (expected) {
     case scene::ValueType::Nil:
         return lua_isnoneornil(L, index) ? std::optional<scene::Value>{scene::Value{}} : std::nullopt;
     case scene::ValueType::Bool:
@@ -1252,8 +1193,7 @@ std::optional<scene::Value> toValue(lua_State* L, int index, scene::ValueType ex
         if (lua_type(L, index) != LUA_TNUMBER)
             return std::nullopt;
         return scene::Value{lua_tonumber(L, index)};
-    case scene::ValueType::String:
-    {
+    case scene::ValueType::String: {
         // Also strict: `lua_tostring` would coerce a number, and a property that
         // accepted `part.Name = 3` would be storing the coercion's answer rather
         // than the caller's intent.
@@ -1263,29 +1203,25 @@ std::optional<scene::Value> toValue(lua_State* L, int index, scene::ValueType ex
         const char* text = lua_tolstring(L, index, &length);
         return scene::Value{std::string(text, length)};
     }
-    case scene::ValueType::Vector3:
-    {
+    case scene::ValueType::Vector3: {
         const float* v = lua_tovector(L, index);
         if (v == nullptr)
             return std::nullopt;
         return scene::Value{core::Vec3{v[0], v[1], v[2]}};
     }
-    case scene::ValueType::CFrame:
-    {
+    case scene::ValueType::CFrame: {
         const CFrameD* cframe = toTagged<CFrameD>(L, index, UserdataTag::CFrame);
         if (cframe == nullptr)
             return std::nullopt;
         return scene::Value{*cframe};
     }
-    case scene::ValueType::Color3:
-    {
+    case scene::ValueType::Color3: {
         const Color3* color = toTagged<Color3>(L, index, UserdataTag::Color3);
         if (color == nullptr)
             return std::nullopt;
         return scene::Value{*color};
     }
-    case scene::ValueType::Instance:
-    {
+    case scene::ValueType::Instance: {
         // nil is a legal Instance value -- it is what an unparented `Parent`
         // reads as and what clearing a reference writes.
         if (lua_isnoneornil(L, index))
@@ -1295,8 +1231,7 @@ std::optional<scene::Value> toValue(lua_State* L, int index, scene::ValueType ex
             return std::nullopt;
         return scene::Value{*id};
     }
-    case scene::ValueType::EnumItem:
-    {
+    case scene::ValueType::EnumItem: {
         const scene::EnumValue* item = toTagged<scene::EnumValue>(L, index, UserdataTag::EnumItem);
         if (item == nullptr)
             return std::nullopt;

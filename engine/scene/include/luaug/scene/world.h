@@ -14,12 +14,6 @@
 // without anyone thinking about it.
 #pragma once
 
-#include <optional>
-#include <string>
-#include <span>
-#include <unordered_map>
-#include <vector>
-
 #include "luaug/core/id.h"
 #include "luaug/core/name_atom.h"
 #include "luaug/core/random.h"
@@ -28,13 +22,18 @@
 #include "luaug/scene/change_queue.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/component_pool.h"
-#include "luaug/scene/enum_registry.h"
 #include "luaug/scene/components.h"
+#include "luaug/scene/enum_registry.h"
 #include "luaug/scene/types.h"
 #include "luaug/scene/value.h"
 
-namespace luaug::scene
-{
+#include <optional>
+#include <span>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+namespace luaug::scene {
 
 // Intrusive links plus the duplicate-name chain (ADR 0026). `lastChild` exists
 // so that appending is O(1) -- child order is parenting order, and every parent

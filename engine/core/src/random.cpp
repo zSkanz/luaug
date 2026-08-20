@@ -3,10 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
-namespace luaug::core
-{
-namespace
-{
+namespace luaug::core {
+namespace {
 
 // PCG-XSH-RR 64/32, verbatim from the reference implementation. Every constant
 // here is part of the published algorithm rather than a tuning choice: changing

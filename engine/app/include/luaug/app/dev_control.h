@@ -12,16 +12,15 @@
 // that makes within-run determinism survive having a watcher attached.
 #pragma once
 
+#include "luaug/core/error.h"
+#include "luaug/core/types.h"
+
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
-#include "luaug/core/error.h"
-#include "luaug/core/types.h"
-
-namespace luaug::app
-{
+namespace luaug::app {
 
 struct DevControlOptions
 {

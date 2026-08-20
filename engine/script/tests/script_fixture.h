@@ -10,6 +10,15 @@
 // question these files exist to answer (M2 brief, ruling R-D).
 #pragma once
 
+#include "luaug/core/i18n.h"
+#include "luaug/core/log.h"
+#include "luaug/core/name_atom.h"
+#include "luaug/core/phase.h"
+#include "luaug/scene/class_registry.h"
+#include "luaug/scene/enum_registry.h"
+#include "luaug/scene/world.h"
+#include "luaug/script/runtime.h"
+
 #include <cstddef>
 #include <initializer_list>
 #include <optional>
@@ -19,17 +28,8 @@
 #include <vector>
 
 #include "class_descriptors.gen.h"
-#include "luaug/core/i18n.h"
-#include "luaug/core/log.h"
-#include "luaug/core/phase.h"
-#include "luaug/core/name_atom.h"
-#include "luaug/scene/class_registry.h"
-#include "luaug/scene/enum_registry.h"
-#include "luaug/scene/world.h"
-#include "luaug/script/runtime.h"
 
-namespace luaug::script::testing
-{
+namespace luaug::script::testing {
 
 using core::usize;
 
@@ -61,9 +61,8 @@ struct Fixture
         //
         // The sink is process-global, so two live fixtures fight over it and the
         // younger wins. No test below keeps two alive while asserting on output.
-        core::setLogSink([this](core::LogLevel level, std::string_view text) {
-            logged.emplace_back(level, std::string(text));
-        });
+        core::setLogSink(
+            [this](core::LogLevel level, std::string_view text) { logged.emplace_back(level, std::string(text)); });
     }
 
     ~Fixture() { core::resetLogSink(); }
@@ -109,8 +108,7 @@ struct Fixture
     [[nodiscard]] std::string errors() const
     {
         std::string out;
-        for (const auto& [level, text] : logged)
-        {
+        for (const auto& [level, text] : logged) {
             if (level != core::LogLevel::Error)
                 continue;
             if (!out.empty())
@@ -123,8 +121,7 @@ struct Fixture
     [[nodiscard]] std::size_t logCount(std::string_view needle) const
     {
         std::size_t count = 0;
-        for (const auto& [level, text] : logged)
-        {
+        for (const auto& [level, text] : logged) {
             (void)level;
             if (text.find(needle) != std::string::npos)
                 ++count;
@@ -134,8 +131,7 @@ struct Fixture
 
     [[nodiscard]] bool logContains(std::string_view needle) const
     {
-        for (const auto& [level, text] : logged)
-        {
+        for (const auto& [level, text] : logged) {
             (void)level;
             if (text.find(needle) != std::string::npos)
                 return true;
@@ -151,8 +147,7 @@ struct Fixture
     // `task.wait` observable from a C++ test at all.
     void tick(usize count = 1)
     {
-        for (usize index = 0; index < count; ++index)
-        {
+        for (usize index = 0; index < count; ++index) {
             scene::EngineState& state = world->engineState();
             state.tick += 1;
             state.simTime = static_cast<core::f64>(state.tick) * state.fixedTimestep;
@@ -162,8 +157,7 @@ struct Fixture
             // headless -- headless is the same scheduler minus the render steps.
             const core::f64 delta = state.fixedTimestep;
             for (const core::Phase phase :
-                 {core::Phase::PreAnimation, core::Phase::PreSimulation, core::Phase::PostSimulation})
-            {
+                 {core::Phase::PreAnimation, core::Phase::PreSimulation, core::Phase::PostSimulation}) {
                 runtime->firePhase(phase, delta);
                 runtime->drain(phase);
             }

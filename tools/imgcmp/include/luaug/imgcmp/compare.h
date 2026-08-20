@@ -7,12 +7,11 @@
 // large error on every other pixel as well.
 #pragma once
 
-#include <cstddef>
-
 #include "luaug/imgcmp/image.h"
 
-namespace luaug::imgcmp
-{
+#include <cstddef>
+
+namespace luaug::imgcmp {
 
 // Why a tolerance exists at all: the same frame rendered on WARP and on a real
 // GPU legitimately lands a rounding step apart per channel. The defaults are

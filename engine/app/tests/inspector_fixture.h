@@ -10,12 +10,6 @@
 // no shipped class uses is the one the panel is likeliest to forget.
 #pragma once
 
-#include <string>
-#include <string_view>
-#include <unordered_map>
-#include <variant>
-#include <vector>
-
 #include "luaug/core/id.h"
 #include "luaug/core/math.h"
 #include "luaug/core/name_atom.h"
@@ -24,8 +18,13 @@
 #include "luaug/scene/value.h"
 #include "luaug/scene/world.h"
 
-namespace luaug::app::testing
-{
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <variant>
+#include <vector>
+
+namespace luaug::app::testing {
 
 namespace core = luaug::core;
 namespace scene = luaug::scene;

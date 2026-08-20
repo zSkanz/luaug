@@ -21,8 +21,7 @@
 
 #include <SDL3/SDL_gpu.h>
 
-namespace luaug::rhi
-{
+namespace luaug::rhi {
 
 class IDevice;
 

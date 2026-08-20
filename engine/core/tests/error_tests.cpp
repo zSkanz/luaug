@@ -1,21 +1,19 @@
-#include <doctest/doctest.h>
+#include "luaug/core/error.h"
+#include "luaug/core/log.h"
 
 #include <array>
+#include <doctest/doctest.h>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "luaug/core/error.h"
-#include "luaug/core/log.h"
-
 using luaug::core::Catalog;
-using luaug::core::EngineError;
 using luaug::core::engineCatalog;
+using luaug::core::EngineError;
 using luaug::core::I18nArg;
 using luaug::core::LogLevel;
 
-namespace
-{
+namespace {
 
 // Each case seeds the process-wide catalog itself rather than relying on
 // another test having done so, so the file has no hidden ordering.
@@ -25,7 +23,7 @@ void seedEngineCatalog()
         "assets.err.not_found": "Asset not found: {content}.",
         "engine.boot.hello": "LuauG {version} - engine initialized."
     })",
-        "test");
+                                                                    "test");
     REQUIRE_MESSAGE(result.ok, result.diagnostic);
 }
 
@@ -74,8 +72,8 @@ TEST_CASE("logging routes through the catalog")
     seedEngineCatalog();
 
     std::vector<std::pair<LogLevel, std::string>> captured;
-    const ScopedLogSink guard([&](LogLevel level, std::string_view text)
-        { captured.emplace_back(level, std::string{text}); });
+    const ScopedLogSink guard(
+        [&](LogLevel level, std::string_view text) { captured.emplace_back(level, std::string{text}); });
 
     SUBCASE("a keyed message is formatted before reaching the sink")
     {

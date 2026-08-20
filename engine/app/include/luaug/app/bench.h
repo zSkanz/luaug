@@ -10,16 +10,15 @@
 // measures elapsed time has no other instrument.
 #pragma once
 
+#include "luaug/core/error.h"
+#include "luaug/core/types.h"
+
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
 
-#include "luaug/core/error.h"
-#include "luaug/core/types.h"
-
-namespace luaug::app
-{
+namespace luaug::app {
 
 using core::f64;
 using core::u64;
@@ -47,7 +46,7 @@ struct BenchResult
 // teach everyone to ignore it. The precise numbers live in
 // `docs/perf-baselines.md`, measured on the reference machine; this catches the
 // change that made a tick ten times slower.
-[[nodiscard]] std::optional<core::EngineError> runBenchmarks(
-    const std::filesystem::path& root, u64 repeats, std::vector<BenchResult>& out);
+[[nodiscard]] std::optional<core::EngineError> runBenchmarks(const std::filesystem::path& root, u64 repeats,
+                                                             std::vector<BenchResult>& out);
 
 } // namespace luaug::app

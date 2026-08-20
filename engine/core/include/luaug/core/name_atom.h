@@ -14,15 +14,14 @@
 // comparison key and nothing else.
 #pragma once
 
+#include "luaug/core/types.h"
+
 #include <deque>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 
-#include "luaug/core/types.h"
-
-namespace luaug::core
-{
+namespace luaug::core {
 
 // Atom 0 is the empty/absent name, so a zero-initialised `NameAtom` is absent
 // and `valid()` is one comparison -- the same convention `InstanceId` uses.

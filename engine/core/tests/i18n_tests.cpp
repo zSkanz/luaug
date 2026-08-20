@@ -1,16 +1,14 @@
-#include <doctest/doctest.h>
-
-#include <array>
-#include <string>
-
 #include "luaug/core/i18n.h"
 
-using luaug::core::Catalog;
-using luaug::core::i64;
-using luaug::core::I18nArg;
+#include <array>
+#include <doctest/doctest.h>
+#include <string>
 
-namespace
-{
+using luaug::core::Catalog;
+using luaug::core::I18nArg;
+using luaug::core::i64;
+
+namespace {
 
 Catalog loadOrFail(std::string_view json)
 {
@@ -75,8 +73,7 @@ TEST_CASE("catalog parsing")
             {R"({"k": "v"} extra)", "trailing content"},
         }};
 
-        for (const Case& testCase : cases)
-        {
+        for (const Case& testCase : cases) {
             Catalog catalog;
             const Catalog::LoadResult result = catalog.loadFromJson(testCase.json, "test");
             CHECK_MESSAGE(!result.ok, testCase.what);
@@ -158,8 +155,7 @@ TEST_CASE("catalog plurals")
 
     SUBCASE("selects 'other' for every other count")
     {
-        for (const i64 count : {static_cast<i64>(0), static_cast<i64>(2), static_cast<i64>(17)})
-        {
+        for (const i64 count : {static_cast<i64>(0), static_cast<i64>(2), static_cast<i64>(17)}) {
             const std::array<I18nArg, 1> args{I18nArg{"count", count}};
             CHECK(catalog.format(LUAUG_TR("reloaded"), args) == "Reloaded " + std::to_string(count) + " scripts.");
         }

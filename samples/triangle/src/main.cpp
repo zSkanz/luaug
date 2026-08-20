@@ -25,19 +25,6 @@
 // it (device creation, shader loading) arrive already formatted through the
 // catalog and are printed verbatim.
 
-#include <array>
-#include <charconv>
-#include <cmath>
-#include <cstddef>
-#include <cstdlib>
-#include <filesystem>
-#include <optional>
-#include <span>
-#include <string>
-#include <string_view>
-#include <utility>
-#include <vector>
-
 #include "luaug/asset/image.h"
 #include "luaug/core/build_info.h"
 #include "luaug/core/error.h"
@@ -53,16 +40,28 @@
 #include "luaug/rhi/backends.h"
 #include "luaug/rhi/device.h"
 
-namespace
-{
+#include <array>
+#include <charconv>
+#include <cmath>
+#include <cstddef>
+#include <cstdlib>
+#include <filesystem>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+namespace {
 
 using luaug::core::f32;
+using luaug::core::I18nArg;
 using luaug::core::i32;
+using luaug::core::LogLevel;
 using luaug::core::u32;
 using luaug::core::u64;
 using luaug::core::usize;
-using luaug::core::I18nArg;
-using luaug::core::LogLevel;
 
 namespace platform = luaug::platform;
 namespace render = luaug::render;
@@ -133,7 +132,7 @@ struct Options
 void report(LogLevel level, std::string_view text)
 {
     const auto stream = (level == LogLevel::Warn || level == LogLevel::Error) ? platform::ConsoleStream::Err
-                                                                             : platform::ConsoleStream::Out;
+                                                                              : platform::ConsoleStream::Out;
     platform::writeConsole(stream, luaug::core::formatLogLine(level, text));
 }
 
@@ -146,16 +145,15 @@ void reportError(const luaug::core::EngineError& error)
 
 void printUsage()
 {
-    report(LogLevel::Info,
-        "luaug-triangle -- draws one triangle through the SDL_GPU backend.\n"
-        "\n"
-        "  --frames N          stop after N frames (required with --headless)\n"
-        "  --headless          render into an offscreen target instead of a window\n"
-        "  --screenshot PATH   write the frame to PATH as PNG (implies a readback, so --headless)\n"
-        "  --verify            assert the triangle is where it should be and report a verdict\n"
-        "  --help              this text\n"
-        "\n"
-        "Both spellings of a valued flag are accepted: --frames 3 and --frames=3.");
+    report(LogLevel::Info, "luaug-triangle -- draws one triangle through the SDL_GPU backend.\n"
+                           "\n"
+                           "  --frames N          stop after N frames (required with --headless)\n"
+                           "  --headless          render into an offscreen target instead of a window\n"
+                           "  --screenshot PATH   write the frame to PATH as PNG (implies a readback, so --headless)\n"
+                           "  --verify            assert the triangle is where it should be and report a verdict\n"
+                           "  --help              this text\n"
+                           "\n"
+                           "Both spellings of a valued flag are accepted: --frames 3 and --frames=3.");
 }
 
 struct Rgba8
@@ -185,16 +183,15 @@ struct Rgba8
 
 [[nodiscard]] bool withinTolerance(const Rgba8& actual, const Rgba8& expected) noexcept
 {
-    return std::abs(actual.r - expected.r) <= kChannelTolerance
-        && std::abs(actual.g - expected.g) <= kChannelTolerance
-        && std::abs(actual.b - expected.b) <= kChannelTolerance
-        && std::abs(actual.a - expected.a) <= kChannelTolerance;
+    return std::abs(actual.r - expected.r) <= kChannelTolerance &&
+           std::abs(actual.g - expected.g) <= kChannelTolerance &&
+           std::abs(actual.b - expected.b) <= kChannelTolerance && std::abs(actual.a - expected.a) <= kChannelTolerance;
 }
 
 [[nodiscard]] std::string describe(const Rgba8& color)
 {
-    return "rgba(" + std::to_string(color.r) + ", " + std::to_string(color.g) + ", " + std::to_string(color.b)
-        + ", " + std::to_string(color.a) + ")";
+    return "rgba(" + std::to_string(color.r) + ", " + std::to_string(color.g) + ", " + std::to_string(color.b) + ", " +
+           std::to_string(color.a) + ")";
 }
 
 // Two claims that no single failure can satisfy at once: the middle of the
@@ -214,15 +211,12 @@ struct Rgba8
     bool ok = true;
 
     const Rgba8 centre = pixelAt(pixels, width, width / 2u, height / 2u);
-    if (withinTolerance(centre, expectedTriangle))
-    {
+    if (withinTolerance(centre, expectedTriangle)) {
         report(LogLevel::Info, "verify: centre is the triangle colour " + describe(centre));
     }
-    else
-    {
-        report(LogLevel::Error,
-            "verify: centre is " + describe(centre) + ", expected the triangle colour "
-                + describe(expectedTriangle));
+    else {
+        report(LogLevel::Error, "verify: centre is " + describe(centre) + ", expected the triangle colour " +
+                                    describe(expectedTriangle));
         ok = false;
     }
 
@@ -233,15 +227,13 @@ struct Rgba8
         std::pair<u32, u32>{width - 1u, height - 1u},
     };
 
-    for (const auto& [x, y] : corners)
-    {
+    for (const auto& [x, y] : corners) {
         const Rgba8 corner = pixelAt(pixels, width, x, y);
         if (withinTolerance(corner, expectedClear))
             continue;
 
-        report(LogLevel::Error,
-            "verify: corner (" + std::to_string(x) + ", " + std::to_string(y) + ") is " + describe(corner)
-                + ", expected the clear colour " + describe(expectedClear));
+        report(LogLevel::Error, "verify: corner (" + std::to_string(x) + ", " + std::to_string(y) + ") is " +
+                                    describe(corner) + ", expected the clear colour " + describe(expectedClear));
         ok = false;
     }
 
@@ -388,12 +380,11 @@ private:
 // Accepts both `--frames=3` and `--frames 3`. The host spells its flags with
 // `=`; somebody typing this into an adb shell will not, and a sample that
 // answers a device question should not also be a spelling test.
-[[nodiscard]] bool valueFor(
-    std::span<const std::string_view> args, usize& index, std::string_view name, std::string_view& out)
+[[nodiscard]] bool valueFor(std::span<const std::string_view> args, usize& index, std::string_view name,
+                            std::string_view& out)
 {
     const std::string_view arg = args[index];
-    if (arg == name)
-    {
+    if (arg == name) {
         if (index + 1 >= args.size())
             return false;
         ++index;
@@ -401,8 +392,7 @@ private:
         return true;
     }
 
-    if (arg.starts_with(name) && arg.size() > name.size() && arg[name.size()] == '=')
-    {
+    if (arg.starts_with(name) && arg.size() > name.size() && arg[name.size()] == '=') {
         out = arg.substr(name.size() + 1);
         return !out.empty();
     }
@@ -413,47 +403,38 @@ private:
 // kExitOk when the caller should proceed, otherwise the exit code to return.
 [[nodiscard]] int parseOptions(std::span<const std::string_view> args, Options& options)
 {
-    for (usize i = 0; i < args.size(); ++i)
-    {
+    for (usize i = 0; i < args.size(); ++i) {
         const std::string_view arg = args[i];
         std::string_view value;
 
-        if (arg == "--help")
-        {
+        if (arg == "--help") {
             printUsage();
             options.helpRequested = true;
             return kExitOk;
         }
-        if (arg == "--headless")
-        {
+        if (arg == "--headless") {
             options.headless = true;
             continue;
         }
-        if (arg == "--verify")
-        {
+        if (arg == "--verify") {
             options.verify = true;
             continue;
         }
-        if (arg.starts_with("--frames"))
-        {
-            if (!valueFor(args, i, "--frames", value))
-            {
+        if (arg.starts_with("--frames")) {
+            if (!valueFor(args, i, "--frames", value)) {
                 report(LogLevel::Error, std::string("--frames needs a count: ") + std::string(arg));
                 return kExitUsage;
             }
             const auto* const end = value.data() + value.size();
             if (const auto result = std::from_chars(value.data(), end, options.frames);
-                result.ec != std::errc{} || result.ptr != end)
-            {
+                result.ec != std::errc{} || result.ptr != end) {
                 report(LogLevel::Error, std::string("--frames is not a number: ") + std::string(value));
                 return kExitUsage;
             }
             continue;
         }
-        if (arg.starts_with("--screenshot"))
-        {
-            if (!valueFor(args, i, "--screenshot", value))
-            {
+        if (arg.starts_with("--screenshot")) {
+            if (!valueFor(args, i, "--screenshot", value)) {
                 report(LogLevel::Error, std::string("--screenshot needs a path: ") + std::string(arg));
                 return kExitUsage;
             }
@@ -469,8 +450,7 @@ private:
     // A headless run has no window to close, so with no budget it would run
     // until something killed it -- under CTest, until the job's timeout. Said
     // here rather than discovered there.
-    if (options.headless && options.frames == 0)
-    {
+    if (options.headless && options.frames == 0) {
         report(LogLevel::Error, "--headless needs --frames N: there is no window to close.");
         return kExitUsage;
     }
@@ -478,8 +458,7 @@ private:
     // A windowed frame is presented and gone before anything could read it
     // back. Headless renders into a target this process owns, which is why both
     // the screenshot and the probe require it -- the same rule the host has.
-    if ((!options.screenshotPath.empty() || options.verify) && !options.headless)
-    {
+    if ((!options.screenshotPath.empty() || options.verify) && !options.headless) {
         report(LogLevel::Error, "--screenshot and --verify need --headless: a presented frame cannot be read back.");
         return kExitUsage;
     }
@@ -489,8 +468,7 @@ private:
 
 int run(const Options& options)
 {
-    if (auto error = platform::init({.headless = options.headless}); error.has_value())
-    {
+    if (auto error = platform::init({.headless = options.headless}); error.has_value()) {
         reportError(*error);
         return kExitFailed;
     }
@@ -509,14 +487,12 @@ int run(const Options& options)
     luaug::core::EngineError error;
 
     const rhi::DeviceResult device = rhi::createSdlGpuDevice({.debug = true}, &error);
-    if (device == nullptr)
-    {
+    if (device == nullptr) {
         reportError(error);
         return kExitNoGraphicsDevice;
     }
 
-    if (!options.headless)
-    {
+    if (!options.headless) {
         const std::array<I18nArg, 1> titleArgs{I18nArg{"version", LUAUG_VERSION_STRING}};
         window = platform::createWindow(
             {
@@ -526,16 +502,14 @@ int run(const Options& options)
                 .height = options.height,
             },
             &error);
-        if (window == nullptr)
-        {
+        if (window == nullptr) {
             reportError(error);
             return kExitFailed;
         }
 
-        if (!device->claimWindow(*window))
-        {
-            reportError(luaug::core::makeError(
-                LUAUG_TR("rhi.err.window_claim_failed"), {}, "SDL_ClaimWindowForGPUDevice"));
+        if (!device->claimWindow(*window)) {
+            reportError(
+                luaug::core::makeError(LUAUG_TR("rhi.err.window_claim_failed"), {}, "SDL_ClaimWindowForGPUDevice"));
             return kExitFailed;
         }
     }
@@ -544,8 +518,7 @@ int run(const Options& options)
     const auto targetHeight = static_cast<u32>(options.height);
 
     rhi::TextureHandle offscreen;
-    if (options.headless)
-    {
+    if (options.headless) {
         offscreen = device->createTexture({
             .format = kOffscreenFormat,
             .usage = rhi::TextureUsage::ColorTarget,
@@ -553,8 +526,7 @@ int run(const Options& options)
             .height = targetHeight,
             .debugName = "triangle-color",
         });
-        if (!offscreen.valid())
-        {
+        if (!offscreen.valid()) {
             reportError(luaug::core::makeError(LUAUG_TR("rhi.err.target_create_failed")));
             return kExitFailed;
         }
@@ -567,24 +539,19 @@ int run(const Options& options)
     u64 frame = 0;
     bool quit = false;
 
-    while (!quit)
-    {
+    while (!quit) {
         if (options.frames != 0 && frame >= options.frames)
             break;
 
-        if (!options.headless)
-        {
-            for (const platform::Event& event : platform::pumpEvents())
-            {
-                if (event.type == platform::EventType::Quit
-                    || event.type == platform::EventType::WindowCloseRequested)
+        if (!options.headless) {
+            for (const platform::Event& event : platform::pumpEvents()) {
+                if (event.type == platform::EventType::Quit || event.type == platform::EventType::WindowCloseRequested)
                     quit = true;
             }
         }
 
         rhi::ICmdList* cmd = device->beginFrame();
-        if (cmd == nullptr)
-        {
+        if (cmd == nullptr) {
             report(LogLevel::Error, "the graphics device would not open a command buffer");
             return kExitFailed;
         }
@@ -594,8 +561,7 @@ int run(const Options& options)
         u32 viewportWidth = targetWidth;
         u32 viewportHeight = targetHeight;
 
-        if (!options.headless)
-        {
+        if (!options.headless) {
             const rhi::Swapchain swapchain = device->acquireSwapchain(*window);
             target = swapchain.texture;
             targetFormat = swapchain.format;
@@ -606,10 +572,8 @@ int run(const Options& options)
         // An invalid target is normal, not an error: a minimized window has no
         // backbuffer this frame. Submitting the empty command buffer keeps the
         // loop pumping instead of stalling on a window nobody can see.
-        if (target.valid())
-        {
-            if (!passAttempted)
-            {
+        if (target.valid()) {
+            if (!passAttempted) {
                 passAttempted = true;
                 passError = pass.create(*device, targetFormat);
                 if (!passError.empty())
@@ -628,8 +592,7 @@ int run(const Options& options)
             cmd->pushDebugGroup("frame");
             cmd->beginRenderPass({.colorAttachments = colors, .debugName = "triangle"});
 
-            if (viewportWidth > 0 && viewportHeight > 0)
-            {
+            if (viewportWidth > 0 && viewportHeight > 0) {
                 cmd->setViewport({
                     .width = static_cast<f32>(viewportWidth),
                     .height = static_cast<f32>(viewportHeight),
@@ -649,33 +612,25 @@ int run(const Options& options)
 
     int exitCode = kExitOk;
 
-    if (!passError.empty())
-    {
+    if (!passError.empty()) {
         report(LogLevel::Error, passError);
         exitCode = kExitFailed;
     }
 
-    if (exitCode == kExitOk && (options.verify || !options.screenshotPath.empty()))
-    {
+    if (exitCode == kExitOk && (options.verify || !options.screenshotPath.empty())) {
         std::vector<std::byte> pixels(static_cast<usize>(targetWidth) * targetHeight * 4u);
-        if (!device->readTexture(offscreen, pixels))
-        {
+        if (!device->readTexture(offscreen, pixels)) {
             reportError(luaug::core::makeError(LUAUG_TR("engine.screenshot.err.readback_failed")));
             exitCode = kExitFailed;
         }
-        else
-        {
-            if (!options.screenshotPath.empty())
-            {
-                if (auto writeError
-                    = luaug::asset::writePng(options.screenshotPath, pixels, targetWidth, targetHeight);
-                    writeError.has_value())
-                {
+        else {
+            if (!options.screenshotPath.empty()) {
+                if (auto writeError = luaug::asset::writePng(options.screenshotPath, pixels, targetWidth, targetHeight);
+                    writeError.has_value()) {
                     reportError(*writeError);
                     exitCode = kExitFailed;
                 }
-                else
-                {
+                else {
                     const std::array<I18nArg, 1> shotArgs{I18nArg{"path", options.screenshotPath.string()}};
                     luaug::core::log(LogLevel::Info, LUAUG_TR("engine.screenshot.info.written"), shotArgs);
                 }
@@ -707,8 +662,8 @@ int main(int argc, char** argv)
     // decides how legibly an engine message reads, and refusing to draw a
     // triangle because a translation file did not ship would defeat the one
     // thing this binary exists to find out.
-    const auto catalogLoad
-        = luaug::core::engineCatalog().loadFromFile(platform::paths().contentDir / "i18n" / "en.json");
+    const auto catalogLoad =
+        luaug::core::engineCatalog().loadFromFile(platform::paths().contentDir / "i18n" / "en.json");
     if (!catalogLoad)
         report(LogLevel::Warn, "no message catalog: " + catalogLoad.diagnostic);
 

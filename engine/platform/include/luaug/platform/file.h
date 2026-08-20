@@ -28,8 +28,7 @@
 #include <string>
 #include <vector>
 
-namespace luaug::platform
-{
+namespace luaug::platform {
 
 // Whole-file read. `out` is replaced on success and left untouched otherwise.
 [[nodiscard]] bool readFile(const std::filesystem::path& path, std::vector<std::byte>& out);

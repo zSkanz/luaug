@@ -11,8 +11,13 @@
 // one property of **every** `ValueType`. That is deliberate: a generic sweep
 // that has only ever swept the classes it was written against has not been
 // shown to be generic, which is the brief's own wording of the risk.
-#include <doctest/doctest.h>
+#include "luaug/app/inspector.h"
+#include "luaug/core/id.h"
+#include "luaug/scene/class_registry.h"
+#include "luaug/scene/value.h"
+#include "luaug/scene/world.h"
 
+#include <doctest/doctest.h>
 #include <ostream>
 #include <string>
 #include <string_view>
@@ -21,11 +26,6 @@
 #include <vector>
 
 #include "inspector_fixture.h"
-#include "luaug/app/inspector.h"
-#include "luaug/core/id.h"
-#include "luaug/scene/class_registry.h"
-#include "luaug/scene/value.h"
-#include "luaug/scene/world.h"
 
 using luaug::app::collectProperties;
 using luaug::app::collectTree;
@@ -33,8 +33,8 @@ using luaug::app::editable;
 using luaug::app::editorFor;
 using luaug::app::EditorKind;
 using luaug::app::formatValue;
-using luaug::app::propertyTag;
 using luaug::app::Inspector;
+using luaug::app::propertyTag;
 using luaug::app::setResultLabel;
 using luaug::app::TreeRow;
 
@@ -43,8 +43,7 @@ namespace scene = luaug::scene;
 
 using SetResult = scene::World::SetResult;
 
-namespace
-{
+namespace {
 
 using luaug::app::testing::Fixture;
 
@@ -80,10 +79,9 @@ TEST_CASE("the sweep visits every property of a class it has never seen")
     // still look plausible.
     std::vector<const scene::PropertyDesc*> properties;
     collectProperties(fixture.classes, fixture.widgetClass, properties);
-    for (luaug::core::usize index = 0; index < properties.size(); ++index)
-    {
-        CHECK(fixture.classes.propertySlot(fixture.widgetClass, properties[index]->name)
-              == static_cast<luaug::core::u16>(index));
+    for (luaug::core::usize index = 0; index < properties.size(); ++index) {
+        CHECK(fixture.classes.propertySlot(fixture.widgetClass, properties[index]->name) ==
+              static_cast<luaug::core::u16>(index));
     }
 
     // The base is not given its child's members, which is the other way the
@@ -116,13 +114,11 @@ TEST_CASE("every ValueType the registry can hold gets a widget and a rendering")
         {scene::ValueType::CFrame, EditorKind::CFrame, scene::Value{core::CFrameD{}}},
         {scene::ValueType::Color3, EditorKind::Color, scene::Value{core::Color3{0.25f, 0.5f, 0.75f}}},
         {scene::ValueType::Instance, EditorKind::InstanceRef, scene::Value{subject}},
-        {scene::ValueType::EnumItem, EditorKind::EnumCombo,
-         scene::Value{scene::EnumValue{fixture.moodEnum, 7}}},
+        {scene::ValueType::EnumItem, EditorKind::EnumCombo, scene::Value{scene::EnumValue{fixture.moodEnum, 7}}},
     };
 
     std::vector<std::string> renderings;
-    for (const Row& row : rows)
-    {
+    for (const Row& row : rows) {
         CAPTURE(scene::valueTypeName(row.type));
 
         // The mapping is per type and not a shrug: a `ValueType` that fell back
@@ -139,8 +135,7 @@ TEST_CASE("every ValueType the registry can hold gets a widget and a rendering")
 
     // Distinct, because nine types all rendering as the same placeholder would
     // satisfy "renders something" while showing nothing.
-    for (luaug::core::usize a = 0; a < renderings.size(); ++a)
-    {
+    for (luaug::core::usize a = 0; a < renderings.size(); ++a) {
         for (luaug::core::usize b = a + 1; b < renderings.size(); ++b)
             CHECK(renderings[a] != renderings[b]);
     }
@@ -183,8 +178,7 @@ TEST_CASE("a readOnly property is refused, and the panel does not offer the fiel
     const scene::PropertyDesc* locked = nullptr;
     const scene::PropertyDesc* sealed = nullptr;
     const scene::PropertyDesc* count = nullptr;
-    for (const scene::PropertyDesc* descriptor : properties)
-    {
+    for (const scene::PropertyDesc* descriptor : properties) {
         if (fixture.atoms.text(descriptor->name) == "Locked")
             locked = descriptor;
         if (fixture.atoms.text(descriptor->name) == "Sealed")
@@ -230,17 +224,17 @@ TEST_CASE("each SetResult is reported distinctly")
     const core::InstanceId subject = fixture.widget(world, "Subject");
 
     Inspector inspector;
-    inspector.enqueue(subject, fixture.atom("Count"), scene::Value{core::f64{3.0}});     // Changed
-    inspector.enqueue(subject, fixture.atom("Count"), scene::Value{core::f64{3.0}});     // Unchanged
-    inspector.enqueue(subject, fixture.atom("Nonesuch"), scene::Value{core::f64{1.0}});  // UnknownProperty
-    inspector.enqueue(subject, fixture.atom("Locked"), scene::Value{core::f64{1.0}});    // ReadOnly
-    inspector.enqueue(subject, fixture.atom("Count"), scene::Value{core::f64{-1.0}});    // InvalidValue
+    inspector.enqueue(subject, fixture.atom("Count"), scene::Value{core::f64{3.0}});    // Changed
+    inspector.enqueue(subject, fixture.atom("Count"), scene::Value{core::f64{3.0}});    // Unchanged
+    inspector.enqueue(subject, fixture.atom("Nonesuch"), scene::Value{core::f64{1.0}}); // UnknownProperty
+    inspector.enqueue(subject, fixture.atom("Locked"), scene::Value{core::f64{1.0}});   // ReadOnly
+    inspector.enqueue(subject, fixture.atom("Count"), scene::Value{core::f64{-1.0}});   // InvalidValue
     inspector.applyPending(world);
 
     REQUIRE(inspector.outcomes().size() == 5);
 
     const std::vector<SetResult> expected{
-        SetResult::Changed, SetResult::Unchanged, SetResult::UnknownProperty,
+        SetResult::Changed,  SetResult::Unchanged,    SetResult::UnknownProperty,
         SetResult::ReadOnly, SetResult::InvalidValue,
     };
     for (luaug::core::usize index = 0; index < expected.size(); ++index)
@@ -252,8 +246,7 @@ TEST_CASE("each SetResult is reported distinctly")
     std::vector<std::string> labels;
     for (const SetResult result : expected)
         labels.emplace_back(setResultLabel(result));
-    for (luaug::core::usize a = 0; a < labels.size(); ++a)
-    {
+    for (luaug::core::usize a = 0; a < labels.size(); ++a) {
         CHECK_FALSE(labels[a].empty());
         for (luaug::core::usize b = a + 1; b < labels.size(); ++b)
             CHECK(labels[a] != labels[b]);
@@ -286,8 +279,7 @@ TEST_CASE("the tree is document order and the panel does not sort it")
     const std::vector<luaug::core::u32> expectedDepths{0, 1, 2, 2, 1};
 
     REQUIRE(rows.size() == expectedIds.size());
-    for (luaug::core::usize index = 0; index < rows.size(); ++index)
-    {
+    for (luaug::core::usize index = 0; index < rows.size(); ++index) {
         CHECK(rows[index].id == expectedIds[index]);
         CHECK(rows[index].depth == expectedDepths[index]);
     }
@@ -342,8 +334,8 @@ TEST_CASE("the outcome history is bounded")
 
     // Newest last, so the drop happens at the front. The final write is the one
     // the world is holding, and it must also be the one the log ends with.
-    CHECK(world.getProperty(subject, fixture.atom("Count"))
-          == scene::Value{static_cast<core::f64>(Inspector::OutcomeHistory * 3)});
+    CHECK(world.getProperty(subject, fixture.atom("Count")) ==
+          scene::Value{static_cast<core::f64>(Inspector::OutcomeHistory * 3)});
     CHECK(inspector.outcomes().back().result == SetResult::Changed);
 }
 

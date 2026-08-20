@@ -12,12 +12,11 @@
 // runtime mystery.
 #pragma once
 
-#include <string_view>
-
 #include "luaug/core/types.h"
 
-namespace luaug::core
-{
+#include <string_view>
+
+namespace luaug::core {
 
 // FNV-1a (32-bit). Chosen for being constexpr-trivial and stable across
 // compilers -- the value must not vary between the engine and the tools that
@@ -26,8 +25,7 @@ namespace luaug::core
 constexpr u32 hashTextKey(std::string_view key) noexcept
 {
     u32 hash = 0x811C9DC5u;
-    for (const char c : key)
-    {
+    for (const char c : key) {
         hash ^= static_cast<u32>(static_cast<unsigned char>(c));
         hash *= 0x01000193u;
     }

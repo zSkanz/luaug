@@ -1,17 +1,15 @@
-#include <doctest/doctest.h>
+#include "luaug/core/text_key.h"
+#include "luaug/render/shader_library.h"
 
+#include <doctest/doctest.h>
 #include <filesystem>
 #include <fstream>
 #include <string_view>
 
-#include "luaug/core/text_key.h"
-#include "luaug/render/shader_library.h"
-
 using luaug::render::ShaderLibrary;
 using luaug::rhi::ShaderFormat;
 
-namespace
-{
+namespace {
 
 // A throwaway content directory. The library's contract is about what it does
 // with files on disk, so testing it against a fixture in memory would test

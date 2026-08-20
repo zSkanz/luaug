@@ -1,13 +1,12 @@
-#include <doctest/doctest.h>
-
 #include <algorithm>
+#include <doctest/doctest.h>
 // doctest prints a failing comparison through operator<<, and phaseName hands
 // back a C string that the checks below compare as a string_view.
+#include "luaug/core/phase.h"
+
 #include <ostream>
 #include <string_view>
 #include <vector>
-
-#include "luaug/core/phase.h"
 
 using luaug::core::Phase;
 using luaug::core::phaseName;
@@ -22,8 +21,7 @@ TEST_CASE("every phase has a name, and no two share one")
     // from then on, which is the kind of wrong number that gets acted on.
     std::vector<std::string_view> seen;
 
-    for (u32 raw = 0; raw < static_cast<u32>(Phase::Count); ++raw)
-    {
+    for (u32 raw = 0; raw < static_cast<u32>(Phase::Count); ++raw) {
         const std::string_view name = phaseName(static_cast<Phase>(static_cast<u8>(raw)));
 
         CHECK_FALSE(name.empty());

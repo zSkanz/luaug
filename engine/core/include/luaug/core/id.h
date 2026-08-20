@@ -11,8 +11,7 @@
 
 #include "luaug/core/types.h"
 
-namespace luaug::core
-{
+namespace luaug::core {
 
 // The identity of an instance, engine-wide. 8 bytes, trivially copyable, and
 // the payload of every `TAG_INSTANCE` userdata (architecture.md §5) -- which is

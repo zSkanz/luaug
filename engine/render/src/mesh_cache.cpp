@@ -1,16 +1,14 @@
 #include "luaug/render/mesh_cache.h"
 
+#include "luaug/core/i18n.h"
+#include "luaug/core/text_key.h"
+
 #include <array>
 #include <cstring>
 #include <utility>
 
-#include "luaug/core/i18n.h"
-#include "luaug/core/text_key.h"
-
-namespace luaug::render
-{
-namespace
-{
+namespace luaug::render {
+namespace {
 
 using core::i32;
 
@@ -20,13 +18,13 @@ constexpr usize kIndexSize = sizeof(u32);
 [[nodiscard]] std::span<const std::byte> asBytes(const asset::Mesh& mesh) noexcept
 {
     return std::span<const std::byte>(reinterpret_cast<const std::byte*>(mesh.vertices.data()),
-        mesh.vertices.size() * kVertexSize);
+                                      mesh.vertices.size() * kVertexSize);
 }
 
 [[nodiscard]] std::span<const std::byte> indexBytes(const asset::Mesh& mesh) noexcept
 {
-    return std::span<const std::byte>(
-        reinterpret_cast<const std::byte*>(mesh.indices.data()), mesh.indices.size() * kIndexSize);
+    return std::span<const std::byte>(reinterpret_cast<const std::byte*>(mesh.indices.data()),
+                                      mesh.indices.size() * kIndexSize);
 }
 
 // Doubling from the high-water mark rather than fitting exactly: a ring that
@@ -35,8 +33,7 @@ constexpr usize kIndexSize = sizeof(u32);
 [[nodiscard]] u32 grownTo(u32 current, u32 needed) noexcept
 {
     u32 next = current == 0 ? 1u : current;
-    while (next < needed)
-    {
+    while (next < needed) {
         // Saturate rather than wrap. A request this large is a bug upstream, and
         // the allocation below will fail with a keyed error instead of silently
         // producing a tiny buffer.
@@ -54,7 +51,7 @@ constexpr usize kIndexSize = sizeof(u32);
 // moved vector hands over its buffer. Copying one would leave the span pointing
 // at the original's storage.
 static_assert(std::is_nothrow_move_constructible_v<std::vector<MeshSection>>,
-    "MeshCache::Entry must be moved, never copied, or Resolved::sections dangles");
+              "MeshCache::Entry must be moved, never copied, or Resolved::sections dangles");
 
 MeshCache::~MeshCache()
 {
@@ -90,8 +87,7 @@ std::optional<core::EngineError> MeshCache::growRing(rhi::IDevice& device, u32 v
         .sizeBytes = static_cast<u32>(nextIndices * kIndexSize),
         .debugName = "mesh-ring-indices",
     });
-    if (!newIndices.valid())
-    {
+    if (!newIndices.valid()) {
         device.destroy(newVertices);
         return core::makeError(LUAUG_TR("render.err.mesh_buffer_failed"), {}, "dynamic index ring");
     }
@@ -114,10 +110,8 @@ std::optional<core::EngineError> MeshCache::growRing(rhi::IDevice& device, u32 v
 
 void MeshCache::destroy(rhi::IDevice& device)
 {
-    for (Entry& entry : entries_)
-    {
-        if (entry.live && !entry.dynamic)
-        {
+    for (Entry& entry : entries_) {
+        if (entry.live && !entry.dynamic) {
             device.destroy(entry.resolved.vertices);
             device.destroy(entry.resolved.indices);
         }
@@ -126,14 +120,12 @@ void MeshCache::destroy(rhi::IDevice& device)
     entries_.clear();
     freeSlots_.clear();
 
-    for (const RetiredRing& ring : retiring_)
-    {
+    for (const RetiredRing& ring : retiring_) {
         device.destroy(ring.vertices);
         device.destroy(ring.indices);
     }
     retiring_.clear();
-    for (const RetiredRing& ring : retired_)
-    {
+    for (const RetiredRing& ring : retired_) {
         device.destroy(ring.vertices);
         device.destroy(ring.indices);
     }
@@ -157,11 +149,9 @@ void MeshCache::beginFrame(rhi::IDevice& device)
     // is what stops its handle resolving. Erasing would let a slot be reused by
     // a static mesh with the same generation, which is the one way a stale
     // dynamic handle could come back as somebody else's geometry.
-    for (usize index = 0; index < entries_.size(); ++index)
-    {
+    for (usize index = 0; index < entries_.size(); ++index) {
         Entry& entry = entries_[index];
-        if (entry.live && entry.dynamic)
-        {
+        if (entry.live && entry.dynamic) {
             entry.live = false;
             entry.sections.clear();
             entry.resolved = Resolved{};
@@ -175,8 +165,7 @@ void MeshCache::beginFrame(rhi::IDevice& device)
     // Two frames of slack, not one. A handle issued before a mid-frame grow is
     // legal to draw for the rest of that frame, and the GPU may still be
     // executing those commands when the next frame begins.
-    for (const RetiredRing& ring : retired_)
-    {
+    for (const RetiredRing& ring : retired_) {
         device.destroy(ring.vertices);
         device.destroy(ring.indices);
     }
@@ -184,8 +173,8 @@ void MeshCache::beginFrame(rhi::IDevice& device)
     retiring_.clear();
 }
 
-MeshHandle MeshCache::create(
-    rhi::IDevice& device, rhi::ICmdList& cmd, const asset::Mesh& mesh, MeshUsage usage, core::EngineError* outError)
+MeshHandle MeshCache::create(rhi::IDevice& device, rhi::ICmdList& cmd, const asset::Mesh& mesh, MeshUsage usage,
+                             core::EngineError* outError)
 {
     const auto vertexCount = static_cast<u32>(mesh.vertices.size());
     const auto indexCount = static_cast<u32>(mesh.indices.size());
@@ -193,13 +182,11 @@ MeshHandle MeshCache::create(
     Resolved resolved;
     resolved.bounds = mesh.bounds;
 
-    if (usage == MeshUsage::Static)
-    {
+    if (usage == MeshUsage::Static) {
         // An empty mesh still gets a handle: a generator that produced nothing
         // this frame is not an error, and the alternative is every caller
         // branching on emptiness before it can draw.
-        if (vertexCount > 0)
-        {
+        if (vertexCount > 0) {
             resolved.vertices = device.createBuffer({
                 .usage = rhi::BufferUsage::Vertex,
                 .sizeBytes = static_cast<u32>(vertexCount * kVertexSize),
@@ -210,8 +197,7 @@ MeshHandle MeshCache::create(
                 .sizeBytes = static_cast<u32>(indexCount * kIndexSize),
                 .debugName = "mesh-indices",
             });
-            if (!resolved.vertices.valid() || !resolved.indices.valid())
-            {
+            if (!resolved.vertices.valid() || !resolved.indices.valid()) {
                 if (resolved.vertices.valid())
                     device.destroy(resolved.vertices);
                 if (resolved.indices.valid())
@@ -226,14 +212,10 @@ MeshHandle MeshCache::create(
                 cmd.upload(resolved.indices, indexBytes(mesh), 0);
         }
     }
-    else
-    {
-        if (ringVertexUsed_ + vertexCount > ringVertexCapacity_
-            || ringIndexUsed_ + indexCount > ringIndexCapacity_)
-        {
+    else {
+        if (ringVertexUsed_ + vertexCount > ringVertexCapacity_ || ringIndexUsed_ + indexCount > ringIndexCapacity_) {
             if (auto error = growRing(device, ringVertexUsed_ + vertexCount, ringIndexUsed_ + indexCount);
-                error.has_value())
-            {
+                error.has_value()) {
                 if (outError != nullptr)
                     *outError = *error;
                 return {};
@@ -257,13 +239,11 @@ MeshHandle MeshCache::create(
     }
 
     u32 slot = 0;
-    if (!freeSlots_.empty())
-    {
+    if (!freeSlots_.empty()) {
         slot = freeSlots_.back();
         freeSlots_.pop_back();
     }
-    else
-    {
+    else {
         slot = static_cast<u32>(entries_.size());
         entries_.emplace_back();
     }
@@ -277,8 +257,7 @@ MeshHandle MeshCache::create(
 
     entry.sections.clear();
     entry.sections.reserve(mesh.submeshes.size());
-    for (const asset::Submesh& submesh : mesh.submeshes)
-    {
+    for (const asset::Submesh& submesh : mesh.submeshes) {
         entry.sections.push_back(MeshSection{
             .firstIndex = submesh.firstIndex,
             .indexCount = submesh.indexCount,
@@ -326,8 +305,7 @@ const MeshCache::Resolved* MeshCache::resolve(MeshHandle handle) const noexcept
 usize MeshCache::staticMeshCount() const noexcept
 {
     usize count = 0;
-    for (const Entry& entry : entries_)
-    {
+    for (const Entry& entry : entries_) {
         if (entry.live && !entry.dynamic)
             ++count;
     }

@@ -2,20 +2,18 @@
 // publishes: §1.3 for the accept value, §5.7 for the frames. Our own output is
 // never the reference.
 
-#include <doctest/doctest.h>
-
-#include <array>
-#include <string>
-#include <vector>
-
 #include "luaug/core/i18n.h"
 #include "luaug/net/websocket_protocol.h"
+
+#include <array>
+#include <doctest/doctest.h>
+#include <string>
+#include <vector>
 
 using namespace luaug::net::ws;
 using luaug::core::u8;
 
-namespace
-{
+namespace {
 
 // An error is identified by the `[key]` prefix `makeError` writes, and that
 // prefix is the CATALOG's name for the key. Without this every raise reports
@@ -77,8 +75,7 @@ TEST_CASE("a masked text frame matches the section 5.7 example byte for byte")
     std::vector<u8> out;
     encodeFrame(out, Opcode::Text, true, bytesOf("Hello"), kRfcMaskKey);
 
-    const std::vector<u8> expected{
-        0x81u, 0x85u, 0x37u, 0xfau, 0x21u, 0x3du, 0x7fu, 0x9fu, 0x4du, 0x51u, 0x58u};
+    const std::vector<u8> expected{0x81u, 0x85u, 0x37u, 0xfau, 0x21u, 0x3du, 0x7fu, 0x9fu, 0x4du, 0x51u, 0x58u};
     CHECK(out == expected);
 }
 
@@ -87,8 +84,7 @@ TEST_CASE("a masked pong matches the section 5.7 example byte for byte")
     std::vector<u8> out;
     encodeFrame(out, Opcode::Pong, true, bytesOf("Hello"), kRfcMaskKey);
 
-    const std::vector<u8> expected{
-        0x8au, 0x85u, 0x37u, 0xfau, 0x21u, 0x3du, 0x7fu, 0x9fu, 0x4du, 0x51u, 0x58u};
+    const std::vector<u8> expected{0x8au, 0x85u, 0x37u, 0xfau, 0x21u, 0x3du, 0x7fu, 0x9fu, 0x4du, 0x51u, 0x58u};
     CHECK(out == expected);
 }
 
@@ -155,8 +151,7 @@ TEST_CASE("a masked frame decodes, and reports that it was masked")
     // A client rejects this rather than accepting it silently -- section 5.1
     // forbids a server to mask -- so the decoder's job is to report the fact,
     // not to hide it by unmasking.
-    const std::vector<u8> masked{
-        0x81u, 0x85u, 0x37u, 0xfau, 0x21u, 0x3du, 0x7fu, 0x9fu, 0x4du, 0x51u, 0x58u};
+    const std::vector<u8> masked{0x81u, 0x85u, 0x37u, 0xfau, 0x21u, 0x3du, 0x7fu, 0x9fu, 0x4du, 0x51u, 0x58u};
     const DecodeResult result = decodeFrame(masked, kMaxPayload);
 
     REQUIRE(result.status == DecodeStatus::Ok);
@@ -168,8 +163,7 @@ TEST_CASE("a frame that is only partly here asks for more, and never guesses")
 {
     const std::vector<u8> whole{0x81u, 0x05u, 0x48u, 0x65u, 0x6cu, 0x6cu, 0x6fu};
 
-    for (std::size_t prefix = 0; prefix < whole.size(); ++prefix)
-    {
+    for (std::size_t prefix = 0; prefix < whole.size(); ++prefix) {
         const std::vector<u8> partial(whole.begin(), whole.begin() + static_cast<std::ptrdiff_t>(prefix));
         const DecodeResult result = decodeFrame(partial, kMaxPayload);
         CHECK(result.status == DecodeStatus::NeedMore);
@@ -233,9 +227,8 @@ TEST_CASE("a length larger than we will hold is refused rather than waited for")
 
 TEST_CASE("everything we encode, we can decode")
 {
-    for (const std::size_t size : {std::size_t{0}, std::size_t{1}, std::size_t{125}, std::size_t{126},
-             std::size_t{65535}, std::size_t{65536}})
-    {
+    for (const std::size_t size :
+         {std::size_t{0}, std::size_t{1}, std::size_t{125}, std::size_t{126}, std::size_t{65535}, std::size_t{65536}}) {
         std::vector<u8> payload(size);
         for (std::size_t i = 0; i < size; ++i)
             payload[i] = static_cast<u8>(i * 31u + 7u);
@@ -263,12 +256,11 @@ TEST_CASE("the response headers end where the payload begins")
 
 TEST_CASE("a well-formed server handshake is accepted")
 {
-    const std::string response =
-        "HTTP/1.1 101 Switching Protocols\r\n"
-        "Upgrade: websocket\r\n"
-        "Connection: Upgrade\r\n"
-        "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n"
-        "\r\n";
+    const std::string response = "HTTP/1.1 101 Switching Protocols\r\n"
+                                 "Upgrade: websocket\r\n"
+                                 "Connection: Upgrade\r\n"
+                                 "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n"
+                                 "\r\n";
     CHECK_FALSE(validateServerHandshake(response, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=").has_value());
 }
 
@@ -276,12 +268,11 @@ TEST_CASE("header names and the two token values are matched case-insensitively"
 {
     // Nothing in HTTP promises the casing a server chooses, and rejecting a
     // valid peer over it would be a bug that only shows up against one server.
-    const std::string response =
-        "HTTP/1.1 101 Switching Protocols\r\n"
-        "upgrade: WebSocket\r\n"
-        "connection: keep-alive, Upgrade\r\n"
-        "sec-websocket-accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n"
-        "\r\n";
+    const std::string response = "HTTP/1.1 101 Switching Protocols\r\n"
+                                 "upgrade: WebSocket\r\n"
+                                 "connection: keep-alive, Upgrade\r\n"
+                                 "sec-websocket-accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n"
+                                 "\r\n";
     CHECK_FALSE(validateServerHandshake(response, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=").has_value());
 }
 
@@ -292,8 +283,7 @@ TEST_CASE("every way a handshake can fail names itself")
     // One key per cause rather than one message with the reason interpolated
     // in: these are different problems with different fixes, and a whole
     // sentence inside a translated frame is what R3 exists to prevent.
-    const auto failsWith = [](std::string_view response, std::string_view expected, luaug::core::TextKey key)
-    {
+    const auto failsWith = [](std::string_view response, std::string_view expected, luaug::core::TextKey key) {
         const auto error = validateServerHandshake(response, expected);
         REQUIRE(error.has_value());
         CHECK(error->key.hash == key.hash);
@@ -302,9 +292,8 @@ TEST_CASE("every way a handshake can fail names itself")
 
     SUBCASE("the status is not 101")
     {
-        const std::string response =
-            "HTTP/1.1 400 Bad Request\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-            "Sec-WebSocket-Accept: x\r\n\r\n";
+        const std::string response = "HTTP/1.1 400 Bad Request\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                                     "Sec-WebSocket-Accept: x\r\n\r\n";
         CHECK(failsWith(response, "x", LUAUG_TR("net.err.handshake_bad_status")).find("400") != std::string::npos);
     }
     SUBCASE("the upgrade header is absent")
@@ -315,10 +304,10 @@ TEST_CASE("every way a handshake can fail names itself")
     }
     SUBCASE("the accept value is for a different key")
     {
-        const std::string response =
-            "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-            "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n";
-        CHECK_FALSE(failsWith(response, "AAAAAAAAAAAAAAAAAAAAAAAAAAA=", LUAUG_TR("net.err.handshake_accept_mismatch")).empty());
+        const std::string response = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                                     "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n";
+        CHECK_FALSE(
+            failsWith(response, "AAAAAAAAAAAAAAAAAAAAAAAAAAA=", LUAUG_TR("net.err.handshake_accept_mismatch")).empty());
     }
     SUBCASE("there is no accept header at all")
     {

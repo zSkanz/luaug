@@ -8,16 +8,15 @@
 // this file is the part that cannot be tested against a published vector.
 #pragma once
 
+#include "luaug/core/error.h"
+#include "luaug/core/types.h"
+
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 
-#include "luaug/core/error.h"
-#include "luaug/core/types.h"
-
-namespace luaug::net
-{
+namespace luaug::net {
 
 using core::u16;
 using core::u32;

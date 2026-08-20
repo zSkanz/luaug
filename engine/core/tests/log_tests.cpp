@@ -2,22 +2,19 @@
 // whole point of it: a host installs a sink to capture output for its own log
 // pane, and the file must still receive every line. A file that went quiet
 // exactly when something was watching would be a file nobody could rely on.
+#include "luaug/core/log.h"
+
 #include <doctest/doctest.h>
-
-#include <ostream>
-
 #include <filesystem>
 #include <fstream>
+#include <ostream>
 #include <sstream>
 #include <string>
 #include <vector>
 
-#include "luaug/core/log.h"
-
 using namespace luaug;
 
-namespace
-{
+namespace {
 
 struct TempFile
 {

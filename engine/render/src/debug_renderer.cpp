@@ -1,14 +1,12 @@
 #include "luaug/render/debug_renderer.h"
 
+#include "luaug/core/text_key.h"
+
 #include <array>
 #include <cstring>
 
-#include "luaug/core/text_key.h"
-
-namespace luaug::render
-{
-namespace
-{
+namespace luaug::render {
+namespace {
 
 // Matches `shaders/src/debug_line.hlsl`. The shader reads TEXCOORD0 as a float3
 // position and TEXCOORD1 as a float4 colour; the colour travels as four
@@ -33,8 +31,8 @@ DebugRenderer::~DebugRenderer()
     // and does nothing -- and destroy() is what engine.cpp calls.
 }
 
-std::optional<core::EngineError> DebugRenderer::create(
-    rhi::IDevice& device, const ShaderLibrary& shaders, rhi::TextureFormat colorFormat)
+std::optional<core::EngineError> DebugRenderer::create(rhi::IDevice& device, const ShaderLibrary& shaders,
+                                                       rhi::TextureFormat colorFormat)
 {
     core::EngineError error;
 
@@ -118,8 +116,7 @@ void DebugRenderer::upload(rhi::IDevice& device, rhi::ICmdList& cmd, const Debug
     if (pendingVertices_ == 0)
         return;
 
-    if (pendingVertices_ > capacityVertices_)
-    {
+    if (pendingVertices_ > capacityVertices_) {
         // Doubling from a generous floor, so a frame that grows steadily
         // reallocates a handful of times rather than once per frame. Releasing
         // the old buffer here is safe even though the previous frame may still
@@ -137,8 +134,7 @@ void DebugRenderer::upload(rhi::IDevice& device, rhi::ICmdList& cmd, const Debug
             .debugName = "debug-line-vertices",
         });
 
-        if (!vertices_.valid())
-        {
+        if (!vertices_.valid()) {
             capacityVertices_ = 0;
             pendingVertices_ = 0;
             return;

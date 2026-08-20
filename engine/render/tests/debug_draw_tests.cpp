@@ -1,16 +1,14 @@
-#include <doctest/doctest.h>
+#include "luaug/render/debug_draw.h"
 
 #include <array>
 #include <cmath>
+#include <doctest/doctest.h>
 #include <span>
-
-#include "luaug/render/debug_draw.h"
 
 using namespace luaug::core;
 using namespace luaug::render;
 
-namespace
-{
+namespace {
 
 constexpr f32 kEpsilon = 1e-5f;
 constexpr f32 kPi = 3.14159265358979323846f;
@@ -44,14 +42,12 @@ Mat4 rotationZ4(f32 radians) noexcept
 std::array<Vec3, 8> boxCorners(Vec3 center, Vec3 halfExtents)
 {
     std::array<Vec3, 8> corners{};
-    for (usize index = 0; index < corners.size(); ++index)
-    {
-        corners[index] = center
-                         + Vec3{
-                             (index & 1u) != 0u ? halfExtents.x : -halfExtents.x,
-                             (index & 2u) != 0u ? halfExtents.y : -halfExtents.y,
-                             (index & 4u) != 0u ? halfExtents.z : -halfExtents.z,
-                         };
+    for (usize index = 0; index < corners.size(); ++index) {
+        corners[index] = center + Vec3{
+                                      (index & 1u) != 0u ? halfExtents.x : -halfExtents.x,
+                                      (index & 2u) != 0u ? halfExtents.y : -halfExtents.y,
+                                      (index & 4u) != 0u ? halfExtents.z : -halfExtents.z,
+                                  };
     }
     return corners;
 }
@@ -60,15 +56,12 @@ std::array<Vec3, 8> boxCorners(Vec3 center, Vec3 halfExtents)
 // 1 = y, 2 = z) that every point holds fixed.
 int constantAxis(std::span<const DebugVertex> points, Vec3 reference) noexcept
 {
-    for (int axis = 0; axis < 3; ++axis)
-    {
+    for (int axis = 0; axis < 3; ++axis) {
         bool constant = true;
-        for (const DebugVertex& vertex : points)
-        {
+        for (const DebugVertex& vertex : points) {
             const f32 value = axis == 0 ? vertex.position.x : (axis == 1 ? vertex.position.y : vertex.position.z);
             const f32 expected = axis == 0 ? reference.x : (axis == 1 ? reference.y : reference.z);
-            if (!near(value, expected))
-            {
+            if (!near(value, expected)) {
                 constant = false;
                 break;
             }
@@ -114,15 +107,12 @@ TEST_CASE("a wire box is twelve edges over the eight corners of the box")
     // Every emitted vertex sits on a corner: each component is the centre plus
     // or minus the matching half extent, nothing in between.
     bool everyComponentIsExtreme = true;
-    for (const DebugVertex& vertex : draw.vertices())
-    {
-        everyComponentIsExtreme = everyComponentIsExtreme
-                                  && (near(vertex.position.x, center.x - halfExtents.x)
-                                      || near(vertex.position.x, center.x + halfExtents.x))
-                                  && (near(vertex.position.y, center.y - halfExtents.y)
-                                      || near(vertex.position.y, center.y + halfExtents.y))
-                                  && (near(vertex.position.z, center.z - halfExtents.z)
-                                      || near(vertex.position.z, center.z + halfExtents.z));
+    for (const DebugVertex& vertex : draw.vertices()) {
+        everyComponentIsExtreme =
+            everyComponentIsExtreme &&
+            (near(vertex.position.x, center.x - halfExtents.x) || near(vertex.position.x, center.x + halfExtents.x)) &&
+            (near(vertex.position.y, center.y - halfExtents.y) || near(vertex.position.y, center.y + halfExtents.y)) &&
+            (near(vertex.position.z, center.z - halfExtents.z) || near(vertex.position.z, center.z + halfExtents.z));
         CHECK(vertex.color == color);
     }
     CHECK(everyComponentIsExtreme);
@@ -134,13 +124,10 @@ TEST_CASE("a wire box is twelve edges over the eight corners of the box")
     std::array<int, 8> hits{};
     bool everyVertexIsACorner = true;
 
-    for (const DebugVertex& vertex : draw.vertices())
-    {
+    for (const DebugVertex& vertex : draw.vertices()) {
         int matches = 0;
-        for (usize index = 0; index < corners.size(); ++index)
-        {
-            if (near(vertex.position, corners[index]))
-            {
+        for (usize index = 0; index < corners.size(); ++index) {
+            if (near(vertex.position, corners[index])) {
                 hits[index] += 1;
                 matches += 1;
             }
@@ -169,8 +156,7 @@ TEST_CASE("wire box edges run along the axes and none is drawn twice")
     std::array<int, 3> edgesPerAxis{};
     bool everyEdgeIsAxisAligned = true;
 
-    for (usize line = 0; line < draw.lineCount(); ++line)
-    {
+    for (usize line = 0; line < draw.lineCount(); ++line) {
         const Vec3 from = draw.vertices()[line * 2].position;
         const Vec3 to = draw.vertices()[line * 2 + 1].position;
 
@@ -207,8 +193,7 @@ TEST_CASE("an oriented wire box is the axis-aligned one pushed through the trans
     // Same topology, transformed positions -- there is one corner ordering and
     // one edge table, not two that could drift apart.
     bool matches = true;
-    for (usize index = 0; index < oriented.vertices().size(); ++index)
-    {
+    for (usize index = 0; index < oriented.vertices().size(); ++index) {
         const Vec3 expected = transformPoint(transform, axisAligned.vertices()[index].position);
         matches = matches && near(oriented.vertices()[index].position, expected);
     }
@@ -242,8 +227,7 @@ TEST_CASE("a wire sphere is three closed rings on the sphere")
     constexpr usize verticesPerRing = 2 * segments;
     std::array<int, 3> constantAxes{};
 
-    for (usize ring = 0; ring < 3; ++ring)
-    {
+    for (usize ring = 0; ring < 3; ++ring) {
         const std::span<const DebugVertex> vertices = draw.vertices().subspan(ring * verticesPerRing, verticesPerRing);
 
         bool connected = true;
@@ -330,8 +314,7 @@ TEST_CASE("a scaled transform draws a triad of the requested length")
 
     REQUIRE(draw.lineCount() == 3u);
 
-    for (usize line = 0; line < draw.lineCount(); ++line)
-    {
+    for (usize line = 0; line < draw.lineCount(); ++line) {
         const Vec3 from = draw.vertices()[line * 2].position;
         const Vec3 to = draw.vertices()[line * 2 + 1].position;
         CHECK(near(length(to - from), 3.0f));
@@ -358,8 +341,7 @@ TEST_CASE("clear empties the buffer without giving up its capacity")
     // end -- a released buffer has to grow back from nothing, and an allocator
     // can hand the same address back by the time the refill is over.
     bool sameAllocation = draw.vertices().data() == buffer;
-    for (int index = 0; index < 16; ++index)
-    {
+    for (int index = 0; index < 16; ++index) {
         draw.wireBox(Vec3{}, {1.0f, 1.0f, 1.0f}, DebugColor{});
         sameAllocation = sameAllocation && draw.vertices().data() == buffer;
     }

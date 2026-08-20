@@ -20,10 +20,8 @@
 #include <unistd.h>
 #endif
 
-namespace luaug::net
-{
-namespace
-{
+namespace luaug::net {
+namespace {
 
 using core::I18nArg;
 
@@ -41,13 +39,10 @@ constexpr SocketHandle kInvalidSocket = INVALID_SOCKET;
 void ensureWinsock()
 {
     static std::once_flag once;
-    std::call_once(
-        once,
-        []
-        {
-            WSADATA data{};
-            WSAStartup(MAKEWORD(2, 2), &data);
-        });
+    std::call_once(once, [] {
+        WSADATA data{};
+        WSAStartup(MAKEWORD(2, 2), &data);
+    });
 }
 
 void closeSocket(SocketHandle handle)
@@ -82,7 +77,8 @@ using SocketHandle = int;
 using AddressLength = socklen_t;
 constexpr SocketHandle kInvalidSocket = -1;
 
-void ensureWinsock() {}
+void ensureWinsock()
+{}
 
 void closeSocket(SocketHandle handle)
 {
@@ -139,10 +135,8 @@ constexpr int kSendFlags = 0;
 
 [[nodiscard]] core::EngineError connectErrorCode(std::string_view host, u16 port, int code)
 {
-    const std::array<I18nArg, 3> args{
-        I18nArg{"host", host},
-        I18nArg{"port", static_cast<core::i64>(port)},
-        I18nArg{"code", static_cast<core::i64>(code)}};
+    const std::array<I18nArg, 3> args{I18nArg{"host", host}, I18nArg{"port", static_cast<core::i64>(port)},
+                                      I18nArg{"code", static_cast<core::i64>(code)}};
     return core::makeError(LUAUG_TR("net.err.connect_failed"), args);
 }
 
@@ -164,8 +158,7 @@ constexpr int kSendFlags = 0;
     const int nfds = handle + 1;
 #endif
 
-    for (;;)
-    {
+    for (;;) {
         const int ready = forWrite ? ::select(nfds, nullptr, &set, nullptr, &timeout)
                                    : ::select(nfds, &set, nullptr, nullptr, &timeout);
         if (ready < 0 && interrupted(lastSocketError()))
@@ -181,10 +174,8 @@ struct TcpStream::Impl
     SocketHandle handle = kInvalidSocket;
 };
 
-TcpStream::TcpStream()
-    : m_impl(std::make_unique<Impl>())
-{
-}
+TcpStream::TcpStream() : m_impl(std::make_unique<Impl>())
+{}
 
 TcpStream::~TcpStream()
 {
@@ -213,41 +204,33 @@ std::optional<core::EngineError> TcpStream::connect(std::string_view host, u16 p
 
     std::optional<core::EngineError> lastError;
 
-    for (const addrinfo* candidate = resolved; candidate != nullptr; candidate = candidate->ai_next)
-    {
-        const SocketHandle handle
-            = ::socket(candidate->ai_family, candidate->ai_socktype, candidate->ai_protocol);
-        if (handle == kInvalidSocket)
-        {
+    for (const addrinfo* candidate = resolved; candidate != nullptr; candidate = candidate->ai_next) {
+        const SocketHandle handle = ::socket(candidate->ai_family, candidate->ai_socktype, candidate->ai_protocol);
+        if (handle == kInvalidSocket) {
             lastError = connectErrorCode(host, port, lastSocketError());
             continue;
         }
 
-        if (!setNonBlocking(handle, true))
-        {
+        if (!setNonBlocking(handle, true)) {
             closeSocket(handle);
             lastError = connectError(host, port, LUAUG_TR("net.err.connect_socket_setup"));
             continue;
         }
 
         bool connected = false;
-        const int result
-            = ::connect(handle, candidate->ai_addr, static_cast<AddressLength>(candidate->ai_addrlen));
-        if (result == 0)
-        {
+        const int result = ::connect(handle, candidate->ai_addr, static_cast<AddressLength>(candidate->ai_addrlen));
+        if (result == 0) {
             connected = true;
         }
-        else if (wouldBlock(lastSocketError()))
-        {
+        else if (wouldBlock(lastSocketError())) {
             // Writability means the connect resolved, one way or the other;
             // SO_ERROR is what says which.
-            if (waitFor(handle, true, timeoutMs) == 1)
-            {
+            if (waitFor(handle, true, timeoutMs) == 1) {
                 int soError = 0;
                 AddressLength length = static_cast<AddressLength>(sizeof(soError));
 #if defined(_WIN32)
-                const int probe = ::getsockopt(
-                    handle, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&soError), &length);
+                const int probe =
+                    ::getsockopt(handle, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&soError), &length);
 #else
                 const int probe = ::getsockopt(handle, SOL_SOCKET, SO_ERROR, &soError, &length);
 #endif
@@ -255,24 +238,20 @@ std::optional<core::EngineError> TcpStream::connect(std::string_view host, u16 p
                 if (!connected && soError != 0)
                     lastError = connectErrorCode(host, port, soError);
             }
-            else
-            {
+            else {
                 lastError = connectError(host, port, LUAUG_TR("net.err.connect_timeout"));
             }
         }
-        else
-        {
+        else {
             lastError = connectErrorCode(host, port, lastSocketError());
         }
 
-        if (!connected)
-        {
+        if (!connected) {
             closeSocket(handle);
             continue;
         }
 
-        if (!setNonBlocking(handle, false))
-        {
+        if (!setNonBlocking(handle, false)) {
             closeSocket(handle);
             lastError = connectError(host, port, LUAUG_TR("net.err.connect_socket_setup"));
             continue;
@@ -302,18 +281,16 @@ std::optional<core::EngineError> TcpStream::send(std::span<const u8> data)
         return core::makeError(LUAUG_TR("net.err.closed"));
 
     usize sent = 0;
-    while (sent < data.size())
-    {
+    while (sent < data.size()) {
         const auto chunk = static_cast<int>(std::min<usize>(data.size() - sent, 1u << 20));
 #if defined(_WIN32)
-        const int written = ::send(
-            m_impl->handle, reinterpret_cast<const char*>(data.data() + sent), chunk, kSendFlags);
+        const int written =
+            ::send(m_impl->handle, reinterpret_cast<const char*>(data.data() + sent), chunk, kSendFlags);
 #else
-        const auto written
-            = static_cast<int>(::send(m_impl->handle, data.data() + sent, static_cast<usize>(chunk), kSendFlags));
+        const auto written =
+            static_cast<int>(::send(m_impl->handle, data.data() + sent, static_cast<usize>(chunk), kSendFlags));
 #endif
-        if (written > 0)
-        {
+        if (written > 0) {
             sent += static_cast<usize>(written);
             continue;
         }
@@ -321,8 +298,7 @@ std::optional<core::EngineError> TcpStream::send(std::span<const u8> data)
         const int error = lastSocketError();
         if (interrupted(error))
             continue;
-        if (wouldBlock(error))
-        {
+        if (wouldBlock(error)) {
             if (waitFor(m_impl->handle, true, 5000) == 1)
                 continue;
         }
@@ -346,21 +322,18 @@ std::optional<core::EngineError> TcpStream::receive(std::span<u8> out, usize& re
     const int ready = waitFor(m_impl->handle, false, timeoutMs);
     if (ready == 0)
         return std::nullopt;
-    if (ready < 0)
-    {
+    if (ready < 0) {
         const std::array<I18nArg, 1> args{I18nArg{"detail", describeSocketError(lastSocketError())}};
         return core::makeError(LUAUG_TR("net.err.receive_failed"), args);
     }
 
 #if defined(_WIN32)
-    const int got = ::recv(
-        m_impl->handle, reinterpret_cast<char*>(out.data()), static_cast<int>(out.size()), 0);
+    const int got = ::recv(m_impl->handle, reinterpret_cast<char*>(out.data()), static_cast<int>(out.size()), 0);
 #else
     const auto got = static_cast<int>(::recv(m_impl->handle, out.data(), out.size(), 0));
 #endif
 
-    if (got > 0)
-    {
+    if (got > 0) {
         received = static_cast<usize>(got);
         return std::nullopt;
     }
@@ -377,8 +350,7 @@ std::optional<core::EngineError> TcpStream::receive(std::span<u8> out, usize& re
 
 void TcpStream::close()
 {
-    if (m_impl && m_impl->handle != kInvalidSocket)
-    {
+    if (m_impl && m_impl->handle != kInvalidSocket) {
         closeSocket(m_impl->handle);
         m_impl->handle = kInvalidSocket;
     }

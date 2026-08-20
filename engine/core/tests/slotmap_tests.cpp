@@ -1,18 +1,16 @@
-#include <doctest/doctest.h>
+#include "luaug/core/slotmap.h"
 
+#include <doctest/doctest.h>
 #include <memory>
 #include <string>
 #include <vector>
-
-#include "luaug/core/slotmap.h"
 
 using luaug::core::InstanceId;
 using luaug::core::SlotMap;
 using luaug::core::u32;
 using luaug::core::usize;
 
-namespace doctest
-{
+namespace doctest {
 
 // Without this a failing handle comparison reads `{?} == {?}`, and the two
 // halves of the handle are the whole point of every check below.
@@ -28,8 +26,7 @@ struct StringMaker<InstanceId>
 
 } // namespace doctest
 
-namespace
-{
+namespace {
 
 // Instances are not copyable in the ECS -- they own children, connections and
 // eventually component storage -- so the container has to work for a type that
@@ -215,12 +212,10 @@ TEST_CASE("forEach visits live slots only, in ascending index order")
 
     std::vector<u32> visited;
     std::vector<int> values;
-    map.forEach(
-        [&visited, &values](InstanceId id, int& value)
-        {
-            visited.push_back(id.index);
-            values.push_back(value);
-        });
+    map.forEach([&visited, &values](InstanceId id, int& value) {
+        visited.push_back(id.index);
+        values.push_back(value);
+    });
 
     CHECK(visited == std::vector<u32>{0, 2, 4});
     CHECK(values == std::vector<int>{0, 20, 40});
@@ -354,11 +349,9 @@ TEST_CASE("many inserts and erases keep the map consistent")
     SlotMap<int> map;
     std::vector<InstanceId> live;
 
-    for (int round = 0; round < 200; ++round)
-    {
+    for (int round = 0; round < 200; ++round) {
         live.push_back(map.insert(round));
-        if (round % 3 == 0 && live.size() >= 2)
-        {
+        if (round % 3 == 0 && live.size() >= 2) {
             const InstanceId victim = live.front();
             live.erase(live.begin());
             CHECK(map.erase(victim));

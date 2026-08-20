@@ -2,18 +2,17 @@
 
 // doctest prints a failing comparison through operator<<, and the accessor here
 // hands back std::string_view.
+#include "luaug/core/name_atom.h"
+
 #include <ostream>
 #include <string>
 #include <vector>
-
-#include "luaug/core/name_atom.h"
 
 using luaug::core::AtomTable;
 using luaug::core::NameAtom;
 using luaug::core::usize;
 
-namespace doctest
-{
+namespace doctest {
 
 // Without this a failing atom comparison reads `{?} == {?}`, and the ids are
 // the one thing worth seeing when it fails.
@@ -139,8 +138,7 @@ TEST_CASE("hundreds of interned names stay addressable after the storage grows")
     std::vector<std::string> names;
     std::vector<NameAtom> atoms;
 
-    for (int index = 0; index < 400; ++index)
-    {
+    for (int index = 0; index < 400; ++index) {
         std::string name = (index % 2 == 0) ? "n" + std::to_string(index)
                                             : "a_considerably_longer_instance_name_" + std::to_string(index);
         atoms.push_back(table.intern(name));
@@ -149,8 +147,7 @@ TEST_CASE("hundreds of interned names stay addressable after the storage grows")
 
     REQUIRE(table.size() == names.size() + 1);
 
-    for (usize index = 0; index < names.size(); ++index)
-    {
+    for (usize index = 0; index < names.size(); ++index) {
         // Fetched again rather than held from before the growth: `text()` reads
         // the string the table owns *now*, which is the only view a caller can
         // rely on across an intern.

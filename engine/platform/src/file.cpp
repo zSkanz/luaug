@@ -3,10 +3,8 @@
 #include <SDL3/SDL_iostream.h>
 #include <SDL3/SDL_stdinc.h>
 
-namespace luaug::platform
-{
-namespace
-{
+namespace luaug::platform {
+namespace {
 
 // u8string(), not string(): see the header. The reinterpret_cast is the
 // standard-sanctioned way back from char8_t, and is a no-op at runtime.

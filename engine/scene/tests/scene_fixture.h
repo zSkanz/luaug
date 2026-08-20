@@ -19,16 +19,15 @@
 // most important property.
 #pragma once
 
-#include <string>
-#include <string_view>
-#include <vector>
-
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/enum_registry.h"
 #include "luaug/scene/world.h"
 
-namespace luaug::scene::testing
-{
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace luaug::scene::testing {
 
 struct Hierarchy
 {

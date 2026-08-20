@@ -1,20 +1,18 @@
-#include <doctest/doctest.h>
+#include "luaug/imgcmp/compare.h"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <doctest/doctest.h>
 
-#include "luaug/imgcmp/compare.h"
-
+using luaug::imgcmp::compare;
 using luaug::imgcmp::CompareOptions;
 using luaug::imgcmp::CompareStatus;
 using luaug::imgcmp::Image;
-using luaug::imgcmp::compare;
 using luaug::imgcmp::makeImage;
 using luaug::imgcmp::renderDiff;
 
-namespace
-{
+namespace {
 
 // Every image here is generated: the comparator has to be testable on a machine
 // with no GPU and with no fixtures checked into the repo (roadmap M1).
@@ -196,8 +194,7 @@ TEST_CASE("the diff image marks exactly the differing pixels")
 
     SUBCASE("untouched pixels stay in a dark opaque band")
     {
-        for (const Rgba background : {pixelAt(diff, 0, 0), pixelAt(diff, 0, 1)})
-        {
+        for (const Rgba background : {pixelAt(diff, 0, 0), pixelAt(diff, 0, 1)}) {
             CHECK(background[0] == background[1]);
             CHECK(background[1] == background[2]);
             CHECK(background[0] < 128);

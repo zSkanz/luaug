@@ -12,20 +12,19 @@
 // Every setter returns false rather than raising. `scene` has no error
 // formatting (that lives above it), so the caller turns a false into the
 // property's own `errKeyOnInvalidSet`.
-#include <cmath>
-#include <string>
-#include <variant>
-
-#include "../generated/class_descriptors.gen.h"
 #include "luaug/core/math.h"
 #include "luaug/render/lighting.h"
 #include "luaug/scene/components.h"
 #include "luaug/scene/world.h"
 
-namespace luaug::render::native
-{
-namespace
-{
+#include <cmath>
+#include <string>
+#include <variant>
+
+#include "../generated/class_descriptors.gen.h"
+
+namespace luaug::render::native {
+namespace {
 
 using core::f32;
 using core::f64;

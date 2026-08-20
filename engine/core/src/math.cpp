@@ -3,10 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
-namespace luaug::core
-{
-namespace
-{
+namespace luaug::core {
+namespace {
 
 // Two unit vectors are treated as parallel below this cross-product length,
 // which for unit inputs is sin(angle) -- so this is an angle of about 1e-6 rad.
@@ -60,8 +58,7 @@ struct AxisSequence
 
 [[nodiscard]] AxisSequence sequenceOf(RotationOrder order) noexcept
 {
-    switch (order)
-    {
+    switch (order) {
     case RotationOrder::XYZ:
         return {0, 1, 2};
     case RotationOrder::XZY:
@@ -114,10 +111,8 @@ Vec3 normalize(Vec3 v) noexcept
 Mat4 operator*(const Mat4& a, const Mat4& b) noexcept
 {
     Mat4 result;
-    for (int column = 0; column < 4; ++column)
-    {
-        for (int row = 0; row < 4; ++row)
-        {
+    for (int column = 0; column < 4; ++column) {
+        for (int row = 0; row < 4; ++row) {
             f32 sum = 0.0f;
             for (int k = 0; k < 4; ++k)
                 sum += a.m[k][row] * b.m[column][k];
@@ -258,10 +253,8 @@ Mat4 lookAt(Vec3 eye, Vec3 target, Vec3 up) noexcept
 Mat3 operator*(const Mat3& a, const Mat3& b) noexcept
 {
     Mat3 result;
-    for (int c = 0; c < 3; ++c)
-    {
-        for (int row = 0; row < 3; ++row)
-        {
+    for (int c = 0; c < 3; ++c) {
+        for (int row = 0; row < 3; ++row) {
             f32 sum = 0.0f;
             for (int k = 0; k < 3; ++k)
                 sum += a.m[k][row] * b.m[c][k];
@@ -303,8 +296,7 @@ Mat3 orthonormalize(const Mat3& m) noexcept
     // than the hint's length: a short-but-skewed up must not read as parallel.
     Vec3 upHint = normalize(column(m, 1));
     Vec3 right = cross(upHint, back);
-    if (length(right) <= kParallelEpsilon)
-    {
+    if (length(right) <= kParallelEpsilon) {
         // The hint carries no roll -- it is parallel to the look axis, or zero.
         // Inventing a hint keeps the axis the caller cared about; discarding
         // both would throw away the one the header calls authoritative. No unit
@@ -468,8 +460,7 @@ void expand(AABB& box, const AABB& other) noexcept
 {
     // Guarded rather than merged blindly: an empty box's bounds are infinities,
     // and merging them in would leave `box` empty forever.
-    if (isEmpty(other))
-    {
+    if (isEmpty(other)) {
         return;
     }
     expand(box, other.min);
@@ -478,24 +469,22 @@ void expand(AABB& box, const AABB& other) noexcept
 
 bool contains(const AABB& box, Vec3 point) noexcept
 {
-    return point.x >= box.min.x && point.x <= box.max.x && point.y >= box.min.y && point.y <= box.max.y
-        && point.z >= box.min.z && point.z <= box.max.z;
+    return point.x >= box.min.x && point.x <= box.max.x && point.y >= box.min.y && point.y <= box.max.y &&
+           point.z >= box.min.z && point.z <= box.max.z;
 }
 
 bool intersects(const AABB& a, const AABB& b) noexcept
 {
-    if (isEmpty(a) || isEmpty(b))
-    {
+    if (isEmpty(a) || isEmpty(b)) {
         return false;
     }
-    return a.min.x <= b.max.x && a.max.x >= b.min.x && a.min.y <= b.max.y && a.max.y >= b.min.y && a.min.z <= b.max.z
-        && a.max.z >= b.min.z;
+    return a.min.x <= b.max.x && a.max.x >= b.min.x && a.min.y <= b.max.y && a.max.y >= b.min.y && a.min.z <= b.max.z &&
+           a.max.z >= b.min.z;
 }
 
 AABB transformed(const Mat4& m, const AABB& box) noexcept
 {
-    if (isEmpty(box))
-    {
+    if (isEmpty(box)) {
         return AABB{};
     }
 
@@ -519,8 +508,7 @@ AABB transformed(const Mat4& m, const AABB& box) noexcept
     };
 }
 
-namespace
-{
+namespace {
 
 // A plane straight out of the matrix has a normal whose length is arbitrary, so
 // `signedDistance` would return a scaled value rather than a distance. Every
@@ -529,8 +517,7 @@ namespace
 Plane normalizedPlane(f32 a, f32 b, f32 c, f32 d) noexcept
 {
     const f32 length = std::sqrt(a * a + b * b + c * c);
-    if (length <= 0.0f)
-    {
+    if (length <= 0.0f) {
         return Plane{Vec3{0.0f, 1.0f, 0.0f}, 0.0f};
     }
     const f32 inverse = 1.0f / length;
@@ -564,13 +551,11 @@ Frustum frustumFromViewProjection(const Mat4& vp) noexcept
 
 bool intersects(const Frustum& frustum, const AABB& box) noexcept
 {
-    if (isEmpty(box))
-    {
+    if (isEmpty(box)) {
         return false;
     }
 
-    for (const Plane& plane : frustum.planes)
-    {
+    for (const Plane& plane : frustum.planes) {
         // The corner furthest along the plane's normal. If even that one is on
         // the negative side, every corner is, and the box is outside this plane
         // -- which is enough to reject it entirely.
@@ -579,8 +564,7 @@ bool intersects(const Frustum& frustum, const AABB& box) noexcept
             plane.normal.y >= 0.0f ? box.max.y : box.min.y,
             plane.normal.z >= 0.0f ? box.max.z : box.min.z,
         };
-        if (signedDistance(plane, positive) < 0.0f)
-        {
+        if (signedDistance(plane, positive) < 0.0f) {
             return false;
         }
     }
@@ -621,8 +605,7 @@ Color3 fromHsv(f32 hue, f32 saturation, f32 value) noexcept
     const f32 q = value * (1.0f - saturation * fraction);
     const f32 t = value * (1.0f - saturation * (1.0f - fraction));
 
-    switch (static_cast<int>(sextant))
-    {
+    switch (static_cast<int>(sextant)) {
     case 0:
         return {value, t, p};
     case 1:
@@ -647,8 +630,7 @@ void toHsv(Color3 color, f32& hue, f32& saturation, f32& value) noexcept
     value = maximum;
     saturation = maximum > 0.0f ? chroma / maximum : 0.0f;
 
-    if (!(chroma > 0.0f))
-    {
+    if (!(chroma > 0.0f)) {
         // Achromatic. Every hue names this colour, so there is nothing to
         // report; 0 is the answer that round-trips, because `fromHsv(0, 0, v)`
         // reproduces the grey whatever hue we had claimed.
@@ -701,8 +683,7 @@ Vec3 toEuler(const Mat3& rotation, RotationOrder order) noexcept
     // the whole rotation is expressed in the first, which is the convention that
     // keeps a round trip stable instead of splitting the angle arbitrarily.
     constexpr f32 lockEpsilon = 1.0f - 1e-6f;
-    if (std::abs(sinMiddle) > lockEpsilon)
-    {
+    if (std::abs(sinMiddle) > lockEpsilon) {
         const f32 sign = sinMiddle < 0.0f ? -1.0f : 1.0f;
         setComponent(result, i, std::atan2(sign * element(rotation, j, i), element(rotation, j, j)));
         setComponent(result, j, std::asin(sinMiddle));
@@ -752,8 +733,7 @@ void toAxisAngle(const Mat3& rotation, Vec3& axis, f32& radians) noexcept
 
     // The sign convention that puts the angle in [0, pi]: q and -q are the same
     // rotation, so flipping to w >= 0 chooses the short way round.
-    if (w < 0.0f)
-    {
+    if (w < 0.0f) {
         x = -x;
         y = -y;
         z = -z;
@@ -761,8 +741,7 @@ void toAxisAngle(const Mat3& rotation, Vec3& axis, f32& radians) noexcept
     }
 
     const f32 sinHalf = length(Vec3{x, y, z});
-    if (sinHalf <= kParallelEpsilon)
-    {
+    if (sinHalf <= kParallelEpsilon) {
         // The identity, or near enough that no axis is recoverable. +X with a
         // zero angle is arbitrary, which is why the header says so.
         axis = Vec3{1.0f, 0.0f, 0.0f};
@@ -787,9 +766,12 @@ Mat3 fromQuaternion(f32 x, f32 y, f32 z, f32 w) noexcept
     const f32 qw = w * s;
 
     Mat3 result;
-    setColumn(result, 0, Vec3{1.0f - 2.0f * (qy * qy + qz * qz), 2.0f * (qx * qy + qz * qw), 2.0f * (qx * qz - qy * qw)});
-    setColumn(result, 1, Vec3{2.0f * (qx * qy - qz * qw), 1.0f - 2.0f * (qx * qx + qz * qz), 2.0f * (qy * qz + qx * qw)});
-    setColumn(result, 2, Vec3{2.0f * (qx * qz + qy * qw), 2.0f * (qy * qz - qx * qw), 1.0f - 2.0f * (qx * qx + qy * qy)});
+    setColumn(result, 0,
+              Vec3{1.0f - 2.0f * (qy * qy + qz * qz), 2.0f * (qx * qy + qz * qw), 2.0f * (qx * qz - qy * qw)});
+    setColumn(result, 1,
+              Vec3{2.0f * (qx * qy - qz * qw), 1.0f - 2.0f * (qx * qx + qz * qz), 2.0f * (qy * qz + qx * qw)});
+    setColumn(result, 2,
+              Vec3{2.0f * (qx * qz + qy * qw), 2.0f * (qy * qz - qx * qw), 1.0f - 2.0f * (qx * qx + qy * qy)});
     return result;
 }
 
@@ -804,32 +786,28 @@ void toQuaternion(const Mat3& rotation, f32& x, f32& y, f32& z, f32& w) noexcept
     const f32 m22 = element(rotation, 2, 2);
     const f32 trace = m00 + m11 + m22;
 
-    if (trace > 0.0f)
-    {
+    if (trace > 0.0f) {
         const f32 s = std::sqrt(trace + 1.0f) * 2.0f;
         w = 0.25f * s;
         x = (element(rotation, 2, 1) - element(rotation, 1, 2)) / s;
         y = (element(rotation, 0, 2) - element(rotation, 2, 0)) / s;
         z = (element(rotation, 1, 0) - element(rotation, 0, 1)) / s;
     }
-    else if (m00 > m11 && m00 > m22)
-    {
+    else if (m00 > m11 && m00 > m22) {
         const f32 s = std::sqrt(1.0f + m00 - m11 - m22) * 2.0f;
         w = (element(rotation, 2, 1) - element(rotation, 1, 2)) / s;
         x = 0.25f * s;
         y = (element(rotation, 0, 1) + element(rotation, 1, 0)) / s;
         z = (element(rotation, 0, 2) + element(rotation, 2, 0)) / s;
     }
-    else if (m11 > m22)
-    {
+    else if (m11 > m22) {
         const f32 s = std::sqrt(1.0f + m11 - m00 - m22) * 2.0f;
         w = (element(rotation, 0, 2) - element(rotation, 2, 0)) / s;
         x = (element(rotation, 0, 1) + element(rotation, 1, 0)) / s;
         y = 0.25f * s;
         z = (element(rotation, 1, 2) + element(rotation, 2, 1)) / s;
     }
-    else
-    {
+    else {
         const f32 s = std::sqrt(1.0f + m22 - m00 - m11) * 2.0f;
         w = (element(rotation, 1, 0) - element(rotation, 0, 1)) / s;
         x = (element(rotation, 0, 2) + element(rotation, 2, 0)) / s;
@@ -856,8 +834,7 @@ Mat3 slerp(const Mat3& a, const Mat3& b, f32 alpha) noexcept
     // flip an interpolation between two nearby frames can take the long way
     // round, which reads as the object spinning 350 degrees to move 10.
     f32 cosine = ax * bx + ay * by + az * bz + aw * bw;
-    if (cosine < 0.0f)
-    {
+    if (cosine < 0.0f) {
         bx = -bx;
         by = -by;
         bz = -bz;
@@ -871,19 +848,15 @@ Mat3 slerp(const Mat3& a, const Mat3& b, f32 alpha) noexcept
     // significant bits; the linear blend and the spherical one agree to well
     // under an f32 ulp there, and only one of them divides by nearly zero.
     constexpr f32 linearThreshold = 1.0f - 1e-6f;
-    if (cosine < linearThreshold)
-    {
+    if (cosine < linearThreshold) {
         const f32 theta = std::acos(std::clamp(cosine, -1.0f, 1.0f));
         const f32 sinTheta = std::sin(theta);
         weightA = std::sin((1.0f - alpha) * theta) / sinTheta;
         weightB = std::sin(alpha * theta) / sinTheta;
     }
 
-    return fromQuaternion(
-        weightA * ax + weightB * bx,
-        weightA * ay + weightB * by,
-        weightA * az + weightB * bz,
-        weightA * aw + weightB * bw);
+    return fromQuaternion(weightA * ax + weightB * bx, weightA * ay + weightB * by, weightA * az + weightB * bz,
+                          weightA * aw + weightB * bw);
 }
 
 CFrameD lerp(const CFrameD& a, const CFrameD& b, f64 alpha) noexcept

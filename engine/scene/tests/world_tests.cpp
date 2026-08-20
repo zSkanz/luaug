@@ -2,9 +2,8 @@
 
 // doctest stringifies whatever a CHECK compares, and that needs the stream
 // operators for std::string and std::string_view to be visible here.
-#include <ostream>
-
 #include <algorithm>
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -20,8 +19,7 @@ using luaug::scene::Value;
 using luaug::scene::World;
 using luaug::scene::testing::Fixture;
 
-namespace
-{
+namespace {
 
 [[nodiscard]] std::vector<Change> drain(World& world)
 {
@@ -31,9 +29,8 @@ namespace
 
 [[nodiscard]] usize countOf(const std::vector<Change>& changes, ChangeKind kind)
 {
-    return static_cast<usize>(std::count_if(changes.begin(), changes.end(), [kind](const Change& change) {
-        return change.kind == kind;
-    }));
+    return static_cast<usize>(
+        std::count_if(changes.begin(), changes.end(), [kind](const Change& change) { return change.kind == kind; }));
 }
 
 [[nodiscard]] std::vector<ChangeKind> kindsOf(const std::vector<Change>& changes)
@@ -360,14 +357,9 @@ TEST_CASE("one reparent raises its fires in the documented order")
 
     // api-design.md §3.1: removed from the old parent, then added to the new,
     // then the ancestry fires.
-    CHECK(
-        kindsOf(drain(fixture.world))
-        == std::vector<ChangeKind>{
-            ChangeKind::ChildRemoved,
-            ChangeKind::DescendantRemoving,
-            ChangeKind::ChildAdded,
-            ChangeKind::DescendantAdded,
-            ChangeKind::AncestryChanged});
+    CHECK(kindsOf(drain(fixture.world)) ==
+          std::vector<ChangeKind>{ChangeKind::ChildRemoved, ChangeKind::DescendantRemoving, ChangeKind::ChildAdded,
+                                  ChangeKind::DescendantAdded, ChangeKind::AncestryChanged});
 }
 
 TEST_CASE("a property write enqueues only when the value changes, and only when watched")
@@ -409,14 +401,12 @@ TEST_CASE("property writes report why they failed")
     Fixture fixture;
     const InstanceId part = fixture.part("Part");
 
-    CHECK(
-        fixture.world.setProperty(part, fixture.atom("NoSuchProperty"), Value{1.0})
-        == World::SetResult::UnknownProperty);
+    CHECK(fixture.world.setProperty(part, fixture.atom("NoSuchProperty"), Value{1.0}) ==
+          World::SetResult::UnknownProperty);
     // Wrong type for the property: the setter rejects it and the instance is
     // untouched.
-    CHECK(
-        fixture.world.setProperty(part, fixture.schema.transparencyProperty, Value{std::string("x")})
-        == World::SetResult::InvalidValue);
+    CHECK(fixture.world.setProperty(part, fixture.schema.transparencyProperty, Value{std::string("x")}) ==
+          World::SetResult::InvalidValue);
     CHECK(fixture.world.getProperty(part, fixture.schema.transparencyProperty).value() == Value{0.0});
     CHECK_FALSE(fixture.world.getProperty(part, fixture.atom("NoSuchProperty")).has_value());
 }
@@ -517,9 +507,8 @@ TEST_CASE("clone deep-copies and rewires only the references that point inside")
     const InstanceId outside = fixture.part("Outside");
     REQUIRE_FALSE(fixture.world.setParent(inside, model).has_value());
 
-    REQUIRE(
-        fixture.world.setProperty(model, fixture.schema.primaryPartProperty, Value{inside})
-        == World::SetResult::Changed);
+    REQUIRE(fixture.world.setProperty(model, fixture.schema.primaryPartProperty, Value{inside}) ==
+            World::SetResult::Changed);
     fixture.world.setAttribute(inside, fixture.atom("Health"), Value{50.0});
     fixture.world.addTag(inside, fixture.atom("Climbable"));
     REQUIRE(fixture.world.setProperty(inside, fixture.schema.transparencyProperty, Value{0.25}) ==
@@ -541,9 +530,8 @@ TEST_CASE("clone deep-copies and rewires only the references that point inside")
 
     // And one pointing outside stays on the original: cloning a model must not
     // clone the world it sits in.
-    REQUIRE(
-        fixture.world.setProperty(model, fixture.schema.primaryPartProperty, Value{outside})
-        == World::SetResult::Changed);
+    REQUIRE(fixture.world.setProperty(model, fixture.schema.primaryPartProperty, Value{outside}) ==
+            World::SetResult::Changed);
     const InstanceId second = fixture.world.clone(model);
     CHECK(fixture.world.getProperty(second, fixture.schema.primaryPartProperty).value() == Value{outside});
 
@@ -556,8 +544,7 @@ TEST_CASE("clone preserves duplicate names and child order")
 {
     Fixture fixture;
     const InstanceId root = fixture.folder("Root");
-    for (int index = 0; index < 3; ++index)
-    {
+    for (int index = 0; index < 3; ++index) {
         const InstanceId child = fixture.folder("Tree");
         REQUIRE_FALSE(fixture.world.setParent(child, root).has_value());
     }
@@ -570,8 +557,7 @@ TEST_CASE("clone preserves duplicate names and child order")
 
 // --- World hash -------------------------------------------------------------
 
-namespace
-{
+namespace {
 
 // Builds the same world twice through the same calls. `internExtra` interns a
 // batch of unrelated strings first, which shifts every atom number without
@@ -579,8 +565,7 @@ namespace
 [[nodiscard]] u64 buildAndHash(bool internExtra)
 {
     Fixture fixture;
-    if (internExtra)
-    {
+    if (internExtra) {
         for (int index = 0; index < 16; ++index)
             (void)fixture.atom("filler" + std::to_string(index));
     }
@@ -617,9 +602,8 @@ TEST_CASE("the world hash changes when anything observable does")
 
     SUBCASE("a property")
     {
-        REQUIRE(
-            fixture.world.setProperty(part, fixture.schema.transparencyProperty, Value{0.5})
-            == World::SetResult::Changed);
+        REQUIRE(fixture.world.setProperty(part, fixture.schema.transparencyProperty, Value{0.5}) ==
+                World::SetResult::Changed);
         CHECK(fixture.world.worldHash() != base);
     }
     SUBCASE("a name")

@@ -9,10 +9,8 @@
 #include <system_error>
 #include <utility>
 
-namespace luaug::core
-{
-namespace
-{
+namespace luaug::core {
+namespace {
 
 // Bounds the recursion rather than the grammar: the parser descends with the
 // document, so a corrupt or hostile file that is nothing but '[' must reach a
@@ -28,23 +26,19 @@ constexpr bool isDigit(char c) noexcept
 
 void appendUtf8(std::string& out, u32 codepoint)
 {
-    if (codepoint < 0x80u)
-    {
+    if (codepoint < 0x80u) {
         out.push_back(static_cast<char>(codepoint));
     }
-    else if (codepoint < 0x800u)
-    {
+    else if (codepoint < 0x800u) {
         out.push_back(static_cast<char>(0xC0u | (codepoint >> 6)));
         out.push_back(static_cast<char>(0x80u | (codepoint & 0x3Fu)));
     }
-    else if (codepoint < 0x10000u)
-    {
+    else if (codepoint < 0x10000u) {
         out.push_back(static_cast<char>(0xE0u | (codepoint >> 12)));
         out.push_back(static_cast<char>(0x80u | ((codepoint >> 6) & 0x3Fu)));
         out.push_back(static_cast<char>(0x80u | (codepoint & 0x3Fu)));
     }
-    else
-    {
+    else {
         out.push_back(static_cast<char>(0xF0u | (codepoint >> 18)));
         out.push_back(static_cast<char>(0x80u | ((codepoint >> 12) & 0x3Fu)));
         out.push_back(static_cast<char>(0x80u | ((codepoint >> 6) & 0x3Fu)));
@@ -67,8 +61,7 @@ bool decimalToDouble(std::string_view token, f64& out)
     std::string buffer(token);
 
     const char* separator = std::localeconv()->decimal_point;
-    if (separator != nullptr && std::string_view{separator} != ".")
-    {
+    if (separator != nullptr && std::string_view{separator} != ".") {
         const usize dot = buffer.find('.');
         if (dot != std::string::npos)
             buffer.replace(dot, 1, separator);
@@ -161,8 +154,7 @@ struct JsonDocument::Impl
 
         void skipSpace() noexcept
         {
-            while (pos < source.size())
-            {
+            while (pos < source.size()) {
                 const char c = source[pos];
                 if (c == ' ' || c == '\t' || c == '\n' || c == '\r')
                     ++pos;
@@ -182,8 +174,7 @@ struct JsonDocument::Impl
 
         bool expect(char c)
         {
-            if (peek() != c)
-            {
+            if (peek() != c) {
                 char message[16];
                 std::snprintf(message, sizeof(message), "expected '%c'", c);
                 return fail(message);
@@ -213,12 +204,12 @@ struct JsonDocument::Impl
 
             skipSpace();
             const char c = peek();
-            switch (c)
-            {
-            case '{': return parseObject(depth, index);
-            case '[': return parseArray(depth, index);
-            case '"':
-            {
+            switch (c) {
+            case '{':
+                return parseObject(depth, index);
+            case '[':
+                return parseArray(depth, index);
+            case '"': {
                 std::string decoded;
                 if (!readString(decoded))
                     return false;
@@ -227,18 +218,26 @@ struct JsonDocument::Impl
                 document.nodes[index].text = text;
                 return true;
             }
-            case 't': return parseLiteral("true", JsonType::Boolean, true, index);
-            case 'f': return parseLiteral("false", JsonType::Boolean, false, index);
-            case 'n': return parseLiteral("null", JsonType::Null, false, index);
+            case 't':
+                return parseLiteral("true", JsonType::Boolean, true, index);
+            case 'f':
+                return parseLiteral("false", JsonType::Boolean, false, index);
+            case 'n':
+                return parseLiteral("null", JsonType::Null, false, index);
             // The three near-misses that a lenient parser would take, each named
             // rather than reported as "expected a value": every one of them is a
             // file written against a different dialect, and saying which dialect
             // is what turns the diagnostic into a fix.
-            case '\'': return fail("a JSON string must be double-quoted");
-            case '/': return fail("comments are not valid JSON");
-            case 'N': return fail("NaN is not a valid JSON number");
-            case 'I': return fail("Infinity is not a valid JSON number");
-            default: break;
+            case '\'':
+                return fail("a JSON string must be double-quoted");
+            case '/':
+                return fail("comments are not valid JSON");
+            case 'N':
+                return fail("NaN is not a valid JSON number");
+            case 'I':
+                return fail("Infinity is not a valid JSON number");
+            default:
+                break;
             }
 
             if (c == '-' || isDigit(c))
@@ -266,15 +265,13 @@ struct JsonDocument::Impl
             std::vector<usize> children;
 
             skipSpace();
-            if (peek() == '}')
-            {
+            if (peek() == '}') {
                 advance();
                 index = self;
                 return true;
             }
 
-            for (;;)
-            {
+            for (;;) {
                 skipSpace();
                 // Only reachable after a comma: the empty object left above.
                 if (peek() == '}')
@@ -299,13 +296,11 @@ struct JsonDocument::Impl
 
                 skipSpace();
                 const char delimiter = peek();
-                if (delimiter == ',')
-                {
+                if (delimiter == ',') {
                     advance();
                     continue;
                 }
-                if (delimiter == '}')
-                {
+                if (delimiter == '}') {
                     advance();
                     break;
                 }
@@ -326,15 +321,13 @@ struct JsonDocument::Impl
             std::vector<usize> children;
 
             skipSpace();
-            if (peek() == ']')
-            {
+            if (peek() == ']') {
                 advance();
                 index = self;
                 return true;
             }
 
-            for (;;)
-            {
+            for (;;) {
                 skipSpace();
                 if (peek() == ']')
                     return fail("trailing comma before ']'");
@@ -346,13 +339,11 @@ struct JsonDocument::Impl
 
                 skipSpace();
                 const char delimiter = peek();
-                if (delimiter == ',')
-                {
+                if (delimiter == ',') {
                     advance();
                     continue;
                 }
-                if (delimiter == ']')
-                {
+                if (delimiter == ']') {
                     advance();
                     break;
                 }
@@ -371,21 +362,18 @@ struct JsonDocument::Impl
             if (peek() == '-')
                 advance();
 
-            if (peek() == '0')
-            {
+            if (peek() == '0') {
                 advance();
                 // "01" is a typo in every file that contains it, and a lenient
                 // parser would read it as two tokens.
                 if (isDigit(peek()))
                     return fail("a number may not have a leading zero");
             }
-            else if (isDigit(peek()))
-            {
+            else if (isDigit(peek())) {
                 while (isDigit(peek()))
                     advance();
             }
-            else
-            {
+            else {
                 return fail("expected a digit in a number");
             }
 
@@ -394,8 +382,7 @@ struct JsonDocument::Impl
             // a double first.
             bool wholeSyntax = true;
 
-            if (peek() == '.')
-            {
+            if (peek() == '.') {
                 advance();
                 if (!isDigit(peek()))
                     return fail("expected a digit after the decimal point");
@@ -404,8 +391,7 @@ struct JsonDocument::Impl
                 wholeSyntax = false;
             }
 
-            if (peek() == 'e' || peek() == 'E')
-            {
+            if (peek() == 'e' || peek() == 'E') {
                 advance();
                 if (peek() == '+' || peek() == '-')
                     advance();
@@ -426,13 +412,10 @@ struct JsonDocument::Impl
             JsonValue::Node& node = document.nodes[index];
             node.number = value;
 
-            if (wholeSyntax)
-            {
+            if (wholeSyntax) {
                 i64 whole = 0;
-                const std::from_chars_result parsed =
-                    std::from_chars(token.data(), token.data() + token.size(), whole);
-                if (parsed.ec == std::errc{} && parsed.ptr == token.data() + token.size())
-                {
+                const std::from_chars_result parsed = std::from_chars(token.data(), token.data() + token.size(), whole);
+                if (parsed.ec == std::errc{} && parsed.ptr == token.data() + token.size()) {
                     node.integral = true;
                     node.integer = whole;
                 }
@@ -445,11 +428,9 @@ struct JsonDocument::Impl
             // reports the fallback from asInteger(), because truncating it is
             // exactly the plausible-looking wrong answer this reader exists to
             // avoid.
-            if (!node.integral)
-            {
+            if (!node.integral) {
                 constexpr f64 kLowest = static_cast<f64>(std::numeric_limits<i64>::min()); // exactly -2^63
-                if (std::isfinite(value) && value == std::floor(value) && value >= kLowest && value < -kLowest)
-                {
+                if (std::isfinite(value) && value == std::floor(value) && value >= kLowest && value < -kLowest) {
                     node.integral = true;
                     node.integer = static_cast<i64>(value);
                 }
@@ -464,8 +445,7 @@ struct JsonDocument::Impl
                 return fail("truncated \\u escape");
 
             u32 value = 0;
-            for (usize i = 0; i < 4; ++i)
-            {
+            for (usize i = 0; i < 4; ++i) {
                 const char c = source[pos + i];
                 u32 digit = 0;
                 if (c >= '0' && c <= '9')
@@ -489,14 +469,12 @@ struct JsonDocument::Impl
                 return false;
 
             text.clear();
-            for (;;)
-            {
+            for (;;) {
                 if (pos >= source.size())
                     return fail("unterminated string");
 
                 const char c = source[pos];
-                if (c == '"')
-                {
+                if (c == '"') {
                     advance();
                     return true;
                 }
@@ -507,8 +485,7 @@ struct JsonDocument::Impl
                 if (static_cast<unsigned char>(c) < 0x20u)
                     return fail("a control character in a string must be escaped");
 
-                if (c != '\\')
-                {
+                if (c != '\\') {
                     text.push_back(c);
                     advance();
                     continue;
@@ -520,24 +497,37 @@ struct JsonDocument::Impl
 
                 const char esc = source[pos];
                 advance();
-                switch (esc)
-                {
-                case '"': text.push_back('"'); break;
-                case '\\': text.push_back('\\'); break;
-                case '/': text.push_back('/'); break;
-                case 'b': text.push_back('\b'); break;
-                case 'f': text.push_back('\f'); break;
-                case 'n': text.push_back('\n'); break;
-                case 'r': text.push_back('\r'); break;
-                case 't': text.push_back('\t'); break;
-                case 'u':
-                {
+                switch (esc) {
+                case '"':
+                    text.push_back('"');
+                    break;
+                case '\\':
+                    text.push_back('\\');
+                    break;
+                case '/':
+                    text.push_back('/');
+                    break;
+                case 'b':
+                    text.push_back('\b');
+                    break;
+                case 'f':
+                    text.push_back('\f');
+                    break;
+                case 'n':
+                    text.push_back('\n');
+                    break;
+                case 'r':
+                    text.push_back('\r');
+                    break;
+                case 't':
+                    text.push_back('\t');
+                    break;
+                case 'u': {
                     u32 codepoint = 0;
                     if (!readHex4(codepoint))
                         return false;
 
-                    if (codepoint >= 0xD800u && codepoint <= 0xDBFFu)
-                    {
+                    if (codepoint >= 0xD800u && codepoint <= 0xDBFFu) {
                         // Half a character. UTF-8 has no encoding for a lone
                         // surrogate, so emitting one would produce bytes that
                         // every downstream decoder rejects -- later, and
@@ -553,8 +543,7 @@ struct JsonDocument::Impl
                             return fail("invalid low surrogate in \\u escape");
                         codepoint = 0x10000u + ((codepoint - 0xD800u) << 10) + (low - 0xDC00u);
                     }
-                    else if (codepoint >= 0xDC00u && codepoint <= 0xDFFFu)
-                    {
+                    else if (codepoint >= 0xDC00u && codepoint <= 0xDFFFu) {
                         return fail("a low surrogate must follow a high surrogate");
                     }
 
@@ -569,10 +558,8 @@ struct JsonDocument::Impl
     };
 };
 
-JsonDocument::JsonDocument()
-    : impl_(std::make_unique<Impl>())
-{
-}
+JsonDocument::JsonDocument() : impl_(std::make_unique<Impl>())
+{}
 
 JsonDocument::~JsonDocument() = default;
 JsonDocument::JsonDocument(JsonDocument&&) noexcept = default;
@@ -652,8 +639,7 @@ bool JsonValue::has(std::string_view key) const noexcept
     if (type() != JsonType::Object)
         return false;
 
-    for (const Node::Text& stored : node_->keys)
-    {
+    for (const Node::Text& stored : node_->keys) {
         if (owner_->view(stored) == key)
             return true;
     }
@@ -669,8 +655,7 @@ JsonValue JsonValue::operator[](std::string_view key) const noexcept
     // not reject them outright does. Both remain visible through keyAt(), so a
     // caller for whom a duplicate is an error -- the i18n catalog is one -- can
     // still see it by iterating.
-    for (usize i = node_->keys.size(); i > 0; --i)
-    {
+    for (usize i = node_->keys.size(); i > 0; --i) {
         if (owner_->view(node_->keys[i - 1]) == key)
             return JsonValue{&owner_->nodes[node_->children[i - 1]], owner_};
     }

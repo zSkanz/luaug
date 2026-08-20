@@ -2,21 +2,19 @@
 
 // doctest stringifies whatever a CHECK compares, and that needs the stream
 // operators for std::string and std::string_view to be visible here.
-#include <ostream>
-
-#include <string>
-#include <vector>
-
 #include "luaug/core/slotmap.h"
 #include "luaug/scene/component_pool.h"
+
+#include <ostream>
+#include <string>
+#include <vector>
 
 using luaug::core::InstanceId;
 using luaug::core::SlotMap;
 using luaug::core::usize;
 using luaug::scene::ComponentPool;
 
-namespace
-{
+namespace {
 
 struct Payload
 {
@@ -138,8 +136,7 @@ TEST_CASE("iteration is dense insertion order and a removal does not reorder sur
     Ids ids;
     ComponentPool<Payload> pool;
     std::vector<InstanceId> created;
-    for (int index = 0; index < 6; ++index)
-    {
+    for (int index = 0; index < 6; ++index) {
         const InstanceId id = ids.next();
         created.push_back(id);
         pool.add(id, Payload{index});
@@ -161,8 +158,7 @@ TEST_CASE("compact closes holes and preserves relative order")
     Ids ids;
     ComponentPool<Payload> pool;
     std::vector<InstanceId> created;
-    for (int index = 0; index < 5; ++index)
-    {
+    for (int index = 0; index < 5; ++index) {
         const InstanceId id = ids.next();
         created.push_back(id);
         pool.add(id, Payload{index});

@@ -25,8 +25,7 @@
 #include "luaug/core/math.h"
 #include "luaug/core/types.h"
 
-namespace luaug::render
-{
+namespace luaug::render {
 
 using core::f32;
 using core::u32;

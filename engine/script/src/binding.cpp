@@ -6,8 +6,7 @@
 #include <cassert>
 #include <string>
 
-namespace luaug::script
-{
+namespace luaug::script {
 
 core::NameAtom VmContext::resolve(int atom) const noexcept
 {
@@ -31,8 +30,7 @@ const MemberEntry* findMember(const MemberTable& table, core::NameAtom name) noe
 {
     if (!name.valid())
         return nullptr;
-    for (const MemberEntry& entry : table)
-    {
+    for (const MemberEntry& entry : table) {
         if (entry.name == name)
             return &entry;
     }
@@ -50,8 +48,7 @@ void raise(lua_State* L, core::TextKey key, std::span<const core::I18nArg> args)
 
 const char* typeName(UserdataTag tag) noexcept
 {
-    switch (tag)
-    {
+    switch (tag) {
     case UserdataTag::Instance:
         return "Instance";
     case UserdataTag::CFrame:
@@ -89,8 +86,7 @@ void raiseUnknownMember(lua_State* L, UserdataTag tag, const char* member)
     raise(L, LUAUG_TR("script.err.unknown_member"), args);
 }
 
-namespace
-{
+namespace {
 
 // The tag rides along as an upvalue rather than as a template parameter, so
 // there is one copy of each dispatch function and not one per type: what differs
@@ -110,8 +106,7 @@ int memberIndex(lua_State* L)
     // (`lapi.cpp:516`). A non-string key returns null and falls through to the
     // unknown-member raise, which is the right answer for `cf[1]`.
     const char* key = lua_tostringatom(L, 2, &atom);
-    if (key != nullptr)
-    {
+    if (key != nullptr) {
         const VmContext& ctx = context(L);
         const core::NameAtom name = ctx.resolve(atom);
         if (const MemberEntry* entry = findMember(ctx.getters[static_cast<usize>(tag)], name))
@@ -121,8 +116,7 @@ int memberIndex(lua_State* L)
         // closure per access, which is why `__namecall` exists and why
         // `signal:Fire()` never comes through here. The Instance binding does
         // the same thing for the same reason.
-        if (const MemberEntry* entry = findMember(ctx.methods[static_cast<usize>(tag)], name))
-        {
+        if (const MemberEntry* entry = findMember(ctx.methods[static_cast<usize>(tag)], name)) {
             lua_pushcfunction(L, entry->fn, typeName(tag));
             return 1;
         }
@@ -137,8 +131,7 @@ int memberNamecall(lua_State* L)
 
     int atom = -1;
     const char* method = lua_namecallatom(L, &atom);
-    if (method != nullptr)
-    {
+    if (method != nullptr) {
         const VmContext& ctx = context(L);
         if (const MemberEntry* entry = findMember(ctx.methods[static_cast<usize>(tag)], ctx.resolve(atom)))
             return entry->fn(L);
@@ -193,13 +186,11 @@ void endTagMetatable(lua_State* L)
 void installTagMetatable(lua_State* L, UserdataTag tag, lua_CFunction equals, lua_CFunction tostring)
 {
     beginTagMetatable(L, tag);
-    if (equals != nullptr)
-    {
+    if (equals != nullptr) {
         lua_pushcfunction(L, equals, "__eq");
         lua_setfield(L, -2, "__eq");
     }
-    if (tostring != nullptr)
-    {
+    if (tostring != nullptr) {
         lua_pushcfunction(L, tostring, "__tostring");
         lua_setfield(L, -2, "__tostring");
     }

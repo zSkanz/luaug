@@ -10,12 +10,11 @@
 // need to read a capture without linking anything that knows how one is made.
 #pragma once
 
-#include <string>
-
 #include "luaug/rhi/device.h"
 
-namespace luaug::rhi
-{
+#include <string>
+
+namespace luaug::rhi {
 
 // The recorded stream: one JSON object per line, in the order the calls
 // happened. Line-oriented on purpose -- a failing gate should point at the call

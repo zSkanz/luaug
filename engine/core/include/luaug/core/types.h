@@ -6,8 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace luaug::core
-{
+namespace luaug::core {
 
 using u8 = std::uint8_t;
 using u16 = std::uint16_t;

@@ -1,11 +1,10 @@
 #pragma once
 
-#include <string_view>
-
 #include "luaug/core/types.h"
 
-namespace luaug::platform
-{
+#include <string_view>
+
+namespace luaug::platform {
 
 enum class ConsoleStream : core::u8
 {

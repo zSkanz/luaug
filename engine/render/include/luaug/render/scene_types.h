@@ -10,8 +10,7 @@
 #include "luaug/core/name_atom.h"
 #include "luaug/scene/class_registry.h"
 
-namespace luaug::render
-{
+namespace luaug::render {
 
 // Camera, MeshPart, PointLight, SpotLight and Sky.
 //

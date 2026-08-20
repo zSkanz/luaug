@@ -6,14 +6,13 @@
 // deliberately the one header in this module that does include SDL.
 #pragma once
 
-#include <filesystem>
-#include <optional>
-
 #include "luaug/core/error.h"
 #include "luaug/core/types.h"
 
-namespace luaug::platform
-{
+#include <filesystem>
+#include <optional>
+
+namespace luaug::platform {
 
 using core::u64;
 

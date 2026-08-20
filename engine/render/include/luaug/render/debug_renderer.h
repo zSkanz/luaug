@@ -6,16 +6,15 @@
 // which is why it exists this early.
 #pragma once
 
-#include <optional>
-
 #include "luaug/core/error.h"
 #include "luaug/core/math.h"
 #include "luaug/render/debug_draw.h"
 #include "luaug/render/shader_library.h"
 #include "luaug/rhi/device.h"
 
-namespace luaug::render
-{
+#include <optional>
+
+namespace luaug::render {
 
 class DebugRenderer
 {
@@ -30,8 +29,8 @@ public:
     // graphics pipeline is compiled against one. A caller that renders into two
     // formats needs two renderers, which is honest: they are two pipelines
     // whatever the API pretends.
-    [[nodiscard]] std::optional<core::EngineError> create(
-        rhi::IDevice& device, const ShaderLibrary& shaders, rhi::TextureFormat colorFormat);
+    [[nodiscard]] std::optional<core::EngineError> create(rhi::IDevice& device, const ShaderLibrary& shaders,
+                                                          rhi::TextureFormat colorFormat);
 
     void destroy(rhi::IDevice& device);
 

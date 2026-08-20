@@ -6,14 +6,13 @@
 // text stays free to be translated or reworded.
 #pragma once
 
-#include <span>
-#include <string>
-
 #include "luaug/core/i18n.h"
 #include "luaug/core/text_key.h"
 
-namespace luaug::core
-{
+#include <span>
+#include <string>
+
+namespace luaug::core {
 
 struct EngineError
 {

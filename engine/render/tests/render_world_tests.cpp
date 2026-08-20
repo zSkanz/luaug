@@ -1,20 +1,18 @@
-#include <doctest/doctest.h>
-
-#include "luaug_test_nearly.h"
-
-#include <ostream>
-
+#include "luaug/core/types.h"
 #include "luaug/render/render_world.h"
 #include "luaug/scene/class_registry.h"
-#include "luaug/core/types.h"
 #include "luaug/scene/components.h"
 #include "luaug/scene/enum_registry.h"
 #include "luaug/scene/world.h"
 
+#include <doctest/doctest.h>
+#include <ostream>
+
+#include "luaug_test_nearly.h"
+
 using namespace luaug;
 
-namespace
-{
+namespace {
 
 // These cases are all about the debug-part path, which needs no meshes and no
 // camera. One shared empty library says that once rather than at every call.
@@ -53,8 +51,7 @@ struct Fixture
         part.name = atoms.intern("Part");
         part.super = instanceClass;
         part.defaultName = part.name;
-        part.attachComponents = [](scene::World& w, core::InstanceId id)
-        { w.parts().add(id, scene::PartComponent{}); };
+        part.attachComponents = [](scene::World& w, core::InstanceId id) { w.parts().add(id, scene::PartComponent{}); };
         part.detachComponents = [](scene::World& w, core::InstanceId id) { w.parts().remove(id); };
         partClass = classes.registerClass(part);
     }
@@ -84,8 +81,9 @@ struct Fixture
         workspace.name = atoms.intern("Workspace");
         workspace.super = instanceClass;
         workspace.defaultName = workspace.name;
-        workspace.attachComponents = [](scene::World& w, core::InstanceId id)
-        { w.workspaces().add(id, scene::WorkspaceComponent{}); };
+        workspace.attachComponents = [](scene::World& w, core::InstanceId id) {
+            w.workspaces().add(id, scene::WorkspaceComponent{});
+        };
         workspace.detachComponents = [](scene::World& w, core::InstanceId id) { w.workspaces().remove(id); };
         workspaceClass = classes.registerClass(workspace);
 
@@ -93,8 +91,9 @@ struct Fixture
         camera.name = atoms.intern("Camera");
         camera.super = instanceClass;
         camera.defaultName = camera.name;
-        camera.attachComponents = [](scene::World& w, core::InstanceId id)
-        { w.cameras().add(id, scene::CameraComponent{}); };
+        camera.attachComponents = [](scene::World& w, core::InstanceId id) {
+            w.cameras().add(id, scene::CameraComponent{});
+        };
         camera.detachComponents = [](scene::World& w, core::InstanceId id) { w.cameras().remove(id); };
         cameraClass = classes.registerClass(camera);
 
@@ -102,8 +101,9 @@ struct Fixture
         meshPart.name = atoms.intern("MeshPart");
         meshPart.super = partClass;
         meshPart.defaultName = meshPart.name;
-        meshPart.attachComponents = [](scene::World& w, core::InstanceId id)
-        { w.meshParts().add(id, scene::MeshPartComponent{}); };
+        meshPart.attachComponents = [](scene::World& w, core::InstanceId id) {
+            w.meshParts().add(id, scene::MeshPartComponent{});
+        };
         meshPart.detachComponents = [](scene::World& w, core::InstanceId id) { w.meshParts().remove(id); };
         meshPartClass = classes.registerClass(meshPart);
     }
@@ -371,8 +371,9 @@ TEST_CASE("extraction reads the environment from Lighting, and defaults without 
     lighting.name = fixture.atoms.intern("Lighting");
     lighting.super = fixture.instanceClass;
     lighting.defaultName = lighting.name;
-    lighting.attachComponents = [](scene::World& w, core::InstanceId id)
-    { w.lighting().add(id, scene::LightingComponent{}); };
+    lighting.attachComponents = [](scene::World& w, core::InstanceId id) {
+        w.lighting().add(id, scene::LightingComponent{});
+    };
     lighting.detachComponents = [](scene::World& w, core::InstanceId id) { w.lighting().remove(id); };
     const scene::ClassId lightingClass = fixture.classes.registerClass(lighting);
 

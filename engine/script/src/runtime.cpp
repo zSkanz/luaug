@@ -1,28 +1,26 @@
 #include "luaug/script/runtime.h"
 
-#include <lua.h>
-#include <lualib.h>
-#include <luacode.h>
-
-#include <cstdlib>
-#include <string>
-#include <vector>
-
 #include "luaug/core/error.h"
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
 #include "luaug/script/datatypes.h"
 #include "luaug/script/instance_binding.h"
-#include "luaug/script/sandbox.h"
 #include "luaug/script/modules.h"
+#include "luaug/script/sandbox.h"
 #include "luaug/script/services.h"
 #include "luaug/script/signals.h"
 #include "luaug/script/tasks.h"
 
-namespace luaug::script
-{
-namespace
-{
+#include <lua.h>
+#include <luacode.h>
+#include <lualib.h>
+
+#include <cstdlib>
+#include <string>
+#include <vector>
+
+namespace luaug::script {
+namespace {
 
 // Fires for the life of the VM rather than only during boot -- every string the
 // VM interns passes through it -- so the sink has to be reachable from a free
@@ -55,8 +53,7 @@ std::string concatArguments(lua_State* L)
 {
     std::string line;
     const int count = lua_gettop(L);
-    for (int index = 1; index <= count; ++index)
-    {
+    for (int index = 1; index <= count; ++index) {
         size_t length = 0;
         const char* text = luaL_tolstring(L, index, &length);
         if (index > 1)
@@ -134,8 +131,7 @@ ScriptRuntime::ScriptRuntime(scene::World& world) : m_world(world), m_impl(std::
 
 ScriptRuntime::~ScriptRuntime()
 {
-    if (m_impl->state != nullptr)
-    {
+    if (m_impl->state != nullptr) {
         lua_close(m_impl->state);
         m_impl->state = nullptr;
     }
@@ -243,9 +239,9 @@ std::optional<core::EngineError> ScriptRuntime::runSource(std::string_view sourc
 
     const std::string chunk = "@" + std::string(chunkName);
     char* bytecode = luau_compile(source.data(), source.size(), &options, &bytecodeSize);
-    if (bytecode == nullptr)
-    {
-        const core::I18nArg args[] = {{"source", chunkName}, {"message", std::string_view{"compilation produced no bytecode"}}};
+    if (bytecode == nullptr) {
+        const core::I18nArg args[] = {{"source", chunkName},
+                                      {"message", std::string_view{"compilation produced no bytecode"}}};
         return core::makeError(LUAUG_TR("script.err.syntax"), args);
     }
 
@@ -264,8 +260,7 @@ std::optional<core::EngineError> ScriptRuntime::runSource(std::string_view sourc
     const int loadStatus = luau_load(thread, chunk.c_str(), bytecode, bytecodeSize, 0);
     std::free(bytecode);
 
-    if (loadStatus != LUA_OK)
-    {
+    if (loadStatus != LUA_OK) {
         const char* message = lua_tostring(thread, -1);
         const std::string text = message == nullptr ? std::string{} : std::string(message);
         const core::I18nArg args[] = {{"source", chunkName}, {"message", text}};
@@ -277,8 +272,7 @@ std::optional<core::EngineError> ScriptRuntime::runSource(std::string_view sourc
     const int resumeStatus = lua_resume(thread, nullptr, 0);
     // LUA_YIELD is the normal outcome for anything that calls `task.wait`: the
     // script has not finished, it is parked, and the scheduler will resume it.
-    if (resumeStatus != LUA_OK && resumeStatus != LUA_YIELD)
-    {
+    if (resumeStatus != LUA_OK && resumeStatus != LUA_YIELD) {
         const char* message = lua_tostring(thread, -1);
         const std::string text = message == nullptr ? std::string{} : std::string(message);
         const core::I18nArg args[] = {{"source", chunkName}, {"message", text}};
@@ -333,8 +327,7 @@ void ScriptRuntime::firePhase(core::Phase phase, f64 delta)
     // resumption points and always will be: `FrameStart` is where a hot reload
     // lands and the parallel windows are the checker's, not a script's.
     const char* name = nullptr;
-    switch (phase)
-    {
+    switch (phase) {
     case core::Phase::PreRender:
         name = "PreRender";
         break;

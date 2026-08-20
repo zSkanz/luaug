@@ -2,27 +2,24 @@
 // RFC 4648 §10. Published vectors on purpose: a digest tested against its own
 // output proves only that it is deterministic.
 
-#include <doctest/doctest.h>
+#include "luaug/net/detail/digest.h"
 
+#include <doctest/doctest.h>
 #include <string>
 #include <vector>
-
-#include "luaug/net/detail/digest.h"
 
 using luaug::core::u8;
 using luaug::net::detail::base64Encode;
 using luaug::net::detail::sha1;
 
-namespace
-{
+namespace {
 
 std::string hex(const luaug::net::detail::Sha1Digest& digest)
 {
     static constexpr char kDigits[] = "0123456789abcdef";
     std::string out;
     out.reserve(40);
-    for (const u8 byte : digest)
-    {
+    for (const u8 byte : digest) {
         out.push_back(kDigits[(byte >> 4) & 0x0Fu]);
         out.push_back(kDigits[byte & 0x0Fu]);
     }
@@ -43,8 +40,8 @@ TEST_CASE("sha1 matches the published vectors")
 
     // 56 bytes: the padding does not fit in the same block as the message, so
     // this is the case that catches a wrong two-block tail.
-    CHECK(hex(sha1(std::string_view{"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"}))
-        == "84983e441c3bd26ebaae4aa1f95129e5e54670f1");
+    CHECK(hex(sha1(std::string_view{"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"})) ==
+          "84983e441c3bd26ebaae4aa1f95129e5e54670f1");
 
     // 55 bytes: the largest message whose 0x80 terminator and 8-byte length
     // still fit in the same block, which is the tighter half of the boundary
@@ -53,8 +50,8 @@ TEST_CASE("sha1 matches the published vectors")
     // Windows CNG (`[System.Security.Cryptography.SHA1]`), an implementation we
     // did not write. A digest checked against our own output would assert
     // nothing.
-    CHECK(hex(sha1(std::string_view{"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnop"}))
-        == "47b172810795699fe739197d1a1f5960700242f1");
+    CHECK(hex(sha1(std::string_view{"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnop"})) ==
+          "47b172810795699fe739197d1a1f5960700242f1");
 
     const std::string million(1000000, 'a');
     CHECK(hex(sha1(million)) == "34aa973cd4c4daa4f61eeb2bdbad27316534016f");

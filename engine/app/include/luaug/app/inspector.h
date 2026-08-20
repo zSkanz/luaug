@@ -35,10 +35,6 @@
 // its labels are literals rather than catalog keys.
 #pragma once
 
-#include <span>
-#include <string>
-#include <vector>
-
 #include "luaug/core/id.h"
 #include "luaug/core/name_atom.h"
 #include "luaug/core/types.h"
@@ -46,8 +42,11 @@
 #include "luaug/scene/value.h"
 #include "luaug/scene/world.h"
 
-namespace luaug::app
-{
+#include <span>
+#include <string>
+#include <vector>
+
+namespace luaug::app {
 
 using core::u32;
 using core::usize;

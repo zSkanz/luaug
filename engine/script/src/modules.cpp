@@ -1,21 +1,19 @@
 #include "luaug/script/modules.h"
 
-#include <lua.h>
-#include <lualib.h>
-#include <luacode.h>
-
-#include <algorithm>
-#include <cstdlib>
-
 #include "luaug/scene/world.h"
 #include "luaug/script/instance_binding.h"
 #include "luaug/script/services.h"
 #include "luaug/script/signals.h"
 
-namespace luaug::script
-{
-namespace
-{
+#include <lua.h>
+#include <luacode.h>
+#include <lualib.h>
+
+#include <algorithm>
+#include <cstdlib>
+
+namespace luaug::script {
+namespace {
 
 [[nodiscard]] ModuleRegistry& registry(lua_State* L) noexcept
 {
@@ -45,8 +43,7 @@ namespace
 
     const std::string chunk = "@" + std::string(chunkName);
     char* bytecode = luau_compile(source.data(), source.size(), &options, &bytecodeSize);
-    if (bytecode == nullptr)
-    {
+    if (bytecode == nullptr) {
         outError = "compilation produced no bytecode";
         return false;
     }
@@ -54,8 +51,7 @@ namespace
     const int status = luau_load(co, chunk.c_str(), bytecode, bytecodeSize, 0);
     std::free(bytecode);
 
-    if (status != LUA_OK)
-    {
+    if (status != LUA_OK) {
         const char* message = lua_tostring(co, -1);
         outError = message == nullptr ? std::string{} : std::string(message);
         lua_pop(co, 1);
@@ -98,36 +94,32 @@ namespace
 // its own globals table (api-design.md §3). It must NOT yield: a module is
 // evaluated once and its result cached, and a half-evaluated module in the cache
 // is a module every later requirer would get wrong.
-[[nodiscard]] bool evaluateModule(
-    lua_State* L, std::string_view source, std::string_view chunkName, std::string& outError)
+[[nodiscard]] bool evaluateModule(lua_State* L, std::string_view source, std::string_view chunkName,
+                                  std::string& outError)
 {
     lua_State* co = lua_newthread(L);
     const int rooted = lua_gettop(L);
     luaL_sandboxthread(co);
 
-    if (!loadChunk(co, source, chunkName, outError))
-    {
+    if (!loadChunk(co, source, chunkName, outError)) {
         lua_remove(L, rooted);
         return false;
     }
 
     const int status = lua_resume(co, nullptr, 0);
-    if (status == LUA_YIELD || status == LUA_BREAK)
-    {
+    if (status == LUA_YIELD || status == LUA_BREAK) {
         outError = "module yielded during evaluation";
         lua_remove(L, rooted);
         return false;
     }
-    if (status != LUA_OK)
-    {
+    if (status != LUA_OK) {
         const char* message = lua_tostring(co, -1);
         outError = message == nullptr ? std::string{} : std::string(message);
         lua_remove(L, rooted);
         return false;
     }
 
-    if (lua_gettop(co) < 1)
-    {
+    if (lua_gettop(co) < 1) {
         outError.clear();
         lua_remove(L, rooted);
         return false;
@@ -144,8 +136,7 @@ namespace
 
 int requireRegistered(lua_State* L, ModuleRegistry::Registered& module, std::string_view from)
 {
-    if (module.resultRef > 0)
-    {
+    if (module.resultRef > 0) {
         lua_getref(L, module.resultRef);
         return 1;
     }
@@ -157,8 +148,7 @@ int requireRegistered(lua_State* L, ModuleRegistry::Registered& module, std::str
     const bool ok = evaluateModule(L, module.source, module.name, error);
     module.loading = false;
 
-    if (!ok)
-    {
+    if (!ok) {
         const core::I18nArg args[] = {{"source", std::string_view{module.name}}, {"message", std::string_view{error}}};
         raise(L, LUAUG_TR("script.err.runtime"), args);
     }
@@ -181,10 +171,8 @@ int scriptRequire(lua_State* L)
     // where a registered module is matched before the permission callback runs
     // and a denied chunk can still reach `@luaug/…` (U-39) -- here there is one
     // gate and it is this function.
-    if (!specifier.empty() && specifier.front() == '@')
-    {
-        for (ModuleRegistry::Registered& module : modules.registered)
-        {
+    if (!specifier.empty() && specifier.front() == '@') {
+        for (ModuleRegistry::Registered& module : modules.registered) {
             if (module.name == specifier)
                 return requireRegistered(L, module, from);
         }
@@ -203,11 +191,9 @@ int scriptRequire(lua_State* L)
     // Keyed on the resolved project-relative path, so two specifiers that name
     // the same file share one evaluation -- which is what "one evaluation per
     // module per VM" means.
-    if (const auto found = modules.byPath.find(path); found != modules.byPath.end())
-    {
+    if (const auto found = modules.byPath.find(path); found != modules.byPath.end()) {
         ModuleRegistry::Module& cached = modules.modules[found->second];
-        if (cached.failed)
-        {
+        if (cached.failed) {
             // The failure is cached and re-raised, rather than the module being
             // re-run in the hope of a different answer (api-design.md §3).
             const core::I18nArg args[] = {
@@ -235,8 +221,7 @@ int scriptRequire(lua_State* L)
     const bool ok = evaluateModule(L, source, path, error);
     modules.modules[index].loading = false;
 
-    if (!ok)
-    {
+    if (!ok) {
         modules.modules[index].failed = true;
         modules.modules[index].error = error;
         const core::I18nArg args[] = {{"source", std::string_view{path}}, {"message", std::string_view{error}}};
@@ -255,10 +240,8 @@ int scriptRequire(lua_State* L)
 {
     std::vector<std::string_view> segments;
     usize start = 0;
-    for (usize index = 0; index <= path.size(); ++index)
-    {
-        if (index == path.size() || path[index] == '/')
-        {
+    for (usize index = 0; index <= path.size(); ++index) {
+        if (index == path.size() || path[index] == '/') {
             if (index > start)
                 segments.push_back(path.substr(start, index - start));
             start = index + 1;
@@ -293,10 +276,8 @@ void registerRequire(lua_State* L)
 void registerModule(lua_State* L, std::string_view name, std::string_view source)
 {
     ModuleRegistry& modules = registry(L);
-    for (ModuleRegistry::Registered& module : modules.registered)
-    {
-        if (module.name == name)
-        {
+    for (ModuleRegistry::Registered& module : modules.registered) {
+        if (module.name == name) {
             module.source = std::string(source);
             return;
         }
@@ -313,9 +294,8 @@ void mountScripts(lua_State* L, std::span<const MountedScript> scripts)
     // Sorted here rather than trusted from the caller: the tree's shape and the
     // start order are both observable, and a directory walk's order is exactly
     // the kind of thing R10 forbids from reaching them.
-    std::sort(ordered.begin(), ordered.end(), [](const MountedScript& a, const MountedScript& b) {
-        return a.path < b.path;
-    });
+    std::sort(ordered.begin(), ordered.end(),
+              [](const MountedScript& a, const MountedScript& b) { return a.path < b.path; });
 
     const core::InstanceId scriptService =
         w.findFirstChildOfClass(context(L).services->dataModel, w.classes().findId(w.atoms().lookup("ScriptService")));
@@ -325,19 +305,17 @@ void mountScripts(lua_State* L, std::span<const MountedScript> scripts)
     const scene::ClassId folderClass = w.classes().findId(w.atoms().lookup("Folder"));
     const scene::ClassId scriptClass = w.classes().findId(w.atoms().lookup("Script"));
 
-    for (const MountedScript& entry : ordered)
-    {
-        const std::vector<std::string_view> segments = pathSegments(entry.mountPath.empty() ? entry.path : entry.mountPath);
+    for (const MountedScript& entry : ordered) {
+        const std::vector<std::string_view> segments =
+            pathSegments(entry.mountPath.empty() ? entry.path : entry.mountPath);
         if (segments.empty())
             continue;
 
         core::InstanceId parent = scriptService;
-        for (usize index = 0; index + 1 < segments.size(); ++index)
-        {
+        for (usize index = 0; index + 1 < segments.size(); ++index) {
             const core::NameAtom name = w.atoms().intern(segments[index]);
             core::InstanceId folder = w.findFirstChild(parent, name);
-            if (!folder.valid())
-            {
+            if (!folder.valid()) {
                 folder = w.create(folderClass);
                 w.setName(folder, name);
                 (void)w.setParent(folder, parent);
@@ -363,14 +341,12 @@ void startScripts(lua_State* L)
     scene::World& w = world(L);
     const core::NameAtom enabled = w.atoms().intern("Enabled");
 
-    for (const ModuleRegistry::Entry& entry : modules.entries)
-    {
+    for (const ModuleRegistry::Entry& entry : modules.entries) {
         // A Script whose `Enabled` is false at boot never starts -- it is still
         // mounted and still in the tree, but no coroutine is created for it
         // (api-design.md §3).
         const std::optional<scene::Value> value = w.getProperty(entry.instance, enabled);
-        if (value.has_value())
-        {
+        if (value.has_value()) {
             if (const auto* flag = std::get_if<bool>(&value.value()); flag != nullptr && !*flag)
                 continue;
         }
@@ -387,8 +363,7 @@ void startScripts(lua_State* L)
         lua_setglobal(co, "script");
 
         std::string error;
-        if (!loadChunk(co, entry.source, entry.path, error))
-        {
+        if (!loadChunk(co, entry.source, entry.path, error)) {
             const core::I18nArg args[] = {
                 {"source", std::string_view{entry.path}},
                 {"message", std::string_view{error}},

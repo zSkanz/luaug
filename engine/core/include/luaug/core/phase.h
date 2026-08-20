@@ -6,8 +6,7 @@
 
 #include "luaug/core/types.h"
 
-namespace luaug::core
-{
+namespace luaug::core {
 
 // Order of declaration is order of execution within a frame, and code relies on
 // that: the scheduler walks the sim phases in enum order. Adding a phase in the

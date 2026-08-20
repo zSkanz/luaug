@@ -30,8 +30,7 @@
 #include "luaug/core/types.h"
 #include "luaug/scene/types.h"
 
-namespace luaug::scene
-{
+namespace luaug::scene {
 
 // `BasePart`'s structural half (M2 brief, Decision 6). The physics half --
 // Anchored, CanCollide, Friction and the rest -- arrives in M5 with a

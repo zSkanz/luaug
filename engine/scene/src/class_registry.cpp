@@ -2,10 +2,8 @@
 
 #include <limits>
 
-namespace luaug::scene
-{
-namespace
-{
+namespace luaug::scene {
+namespace {
 
 // Five of the six public accessors need "the entry for this id, or nothing",
 // and `Entry` is private so a plain free function cannot name it. Deducing the
@@ -46,8 +44,7 @@ ClassId ClassRegistry::registerClass(const ClassDescriptor& descriptor)
     entry.descriptor = descriptor;
     entry.ancestry.push_back(id);
 
-    if (descriptor.super != InvalidClass)
-    {
+    if (descriptor.super != InvalidClass) {
         // Both of these are why registration insists the super came first: the
         // super's ancestry and lookup maps are already complete, so this is a
         // copy rather than a walk, and it is paid once per class instead of
@@ -67,8 +64,7 @@ ClassId ClassRegistry::registerClass(const ClassDescriptor& descriptor)
     // member, and a subscription made through the base must survive the derived
     // class redeclaring it.
     u16 nextSlot = static_cast<u16>(entry.properties.size());
-    for (const PropertyDesc& property : entry.descriptor.properties)
-    {
+    for (const PropertyDesc& property : entry.descriptor.properties) {
         PropertyEntry& slot = entry.properties[property.name.id];
         slot.descriptor = &property;
         if (slot.slot == NoSlot)
@@ -101,8 +97,7 @@ bool ClassRegistry::isA(ClassId derived, ClassId base) const noexcept
     if (entry == nullptr || base == InvalidClass)
         return false;
 
-    for (const ClassId ancestor : entry->ancestry)
-    {
+    for (const ClassId ancestor : entry->ancestry) {
         if (ancestor == base)
             return true;
     }

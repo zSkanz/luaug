@@ -12,14 +12,13 @@
 // without having to remember to delete it.
 #pragma once
 
-#include <span>
-#include <vector>
-
 #include "luaug/core/math.h"
 #include "luaug/core/types.h"
 
-namespace luaug::render
-{
+#include <span>
+#include <vector>
+
+namespace luaug::render {
 
 using core::f32;
 using core::Mat4;
@@ -35,8 +34,7 @@ struct DebugColor
 
     [[nodiscard]] static constexpr DebugColor fromLinear(f32 r, f32 g, f32 b, f32 a = 1.0f) noexcept
     {
-        const auto channel = [](f32 value) -> u32
-        {
+        const auto channel = [](f32 value) -> u32 {
             const f32 clamped = value < 0.0f ? 0.0f : (value > 1.0f ? 1.0f : value);
             return static_cast<u32>(clamped * 255.0f + 0.5f);
         };

@@ -10,8 +10,7 @@
 
 #include "luaug/core/types.h"
 
-namespace luaug::rhi
-{
+namespace luaug::rhi {
 
 using core::f32;
 using core::f64;
@@ -44,8 +43,11 @@ enum class BackendId : u8
     struct Name                                                                                                        \
     {                                                                                                                  \
         u32 id = 0;                                                                                                    \
-        [[nodiscard]] constexpr bool valid() const noexcept { return id != 0; }                                         \
-        [[nodiscard]] constexpr bool operator==(const Name&) const noexcept = default;                                  \
+        [[nodiscard]] constexpr bool valid() const noexcept                                                            \
+        {                                                                                                              \
+            return id != 0;                                                                                            \
+        }                                                                                                              \
+        [[nodiscard]] constexpr bool operator==(const Name&) const noexcept = default;                                 \
     }
 
 LUAUG_RHI_HANDLE(BufferHandle);
@@ -88,8 +90,8 @@ enum class TextureFormat : u8
 
 [[nodiscard]] constexpr bool isDepthFormat(TextureFormat format) noexcept
 {
-    return format == TextureFormat::D16Unorm || format == TextureFormat::D24UnormS8Uint
-        || format == TextureFormat::D32Float || format == TextureFormat::D32FloatS8Uint;
+    return format == TextureFormat::D16Unorm || format == TextureFormat::D24UnormS8Uint ||
+           format == TextureFormat::D32Float || format == TextureFormat::D32FloatS8Uint;
 }
 
 enum class TextureUsage : u32

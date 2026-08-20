@@ -14,15 +14,14 @@
 //      the order is maintained explicitly rather than inherited from a heap.
 #pragma once
 
-#include <vector>
-
 #include "luaug/core/types.h"
 #include "luaug/script/binding.h"
 
+#include <vector>
+
 struct lua_State;
 
-namespace luaug::script
-{
+namespace luaug::script {
 
 // A pending resumption: a coroutine parked by `task.wait` or a callback
 // scheduled by `task.delay`. The two are one list because §3.2 says they

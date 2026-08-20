@@ -1,21 +1,19 @@
-#include <doctest/doctest.h>
-
 #include <cmath>
+#include <doctest/doctest.h>
 // doctest prints a failing comparison through operator<<, and the accessors
 // here hand back std::string_view -- which json.h has no reason to make
 // streamable on its own.
+#include "luaug/core/json.h"
+
 #include <ostream>
 #include <string>
-
-#include "luaug/core/json.h"
 
 using luaug::core::JsonDocument;
 using luaug::core::JsonType;
 using luaug::core::JsonValue;
 using luaug::core::usize;
 
-namespace
-{
+namespace {
 
 JsonDocument parseOrFail(std::string_view json)
 {
@@ -342,8 +340,7 @@ TEST_CASE("malformed documents are rejected, and the diagnostic names the offset
         {"\"\\ud83d\\u0041\"", 13, "a high surrogate followed by a non-surrogate"},
     };
 
-    for (const Case& testCase : cases)
-    {
+    for (const Case& testCase : cases) {
         const std::string diagnostic = diagnosticOf(testCase.json);
         CHECK_MESSAGE(offsetIn(diagnostic) == testCase.offset, testCase.what << " -> " << diagnostic);
     }
@@ -372,8 +369,7 @@ TEST_CASE("nesting is bounded")
         CHECK(root.type() == JsonType::Array);
 
         JsonValue level = root;
-        for (usize depth = 1; depth < 64; ++depth)
-        {
+        for (usize depth = 1; depth < 64; ++depth) {
             REQUIRE(level.size() == 1);
             level = level.at(0);
         }

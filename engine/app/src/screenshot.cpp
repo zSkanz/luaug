@@ -5,11 +5,10 @@
 
 #include "luaug/asset/image.h"
 
-namespace luaug::app
-{
+namespace luaug::app {
 
-std::optional<core::EngineError> writePng(
-    const std::filesystem::path& path, std::span<const std::byte> pixels, core::u32 width, core::u32 height)
+std::optional<core::EngineError> writePng(const std::filesystem::path& path, std::span<const std::byte> pixels,
+                                          core::u32 width, core::u32 height)
 {
     return asset::writePng(path, pixels, width, height);
 }

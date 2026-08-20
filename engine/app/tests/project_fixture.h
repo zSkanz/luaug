@@ -5,21 +5,18 @@
 // and the compiler would not have said so.
 #pragma once
 
-#include <doctest/doctest.h>
+#include "luaug/app/world_host.h"
+#include "luaug/core/i18n.h"
+#include "luaug/core/log.h"
 
+#include <doctest/doctest.h>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "luaug/app/world_host.h"
-#include "luaug/core/i18n.h"
-#include "luaug/core/log.h"
-
-namespace luaug::app::testing
-{
-
+namespace luaug::app::testing {
 
 // A project on disk, because that is what the host mounts and a fake filesystem
 // would be testing the fake. Removed on the way out, so a failed run leaves
@@ -31,8 +28,8 @@ struct Project
     Project()
     {
         static int counter = 0;
-        root = std::filesystem::temp_directory_path()
-            / ("luaug-worldhost-" + std::to_string(++counter) + "-" + std::to_string(std::hash<std::string>{}(__FILE__)));
+        root = std::filesystem::temp_directory_path() / ("luaug-worldhost-" + std::to_string(++counter) + "-" +
+                                                         std::to_string(std::hash<std::string>{}(__FILE__)));
         std::filesystem::remove_all(root);
         std::filesystem::create_directories(root);
     }
@@ -69,13 +66,11 @@ struct Captured
     Captured()
     {
         core::engineCatalog().loadFromFile(LUAUG_TEST_CATALOG);
-        core::setLogSink(
-            [this](core::LogLevel level, std::string_view text)
-            {
-                lines.emplace_back(text);
-                if (level == core::LogLevel::Error)
-                    errors.emplace_back(text);
-            });
+        core::setLogSink([this](core::LogLevel level, std::string_view text) {
+            lines.emplace_back(text);
+            if (level == core::LogLevel::Error)
+                errors.emplace_back(text);
+        });
     }
     ~Captured() { core::resetLogSink(); }
 
@@ -88,8 +83,7 @@ struct Captured
 
     [[nodiscard]] bool contains(std::string_view needle) const
     {
-        for (const std::string& line : lines)
-        {
+        for (const std::string& line : lines) {
             if (line.find(needle) != std::string::npos)
                 return true;
         }

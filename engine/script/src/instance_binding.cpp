@@ -1,5 +1,9 @@
 #include "luaug/script/instance_binding.h"
 
+#include "luaug/scene/world.h"
+#include "luaug/script/datatypes.h"
+#include "luaug/script/signals.h"
+
 #include <lua.h>
 #include <lualib.h>
 
@@ -9,14 +13,8 @@
 #include <string_view>
 #include <vector>
 
-#include "luaug/scene/world.h"
-#include "luaug/script/datatypes.h"
-#include "luaug/script/signals.h"
-
-namespace luaug::script
-{
-namespace
-{
+namespace luaug::script {
+namespace {
 
 using scene::ClassId;
 using scene::World;
@@ -45,8 +43,7 @@ using scene::World;
 [[nodiscard]] core::InstanceId liveInstance(lua_State* L, int index)
 {
     const core::InstanceId* id = toInstance(L, index);
-    if (id == nullptr)
-    {
+    if (id == nullptr) {
         // `luaL_checkudatatagged` produces the argument error naming the type it
         // wanted, which reads better than anything assembled here would.
         luaL_checkudatatagged(L, index, static_cast<int>(UserdataTag::Instance));
@@ -67,8 +64,8 @@ using scene::World;
     raise(L, LUAUG_TR("scene.err.unknown_member"), args);
 }
 
-[[noreturn]] void raisePropertyError(
-    lua_State* L, core::TextKey key, core::InstanceId id, const scene::PropertyDesc& property)
+[[noreturn]] void raisePropertyError(lua_State* L, core::TextKey key, core::InstanceId id,
+                                     const scene::PropertyDesc& property)
 {
     const World& w = world(L);
     const core::I18nArg args[] = {
@@ -91,8 +88,7 @@ int instanceIndex(lua_State* L)
     const core::NameAtom name = context(L).resolve(atom);
     const ClassId classId = w.classOf(id);
 
-    if (const scene::PropertyDesc* property = w.classes().findProperty(classId, name))
-    {
+    if (const scene::PropertyDesc* property = w.classes().findProperty(classId, name)) {
         if (property->get == nullptr)
             raisePropertyError(L, LUAUG_TR("script.err.not_implemented"), id, *property);
         pushValue(L, property->get(w, id));
@@ -102,12 +98,10 @@ int instanceIndex(lua_State* L)
     // A method reached without calling it -- `local f = part.Destroy`. It
     // allocates a closure per access, which is why `__namecall` exists and why
     // `part:Destroy()` never comes through here.
-    if (const scene::MethodDesc* method = w.classes().findMethod(classId, name))
-    {
+    if (const scene::MethodDesc* method = w.classes().findMethod(classId, name)) {
         const auto& implementations = context(L).instanceMethods;
         const auto found = implementations.find(method);
-        if (found == implementations.end())
-        {
+        if (found == implementations.end()) {
             const core::I18nArg args[] = {
                 {"className", className(L, id)},
                 {"property", w.atoms().text(method->name)},
@@ -124,8 +118,7 @@ int instanceIndex(lua_State* L)
         return 1;
     }
 
-    if (const scene::EventDesc* event = w.classes().findEvent(classId, name))
-    {
+    if (const scene::EventDesc* event = w.classes().findEvent(classId, name)) {
         // The same object every time, which a script that connects in one place
         // and disconnects in another depends on.
         pushInstanceEvent(L, id, event->slot);
@@ -162,15 +155,13 @@ int instanceNewIndex(lua_State* L)
     // generic setter, because a cycle and a destroyed instance are two different
     // refusals with two different keys and the accessor collapses both to
     // `false` (native_accessors.cpp says so at the collapse).
-    if (name == context(L).wellKnown.parent && property->type == scene::ValueType::Instance)
-    {
+    if (name == context(L).wellKnown.parent && property->type == scene::ValueType::Instance) {
         core::InstanceId target;
         if (const auto* reference = std::get_if<core::InstanceId>(&value.value()))
             target = *reference;
 
         const core::InstanceId previous = w.parentOf(id);
-        if (const std::optional<core::TextKey> refusal = w.setParent(id, target))
-        {
+        if (const std::optional<core::TextKey> refusal = w.setParent(id, target)) {
             const core::I18nArg args[] = {{"instance", w.atoms().text(w.name(id))}};
             raise(L, *refusal, args);
         }
@@ -184,8 +175,7 @@ int instanceNewIndex(lua_State* L)
         return 0;
     }
 
-    switch (w.setProperty(id, name, *value))
-    {
+    switch (w.setProperty(id, name, *value)) {
     case World::SetResult::Changed:
         flushSceneChanges(L);
         return 0;
@@ -217,8 +207,7 @@ int instanceNamecall(lua_State* L)
 
     const auto& implementations = context(L).instanceMethods;
     const auto found = implementations.find(descriptor);
-    if (found == implementations.end())
-    {
+    if (found == implementations.end()) {
         const core::I18nArg args[] = {
             {"className", className(L, id)},
             {"property", w.atoms().text(descriptor->name)},
@@ -242,8 +231,7 @@ int instanceEq(lua_State* L)
 int instanceTostring(lua_State* L)
 {
     const core::InstanceId* id = toInstance(L, 1);
-    if (id == nullptr || !world(L).alive(*id))
-    {
+    if (id == nullptr || !world(L).alive(*id)) {
         // Deliberately does NOT raise. `tostring` is what a log line and a
         // debugger call, and a print that throws where a handle happens to be
         // dead is worse than a print that says so.
@@ -275,8 +263,7 @@ int instanceTostring(lua_State* L)
 void pushInstanceArray(lua_State* L, const std::vector<core::InstanceId>& ids)
 {
     lua_createtable(L, static_cast<int>(ids.size()), 0);
-    for (usize index = 0; index < ids.size(); ++index)
-    {
+    for (usize index = 0; index < ids.size(); ++index) {
         pushInstance(L, ids[index]);
         lua_rawseti(L, -2, static_cast<int>(index) + 1);
     }
@@ -397,8 +384,7 @@ int methodDestroy(lua_State* L)
 // member of it.
 [[nodiscard]] std::optional<scene::Value> toAttributeValue(lua_State* L, int index)
 {
-    switch (lua_type(L, index))
-    {
+    switch (lua_type(L, index)) {
     case LUA_TNIL:
     case LUA_TNONE:
         return scene::Value{};
@@ -406,8 +392,7 @@ int methodDestroy(lua_State* L)
         return scene::Value{lua_toboolean(L, index) != 0};
     case LUA_TNUMBER:
         return scene::Value{lua_tonumber(L, index)};
-    case LUA_TSTRING:
-    {
+    case LUA_TSTRING: {
         size_t length = 0;
         const char* text = lua_tolstring(L, index, &length);
         return scene::Value{std::string(text, length)};
@@ -437,8 +422,7 @@ int methodDestroy(lua_State* L)
 
     size_t length = 0;
     const char* text = luaL_checklstring(L, index, &length);
-    if (length == 0)
-    {
+    if (length == 0) {
         const core::I18nArg args[] = {{"name", std::string_view{""}}};
         raise(L, LUAUG_TR("scene.err.invalid_name"), args);
     }
@@ -458,8 +442,7 @@ int methodSetAttribute(lua_State* L)
     const core::NameAtom name = checkAttributeName(L, 2);
 
     const std::optional<scene::Value> value = toAttributeValue(L, 3);
-    if (!value.has_value() || !world(L).setAttribute(id, name, *value))
-    {
+    if (!value.has_value() || !world(L).setAttribute(id, name, *value)) {
         const core::I18nArg args[] = {
             {"attribute", world(L).atoms().text(name)},
             {"valueType", std::string_view{luaL_typename(L, 3)}},
@@ -478,8 +461,7 @@ int methodGetPropertyChangedSignal(lua_State* L)
 
     // A name the class does not have raises, and the key says where attributes
     // are watched instead -- which is the mistake this call actually attracts.
-    if (w.classes().findProperty(w.classOf(id), name) == nullptr)
-    {
+    if (w.classes().findProperty(w.classOf(id), name) == nullptr) {
         size_t length = 0;
         const char* text = luaL_checklstring(L, 2, &length);
         const core::I18nArg args[] = {
@@ -509,8 +491,7 @@ int methodGetAttributes(lua_State* L)
     world(L).collectAttributes(id, attributes);
 
     lua_createtable(L, 0, static_cast<int>(attributes.size()));
-    for (const auto& [name, value] : attributes)
-    {
+    for (const auto& [name, value] : attributes) {
         const std::string_view text = world(L).atoms().text(name);
         lua_pushlstring(L, text.data(), text.size());
         pushValue(L, value);
@@ -554,8 +535,7 @@ int methodGetTags(lua_State* L)
     world(L).collectTags(id, tags);
 
     lua_createtable(L, static_cast<int>(tags.size()), 0);
-    for (usize index = 0; index < tags.size(); ++index)
-    {
+    for (usize index = 0; index < tags.size(); ++index) {
         const std::string_view text = world(L).atoms().text(tags[index]);
         lua_pushlstring(L, text.data(), text.size());
         lua_rawseti(L, -2, static_cast<int>(index) + 1);
@@ -598,8 +578,7 @@ int methodGetTags(lua_State* L)
     w.collectDescendants(id, descendants);
 
     bool any = false;
-    for (const core::InstanceId descendant : descendants)
-    {
+    for (const core::InstanceId descendant : descendants) {
         const scene::PartComponent* part = w.parts().find(descendant);
         if (part == nullptr)
             continue;
@@ -613,8 +592,7 @@ int methodGetTags(lua_State* L)
             static_cast<f64>(part->size.z) * 0.5,
         };
         f64 extents[3] = {0.0, 0.0, 0.0};
-        for (int axis = 0; axis < 3; ++axis)
-        {
+        for (int axis = 0; axis < 3; ++axis) {
             for (int local = 0; local < 3; ++local)
                 extents[axis] += std::fabs(static_cast<f64>(r.m[local][axis])) * half[local];
         }
@@ -622,8 +600,7 @@ int methodGetTags(lua_State* L)
         const core::DVec3 centre = part->cframe.position;
         const core::DVec3 low{centre.x - extents[0], centre.y - extents[1], centre.z - extents[2]};
         const core::DVec3 high{centre.x + extents[0], centre.y + extents[1], centre.z + extents[2]};
-        if (!any)
-        {
+        if (!any) {
             minimum = low;
             maximum = high;
             any = true;
@@ -643,12 +620,9 @@ int methodGetTags(lua_State* L)
 // group of parts has no orientation to inherit.
 [[nodiscard]] core::CFrameD pivotBase(World& w, core::InstanceId id)
 {
-    if (const scene::ModelComponent* model = w.models().find(id); model != nullptr)
-    {
-        if (w.alive(model->primaryPart))
-        {
-            if (const scene::PartComponent* part = w.parts().find(model->primaryPart))
-            {
+    if (const scene::ModelComponent* model = w.models().find(id); model != nullptr) {
+        if (w.alive(model->primaryPart)) {
+            if (const scene::PartComponent* part = w.parts().find(model->primaryPart)) {
                 // The primary part's OWN pivot, offset included: a model whose
                 // primary part hinges about its edge hinges about that edge too,
                 // which is the property that makes assigning a primary part mean
@@ -662,10 +636,9 @@ int methodGetTags(lua_State* L)
         core::CFrameD pivot;
         // An identity fallback would move a model built far from the origin by
         // its whole distance the first time anything pivoted it.
-        if (worldExtents(w, id, minimum, maximum))
-        {
+        if (worldExtents(w, id, minimum, maximum)) {
             pivot.position = core::DVec3{(minimum.x + maximum.x) * 0.5, (minimum.y + maximum.y) * 0.5,
-                (minimum.z + maximum.z) * 0.5};
+                                         (minimum.z + maximum.z) * 0.5};
         }
         return pivot;
     }
@@ -703,12 +676,10 @@ int methodPivotTo(lua_State* L)
     // moves by the same transform -- which is what preserves relative layout.
     const core::CFrameD delta = target * core::inverse(pivotOf(w, id));
 
-    if (w.models().find(id) != nullptr)
-    {
+    if (w.models().find(id) != nullptr) {
         std::vector<core::InstanceId> descendants;
         w.collectDescendants(id, descendants);
-        for (const core::InstanceId descendant : descendants)
-        {
+        for (const core::InstanceId descendant : descendants) {
             const scene::PartComponent* part = w.parts().find(descendant);
             if (part == nullptr)
                 continue;
@@ -720,8 +691,7 @@ int methodPivotTo(lua_State* L)
         return 0;
     }
 
-    if (const scene::PartComponent* part = w.parts().find(id); part != nullptr)
-    {
+    if (const scene::PartComponent* part = w.parts().find(id); part != nullptr) {
         // Only itself. Parts welded or attached to it are M5's business, and
         // moving descendants of a part would make `PivotTo` mean two different
         // things depending on what happened to be parented under it.
@@ -730,8 +700,7 @@ int methodPivotTo(lua_State* L)
         return 0;
     }
 
-    if (const scene::CameraComponent* camera = w.cameras().find(id); camera != nullptr)
-    {
+    if (const scene::CameraComponent* camera = w.cameras().find(id); camera != nullptr) {
         w.setProperty(id, cframeProperty, scene::Value{delta * camera->cframe});
         flushSceneChanges(L);
         return 0;
@@ -753,8 +722,7 @@ int methodGetExtentsSize(lua_State* L)
     bool any = false;
     core::DVec3 minimum;
     core::DVec3 maximum;
-    for (const core::InstanceId descendant : descendants)
-    {
+    for (const core::InstanceId descendant : descendants) {
         const scene::PartComponent* part = w.parts().find(descendant);
         if (part == nullptr)
             continue;
@@ -769,8 +737,7 @@ int methodGetExtentsSize(lua_State* L)
             static_cast<f64>(part->size.z) * 0.5,
         };
         f64 extents[3] = {0.0, 0.0, 0.0};
-        for (int world = 0; world < 3; ++world)
-        {
+        for (int world = 0; world < 3; ++world) {
             for (int local = 0; local < 3; ++local)
                 extents[world] += std::abs(static_cast<f64>(r.m[local][world])) * half[local];
         }
@@ -778,8 +745,7 @@ int methodGetExtentsSize(lua_State* L)
 
         const core::DVec3 low = part->cframe.position - extent;
         const core::DVec3 high = part->cframe.position + extent;
-        if (!any)
-        {
+        if (!any) {
             minimum = low;
             maximum = high;
             any = true;
@@ -806,8 +772,7 @@ int instanceNew(lua_State* L)
 
     const ClassId classId = w.classes().findId(w.atoms().lookup(requested));
     const scene::ClassDescriptor* descriptor = w.classes().find(classId);
-    if (descriptor == nullptr)
-    {
+    if (descriptor == nullptr) {
         const core::I18nArg args[] = {{"className", requested}};
         raise(L, LUAUG_TR("scene.err.unknown_class"), args);
     }
@@ -823,8 +788,7 @@ int instanceNew(lua_State* L)
     else if (hasFlag(descriptor->flags, scene::ClassFlags::NotCreatable))
         tag = "NotCreatable";
 
-    if (tag != nullptr)
-    {
+    if (tag != nullptr) {
         const core::I18nArg args[] = {{"className", requested}, {"classTag", std::string_view{tag}}};
         raise(L, LUAUG_TR("scene.err.not_creatable"), args);
     }
@@ -869,8 +833,7 @@ constexpr InstanceMethodBinding InstanceMethods[] = {
 
 void pushInstance(lua_State* L, core::InstanceId id)
 {
-    if (!id.valid())
-    {
+    if (!id.valid()) {
         // nil rather than a dead handle: `nil` is the honest answer and the one
         // `Instance?` is typed for.
         lua_pushnil(L);
@@ -886,14 +849,14 @@ void pushInstance(lua_State* L, core::InstanceId id)
     // is what the hit is validated against.
     const int slot = static_cast<int>(id.index) + 1;
     lua_rawgeti(L, cache, slot);
-    if (const core::InstanceId* cached = toInstance(L, -1); cached != nullptr && *cached == id)
-    {
+    if (const core::InstanceId* cached = toInstance(L, -1); cached != nullptr && *cached == id) {
         lua_replace(L, cache);
         return;
     }
     lua_pop(L, 1);
 
-    void* memory = lua_newuserdatataggedwithmetatable(L, sizeof(InstanceUserdata), static_cast<int>(UserdataTag::Instance));
+    void* memory =
+        lua_newuserdatataggedwithmetatable(L, sizeof(InstanceUserdata), static_cast<int>(UserdataTag::Instance));
     *static_cast<InstanceUserdata*>(memory) = InstanceUserdata{id};
 
     lua_pushvalue(L, -1);
@@ -917,12 +880,10 @@ void bindInstanceMethods(lua_State* L, std::span<const InstanceMethodBinding> bi
     VmContext& ctx = context(L);
     World& w = *ctx.world;
 
-    for (const InstanceMethodBinding& binding : bindings)
-    {
+    for (const InstanceMethodBinding& binding : bindings) {
         const ClassId classId = w.classes().findId(w.atoms().lookup(binding.className));
         const scene::MethodDesc* descriptor = w.classes().findMethod(classId, w.atoms().lookup(binding.methodName));
-        if (descriptor == nullptr)
-        {
+        if (descriptor == nullptr) {
             ++ctx.unboundDeclarations;
             continue;
         }
@@ -942,13 +903,11 @@ MethodCoverage methodCoverage(lua_State* L)
     // Walks every class the registry holds and counts the declared methods with
     // no implementation. The other direction is counted as the bindings land,
     // because a stale entry has no descriptor to be found by.
-    for (ClassId classId = 1; classId < static_cast<ClassId>(w.classes().classCount()); ++classId)
-    {
+    for (ClassId classId = 1; classId < static_cast<ClassId>(w.classes().classCount()); ++classId) {
         const scene::ClassDescriptor* descriptor = w.classes().find(classId);
         if (descriptor == nullptr)
             continue;
-        for (const scene::MethodDesc& method : descriptor->methods)
-        {
+        for (const scene::MethodDesc& method : descriptor->methods) {
             ++coverage.declared;
             if (ctx.instanceMethods.find(&method) == ctx.instanceMethods.end())
                 ++coverage.declaredWithoutBinding;

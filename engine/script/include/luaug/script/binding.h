@@ -31,10 +31,6 @@
 //      perform, before the freeze.
 #pragma once
 
-#include <span>
-#include <unordered_map>
-#include <vector>
-
 #include "luaug/core/error.h"
 #include "luaug/core/i18n.h"
 #include "luaug/core/id.h"
@@ -43,16 +39,18 @@
 #include "luaug/core/types.h"
 #include "luaug/scene/class_registry.h"
 
+#include <span>
+#include <unordered_map>
+#include <vector>
+
 struct lua_State;
 typedef int (*lua_CFunction)(lua_State* L);
 
-namespace luaug::scene
-{
+namespace luaug::scene {
 class World;
 }
 
-namespace luaug::script
-{
+namespace luaug::script {
 
 class SignalSystem;
 class TaskScheduler;

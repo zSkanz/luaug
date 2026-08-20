@@ -12,18 +12,17 @@
 // knows the truth -- so the one place that knows tells the one place that asks.
 #pragma once
 
+#include "luaug/core/error.h"
+#include "luaug/core/types.h"
+#include "luaug/rhi/device.h"
+
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "luaug/core/error.h"
-#include "luaug/core/types.h"
-#include "luaug/rhi/device.h"
-
-namespace luaug::render
-{
+namespace luaug::render {
 
 using core::u32;
 
@@ -33,16 +32,15 @@ public:
     // Reads `<contentDir>/shaders/manifest.json` and the reflection sidecars it
     // names. Blobs are not read here -- a manifest with fifty shaders should not
     // cost fifty file reads to answer a question about one.
-    [[nodiscard]] std::optional<core::EngineError> load(
-        const std::filesystem::path& contentDir, rhi::ShaderFormat format);
+    [[nodiscard]] std::optional<core::EngineError> load(const std::filesystem::path& contentDir,
+                                                        rhi::ShaderFormat format);
 
     // Creates the shader on the device, reading its blob now. Returns an
     // invalid handle and fills `outError` when the name, the stage or the blob
     // is missing -- all of which mean the content directory disagrees with the
     // binary, which is a deployment problem worth naming precisely.
-    [[nodiscard]] rhi::ShaderHandle create(
-        rhi::IDevice& device, std::string_view name, rhi::ShaderStage stage,
-        core::EngineError* outError = nullptr) const;
+    [[nodiscard]] rhi::ShaderHandle create(rhi::IDevice& device, std::string_view name, rhi::ShaderStage stage,
+                                           core::EngineError* outError = nullptr) const;
 
     [[nodiscard]] bool empty() const noexcept { return entries_.empty(); }
     [[nodiscard]] rhi::ShaderFormat format() const noexcept { return format_; }

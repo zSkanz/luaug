@@ -15,8 +15,7 @@
 #include "luaug/core/math.h"
 #include "luaug/core/types.h"
 
-namespace luaug::core
-{
+namespace luaug::core {
 
 class Pcg32
 {

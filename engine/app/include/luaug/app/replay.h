@@ -8,16 +8,15 @@
 // tell you where to look; two final hashes that differ tell you nothing.
 #pragma once
 
+#include "luaug/core/error.h"
+#include "luaug/core/types.h"
+
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
 
-#include "luaug/core/error.h"
-#include "luaug/core/types.h"
-
-namespace luaug::app
-{
+namespace luaug::app {
 
 using core::u64;
 
@@ -47,16 +46,13 @@ struct ReplayTrace
 {
     std::vector<ReplayCheckpoint> checkpoints;
 
-    [[nodiscard]] u64 finalHash() const noexcept
-    {
-        return checkpoints.empty() ? 0u : checkpoints.back().hash;
-    }
+    [[nodiscard]] u64 finalHash() const noexcept { return checkpoints.empty() ? 0u : checkpoints.back().hash; }
 };
 
 // Parses `<directory>/scenario.json`. The script path in it is resolved against
 // the directory, so a scenario is relocatable.
-[[nodiscard]] std::optional<core::EngineError> loadScenario(
-    const std::filesystem::path& directory, ReplayScenario& out);
+[[nodiscard]] std::optional<core::EngineError> loadScenario(const std::filesystem::path& directory,
+                                                            ReplayScenario& out);
 
 // Boots a world, runs `scenario.ticks` fixed steps and samples the hash. Nothing
 // here reads a clock: the tick is the only time there is.
@@ -71,9 +67,9 @@ struct ReplayTrace
 
 // Reports the FIRST checkpoint at which two traces disagree, which is the one
 // worth reporting -- everything after a divergence is a consequence of it.
-[[nodiscard]] std::optional<core::EngineError> compareTraces(
-    const ReplayTrace& expected, const ReplayTrace& actual, std::string_view expectedLabel,
-    std::string_view actualLabel);
+[[nodiscard]] std::optional<core::EngineError> compareTraces(const ReplayTrace& expected, const ReplayTrace& actual,
+                                                             std::string_view expectedLabel,
+                                                             std::string_view actualLabel);
 
 // The gate. Runs every scenario under `root` twice in this process and compares
 // the two traces against each other and against the recorded `trace.txt` -- and

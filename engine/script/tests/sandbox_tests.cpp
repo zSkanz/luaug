@@ -1,20 +1,17 @@
+#include "luaug/script/sandbox.h"
+
+#include <lua.h>
+#include <luacode.h>
+#include <lualib.h>
+
 #include <doctest/doctest.h>
-
 #include <ostream>
-
 #include <string>
 #include <vector>
 
-#include <lua.h>
-#include <lualib.h>
-#include <luacode.h>
-
-#include "luaug/script/sandbox.h"
-
 using namespace luaug::script;
 
-namespace
-{
+namespace {
 
 // A VM booted the way `runtime.cpp` boots one, minus everything that is not
 // about the sandbox. Kept here rather than reaching for `ScriptRuntime` so that
@@ -62,8 +59,7 @@ struct SandboxedVm
         REQUIRE(loaded == LUA_OK);
 
         const int status = lua_resume(thread, nullptr, 0);
-        if (status != LUA_OK)
-        {
+        if (status != LUA_OK) {
             const char* message = lua_tostring(thread, -1);
             FAIL_CHECK("chunk failed: " << (message == nullptr ? "?" : message));
             lua_pop(state, 1);
@@ -103,8 +99,7 @@ TEST_CASE("every removed global reads as nil from inside the VM")
 {
     SandboxedVm vm;
 
-    for (const char* const* name = RemovedGlobals; *name != nullptr; ++name)
-    {
+    for (const char* const* name = RemovedGlobals; *name != nullptr; ++name) {
         // Named directly, which is the whole point: a *spec* could not do this,
         // because naming an undeclared global is a strict-mode analyzer error
         // (ruling R-D). A raw chunk is not analysed, so C++ can ask the question
@@ -165,14 +160,11 @@ TEST_CASE("everything the document says survives, survives")
     // so that a failure here has exactly one possible cause, which means the
     // engine-provided globals belong to a runtime test rather than this one.
     const char* const survivors[] = {
-        "assert", "error",  "print",  "pcall",   "xpcall",       "select",
-        "next",   "pairs",  "ipairs", "rawget", "rawset",  "rawequal",     "rawlen",
-        "getmetatable",     "setmetatable",     "tonumber", "tostring",    "type",
-        "typeof", "unpack", "gcinfo",
-        nullptr,
+        "assert",   "error",  "print",  "pcall",    "xpcall", "select",       "next",         "pairs",
+        "ipairs",   "rawget", "rawset", "rawequal", "rawlen", "getmetatable", "setmetatable", "tonumber",
+        "tostring", "type",   "typeof", "unpack",   "gcinfo", nullptr,
     };
-    for (const char* const* name = survivors; *name != nullptr; ++name)
-    {
+    for (const char* const* name = survivors; *name != nullptr; ++name) {
         CAPTURE(std::string(*name));
         CHECK(vm.evaluate(std::string("type(") + *name + ") == \"function\""));
     }
@@ -180,8 +172,7 @@ TEST_CASE("everything the document says survives, survives")
     const char* const libraries[] = {
         "table", "string", "math", "coroutine", "utf8", "buffer", "bit32", "os", "vector", "debug", nullptr,
     };
-    for (const char* const* name = libraries; *name != nullptr; ++name)
-    {
+    for (const char* const* name = libraries; *name != nullptr; ++name) {
         CAPTURE(std::string(*name));
         CHECK(vm.evaluate(std::string("type(") + *name + ") == \"table\""));
     }

@@ -14,15 +14,14 @@
 // the component store.
 #pragma once
 
-#include <span>
-
 #include "luaug/core/id.h"
 #include "luaug/script/binding.h"
 
+#include <span>
+
 struct lua_State;
 
-namespace luaug::script
-{
+namespace luaug::script {
 
 // One method implementation, named by the class that DECLARES it. Binding it to
 // the declaring class is what makes inheritance work for free: the registry

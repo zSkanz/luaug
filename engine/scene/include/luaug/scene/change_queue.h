@@ -13,16 +13,15 @@
 // Luau values, live entirely on the `script` side of the same drain.
 #pragma once
 
-#include <span>
-#include <vector>
-
 #include "luaug/core/id.h"
 #include "luaug/core/name_atom.h"
 #include "luaug/core/types.h"
 #include "luaug/scene/types.h"
 
-namespace luaug::scene
-{
+#include <span>
+#include <vector>
+
+namespace luaug::scene {
 
 enum class ChangeKind : u8
 {

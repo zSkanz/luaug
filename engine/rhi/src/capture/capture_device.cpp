@@ -24,19 +24,17 @@
 //     many bytes went past. A gate that cannot see the values is a gate that
 //     can only report that the frame still has the same shape.
 
+#include "luaug/rhi/backends.h"
+#include "luaug/rhi/capture.h"
+
 #include <cmath>
 #include <cstring>
 #include <span>
 #include <string>
 #include <string_view>
 
-#include "luaug/rhi/backends.h"
-#include "luaug/rhi/capture.h"
-
-namespace luaug::rhi
-{
-namespace
-{
+namespace luaug::rhi {
+namespace {
 
 constexpr i64 kQuantizeScale = 10000;
 
@@ -74,18 +72,15 @@ std::string quantized(f32 value)
 [[nodiscard]] std::string uniformDigest(std::span<const std::byte> data)
 {
     u64 hash = 1469598103934665603ull;
-    const auto fold = [&hash](u64 value)
-    {
-        for (int shift = 0; shift < 64; shift += 8)
-        {
+    const auto fold = [&hash](u64 value) {
+        for (int shift = 0; shift < 64; shift += 8) {
             hash ^= (value >> shift) & 0xFFull;
             hash *= 1099511628211ull;
         }
     };
 
     usize offset = 0;
-    for (; offset + sizeof(f32) <= data.size(); offset += sizeof(f32))
-    {
+    for (; offset + sizeof(f32) <= data.size(); offset += sizeof(f32)) {
         f32 value = 0.0f;
         std::memcpy(&value, data.data() + offset, sizeof(value));
         // Through the same `llround` `quantized` uses, so a value that prints
@@ -109,8 +104,7 @@ std::string escaped(std::string_view text)
 {
     std::string out;
     out.reserve(text.size());
-    for (const char c : text)
-    {
+    for (const char c : text) {
         if (c == '"' || c == '\\')
             out += '\\';
         // Debug names are developer ASCII; a control character in one is a bug
@@ -122,101 +116,130 @@ std::string escaped(std::string_view text)
 
 std::string_view name(TextureFormat value)
 {
-    switch (value)
-    {
-    case TextureFormat::Undefined: return "Undefined";
-    case TextureFormat::R8Unorm: return "R8Unorm";
-    case TextureFormat::Rg8Unorm: return "Rg8Unorm";
-    case TextureFormat::Rgba8Unorm: return "Rgba8Unorm";
-    case TextureFormat::Rgba8UnormSrgb: return "Rgba8UnormSrgb";
-    case TextureFormat::Bgra8Unorm: return "Bgra8Unorm";
-    case TextureFormat::Bgra8UnormSrgb: return "Bgra8UnormSrgb";
-    case TextureFormat::R32Float: return "R32Float";
-    case TextureFormat::Rgba16Float: return "Rgba16Float";
-    case TextureFormat::Rgba32Float: return "Rgba32Float";
-    case TextureFormat::D16Unorm: return "D16Unorm";
-    case TextureFormat::D24UnormS8Uint: return "D24UnormS8Uint";
-    case TextureFormat::D32Float: return "D32Float";
-    case TextureFormat::D32FloatS8Uint: return "D32FloatS8Uint";
-    case TextureFormat::Bc1RgbaUnorm: return "Bc1RgbaUnorm";
-    case TextureFormat::Bc3RgbaUnorm: return "Bc3RgbaUnorm";
-    case TextureFormat::Bc5RgUnorm: return "Bc5RgUnorm";
-    case TextureFormat::Bc7RgbaUnorm: return "Bc7RgbaUnorm";
+    switch (value) {
+    case TextureFormat::Undefined:
+        return "Undefined";
+    case TextureFormat::R8Unorm:
+        return "R8Unorm";
+    case TextureFormat::Rg8Unorm:
+        return "Rg8Unorm";
+    case TextureFormat::Rgba8Unorm:
+        return "Rgba8Unorm";
+    case TextureFormat::Rgba8UnormSrgb:
+        return "Rgba8UnormSrgb";
+    case TextureFormat::Bgra8Unorm:
+        return "Bgra8Unorm";
+    case TextureFormat::Bgra8UnormSrgb:
+        return "Bgra8UnormSrgb";
+    case TextureFormat::R32Float:
+        return "R32Float";
+    case TextureFormat::Rgba16Float:
+        return "Rgba16Float";
+    case TextureFormat::Rgba32Float:
+        return "Rgba32Float";
+    case TextureFormat::D16Unorm:
+        return "D16Unorm";
+    case TextureFormat::D24UnormS8Uint:
+        return "D24UnormS8Uint";
+    case TextureFormat::D32Float:
+        return "D32Float";
+    case TextureFormat::D32FloatS8Uint:
+        return "D32FloatS8Uint";
+    case TextureFormat::Bc1RgbaUnorm:
+        return "Bc1RgbaUnorm";
+    case TextureFormat::Bc3RgbaUnorm:
+        return "Bc3RgbaUnorm";
+    case TextureFormat::Bc5RgUnorm:
+        return "Bc5RgUnorm";
+    case TextureFormat::Bc7RgbaUnorm:
+        return "Bc7RgbaUnorm";
     }
     return "?";
 }
 
 std::string_view name(PrimitiveType value)
 {
-    switch (value)
-    {
-    case PrimitiveType::TriangleList: return "TriangleList";
-    case PrimitiveType::TriangleStrip: return "TriangleStrip";
-    case PrimitiveType::LineList: return "LineList";
-    case PrimitiveType::LineStrip: return "LineStrip";
-    case PrimitiveType::PointList: return "PointList";
+    switch (value) {
+    case PrimitiveType::TriangleList:
+        return "TriangleList";
+    case PrimitiveType::TriangleStrip:
+        return "TriangleStrip";
+    case PrimitiveType::LineList:
+        return "LineList";
+    case PrimitiveType::LineStrip:
+        return "LineStrip";
+    case PrimitiveType::PointList:
+        return "PointList";
     }
     return "?";
 }
 
 std::string_view name(IndexType value)
 {
-    switch (value)
-    {
-    case IndexType::U16: return "U16";
-    case IndexType::U32: return "U32";
+    switch (value) {
+    case IndexType::U16:
+        return "U16";
+    case IndexType::U32:
+        return "U32";
     }
     return "?";
 }
 
 std::string_view name(ShaderStage value)
 {
-    switch (value)
-    {
-    case ShaderStage::Vertex: return "Vertex";
-    case ShaderStage::Fragment: return "Fragment";
+    switch (value) {
+    case ShaderStage::Vertex:
+        return "Vertex";
+    case ShaderStage::Fragment:
+        return "Fragment";
     }
     return "?";
 }
 
 std::string_view name(LoadOp value)
 {
-    switch (value)
-    {
-    case LoadOp::Load: return "Load";
-    case LoadOp::Clear: return "Clear";
-    case LoadOp::DontCare: return "DontCare";
+    switch (value) {
+    case LoadOp::Load:
+        return "Load";
+    case LoadOp::Clear:
+        return "Clear";
+    case LoadOp::DontCare:
+        return "DontCare";
     }
     return "?";
 }
 
 std::string_view name(StoreOp value)
 {
-    switch (value)
-    {
-    case StoreOp::Store: return "Store";
-    case StoreOp::DontCare: return "DontCare";
+    switch (value) {
+    case StoreOp::Store:
+        return "Store";
+    case StoreOp::DontCare:
+        return "DontCare";
     }
     return "?";
 }
 
 std::string_view name(FillMode value)
 {
-    switch (value)
-    {
-    case FillMode::Solid: return "Solid";
-    case FillMode::Wireframe: return "Wireframe";
+    switch (value) {
+    case FillMode::Solid:
+        return "Solid";
+    case FillMode::Wireframe:
+        return "Wireframe";
     }
     return "?";
 }
 
 std::string_view name(CullMode value)
 {
-    switch (value)
-    {
-    case CullMode::None: return "None";
-    case CullMode::Front: return "Front";
-    case CullMode::Back: return "Back";
+    switch (value) {
+    case CullMode::None:
+        return "None";
+    case CullMode::Front:
+        return "Front";
+    case CullMode::Back:
+        return "Back";
     }
     return "?";
 }
@@ -279,8 +302,7 @@ public:
                        .str("name", desc.debugName)
                        .finish();
 
-        for (const ColorAttachment& color : desc.colorAttachments)
-        {
+        for (const ColorAttachment& color : desc.colorAttachments) {
             stream_ += Line("colorAttachment")
                            .num("texture", static_cast<u64>(color.texture.id))
                            .str("load", name(color.loadOp))
@@ -292,8 +314,7 @@ public:
                            .finish();
         }
 
-        if (desc.depthStencil.texture.valid())
-        {
+        if (desc.depthStencil.texture.valid()) {
             stream_ += Line("depthAttachment")
                            .str("load", name(desc.depthStencil.loadOp))
                            .str("store", name(desc.depthStencil.storeOp))
@@ -343,10 +364,7 @@ public:
 
     void bindIndexBuffer(BufferHandle buffer, IndexType type) override
     {
-        stream_ += Line("bindIndexBuffer")
-                       .num("buffer", static_cast<u64>(buffer.id))
-                       .str("type", name(type))
-                       .finish();
+        stream_ += Line("bindIndexBuffer").num("buffer", static_cast<u64>(buffer.id)).str("type", name(type)).finish();
     }
 
     // Only the byte count, not the contents. A uniform block is usually a
@@ -376,8 +394,7 @@ public:
                        .num("count", static_cast<u64>(bindings.size()))
                        .finish();
 
-        for (const TextureBinding& binding : bindings)
-        {
+        for (const TextureBinding& binding : bindings) {
             stream_ += Line("textureBinding")
                            .num("texture", static_cast<u64>(binding.texture.id))
                            .num("sampler", static_cast<u64>(binding.sampler.id))
@@ -395,8 +412,7 @@ public:
                        .finish();
     }
 
-    void drawIndexed(
-        u32 indexCount, u32 instanceCount, u32 firstIndex, i32 vertexOffset, u32 firstInstance) override
+    void drawIndexed(u32 indexCount, u32 instanceCount, u32 firstIndex, i32 vertexOffset, u32 firstInstance) override
     {
         stream_ += Line("drawIndexed")
                        .num("indices", static_cast<u64>(indexCount))
@@ -500,10 +516,8 @@ public:
     [[nodiscard]] SamplerHandle createSampler(const SamplerDesc& desc) override
     {
         const SamplerHandle handle{nextSampler_++};
-        stream_ += Line("createSampler")
-                       .num("sampler", static_cast<u64>(handle.id))
-                       .str("name", desc.debugName)
-                       .finish();
+        stream_ +=
+            Line("createSampler").num("sampler", static_cast<u64>(handle.id)).str("name", desc.debugName).finish();
         return handle;
     }
 

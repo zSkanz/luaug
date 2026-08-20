@@ -1,13 +1,3 @@
-#include <doctest/doctest.h>
-
-#include <algorithm>
-#include <cstddef>
-#include <cstring>
-#include <filesystem>
-#include <fstream>
-#include <string>
-#include <vector>
-
 #include "luaug/core/i18n.h"
 #include "luaug/core/text_key.h"
 #include "luaug/platform/event.h"
@@ -16,11 +6,19 @@
 #include "luaug/platform/sdl_interop.h"
 #include "luaug/platform/window.h"
 
-using luaug::core::EngineError;
-using luaug::core::engineCatalog;
+#include <algorithm>
+#include <cstddef>
+#include <cstring>
+#include <doctest/doctest.h>
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <vector>
 
-namespace
-{
+using luaug::core::engineCatalog;
+using luaug::core::EngineError;
+
+namespace {
 
 void seedRealCatalog()
 {
@@ -98,8 +96,7 @@ TEST_CASE("a window cannot be created before init")
     REQUIRE_FALSE(luaug::platform::isInitialized());
 
     EngineError error;
-    const auto window = luaug::platform::createWindow(
-        {.titleKey = LUAUG_TR("platform.window.title")}, &error);
+    const auto window = luaug::platform::createWindow({.titleKey = LUAUG_TR("platform.window.title")}, &error);
 
     CHECK(window == nullptr);
     CHECK_FALSE(error.message.empty());
@@ -154,8 +151,7 @@ TEST_CASE("the pump translates what the engine models and drops the rest")
     const auto raw = luaug::platform::rawEvents();
 
     CHECK(std::ranges::any_of(events, [](const auto& e) { return e.type == EventType::Quit; }));
-    CHECK(std::ranges::any_of(
-        events, [](const auto& e) { return e.type == EventType::KeyDown && e.key == Key::F3; }));
+    CHECK(std::ranges::any_of(events, [](const auto& e) { return e.type == EventType::KeyDown && e.key == Key::F3; }));
     CHECK_FALSE(std::ranges::any_of(
         events, [](const auto& e) { return e.type == EventType::KeyDown && e.key == Key::Unknown; }));
 
@@ -173,8 +169,7 @@ TEST_CASE("the pump translates what the engine models and drops the rest")
 
 TEST_CASE("readFile returns the file's bytes exactly")
 {
-    const std::filesystem::path path
-        = std::filesystem::temp_directory_path() / "luaug-platform-readfile.bin";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "luaug-platform-readfile.bin";
 
     // A NUL in the middle and a bare CR: a reader that went through a text-mode
     // FILE* or treated the buffer as a C string would lose one or the other.
@@ -199,8 +194,7 @@ TEST_CASE("readFile returns the file's bytes exactly")
 
 TEST_CASE("readFile fails without touching the caller's buffer")
 {
-    const std::filesystem::path missing
-        = std::filesystem::temp_directory_path() / "luaug-platform-does-not-exist.bin";
+    const std::filesystem::path missing = std::filesystem::temp_directory_path() / "luaug-platform-does-not-exist.bin";
 
     std::vector<std::byte> bytes{std::byte{0x7f}};
     CHECK_FALSE(luaug::platform::readFile(missing, bytes));

@@ -1,9 +1,7 @@
 #include "scene_fixture.h"
 
-namespace luaug::scene::testing
-{
-namespace
-{
+namespace luaug::scene::testing {
+namespace {
 
 // The accessors are plain function pointers and cannot capture anything, so
 // each reaches the atom table through the `World` it is handed. That is exactly
@@ -126,15 +124,11 @@ Hierarchy::Hierarchy()
     // and one of them would have silently kept compiling with the new flag
     // reading an accessor pointer if the types had happened to line up.
     m_instanceProperties = {
-        PropertyDesc{
-            .name = nameProperty, .type = ValueType::String, .get = getName, .set = setName},
+        PropertyDesc{.name = nameProperty, .type = ValueType::String, .get = getName, .set = setName},
     };
     m_basePartProperties = {
         PropertyDesc{
-            .name = transparencyProperty,
-            .type = ValueType::Number,
-            .get = getTransparency,
-            .set = setTransparency},
+            .name = transparencyProperty, .type = ValueType::Number, .get = getTransparency, .set = setTransparency},
         PropertyDesc{.name = sizeProperty, .type = ValueType::Vector3, .get = getSize, .set = setSize},
     };
     m_partProperties = {
@@ -142,10 +136,7 @@ Hierarchy::Hierarchy()
     };
     m_modelProperties = {
         PropertyDesc{
-            .name = primaryPartProperty,
-            .type = ValueType::Instance,
-            .get = getPrimaryPart,
-            .set = setPrimaryPart},
+            .name = primaryPartProperty, .type = ValueType::Instance, .get = getPrimaryPart, .set = setPrimaryPart},
     };
 
     ClassDescriptor instanceClassDesc;

@@ -20,8 +20,7 @@
 
 #include <filesystem>
 
-namespace luaug::platform
-{
+namespace luaug::platform {
 
 // Installs the process-wide fault handler. Idempotent; a second call replaces
 // the directory rather than stacking a second handler.

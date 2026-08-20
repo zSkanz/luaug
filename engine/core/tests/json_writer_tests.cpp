@@ -7,13 +7,12 @@
 // doctest stringifies a failed comparison through `operator<<`, and a
 // `string_view` has no declaration for one without this. Without it the failure
 // is a page of template errors inside <string_view> rather than a test.
-#include <ostream>
-
-#include <limits>
-#include <string>
-
 #include "luaug/core/json.h"
 #include "luaug/core/json_writer.h"
+
+#include <limits>
+#include <ostream>
+#include <string>
 
 using luaug::core::JsonDocument;
 using luaug::core::jsonQuote;

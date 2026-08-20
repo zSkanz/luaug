@@ -1,27 +1,28 @@
 #include "luaug/render/shader_library.h"
 
-#include <array>
-
 #include "luaug/core/json.h"
 #include "luaug/core/text_key.h"
 #include "luaug/platform/file.h"
 
-namespace luaug::render
-{
-namespace
-{
+#include <array>
+
+namespace luaug::render {
+namespace {
 
 using core::I18nArg;
 
 // The manifest's key for each format, written by cmake/luaug_shaders.cmake.
 [[nodiscard]] std::string_view formatKey(rhi::ShaderFormat format) noexcept
 {
-    switch (format)
-    {
-    case rhi::ShaderFormat::SpirV: return "spirv";
-    case rhi::ShaderFormat::Dxil: return "dxil";
-    case rhi::ShaderFormat::Msl: return "msl";
-    case rhi::ShaderFormat::Unknown: return "";
+    switch (format) {
+    case rhi::ShaderFormat::SpirV:
+        return "spirv";
+    case rhi::ShaderFormat::Dxil:
+        return "dxil";
+    case rhi::ShaderFormat::Msl:
+        return "msl";
+    case rhi::ShaderFormat::Unknown:
+        return "";
     }
     return "";
 }
@@ -37,15 +38,13 @@ using core::I18nArg;
 
 } // namespace
 
-std::optional<core::EngineError> ShaderLibrary::load(
-    const std::filesystem::path& contentDir, rhi::ShaderFormat format)
+std::optional<core::EngineError> ShaderLibrary::load(const std::filesystem::path& contentDir, rhi::ShaderFormat format)
 {
     entries_.clear();
     format_ = format;
 
     const std::string_view key = formatKey(format);
-    if (key.empty())
-    {
+    if (key.empty()) {
         // A device that reports no shader format cannot be given shaders. Saying
         // so here beats every create() failing individually for a reason that
         // has nothing to do with the shader being asked for.
@@ -54,8 +53,7 @@ std::optional<core::EngineError> ShaderLibrary::load(
 
     const std::filesystem::path manifestPath = contentDir / "shaders" / "manifest.json";
     std::string text;
-    if (!platform::readTextFile(manifestPath, text))
-    {
+    if (!platform::readTextFile(manifestPath, text)) {
         const std::array<I18nArg, 1> args{I18nArg{"path", manifestPath.string()}};
         return core::makeError(LUAUG_TR("render.err.shader_manifest_missing"), args);
     }
@@ -67,8 +65,7 @@ std::optional<core::EngineError> ShaderLibrary::load(
     const std::filesystem::path root = manifestPath.parent_path();
     const core::JsonValue shaders = document.root()["shaders"];
 
-    for (core::usize i = 0; i < shaders.size(); ++i)
-    {
+    for (core::usize i = 0; i < shaders.size(); ++i) {
         const core::JsonValue shader = shaders.at(i);
 
         const std::optional<rhi::ShaderStage> stage = parseStage(shader["stage"].asString());
@@ -94,8 +91,7 @@ std::optional<core::EngineError> ShaderLibrary::load(
         // nothing.
         const std::filesystem::path reflectPath = root / shader["reflect"].asString();
         std::string reflectText;
-        if (!platform::readTextFile(reflectPath, reflectText))
-        {
+        if (!platform::readTextFile(reflectPath, reflectText)) {
             const std::array<I18nArg, 1> args{I18nArg{"path", reflectPath.string()}};
             return core::makeError(LUAUG_TR("render.err.shader_reflect_missing"), args);
         }
@@ -110,8 +106,7 @@ std::optional<core::EngineError> ShaderLibrary::load(
         entries_.push_back(std::move(entry));
     }
 
-    if (entries_.empty())
-    {
+    if (entries_.empty()) {
         const std::array<I18nArg, 1> args{I18nArg{"format", formatKey(format)}};
         return core::makeError(LUAUG_TR("render.err.shader_none_for_format"), args);
     }
@@ -119,25 +114,21 @@ std::optional<core::EngineError> ShaderLibrary::load(
     return std::nullopt;
 }
 
-const ShaderLibrary::Entry* ShaderLibrary::find(
-    std::string_view name, rhi::ShaderStage stage) const noexcept
+const ShaderLibrary::Entry* ShaderLibrary::find(std::string_view name, rhi::ShaderStage stage) const noexcept
 {
-    for (const Entry& entry : entries_)
-    {
+    for (const Entry& entry : entries_) {
         if (entry.name == name && entry.stage == stage)
             return &entry;
     }
     return nullptr;
 }
 
-rhi::ShaderHandle ShaderLibrary::create(
-    rhi::IDevice& device, std::string_view name, rhi::ShaderStage stage, core::EngineError* outError) const
+rhi::ShaderHandle ShaderLibrary::create(rhi::IDevice& device, std::string_view name, rhi::ShaderStage stage,
+                                        core::EngineError* outError) const
 {
     const Entry* entry = find(name, stage);
-    if (entry == nullptr)
-    {
-        if (outError != nullptr)
-        {
+    if (entry == nullptr) {
+        if (outError != nullptr) {
             const std::array<I18nArg, 1> args{I18nArg{"name", name}};
             *outError = core::makeError(LUAUG_TR("render.err.shader_not_found"), args);
         }
@@ -145,10 +136,8 @@ rhi::ShaderHandle ShaderLibrary::create(
     }
 
     std::vector<std::byte> code;
-    if (!platform::readFile(entry->blob, code))
-    {
-        if (outError != nullptr)
-        {
+    if (!platform::readFile(entry->blob, code)) {
+        if (outError != nullptr) {
             const std::array<I18nArg, 1> args{I18nArg{"path", entry->blob.string()}};
             *outError = core::makeError(LUAUG_TR("render.err.shader_blob_missing"), args);
         }

@@ -1,18 +1,16 @@
-#include <doctest/doctest.h>
+#include "luaug/imgcmp/command_line.h"
 
+#include <doctest/doctest.h>
 #include <initializer_list>
 #include <string_view>
 #include <vector>
-
-#include "luaug/imgcmp/command_line.h"
 
 using luaug::imgcmp::Command;
 using luaug::imgcmp::CommandStatus;
 using luaug::imgcmp::parseCommandLine;
 using luaug::imgcmp::usageText;
 
-namespace
-{
+namespace {
 
 // argv[0] is already stripped, matching what main() passes.
 Command parse(std::initializer_list<std::string_view> args)
@@ -83,8 +81,7 @@ TEST_CASE("help is a request, not a mistake")
 // for, and report a pass that means nothing.
 TEST_CASE("a malformed command line is refused rather than defaulted")
 {
-    const auto rejects = [](const Command& command)
-    {
+    const auto rejects = [](const Command& command) {
         CHECK(command.status == CommandStatus::UsageError);
         CHECK_FALSE(command.error.empty());
     };

@@ -1,5 +1,4 @@
 #include <doctest/doctest.h>
-
 #include <ostream>
 
 #include "script_fixture.h"
@@ -377,8 +376,7 @@ TEST_CASE("a destroyed handle keeps resolving until its Destroying has been carr
     // sandboxing gives each one its own globals, and the scheduler that would
     // drain between them arrives with `task`. `script.err.instance_dead` gets
     // its Luau-level test then.
-    const luaug::core::InstanceId id = fixture.world->create(
-        fixture.classes.findId(fixture.atoms.lookup("Part")));
+    const luaug::core::InstanceId id = fixture.world->create(fixture.classes.findId(fixture.atoms.lookup("Part")));
     REQUIRE(fixture.world->alive(id));
     fixture.world->destroy(id);
     CHECK(fixture.world->alive(id));

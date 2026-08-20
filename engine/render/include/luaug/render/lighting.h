@@ -10,8 +10,7 @@
 
 #include "luaug/core/math.h"
 
-namespace luaug::render
-{
+namespace luaug::render {
 
 // The unit vector pointing **from the world towards the sun** -- so at noon on
 // the equator it is straight up, and shading dots it against a surface normal

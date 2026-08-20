@@ -1,7 +1,6 @@
 #include "luaug/scene/value.h"
 
-namespace luaug::scene
-{
+namespace luaug::scene {
 
 const char* valueTypeName(ValueType type) noexcept
 {
@@ -14,17 +13,25 @@ const char* valueTypeName(ValueType type) noexcept
     // These are the names api-design.md §2.3 puts in front of developers --
     // `typeof` on a Vector3 answers "vector", not "Vector3" -- so an error that
     // formats one of them names the thing the reader already knows.
-    switch (type)
-    {
-    case ValueType::Nil: return "nil";
-    case ValueType::Bool: return "boolean";
-    case ValueType::Number: return "number";
-    case ValueType::String: return "string";
-    case ValueType::Vector3: return "vector";
-    case ValueType::CFrame: return "CFrame";
-    case ValueType::Color3: return "Color3";
-    case ValueType::Instance: return "Instance";
-    case ValueType::EnumItem: return "EnumItem";
+    switch (type) {
+    case ValueType::Nil:
+        return "nil";
+    case ValueType::Bool:
+        return "boolean";
+    case ValueType::Number:
+        return "number";
+    case ValueType::String:
+        return "string";
+    case ValueType::Vector3:
+        return "vector";
+    case ValueType::CFrame:
+        return "CFrame";
+    case ValueType::Color3:
+        return "Color3";
+    case ValueType::Instance:
+        return "Instance";
+    case ValueType::EnumItem:
+        return "EnumItem";
     }
     return "nil";
 }

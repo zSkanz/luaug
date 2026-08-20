@@ -5,13 +5,12 @@
 // makes `rhi_capture` able to serialise a desc field by field.
 #pragma once
 
+#include "luaug/rhi/types.h"
+
 #include <span>
 #include <string_view>
 
-#include "luaug/rhi/types.h"
-
-namespace luaug::rhi
-{
+namespace luaug::rhi {
 
 struct BufferDesc
 {

@@ -4,23 +4,21 @@
 // indistinguishable from one that never reloaded. Anything weaker -- "the hash
 // changed" -- passes against a reload that half-applied the edit.
 
-#include <doctest/doctest.h>
+#include "luaug/app/reload.h"
+#include "luaug/core/i18n.h"
 
+#include <doctest/doctest.h>
 #include <memory>
 #include <string>
 
 #include "project_fixture.h"
-
-#include "luaug/app/reload.h"
-#include "luaug/core/i18n.h"
 
 using namespace luaug;
 using luaug::app::testing::bootOptions;
 using luaug::app::testing::Captured;
 using luaug::app::testing::Project;
 
-namespace
-{
+namespace {
 
 // A script whose observable result is entirely decided by `marker`, so two
 // worlds built from two different values of it cannot hash the same.
@@ -28,8 +26,8 @@ std::string scriptNamed(std::string_view marker)
 {
     return std::string(R"(
         local root = Instance.new("Folder")
-        root.Name = ")")
-        + std::string(marker) + R"("
+        root.Name = ")") +
+           std::string(marker) + R"("
         root.Parent = workspace
 
         local run = game:GetService("RunService")
@@ -37,7 +35,8 @@ std::string scriptNamed(std::string_view marker)
         run.Heartbeat:Connect(function()
             ticks += 1
             local part = Instance.new("Part")
-            part.Name = ")" + std::string(marker) + R"(-" .. tostring(ticks)
+            part.Name = ")" +
+           std::string(marker) + R"(-" .. tostring(ticks)
             part.Position = vector.create(ticks, 0, 0)
             part.Parent = root
         end)

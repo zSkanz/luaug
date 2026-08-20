@@ -16,32 +16,28 @@
 // than catalog keys -- the same reason a GPU debug-group name is one.
 #pragma once
 
-#include <span>
-
 #include "luaug/app/frame_scheduler.h"
 #include "luaug/app/inspector.h"
 #include "luaug/core/id.h"
 #include "luaug/platform/event.h"
 #include "luaug/rhi/types.h"
 
-namespace luaug::platform
-{
+#include <span>
+
+namespace luaug::platform {
 class Window;
 }
 
-namespace luaug::scene
-{
+namespace luaug::scene {
 class World;
 }
 
-namespace luaug::rhi
-{
+namespace luaug::rhi {
 class ICmdList;
 class IDevice;
 } // namespace luaug::rhi
 
-namespace luaug::app
-{
+namespace luaug::app {
 
 class DebugOverlay
 {

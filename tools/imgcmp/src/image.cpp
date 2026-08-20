@@ -7,10 +7,8 @@
 #include <stb_image.h>
 #include <stb_image_write.h>
 
-namespace luaug::imgcmp
-{
-namespace
-{
+namespace luaug::imgcmp {
+namespace {
 
 struct StbiFree
 {
@@ -56,13 +54,11 @@ LoadResult decodePng(std::span<const std::uint8_t> bytes)
 {
     LoadResult result;
 
-    if (bytes.empty())
-    {
+    if (bytes.empty()) {
         result.error = "empty image data";
         return result;
     }
-    if (!fitsInInt(bytes.size()))
-    {
+    if (!fitsInInt(bytes.size())) {
         result.error = "image data is larger than the decoder can address";
         return result;
     }
@@ -73,14 +69,12 @@ LoadResult decodePng(std::span<const std::uint8_t> bytes)
     const StbiPixels pixels{
         stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()), &width, &height, &channelsInFile, 4)};
 
-    if (!pixels)
-    {
+    if (!pixels) {
         const char* reason = stbi_failure_reason();
         result.error = reason != nullptr ? reason : "not a supported PNG";
         return result;
     }
-    if (width <= 0 || height <= 0)
-    {
+    if (width <= 0 || height <= 0) {
         result.error = "decoded image has no pixels";
         return result;
     }
@@ -98,23 +92,20 @@ LoadResult loadPngFile(const std::filesystem::path& path)
     LoadResult result;
 
     std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file)
-    {
+    if (!file) {
         result.error = "cannot open " + path.string();
         return result;
     }
 
     const std::streamoff size = file.tellg();
-    if (size <= 0)
-    {
+    if (size <= 0) {
         result.error = path.string() + " is empty or not readable";
         return result;
     }
 
     file.seekg(0, std::ios::beg);
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
-    if (!file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size)))
-    {
+    if (!file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size))) {
         result.error = "cannot read " + path.string();
         return result;
     }
@@ -137,9 +128,8 @@ WriteResult encodePng(const Image& image, std::vector<std::uint8_t>& out)
         return WriteResult{false, "image row is larger than the encoder can address"};
 
     const int written = stbi_write_png_to_func(&appendEncodedBytes, &out, image.width, image.height, 4,
-        image.rgba.data(), static_cast<int>(strideBytes));
-    if (written == 0)
-    {
+                                               image.rgba.data(), static_cast<int>(strideBytes));
+    if (written == 0) {
         out.clear();
         return WriteResult{false, "PNG encoding failed"};
     }

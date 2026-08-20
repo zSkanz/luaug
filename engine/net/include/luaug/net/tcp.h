@@ -10,16 +10,15 @@
 // compiles on one platform.
 #pragma once
 
+#include "luaug/core/error.h"
+#include "luaug/core/types.h"
+
 #include <memory>
 #include <optional>
 #include <span>
 #include <string_view>
 
-#include "luaug/core/error.h"
-#include "luaug/core/types.h"
-
-namespace luaug::net
-{
+namespace luaug::net {
 
 using core::u16;
 using core::u32;

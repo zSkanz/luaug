@@ -2,10 +2,8 @@
 
 #include "luaug/core/text_key.h"
 
-namespace luaug::app
-{
-namespace
-{
+namespace luaug::app {
+namespace {
 
 // Compile-time membership. A backend that is off is not merely unavailable at
 // runtime -- its creator is not declared, so naming it here would not link.
@@ -70,19 +68,20 @@ std::string_view availableBackendNames()
 
 std::string_view backendName(rhi::BackendId backend)
 {
-    switch (backend)
-    {
-    case rhi::BackendId::SdlGpu: return "sdlgpu";
-    case rhi::BackendId::Capture: return "capture";
-    case rhi::BackendId::Null: return "null";
+    switch (backend) {
+    case rhi::BackendId::SdlGpu:
+        return "sdlgpu";
+    case rhi::BackendId::Capture:
+        return "capture";
+    case rhi::BackendId::Null:
+        return "null";
     }
     return "unknown";
 }
 
 rhi::DeviceResult createDevice(const rhi::DeviceDesc& desc, core::EngineError* outError)
 {
-    switch (desc.backend)
-    {
+    switch (desc.backend) {
     case rhi::BackendId::SdlGpu:
 #if LUAUG_RHI_SDLGPU
         return rhi::createSdlGpuDevice(desc, outError);

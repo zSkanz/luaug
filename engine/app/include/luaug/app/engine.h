@@ -1,16 +1,15 @@
 // Subsystem bring-up and the frame loop (architecture.md §2 "app", §3).
 #pragma once
 
-#include <filesystem>
-#include <optional>
-#include <string>
-
 #include "luaug/core/error.h"
 #include "luaug/core/types.h"
 #include "luaug/rhi/types.h"
 
-namespace luaug::app
-{
+#include <filesystem>
+#include <optional>
+#include <string>
+
+namespace luaug::app {
 
 using core::i32;
 using core::u64;

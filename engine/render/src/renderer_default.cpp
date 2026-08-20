@@ -1,4 +1,7 @@
+#include "luaug/core/i18n.h"
+#include "luaug/core/text_key.h"
 #include "luaug/render/renderer.h"
+#include "luaug/render/shader_types.h"
 #include "luaug/render/shadow.h"
 
 #include <algorithm>
@@ -6,14 +9,8 @@
 #include <cmath>
 #include <memory>
 
-#include "luaug/core/i18n.h"
-#include "luaug/core/text_key.h"
-#include "luaug/render/shader_types.h"
-
-namespace luaug::render
-{
-namespace
-{
+namespace luaug::render {
+namespace {
 
 using core::f32;
 using core::Mat4;
@@ -73,11 +70,11 @@ constexpr rhi::TextureFormat kShadowFormat = rhi::TextureFormat::D32Float;
 class DefaultRenderer final : public IRenderer
 {
 public:
-    std::optional<core::EngineError> create(
-        rhi::IDevice& device, const ShaderLibrary& shaders, rhi::TextureFormat colorFormat) override;
+    std::optional<core::EngineError> create(rhi::IDevice& device, const ShaderLibrary& shaders,
+                                            rhi::TextureFormat colorFormat) override;
     void destroy(rhi::IDevice& device) override;
     void render(rhi::IDevice& device, rhi::ICmdList& cmd, const RenderTarget& target, const RenderWorld& world,
-        const MeshCache& meshes) override;
+                const MeshCache& meshes) override;
     [[nodiscard]] bool valid() const noexcept override { return valid_; }
     [[nodiscard]] f32 shadowRadius() const noexcept override { return kShadowRadius; }
 
@@ -94,7 +91,7 @@ private:
     };
 
     void drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world, const MeshCache& meshes, const Mat4& viewProjection,
-        Selection selection);
+                      Selection selection);
 
     bool valid_ = false;
     rhi::TextureFormat colorFormat_ = rhi::TextureFormat::Undefined;
@@ -149,10 +146,12 @@ Mat4 sunViewProjection(Vec3 sunDirection, core::DVec3 origin) noexcept
     // large (ADR 0014). What comes out is under half a texel and fits an f32
     // with room to spare, which is the whole reason the rounding happens here
     // rather than in a shader.
-    const core::f64 lightX = static_cast<core::f64>(view.m[0][0]) * origin.x
-        + static_cast<core::f64>(view.m[1][0]) * origin.y + static_cast<core::f64>(view.m[2][0]) * origin.z;
-    const core::f64 lightY = static_cast<core::f64>(view.m[0][1]) * origin.x
-        + static_cast<core::f64>(view.m[1][1]) * origin.y + static_cast<core::f64>(view.m[2][1]) * origin.z;
+    const core::f64 lightX = static_cast<core::f64>(view.m[0][0]) * origin.x +
+                             static_cast<core::f64>(view.m[1][0]) * origin.y +
+                             static_cast<core::f64>(view.m[2][0]) * origin.z;
+    const core::f64 lightY = static_cast<core::f64>(view.m[0][1]) * origin.x +
+                             static_cast<core::f64>(view.m[1][1]) * origin.y +
+                             static_cast<core::f64>(view.m[2][1]) * origin.z;
 
     const auto texel = static_cast<core::f64>(kShadowTexel);
     const core::f64 residualX = lightX - std::round(lightX / texel) * texel;
@@ -164,15 +163,13 @@ Mat4 sunViewProjection(Vec3 sunDirection, core::DVec3 origin) noexcept
     return orthographic(kShadowExtent, 0.1f, kShadowDepth) * view;
 }
 
-
-std::optional<core::EngineError> DefaultRenderer::create(
-    rhi::IDevice& device, const ShaderLibrary& shaders, rhi::TextureFormat colorFormat)
+std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, const ShaderLibrary& shaders,
+                                                         rhi::TextureFormat colorFormat)
 {
     colorFormat_ = colorFormat;
 
     core::EngineError error;
-    const auto load = [&](std::string_view name, rhi::ShaderStage stage) -> rhi::ShaderHandle
-    {
+    const auto load = [&](std::string_view name, rhi::ShaderStage stage) -> rhi::ShaderHandle {
         const rhi::ShaderHandle handle = shaders.create(device, name, stage, &error);
         if (handle.valid() && shaderCount_ < std::size(shaders_))
             shaders_[shaderCount_++] = handle;
@@ -188,9 +185,8 @@ std::optional<core::EngineError> DefaultRenderer::create(
     const rhi::ShaderHandle tonemapVertex = load("tonemap", rhi::ShaderStage::Vertex);
     const rhi::ShaderHandle tonemapFragment = load("tonemap", rhi::ShaderStage::Fragment);
 
-    if (!shadowVertex.valid() || !pbrVertex.valid() || !pbrFragment.valid() || !skyVertex.valid()
-        || !skyFragment.valid() || !tonemapVertex.valid() || !tonemapFragment.valid())
-    {
+    if (!shadowVertex.valid() || !pbrVertex.valid() || !pbrFragment.valid() || !skyVertex.valid() ||
+        !skyFragment.valid() || !tonemapVertex.valid() || !tonemapFragment.valid()) {
         destroy(device);
         return error.key.hash != 0 ? error : core::makeError(LUAUG_TR("render.err.shader_format_unknown"));
     }
@@ -280,9 +276,8 @@ std::optional<core::EngineError> DefaultRenderer::create(
         .debugName = "tonemap",
     });
 
-    if (!shadowPipeline_.valid() || !pbrPipeline_.valid() || !pbrBlendPipeline_.valid() || !skyPipeline_.valid()
-        || !tonemapPipeline_.valid())
-    {
+    if (!shadowPipeline_.valid() || !pbrPipeline_.valid() || !pbrBlendPipeline_.valid() || !skyPipeline_.valid() ||
+        !tonemapPipeline_.valid()) {
         destroy(device);
         return core::makeError(LUAUG_TR("render.err.pipeline_create_failed"));
     }
@@ -298,8 +293,7 @@ std::optional<core::EngineError> DefaultRenderer::create(
     // The three defaults, in the values that make a missing map a no-op rather
     // than a change: white multiplies to itself, (0.5, 0.5, 1) is the tangent-
     // space normal pointing straight out, and black adds nothing.
-    const auto onePixel = [&](const char* name, core::u8 r, core::u8 g, core::u8 b) -> rhi::TextureHandle
-    {
+    const auto onePixel = [&](const char* name, core::u8 r, core::u8 g, core::u8 b) -> rhi::TextureHandle {
         const rhi::TextureHandle handle = device.createTexture({
             .format = rhi::TextureFormat::Rgba8Unorm,
             .usage = rhi::TextureUsage::Sampled,
@@ -319,8 +313,7 @@ std::optional<core::EngineError> DefaultRenderer::create(
     whitePixel_ = onePixel("default-white", 0xFF, 0xFF, 0xFF);
     flatNormalPixel_ = onePixel("default-normal", 0x80, 0x80, 0xFF);
     blackPixel_ = onePixel("default-black", 0x00, 0x00, 0x00);
-    if (!whitePixel_.valid() || !flatNormalPixel_.valid() || !blackPixel_.valid())
-    {
+    if (!whitePixel_.valid() || !flatNormalPixel_.valid() || !blackPixel_.valid()) {
         destroy(device);
         return core::makeError(LUAUG_TR("render.err.target_create_failed"));
     }
@@ -332,8 +325,7 @@ std::optional<core::EngineError> DefaultRenderer::create(
         .height = kShadowResolution,
         .debugName = "shadow-map",
     });
-    if (!shadowMap_.valid())
-    {
+    if (!shadowMap_.valid()) {
         destroy(device);
         return core::makeError(LUAUG_TR("render.err.target_create_failed"));
     }
@@ -381,21 +373,17 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
     shaderCount_ = 0;
 
     for (rhi::PipelineHandle* pipeline :
-        {&shadowPipeline_, &pbrPipeline_, &pbrBlendPipeline_, &skyPipeline_, &tonemapPipeline_})
-    {
+         {&shadowPipeline_, &pbrPipeline_, &pbrBlendPipeline_, &skyPipeline_, &tonemapPipeline_}) {
         if (pipeline->valid())
             device.destroy(*pipeline);
         *pipeline = {};
     }
-    for (rhi::TextureHandle* texture :
-        {&hdr_, &depth_, &shadowMap_, &whitePixel_, &flatNormalPixel_, &blackPixel_})
-    {
+    for (rhi::TextureHandle* texture : {&hdr_, &depth_, &shadowMap_, &whitePixel_, &flatNormalPixel_, &blackPixel_}) {
         if (texture->valid())
             device.destroy(*texture);
         *texture = {};
     }
-    for (rhi::SamplerHandle* sampler : {&linearSampler_, &shadowSampler_})
-    {
+    for (rhi::SamplerHandle* sampler : {&linearSampler_, &shadowSampler_}) {
         if (sampler->valid())
             device.destroy(*sampler);
         *sampler = {};
@@ -408,7 +396,7 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
 }
 
 void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world, const MeshCache& meshes,
-    const Mat4& viewProjection, Selection selection)
+                                   const Mat4& viewProjection, Selection selection)
 {
     const bool shadowPass = selection == Selection::Shadow;
     // The draws arrive sorted (Decision 7), so this walks them in order and
@@ -416,8 +404,7 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
     // be the backend doing work bgfx would have to repeat.
     u32 boundMaterial = 0xFFFFFFFFu;
 
-    for (const DrawItem& draw : world.draws)
-    {
+    for (const DrawItem& draw : world.draws) {
         // The shadow pass takes everything; the forward passes take only what
         // the camera can see. A caster behind the camera still casts into the
         // frame -- including a half-transparent one, which still occludes. The
@@ -437,27 +424,25 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
         if (section.indexCount == 0)
             continue;
 
-        if (shadowPass)
-        {
+        if (shadowPass) {
             const GpuShadowUniforms uniforms{viewProjection, draw.transform};
             cmd.bindUniforms(rhi::ShaderStage::Vertex, 0, asBytes(&uniforms, sizeof(uniforms)));
         }
-        else
-        {
+        else {
             GpuObjectUniforms uniforms{viewProjection, draw.transform, normalMatrixOf(draw.transform)};
             uniforms.instanceAlphaUnused[0] = draw.alpha;
             cmd.bindUniforms(rhi::ShaderStage::Vertex, 0, asBytes(&uniforms, sizeof(uniforms)));
 
-            if (draw.material != boundMaterial && draw.material < world.materials.size())
-            {
+            if (draw.material != boundMaterial && draw.material < world.materials.size()) {
                 const RenderMaterial& material = world.materials[draw.material];
                 cmd.bindUniforms(rhi::ShaderStage::Fragment, 1, asBytes(&material.uniforms, sizeof(material.uniforms)));
 
                 // Every slot is bound every time, with the shadow map last.
                 // A slot left over from the previous material is the classic
                 // way one mesh ends up wearing another's texture.
-                const auto orDefault = [](rhi::TextureHandle handle, rhi::TextureHandle fallback)
-                { return handle.valid() ? handle : fallback; };
+                const auto orDefault = [](rhi::TextureHandle handle, rhi::TextureHandle fallback) {
+                    return handle.valid() ? handle : fallback;
+                };
                 const std::array<rhi::TextureBinding, 5> textures{
                     rhi::TextureBinding{orDefault(material.baseColor, whitePixel_), linearSampler_},
                     rhi::TextureBinding{orDefault(material.normal, flatNormalPixel_), linearSampler_},
@@ -478,15 +463,14 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
 }
 
 void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const RenderTarget& target,
-    const RenderWorld& world, const MeshCache& meshes)
+                             const RenderWorld& world, const MeshCache& meshes)
 {
     if (!valid_ || !target.color.valid() || target.width == 0 || target.height == 0)
         return;
     if (ensureTargets(device, target.width, target.height).has_value())
         return;
 
-    if (!defaultsUploaded_)
-    {
+    if (!defaultsUploaded_) {
         // White multiplies to itself, (0.5, 0.5, 1) is the tangent-space normal
         // pointing straight out, and black adds nothing -- so a material with no
         // map gets a sample that changes nothing rather than an unbound read.
@@ -513,7 +497,8 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     });
     cmd.setPipeline(shadowPipeline_);
     cmd.setViewport({.width = static_cast<f32>(kShadowResolution), .height = static_cast<f32>(kShadowResolution)});
-    cmd.setScissor({.width = static_cast<core::i32>(kShadowResolution), .height = static_cast<core::i32>(kShadowResolution)});
+    cmd.setScissor(
+        {.width = static_cast<core::i32>(kShadowResolution), .height = static_cast<core::i32>(kShadowResolution)});
     if (world.camera.valid)
         drawGeometry(cmd, world, meshes, sunMatrix, Selection::Shadow);
     cmd.endRenderPass();
@@ -536,8 +521,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     cmd.setViewport({.width = static_cast<f32>(target.width), .height = static_cast<f32>(target.height)});
     cmd.setScissor({.width = static_cast<core::i32>(target.width), .height = static_cast<core::i32>(target.height)});
 
-    if (world.camera.valid)
-    {
+    if (world.camera.valid) {
         GpuSkyUniforms sky;
         // The sky shader turns a screen position back into a world direction,
         // so it needs the inverse. Computed once per frame rather than per
@@ -571,14 +555,13 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         // zero when fog is off -- which makes the fog factor zero without the
         // shader needing to know that `end <= start` means anything.
         frame.fogRange[2] = world.environment.fogEnd > world.environment.fogStart
-            ? 1.0f / (world.environment.fogEnd - world.environment.fogStart)
-            : 0.0f;
+                                ? 1.0f / (world.environment.fogEnd - world.environment.fogStart)
+                                : 0.0f;
         frame.sunViewProjection = sunMatrix;
 
         const auto lightCount = static_cast<u32>(std::min<core::usize>(world.lights.size(), kMaxForwardLights));
         frame.lightCountUnused[0] = static_cast<f32>(lightCount);
-        for (u32 index = 0; index < lightCount; ++index)
-        {
+        for (u32 index = 0; index < lightCount; ++index) {
             const RenderLight& light = world.lights[index];
             GpuLight& gpu = frame.lights[index];
             gpu.positionRange[0] = light.position.x;

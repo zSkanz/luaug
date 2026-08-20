@@ -1,9 +1,9 @@
-#include <doctest/doctest.h>
+#include "luaug/script/services.h"
 
+#include <doctest/doctest.h>
 #include <ostream>
 
 #include "script_fixture.h"
-#include "luaug/script/services.h"
 
 using luaug::script::testing::Fixture;
 
@@ -149,8 +149,8 @@ TEST_CASE("FixedTimestep is the grid every timing guarantee rests on")
     )") == "");
 
     // Read-only until the physics module ships.
-    CHECK(fixture.raises(R"(game:GetService("PhysicsService").FixedTimestep = 1 / 30)",
-                         "scene.err.read_only_property"));
+    CHECK(
+        fixture.raises(R"(game:GetService("PhysicsService").FixedTimestep = 1 / 30)", "scene.err.read_only_property"));
 }
 
 // --- TagService --------------------------------------------------------------

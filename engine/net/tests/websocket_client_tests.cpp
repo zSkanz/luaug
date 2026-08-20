@@ -2,19 +2,18 @@
 // chooses. What is proved here is what no published vector can be: that the
 // socket, the handshake and the reassembly loop agree with each other.
 
-#include <doctest/doctest.h>
+#include "luaug/core/i18n.h"
+#include "luaug/net/websocket.h"
+#include "luaug/net/websocket_protocol.h"
 
 #include <chrono>
+#include <doctest/doctest.h>
 #include <functional>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "loopback_server.h"
-
-#include "luaug/core/i18n.h"
-#include "luaug/net/websocket.h"
-#include "luaug/net/websocket_protocol.h"
 
 using luaug::core::u16;
 using luaug::core::u8;
@@ -25,8 +24,7 @@ using luaug::net::testing::Connection;
 using luaug::net::testing::LoopbackServer;
 namespace ws = luaug::net::ws;
 
-namespace
-{
+namespace {
 
 // M2 Finding 11: an error is identified by the `[key]` prefix, and the prefix
 // is the catalog's name for the key. Without the catalog every raise reads
@@ -50,12 +48,11 @@ std::string completeHandshake(Connection& connection)
     const usize end = request.find("\r\n", at);
     const std::string key = request.substr(at + marker.size(), end - at - marker.size());
 
-    connection.write(
-        "HTTP/1.1 101 Switching Protocols\r\n"
-        "Upgrade: websocket\r\n"
-        "Connection: Upgrade\r\n"
-        "Sec-WebSocket-Accept: "
-        + ws::computeAccept(key) + "\r\n\r\n");
+    connection.write("HTTP/1.1 101 Switching Protocols\r\n"
+                     "Upgrade: websocket\r\n"
+                     "Connection: Upgrade\r\n"
+                     "Sec-WebSocket-Accept: " +
+                     ws::computeAccept(key) + "\r\n\r\n");
 
     return request;
 }
@@ -109,16 +106,13 @@ TEST_CASE("a wrong accept value fails the connection instead of proceeding")
     seedRealCatalog();
 
     LoopbackServer server;
-    server.serve(
-        [](Connection& connection)
-        {
-            connection.readUntil("\r\n\r\n");
-            connection.write(
-                "HTTP/1.1 101 Switching Protocols\r\n"
-                "Upgrade: websocket\r\n"
-                "Connection: Upgrade\r\n"
-                "Sec-WebSocket-Accept: AAAAAAAAAAAAAAAAAAAAAAAAAAA=\r\n\r\n");
-        });
+    server.serve([](Connection& connection) {
+        connection.readUntil("\r\n\r\n");
+        connection.write("HTTP/1.1 101 Switching Protocols\r\n"
+                         "Upgrade: websocket\r\n"
+                         "Connection: Upgrade\r\n"
+                         "Sec-WebSocket-Accept: AAAAAAAAAAAAAAAAAAAAAAAAAAA=\r\n\r\n");
+    });
 
     WebSocketClient client;
     const auto error = client.connect(optionsFor(server));
@@ -135,26 +129,24 @@ TEST_CASE("what the client sends arrives as a masked text frame")
     std::string decoded;
     bool wasMasked = false;
 
-    server.serve(
-        [&decoded, &wasMasked](Connection& connection)
-        {
-            completeHandshake(connection);
+    server.serve([&decoded, &wasMasked](Connection& connection) {
+        completeHandshake(connection);
 
-            // Two bytes of header, then the mask and the payload. The length is
-            // read from the header rather than assumed, which is the only way
-            // this reads a frame the client chose the size of.
-            const std::vector<u8> header = connection.read(2);
-            const usize length = static_cast<usize>(header[1] & 0x7Fu);
-            wasMasked = (header[1] & 0x80u) != 0u;
+        // Two bytes of header, then the mask and the payload. The length is
+        // read from the header rather than assumed, which is the only way
+        // this reads a frame the client chose the size of.
+        const std::vector<u8> header = connection.read(2);
+        const usize length = static_cast<usize>(header[1] & 0x7Fu);
+        wasMasked = (header[1] & 0x80u) != 0u;
 
-            std::vector<u8> whole = header;
-            const std::vector<u8> rest = connection.read((wasMasked ? 4u : 0u) + length);
-            whole.insert(whole.end(), rest.begin(), rest.end());
+        std::vector<u8> whole = header;
+        const std::vector<u8> rest = connection.read((wasMasked ? 4u : 0u) + length);
+        whole.insert(whole.end(), rest.begin(), rest.end());
 
-            const ws::DecodeResult result = ws::decodeFrame(whole, 1u << 20);
-            REQUIRE(result.status == ws::DecodeStatus::Ok);
-            decoded.assign(result.frame.payload.begin(), result.frame.payload.end());
-        });
+        const ws::DecodeResult result = ws::decodeFrame(whole, 1u << 20);
+        REQUIRE(result.status == ws::DecodeStatus::Ok);
+        decoded.assign(result.frame.payload.begin(), result.frame.payload.end());
+    });
 
     WebSocketClient client;
     REQUIRE_FALSE(client.connect(optionsFor(server)).has_value());
@@ -169,15 +161,13 @@ TEST_CASE("what the client sends arrives as a masked text frame")
 TEST_CASE("a fragmented message is delivered whole, once")
 {
     LoopbackServer server;
-    server.serve(
-        [](Connection& connection)
-        {
-            completeHandshake(connection);
-            connection.write(serverFrame(ws::Opcode::Text, false, R"({"type":)"));
-            connection.write(serverFrame(ws::Opcode::Continuation, false, R"("reload",)"));
-            connection.write(serverFrame(ws::Opcode::Continuation, true, R"("id":7})"));
-            connection.readUntil("\x88"); // wait for the client's Close
-        });
+    server.serve([](Connection& connection) {
+        completeHandshake(connection);
+        connection.write(serverFrame(ws::Opcode::Text, false, R"({"type":)"));
+        connection.write(serverFrame(ws::Opcode::Continuation, false, R"("reload",)"));
+        connection.write(serverFrame(ws::Opcode::Continuation, true, R"("id":7})"));
+        connection.readUntil("\x88"); // wait for the client's Close
+    });
 
     WebSocketClient client;
     REQUIRE_FALSE(client.connect(optionsFor(server)).has_value());
@@ -198,19 +188,17 @@ TEST_CASE("a ping is answered without the caller ever seeing it")
     LoopbackServer server;
     bool sawPong = false;
 
-    server.serve(
-        [&sawPong](Connection& connection)
-        {
-            completeHandshake(connection);
-            connection.write(serverFrame(ws::Opcode::Ping, true, "beat"));
+    server.serve([&sawPong](Connection& connection) {
+        completeHandshake(connection);
+        connection.write(serverFrame(ws::Opcode::Ping, true, "beat"));
 
-            const std::vector<u8> header = connection.read(2);
-            sawPong = header[0] == 0x8Au && (header[1] & 0x80u) != 0u;
-            connection.read(4u + static_cast<usize>(header[1] & 0x7Fu));
+        const std::vector<u8> header = connection.read(2);
+        sawPong = header[0] == 0x8Au && (header[1] & 0x80u) != 0u;
+        connection.read(4u + static_cast<usize>(header[1] & 0x7Fu));
 
-            connection.write(serverFrame(ws::Opcode::Text, true, "after"));
-            connection.readUntil("\x88");
-        });
+        connection.write(serverFrame(ws::Opcode::Text, true, "after"));
+        connection.readUntil("\x88");
+    });
 
     WebSocketClient client;
     REQUIRE_FALSE(client.connect(optionsFor(server)).has_value());
@@ -233,14 +221,12 @@ TEST_CASE("a close from the server ends the connection with the closed key")
     seedRealCatalog();
 
     LoopbackServer server;
-    server.serve(
-        [](Connection& connection)
-        {
-            completeHandshake(connection);
-            connection.write(serverFrame(ws::Opcode::Close, true, ""));
-            // Do not read the client's reply; the point is that the client
-            // stops regardless of what happens next.
-        });
+    server.serve([](Connection& connection) {
+        completeHandshake(connection);
+        connection.write(serverFrame(ws::Opcode::Close, true, ""));
+        // Do not read the client's reply; the point is that the client
+        // stops regardless of what happens next.
+    });
 
     WebSocketClient client;
     REQUIRE_FALSE(client.connect(optionsFor(server)).has_value());
@@ -260,15 +246,12 @@ TEST_CASE("the ways a server can break the protocol all close the connection")
 {
     seedRealCatalog();
 
-    const auto rejects = [](const std::function<void(Connection&)>& misbehave)
-    {
+    const auto rejects = [](const std::function<void(Connection&)>& misbehave) {
         LoopbackServer server;
-        server.serve(
-            [&misbehave](Connection& connection)
-            {
-                completeHandshake(connection);
-                misbehave(connection);
-            });
+        server.serve([&misbehave](Connection& connection) {
+            completeHandshake(connection);
+            misbehave(connection);
+        });
 
         WebSocketClient client;
         REQUIRE_FALSE(client.connect(optionsFor(server)).has_value());
@@ -287,13 +270,11 @@ TEST_CASE("the ways a server can break the protocol all close the connection")
 
     SUBCASE("it masks a frame, which section 5.1 forbids a server to do")
     {
-        rejects(
-            [](Connection& connection)
-            {
-                std::vector<u8> masked;
-                ws::encodeFrame(masked, ws::Opcode::Text, true, std::span<const u8>{}, 0x11223344u);
-                connection.write(masked);
-            });
+        rejects([](Connection& connection) {
+            std::vector<u8> masked;
+            ws::encodeFrame(masked, ws::Opcode::Text, true, std::span<const u8>{}, 0x11223344u);
+            connection.write(masked);
+        });
     }
     SUBCASE("it continues a message that was never started")
     {
@@ -301,12 +282,10 @@ TEST_CASE("the ways a server can break the protocol all close the connection")
     }
     SUBCASE("it starts a message before finishing the last one")
     {
-        rejects(
-            [](Connection& connection)
-            {
-                connection.write(serverFrame(ws::Opcode::Text, false, "a"));
-                connection.write(serverFrame(ws::Opcode::Text, true, "b"));
-            });
+        rejects([](Connection& connection) {
+            connection.write(serverFrame(ws::Opcode::Text, false, "a"));
+            connection.write(serverFrame(ws::Opcode::Text, true, "b"));
+        });
     }
     SUBCASE("it sends binary on a text-only channel")
     {
@@ -314,31 +293,27 @@ TEST_CASE("the ways a server can break the protocol all close the connection")
     }
     SUBCASE("it sets a reserved bit")
     {
-        rejects(
-            [](Connection& connection)
-            {
-                const std::vector<u8> frame{0xC1u, 0x00u};
-                connection.write(frame);
-            });
+        rejects([](Connection& connection) {
+            const std::vector<u8> frame{0xC1u, 0x00u};
+            connection.write(frame);
+        });
     }
 }
 
 TEST_CASE("a timeout is not a failure, and it does not lose the half-arrived message")
 {
     LoopbackServer server;
-    server.serve(
-        [](Connection& connection)
-        {
-            completeHandshake(connection);
-            // Half a frame, then a pause the client must sit through, then the
-            // rest. A reader that discarded its buffer on timeout would lose it.
-            const std::vector<u8> head{0x81u, 0x05u, 0x48u, 0x65u};
-            connection.write(head);
-            std::this_thread::sleep_for(std::chrono::milliseconds(250));
-            const std::vector<u8> tail{0x6cu, 0x6cu, 0x6fu};
-            connection.write(tail);
-            connection.readUntil("\x88");
-        });
+    server.serve([](Connection& connection) {
+        completeHandshake(connection);
+        // Half a frame, then a pause the client must sit through, then the
+        // rest. A reader that discarded its buffer on timeout would lose it.
+        const std::vector<u8> head{0x81u, 0x05u, 0x48u, 0x65u};
+        connection.write(head);
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        const std::vector<u8> tail{0x6cu, 0x6cu, 0x6fu};
+        connection.write(tail);
+        connection.readUntil("\x88");
+    });
 
     WebSocketClient client;
     REQUIRE_FALSE(client.connect(optionsFor(server)).has_value());

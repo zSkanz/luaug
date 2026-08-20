@@ -1,17 +1,15 @@
 #include "luaug/net/websocket.h"
 
+#include "luaug/net/tcp.h"
+#include "luaug/net/websocket_protocol.h"
+
 #include <array>
 #include <chrono>
 #include <random>
 #include <vector>
 
-#include "luaug/net/tcp.h"
-#include "luaug/net/websocket_protocol.h"
-
-namespace luaug::net
-{
-namespace
-{
+namespace luaug::net {
+namespace {
 
 using core::I18nArg;
 using core::u64;
@@ -54,10 +52,8 @@ struct WebSocketClient::Impl
     std::random_device random;
 };
 
-WebSocketClient::WebSocketClient()
-    : m_impl(std::make_unique<Impl>())
-{
-}
+WebSocketClient::WebSocketClient() : m_impl(std::make_unique<Impl>())
+{}
 
 WebSocketClient::~WebSocketClient()
 {
@@ -78,8 +74,7 @@ std::optional<core::EngineError> WebSocketClient::connect(const WebSocketClientO
         return error;
 
     std::array<u8, 16> nonce{};
-    for (usize i = 0; i < nonce.size(); i += 4)
-    {
+    for (usize i = 0; i < nonce.size(); i += 4) {
         const u32 word = randomWord(m_impl->random);
         nonce[i] = static_cast<u8>((word >> 24) & 0xFFu);
         nonce[i + 1] = static_cast<u8>((word >> 16) & 0xFFu);
@@ -87,13 +82,10 @@ std::optional<core::EngineError> WebSocketClient::connect(const WebSocketClientO
         nonce[i + 3] = static_cast<u8>(word & 0xFFu);
     }
 
-    const ws::ClientHandshake handshake
-        = ws::buildClientHandshake(options.host, options.port, options.path, nonce);
+    const ws::ClientHandshake handshake = ws::buildClientHandshake(options.host, options.port, options.path, nonce);
 
-    const std::span<const u8> request(
-        reinterpret_cast<const u8*>(handshake.request.data()), handshake.request.size());
-    if (auto error = m_impl->stream.send(request))
-    {
+    const std::span<const u8> request(reinterpret_cast<const u8*>(handshake.request.data()), handshake.request.size());
+    if (auto error = m_impl->stream.send(request)) {
         m_impl->stream.close();
         return error;
     }
@@ -104,12 +96,9 @@ std::optional<core::EngineError> WebSocketClient::connect(const WebSocketClientO
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(options.connectTimeoutMs);
     std::string response;
 
-    for (;;)
-    {
-        if (const auto end = ws::findHeaderEnd(response))
-        {
-            if (auto error = ws::validateServerHandshake(response, handshake.expectedAccept))
-            {
+    for (;;) {
+        if (const auto end = ws::findHeaderEnd(response)) {
+            if (auto error = ws::validateServerHandshake(response, handshake.expectedAccept)) {
                 m_impl->stream.close();
                 return error;
             }
@@ -120,16 +109,14 @@ std::optional<core::EngineError> WebSocketClient::connect(const WebSocketClientO
         }
 
         const u32 left = remainingMs(deadline);
-        if (left == 0)
-        {
+        if (left == 0) {
             m_impl->stream.close();
             return core::makeError(LUAUG_TR("net.err.handshake_timeout"));
         }
 
         std::array<u8, kReadChunk> chunk{};
         usize got = 0;
-        if (auto error = m_impl->stream.receive(chunk, got, left))
-        {
+        if (auto error = m_impl->stream.receive(chunk, got, left)) {
             m_impl->stream.close();
             return error;
         }
@@ -137,8 +124,7 @@ std::optional<core::EngineError> WebSocketClient::connect(const WebSocketClientO
 
         // A response that never terminates is a peer feeding us a header
         // forever. The ceiling on a message is the ceiling on this too.
-        if (response.size() > m_impl->maxMessageBytes)
-        {
+        if (response.size() > m_impl->maxMessageBytes) {
             m_impl->stream.close();
             return core::makeError(LUAUG_TR("net.err.handshake_headers_unbounded"));
         }
@@ -152,12 +138,9 @@ std::optional<core::EngineError> WebSocketClient::sendText(std::string_view text
 
     std::vector<u8> wire;
     wire.reserve(text.size() + 14);
-    ws::encodeFrame(
-        wire,
-        ws::Opcode::Text,
-        true,
-        std::span<const u8>(reinterpret_cast<const u8*>(text.data()), text.size()),
-        randomWord(m_impl->random));
+    ws::encodeFrame(wire, ws::Opcode::Text, true,
+                    std::span<const u8>(reinterpret_cast<const u8*>(text.data()), text.size()),
+                    randomWord(m_impl->random));
 
     return m_impl->stream.send(wire);
 }
@@ -172,34 +155,28 @@ std::optional<core::EngineError> WebSocketClient::receiveText(std::string& out, 
 
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
 
-    for (;;)
-    {
+    for (;;) {
         const ws::DecodeResult decoded = ws::decodeFrame(m_impl->inbound, m_impl->maxMessageBytes);
 
-        if (decoded.status == ws::DecodeStatus::Malformed)
-        {
+        if (decoded.status == ws::DecodeStatus::Malformed) {
             close();
             return core::makeError(LUAUG_TR("net.err.frame_malformed"));
         }
 
-        if (decoded.status == ws::DecodeStatus::Ok)
-        {
-            m_impl->inbound.erase(
-                m_impl->inbound.begin(), m_impl->inbound.begin() + static_cast<std::ptrdiff_t>(decoded.consumed));
+        if (decoded.status == ws::DecodeStatus::Ok) {
+            m_impl->inbound.erase(m_impl->inbound.begin(),
+                                  m_impl->inbound.begin() + static_cast<std::ptrdiff_t>(decoded.consumed));
 
             // §5.1: a server must not mask. Unmasking it anyway would hide a
             // peer that is not speaking this protocol.
-            if (decoded.frame.masked)
-            {
+            if (decoded.frame.masked) {
                 close();
                 return core::makeError(LUAUG_TR("net.err.server_masked"));
             }
 
             const ws::Frame& frame = decoded.frame;
-            switch (frame.opcode)
-            {
-            case ws::Opcode::Ping:
-            {
+            switch (frame.opcode) {
+            case ws::Opcode::Ping: {
                 std::vector<u8> pong;
                 ws::encodeFrame(pong, ws::Opcode::Pong, true, frame.payload, randomWord(m_impl->random));
                 if (auto error = m_impl->stream.send(pong))
@@ -208,8 +185,7 @@ std::optional<core::EngineError> WebSocketClient::receiveText(std::string& out, 
             }
             case ws::Opcode::Pong:
                 continue;
-            case ws::Opcode::Close:
-            {
+            case ws::Opcode::Close: {
                 std::vector<u8> reply;
                 ws::encodeFrame(reply, ws::Opcode::Close, true, {}, randomWord(m_impl->random));
                 (void)m_impl->stream.send(reply);
@@ -217,10 +193,8 @@ std::optional<core::EngineError> WebSocketClient::receiveText(std::string& out, 
                 return core::makeError(LUAUG_TR("net.err.closed"));
             }
             case ws::Opcode::Binary:
-            case ws::Opcode::Text:
-            {
-                if (m_impl->assembling)
-                {
+            case ws::Opcode::Text: {
+                if (m_impl->assembling) {
                     close();
                     return core::makeError(LUAUG_TR("net.err.message_interleaved"));
                 }
@@ -229,15 +203,12 @@ std::optional<core::EngineError> WebSocketClient::receiveText(std::string& out, 
                 m_impl->assembling = true;
                 break;
             }
-            case ws::Opcode::Continuation:
-            {
-                if (!m_impl->assembling)
-                {
+            case ws::Opcode::Continuation: {
+                if (!m_impl->assembling) {
                     close();
                     return core::makeError(LUAUG_TR("net.err.continuation_orphan"));
                 }
-                if (m_impl->pending.size() + frame.payload.size() > m_impl->maxMessageBytes)
-                {
+                if (m_impl->pending.size() + frame.payload.size() > m_impl->maxMessageBytes) {
                     close();
                     return core::makeError(LUAUG_TR("net.err.message_too_large"));
                 }
@@ -250,8 +221,7 @@ std::optional<core::EngineError> WebSocketClient::receiveText(std::string& out, 
                 continue;
 
             m_impl->assembling = false;
-            if (!m_impl->pendingIsText)
-            {
+            if (!m_impl->pendingIsText) {
                 m_impl->pending.clear();
                 // The control channel is JSON text (ADR 0035). A binary message
                 // means the peer is talking about something else, and guessing

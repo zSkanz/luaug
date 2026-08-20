@@ -16,15 +16,14 @@
 // records sibling order in its own links.
 #pragma once
 
+#include "luaug/core/id.h"
+#include "luaug/core/types.h"
+
 #include <optional>
 #include <utility>
 #include <vector>
 
-#include "luaug/core/id.h"
-#include "luaug/core/types.h"
-
-namespace luaug::core
-{
+namespace luaug::core {
 
 // `Handle` is the id type this map hands out: any aggregate with a `u32 index`,
 // a `u32 generation` and a `valid()`. It is a parameter rather than always
@@ -40,8 +39,7 @@ public:
 
     [[nodiscard]] Handle insert(T value)
     {
-        if (m_freeHead != FreeListEnd)
-        {
+        if (m_freeHead != FreeListEnd) {
             const u32 index = m_freeHead;
             // Move in BEFORE unlinking. If `T`'s move throws, the slot is still
             // on the free list and nothing has leaked; unlinking first would
@@ -91,10 +89,8 @@ public:
     {
         // Generations are deliberately NOT reset. Handles taken before a clear
         // must not spring back to life when the slots refill.
-        for (usize index = 0; index < m_slots.size(); ++index)
-        {
-            if (m_slots[index].has_value())
-            {
+        for (usize index = 0; index < m_slots.size(); ++index) {
+            if (m_slots[index].has_value()) {
                 const u32 slot = static_cast<u32>(index);
                 m_slots[index].reset();
                 bumpGeneration(slot);
@@ -110,8 +106,7 @@ public:
     template <class Fn>
     void forEach(Fn&& fn)
     {
-        for (usize index = 0; index < m_slots.size(); ++index)
-        {
+        for (usize index = 0; index < m_slots.size(); ++index) {
             if (m_slots[index].has_value())
                 fn(Handle{static_cast<u32>(index), m_generations[index]}, *m_slots[index]);
         }
@@ -120,8 +115,7 @@ public:
     template <class Fn>
     void forEach(Fn&& fn) const
     {
-        for (usize index = 0; index < m_slots.size(); ++index)
-        {
+        for (usize index = 0; index < m_slots.size(); ++index) {
             if (m_slots[index].has_value())
                 fn(Handle{static_cast<u32>(index), m_generations[index]}, *m_slots[index]);
         }

@@ -1,17 +1,15 @@
-#include <doctest/doctest.h>
-
-#include <array>
-#include <cstddef>
-#include <string>
-#include <vector>
-
 #include "luaug/platform/platform.h"
 #include "luaug/rhi/backends.h"
 
+#include <array>
+#include <cstddef>
+#include <doctest/doctest.h>
+#include <string>
+#include <vector>
+
 using namespace luaug::rhi;
 
-namespace
-{
+namespace {
 
 // A GPU device is not guaranteed on every machine this runs on -- a Linux CI
 // runner has no Vulkan driver unless lavapipe is installed, and the roadmap
@@ -108,8 +106,7 @@ TEST_CASE("first light: a cleared target reads back as the colour it was cleared
     // Unorm8 rounding of 0.5 lands on 127 or 128 depending on the backend's
     // convention, so the green channel is checked as a range rather than a
     // value. Red, blue and alpha are exact.
-    for (std::size_t pixel = 0; pixel < static_cast<std::size_t>(kSize) * kSize; ++pixel)
-    {
+    for (std::size_t pixel = 0; pixel < static_cast<std::size_t>(kSize) * kSize; ++pixel) {
         const std::size_t base = pixel * 4;
         REQUIRE(channel(base + 0) == 255);
         REQUIRE(channel(base + 1) >= 127);
@@ -129,8 +126,8 @@ TEST_CASE("resources round-trip through the device")
 
     IDevice& device = *gpu.device;
 
-    const BufferHandle vertices
-        = device.createBuffer({.usage = BufferUsage::Vertex, .sizeBytes = 64, .debugName = "verts"});
+    const BufferHandle vertices =
+        device.createBuffer({.usage = BufferUsage::Vertex, .sizeBytes = 64, .debugName = "verts"});
     const SamplerHandle sampler = device.createSampler({.debugName = "linear"});
 
     CHECK(vertices.valid());

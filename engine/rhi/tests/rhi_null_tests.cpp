@@ -1,9 +1,8 @@
-#include <doctest/doctest.h>
+#include "luaug/rhi/backends.h"
 
 #include <array>
 #include <cstddef>
-
-#include "luaug/rhi/backends.h"
+#include <doctest/doctest.h>
 
 using namespace luaug::rhi;
 

@@ -1,16 +1,14 @@
+#include "luaug/render/shadow.h"
+
+#include <cmath>
 #include <doctest/doctest.h>
 
 #include "luaug_test_nearly.h"
 
-#include <cmath>
-
-#include "luaug/render/shadow.h"
-
 using namespace luaug;
 using luaug::testing::nearly;
 
-namespace
-{
+namespace {
 
 // Where a fixed WORLD point lands on the shadow map, in texels, for a camera at
 // `origin`. This is the quantity the crawl is about: the snapshot is
@@ -51,8 +49,7 @@ TEST_CASE("a world point keeps its shadow texel when the camera moves under one"
     // the M4 example's orbit speed the camera moves 0.42 of a texel per frame,
     // so no step here ever crosses a boundary on its own.
     const core::Vec3 reference = shadowTexelOf(kMorningSun, core::DVec3{}, world);
-    for (int step = 1; step <= 8; ++step)
-    {
+    for (int step = 1; step <= 8; ++step) {
         const auto offset = static_cast<core::f64>(step) * 0.4 * static_cast<core::f64>(render::kShadowTexel);
         const core::Vec3 moved = shadowTexelOf(kMorningSun, core::DVec3{offset, 0.0, offset * 0.5}, world);
 
@@ -76,11 +73,12 @@ TEST_CASE("without the snap the same movement lands between texels")
     const auto resolution = static_cast<core::f32>(render::kShadowResolution);
 
     const auto offset = static_cast<core::f32>(0.4 * static_cast<core::f64>(render::kShadowTexel));
-    const core::Vec3 a = core::transformPoint(matrix,
-        core::Vec3{static_cast<core::f32>(world.x), static_cast<core::f32>(world.y), static_cast<core::f32>(world.z)});
-    const core::Vec3 b = core::transformPoint(matrix,
-        core::Vec3{static_cast<core::f32>(world.x) - offset, static_cast<core::f32>(world.y),
-            static_cast<core::f32>(world.z) - offset * 0.5f});
+    const core::Vec3 a =
+        core::transformPoint(matrix, core::Vec3{static_cast<core::f32>(world.x), static_cast<core::f32>(world.y),
+                                                static_cast<core::f32>(world.z)});
+    const core::Vec3 b = core::transformPoint(matrix, core::Vec3{static_cast<core::f32>(world.x) - offset,
+                                                                 static_cast<core::f32>(world.y),
+                                                                 static_cast<core::f32>(world.z) - offset * 0.5f});
 
     const core::f32 slide = ((b.x - a.x) * 0.5f) * resolution;
     CHECK(distanceToNearestInteger(slide) > 0.05f);
@@ -92,8 +90,7 @@ TEST_CASE("snapping never moves the grid by more than half a texel")
     // half a texel would mean the rounding went the wrong way -- which would
     // shift the whole map rather than align it.
     const core::Mat4 unsnapped = render::sunViewProjection(kMorningSun, core::DVec3{});
-    for (int step = 0; step < 16; ++step)
-    {
+    for (int step = 0; step < 16; ++step) {
         const auto offset = static_cast<core::f64>(step) * 7.31;
         const core::Mat4 snapped = render::sunViewProjection(kMorningSun, core::DVec3{offset, 0.0, -offset});
         // Column 3 of the projection*view product carries the translation; the
