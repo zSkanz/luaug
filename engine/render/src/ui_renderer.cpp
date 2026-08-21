@@ -34,7 +34,7 @@ std::optional<core::EngineError> UiRenderer::create(rhi::IDevice& device, const 
     const std::array<rhi::VertexBufferLayout, 1> buffers{
         rhi::VertexBufferLayout{.slot = 0, .strideBytes = kVertexStride}};
 
-    const std::array<rhi::VertexAttribute, 2> attributes{
+    const std::array<rhi::VertexAttribute, 4> attributes{
         rhi::VertexAttribute{
             .location = 0,
             .bufferSlot = 0,
@@ -46,6 +46,21 @@ std::optional<core::EngineError> UiRenderer::create(rhi::IDevice& device, const 
             .bufferSlot = 0,
             .format = rhi::VertexFormat::Ubyte4Unorm,
             .offsetBytes = offsetof(UiVertex, r),
+        },
+        // The rounded-corner frame (D030): the vertex's offset from the quad's
+        // centre and the quad's half-extent, packed as one `Float4` because two
+        // pairs that always travel together are one attribute.
+        rhi::VertexAttribute{
+            .location = 2,
+            .bufferSlot = 0,
+            .format = rhi::VertexFormat::Float4,
+            .offsetBytes = offsetof(UiVertex, localX),
+        },
+        rhi::VertexAttribute{
+            .location = 3,
+            .bufferSlot = 0,
+            .format = rhi::VertexFormat::Float1,
+            .offsetBytes = offsetof(UiVertex, radius),
         },
     };
 

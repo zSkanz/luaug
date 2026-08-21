@@ -3,8 +3,8 @@
 {"op":"createShader","shader":1,"stage":"Vertex","bytes":984,"samplers":0,"uniformBuffers":1,"name":"debug_line"}
 {"op":"createShader","shader":2,"stage":"Fragment","bytes":636,"samplers":0,"uniformBuffers":0,"name":"debug_line"}
 {"op":"createGraphicsPipeline","pipeline":1,"vertexShader":1,"fragmentShader":2,"primitive":"LineList","fill":"Solid","cull":"None","depthTest":false,"depthWrite":false,"colorTargets":1,"depthFormat":"Undefined","name":"debug-line"}
-{"op":"createShader","shader":3,"stage":"Vertex","bytes":1184,"samplers":0,"uniformBuffers":1,"name":"ui2d"}
-{"op":"createShader","shader":4,"stage":"Fragment","bytes":576,"samplers":0,"uniformBuffers":0,"name":"ui2d"}
+{"op":"createShader","shader":3,"stage":"Vertex","bytes":1512,"samplers":0,"uniformBuffers":1,"name":"ui2d"}
+{"op":"createShader","shader":4,"stage":"Fragment","bytes":1428,"samplers":0,"uniformBuffers":0,"name":"ui2d"}
 {"op":"createGraphicsPipeline","pipeline":2,"vertexShader":3,"fragmentShader":4,"primitive":"TriangleList","fill":"Solid","cull":"None","depthTest":false,"depthWrite":false,"colorTargets":1,"depthFormat":"Undefined","name":"ui2d"}
 {"op":"createBuffer","buffer":1,"usage":1,"size":196608,"name":"mesh-ring-vertices"}
 {"op":"createBuffer","buffer":2,"usage":2,"size":32768,"name":"mesh-ring-indices"}

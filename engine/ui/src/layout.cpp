@@ -252,6 +252,7 @@ void place(scene::World& world, Pass& pass, core::InstanceId id, Vec2 parentOrig
     const bool horizontal = mods.list->fillDirection == FillHorizontal;
     const f32 gap = resolve(mods.list->padding, horizontal ? contentSize.x : contentSize.y);
     const f32 lineLimit = horizontal ? contentSize.x : contentSize.y;
+    const f32 crossLimit = horizontal ? contentSize.y : contentSize.x;
 
     // Measured first, so the cross-axis alignment has a total to work from. A
     // stack that aligned as it went could not centre itself.
@@ -284,6 +285,21 @@ void place(scene::World& world, Pass& pass, core::InstanceId id, Vec2 parentOrig
             cursor = lineLimit - lineMain;
 
         const i32 crossAlign = horizontal ? mods.list->verticalAlignment : mods.list->horizontalAlignment;
+
+        // **What a cross-axis alignment aligns AGAINST** (D029). Without wrap it
+        // is the container's own extent, exactly as the main axis uses
+        // `lineLimit` above -- and using the widest child instead is what made a
+        // centred column of equal-width children sit on the left edge:
+        // `lineCross - cross` is zero for every one of them, so "centred" placed
+        // them all at `content.min`.
+        //
+        // **With wrap it is the line's own band, and that is a decision rather
+        // than a fallout.** Wrapped lines stack along the cross axis, each
+        // occupying `lineCross` of it; centring one against the whole container
+        // would put every line on top of every other. Within its band is the
+        // only arrangement that is still a stack.
+        const f32 crossExtent = mods.list->wraps ? lineCross : crossLimit;
+
         for (usize index = lineStart; index < lineEnd; ++index) {
             const Vec2 childSize = sizes[index];
             const f32 main = horizontal ? childSize.x : childSize.y;
@@ -291,9 +307,9 @@ void place(scene::World& world, Pass& pass, core::InstanceId id, Vec2 parentOrig
 
             f32 crossOffset = lineOffset;
             if (crossAlign == AlignCenter)
-                crossOffset += (lineCross - cross) * 0.5f;
+                crossOffset += (crossExtent - cross) * 0.5f;
             else if (crossAlign == AlignEnd)
-                crossOffset += lineCross - cross;
+                crossOffset += crossExtent - cross;
 
             const Vec2 at = horizontal ? Vec2{content.min.x + cursor, content.min.y + crossOffset}
                                        : Vec2{content.min.x + crossOffset, content.min.y + cursor};

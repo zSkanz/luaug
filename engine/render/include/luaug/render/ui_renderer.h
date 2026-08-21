@@ -34,9 +34,27 @@ struct UiVertex
     core::u8 g = 255;
     core::u8 b = 255;
     core::u8 a = 255;
+    // The rounded-corner three (D030). `UICorner` was declared, stored, read
+    // back and consumed by nothing at all for a whole milestone; these are what
+    // consumes it.
+    //
+    // Per VERTEX rather than per draw, because there is one draw per scissor run
+    // and a run is hundreds of quads with different radii. Twelve more bytes on
+    // a UI vertex is nothing against a second pipeline or a draw per element,
+    // and a radius of zero costs the fragment stage one `max` -- which is why
+    // this is one shader rather than two.
+    //
+    // `localX`/`localY` are the vertex's offset from the quad's centre and
+    // `halfX`/`halfY` its half-extent, so the fragment stage has a signed
+    // distance without needing the quad's screen position.
+    core::f32 localX = 0.0f;
+    core::f32 localY = 0.0f;
+    core::f32 halfX = 0.0f;
+    core::f32 halfY = 0.0f;
+    core::f32 radius = 0.0f;
 };
 
-static_assert(sizeof(UiVertex) == 12, "the ui2d vertex layout is an ABI decision the shader shares");
+static_assert(sizeof(UiVertex) == 32, "the ui2d vertex layout is an ABI decision the shader shares");
 
 // One run of quads sharing a clip rectangle. The draw list is already ordered,
 // so a run is a contiguous span rather than a bucket -- which is what makes

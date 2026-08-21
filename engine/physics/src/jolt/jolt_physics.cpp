@@ -690,18 +690,16 @@ public:
         // Reading a wall clock for it would put a wall clock inside the
         // simulation, which is exactly what R10 forbids.
         if (record->motion == MotionType::Kinematic) {
-            const JPH::RVec3 position = toJoltPosition(transform.position);
-            const JPH::Quat rotation = toJolt(transform.rotation);
-            for (PendingMove& pending : m_kinematicMoves) {
-                if (pending.id == record->id) {
-                    // Two writes in one tick collapse to the last, because that
-                    // is what two property writes in one tick mean.
-                    pending.position = position;
-                    pending.rotation = rotation;
-                    return;
-                }
-            }
-            m_kinematicMoves.push_back(PendingMove{record->id, position, rotation});
+            // Appended, never searched. Two writes to one body in one tick both
+            // land and `step` applies them in order, so the last one wins --
+            // which is what two property writes in one tick mean anyway.
+            //
+            // The first version deduplicated here by scanning the list, and that
+            // was quadratic: `churn10k` moves six thousand anchored parts a tick
+            // and each write walked every pending move before it, which cost
+            // four milliseconds a tick that the benchmark found immediately.
+            m_kinematicMoves.push_back(
+                PendingMove{record->id, toJoltPosition(transform.position), toJolt(transform.rotation)});
             return;
         }
 

@@ -304,6 +304,12 @@ std::optional<core::EngineError> Importer::run()
     if (auto error = readAnimations())
         return error;
 
+    // The host's pass stops here: it wanted the skeleton and the clips, and
+    // decoding an image or optimizing a vertex cache for it would be work for a
+    // caller that has no GPU.
+    if (options_.skeletonOnly)
+        return std::nullopt;
+
     for (const MeshInstance& instance : instances_) {
         const fg::Mesh& mesh = asset_.meshes[instance.meshIndex];
         for (const fg::Primitive& primitive : mesh.primitives) {

@@ -84,6 +84,15 @@ struct DrawQuad
     // `DrawList::scissors`. 0 is "the whole window", which is why that entry is
     // always present.
     u32 scissor = 0;
+    // Corner radius in pixels, from a `UICorner` on the element (D030). Zero is
+    // a square corner and is the overwhelmingly common case; the shader's
+    // rounded-rectangle distance costs nothing at zero, which is why this is a
+    // number on every quad rather than a second pipeline.
+    //
+    // It rounds the DRAWING only. Layout does not see it and neither does the
+    // hit test -- `UICorner`'s own doc says so, and a button whose corner you
+    // could see through but not click through would be worse than a square one.
+    f32 cornerRadius = 0.0f;
 };
 
 struct DrawList

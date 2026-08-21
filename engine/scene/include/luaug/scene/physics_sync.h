@@ -108,6 +108,14 @@ private:
         // The transform this mirror last wrote INTO the component. A component
         // that differs from it now is a script's write.
         core::CFrameD written;
+        // Until which TICK an anchored part stays `Kinematic` (D031). Set when a
+        // script writes its `CFrame`; a part past it goes back to `Static`.
+        //
+        // A tick count and never a duration: R10 forbids a simulation decision
+        // that a wall clock could change, and "kinematic for a fifth of a
+        // second" would make a body's broadphase layer depend on how fast the
+        // machine was running.
+        u64 movingUntilTick = 0;
         // Marked each tick during the sweep; anything unmarked afterwards has
         // left the world and its body is destroyed.
         bool seen = false;
@@ -146,7 +154,7 @@ private:
     [[nodiscard]] bool isDriven(core::InstanceId id) const;
     [[nodiscard]] physics::ShapeDesc shapeOf(core::InstanceId id, const PartComponent& part) const;
     [[nodiscard]] physics::BodyDesc descOf(core::InstanceId id, const PartComponent& part,
-                                           const RigidBodyComponent& body) const;
+                                           const RigidBodyComponent& body, bool movingAnchored) const;
 
     World& m_scene;
     physics::IPhysics3D& m_backend;

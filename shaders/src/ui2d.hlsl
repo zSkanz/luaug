@@ -1,5 +1,10 @@
 // The 2D pass: screen-space coloured quads, drawn over the world.
 //
+// `UICorner` is rounded HERE and nowhere else (D030): the geometry stays four
+// vertices and the shape is a signed distance on the fragment, so a rounded
+// panel costs the same draw as a square one. Layout and hit-testing do not see
+// it, which is what `UICorner`'s own doc promises.
+//
 // Everything the UI draws is one of these. A `Frame`'s background is a quad, a
 // `TextLabel`'s glyphs are quads -- the built-in vector face emits axis-aligned
 // rectangles rather than sampled bitmaps (engine/ui/src/text.cpp) -- and a
@@ -28,11 +33,18 @@ struct VertexInput
 {
     float2 Position : TEXCOORD0;
     float4 Color : TEXCOORD1;
+    // xy: this vertex's offset from the quad's centre. zw: the quad's
+    // half-extent. Together they let the fragment stage measure a corner
+    // without knowing where on the screen the quad is.
+    float4 LocalHalf : TEXCOORD2;
+    float Radius : TEXCOORD3;
 };
 
 struct Interpolants
 {
     float4 Color : TEXCOORD0;
+    float4 LocalHalf : TEXCOORD1;
+    float Radius : TEXCOORD2;
     float4 Position : SV_Position;
 };
 
@@ -42,10 +54,35 @@ Interpolants VertexMain(VertexInput input)
     output.Position = float4(input.Position.x * ScreenToClip.x + ScreenToClip.z,
                              input.Position.y * ScreenToClip.y + ScreenToClip.w, 0.0f, 1.0f);
     output.Color = input.Color;
+    output.LocalHalf = input.LocalHalf;
+    output.Radius = input.Radius;
     return output;
+}
+
+// The signed distance from a point to a rounded rectangle centred on the origin:
+// negative inside, zero on the edge, positive outside. The standard form, and
+// the reason a corner needs no extra geometry -- the quad stays four vertices
+// and the shape is arithmetic on the fragment.
+float roundedRectDistance(float2 local, float2 half, float radius)
+{
+    const float2 outside = abs(local) - (half - radius);
+    return length(max(outside, 0.0f)) + min(max(outside.x, outside.y), 0.0f) - radius;
 }
 
 float4 FragmentMain(Interpolants input) : SV_Target0
 {
-    return input.Color;
+    float4 color = input.Color;
+
+    // A radius of zero is a square corner and the overwhelmingly common case, so
+    // it costs one compare rather than a second pipeline.
+    if (input.Radius > 0.0f) {
+        const float distance = roundedRectDistance(input.LocalHalf.xy, input.LocalHalf.zw, input.Radius);
+        // Antialiased over one pixel of the distance's own gradient rather than
+        // clipped: a hard cut on a curve is a staircase, and `fwidth` is what
+        // makes the edge one pixel wide whatever the UI is scaled to.
+        const float edge = fwidth(distance);
+        color.a *= 1.0f - smoothstep(-edge, edge, distance);
+    }
+
+    return color;
 }

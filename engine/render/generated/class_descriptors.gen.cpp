@@ -61,7 +61,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .type = scene::ValueType::EnumItem,
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
-            .inert = false,
+            .inert = true,
             .docKey = {},
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getMeshPartCollisionFidelity,

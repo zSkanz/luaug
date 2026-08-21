@@ -254,6 +254,17 @@ std::optional<core::EngineError> runScenario(const ReplayScenario& scenario, Rep
             host.input().setSnapshot(device);
 
         host.tick();
+
+        // The counters a script can read, published in a replay too. Most of
+        // them are zero here and honestly so -- there is no render frame -- but
+        // the audio ones are real, and M6's soak gate is a scenario that reads
+        // `AudioUnderruns` after an hour of ticks. A stat that only existed in
+        // a windowed run would be a stat no gate could assert.
+        host.publishStats({
+            .audioUnderruns = static_cast<f64>(host.audio().stats().underruns),
+            .audioVoices = static_cast<f64>(host.audio().stats().activeVoices),
+        });
+
         if (tick % scenario.checkpointEvery == 0 || tick == scenario.ticks)
             out.checkpoints.push_back({tick, host.world().worldHash()});
     }

@@ -65,6 +65,25 @@ void emit(const scene::World& world, const Entry& entry, DrawList& out)
     // just does not draw. Skipping the quad rather than submitting an invisible
     // one is the difference between a HUD that costs nothing and one that costs
     // a draw per element.
+    // `UICorner`, if the element has one (D030). Clamped to half the shorter
+    // side, because a radius past that is a circle and anything beyond it is
+    // arithmetic with no meaning -- and clamping here rather than in the shader
+    // keeps the fragment stage a distance function with no special cases.
+    f32 cornerRadius = 0.0f;
+    for (core::InstanceId child = world.firstChild(entry.id); child.valid(); child = world.nextSibling(child)) {
+        if (const scene::UICornerComponent* corner = world.uiCorners().find(child); corner != nullptr) {
+            const f32 width = box.max.x - box.min.x;
+            const f32 height = box.max.y - box.min.y;
+            const f32 shorter = std::fmin(width, height);
+            // A `UDim`, so `Scale` is a fraction of the SHORTER side: a radius
+            // that meant a fraction of the width would make a wide button's
+            // corners taller than its height.
+            const f32 radius = corner->cornerRadius.scale * shorter + corner->cornerRadius.offset;
+            cornerRadius = std::fmax(0.0f, std::fmin(radius, shorter * 0.5f));
+            break;
+        }
+    }
+
     if (backgroundAlpha > 0.0f) {
         DrawQuad quad;
         quad.min = box.min;
@@ -72,6 +91,7 @@ void emit(const scene::World& world, const Entry& entry, DrawList& out)
         quad.color = self->backgroundColor;
         quad.alpha = backgroundAlpha;
         quad.scissor = entry.scissor;
+        quad.cornerRadius = cornerRadius;
         out.quads.push_back(quad);
     }
 
@@ -87,6 +107,7 @@ void emit(const scene::World& world, const Entry& entry, DrawList& out)
             quad.color = image->imageColor;
             quad.alpha = backgroundAlpha > 0.0f ? 1.0f : 1.0f;
             quad.scissor = entry.scissor;
+            quad.cornerRadius = cornerRadius;
             out.quads.push_back(quad);
         }
         return;

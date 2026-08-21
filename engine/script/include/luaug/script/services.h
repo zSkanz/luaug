@@ -81,6 +81,11 @@ struct FrameStats
     f64 drawCalls = 0.0;
     f64 physicsBodies = 0.0;
     f64 luaMemoryKb = 0.0;
+    // The mixer's own two, and the first of them is the M6 gate's number: the
+    // roadmap asks for "buffer underrun counter zero in a 60 s soak", and a
+    // counter a script cannot read is a gate a human has to take on trust.
+    f64 audioUnderruns = 0.0;
+    f64 audioVoices = 0.0;
 };
 
 // A coroutine parked on `WaitForChild`. Kept apart from the timer list because

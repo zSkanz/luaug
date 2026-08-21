@@ -171,6 +171,44 @@ to a file and taxes every configuration to enable.
 | M5 | `examples/03-physics-playground` (the deliverable: 18 dynamic crates, a seesaw, ramps, a character, the Jolt wireframe on) | `win-msvc-dev` | median frame, 1080p | **1.11 ms** | 16.7 ms — a 60 fps frame |
 | M5 | `examples/03-physics-playground` | `win-msvc-dev` | worst frame | 1.93 ms | — |
 | M5 | `examples/03-physics-playground` | `win-msvc-dev` | draws / triangles | 0 / 0 — every part is a debug wireframe (D022) |
+| **M6** | `tests/bench/platforms200` (200 platforms written every tick, 200 written every 15th so each transitions both ways 20 times, 600 anchored parts nobody writes) | `win-msvc-dev` | mean sim tick | **0.60 ms** | 16 ms |
+| M6 | `tests/bench/platforms200` | `win-msvc-dev` | worst sim tick | 2.8 ms | — |
+| M6 | `tests/bench/platforms200` | `win-msvc-dev` | physics: apply / step / writeback | 0.14 / 0.29 / 0.08 ms | — |
+| M6 | `tests/bench/churn10k` **after D031** (the same scene: two thirds of its anchored parts are written every tick, so two thirds of them are now KINEMATIC) | `win-msvc-dev` | mean sim tick | **7.32 ms** | 16 ms |
+| M6 | `tests/bench/churn10k` | `win-msvc-dev` | physics: apply / step / writeback | 0.43 / 3.89 / 0.78 ms | — |
+
+**What D031's motion switch costs, and it is `churn10k` that priced it rather
+than the scene built for the purpose.** Four hundred platforms with four hundred
+transitions over three hundred ticks do not show above the noise: 0.14 ms of
+apply, and the six hundred still parts stay in the static layer and cost nothing.
+That is the number the fix was designed to produce.
+
+`churn10k` is the one that moved, from **4.96 ms a tick to 7.32**, and the
+increase is honest: two thirds of its ten thousand anchored parts are written
+every tick, so two thirds of them are now kinematic bodies in the broadphase
+layer Jolt re-fits each tick. The step went from 1.23 ms to 3.89 and that is
+Jolt doing work it was previously not asked to do -- for parts that were moving
+all along and were being teleported. The budget is 16 ms and it is still met.
+
+**Two costs found by measuring rather than by reasoning, both fixed before this
+row was written**, and they are the reason this file exists:
+
+  * Writeback went from 0.03 ms to **9.9 ms**. Jolt reports every kinematic body
+    as active, always, so the mirror was copying six thousand solver transforms a
+    tick back into components whose transforms the SCRIPT owns. A kinematic body
+    is not written back now.
+  * Apply went from 1.60 ms to **6.96 ms**. The pending-move list was
+    deduplicated by scanning it, which is quadratic in the number of kinematic
+    writes in a tick; six thousand of them cost four milliseconds. It appends and
+    `step` applies in order, so the last write still wins.
+
+The number that would have shown and does not is the one the narrow fix avoided.
+`Anchored` meaning kinematic always would have put the six hundred still parts --
+and every floor and wall of every real world -- into the layer that is re-fitted
+every tick, and `churn10k`'s ten thousand are what that costs at scale. The
+hysteresis is what bounds the transition count: inside twelve ticks a platform
+transitions once and stays, and `platforms200`'s second population deliberately
+writes outside it to price the pathological case.
 
 **The mirror costs about 160 ns per body per tick to decide that nothing
 changed**, which is the 1.60 ms `apply` row above over ten thousand static

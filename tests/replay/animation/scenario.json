@@ -1,0 +1,9 @@
+{
+  "name": "animation",
+  "script": ".",
+  "seed": 13,
+  "ticks": 900,
+  "checkpointEvery": 150,
+  "sameBuildOnly": true,
+  "requireAttribute": "AnimationSampled"
+}

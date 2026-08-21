@@ -152,11 +152,29 @@ void buildUiGeometry(const ui::DrawList& list, core::Vec2 viewport, std::vector<
             });
         }
 
-        const render::UiVertex a{quad.min.x,           quad.min.y,           toByte(quad.color.r),
-                                 toByte(quad.color.g), toByte(quad.color.b), toByte(quad.alpha)};
-        const render::UiVertex b{quad.max.x, quad.min.y, a.r, a.g, a.b, a.a};
-        const render::UiVertex c{quad.max.x, quad.max.y, a.r, a.g, a.b, a.a};
-        const render::UiVertex d{quad.min.x, quad.max.y, a.r, a.g, a.b, a.a};
+        // The quad's own frame, so the fragment stage can measure a corner
+        // without knowing where on screen the quad is (D030).
+        const f32 halfX = (quad.max.x - quad.min.x) * 0.5f;
+        const f32 halfY = (quad.max.y - quad.min.y) * 0.5f;
+
+        const auto corner = [&](f32 x, f32 y) {
+            return render::UiVertex{x,
+                                    y,
+                                    toByte(quad.color.r),
+                                    toByte(quad.color.g),
+                                    toByte(quad.color.b),
+                                    toByte(quad.alpha),
+                                    x - (quad.min.x + halfX),
+                                    y - (quad.min.y + halfY),
+                                    halfX,
+                                    halfY,
+                                    quad.cornerRadius};
+        };
+
+        const render::UiVertex a = corner(quad.min.x, quad.min.y);
+        const render::UiVertex b = corner(quad.max.x, quad.min.y);
+        const render::UiVertex c = corner(quad.max.x, quad.max.y);
+        const render::UiVertex d = corner(quad.min.x, quad.max.y);
         vertices.insert(vertices.end(), {a, b, c, a, c, d});
         runs.back().vertexCount += 6;
     }
@@ -546,6 +564,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // repository has had to find later.
             .physicsBodies = host->physics() != nullptr ? static_cast<f64>(host->physics()->bodyCount()) : 0.0,
             .luaMemoryKb = static_cast<f64>(lua_totalbytes(host->runtime().state(), 0)) / 1024.0,
+            .audioUnderruns = static_cast<f64>(host->audio().stats().underruns),
+            .audioVoices = static_cast<f64>(host->audio().stats().activeVoices),
         });
 
         if (options.frameStats) {
@@ -775,8 +795,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             if (renderer != nullptr && renderer->valid())
                 meshLoader.syncPrimitives(*device, *cmd, host->world(), meshCache, meshLibrary);
             if (renderer != nullptr && renderer->valid())
-                (void)meshLoader.sync(*device, *cmd, host->world(), host->workspace(), meshCache, meshLibrary,
-                                      &host->skeletons());
+                (void)meshLoader.sync(*device, *cmd, host->world(), host->workspace(), meshCache, meshLibrary);
 
             // Extraction happens once, at a known moment, from a world that is
             // between ticks (ADR 0027). Rendering never walks the ECS.

@@ -194,10 +194,12 @@ public:
     void pumpInput(std::span<const platform::Event> events);
     [[nodiscard]] input::InputSystem& input() noexcept { return m_input; }
 
-    // Where `MeshLoader` puts the skeleton and clips it reads out of a glTF.
-    // The loader runs in the render loop and this is simulation state, which is
-    // exactly why it is handed over rather than owned there.
-    [[nodiscard]] render::SkeletonLibrary& skeletons() noexcept { return m_skeletons; }
+    // The skeletons and clips read out of each skinned glTF. Read-only from
+    // outside: the host fills it, at the tick's own safe point, because
+    // animation is SIMULATION -- it advances on the SimClock, a script reads
+    // `TimePosition` off it, and it has to run in a headless replay where there
+    // is no renderer at all.
+    [[nodiscard]] const render::SkeletonLibrary& skeletons() const noexcept { return m_skeletons; }
 
     // The poses `render::extract` reads. Null before `boot`, which is the same
     // window in which there is no world to extract from.
@@ -243,6 +245,16 @@ private:
     // the same file its editor does.
     [[nodiscard]] std::optional<core::EngineError> registerRuntimeModules();
 
+    // Reads the skeleton and clips of every `MeshPart` content the library does
+    // not yet hold, once per URN. A parse and nothing else: no image is decoded
+    // and no vertex is touched (`GltfImportOptions::skeletonOnly`).
+    //
+    // Synchronous, at the top of a tick, which is the same narrowing
+    // `MeshLoader` made for the same reason: M7 is the milestone with a job pool
+    // and something to stream, and a background loader with one caller and no
+    // eviction policy is the speculative half of the design.
+    void syncSkeletons();
+
     [[nodiscard]] std::optional<core::EngineError> mountProject(const std::filesystem::path& path);
     [[nodiscard]] std::optional<core::EngineError> mountConformance(const std::filesystem::path& root);
 
@@ -269,6 +281,9 @@ private:
     // before nothing: `m_animation` is destroyed first, which is the order its
     // own references need.
     render::SkeletonLibrary m_skeletons;
+    // Content atoms already attempted, so a file with no skeleton is parsed once
+    // rather than once a tick forever.
+    std::vector<core::u32> m_skeletonsTried;
     std::optional<render::AnimationSystem> m_animation;
 
     std::filesystem::path m_root;

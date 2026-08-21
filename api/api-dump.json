@@ -559,12 +559,14 @@
         {
           "Name": "ScaleType",
           "Type": "Enum.ScaleType",
-          "Default": "Enum.ScaleType.Stretch"
+          "Default": "Enum.ScaleType.Stretch",
+          "Inert": true
         },
         {
           "Name": "SliceCenter",
           "Type": "Rect",
-          "Default": "Rect.new(Vector2.zero, Vector2.zero)"
+          "Default": "Rect.new(Vector2.zero, Vector2.zero)",
+          "Inert": true
         }
       ],
       "Methods": [],
@@ -1150,7 +1152,8 @@
       "Properties": [
         {
           "Name": "CollisionFidelity",
-          "Type": "Enum.CollisionFidelity"
+          "Type": "Enum.CollisionFidelity",
+          "Inert": true
         },
         {
           "Name": "MeshContent",
@@ -1443,7 +1446,8 @@
         {
           "Name": "ScrollBarThickness",
           "Type": "number",
-          "Default": "12"
+          "Default": "12",
+          "Inert": true
         }
       ],
       "Methods": [],

@@ -1,0 +1,7 @@
+{
+  "name": "platforms200",
+  "script": "init.luau",
+  "seed": 1031,
+  "ticks": 300,
+  "budgetMs": 16.0
+}

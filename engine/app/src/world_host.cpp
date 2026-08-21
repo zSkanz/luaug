@@ -1,10 +1,12 @@
 #include "luaug/app/world_host.h"
 
+#include "luaug/asset/gltf.h"
 #include "luaug/audio/scene_types.h"
 #include "luaug/core/build_info.h"
 #include "luaug/core/json.h"
 #include "luaug/core/log.h"
 #include "luaug/input/scene_types.h"
+#include "luaug/platform/file.h"
 #include "luaug/platform/platform.h"
 #include "luaug/render/debug_draw.h"
 #include "luaug/render/scene_types.h"
@@ -521,11 +523,52 @@ ConformanceReport WorldHost::conformanceReport() const
     return report;
 }
 
+void WorldHost::syncSkeletons()
+{
+    m_world->meshParts().forEach([&](core::InstanceId id, const scene::MeshPartComponent& meshPart) {
+        (void)id;
+        const core::NameAtom content = meshPart.meshContent;
+        if (content.id == 0 || m_skeletons.find(content) != nullptr)
+            return;
+        if (std::find(m_skeletonsTried.begin(), m_skeletonsTried.end(), content.id) != m_skeletonsTried.end())
+            return;
+        // Remembered before anything can go wrong, so a file with no skeleton --
+        // which is most of them -- costs one parse rather than one per tick
+        // forever.
+        m_skeletonsTried.push_back(content.id);
+
+        const std::string urn(m_world->atoms().text(content));
+        constexpr std::string_view scheme = "asset://";
+        if (!urn.starts_with(scheme))
+            return;
+
+        const std::filesystem::path base = m_root.empty() ? platform::paths().contentDir : m_root / "content";
+        const std::filesystem::path path = base / urn.substr(scheme.size());
+
+        std::vector<std::byte> bytes;
+        if (!platform::readFile(path, bytes))
+            return;
+
+        asset::Model model;
+        if (asset::importGltf(bytes, path.parent_path(), {.skeletonOnly = true}, model).has_value())
+            return;
+        if (model.joints.empty())
+            return;
+
+        m_skeletons.set(content, render::SkeletonLibrary::Entry{std::move(model.joints), std::move(model.clips)});
+    });
+}
+
 void WorldHost::tick()
 {
     scene::EngineState& state = m_world->engineState();
     if (state.paused)
         return;
+
+    // Before anything else in the tick: a track loaded by a script this tick has
+    // to find the skeleton its mesh names, and a headless replay has no render
+    // loop to have loaded it.
+    syncSkeletons();
 
     state.tick += 1;
     state.simTime = static_cast<f64>(state.tick) * state.fixedTimestep;

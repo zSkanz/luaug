@@ -92,6 +92,21 @@ bool PhysicsSync::inWorld(core::InstanceId id) const
     return m_lastParentInWorld;
 }
 
+// How many ticks an anchored part stays `Kinematic` after the last write to its
+// `CFrame` (D031).
+//
+// **Hysteresis, and the number is chosen rather than found.** Without it a part
+// written every other tick would flip between the two broadphase layers every
+// other tick, and each flip is a body rebuild. Twelve ticks covers any driver
+// writing at five hertz or faster -- a tween writes every tick, a script nudging
+// a platform on a timer is the slow end -- and costs at most a fifth of a second
+// of a stopped body sitting in the moving layer, where the only price is that it
+// is re-fitted for those twelve ticks.
+//
+// TICKS and not seconds. A body's broadphase layer must not depend on how fast
+// the machine was running (R10).
+constexpr u64 kAnchoredMovingTicks = 12;
+
 physics::ShapeDesc PhysicsSync::shapeOf(core::InstanceId id, const PartComponent& part) const
 {
     physics::ShapeDesc shape;
@@ -110,8 +125,8 @@ physics::ShapeDesc PhysicsSync::shapeOf(core::InstanceId id, const PartComponent
     return shape;
 }
 
-physics::BodyDesc PhysicsSync::descOf(core::InstanceId id, const PartComponent& part,
-                                      const RigidBodyComponent& body) const
+physics::BodyDesc PhysicsSync::descOf(core::InstanceId id, const PartComponent& part, const RigidBodyComponent& body,
+                                      bool movingAnchored) const
 {
     physics::BodyDesc desc;
     desc.shape = shapeOf(id, part);
@@ -119,7 +134,22 @@ physics::BodyDesc PhysicsSync::descOf(core::InstanceId id, const PartComponent& 
     // A part an active weld drives is Kinematic: it still collides and still
     // pushes what it runs into, and the solver does not move it -- which is what
     // "driven, not simulated" means (roadmap M5).
-    desc.motion = isDriven(id)    ? physics::MotionType::Kinematic
+    //
+    // **And so is an anchored part something is currently WRITING** (D031). A
+    // moving platform is `Anchored` with a tween on its `CFrame`, and it was
+    // classified `Static` -- which is the layer Jolt keeps precisely so that it
+    // is never re-fitted. A static body does not move and derives no velocity,
+    // so D027's `MoveKinematic` was handed a target and nothing happened: the
+    // fix was right and unreachable.
+    //
+    // Only what is written, and only while it is written. The alternative --
+    // `Anchored` meaning kinematic always -- was rejected by the human on cost
+    // rather than taste: `jolt_physics.cpp` splits the broadphase into
+    // `NonMoving` and `Moving`, and making every floor and wall kinematic would
+    // put a world of never-moving bodies into the layer that is updated every
+    // tick, to solve a problem two platforms have.
+    const bool driven = isDriven(id) || (body.anchored && movingAnchored);
+    desc.motion = driven          ? physics::MotionType::Kinematic
                   : body.anchored ? physics::MotionType::Static
                                   : physics::MotionType::Dynamic;
     desc.friction = body.friction;
@@ -163,7 +193,18 @@ void PhysicsSync::applyBody(core::InstanceId id, PartComponent& part, RigidBodyC
         m_bodies.resize(static_cast<usize>(id.index) + 1);
 
     BodyRecord& record = m_bodies[id.index];
-    const physics::BodyDesc desc = descOf(id, part, body);
+
+    // A script's write, told apart from the mirror's own the same way the
+    // transform sync below does it: the component differs from what this mirror
+    // last put there. An anchored part that is being written is a platform in
+    // motion, and it holds that state for `kAnchoredMovingTicks` afterwards
+    // (D031).
+    const u64 tick = m_scene.engineState().tick;
+    const bool written = record.generation == id.generation && !(part.cframe == record.written);
+    if (written)
+        record.movingUntilTick = tick + kAnchoredMovingTicks;
+
+    const physics::BodyDesc desc = descOf(id, part, body, record.movingUntilTick > tick);
 
     if (record.generation != id.generation) {
         // The slot is empty, or it holds a body that belonged to a different
@@ -233,6 +274,20 @@ void PhysicsSync::applyBody(core::InstanceId id, PartComponent& part, RigidBodyC
         if (!(part.cframe == record.written)) {
             m_backend.setBodyTransform(m_world, record.handle, part.cframe);
             record.written = part.cframe;
+        }
+        else if (record.motion == physics::MotionType::Kinematic) {
+            // **A kinematic body that was not written this tick is told to stay
+            // where it is**, and that is not a no-op: `MoveKinematic` sets a
+            // velocity, and a body nobody re-targets keeps the last one and
+            // COASTS. A platform whose tween finished sailed on past its
+            // destination, and a welded part whose anchor stopped moving flew
+            // away -- both found by two conformance cases the moment D027's fix
+            // landed.
+            //
+            // Handing over the same target computes a velocity of zero, which is
+            // the honest way to say "it is not moving" to a system whose whole
+            // vocabulary is velocity.
+            m_backend.setBodyTransform(m_world, record.handle, part.cframe);
         }
     }
 
@@ -454,6 +509,18 @@ void PhysicsSync::writeBack()
         if (id.index >= m_bodies.size() || m_bodies[id.index].generation != id.generation)
             continue;
         BodyRecord& record = m_bodies[id.index];
+
+        // **A kinematic body is not written back** (D031). Its transform is the
+        // script's -- a tween wrote it and the mirror moved the body to match --
+        // so copying the solver's answer back into the component says nothing
+        // and costs a pool lookup and a write per body per tick.
+        //
+        // Jolt reports every kinematic body as active, always, so before this
+        // line `churn10k`'s writeback went from 0.03 ms to 9.9 ms the moment
+        // moving anchored parts became kinematic. The measurement is what found
+        // it, which is the whole argument for `perf-baselines.md`.
+        if (record.motion == physics::MotionType::Kinematic)
+            continue;
 
         // The QUIET write: straight into the component, with the changed set
         // reaching a listener only if one exists (architecture.md §4). Ten

@@ -273,3 +273,205 @@ TEST_CASE("text measures wider as it gets bigger and taller as it wraps")
     CHECK(wrapped.lineCount > 1);
     CHECK(wrapped.size.x <= doctest::Approx(40.0));
 }
+
+// --- Cross-axis alignment (D029) ----------------------------------------------
+
+TEST_CASE("a centred column centres against the CONTAINER, not against its widest child")
+{
+    // The defect a person found in the obby's menu: every child sat sixteen
+    // pixels left of centre, which is half the thirty-two the children were
+    // inset by. The cross-axis metric was the widest child in the line, so a
+    // column of equal-width children got an offset of zero and landed on the
+    // left edge -- "centred" and "flush left" were the same code path whenever
+    // the children agreed about their width.
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId panel = fixture.child("Frame", screen);
+    fixture.object(panel).size = core::UDim2{core::UDim{0.0f, 400.0f}, core::UDim{0.0f, 400.0f}};
+
+    const InstanceId list = fixture.child("UIListLayout", panel);
+    scene::UIListLayoutComponent* layout = fixture.world->listLayouts().find(list);
+    layout->horizontalAlignment = 1; // Center
+    layout->verticalAlignment = 1;   // Center
+
+    // Both the same width, and both narrower than the panel -- the exact shape
+    // that produced the bug.
+    const InstanceId a = fixture.child("Frame", panel);
+    const InstanceId b = fixture.child("Frame", panel);
+    for (const InstanceId child : {a, b})
+        fixture.object(child).size = core::UDim2{core::UDim{0.0f, 200.0f}, core::UDim{0.0f, 50.0f}};
+    fixture.run();
+
+    // A 200-wide child in a 400-wide panel starts at 100 and its centre is the
+    // panel's. Put `lineCross` back to the widest child and this reads 0.
+    CHECK(fixture.object(a).absolutePosition.x == doctest::Approx(100.0));
+    CHECK(fixture.object(b).absolutePosition.x == doctest::Approx(100.0));
+
+    const auto childCentre = fixture.object(a).absolutePosition.x + fixture.object(a).absoluteSize.x * 0.5f;
+    CHECK(static_cast<double>(childCentre) == doctest::Approx(200.0));
+}
+
+TEST_CASE("an End cross alignment reaches the container's far edge")
+{
+    // The same metric, from the other end: with the widest child as the extent,
+    // "flush right" was also "flush left".
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId panel = fixture.child("Frame", screen);
+    fixture.object(panel).size = core::UDim2{core::UDim{0.0f, 400.0f}, core::UDim{0.0f, 400.0f}};
+
+    const InstanceId list = fixture.child("UIListLayout", panel);
+    fixture.world->listLayouts().find(list)->horizontalAlignment = 2; // End
+
+    const InstanceId child = fixture.child("Frame", panel);
+    fixture.object(child).size = core::UDim2{core::UDim{0.0f, 120.0f}, core::UDim{0.0f, 30.0f}};
+    fixture.run();
+
+    CHECK(fixture.object(child).absolutePosition.x == doctest::Approx(280.0));
+}
+
+TEST_CASE("a horizontal row centres its children vertically against the container")
+{
+    // The cross axis is the OTHER one for a horizontal list, and a fix that
+    // only worked for columns would be half a fix.
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId panel = fixture.child("Frame", screen);
+    fixture.object(panel).size = core::UDim2{core::UDim{0.0f, 400.0f}, core::UDim{0.0f, 200.0f}};
+
+    const InstanceId list = fixture.child("UIListLayout", panel);
+    scene::UIListLayoutComponent* layout = fixture.world->listLayouts().find(list);
+    layout->fillDirection = 0; // Horizontal
+    layout->verticalAlignment = 1;
+
+    const InstanceId child = fixture.child("Frame", panel);
+    fixture.object(child).size = core::UDim2{core::UDim{0.0f, 40.0f}, core::UDim{0.0f, 60.0f}};
+    fixture.run();
+
+    CHECK(fixture.object(child).absolutePosition.y == doctest::Approx(70.0));
+}
+
+TEST_CASE("a wrapped line centres within its own band, which is a decision")
+{
+    // **Written rather than discovered.** With wrap, lines stack along the cross
+    // axis and each occupies its own band; centring one against the whole
+    // container would put every line on top of every other. Within the band is
+    // the only arrangement that is still a stack -- and the case that says so is
+    // here, because "what does a wrapped line centre against" is a real choice
+    // and the answer must not be whatever the code happened to do.
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId panel = fixture.child("Frame", screen);
+    fixture.object(panel).size = core::UDim2{core::UDim{0.0f, 200.0f}, core::UDim{0.0f, 400.0f}};
+
+    const InstanceId list = fixture.child("UIListLayout", panel);
+    scene::UIListLayoutComponent* layout = fixture.world->listLayouts().find(list);
+    layout->fillDirection = 0; // Horizontal
+    layout->wraps = true;
+    layout->verticalAlignment = 1; // Center, on the cross axis
+
+    // Three 80-wide children in a 200-wide panel: two on the first line, one on
+    // the second. The first line's band is as tall as its tallest child.
+    const InstanceId a = fixture.child("Frame", panel);
+    const InstanceId b = fixture.child("Frame", panel);
+    const InstanceId c = fixture.child("Frame", panel);
+    fixture.object(a).size = core::UDim2{core::UDim{0.0f, 80.0f}, core::UDim{0.0f, 60.0f}};
+    fixture.object(b).size = core::UDim2{core::UDim{0.0f, 80.0f}, core::UDim{0.0f, 20.0f}};
+    fixture.object(c).size = core::UDim2{core::UDim{0.0f, 80.0f}, core::UDim{0.0f, 30.0f}};
+    fixture.run();
+
+    // The band is 60 tall. `a` fills it, so it sits at the top; `b` is 20 tall
+    // and centres within the band at 20 -- not at 190, which is where centring
+    // against the 400-tall panel would put it.
+    CHECK(fixture.object(a).absolutePosition.y == doctest::Approx(0.0));
+    CHECK(fixture.object(b).absolutePosition.y == doctest::Approx(20.0));
+    // And the second line is below the first rather than on top of it. Exactly
+    // 60 here, because this list sets no `Padding` -- a band's height is its
+    // tallest child and lines meet.
+    CHECK(fixture.object(c).absolutePosition.y == doctest::Approx(60.0));
+}
+
+// --- UICorner (D030) ----------------------------------------------------------
+
+TEST_CASE("a UICorner reaches the draw list, which is where a rounded corner is")
+{
+    // `CornerRadius` was declared, stored, read back and consumed by NOTHING for
+    // a whole milestone -- neither the UI module nor the shader mentioned a
+    // radius -- and a person found it by looking at a square button. This is the
+    // consumer, and `inertcheck` is the lint that would have found the absence.
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId panel = fixture.child("Frame", screen);
+    fixture.object(panel).size = core::UDim2{core::UDim{0.0f, 200.0f}, core::UDim{0.0f, 100.0f}};
+
+    const InstanceId corner = fixture.child("UICorner", panel);
+    fixture.world->uiCorners().find(corner)->cornerRadius = core::UDim{0.0f, 12.0f};
+    fixture.run();
+
+    ui::DrawList list;
+    ui::buildDrawList(*fixture.world, fixture.service, list);
+    REQUIRE_FALSE(list.quads.empty());
+    CHECK(list.quads[0].cornerRadius == doctest::Approx(12.0));
+}
+
+TEST_CASE("a radius is clamped to half the shorter side, and a Scale is a fraction of it")
+{
+    // Past half the shorter side a rounded rectangle IS a stadium, and beyond
+    // that the arithmetic has no meaning -- so it is clamped here rather than in
+    // the shader, which keeps the fragment stage a distance function with no
+    // special cases.
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId panel = fixture.child("Frame", screen);
+    fixture.object(panel).size = core::UDim2{core::UDim{0.0f, 200.0f}, core::UDim{0.0f, 40.0f}};
+
+    const InstanceId corner = fixture.child("UICorner", panel);
+    fixture.world->uiCorners().find(corner)->cornerRadius = core::UDim{0.0f, 500.0f};
+    fixture.run();
+
+    ui::DrawList list;
+    ui::buildDrawList(*fixture.world, fixture.service, list);
+    REQUIRE_FALSE(list.quads.empty());
+    CHECK(list.quads[0].cornerRadius == doctest::Approx(20.0));
+
+    // A `Scale` is a fraction of the SHORTER side: half of a 200x40 panel is 20,
+    // and a radius that meant a fraction of the WIDTH would make a wide button's
+    // corners taller than the button.
+    fixture.world->uiCorners().find(corner)->cornerRadius = core::UDim{0.25f, 0.0f};
+    list.clear();
+    ui::buildDrawList(*fixture.world, fixture.service, list);
+    CHECK(list.quads[0].cornerRadius == doctest::Approx(10.0));
+}
+
+TEST_CASE("a UICorner changes the drawing and not the hit test")
+{
+    // `UICorner`'s own doc promises it: a button whose corner you could see
+    // through but not click through would be worse than a square one.
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId panel = fixture.child("Frame", screen);
+    fixture.object(panel).size = core::UDim2{core::UDim{0.0f, 100.0f}, core::UDim{0.0f, 100.0f}};
+
+    const InstanceId corner = fixture.child("UICorner", panel);
+    fixture.world->uiCorners().find(corner)->cornerRadius = core::UDim{0.0f, 50.0f};
+    fixture.run();
+
+    // The very corner pixel, which a 50-radius round would have cut away.
+    CHECK(ui::hitTest(*fixture.world, fixture.service, core::Vec2{1.0f, 1.0f}) == panel);
+    // And the layout is untouched: the box is still the box.
+    CHECK(fixture.object(panel).absoluteSize.x == doctest::Approx(100.0));
+}
+
+TEST_CASE("no UICorner means a radius of zero, which costs the shader one compare")
+{
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId panel = fixture.child("Frame", screen);
+    fixture.object(panel).size = core::UDim2{core::UDim{0.0f, 80.0f}, core::UDim{0.0f, 80.0f}};
+    fixture.run();
+
+    ui::DrawList list;
+    ui::buildDrawList(*fixture.world, fixture.service, list);
+    REQUIRE_FALSE(list.quads.empty());
+    CHECK(list.quads[0].cornerRadius == doctest::Approx(0.0));
+}

@@ -41,6 +41,18 @@ struct GltfImportOptions
     // black mesh.
     bool generateMissingNormals = true;
     bool generateMissingTangents = true;
+
+    // Read the skeleton and the clips only: no geometry, no materials, no
+    // images. What the HOST wants from a skinned file, because animation is
+    // simulation -- it advances on the SimClock, it has to run in a headless
+    // replay, and a script reads `TimePosition` off it -- while the vertices and
+    // the textures belong to the renderer.
+    //
+    // Parsing one file twice is the honest cost of that split in v1, and it is a
+    // parse rather than an upload: this pass decodes no image and touches no
+    // vertex. M7's asset pipeline is where a file becomes one artefact both
+    // halves read.
+    bool skeletonOnly = false;
 };
 
 // Imports one file's mesh, materials and images into `out`.

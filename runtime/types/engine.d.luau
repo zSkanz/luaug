@@ -617,9 +617,13 @@ declare extern type MeshPart extends BasePart with
     --- leaves the previous mesh in place and reports why, because a part that silently becomes
     --- invisible is harder to diagnose than one that says it could not load.
     MeshContent: Content
-    --- How closely the collision shape follows the rendered geometry. `Precise` is accepted and
-    --- collides as `Hull` in this release -- the property reads back what was written, because a value
-    --- that silently became another value is worse than one that says what it did.
+    --- How closely the collision shape follows the rendered geometry. **Stored and not yet read** (M7):
+    --- every fidelity collides as the mesh's bounding BOX, because a hull needs the mesh's points and
+    --- those live in the render module, which sits above the physics mirror. M7's asset pipeline is
+    --- what hands a hull across. The property reads back what was written rather than what it resolved
+    --- to, because a value that silently became another value is worse than one that says what it did.
+    --- This carried the same claim as prose in `physics_sync.cpp` for a milestone and was NOT marked --
+    --- `inertcheck` is what found it.
     CollisionFidelity: EnumCollisionFidelity
 end
 
@@ -807,7 +811,10 @@ declare extern type InputBinding extends Instance with
     --- What a prompt shows for this binding. A localization key is allowed and is the intended use
     --- (§6): a binding that says "ui.prompt.interact" translates and one that says "Interact" does
     --- not. Empty means the engine has nothing to offer and the prompt should fall back to the key's
-    --- own name.
+    --- own name. **The engine never acts on this and never will**, which is what makes it different
+    --- from an `Inert` property: it is data a GAME reads back through `GetPreferredBinding` to draw its
+    --- own prompt. There is no prompt widget in v1 and there is not meant to be one -- a rebinding
+    --- screen is a game''s screen.
     DisplayName: string
     --- A glyph for this binding, as an `asset://` URI. Empty means none.
     Image: Content
@@ -937,11 +944,13 @@ declare extern type ImageLabel extends UIObject with
     --- Multiplied into the image, so one white glyph sheet can be drawn in any colour. White leaves it
     --- alone.
     ImageColor: Color3
-    --- How the picture fits the box.
+    --- How the picture fits the box. **Stored and not yet read** (M7): there is no picture to fit until
+    --- the asset pipeline can hand one over, and `Image` carries the same marker for the same reason.
     ScaleType: EnumScaleType
-    --- For `ScaleType.Slice`, where the nine-slice cuts are, in SOURCE pixels. An inverted or empty
-    --- rectangle is kept as given rather than corrected: a slice quietly fixed up is a panel that draws
-    --- wrong with no way to find out why.
+    --- For `ScaleType.Slice`, where the nine-slice cuts are, in SOURCE pixels. **Stored and not yet
+    --- read** (M7), with `Image` and `ScaleType`: a cut is a cut in a texture, and there is no texture
+    --- yet. An inverted or empty rectangle is kept as given rather than corrected: a slice quietly
+    --- fixed up is a panel that draws wrong with no way to find out why.
     SliceCenter: Rect
 end
 
@@ -955,7 +964,9 @@ declare extern type ScrollFrame extends UIObject with
     --- How far the canvas is scrolled, in pixels. Clamped to what the canvas allows on the next layout,
     --- so a write past the end settles at the end rather than showing emptiness.
     CanvasPosition: Vector2
-    --- In pixels; zero draws no bar and still scrolls, which is what a touch surface wants.
+    --- In pixels; zero draws no bar and still scrolls, which is what a touch surface wants. **Stored
+    --- and not yet read** (M7): v1 scrolls by `CanvasPosition` and draws no bar at all, so every
+    --- thickness behaves as zero. The scrolling is real; the bar is the part that is missing.
     ScrollBarThickness: number
 end
 

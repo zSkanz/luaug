@@ -1,0 +1,9 @@
+{
+  "name": "audiosoak",
+  "script": ".",
+  "seed": 11,
+  "ticks": 3600,
+  "checkpointEvery": 600,
+  "sameBuildOnly": true,
+  "requireAttribute": "AudioSoakClean"
+}

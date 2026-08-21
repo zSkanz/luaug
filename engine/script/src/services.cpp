@@ -312,6 +312,17 @@ int debugServiceGetStat(lua_State* L)
         lua_pushnumber(L, frame.luaMemoryKb);
         return 1;
     }
+    if (name == "AudioUnderruns") {
+        // Zero on a headless run because there is no device to starve, and that
+        // is the truthful answer rather than a missing one -- the same reasoning
+        // `PhysicsBodies` carries above.
+        lua_pushnumber(L, frame.audioUnderruns);
+        return 1;
+    }
+    if (name == "AudioVoices") {
+        lua_pushnumber(L, frame.audioVoices);
+        return 1;
+    }
 
     const core::NameAtom atom = world(L).atoms().lookup(name);
     for (const auto& [key, value] : services(L).stats.entries) {

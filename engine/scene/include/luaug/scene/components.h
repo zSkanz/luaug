@@ -403,11 +403,11 @@ struct TextLabelComponent
 struct TextInputComponent
 {
     std::string placeholderText;
-    // Which field the keyboard is reaching, and the caret's position in BYTES
-    // rather than in codepoints -- the text is UTF-8 and the editor moves by
-    // whole sequences, so a byte index is exact where a character index would
-    // need a second walk to use.
-    u32 caret = 0;
+    // **No caret.** There was a `caret` field here and nothing ever moved it:
+    // v1's editor appends and backspaces at the end, which is what the class's
+    // own doc promises. A field that named a feature nobody had written is the
+    // same lie `Inert` exists to make impossible, and `inertcheck` is what found
+    // it. When a real caret arrives it arrives with the code that moves it.
     bool focused = false;
 };
 

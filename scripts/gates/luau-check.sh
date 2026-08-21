@@ -137,6 +137,14 @@ lute tools/repo/i18nlint.luau
 echo "== module layering =="
 lute tools/repo/checklayers.luau
 
+# Every component field has a reader, or its property is marked `Inert`. The
+# mechanical half of D030: `Inert` was built at M4.5 so that "stored and nothing
+# acts on it" would be visible, and two milestones later a property was born into
+# exactly that state and nobody marked it. A marker that depends on somebody
+# remembering is the one thing it exists not to depend on.
+echo "== stored-and-unread properties =="
+lute tools/repo/inertcheck.luau
+
 echo "== the CLI's own tests =="
 lute test tools/cli/tests
 

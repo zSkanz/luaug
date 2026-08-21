@@ -1,0 +1,211 @@
+{
+  "asset": {
+    "version": "2.0",
+    "generator": "LuauG M6 skinned-bar fixture"
+  },
+  "scene": 0,
+  "scenes": [
+    {
+      "name": "Bar",
+      "nodes": [
+        0,
+        2
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "name": "Bar",
+      "mesh": 0,
+      "skin": 0
+    },
+    {
+      "name": "Unused"
+    },
+    {
+      "name": "Root",
+      "children": [
+        3
+      ],
+      "translation": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "Tip",
+      "translation": [
+        0.0,
+        1.0,
+        0.0
+      ]
+    }
+  ],
+  "skins": [
+    {
+      "name": "Rig",
+      "joints": [
+        3,
+        2
+      ],
+      "inverseBindMatrices": 5
+    }
+  ],
+  "meshes": [
+    {
+      "name": "Bar",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1,
+            "JOINTS_0": 2,
+            "WEIGHTS_0": 3
+          },
+          "indices": 4
+        }
+      ]
+    }
+  ],
+  "animations": [
+    {
+      "name": "Bend",
+      "samplers": [
+        {
+          "input": 6,
+          "output": 7,
+          "interpolation": "LINEAR"
+        }
+      ],
+      "channels": [
+        {
+          "sampler": 0,
+          "target": {
+            "node": 3,
+            "path": "rotation"
+          }
+        }
+      ]
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": 500,
+      "uri": "data:application/octet-stream;base64,AAAAvwAAAAAAAAAAAAAAPwAAAAAAAAAAAAAAvwAAgD8AAAAAAAAAPwAAgD8AAAAAAAAAvwAAAEAAAAAAAAAAPwAAAEAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AQAAAAAAAAABAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAA/AAAAPwAAAAAAAAAAAAAAPwAAAD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAAABAAIAAgABAAMAAgADAAQABAADAAUAAACAPwAAAAAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAgL8AAAAAAACAPwAAgD8AAAAAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAPwAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAADzBDU/8wQ1PwAAAAAAAAAAAAAAAAAAgD8="
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": 72,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 72,
+      "byteLength": 72,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 144,
+      "byteLength": 48,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 192,
+      "byteLength": 96,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 288,
+      "byteLength": 24,
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 312,
+      "byteLength": 128
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 440,
+      "byteLength": 12
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 452,
+      "byteLength": 48
+    }
+  ],
+  "accessors": [
+    {
+      "componentType": 5126,
+      "count": 6,
+      "type": "VEC3",
+      "min": [
+        -0.5,
+        0.0,
+        0.0
+      ],
+      "max": [
+        0.5,
+        2.0,
+        0.0
+      ],
+      "bufferView": 0
+    },
+    {
+      "componentType": 5126,
+      "count": 6,
+      "type": "VEC3",
+      "bufferView": 1
+    },
+    {
+      "componentType": 5123,
+      "count": 6,
+      "type": "VEC4",
+      "bufferView": 2
+    },
+    {
+      "componentType": 5126,
+      "count": 6,
+      "type": "VEC4",
+      "bufferView": 3
+    },
+    {
+      "componentType": 5123,
+      "count": 12,
+      "type": "SCALAR",
+      "bufferView": 4
+    },
+    {
+      "componentType": 5126,
+      "count": 2,
+      "type": "MAT4",
+      "bufferView": 5
+    },
+    {
+      "componentType": 5126,
+      "count": 3,
+      "type": "SCALAR",
+      "min": [
+        0.0
+      ],
+      "max": [
+        1.0
+      ],
+      "bufferView": 6
+    },
+    {
+      "componentType": 5126,
+      "count": 3,
+      "type": "VEC4",
+      "bufferView": 7
+    }
+  ]
+}
