@@ -159,7 +159,10 @@ private:
 class LoopbackServer
 {
 public:
-    LoopbackServer()
+    // The accept deadline is a parameter only so a test can prove the guard
+    // fires without spending ten seconds doing it. Every real case takes the
+    // default.
+    explicit LoopbackServer(int acceptDeadlineMs = 10000) : m_acceptDeadlineMs(acceptDeadlineMs)
     {
         startupSockets();
 
@@ -188,6 +191,9 @@ public:
 
     ~LoopbackServer()
     {
+        // The stop flag BEFORE the join, or a destructor running after a failed
+        // client would wait on a thread that is waiting for that client.
+        m_stopping.store(true);
         join();
         closeRaw(m_listener);
     }
@@ -204,9 +210,8 @@ public:
     void serve(std::function<void(Connection&)> handler)
     {
         m_thread = std::thread([this, handler = std::move(handler)] {
-            const RawSocket accepted = ::accept(m_listener, nullptr, nullptr);
+            const RawSocket accepted = acceptWithDeadline();
             if (accepted == kInvalid) {
-                m_failure = "loopback server: accept failed";
                 return;
             }
             Connection connection(accepted);
@@ -228,10 +233,67 @@ public:
     [[nodiscard]] const std::string& failure() const noexcept { return m_failure; }
 
 private:
+    // `accept` with a deadline, which is the half of this helper that D018 was.
+    //
+    // A bare `::accept` blocks forever when the client never connects -- and a
+    // client that failed to connect is exactly the state a FAILING test leaves
+    // behind, so the assertion failure was being converted into a hung suite
+    // and a lost CI runner. `Connection` has had a read deadline since it was
+    // written, for the reason spelled out at its constructor; this is the same
+    // reasoning applied to the step before it.
+    //
+    // Polled rather than one long `select`, so the destructor's stop flag is
+    // noticed promptly instead of a hundredth of the way through a ten-second
+    // wait.
+    [[nodiscard]] RawSocket acceptWithDeadline()
+    {
+        constexpr int pollMs = 50;
+
+        for (int waited = 0; waited < m_acceptDeadlineMs; waited += pollMs) {
+            if (m_stopping.load()) {
+                m_failure = "loopback server: stopped before a client connected";
+                return kInvalid;
+            }
+
+            fd_set readable;
+            FD_ZERO(&readable);
+            FD_SET(m_listener, &readable);
+
+            timeval timeout{};
+            timeout.tv_sec = 0;
+            timeout.tv_usec = pollMs * 1000;
+
+#if defined(_WIN32)
+            const int ready = ::select(0, &readable, nullptr, nullptr, &timeout);
+#else
+            const int ready = ::select(m_listener + 1, &readable, nullptr, nullptr, &timeout);
+#endif
+            if (ready < 0) {
+                m_failure = "loopback server: select failed while waiting to accept";
+                return kInvalid;
+            }
+            if (ready == 0) {
+                continue;
+            }
+
+            const RawSocket accepted = ::accept(m_listener, nullptr, nullptr);
+            if (accepted == kInvalid) {
+                m_failure = "loopback server: accept failed";
+                return kInvalid;
+            }
+            return accepted;
+        }
+
+        m_failure = "loopback server: no client connected before the accept deadline";
+        return kInvalid;
+    }
+
     RawSocket m_listener = kInvalid;
     u16 m_port = 0;
+    int m_acceptDeadlineMs = 10000;
     std::thread m_thread;
     std::string m_failure;
+    std::atomic<bool> m_stopping{false};
 };
 
 } // namespace luaug::net::testing

@@ -433,6 +433,61 @@ time.
    past the end of a buffer. That case now REPAIRS the TOC hash after corrupting
    the entry, so the bounds check is still covered by something.
 
+2. **A bounds-checked reader is not a safe reader, because the allocation
+   happens first.** Every offset and length in the mesh format was checked
+   before it was followed, and the corruption case still threw `bad_alloc` on
+   its first run: a flipped bit in a section's element COUNT reached
+   `vector::resize` before anything compared it against the bytes the section
+   actually had.
+
+   The fix has two halves and the split is the interesting part. For a section
+   of fixed-size records the check is exact arithmetic —
+   `count <= length / recordBytes` — and every one of the nine such sections now
+   carries it. For the two meshopt-COMPRESSED streams there is no such relation,
+   because the encoded size is a function of the data rather than of the count;
+   those are bounded by a stated engine ceiling instead (`MaxMeshVertices`,
+   four million), which is honest about being a limit rather than a derivation.
+
+   **A count is an input too**, and it is the input that is easiest to forget,
+   because it does not look like a pointer.
+
+3. **D018 reproduced during a routine gate run, and the hung process answered
+   the question before a quarantine was needed.** §12 allows quarantining a test
+   that flakes twice; this one hung a second time, and it turned out to be
+   cheaper to look at it than to file it.
+
+   The evidence was two commands. The process held exactly ONE socket —
+   `127.0.0.1:65533` in `LISTEN`, nothing established — and two threads, both
+   waiting. `tests/loopback_server.h` called `::accept` with no deadline, and
+   `~LoopbackServer` joined that thread BEFORE closing the listener.
+
+   **So the state a FAILING test leaves behind was being converted into a suite
+   that hangs forever**, which is exactly why it presented as a flake: the
+   assertion failure underneath was invisible. And the guard already existed one
+   step later — `Connection` has had a ten-second read deadline since it was
+   written, with a comment saying a suite that hangs tells you less than one
+   that fails. The step before it never got the same treatment.
+
+   The general shape: **a blocking call in test scaffolding needs a deadline for
+   the same reason one in production code does, and the scaffolding is where
+   nobody thinks to put one.** Fixed with a polled `select` against a deadline
+   and a stop flag the destructor sets first; break-verified by reverting to the
+   bare `accept`, at which point the new regression case hangs.
+
+4. **meshoptimizer's index codec rotates triangles, and the round-trip test was
+   wrong rather than the codec.** `(16, 15, 32)` comes back as `(15, 32, 16)`:
+   the same triangle, wound the same way, starting on a different vertex. It is
+   invisible to a renderer and invisible to the submesh ranges, and visible only
+   to a test comparing index arrays element by element — which is what the first
+   version of the case did, and it read as data corruption.
+
+   Worth keeping because the reflex it corrects is a good one: "the bytes must
+   come back identical" is right for the VERTEX stream, which is losslessly
+   encoded and is compared with `memcmp` for exactly that reason, and wrong for
+   the index stream, whose codec is defined to preserve triangles rather than
+   arrays. **A round-trip test has to assert the invariant the codec promises,
+   not the strongest invariant the author can imagine.**
+
 ## Gate Record
 
 (filled at milestone end, before human review)

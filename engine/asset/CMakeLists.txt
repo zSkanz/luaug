@@ -14,6 +14,7 @@ luaug_add_module(asset
     SOURCES
         src/image.cpp
         src/gltf.cpp
+        src/mesh_format.cpp
         src/pack.cpp
         src/primitives.cpp
     DEPS
@@ -38,6 +39,7 @@ luaug_add_module_tests(asset
     SOURCES
         tests/image_tests.cpp
         tests/gltf_tests.cpp
+        tests/mesh_format_tests.cpp
         tests/pack_tests.cpp
         tests/primitive_tests.cpp
 )

@@ -365,3 +365,23 @@ TEST_CASE("connecting where nothing listens fails quickly rather than stalling")
     // the engine has to be able to retry.
     CHECK(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() < 3000);
 }
+
+TEST_CASE("a loopback server whose client never arrives reports rather than hangs")
+{
+    // D018, and the case that keeps it fixed. `::accept` with no deadline turns
+    // the state a FAILING test leaves behind -- a client that never connected --
+    // into a suite that hangs forever, which is why the defect presented as a
+    // flake: the underlying assertion failure was invisible behind the hang.
+    //
+    // A short deadline so the case costs a fifth of a second rather than ten
+    // seconds; the mechanism under test is the same one every real case gets.
+    const auto started = std::chrono::steady_clock::now();
+    {
+        luaug::net::testing::LoopbackServer server(200);
+        server.serve([](luaug::net::testing::Connection&) { FAIL("nothing should have connected"); });
+        server.join();
+        CHECK(server.failure().find("accept deadline") != std::string::npos);
+    }
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    CHECK(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() < 3000);
+}

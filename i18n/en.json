@@ -99,6 +99,12 @@
   "asset.pack.err.order": "The content pack table of contents is not sorted, or names one asset twice.",
   "asset.pack.err.hash_mismatch": "Content pack entry {hash} does not match the bytes stored under it.",
   "asset.pack.err.toc_hash": "The content pack table of contents does not match the hash in its header.",
+  "asset.mesh.err.magic": "That file is not a LuauG mesh.",
+  "asset.mesh.err.version": "This build reads mesh format {expected}; that mesh is format {found}.",
+  "asset.mesh.err.malformed": "The mesh is malformed: a section, an offset or an index points outside it.",
+  "asset.mesh.err.empty": "A mesh with no vertices or no indices cannot be compiled.",
+  "asset.mesh.err.image_count": "The mesh was given a different number of texture hashes than it has images.",
+  "asset.mesh.err.too_large": "The mesh claims more vertices or indices than this engine will load.",
 
   "render.err.shader_format_unknown": "The graphics device reports no shader format, so no shaders can be loaded.",
   "render.err.shader_manifest_missing": "No shader manifest at {path}. Build the shaders, or check that content shipped beside the executable.",
