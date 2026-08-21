@@ -91,6 +91,22 @@ export type Property = {
     --- A marker is not permission. Every entry here is a debt with a milestone
     --- attached, named in the property's own `Doc`.
     Inert: boolean?,
+    --- Overrides the i18n key raised when a write is refused.
+    ---
+    --- Absent, the key is derived from the property's TYPE, which is right for
+    --- a property whose only way to refuse is a wrong type and wrong for every
+    --- property with a range: `PhysicsService.FixedTimestep = 1/10` answered
+    --- "it takes a number" about a number for a whole milestone (D021). A
+    --- setter returns a bool and has no way to say *which* of its conditions
+    --- failed, so the key has to carry the whole domain rather than the
+    --- failure.
+    ---
+    --- That is why the override reads as a domain and not as an error: a range
+    --- key SUBSUMES the type key, because "it takes a number from 0 to 1" is
+    --- equally true of `Restitution = "loud"`. Keys are shared by shape
+    --- (`number_at_least_zero`) rather than minted per property, so a reader
+    --- who has seen one has seen them all.
+    ErrorKey: string?,
     Doc: string,
 }
 
@@ -316,6 +332,20 @@ local function checkProperty(errors: { string }, owner: string, property: Proper
     end
     if property.Doc == "" then
         table.insert(errors, `{where}: every member carries doc text, which becomes its i18n key (§5)`)
+    end
+    -- A read-only property is never set, so an override on one is a key nothing
+    -- can raise -- and it reads, to the next person, as though the property has
+    -- a domain somebody has to satisfy.
+    if property.ErrorKey ~= nil then
+        if property.ReadOnly == true then
+            table.insert(errors, `{where}: ErrorKey on a read-only property names a refusal that cannot happen`)
+        end
+        if string.match(property.ErrorKey, "^%l[%l%d_]*%.err%.[%l%d_]+$") == nil then
+            table.insert(
+                errors,
+                `{where}: ErrorKey "{property.ErrorKey}" is not a <module>.err.<name> catalog key (§6)`
+            )
+        end
     end
 end
 

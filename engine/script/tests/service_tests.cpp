@@ -162,13 +162,20 @@ TEST_CASE("FixedTimestep is the grid every timing guarantee rests on")
     // is refused rather than clamped -- a clamp would read back as a number
     // nobody wrote.
     //
-    // The key is the type's, because a setter answers the caller with a bool and
-    // the descriptor carries one key per value type. It reads as "it takes a
-    // number" for a value that IS a number, which is the honest limit of a
-    // per-type key and is recorded as D021 in `docs/defects.md`.
-    CHECK(fixture.raises(R"(game:GetService("PhysicsService").FixedTimestep = 1 / 10)", "scene.err.expected_number"));
-    CHECK(fixture.raises(R"(game:GetService("PhysicsService").FixedTimestep = 1 / 1000)", "scene.err.expected_number"));
-    CHECK(fixture.raises(R"(game:GetService("PhysicsService").FixedTimestep = 0 / 0)", "scene.err.expected_number"));
+    // The key is the property's own (D021, fixed at M6). A setter still answers
+    // with a bool and the descriptor still carries one key, so the key states
+    // the whole DOMAIN rather than the failure -- which is why the same one
+    // covers a wrong-typed value: "it takes a tick length from 1/240 to 1/30"
+    // is true of `"fast"` as much as of 1/10. What it stopped doing is
+    // answering "it takes a number" about a number.
+    CHECK(fixture.raises(R"(game:GetService("PhysicsService").FixedTimestep = 1 / 10)",
+                         "scene.err.number_fixed_timestep"));
+    CHECK(fixture.raises(R"(game:GetService("PhysicsService").FixedTimestep = 1 / 1000)",
+                         "scene.err.number_fixed_timestep"));
+    CHECK(fixture.raises(R"(game:GetService("PhysicsService").FixedTimestep = 0 / 0)",
+                         "scene.err.number_fixed_timestep"));
+    CHECK(fixture.raises(R"(game:GetService("PhysicsService").FixedTimestep = "fast")",
+                         "scene.err.number_fixed_timestep"));
 }
 
 // --- TagService --------------------------------------------------------------

@@ -406,8 +406,36 @@ overlooked.
 
 ## Findings
 
-(append during the milestone: the things the documents assumed that reality
-corrected)
+Things the documents assumed that reality corrected, in the order they cost
+time.
+
+1. **The audio gate names a counter miniaudio does not have.** The roadmap's
+   words are "buffer underrun counter zero in a 60 s soak", and the string
+   `underrun` appears six times in the whole of `miniaudio.h` (0.11.25) --
+   every one of them a comment or an ALSA log message
+   (`miniaudio.h:29882`, `:29931`, `:29944`), none of them a counter a caller
+   can read. There is no `ma_device_get_underruns` and nothing equivalent. So
+   the counter is ours to build and, more to the point, ours to *define*: it
+   counts the data-callback invocations in which a voice that should have been
+   audible was mixed as silence, plus the commands dropped because the ring
+   between the sim and the mixer was full. Both are real failure modes of the
+   design in Decision 9, and both are zero in a healthy run. Written down
+   because "the counter reads zero" is worthless until somebody says what it
+   counts -- and a counter nothing ever increments is the fourteenth gate that
+   passes while doing nothing.
+
+2. **Clay has exactly one current context, in a global.** `Clay__currentContext`
+   (`clay.h:1018`) is a file-scope pointer that `Clay_SetCurrentContext` writes
+   and every layout call reads. The solver is therefore not reentrant and not
+   thread-safe, which is fine -- Decision 17 of the NOT-in-scope list already
+   keeps layout on the sim thread -- but it is a constraint that has to be
+   known before somebody moves relayout into a job at M7. It also means the
+   arena is sized once, up front, from `Clay_MinMemorySize()`
+   (`clay.h:824`), and that arena exhaustion arrives as
+   `CLAY_ERROR_TYPE_ARENA_CAPACITY_EXCEEDED` through the error handler passed to
+   `Clay_Initialize` (`clay.h:778`, `:837`) rather than as a crash. That handler
+   is the one place a UI too large for its arena can be reported, so it gets a
+   real i18n key rather than a default.
 
 ## Gate Record
 

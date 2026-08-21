@@ -204,6 +204,7 @@ local Classes: { Schema.Class } = {
             {
                 Name = "GeographicLatitude",
                 Type = "number",
+                ErrorKey = "scene.err.number_latitude_degrees",
                 Doc = "Degrees north of the equator, which tilts the sun's arc across the sky. The second and last "
                     .. "input to SunDirection.",
             },
@@ -216,6 +217,7 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Brightness",
                 Type = "number",
+                ErrorKey = "scene.err.number_at_least_zero",
                 Doc = "How strong the sun is, independent of its colour.",
             },
             {
@@ -226,11 +228,13 @@ local Classes: { Schema.Class } = {
             {
                 Name = "FogStart",
                 Type = "number",
+                ErrorKey = "scene.err.number_at_least_zero",
                 Doc = "Distance in metres at which fog begins.",
             },
             {
                 Name = "FogEnd",
                 Type = "number",
+                ErrorKey = "scene.err.number_at_least_zero",
                 Doc = "Distance in metres at which fog is total. Equal to or below FogStart means no fog at all, "
                     .. "which is how fog is turned off without a separate flag.",
             },
@@ -623,6 +627,7 @@ local Classes: { Schema.Class } = {
                 Type = "number",
                 Default = "1/60",
                 ThreadSafety = "ReadParallel",
+                ErrorKey = "scene.err.number_fixed_timestep",
                 Doc = "The duration of one simulation tick, in seconds, and therefore the grid every timing "
                     .. "guarantee is expressed against: `task.wait(1)` is exactly 60 ticks at the default 1/60, on "
                     .. "every machine and every run. Express durations as multiples of it and the same code stays "

@@ -391,6 +391,7 @@ local Classes: { Schema.Class } = {
                 Name = "Friction",
                 Type = "number",
                 Default = "0.3",
+                ErrorKey = "scene.err.number_at_least_zero",
                 Doc = "How much this surface resists sliding, 0 frictionless and 1 very grippy. The value the "
                     .. "solver uses for a contact combines both surfaces' -- one slippery part is enough to make "
                     .. "a pair slide.",
@@ -399,6 +400,7 @@ local Classes: { Schema.Class } = {
                 Name = "Restitution",
                 Type = "number",
                 Default = "0",
+                ErrorKey = "scene.err.number_zero_to_one",
                 Doc = "How much of an impact this surface gives back, 0 a dead stop and 1 a perfect bounce. "
                     .. "Combined across a contact pair the same way Friction is.",
             },
@@ -406,6 +408,7 @@ local Classes: { Schema.Class } = {
                 Name = "Density",
                 Type = "number",
                 Default = "1",
+                ErrorKey = "scene.err.number_above_zero",
                 Doc = "Mass per cubic metre. Mass is this times the volume the Size and Shape describe, and there "
                     .. "is no Mass property precisely so that the two cannot be set to contradict each other.",
             },
@@ -603,6 +606,7 @@ local Classes: { Schema.Class } = {
                 Name = "WalkSpeed",
                 Type = "number",
                 Default = "16",
+                ErrorKey = "scene.err.number_at_least_zero",
                 Doc = "How fast Move drives the character along the ground, in metres per second. The direction "
                     .. "passed to Move is scaled by this, so a half-length direction walks at half speed.",
             },
@@ -610,6 +614,7 @@ local Classes: { Schema.Class } = {
                 Name = "JumpSpeed",
                 Type = "number",
                 Default = "8",
+                ErrorKey = "scene.err.number_at_least_zero",
                 Doc = "The upward speed Jump imparts, in metres per second. How high that reaches depends on "
                     .. "`Workspace.Gravity`, which is the relationship a game tunes rather than a height.",
             },
@@ -617,6 +622,7 @@ local Classes: { Schema.Class } = {
                 Name = "MaxSlopeAngle",
                 Type = "number",
                 Default = "46",
+                ErrorKey = "scene.err.number_slope_degrees",
                 Doc = "The steepest ground, in degrees from horizontal, the character can stand and walk on. "
                     .. "Anything steeper is a wall it slides down rather than a floor it stands on.",
             },
@@ -624,6 +630,7 @@ local Classes: { Schema.Class } = {
                 Name = "AutoStepHeight",
                 Type = "number",
                 Default = "0.5",
+                ErrorKey = "scene.err.number_at_least_zero",
                 Doc = "The tallest ledge, in metres, the character walks over rather than into. This is the "
                     .. "single number that separates a character from a capsule: at zero, a kerb stops it.",
             },
@@ -689,18 +696,21 @@ local Classes: { Schema.Class } = {
             {
                 Name = "FieldOfView",
                 Type = "number",
+                ErrorKey = "scene.err.number_cone_degrees",
                 Doc = "The vertical field of view in degrees. Clamped to a sane open interval: zero and 180 both "
                     .. "produce a projection matrix that renders nothing.",
             },
             {
                 Name = "NearPlane",
                 Type = "number",
+                ErrorKey = "scene.err.number_above_zero",
                 Doc = "Distance in metres to the near clip plane. Small values buy little and cost depth precision "
                     .. "everywhere, so this is worth raising rather than lowering.",
             },
             {
                 Name = "FarPlane",
                 Type = "number",
+                ErrorKey = "scene.err.number_above_zero",
                 Doc = "Distance in metres to the far clip plane; geometry beyond it is not drawn.",
             },
         },
@@ -722,11 +732,13 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Brightness",
                 Type = "number",
+                ErrorKey = "scene.err.number_at_least_zero",
                 Doc = "How much light this emits. Zero is off without the instance having to be destroyed.",
             },
             {
                 Name = "Range",
                 Type = "number",
+                ErrorKey = "scene.err.number_at_least_zero",
                 Doc = "The radius in metres beyond which this light contributes nothing, which is what lets the "
                     .. "renderer skip it for distant geometry.",
             },
@@ -755,16 +767,19 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Brightness",
                 Type = "number",
+                ErrorKey = "scene.err.number_at_least_zero",
                 Doc = "How much light this emits.",
             },
             {
                 Name = "Range",
                 Type = "number",
+                ErrorKey = "scene.err.number_at_least_zero",
                 Doc = "The distance in metres beyond which this light contributes nothing.",
             },
             {
                 Name = "Angle",
                 Type = "number",
+                ErrorKey = "scene.err.number_cone_degrees",
                 Doc = "The full width of the cone in degrees.",
             },
             {

@@ -518,7 +518,15 @@ local function generate(target: Module)
                     end
                 end
 
-                local errorKey = InvalidSetKeys[valueType]
+                -- The property's own key wins over the one derived from its
+                -- type (D021). A ranged property has no way to report which of
+                -- its conditions a write failed -- `set` answers with a bool --
+                -- so the key states the whole domain, which is true of a
+                -- wrong-typed value as much as of an out-of-range one.
+                local errorKey = property.ErrorKey
+                if errorKey == nil then
+                    errorKey = InvalidSetKeys[valueType]
+                end
                 if errorKey == nil then
                     table.insert(Errors, `{class.Name}.{property.Name}: no invalid-set key for ValueType::{valueType}`)
                     errorKey = "scene.err.unknown_property"
