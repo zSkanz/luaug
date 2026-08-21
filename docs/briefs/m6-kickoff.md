@@ -71,6 +71,17 @@ constraint that decides most of the decisions below.
       `KeyboardService` was deleted this milestone for being exactly that. Pure
       Luau, no engine change, `Simulation` clock by default. Document how to
       reach the underlying instances: sugar that cannot be escaped is a wall.
+- [ ] **An action must be drivable by a non-device source** — a design
+      constraint added to the roadmap 2026-08-20 by human decision, **after this
+      brief imported its scope**. `InputBinding` is keyed by `KeyCode`, so only
+      hardware can feed an `InputAction`; a touch button and a virtual thumbstick
+      were the reason it was raised. Mobile stays post-v1, but the proving caller
+      ships here: a `TextButton` in the obby HUD driving a real action, which is
+      useful on a desktop on its own. It must go through the same dispatch —
+      same clock, same `Sink`, recorded in the replay stream — or it is the
+      second input path that was declined an hour earlier. And it must carry a
+      **value**, not a press: design a virtual button and the thumbstick will not
+      fit later.
 - [ ] `examples/04-obby` — main menu (tweened), HUD, checkpoints, moving
       platforms (tweens on physics-kinematic parts), sounds, an animated
       character, fully playable start→finish

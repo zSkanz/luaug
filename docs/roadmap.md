@@ -661,6 +661,31 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   clock (ADR 0039's safe default), priority zero, not sinking — and say in the
   doc how to reach the underlying instances, because sugar that cannot be
   escaped is a wall.
+- **Design constraint (not scope): an action must be drivable by something that
+  is not a physical device** (human decision, 2026-08-20). `InputBinding` is
+  keyed by `KeyCode`, so today only hardware can feed an `InputAction`. A
+  touch-screen button and a virtual thumbstick are the reason it was raised, and
+  mobile stays post-v1 (R15) — but the seam is nearly free while the IAS is
+  being written and costs a refactor to reopen, which is the same argument M4
+  made for its three renderer seams.
+
+  - **The proving caller ships in this milestone.** M6 is the milestone with UI,
+    so a `TextButton` in the obby's HUD driving a real action is buildable now,
+    testable on a desktop, and useful on its own — HUD buttons, menu shortcuts,
+    an accessibility path for a player who cannot hold a key. A seam with a
+    caller is a seam; a seam without one is speculation.
+  - **It goes through the same dispatch or it is the thing that was just
+    declined.** Same clock, same `Sink`, same fallthrough order, and **recorded
+    in the replay stream like any other input** — otherwise a HUD button is a
+    second input model wearing a different hat, and M6's own gate (an obby run
+    replayed headless to the finish flag) cannot see it.
+  - **Carry a VALUE, not a press.** The easy mistake is designing a virtual
+    *button* — and then a thumbstick, which is the other half of any touch
+    control scheme, does not fit and needs a second mechanism. Whatever the seam
+    is, it must be able to express `Direction2D` on day one.
+  - **`Enum.InputDeviceType.Touch` already exists**, declared with "nothing
+    produces it in v1" written into the enum. When something eventually does, it
+    should produce it through this seam rather than growing a new one.
 - **Deliverable:** `examples/04-obby` — main menu (tweened), HUD, checkpoints,
   moving platforms (tweens on physics-kinematic parts — a deliberate
   integration stressor), sounds, an animated character, fully playable
