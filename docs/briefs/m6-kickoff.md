@@ -31,14 +31,14 @@ constraint that decides most of the decisions below.
 
 ## Scope checklist (from roadmap)
 
-- [ ] **Input Action System** clone per api-design.md §2.4 (ADR 0029): actions,
+- [x] **Input Action System** clone per api-design.md §2.4 (ADR 0029): actions,
       bindings, contexts, gamepad + KB/M, runtime rebinding
-- [ ] **UI Instances** (`ScreenGui`/`Frame`/`TextLabel`/`TextButton`/`TextInput`/
+- [x] **UI Instances** (`ScreenGui`/`Frame`/`TextLabel`/`TextButton`/`TextInput`/
       `ImageLabel`/`ImageButton`/`ScrollFrame` + `UIListLayout`/`UIPadding`/
       `UICorner`) over Clay layout, stb_truetype text, UDim2-style coordinates
-- [ ] **TweenService** equivalent: property tweens including UI; easing families
+- [x] **TweenService** equivalent: property tweens including UI; easing families
       conformant to reference easing tables checked in as test fixtures
-- [ ] **miniaudio**: 2D sounds + basic 3D spatialization as `Sound` Instances,
+- [x] **miniaudio**: 2D sounds + basic 3D spatialization as `Sound` Instances,
       `AudioGroup` buses, `AudioService`
 - [ ] **Minimal skeletal animation**: glTF clip playback + linear blending
       (`AnimationPlayer`/`AnimationTrack` per api-design.md) — no state machines,
@@ -98,7 +98,7 @@ remains here is UI's own use of it.
       pane**, both named by `architecture.md` §app. Scheduled here by the M5
       close, because this is the milestone that gives the shell its remaining
       panes.
-- [ ] **D021 — a range refusal reports the key for a type.** The register says
+- [x] **D021 — a range refusal reports the key for a type.** The register says
       the fix "belongs with a milestone that has other reasons to touch the
       generator". This one has more of those than any milestone since M2: five
       datatypes, twelve enums, twenty-odd classes and four services all land
@@ -157,14 +157,14 @@ decision rather than against a hope.
 
 ## Gate checklist (verbatim from roadmap)
 
-- [ ] UI capture goldens at two resolutions (proves layout scaling)
-- [ ] tween output vs. easing fixture tables
+- [x] UI capture goldens at two resolutions (proves layout scaling)
+- [x] tween output vs. easing fixture tables
 - [ ] input replay of a full obby run completes to the finish flag in CI
       headless (the E2E gate for the whole stack so far)
 - [ ] audio smoke test (device opens, buffer underrun counter zero in a 60 s
       soak)
 - [ ] animation clip sampling determinism covered by the replay hash
-- [ ] the M5 example migrated to the Action System with no regression
+- [x] the M5 example migrated to the Action System with no regression
 
 And the standing items every gate here carries: both tiers green through
 `scripts/localgate.ps1`, the docs gate, the formatting gate, a screenshot of the
@@ -475,6 +475,78 @@ time.
    `Clay_Initialize` (`clay.h:778`, `:837`) rather than as a crash. That handler
    is the one place a UI too large for its arena can be reported, so it gets a
    real i18n key rather than a default.
+
+3. **The layout Clay was chosen for is not a layout problem.** A `UDim2`
+   placement is `parentSize * scale + offset` minus `anchorPoint * ownSize` --
+   two multiplies and an add per axis, in one pass, with nothing
+   under-determined and nothing to iterate. Clay solves FLOW layout, and the
+   only parts of §2.2's model that are flow-shaped are `UIListLayout` and
+   `AutomaticSize`. What settled it is narrower than the aesthetics: `UDim.Scale`
+   is deliberately unclamped and Clay's `PERCENT` raises past 1
+   (`clay.h:294`), and `AnchorPoint` is a fraction per axis while Clay's
+   floating attachment takes corner and centre ENUMERATORS. Both are cases in
+   `layout_tests.cpp` named after the fact. ADR 0040, and the manifest row is
+   untouched because removing a dependency is not the agent's call (§10).
+
+4. **A gate item named a counter the library does not have.** The roadmap asks
+   for "buffer underrun counter zero in a 60 s soak"; `underrun` appears six
+   times in 95,000 lines of miniaudio and every one is a comment or an ALSA log
+   line. The counter is ours, and so is the definition of what it counts. The
+   general shape is worth keeping: **a gate written before the implementation
+   can name a number that turns out not to exist**, and the fix is to define it
+   rather than to quietly report a zero nothing computes.
+
+5. **The generator caught a layering error a human would have argued about.**
+   `audio` was at L2 with the other backend seams, and it owns `Sound` -- a
+   module that registers a class into scene's registry has to be able to see
+   scene, and L2 cannot. `gen_cpp` refused it by name and by layer, in one line,
+   before a single file was written. The module moved to L4 beside `render`,
+   which has been there since M4 for the same reason, and ADR 0009's seam is
+   untouched: the seam is the module boundary, not its layer.
+
+6. **Three services became boot services for one reason, discovered three
+   times.** `Lighting` was the first, at M4.5, after the renderer spent four
+   milestones lighting scenes with struct defaults. M6 added `UIService` and
+   `AudioService`: the frame lays out, draws and mixes whether or not a script
+   ever asks for the service, so "created on first `GetService`" cannot be true
+   of any of them. The rule that falls out: **if the FRAME reads a service, it
+   is a boot service.** Each addition moved tick 0's world hash and cost a
+   re-record of two traces on two tiers -- which is the honest price and is
+   cheap.
+
+7. **The capture gate records an upload's SIZE and not its contents.** Found
+   while recording the UI goldens: the two resolutions differ in their scissors
+   and viewports and would have been byte-identical if only the quads had moved.
+   It is the same shape as M4.5's finding -- that gate recorded the size of
+   every uniform block and never its contents -- and the fix reached
+   `bindUniforms` and not `upload`, which was carrying debug-line geometry even
+   then. D026, with what holds the line meanwhile written into the row.
+
+8. **`Enum.KeyCode` and `platform`'s device tables are one spelling space, and
+   making them so cost ten renames.** The keyboard block of the enum IS
+   `platform::Key`, item for item, which is what lets `keyCodeOf` be a
+   subtraction rather than a table -- and it is asserted against
+   `platform::Key::Count` at compile time, so a key added to one list and not
+   the other is a build failure rather than every gamepad code silently shifting
+   by one. The ten renames were the digits: `"0"` became `Digit0`, because a
+   legend that differed from the item name for ten of the ninety-four would have
+   meant a second table to keep in step.
+
+9. **Two defects, and both were about disabling rather than about pressing.**
+   The IAS seam tests found that an action inside a DISABLED context kept its
+   last value forever -- close a menu mid-press and the jump stays held -- and
+   that a disabled action inside a sinking context still ate its key. Neither is
+   visible from the pressing side, which is where the obvious tests are, and
+   both were found by writing the case for the property's own documentation.
+
+10. **Two things could not be shipped because they need an asset, and both are
+    marked rather than hidden.** `TextLabel.Font` needs a TrueType FILE and
+    `ImageLabel.Image` needs a texture; both are a licence or a pipeline
+    decision that belongs to M7 or to a human (R6). Both carry `Inert` with the
+    milestone named in their own doc, which is exactly what that marker is for.
+    v1's text is the vector face already inside `third_party/stb`: ASCII, one
+    weight, no kerning, and unmistakably a placeholder -- which is better than a
+    label that says nothing.
 
 ## Gate Record
 

@@ -7,10 +7,15 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 - **M6 — Playing the World — IN PROGRESS.** The brief is
   [`docs/briefs/m6-kickoff.md`](docs/briefs/m6-kickoff.md), with its fifteen
-  decisions and its Findings. Three of the five systems are in: the **Input
-  Action System** (ADR 0039), **TweenService**, and the **UI layout** (ADR 0040).
-  Audio and skeletal animation are not started; `examples/04-obby` is not
-  started; no gate item is recorded yet.
+  decisions and its Findings. **Four of the five systems are in and the fifth is
+  half in**: the Input Action System (ADR 0039), TweenService, the whole UI
+  (layout — ADR 0040 — plus the 2D render pass, hit-testing and text focus), and
+  audio. Animation has its ASSET half: glTF skins, weights and clips load and are
+  tested. It has no runtime and no skinned draw.
+  **Not started**: `AnimationPlayer`/`AnimationTrack`, the skinned pipeline,
+  D017, and `examples/04-obby`. Two of the six gate items are recorded (the UI
+  goldens at two resolutions, the tween easing fixtures) and one is done without
+  a record yet (the M5 example migrated to the Action System).
 - **M5 — Feeling the World: Jolt Physics + Character — COMPLETE, signed off
   2026-08-20**, tagged `milestone/m5`. Signed after a review round that found
   something: two `CharacterBody` were reported as passing through each other,
@@ -44,8 +49,16 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   SimClock. `TweenService:GetValue` is checked against 297 numbers computed from
   the published easing formulas by an implementation written separately from the
   engine's.
-- **The UI lays out**, at any resolution, with a dirty flag that makes an idle
-  frame run no solver at all. It does not draw yet: there is no ui2d pass.
+- **The UI lays out, draws and answers a pointer.** Two passes over each dirty
+  `ScreenGui`, a 2D pipeline over the finished frame, and a hit test that fires
+  `Activated` only when both ends of a press land on one element. An idle frame
+  runs no solver at all, and the test asserts that as a COUNTER.
+- **A `Sound`'s timeline is the simulation's**, so `Ended` lands on the same
+  tick in a replay, in a headless run, and on a machine with a different audio
+  buffer. The underrun counter the roadmap's gate names does not exist in
+  miniaudio; this engine defines one and defines what it counts.
+- **A glTF skeleton loads**, sorted parents-first with the vertex stream
+  remapped to match — neither of which the file gives you.
 - **D021 is fixed**: a range refusal names its range.
 - **Four value types** -- `Vector2`, `UDim`, `UDim2`, `Rect` -- with the
   attribute domain §2.2 widened by them, and a world-hash case that requires
@@ -130,12 +143,25 @@ scope. The ones most likely to be mistaken for bugs:
   raises "it takes a number" about a number. Every M5 property with a range is
   affected; the fix is a per-property error-key override in the IDL.
 - **D022 — a `Part` never reaches the solid renderer.** Scheduled with M7.5.
-- **M6's next step, written out so it is not re-derived**: the ui2d render pass.
-  `engine/ui` produces a `DrawList` of quads and scissors and nothing consumes
-  it — `render` needs a 2D pipeline, a shader pair, and a call from
-  `renderer_default` after the world and before ImGui. The UI goldens at two
-  resolutions are blocked on it and so is the obby. After that, in the brief's
-  order: `engine/audio`, skeletal animation, D017, `examples/04-obby`, gates.
+- **M6's next step, written out so it is not re-derived**: the animation
+  RUNTIME. The clips load; nothing plays them. The design question it has to
+  answer first, because it is the reason this was not simply written: an
+  `AnimationTrack` needs the clip data (owned by `render`'s mesh library, L4),
+  a signal (owned by `script`, L5) and a home for its state. The shape that fits
+  the engine already exists — `scene` holds an injected `IPhysics3D*` and `app`
+  wires it — so a `scene::ClipProvider*` implemented by `render` and read by a
+  track system in `script` is the answer that needs no layering change.
+  `script` already has `asset` among its declared deps (architecture.md §2) and
+  does not link it yet, which is the other half of the same plumbing.
+- **The `AnimationPlayer`/`AnimationTrack` IDL was written and then reverted**,
+  deliberately. `api/defs/instances.api.luau`'s own header says a class whose
+  behaviour belongs to a later milestone arrives WITH it, because a property
+  that accepts a write and changes nothing is worse than a missing one — it
+  type-checks. The definitions are cheap to rewrite and were not worth shipping
+  ahead of the runtime.
+- After the runtime, in the brief's order: the skinned pipeline (a second vertex
+  stream and a `pbr_skinned` variant — Decision 11), D017, `examples/04-obby`,
+  and the three gate items that need it.
 - **Two of M6's decisions went against a document, and both are ADRs.**
   ADR 0039 (an `InputContext` declares its dispatch rate; the IAS's enums are
   total) and ADR 0040 (a UDim2 placement is arithmetic, so v1 does not call
