@@ -529,9 +529,10 @@ TEST_CASE("the boot-time method cross-check reports both directions")
     // rather than a promise. That number going DOWN by one is the removal; 60
     // once `TweenService:Create` and `:GetValue` landed beside it, and 64 once
     // `Sound:Play`/`Pause`/`Stop` and `AudioService:PlayLocal` did; 65 once
-    // `AnimationPlayer:LoadAnimation` brought the animation runtime.
-    CHECK(coverage.declared == 65);
-    CHECK(coverage.bound == 65);
+    // `AnimationPlayer:LoadAnimation` brought the animation runtime; 66 once
+    // `InputService:IsKeyDown` arrived with ADR 0041's raw event surface.
+    CHECK(coverage.declared == 66);
+    CHECK(coverage.bound == 66);
     CHECK(coverage.declaredWithoutBinding == 0);
 }
 

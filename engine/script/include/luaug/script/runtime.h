@@ -98,6 +98,16 @@ public:
     // as an empty world rather than as an error.
     void setPhysics(scene::PhysicsSync* physics);
 
+    // The device snapshot `InputService:IsKeyDown` reads, and the source of the
+    // raw events below. Null in a runtime the host has not wired, which those
+    // bindings answer as "nothing is down".
+    void setInput(const input::InputSystem* input);
+
+    // Enqueues `InputBegan` / `InputChanged` / `InputEnded` for one tick's raw
+    // events (ADR 0041). Called right after the simulation dispatch, so they
+    // land in the same drain as the `InputAction` signals the same tick raised.
+    void fireInputEvents(std::span<const input::RawInputEvent> events);
+
     // The animation host the `AnimationTrack` bindings drive. Null in a build
     // with no render module, which those bindings answer as a track that plays
     // nothing rather than as an error.

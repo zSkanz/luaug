@@ -272,6 +272,7 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
     // is the same answer a build with no render module gives.
     m_animation.emplace(*m_world, m_skeletons);
     m_runtime->setAnimation(&*m_animation);
+    m_runtime->setInput(&m_input);
 
 #if LUAUG_PHYSICS_JOLT
     // The one hand-written switch over what the build compiled in (ADR 0023),
@@ -530,6 +531,13 @@ void WorldHost::tick()
     // phase's own handlers go through, so a script that jumps on a press sees
     // the press in the tick it happened rather than in the next one.
     m_input.dispatchSimTick(*m_world, state.tick);
+
+    // The raw events the same dispatch produced (ADR 0041), enqueued right
+    // beside the action signals it raised. They are what a caller reaching for
+    // the familiar surface gets, and they come out of THIS dispatch rather than
+    // from the OS -- so they sink like an action, replay like an action, and a
+    // handler that writes to the world is deterministic.
+    m_runtime->fireInputEvents(m_input.drainRawEvents());
 
     // The sound timeline, beside the input dispatch and for the same reason:
     // both are simulation state advanced by the tick, and both raise their

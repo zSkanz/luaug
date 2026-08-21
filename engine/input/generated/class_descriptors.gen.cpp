@@ -322,7 +322,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .set = nullptr,
         },
     }};
-    static std::array<scene::MethodDesc, 1> inputServiceMethods;
+    static std::array<scene::MethodDesc, 2> inputServiceMethods;
     inputServiceMethods = {{
         scene::MethodDesc{
             .name = atoms.intern("GetPointerPosition"),
@@ -330,17 +330,38 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .docKey = {},
         },
+        scene::MethodDesc{
+            .name = atoms.intern("IsKeyDown"),
+            .yields = false,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .docKey = {},
+        },
     }};
-    static std::array<scene::EventDesc, 2> inputServiceEvents;
+    static std::array<scene::EventDesc, 5> inputServiceEvents;
     inputServiceEvents = {{
         scene::EventDesc{
-            .name = atoms.intern("InputDeviceChanged"),
+            .name = atoms.intern("InputBegan"),
             .slot = 7,
             .docKey = {},
         },
         scene::EventDesc{
-            .name = atoms.intern("WindowFocusChanged"),
+            .name = atoms.intern("InputChanged"),
             .slot = 8,
+            .docKey = {},
+        },
+        scene::EventDesc{
+            .name = atoms.intern("InputEnded"),
+            .slot = 9,
+            .docKey = {},
+        },
+        scene::EventDesc{
+            .name = atoms.intern("InputDeviceChanged"),
+            .slot = 10,
+            .docKey = {},
+        },
+        scene::EventDesc{
+            .name = atoms.intern("WindowFocusChanged"),
+            .slot = 11,
             .docKey = {},
         },
     }};

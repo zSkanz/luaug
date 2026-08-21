@@ -57,6 +57,9 @@ end
 declare extern type EnumInputDeviceType extends EnumItem with
 end
 
+declare extern type EnumUserInputType extends EnumItem with
+end
+
 declare extern type EnumInputRate extends EnumItem with
 end
 
@@ -345,6 +348,25 @@ declare extern type Tween with
     --- undoing, and a tween that snapped back would be impossible to interrupt gracefully. `Completed`
     --- fires with `Cancelled`.
     function Cancel(self): ()
+end
+
+declare extern type InputObject with
+    --- What kind of input this is. The coarse question, for a handler that does not care which key.
+    read UserInputType: EnumUserInputType
+    --- Which key, button or axis. `Unknown` for pointer motion and the wheel, which are not keys -- and
+    --- `Unknown` is a real item rather than nil precisely so this property never has to be checked
+    --- before it is compared.
+    read KeyCode: EnumKeyCode
+    --- Where the pointer is, in window pixels with the origin at the top left, with `z` carrying the
+    --- accumulated wheel. For a gamepad axis it is the deflection instead: `x` and `y` for a stick, `x`
+    --- alone for a trigger. A three-wide vector rather than a `Vector2` because `vector` is this
+    --- engine''s native primitive (ADR 0013) -- it costs no userdata and no allocation, which matters
+    --- on a value produced several times a tick.
+    read Position: vector
+    --- How much it moved since the last tick, in the same units as `Position`. `z` is the wheel
+    --- movement, which is where a `MouseWheel` event puts its one number. Zero for anything that is not
+    --- motion.
+    read Delta: vector
 end
 
 declare extern type AnimationTrack with
@@ -1295,6 +1317,31 @@ declare extern type InputService extends Instance with
     --- changes on a real input and not on a resting one: a gamepad stick drifting inside its dead zone
     --- does not steal the prompts from a keyboard.
     read LastInputDeviceType: EnumInputDeviceType
+    --- Fired on the tick an input STARTS -- a key pressed, a button pushed, a trigger crossing half
+    --- deflection (§2.4, ADR 0041). **`uiConsumed` is the second argument for a reason: read it.** It
+    --- is true when the interface already took this input -- the pointer was over an element, or a
+    --- `TextInput` had focus -- and a handler that ignores it is a handler that fires the gun when the
+    --- player clicks a button and jumps when they type a `w` into a chat box. **What this costs, stated
+    --- where it is read: a key handled here cannot be rebound.** It does not appear in a remapping
+    --- screen, because nothing in the tree says it exists. An `InputAction` does appear, binds a
+    --- keyboard key and a gamepad button to one name, and is what a shipped game should use -- this is
+    --- the direct, familiar option beside it, and it is the right one for a prototype, a debug key, or
+    --- anything a player will never remap. It fires on the SIMULATION clock, from the Input Action
+    --- System''s own dispatch, so a handler that writes to the world replays exactly. Camera look at
+    --- render rate is an `InputContext` with `Rate = Enum.InputRate.Render`.
+    read InputBegan: Signal<InputObject, boolean>
+    --- Fired on a tick an input MOVED without starting or ending: pointer motion, the wheel, a stick or
+    --- a trigger's deflection. `Position` and `Delta` carry it. One fire per tick per source at most,
+    --- with the deltas ACCUMULATED since the last one -- several device events land in a tick and a
+    --- handler that saw only the last would lose most of a fast flick. The same rebinding cost as
+    --- `InputBegan` applies.
+    read InputChanged: Signal<InputObject, boolean>
+    --- Fired on the tick an input STOPS. It fires for everything held when the window loses focus, so a
+    --- handler that pairs `InputBegan` with this one never leaks a press -- which is the failure that
+    --- leaves a character walking into a wall after an alt-tab. `uiConsumed` carries what it carried
+    --- when the input began, so a press that started on a button is still marked consumed when it is
+    --- released off one.
+    read InputEnded: Signal<InputObject, boolean>
     --- Fired when `LastInputDeviceType` changes, so a prompt redraws once rather than polling.
     read InputDeviceChanged: Signal<EnumInputDeviceType>
     --- Fired when the game window gains or loses keyboard focus. Losing focus releases every held
@@ -1303,6 +1350,14 @@ declare extern type InputService extends Instance with
     --- The pointer in window pixels, origin at the top left, as of the current tick. A snapshot like
     --- every other input read: two calls inside one tick agree.
     function GetPointerPosition(self): Vector2
+    --- Whether that key, button or trigger is held as of the current tick. The shortest thing this API
+    --- can be asked, and the reason there is no separate sugar module for it. It reads the device
+    --- SNAPSHOT and ignores what the UI consumed, which is the opposite of the events'' second argument
+    --- -- a poll asks what the hardware is doing and an event asks what happened to the game. A caller
+    --- who wants the UI-aware answer wants an `InputAction`, which is also the one that can be rebound.
+    --- An analogue source counts as down past half deflection, which is the same rule a `Bool` action
+    --- applies to one.
+    function IsKeyDown(self, keyCode: EnumKeyCode): boolean
 end
 
 declare extern type TweenService extends Instance with
@@ -1500,6 +1555,18 @@ declare Enum: {
         Gamepad: EnumInputDeviceType,
         Touch: EnumInputDeviceType,
         GetEnumItems: (self: any) -> { EnumInputDeviceType },
+    },
+    UserInputType: {
+        None: EnumUserInputType,
+        Keyboard: EnumUserInputType,
+        MouseButton1: EnumUserInputType,
+        MouseButton2: EnumUserInputType,
+        MouseButton3: EnumUserInputType,
+        MouseMovement: EnumUserInputType,
+        MouseWheel: EnumUserInputType,
+        Gamepad: EnumUserInputType,
+        Touch: EnumUserInputType,
+        GetEnumItems: (self: any) -> { EnumUserInputType },
     },
     InputRate: {
         Simulation: EnumInputRate,

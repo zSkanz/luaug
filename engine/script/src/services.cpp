@@ -764,6 +764,20 @@ int inputServiceGetPointerPosition(lua_State* L)
     return 1;
 }
 
+int inputServiceIsKeyDown(lua_State* L)
+{
+    const scene::EnumValue item = checkEnumItem(L, 2);
+    if (item.enumId != scene::generated::KeyCodeEnumId)
+        luaL_argerror(L, 2, "Enum.KeyCode");
+
+    // Null in a world the host has not handed a device to -- a bare
+    // `ScriptRuntime` in a test. Nothing is down in a world with no devices,
+    // which is the same answer an unfocused window gives.
+    const input::InputSystem* devices = services(L).input;
+    lua_pushboolean(L, devices != nullptr && devices->isKeyDown(item.value));
+    return 1;
+}
+
 // --- Sound and AudioService (M6) ---------------------------------------------
 
 int soundPlay(lua_State* L)
@@ -863,6 +877,7 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"InputAction", "GetState", inputActionGetState},
     {"InputAction", "GetPreferredBinding", inputActionGetPreferredBinding},
     {"InputService", "GetPointerPosition", inputServiceGetPointerPosition},
+    {"InputService", "IsKeyDown", inputServiceIsKeyDown},
 
     {"AnimationPlayer", "LoadAnimation", animationPlayerLoadAnimation},
 

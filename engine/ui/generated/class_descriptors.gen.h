@@ -50,16 +50,17 @@ inline constexpr scene::EnumId RunContextEnumId = 7;
 inline constexpr scene::EnumId KeyCodeEnumId = 8;
 inline constexpr scene::EnumId InputActionTypeEnumId = 9;
 inline constexpr scene::EnumId InputDeviceTypeEnumId = 10;
-inline constexpr scene::EnumId InputRateEnumId = 11;
-inline constexpr scene::EnumId EasingStyleEnumId = 12;
-inline constexpr scene::EnumId EasingDirectionEnumId = 13;
-inline constexpr scene::EnumId PlaybackStateEnumId = 14;
-inline constexpr scene::EnumId FillDirectionEnumId = 15;
-inline constexpr scene::EnumId HorizontalAlignmentEnumId = 16;
-inline constexpr scene::EnumId VerticalAlignmentEnumId = 17;
-inline constexpr scene::EnumId SortOrderEnumId = 18;
-inline constexpr scene::EnumId AutomaticSizeEnumId = 19;
-inline constexpr scene::EnumId ScaleTypeEnumId = 20;
+inline constexpr scene::EnumId UserInputTypeEnumId = 11;
+inline constexpr scene::EnumId InputRateEnumId = 12;
+inline constexpr scene::EnumId EasingStyleEnumId = 13;
+inline constexpr scene::EnumId EasingDirectionEnumId = 14;
+inline constexpr scene::EnumId PlaybackStateEnumId = 15;
+inline constexpr scene::EnumId FillDirectionEnumId = 16;
+inline constexpr scene::EnumId HorizontalAlignmentEnumId = 17;
+inline constexpr scene::EnumId VerticalAlignmentEnumId = 18;
+inline constexpr scene::EnumId SortOrderEnumId = 19;
+inline constexpr scene::EnumId AutomaticSizeEnumId = 20;
+inline constexpr scene::EnumId ScaleTypeEnumId = 21;
 
 } // namespace generated
 

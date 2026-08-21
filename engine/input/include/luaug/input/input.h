@@ -78,6 +78,59 @@ enum class Rate : i32
     Render = 1,
 };
 
+// `Enum.UserInputType`'s values -- what KIND of input an `InputObject` carries
+// (ADR 0041).
+enum class UserInputType : i32
+{
+    None = 0,
+    Keyboard = 1,
+    MouseButton1 = 2,
+    MouseButton2 = 3,
+    MouseButton3 = 4,
+    MouseMovement = 5,
+    MouseWheel = 6,
+    Gamepad = 7,
+    Touch = 8,
+};
+
+// One raw input, as `InputService.InputBegan` / `InputChanged` / `InputEnded`
+// carry it.
+//
+// **Produced by the IAS's own dispatch and never read from the OS** (ADR 0041).
+// That is the whole reason this surface is allowed to exist: the events come
+// from the same snapshot the actions do, on the same tick, after the UI has
+// consumed what it consumed -- so they sink correctly, they replay from the
+// recorded stream, and a handler that writes to the world is deterministic.
+//
+// POD and trivially copyable, because it crosses the same kind of seam a
+// `scene::Change` does and for the same reason: `script` turns one into a
+// userdata, and nothing here may know what a Luau value is (R17).
+struct RawInputEvent
+{
+    enum class Phase : core::u8
+    {
+        Began,
+        Changed,
+        Ended,
+    };
+
+    Phase phase = Phase::Began;
+    UserInputType userInputType = UserInputType::None;
+    // `Enum.KeyCode`'s value, or 0 (`Unknown`) for motion and the wheel.
+    i32 keyCode = 0;
+    // Pointer position in window pixels with `z` carrying the accumulated
+    // wheel, or a gamepad axis's deflection. `vector` rather than a `Vector2`
+    // because `vector` is the native primitive (ADR 0013) and this is produced
+    // several times a tick.
+    core::Vec3 position;
+    core::Vec3 delta;
+    // Whether the interface already took this input -- the second argument of
+    // every one of the three events, and the one a handler that ignores it
+    // regrets: it is what stops a click on a button also firing the gun and a
+    // `w` typed into a text box also jumping.
+    bool uiConsumed = false;
+};
+
 // The number of `Enum.KeyCode` items. It is not derived from `platform`'s enums
 // because it is not their union: the KeyCode table adds two composite sticks
 // that no device event names. `input.cpp` static_asserts the arithmetic against
@@ -148,6 +201,13 @@ public:
 
     [[nodiscard]] const DeviceState& snapshot() const noexcept { return m_state; }
 
+    // Whether one `Enum.KeyCode` is held, by the same rule a `Bool` action
+    // applies -- an analogue source counts as down past half deflection. What
+    // `InputService:IsKeyDown` answers, and it deliberately ignores what the UI
+    // consumed: a poll asks what the HARDWARE is doing, and an event asks what
+    // happened to the game.
+    [[nodiscard]] bool isKeyDown(i32 keyCode) const noexcept;
+
     // Resolves every `Simulation`-rate context and writes the result into the
     // world. Enqueues a `Change` per action whose value moved.
     void dispatchSimTick(scene::World& world, u64 tick);
@@ -168,6 +228,23 @@ public:
     // health bar from eating the jump button.
     void setPointerCapturedByUi(bool captured) noexcept { m_uiCapturedPointer = captured; }
 
+    // Whether a `TextInput` has focus. The keyboard half of the same claim, and
+    // it consumes the KEYBOARD codes for that frame -- so a player typing `w`
+    // into a chat box does not also walk forward, which is the same defect the
+    // pointer flag fixes one device over.
+    void setKeyboardCapturedByUi(bool captured) noexcept { m_uiCapturedKeyboard = captured; }
+
+    // The raw events this tick's `Simulation` dispatch produced, in a stable
+    // order: keys first by `KeyCode`, then the pointer, then the wheel, then the
+    // gamepad axes. Drained rather than pushed as a `scene::Change`, because a
+    // `Change` is sixteen POD bytes about an Instance and an `InputObject` is
+    // neither -- the same reasoning `AnimationHost::drainEnded` carries.
+    //
+    // Empty for a `Render` dispatch: ADR 0041 puts these on the `Simulation`
+    // clock so that a handler which writes to the world replays by
+    // construction.
+    [[nodiscard]] std::span<const RawInputEvent> drainRawEvents() noexcept;
+
     // Clears every held input and dispatches, so that anything down is released.
     // Called when the window loses focus: an alt-tab that left a key held is how
     // a character keeps walking into a wall while its window is in the
@@ -176,6 +253,13 @@ public:
 
 private:
     void dispatch(scene::World& world, Rate rate);
+
+    // Fills `m_rawEvents` from the difference between `m_previous` and the
+    // current snapshot. Called at the top of a `Simulation` dispatch, after the
+    // UI's claims are known and before any context resolves -- these events
+    // describe what the DEVICE did, and a sinking context is a fact about
+    // actions rather than about hardware.
+    void collectRawEvents(core::Vec2 pointerDelta, core::Vec2 wheel);
 
     DeviceState m_state;
     // Accumulated since the last `Simulation` dispatch and since the last
@@ -186,6 +270,20 @@ private:
     core::Vec2 m_renderPointerDelta;
     core::Vec2 m_renderWheel;
     bool m_uiCapturedPointer = false;
+    bool m_uiCapturedKeyboard = false;
+
+    // What the last `Simulation` dispatch saw, so the next one can tell a press
+    // from a hold. Held here rather than derived from the event stream, because
+    // the snapshot IS the contract: a replay hands over a state and this has to
+    // produce the same events from it as a live device would.
+    DeviceState m_previous;
+    bool m_hasPrevious = false;
+    // Whether each held input was UI-consumed when it began, so that
+    // `InputEnded` reports what `InputBegan` reported -- a press that started on
+    // a button is still consumed when it is released off one.
+    std::array<bool, kKeyCodeCount> m_beganConsumed{};
+    std::vector<RawInputEvent> m_rawEvents;
+    std::vector<RawInputEvent> m_rawDrained;
 
     // Reused across dispatches so a steady-state frame allocates nothing.
     // A context and its priority, sorted highest first by a STABLE sort, so

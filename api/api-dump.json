@@ -728,15 +728,64 @@
           "Name": "GetPointerPosition",
           "Parameters": [],
           "Returns": ["Vector2"]
+        },
+        {
+          "Name": "IsKeyDown",
+          "Parameters": [
+            {
+              "Name": "keyCode",
+              "Type": "Enum.KeyCode"
+            }
+          ],
+          "Returns": ["boolean"]
         }
       ],
       "Events": [
+        {
+          "Name": "InputBegan",
+          "Parameters": [
+            {
+              "Name": "input",
+              "Type": "InputObject"
+            },
+            {
+              "Name": "uiConsumed",
+              "Type": "boolean"
+            }
+          ]
+        },
+        {
+          "Name": "InputChanged",
+          "Parameters": [
+            {
+              "Name": "input",
+              "Type": "InputObject"
+            },
+            {
+              "Name": "uiConsumed",
+              "Type": "boolean"
+            }
+          ]
+        },
         {
           "Name": "InputDeviceChanged",
           "Parameters": [
             {
               "Name": "deviceType",
               "Type": "Enum.InputDeviceType"
+            }
+          ]
+        },
+        {
+          "Name": "InputEnded",
+          "Parameters": [
+            {
+              "Name": "input",
+              "Type": "InputObject"
+            },
+            {
+              "Name": "uiConsumed",
+              "Type": "boolean"
             }
           ]
         },
@@ -2582,6 +2631,39 @@
           "ThreadSafety": "Unsafe"
         }
       ],
+      "Operators": []
+    },
+    {
+      "Name": "InputObject",
+      "Constructors": [],
+      "Constants": [],
+      "Properties": [
+        {
+          "Name": "Delta",
+          "Type": "vector",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "KeyCode",
+          "Type": "Enum.KeyCode",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Position",
+          "Type": "vector",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "UserInputType",
+          "Type": "Enum.UserInputType",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Methods": [],
       "Operators": []
     },
     {
@@ -4434,6 +4516,47 @@
         {
           "Name": "Name",
           "Value": 0
+        }
+      ]
+    },
+    {
+      "Name": "UserInputType",
+      "Items": [
+        {
+          "Name": "Gamepad",
+          "Value": 7
+        },
+        {
+          "Name": "Keyboard",
+          "Value": 1
+        },
+        {
+          "Name": "MouseButton1",
+          "Value": 2
+        },
+        {
+          "Name": "MouseButton2",
+          "Value": 3
+        },
+        {
+          "Name": "MouseButton3",
+          "Value": 4
+        },
+        {
+          "Name": "MouseMovement",
+          "Value": 5
+        },
+        {
+          "Name": "MouseWheel",
+          "Value": 6
+        },
+        {
+          "Name": "None",
+          "Value": 0
+        },
+        {
+          "Name": "Touch",
+          "Value": 8
         }
       ]
     },

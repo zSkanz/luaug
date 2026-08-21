@@ -130,6 +130,11 @@ enum class UserdataTag : int
     // and the VM-local index of the record that carries its `Ended` signal.
     AnimationTrack = 18,
 
+    // The raw input snapshot `InputService`'s three events carry (ADR 0041). A
+    // VALUE type unlike the two handles above it: it describes what happened on
+    // one tick and there is nothing behind it to mutate.
+    InputObject = 19,
+
     // Not a tag. The count exists so a registration loop can assert it covered
     // everything, and so the budget remaining is a number someone can read.
     Count,

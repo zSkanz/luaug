@@ -62,7 +62,7 @@ constraint that decides most of the decisions below.
       decision, because it is baked into every golden recorded after it. The
       debug wire path stays — `render_world.cpp` says why, and it is still how
       anything is seen when the real path breaks.
-- [ ] **`InputService` gains a raw event surface** — human decision 2026-08-21,
+- [x] **`InputService` gains a raw event surface** — human decision 2026-08-21,
       **ADR 0041**, amending ADR 0029. `InputBegan` / `InputChanged` /
       `InputEnded` carrying an `InputObject` and a UI-consumed flag, plus
       `IsKeyDown`. Fed from the IAS's own dispatch and never from the OS, after

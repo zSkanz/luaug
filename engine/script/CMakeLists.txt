@@ -15,6 +15,7 @@ luaug_add_module(script
     LAYER 5
     SOURCES
         src/animation.cpp
+        src/input_events.cpp
         src/binding.cpp
         src/datatypes.cpp
         src/instance_binding.cpp

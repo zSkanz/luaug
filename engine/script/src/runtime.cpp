@@ -4,6 +4,7 @@
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
 #include "luaug/script/datatypes.h"
+#include "luaug/script/input_events.h"
 #include "luaug/script/instance_binding.h"
 #include "luaug/script/modules.h"
 #include "luaug/script/sandbox.h"
@@ -201,6 +202,16 @@ void ScriptRuntime::setGizmoSink(const GizmoSink& sink)
 void ScriptRuntime::setPhysics(scene::PhysicsSync* physics)
 {
     m_impl->services.physics = physics;
+}
+
+void ScriptRuntime::setInput(const input::InputSystem* input)
+{
+    m_impl->services.input = input;
+}
+
+void ScriptRuntime::fireInputEvents(std::span<const input::RawInputEvent> events)
+{
+    luaug::script::fireInputEvents(m_impl->state, events);
 }
 
 void ScriptRuntime::setAnimation(scene::AnimationHost* animation)

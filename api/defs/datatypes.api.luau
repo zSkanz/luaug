@@ -1438,6 +1438,56 @@ local Datatypes: { Schema.Datatype } = {
         } :: { Schema.Method },
     },
     {
+        Name = "InputObject",
+        Module = "script",
+        Doc = "One raw input, as `InputService.InputBegan`, `InputChanged` and `InputEnded` carry it (§2.4, "
+            .. "ADR 0041). A read-only SNAPSHOT and not a live object: it describes what happened on one "
+            .. "tick, and a handler that stashes one is holding a fact rather than a handle.\n\n**These "
+            .. "events come from the Input Action System''s own dispatch, not from the operating system.** "
+            .. "Same source, same tick, after the UI has consumed what it consumed -- and in a replay they "
+            .. "come from the recorded stream, so a recorded run reproduces every input a game reads.",
+        Properties = {
+            {
+                Name = "UserInputType",
+                Type = "Enum.UserInputType",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "What kind of input this is. The coarse question, for a handler that does not care which "
+                    .. "key.",
+            },
+            {
+                Name = "KeyCode",
+                Type = "Enum.KeyCode",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "Which key, button or axis. `Unknown` for pointer motion and the wheel, which are not "
+                    .. "keys -- and `Unknown` is a real item rather than nil precisely so this property never "
+                    .. "has to be checked before it is compared.",
+            },
+            {
+                Name = "Position",
+                Type = "vector",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "Where the pointer is, in window pixels with the origin at the top left, with `z` "
+                    .. "carrying the accumulated wheel. For a gamepad axis it is the deflection instead: `x` "
+                    .. "and `y` for a stick, `x` alone for a trigger.\n\nA three-wide vector rather than a "
+                    .. "`Vector2` because `vector` is this engine''s native primitive (ADR 0013) -- it costs "
+                    .. "no userdata and no allocation, which matters on a value produced several times a "
+                    .. "tick.",
+            },
+            {
+                Name = "Delta",
+                Type = "vector",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "How much it moved since the last tick, in the same units as `Position`. `z` is the "
+                    .. "wheel movement, which is where a `MouseWheel` event puts its one number. Zero for "
+                    .. "anything that is not motion.",
+            },
+        } :: { Schema.Property },
+    },
+    {
         Name = "AnimationTrack",
         Module = "script",
         Doc = "One clip playing on one `AnimationPlayer`, returned by `LoadAnimation` (§2.2). A handle rather "

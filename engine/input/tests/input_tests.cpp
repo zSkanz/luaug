@@ -416,3 +416,239 @@ TEST_CASE("a resting stick does not steal the prompts from the keyboard")
     fixture.system.pumpFrame(nudge);
     CHECK(fixture.system.snapshot().lastDevice == input::DeviceType::Gamepad);
 }
+
+// --- The raw event surface (ADR 0041) ----------------------------------------
+//
+// Every case below is about the one property that made this surface allowable at
+// all: these events come out of the IAS's own dispatch. Not from the OS, not on
+// the wall clock, and not before the UI has said what it took.
+
+namespace {
+
+// The raw events one `Simulation` dispatch produced, drained.
+[[nodiscard]] std::vector<input::RawInputEvent> rawOf(Fixture& fixture)
+{
+    const std::span<const input::RawInputEvent> events = fixture.system.drainRawEvents();
+    return std::vector<input::RawInputEvent>(events.begin(), events.end());
+}
+
+[[nodiscard]] platform::Event mouseButton(platform::EventType type)
+{
+    platform::Event event;
+    event.type = type;
+    event.button = platform::MouseButton::Left;
+    return event;
+}
+
+} // namespace
+
+TEST_CASE("a key press and release produce InputBegan and InputEnded, once each")
+{
+    Fixture fixture;
+    fixture.system.dispatchSimTick(*fixture.world, 1);
+    CHECK(rawOf(fixture).empty());
+
+    fixture.press("Space");
+    fixture.system.dispatchSimTick(*fixture.world, 2);
+    std::vector<input::RawInputEvent> began = rawOf(fixture);
+    REQUIRE(began.size() == 1);
+    CHECK(began[0].phase == input::RawInputEvent::Phase::Began);
+    CHECK(began[0].userInputType == input::UserInputType::Keyboard);
+    CHECK(began[0].keyCode == fixture.keyCode("Space"));
+    CHECK_FALSE(began[0].uiConsumed);
+
+    // Held is not begun. A surface that fired every tick a key was down would be
+    // a polling loop wearing an event's clothes, and every handler would have to
+    // filter it back out.
+    fixture.system.dispatchSimTick(*fixture.world, 3);
+    CHECK(rawOf(fixture).empty());
+
+    fixture.release("Space");
+    fixture.system.dispatchSimTick(*fixture.world, 4);
+    std::vector<input::RawInputEvent> ended = rawOf(fixture);
+    REQUIRE(ended.size() == 1);
+    CHECK(ended[0].phase == input::RawInputEvent::Phase::Ended);
+    CHECK(ended[0].keyCode == fixture.keyCode("Space"));
+}
+
+TEST_CASE("nothing is produced on the Render clock")
+{
+    // ADR 0041 puts these on `Simulation` so a handler that writes to the world
+    // replays by construction. A render dispatch that also produced them would
+    // fire one press twice, on two clocks, one of which a replay does not have.
+    Fixture fixture;
+    fixture.press("Space");
+    fixture.system.dispatchRenderRate(*fixture.world);
+    CHECK(rawOf(fixture).empty());
+
+    fixture.system.dispatchSimTick(*fixture.world, 1);
+    CHECK(rawOf(fixture).size() == 1);
+}
+
+TEST_CASE("the UI's claim reaches the event's second argument")
+{
+    Fixture fixture;
+    fixture.system.setPointerCapturedByUi(true);
+
+    const platform::Event events[] = {mouseButton(platform::EventType::MouseButtonDown)};
+    fixture.system.pumpFrame(events);
+    fixture.system.dispatchSimTick(*fixture.world, 1);
+
+    std::vector<input::RawInputEvent> raw = rawOf(fixture);
+    REQUIRE(raw.size() == 1);
+    CHECK(raw[0].userInputType == input::UserInputType::MouseButton1);
+    // The whole reason the flag is the SECOND argument rather than something a
+    // handler has to go and ask for: a click on a button must not also fire the
+    // gun, and the only way a handler can know is if it is told.
+    CHECK(raw[0].uiConsumed);
+}
+
+TEST_CASE("a keyboard press is the game's even while the pointer is over the UI")
+{
+    // The pointer's claim covers the mouse codes and nothing else. A health bar
+    // under the cursor eating the jump key is the defect this asserts against.
+    Fixture fixture;
+    fixture.system.setPointerCapturedByUi(true);
+    fixture.press("Space");
+    fixture.system.dispatchSimTick(*fixture.world, 1);
+
+    std::vector<input::RawInputEvent> raw = rawOf(fixture);
+    REQUIRE(raw.size() == 1);
+    CHECK_FALSE(raw[0].uiConsumed);
+}
+
+TEST_CASE("a focused TextInput takes the keyboard, and the action stops seeing it")
+{
+    Fixture fixture;
+    const InstanceId context = fixture.context();
+    const InstanceId jump = fixture.action(context, input::ActionType::Bool);
+    const InstanceId binding = fixture.binding(jump);
+    fixture.world->inputBindings().find(binding)->keyCode = fixture.keyCode("W");
+
+    fixture.press("W");
+    fixture.system.dispatchSimTick(*fixture.world, 1);
+    CHECK(fixture.state(jump).pressed);
+
+    // Focus moves into a text field. The key is still physically down, and the
+    // action has to stop seeing it or a player typing `w` into a chat box walks
+    // forward.
+    fixture.system.setKeyboardCapturedByUi(true);
+    fixture.system.dispatchSimTick(*fixture.world, 2);
+    CHECK_FALSE(fixture.state(jump).pressed);
+}
+
+TEST_CASE("InputEnded reports what InputBegan reported, even if the UI let go first")
+{
+    // A press that started on a button is still that press when it is released,
+    // and a handler pairing the two must not be told the release was the game's
+    // when the press was not. Otherwise a drag off a button is half-handled.
+    Fixture fixture;
+    fixture.system.setPointerCapturedByUi(true);
+
+    const platform::Event downEvents[] = {mouseButton(platform::EventType::MouseButtonDown)};
+    fixture.system.pumpFrame(downEvents);
+    fixture.system.dispatchSimTick(*fixture.world, 1);
+    REQUIRE(rawOf(fixture).size() == 1);
+
+    fixture.system.setPointerCapturedByUi(false);
+    const platform::Event upEvents[] = {mouseButton(platform::EventType::MouseButtonUp)};
+    fixture.system.pumpFrame(upEvents);
+    fixture.system.dispatchSimTick(*fixture.world, 2);
+
+    std::vector<input::RawInputEvent> raw = rawOf(fixture);
+    REQUIRE(raw.size() == 1);
+    CHECK(raw[0].phase == input::RawInputEvent::Phase::Ended);
+    CHECK(raw[0].uiConsumed);
+}
+
+TEST_CASE("pointer motion is one InputChanged a tick, with the delta accumulated")
+{
+    Fixture fixture;
+    platform::Event first;
+    first.type = platform::EventType::MouseMoved;
+    first.pointerX = 10.0f;
+    first.pointerY = 20.0f;
+    first.pointerDeltaX = 3.0f;
+    platform::Event second = first;
+    second.pointerX = 14.0f;
+    second.pointerDeltaX = 4.0f;
+    const platform::Event events[] = {first, second};
+    fixture.system.pumpFrame(events);
+    fixture.system.dispatchSimTick(*fixture.world, 1);
+
+    std::vector<input::RawInputEvent> raw = rawOf(fixture);
+    REQUIRE(raw.size() == 1);
+    CHECK(raw[0].phase == input::RawInputEvent::Phase::Changed);
+    CHECK(raw[0].userInputType == input::UserInputType::MouseMovement);
+    // Seven and not four: a handler that saw only the last device event would
+    // lose most of a fast flick, which is the same reason the deltas are
+    // accumulated for actions.
+    CHECK(static_cast<double>(raw[0].delta.x) == doctest::Approx(7.0));
+    CHECK(static_cast<double>(raw[0].position.x) == doctest::Approx(14.0));
+    // Motion has no beginning and no end, so it is never `Began` or `Ended`.
+    CHECK(raw[0].keyCode == 0);
+}
+
+TEST_CASE("a resting pointer produces nothing at all")
+{
+    // Sixty ticks a second into a handler that has nothing to react to is the
+    // cost a naive implementation pays forever.
+    Fixture fixture;
+    fixture.system.dispatchSimTick(*fixture.world, 1);
+    (void)rawOf(fixture);
+    for (core::u64 tick = 2; tick < 10; ++tick) {
+        fixture.system.dispatchSimTick(*fixture.world, tick);
+        CHECK(rawOf(fixture).empty());
+    }
+}
+
+TEST_CASE("losing focus ends everything that was held")
+{
+    // A handler that pairs `InputBegan` with `InputEnded` must never leak a
+    // press. An alt-tab that left W down is how a character keeps walking into a
+    // wall with the window in the background.
+    Fixture fixture;
+    fixture.press("W");
+    fixture.press("A");
+    fixture.system.dispatchSimTick(*fixture.world, 1);
+    REQUIRE(rawOf(fixture).size() == 2);
+
+    fixture.system.releaseAll(*fixture.world);
+    std::vector<input::RawInputEvent> raw = rawOf(fixture);
+    REQUIRE(raw.size() == 2);
+    CHECK(raw[0].phase == input::RawInputEvent::Phase::Ended);
+    CHECK(raw[1].phase == input::RawInputEvent::Phase::Ended);
+}
+
+TEST_CASE("events come out in KeyCode order, which is an order something promises")
+{
+    // R10: an observable order has to come from a container that has one. Two
+    // keys pressed in the same frame arrive from the OS in whatever order the
+    // driver produced, and a replay must not depend on it.
+    Fixture fixture;
+    fixture.press("Z");
+    fixture.press("A");
+    fixture.system.dispatchSimTick(*fixture.world, 1);
+
+    std::vector<input::RawInputEvent> raw = rawOf(fixture);
+    REQUIRE(raw.size() == 2);
+    CHECK(raw[0].keyCode < raw[1].keyCode);
+    CHECK(raw[0].keyCode == fixture.keyCode("A"));
+}
+
+TEST_CASE("IsKeyDown reads the device and ignores what the UI took")
+{
+    // The opposite of the events' second argument, deliberately: a poll asks
+    // what the hardware is doing. A caller who wants the UI-aware answer wants
+    // an `InputAction`, which is also the one that can be rebound.
+    Fixture fixture;
+    CHECK_FALSE(fixture.system.isKeyDown(fixture.keyCode("Space")));
+
+    fixture.press("Space");
+    CHECK(fixture.system.isKeyDown(fixture.keyCode("Space")));
+    fixture.system.setKeyboardCapturedByUi(true);
+    CHECK(fixture.system.isKeyDown(fixture.keyCode("Space")));
+
+    fixture.release("Space");
+    CHECK_FALSE(fixture.system.isKeyDown(fixture.keyCode("Space")));
+}

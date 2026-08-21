@@ -2025,6 +2025,61 @@ void registerEnums(EnumRegistry& enums, core::AtomTable& atoms)
     inputDeviceTypeDesc.items = inputDeviceTypeItems;
     enums.registerEnum(inputDeviceTypeDesc);
 
+    // --- UserInputType ---
+    static std::array<EnumItemDesc, 9> userInputTypeItems;
+    userInputTypeItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("None"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Keyboard"),
+            .value = 1,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("MouseButton1"),
+            .value = 2,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("MouseButton2"),
+            .value = 3,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("MouseButton3"),
+            .value = 4,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("MouseMovement"),
+            .value = 5,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("MouseWheel"),
+            .value = 6,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Gamepad"),
+            .value = 7,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Touch"),
+            .value = 8,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor userInputTypeDesc;
+    userInputTypeDesc.name = atoms.intern("UserInputType");
+    userInputTypeDesc.docKey = {};
+    userInputTypeDesc.items = userInputTypeItems;
+    enums.registerEnum(userInputTypeDesc);
+
     // --- InputRate ---
     static std::array<EnumItemDesc, 2> inputRateItems;
     inputRateItems = {{

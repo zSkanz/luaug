@@ -318,6 +318,150 @@ struct Contribution
 
 } // namespace
 
+namespace {
+
+// Which `Enum.UserInputType` a `KeyCode` produces. Coarser than `deviceOf`,
+// because these are the kinds a raw handler switches on rather than the families
+// a prompt draws for.
+[[nodiscard]] UserInputType userInputTypeOf(i32 keyCode) noexcept
+{
+    if (inRange(keyCode, KeyboardFirst, KeyboardCount))
+        return UserInputType::Keyboard;
+    if (keyCode == MouseMovement)
+        return UserInputType::MouseMovement;
+    if (keyCode == MouseWheel)
+        return UserInputType::MouseWheel;
+    if (inRange(keyCode, MouseButtonFirst, MouseButtonCount)) {
+        // The first three get their own items because `== MouseButton1` is the
+        // overwhelmingly common test; the fourth and fifth have no name in the
+        // enum and report as the primary's neighbour rather than as `None`.
+        switch (keyCode - MouseButtonFirst) {
+        case 0:
+            return UserInputType::MouseButton1;
+        case 1:
+            return UserInputType::MouseButton2;
+        case 2:
+            return UserInputType::MouseButton3;
+        default:
+            return UserInputType::MouseButton1;
+        }
+    }
+    if (inRange(keyCode, PadButtonFirst, PadButtonCount) || inRange(keyCode, PadAxisFirst, PadAxisCount) ||
+        keyCode == LeftThumbstick || keyCode == RightThumbstick)
+        return UserInputType::Gamepad;
+    return UserInputType::None;
+}
+
+// Whether the interface already took this input. Two claims, one per device
+// family, and each one covers exactly the codes that family produces -- which is
+// what stops a HUD button under the pointer from also eating the jump key.
+[[nodiscard]] bool consumedByUi(i32 keyCode, bool pointerCaptured, bool keyboardCaptured) noexcept
+{
+    if (pointerCaptured &&
+        (inRange(keyCode, MouseButtonFirst, MouseButtonCount) || keyCode == MouseMovement || keyCode == MouseWheel))
+        return true;
+    return keyboardCaptured && inRange(keyCode, KeyboardFirst, KeyboardCount);
+}
+
+} // namespace
+
+bool InputSystem::isKeyDown(i32 keyCode) const noexcept
+{
+    // The same `digital`, with nothing consumed: a poll is about the device.
+    static const std::array<bool, kKeyCodeCount> nothingConsumed{};
+    return digital(m_state, nothingConsumed, keyCode);
+}
+
+std::span<const RawInputEvent> InputSystem::drainRawEvents() noexcept
+{
+    m_rawDrained.swap(m_rawEvents);
+    m_rawEvents.clear();
+    return m_rawDrained;
+}
+
+void InputSystem::collectRawEvents(core::Vec2 pointerDelta, core::Vec2 wheel)
+{
+    m_rawEvents.clear();
+
+    const core::Vec3 pointer{m_state.pointer.x, m_state.pointer.y, 0.0f};
+
+    // **Walked by KeyCode, ascending.** The order these fire in is observable --
+    // a handler may write to the world -- so it has to come from something that
+    // promises one (R10), and an array index is the cheapest promise there is.
+    for (i32 code = 1; code < static_cast<i32>(kKeyCodeCount); ++code) {
+        const auto slot = static_cast<usize>(code);
+        // `digital` rather than `held`, so a trigger crossing half deflection
+        // begins and ends like a button -- which is what `Enum.KeyCode`'s own
+        // doc promises and what a `Bool` action already does with one.
+        static const std::array<bool, kKeyCodeCount> nothingConsumed{};
+        const bool held = digital(m_state, nothingConsumed, code);
+        const bool was = m_hasPrevious && digital(m_previous, nothingConsumed, code);
+        if (held == was)
+            continue;
+
+        const UserInputType kind = userInputTypeOf(code);
+        const bool consumed =
+            held ? consumedByUi(code, m_uiCapturedPointer, m_uiCapturedKeyboard) : m_beganConsumed[slot];
+        if (held)
+            m_beganConsumed[slot] = consumed;
+
+        RawInputEvent event;
+        event.phase = held ? RawInputEvent::Phase::Began : RawInputEvent::Phase::Ended;
+        event.userInputType = kind;
+        event.keyCode = code;
+        event.position = pointer;
+        event.uiConsumed = consumed;
+        m_rawEvents.push_back(event);
+    }
+
+    // Motion, once per tick, with the delta ACCUMULATED since the last dispatch.
+    // A handler that saw only the last device event would lose most of a fast
+    // flick, which is the same reason the deltas are accumulated at all.
+    if (pointerDelta.x != 0.0f || pointerDelta.y != 0.0f) {
+        RawInputEvent event;
+        event.phase = RawInputEvent::Phase::Changed;
+        event.userInputType = UserInputType::MouseMovement;
+        event.position = pointer;
+        event.delta = core::Vec3{pointerDelta.x, pointerDelta.y, 0.0f};
+        event.uiConsumed = m_uiCapturedPointer;
+        m_rawEvents.push_back(event);
+    }
+
+    if (wheel.x != 0.0f || wheel.y != 0.0f) {
+        RawInputEvent event;
+        event.phase = RawInputEvent::Phase::Changed;
+        event.userInputType = UserInputType::MouseWheel;
+        // `z` is where the wheel lives, in both fields, so a handler reads one
+        // component whichever it reached for.
+        event.position = core::Vec3{m_state.pointer.x, m_state.pointer.y, wheel.y};
+        event.delta = core::Vec3{wheel.x, 0.0f, wheel.y};
+        event.uiConsumed = m_uiCapturedPointer;
+        m_rawEvents.push_back(event);
+    }
+
+    // Gamepad axes, which have no press to begin or end: a stick that moved is
+    // `InputChanged` with its deflection, and one resting at the same value
+    // produces nothing at all.
+    for (i32 code = PadAxisFirst; code < PadAxisFirst + PadAxisCount; ++code) {
+        const auto slot = static_cast<usize>(code);
+        const f32 value = m_state.axis[slot];
+        const f32 was = m_hasPrevious ? m_previous.axis[slot] : 0.0f;
+        if (value == was)
+            continue;
+
+        RawInputEvent event;
+        event.phase = RawInputEvent::Phase::Changed;
+        event.userInputType = UserInputType::Gamepad;
+        event.keyCode = code;
+        event.position = core::Vec3{value, 0.0f, 0.0f};
+        event.delta = core::Vec3{value - was, 0.0f, 0.0f};
+        m_rawEvents.push_back(event);
+    }
+
+    m_previous = m_state;
+    m_hasPrevious = true;
+}
+
 void InputSystem::dispatch(scene::World& world, Rate rate)
 {
     const core::NameAtom pressedAtom = world.atoms().intern("Pressed");
@@ -357,6 +501,22 @@ void InputSystem::dispatch(scene::World& world, Rate rate)
         m_consumed[static_cast<usize>(MouseMovement)] = true;
         m_consumed[static_cast<usize>(MouseWheel)] = true;
     }
+
+    // The keyboard half of the same claim: a focused `TextInput` eats the keys.
+    // Without it a player typing `w` into a chat box walks forward, which is the
+    // same defect the pointer flag fixes one device over.
+    if (m_uiCapturedKeyboard) {
+        for (i32 code = KeyboardFirst; code < KeyboardFirst + KeyboardCount; ++code)
+            m_consumed[static_cast<usize>(code)] = true;
+    }
+
+    // The raw events (ADR 0041), collected HERE: after the UI's claims are known
+    // and before any context resolves. They describe what the device did, so a
+    // sinking context -- which is a fact about actions -- must not change them,
+    // while the UI's claim -- which is a fact about who the input reached --
+    // must.
+    if (simulation)
+        collectRawEvents(pointerDelta, wheel);
 
     for (const auto& [priority, contextId] : m_contexts) {
         const scene::InputContextComponent* context = world.inputContexts().find(contextId);

@@ -680,8 +680,66 @@ local Classes: { Schema.Class } = {
                 Doc = "The pointer in window pixels, origin at the top left, as of the current tick. A "
                     .. "snapshot like every other input read: two calls inside one tick agree.",
             },
+            {
+                Name = "IsKeyDown",
+                Parameters = { { Name = "keyCode", Type = "Enum.KeyCode" } },
+                Returns = { "boolean" },
+                Doc = "Whether that key, button or trigger is held as of the current tick. The shortest thing "
+                    .. "this API can be asked, and the reason there is no separate sugar module for "
+                    .. "it.\n\nIt reads the device SNAPSHOT and ignores what the UI consumed, which is the "
+                    .. "opposite of the events'' second argument -- a poll asks what the hardware is doing and "
+                    .. "an event asks what happened to the game. A caller who wants the UI-aware answer wants "
+                    .. "an `InputAction`, which is also the one that can be rebound.\n\nAn analogue source "
+                    .. "counts as down past half deflection, which is the same rule a `Bool` action applies to "
+                    .. "one.",
+            },
         } :: { Schema.Method },
         Events = {
+            {
+                Name = "InputBegan",
+                Parameters = {
+                    { Name = "input", Type = "InputObject" },
+                    { Name = "uiConsumed", Type = "boolean" },
+                },
+                Doc = "Fired on the tick an input STARTS -- a key pressed, a button pushed, a trigger crossing "
+                    .. "half deflection (§2.4, ADR 0041).\n\n**`uiConsumed` is the second argument for a "
+                    .. "reason: read it.** It is true when the interface already took this input -- the "
+                    .. "pointer was over an element, or a `TextInput` had focus -- and a handler that ignores "
+                    .. "it is a handler that fires the gun when the player clicks a button and jumps when they "
+                    .. "type a `w` into a chat box.\n\n**What this costs, stated where it is read: a key "
+                    .. "handled here cannot be rebound.** It does not appear in a remapping screen, because "
+                    .. "nothing in the tree says it exists. An `InputAction` does appear, binds a keyboard key "
+                    .. "and a gamepad button to one name, and is what a shipped game should use -- this is the "
+                    .. "direct, familiar option beside it, and it is the right one for a prototype, a debug "
+                    .. "key, or anything a player will never remap.\n\nIt fires on the SIMULATION clock, from "
+                    .. "the Input Action System''s own dispatch, so a handler that writes to the world "
+                    .. "replays exactly. Camera look at render rate is an `InputContext` with "
+                    .. "`Rate = Enum.InputRate.Render`.",
+            },
+            {
+                Name = "InputChanged",
+                Parameters = {
+                    { Name = "input", Type = "InputObject" },
+                    { Name = "uiConsumed", Type = "boolean" },
+                },
+                Doc = "Fired on a tick an input MOVED without starting or ending: pointer motion, the wheel, a "
+                    .. "stick or a trigger's deflection. `Position` and `Delta` carry it.\n\nOne fire per tick "
+                    .. "per source at most, with the deltas ACCUMULATED since the last one -- several device "
+                    .. "events land in a tick and a handler that saw only the last would lose most of a fast "
+                    .. "flick. The same rebinding cost as `InputBegan` applies.",
+            },
+            {
+                Name = "InputEnded",
+                Parameters = {
+                    { Name = "input", Type = "InputObject" },
+                    { Name = "uiConsumed", Type = "boolean" },
+                },
+                Doc = "Fired on the tick an input STOPS. It fires for everything held when the window loses "
+                    .. "focus, so a handler that pairs `InputBegan` with this one never leaks a press -- which "
+                    .. "is the failure that leaves a character walking into a wall after an alt-tab.\n\n"
+                    .. "`uiConsumed` carries what it carried when the input began, so a press that started on "
+                    .. "a button is still marked consumed when it is released off one.",
+            },
             {
                 Name = "InputDeviceChanged",
                 Parameters = { { Name = "deviceType", Type = "Enum.InputDeviceType" } },

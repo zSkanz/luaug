@@ -277,7 +277,14 @@ local ServiceNameExceptions = { Workspace = true, Lighting = true }
 --- tense in English and not in this pattern's grammar. It stays because §2.2
 --- names it, and because `FocusEnded` beside `Focused` would be two words for
 --- one pair of facts.
-local EventNameExceptions = { Heartbeat = true, MessageOut = true, FocusLost = true }
+---
+--- `InputBegan` is M6's too, and it is here for the reason ADR 0041 exists: the
+--- whole value of the surface is that a person arriving from a familiar platform
+--- reaches for that exact name and finds it. `InputChanged` and `InputEnded`
+--- already read as past-tense facts and need no exception; renaming only the
+--- first of the three to `InputStarted` would break the set to satisfy a rule
+--- the other two already satisfy.
+local EventNameExceptions = { Heartbeat = true, MessageOut = true, FocusLost = true, InputBegan = true }
 
 local function isPascalCase(name: string): boolean
     return string.match(name, PascalCase) ~= nil

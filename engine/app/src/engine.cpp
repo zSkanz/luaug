@@ -818,8 +818,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             interaction.backspace = uiBackspace;
             interaction.submit = uiSubmit;
             lastUiPointerDown = uiPointerDown;
-            host->input().setPointerCapturedByUi(
-                ui::updateInteraction(host->world(), host->uiService(), interaction).pointerOverUi);
+            const ui::InteractionResult uiResult = ui::updateInteraction(host->world(), host->uiService(), interaction);
+            host->input().setPointerCapturedByUi(uiResult.pointerOverUi);
+            // The keyboard half of the same claim (ADR 0041): a focused
+            // `TextInput` eats the keys, so typing into a chat box does not also
+            // drive the character.
+            host->input().setKeyboardCapturedByUi(uiResult.textInputFocused);
 
             ui::buildDrawList(host->world(), host->uiService(), uiDrawList);
             buildUiGeometry(uiDrawList, uiViewport, uiVertices, uiRuns);

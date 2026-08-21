@@ -165,6 +165,14 @@ struct InteractionResult
     // mouse codes consumed for that frame, so a button over the world does not
     // also shoot the gun.
     bool pointerOverUi = false;
+
+    // True while a `TextInput` has focus. `input` marks the KEYBOARD codes
+    // consumed for that frame, which is the same claim one device over: a player
+    // typing `w` into a chat box should not also walk forward. It is also what
+    // makes `uiConsumed` mean something on `InputService.InputBegan` for a key
+    // (ADR 0041) -- a flag that was always false for the keyboard would be
+    // honest and useless.
+    bool textInputFocused = false;
 };
 
 // Fires `Activated`, `PointerEntered` and `PointerExited`, moves focus between

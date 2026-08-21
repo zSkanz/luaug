@@ -385,6 +385,51 @@ local Definition: Schema.Definition = {
             } :: { Schema.EnumItem },
         },
         {
+            Name = "UserInputType",
+            Doc = "What KIND of input an `InputObject` came from, on `InputService`'s raw events (§2.4, "
+                .. "ADR 0041). It is coarser than `KeyCode` on purpose: a handler that only cares whether "
+                .. "something was typed at all reads this and stops, and one that cares which key reads "
+                .. "`KeyCode` beside it.\n\nThe mouse buttons are separate items rather than one `Mouse` "
+                .. "item plus a `KeyCode`, because the overwhelmingly common test is `== MouseButton1` and "
+                .. "spelling that as two comparisons would be worse for no gain.",
+            Items = {
+                {
+                    Name = "None",
+                    Value = 0,
+                    Doc = "What a default-constructed `InputObject` carries. Nothing produces it: an event that "
+                        .. "fired came from something.",
+                },
+                { Name = "Keyboard", Value = 1 },
+                { Name = "MouseButton1", Value = 2, Doc = "The primary button -- left on a right-handed mouse." },
+                { Name = "MouseButton2", Value = 3, Doc = "The secondary button." },
+                { Name = "MouseButton3", Value = 4, Doc = "The middle button, usually the wheel pressed in." },
+                {
+                    Name = "MouseMovement",
+                    Value = 5,
+                    Doc = "The pointer moved. Fires `InputChanged` and never `InputBegan` or `InputEnded`: "
+                        .. "motion has no beginning and no end.",
+                },
+                {
+                    Name = "MouseWheel",
+                    Value = 6,
+                    Doc = "The wheel turned. `InputChanged`, with the amount in `Delta.z` -- one notch is 1.",
+                },
+                {
+                    Name = "Gamepad",
+                    Value = 7,
+                    Doc = "A pad button or stick. `KeyCode` says which, and a stick's deflection arrives as "
+                        .. "`InputChanged` with the axis value in `Position`.",
+                },
+                {
+                    Name = "Touch",
+                    Value = 8,
+                    Doc = "Declared because the enum is designed once. Nothing produces it in v1: there is no "
+                        .. "touch input and no mobile port (R15), the same clause "
+                        .. "`Enum.InputDeviceType.Touch` carries.",
+                },
+            } :: { Schema.EnumItem },
+        },
+        {
             Name = "InputRate",
             Doc = "Which clock an `InputContext` is dispatched on (ADR 0039). It is a property of the context "
                 .. "rather than of the action, and it is NOT derived from `Priority`: priority orders "

@@ -217,6 +217,7 @@ InteractionResult updateInteraction(scene::World& world, core::InstanceId uiServ
     if (!world.alive(g_state.focused))
         g_state.focused = {};
 
+    result.textInputFocused = g_state.focused.valid();
     return result;
 }
 

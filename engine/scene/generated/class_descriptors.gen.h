@@ -48,16 +48,17 @@ inline constexpr EnumId RunContextEnumId = 7;
 inline constexpr EnumId KeyCodeEnumId = 8;
 inline constexpr EnumId InputActionTypeEnumId = 9;
 inline constexpr EnumId InputDeviceTypeEnumId = 10;
-inline constexpr EnumId InputRateEnumId = 11;
-inline constexpr EnumId EasingStyleEnumId = 12;
-inline constexpr EnumId EasingDirectionEnumId = 13;
-inline constexpr EnumId PlaybackStateEnumId = 14;
-inline constexpr EnumId FillDirectionEnumId = 15;
-inline constexpr EnumId HorizontalAlignmentEnumId = 16;
-inline constexpr EnumId VerticalAlignmentEnumId = 17;
-inline constexpr EnumId SortOrderEnumId = 18;
-inline constexpr EnumId AutomaticSizeEnumId = 19;
-inline constexpr EnumId ScaleTypeEnumId = 20;
+inline constexpr EnumId UserInputTypeEnumId = 11;
+inline constexpr EnumId InputRateEnumId = 12;
+inline constexpr EnumId EasingStyleEnumId = 13;
+inline constexpr EnumId EasingDirectionEnumId = 14;
+inline constexpr EnumId PlaybackStateEnumId = 15;
+inline constexpr EnumId FillDirectionEnumId = 16;
+inline constexpr EnumId HorizontalAlignmentEnumId = 17;
+inline constexpr EnumId VerticalAlignmentEnumId = 18;
+inline constexpr EnumId SortOrderEnumId = 19;
+inline constexpr EnumId AutomaticSizeEnumId = 20;
+inline constexpr EnumId ScaleTypeEnumId = 21;
 
 } // namespace generated
 

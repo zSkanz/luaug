@@ -18,6 +18,7 @@
 #include "luaug/core/log.h"
 #include "luaug/core/math.h"
 #include "luaug/core/name_atom.h"
+#include "luaug/input/input.h"
 #include "luaug/platform/event.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/physics_sync.h"
@@ -155,6 +156,11 @@ public:
     // which is the same answer an empty world gives -- so every reader checks
     // rather than assuming.
     scene::PhysicsSync* physics = nullptr;
+
+    // The device snapshot `InputService:IsKeyDown` reads, or null before the
+    // host hands it over. Same arrangement as `physics` and `animation`: the
+    // system belongs to the host's lifetime and this is a view onto it.
+    const input::InputSystem* input = nullptr;
 
     // The animation host, or null in a build with no render module. Same
     // arrangement and same rule as `physics` above: null is a real state, and a
