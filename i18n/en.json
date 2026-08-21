@@ -102,6 +102,7 @@
   "render.err.target_create_failed": "Could not create an offscreen render target.",
   "render.err.mesh_buffer_failed": "Could not create a GPU buffer for mesh geometry.",
   "render.err.debug_pipeline_failed": "Could not create the debug-draw pipeline.",
+  "render.err.ui_pipeline_failed": "The 2D user-interface pipeline could not be created; nothing will be drawn over the world.",
 
   "rhi.err.device_create_failed": "Could not create a graphics device.",
   "rhi.err.backend_not_compiled": "That render backend was not compiled into this build.",

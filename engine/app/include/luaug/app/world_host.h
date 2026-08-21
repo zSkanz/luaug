@@ -146,6 +146,12 @@ public:
     // Invalid in a build with no render module, which is not an error.
     [[nodiscard]] core::InstanceId lighting() const noexcept { return m_lighting; }
 
+    // The parent of every `ScreenGui` (M6). A boot service for the same reason
+    // `Lighting` is: the frame reads it whether or not a script asks for it,
+    // and a service resolved after the host cached its id is how M4 spent four
+    // milestones lighting scenes with defaults.
+    [[nodiscard]] core::InstanceId uiService() const noexcept { return m_uiService; }
+
     // The physics mirror, or null in a build with no physics backend. The world
     // owns it because a hot reload rebuilds the world, and a simulation that
     // outlived the tree it mirrors would be holding bodies for parts that no
@@ -218,6 +224,7 @@ private:
     std::filesystem::path m_root;
     core::InstanceId m_workspace;
     core::InstanceId m_lighting;
+    core::InstanceId m_uiService;
     PreserveReport m_preserveReport;
     render::DebugDraw* m_gizmos = nullptr;
 

@@ -28,7 +28,9 @@
 #include "luaug/render/render_world.h"
 #include "luaug/render/renderer.h"
 #include "luaug/render/shader_library.h"
+#include "luaug/render/ui_renderer.h"
 #include "luaug/rhi/device.h"
+#include "luaug/ui/ui.h"
 
 #include <algorithm>
 #include <array>
@@ -109,6 +111,57 @@ private:
 // (ADR 0027). The real renderer is M4; until then this is how 500 scripted
 // instances are seen at all, and it is what `examples/01-instances` is
 // visualized with.
+// The UI's draw list into the renderer's vertices, plus one run per contiguous
+// span sharing a clip rectangle.
+//
+// A copy per frame over a few hundred quads, and it is what keeps the layering
+// honest: `render` is L4 and `ui` is L5, so the renderer cannot see a
+// `ui::DrawQuad` and does not need to (architecture.md §2 rule 3).
+//
+// Six vertices a quad rather than four and an index buffer. The geometry is the
+// smallest thing in the frame; an index buffer would save a third of its
+// bandwidth and cost a second upload.
+void buildUiGeometry(const ui::DrawList& list, core::Vec2 viewport, std::vector<render::UiVertex>& vertices,
+                     std::vector<render::UiScissorRun>& runs)
+{
+    vertices.clear();
+    runs.clear();
+
+    const auto toByte = [](f32 value) {
+        const f32 clamped = value < 0.0f ? 0.0f : (value > 1.0f ? 1.0f : value);
+        return static_cast<core::u8>(clamped * 255.0f + 0.5f);
+    };
+
+    core::u32 currentScissor = 0xffffffffu;
+    for (const ui::DrawQuad& quad : list.quads) {
+        if (quad.scissor != currentScissor) {
+            currentScissor = quad.scissor;
+            const core::Rect& clip = list.scissors[currentScissor];
+            // Clamped to the target, because a scissor outside it is a
+            // validation error on every backend rather than an empty draw.
+            const f32 left = std::fmax(0.0f, clip.min.x);
+            const f32 top = std::fmax(0.0f, clip.min.y);
+            const f32 right = std::fmin(viewport.x, clip.max.x);
+            const f32 bottom = std::fmin(viewport.y, clip.max.y);
+            runs.push_back(render::UiScissorRun{
+                .scissor = {static_cast<core::i32>(left), static_cast<core::i32>(top),
+                            static_cast<core::i32>(std::fmax(0.0f, right - left)),
+                            static_cast<core::i32>(std::fmax(0.0f, bottom - top))},
+                .firstVertex = static_cast<core::u32>(vertices.size()),
+                .vertexCount = 0,
+            });
+        }
+
+        const render::UiVertex a{quad.min.x,           quad.min.y,           toByte(quad.color.r),
+                                 toByte(quad.color.g), toByte(quad.color.b), toByte(quad.alpha)};
+        const render::UiVertex b{quad.max.x, quad.min.y, a.r, a.g, a.b, a.a};
+        const render::UiVertex c{quad.max.x, quad.max.y, a.r, a.g, a.b, a.a};
+        const render::UiVertex d{quad.min.x, quad.max.y, a.r, a.g, a.b, a.a};
+        vertices.insert(vertices.end(), {a, b, c, a, c, d});
+        runs.back().vertexCount += 6;
+    }
+}
+
 void submitWorld(const render::RenderWorld& snapshot, render::DebugDraw& draw)
 {
     for (const render::RenderPart& part : snapshot.parts) {
@@ -284,7 +337,15 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     std::unique_ptr<render::IRenderer> renderer;
     render::ShaderLibrary shaders;
     render::DebugRenderer debugRenderer;
+    render::UiRenderer uiRenderer;
+    // The size the UI was last laid out against, so a target that changes size
+    // dirties every tree. Held here rather than derived, because "did this
+    // change" is a question about the previous frame.
+    core::Vec2 lastUiViewport;
     render::DebugDraw debugDraw;
+    ui::DrawList uiDrawList;
+    std::vector<render::UiVertex> uiVertices;
+    std::vector<render::UiScissorRun> uiRuns;
     bool debugPassAttempted = false;
 
     const auto ensureDebugPass = [&](rhi::TextureFormat colorFormat) {
@@ -301,6 +362,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             return;
         }
         if (auto error = debugRenderer.create(*device, shaders, colorFormat); error.has_value())
+            core::logText(LogLevel::Warn, error->message);
+
+        // Built beside the debug one and, like it, not required: a machine
+        // whose content directory is missing the 2D shader boots and draws the
+        // world with no UI over it, which is a better failure than refusing to
+        // start.
+        if (auto error = uiRenderer.create(*device, shaders, colorFormat); error.has_value())
             core::logText(LogLevel::Warn, error->message);
 
         // The real renderer is built beside the debug one and neither is
@@ -671,6 +739,24 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             const f32 shadowRadius = renderer != nullptr && renderer->valid() ? renderer->shadowRadius() : 0.0f;
             render::extract(host->world(), host->workspace(), host->lighting(), meshLibrary, aspect, shadowRadius,
                             snapshot);
+            // The UI is laid out against the TARGET's size rather than the
+            // window's: an offscreen render at 640x360 has to produce the
+            // layout that resolution would, which is the whole of what the
+            // two-resolution goldens check.
+            const core::Vec2 uiViewport{static_cast<f32>(targetWidth), static_cast<f32>(targetHeight)};
+            if (uiViewport != lastUiViewport) {
+                // A scale is a fraction of something that just changed, so
+                // every tree is stale. Marked here rather than in the resize
+                // handler because an offscreen target can change size with no
+                // window event at all.
+                host->world().screenGuis().forEach(
+                    [](core::InstanceId, scene::ScreenGuiComponent& screen) { screen.layoutDirty = true; });
+                lastUiViewport = uiViewport;
+            }
+            ui::layout(host->world(), host->uiService(), uiViewport);
+            ui::buildDrawList(host->world(), host->uiService(), uiDrawList);
+            buildUiGeometry(uiDrawList, uiViewport, uiVertices, uiRuns);
+
             frameDrawCalls = 0;
             frameTriangles = 0;
             for (const render::DrawItem& draw : snapshot.draws) {
@@ -705,6 +791,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // FrameStart safe point, so a file read cannot land mid-tick.
             if (debugRenderer.valid())
                 debugRenderer.upload(*device, *cmd, debugDraw);
+            if (uiRenderer.valid())
+                uiRenderer.upload(*device, *cmd, uiVertices, uiRuns);
 
             // The real renderer owns the target when there is a camera to look
             // through. Without one -- an empty project, a world booting, a
@@ -757,6 +845,28 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     debugRenderer.render(*cmd, orbitCamera(targetWidth, targetHeight));
                 }
 
+                cmd->endRenderPass();
+                cmd->popDebugGroup();
+            }
+
+            // The UI, in its own pass that LOADS: it is drawn over the finished
+            // frame whatever produced it, so a project with no camera still has
+            // a menu. Before the debug overlay and after everything else, which
+            // is the order api-design.md §2.2 implies -- game UI is part of the
+            // game, and the ImGui overlay is on top of the game.
+            if (uiRenderer.valid() && !uiVertices.empty()) {
+                const std::array<rhi::ColorAttachment, 1> uiColors{rhi::ColorAttachment{
+                    .texture = target,
+                    .loadOp = rhi::LoadOp::Load,
+                    .storeOp = rhi::StoreOp::Store,
+                }};
+                cmd->pushDebugGroup("ui");
+                cmd->beginRenderPass({.colorAttachments = uiColors, .debugName = "ui"});
+                cmd->setViewport({
+                    .width = static_cast<f32>(targetWidth),
+                    .height = static_cast<f32>(targetHeight),
+                });
+                uiRenderer.render(*cmd, uiViewport);
                 cmd->endRenderPass();
                 cmd->popDebugGroup();
             }
@@ -873,6 +983,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         core::log(LogLevel::Info, LUAUG_TR("engine.frame.info.stats"), stats);
     }
 
+    uiRenderer.destroy(*device);
     debugRenderer.destroy(*device);
     if (offscreen.valid())
         device->destroy(offscreen);

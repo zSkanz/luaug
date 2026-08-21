@@ -256,6 +256,7 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
     // all, and this stays invalid -- which `extract` reads as "no environment
     // state" and answers with the defaults, rather than as an error.
     m_lighting = m_world->findFirstChildOfClass(m_runtime->dataModel(), m_classes.findId(m_atoms.lookup("Lighting")));
+    m_uiService = m_world->findFirstChildOfClass(m_runtime->dataModel(), m_classes.findId(m_atoms.lookup("UIService")));
 
 #if LUAUG_PHYSICS_JOLT
     // The one hand-written switch over what the build compiled in (ADR 0023),

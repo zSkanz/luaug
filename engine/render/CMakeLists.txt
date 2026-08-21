@@ -24,6 +24,7 @@ luaug_add_module(render
         src/renderer_default.cpp
         src/mesh_loader.cpp
         src/scene_types.cpp
+        src/ui_renderer.cpp
         generated/class_descriptors.gen.cpp
     DEPS
         asset

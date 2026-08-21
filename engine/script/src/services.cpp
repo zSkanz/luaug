@@ -832,8 +832,9 @@ void registerServices(lua_State* L)
 
     state.dataModel = w.create(w.classes().findId(atoms.intern("DataModel")));
 
-    // `Workspace`, `ScriptService` and `Lighting` exist from boot; every other
-    // service is created by its first `GetService` (api-design.md §1.2). The
+    // `Workspace`, `ScriptService`, `Lighting` and `UIService` exist from boot;
+    // every other service is created by its first `GetService`
+    // (api-design.md §1.2). The
     // first two are here because a script reaches `workspace` through a global
     // rather than through a call, and because the mount point has to exist
     // before anything mounts.
@@ -854,6 +855,14 @@ void registerServices(lua_State* L)
     if (const ClassId lightingClass = w.classes().findId(atoms.intern("Lighting"));
         lightingClass != scene::InvalidClass)
         (void)getServiceOfClass(L, lightingClass);
+
+    // `UIService` joins them at M6 for exactly the reason `Lighting` did: the
+    // frame lays out and draws every `ScreenGui` under it whether or not a
+    // script ever asked for the service, so "created on first `GetService`"
+    // cannot be true of it either. Guarded the same way, because the class is
+    // registered by `ui` and an engine built without that module has none.
+    if (const ClassId uiClass = w.classes().findId(atoms.intern("UIService")); uiClass != scene::InvalidClass)
+        (void)getServiceOfClass(L, uiClass);
 
     // Whatever the boot tree raised is consumed rather than queued: nothing can
     // have connected yet, and a fire nobody could have subscribed to is a fire

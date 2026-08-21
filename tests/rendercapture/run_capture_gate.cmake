@@ -18,8 +18,17 @@ endforeach()
 
 file(REMOVE "${OUTPUT}")
 
+# The window size is optional and defaults to the host's, so the scenes that
+# predate it are unchanged. M6's UI goldens pass one, because the SAME script at
+# two resolutions is the whole of what they check.
+set(size_args)
+if(DEFINED WIDTH AND DEFINED HEIGHT)
+    set(size_args "--width=${WIDTH}" "--height=${HEIGHT}")
+endif()
+
 execute_process(
     COMMAND "${HOST}" "${SCRIPT}" --headless "--frames=${FRAMES}" --exit --rhi=capture "--capture-out=${OUTPUT}"
+            ${size_args}
     RESULT_VARIABLE host_result
     OUTPUT_VARIABLE host_output
     ERROR_VARIABLE host_output)

@@ -232,6 +232,35 @@ if(LUAUG_BUILD_TESTS)
                 -P ${CMAKE_SOURCE_DIR}/tests/rendercapture/run_capture_gate.cmake)
         set_tests_properties(capture_gate_meshes PROPERTIES TIMEOUT 120)
 
+        # M6's gate: the SAME UI script captured at two resolutions, as two
+        # goldens. The pair is the check -- a layout that ignored the window
+        # would produce two identical streams, and the two differ in exactly the
+        # way scaling predicts: the clipped strip's scissor is 512,668,704x40 at
+        # 1280x720 and 256,308,352x40 at 640x360, so the scale-driven numbers
+        # halve and the offset-driven height does not.
+        #
+        # What these goldens can and cannot see is worth knowing before trusting
+        # them: `upload` records a buffer's SIZE and not its contents (D026), so
+        # the QUADS are invisible here. The rectangles themselves are asserted
+        # exactly by `luaug_ui_tests`, and the pixels by a screenshot in the gate
+        # record. This pair covers the scissors, the viewport and the draw count.
+        foreach(resolution 1280x720 640x360)
+            string(REPLACE "x" ";" size ${resolution})
+            list(GET size 0 ui_width)
+            list(GET size 1 ui_height)
+            add_test(NAME capture_gate_ui_${resolution}
+                COMMAND ${CMAKE_COMMAND}
+                    -DHOST=$<TARGET_FILE:luaug_host>
+                    -DGOLDEN=${CMAKE_SOURCE_DIR}/tests/rendercapture/uipanel-${resolution}.jsonl
+                    -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/capture-gate-ui-${resolution}.jsonl
+                    -DSCRIPT=${CMAKE_SOURCE_DIR}/tests/rendercapture/uipanel
+                    -DFRAMES=2
+                    -DWIDTH=${ui_width}
+                    -DHEIGHT=${ui_height}
+                    -P ${CMAKE_SOURCE_DIR}/tests/rendercapture/run_capture_gate.cmake)
+            set_tests_properties(capture_gate_ui_${resolution} PROPERTIES TIMEOUT 60)
+        endforeach()
+
         # M4.5's gate addition, and the one check in this file that is not a
         # golden: one scene at two `ClockTime` values, and the two frames must
         # differ. See the driver for why a golden could not make that claim --

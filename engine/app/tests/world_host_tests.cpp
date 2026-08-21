@@ -25,7 +25,7 @@ using luaug::app::testing::Captured;
 using luaug::app::testing::Project;
 using luaug::testing::nearly;
 
-TEST_CASE("an empty world still boots, with game and its two services")
+TEST_CASE("an empty world still boots, with game and its boot services")
 {
     Captured log;
     app::WorldHost host;
@@ -33,9 +33,11 @@ TEST_CASE("an empty world still boots, with game and its two services")
 
     CHECK(host.workspace().valid());
     CHECK(host.world().alive(host.runtime().dataModel()));
-    // `Workspace`, `ScriptService` and `Lighting` exist from boot; nothing else
-    // does until it is asked for.
-    CHECK(host.world().childCount(host.runtime().dataModel()) == 3);
+    // `Workspace`, `ScriptService`, `Lighting` and -- from M6 -- `UIService`
+    // exist from boot; nothing else does until it is asked for. The last two are
+    // there for one reason: the frame reads both whether or not a script asks,
+    // so "created on first GetService" cannot be true of either.
+    CHECK(host.world().childCount(host.runtime().dataModel()) == 4);
 }
 
 // --- The M4.5 gate addition: `Lighting` resolution, at the HOST --------------
