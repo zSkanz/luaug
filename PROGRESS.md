@@ -54,98 +54,16 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ### M6: what a game can do that it could not
 
-- **Input is one model, and the scaffold is gone.** `InputContext` →
-  `InputAction` → `InputBinding`, resolved in priority order with per-input
-  sinking, on a clock the context declares (ADR 0039). `KeyboardService` is
-  deleted from the IDL, the defs, the api-dump and the binary -- which is what
-  M5's `DevOnly` tag was for. The determinism scene migrated and `inputs.txt`
-  did not change a line.
-- **`Enum.KeyCode` is ninety-four items** spanning keyboard, mouse and the
-  standard gamepad, and its item names ARE `platform`'s device-layer names --
-  asserted against `platform::Key::Count` at compile time, so a key added to one
-  list and not the other is a build failure rather than every gamepad code
-  shifting by one.
-- **Tweens write through the setter scripts write through**, and step on the
-  SimClock. `TweenService:GetValue` is checked against 297 numbers computed from
-  the published easing formulas by an implementation written separately from the
-  engine's.
-- **The UI lays out, draws and answers a pointer.** Two passes over each dirty
-  `ScreenGui`, a 2D pipeline over the finished frame, and a hit test that fires
-  `Activated` only when both ends of a press land on one element. An idle frame
-  runs no solver at all, and the test asserts that as a COUNTER.
-- **A `Sound`'s timeline is the simulation's**, so `Ended` lands on the same
-  tick in a replay, in a headless run, and on a machine with a different audio
-  buffer. The underrun counter the roadmap's gate names does not exist in
-  miniaudio; this engine defines one and defines what it counts.
-- **A skinned character animates and casts a shadow that walks.** glTF skins
-  and clips load (parents-first, with the vertex stream remapped — neither of
-  which the file gives you), `AnimationPlayer`/`AnimationTrack` play and blend
-  them on the SimClock, and there is a skinned pipeline for the forward pass AND
-  the shadow one. Without the second, a character's shadow stands still while it
-  walks: a bug nobody can photograph, because the image is correct everywhere
-  except on the ground.
-- **`Instance.new("Part")` is visible.** Five generated solids, one per
-  `Enum.PartShape`, through `MeshCache` like any imported mesh — and the renderer
-  changed not one line, which is what M4's "engine-generated geometry must reach
-  the renderer" constraint was written to get. `Part.Shape` is honoured rather
-  than marked `Inert`.
-- **A person arriving from a familiar platform finds `InputBegan`** (ADR 0041),
-  fed from the IAS's own dispatch and never from the OS: it sinks like an action,
-  replays like an action, and carries whether the UI already took it. And a HUD
-  button drives a real action through four virtual `KeyCode`s, which is the
-  roadmap's non-device seam with its proving caller.
-- **A character rides a moving platform**, which took two defects to reach:
-  kinematic bodies are MOVED rather than teleported so they have a velocity at
-  all (D027), and an anchored part something is writing becomes kinematic for
-  twelve ticks (D031). Both were found by a person playing the obby.
-- **A label in Portuguese says what is missing.** Text is decoded as UTF-8 and a
-  codepoint the face cannot draw gets a visible box rather than mojibake, out of
-  a glyph store keyed by face, size and codepoint — a cache and not a bake, so
-  M7's user font is a widening rather than a rewrite.
-- **`examples/04-obby` is a game**, playable start to finish, and it is the
-  milestone's E2E gate: a recorded input stream drives it headless to the finish
-  flag with the whole stack in the loop.
-- **D021 is fixed**: a range refusal names its range.
-- **Four value types** -- `Vector2`, `UDim`, `UDim2`, `Rect` -- with the
-  attribute domain §2.2 widened by them, and a world-hash case that requires
-  every `Value` alternative to hash its payload rather than its tag.
+Moved to [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md)
+with M5's, for the same reason and on the same day. The filled Gate Record and
+the milestone's eighteen Findings are in
+[`docs/briefs/m6-kickoff.md`](docs/briefs/m6-kickoff.md).
 
 ### M5: what the world can do that it could not
 
-- **A `BasePart` that is not `Anchored` is a Jolt body.** Gravity, contacts,
-  impulses, friction, restitution, density, collision groups, and `Touched` /
-  `TouchEnded` as deferred signals. `Workspace.Gravity` is real and signed.
-- **The mirror lives in `scene`**, where architecture.md §2 always said it
-  would: "physics sync via an injected `IPhysics3D*`". The tree is the authority
-  and the body mirrors it; `scene` never learns a body's identity beyond an
-  opaque handle and `physics` never learns what an Instance is.
-- **`CharacterBody` walks**, on a Jolt `CharacterVirtual` rather than a rigid
-  body — it climbs steps under `AutoStepHeight`, is stopped by anything above
-  it, jumps only when grounded, and reports what it landed on.
-- **A script can ask the world what is there**: `Workspace:Raycast`,
-  `:Spherecast`, `:GetBodiesInBox`, over `RaycastParams` and `RaycastResult`.
-- **Two `CharacterBody` block each other, and `CollisionGroup` decides it.**
-  Raised in review as "they pass through"; they do not, because each character
-  carries a rigid body inside its capsule. What was real is that the character
-  was the one thing in the world outside the collidability matrix — D025, fixed,
-  with the decision (block, never push) written into the class doc.
-- **`Weld` and `WeldConstraint`** (added to M5 by human decision on 2026-08-20):
-  a transform weld, resolved in dependency order after the step, with cycles
-  refused at the write that would create one.
-- **The determinism gate is blocking and replays INPUT.** A scenario carries a
-  recorded `inputs.txt` and the keyboard snapshot comes from it, so what is
-  replayed is a keystroke's whole path to the character rather than a bot
-  calling `Move`. The physics scenario is `sameBuildOnly` — run three times,
-  compared against itself, with no committed trace — because ADR 0025's
-  guarantee is same-BUILD and CI's compiler is not this machine's (D024).
-- **`WorldHash` covers physics state**, including the four things no script can
-  read: a queued impulse, a character's command, its vertical velocity, and
-  which bodies the solver has put to sleep.
-- **The C++ formatting gate exists**, five milestones after architecture.md §9
-  first listed it, at a pinned clang-format 18 — and it now sees files that are
-  not yet staged, which it did not when it was turned on.
-- **D016 is fixed**: a `BindToClose` handler that yields is waited for, up to a
-  capped grace period.
+Moved to [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md)
+when this file passed its ~300-line cap (§11). Nothing was dropped: the M5 brief
+carries the same milestone's seventeen Findings and its Gate Record.
 
 ### What does NOT exist yet
 
@@ -365,21 +283,32 @@ Entries for the planning session and for M0 through M4 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
 
-- **2026-08-21 (session 11, Claude Opus): M6 built and signed off.** Picked
-  up mid-milestone with four systems in, and finished it: the animation runtime
-  and the skinned pipeline, solid `Part` rendering, `InputService`'s raw event
-  surface, the non-device input seam, the glyph cache, Clay's removal,
-  `examples/04-obby` with its end-to-end replay gate, the audio soak, the
-  animation determinism scene, D017's two DebugShell panes, and the Gate Record.
-  Learned, and the one to keep: **the deliverable is the test that finds what the
-  tests do not.** Six of the ten defects closed this milestone were found by a
-  person playing the obby — a character that does not ride a platform, a
-  classification that made the fix for it unreachable, a menu 16 px off centre, a
-  `UICorner` that drew nothing. Every one of them had passing unit tests around
-  it. The second lesson is inside the fourth: `UICorner` was born in exactly the
-  state `Inert` was built at M4.5 to make visible, and nobody marked it, because
-  the marker depended on somebody remembering. `tools/repo/inertcheck.luau` is
-  the mechanical half, and run once against the whole tree it found five more.
-  The third: **a gate can be wrong about the thing it gates.** The audio soak
-  reported 1,348 underruns on a real device and every one of them was the mixer
-  working correctly.
+- **2026-08-21 (session 12, Claude Opus): M7 started; the substrate and the
+  offline pipeline are in.** The brief with its eleven decisions, then
+  `engine/jobs` (work-stealing pool, dependencies, `parallelFor`, and
+  `StableCommit` as R10's commit rule made into a type), `platform`'s async IO
+  with a priority queue SDL does not have, `core::ContentHash` on a vendored
+  BLAKE3, the `.lpack` container, the `.lmesh` format with LOD chains and
+  meshlets, basis_universal in two targets, `tools/assetc`, and
+  `luaug build-assets --verify`. Five stages green throughout; 36 ctest targets
+  on Windows and 35 in the container.
+
+  **The proof the pipeline is real is a differential, not a screenshot**:
+  `examples/02-meshes` renders byte-identically -- 0 differing pixels at
+  1280x720 -- with its `content/` directory REMOVED and only the pack mounted.
+  A screenshot would have proved something drew; that removal is what proves
+  the pack drew it.
+
+  Learned, and the one to keep: **a bounds-checked reader is not a safe reader,
+  because the allocation happens first.** Every offset in the mesh format was
+  checked before it was followed and the corruption case still threw
+  `bad_alloc` -- a flipped bit in a section's element COUNT reached
+  `vector::resize` before anything compared it against the bytes the section
+  had. A count is an input too, and it is the one that does not look like a
+  pointer. The second: **D018 reproduced and was cheaper to look at than to
+  quarantine.** Two commands on the hung process -- one socket in `LISTEN`, two
+  threads waiting -- and it was `::accept` with no deadline, turning the state a
+  FAILING test leaves behind into a suite that hangs forever.
+
+- **2026-08-21 (session 11, Claude Opus): M6 built and signed off.** Moved to
+  the archive with the rest of M6.

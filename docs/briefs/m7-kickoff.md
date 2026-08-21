@@ -50,13 +50,13 @@ that is the only way a person can see whether it works.
 
 ## Scope checklist (from roadmap)
 
-- [ ] **Offline pipeline via Lute (`luaug build-assets`)**: glTF to engine mesh
+- [x] **Offline pipeline via Lute (`luaug build-assets`)**: glTF to engine mesh
       format, basis_universal/KTX2 textures, meshopt LODs, content-addressed
       pack + manifest, deterministic outputs (same input, same hashes; enables
       CI caching)
 - [ ] **assimp as the offline-CLI-only importer** for exotic formats,
       normalizing to glTF 2.0 — never linked into the runtime
-- [ ] **Engine job system + async IO**
+- [x] **Engine job system + async IO**
 - [ ] **64-bit world coordinates + floating origin** (render-relative
       translation; origin/rebase is per-World state, never a global — ADR 0014)
       — enforced by tests

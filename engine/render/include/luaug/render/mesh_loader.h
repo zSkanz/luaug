@@ -16,6 +16,8 @@
 // queue.
 #pragma once
 
+#include "luaug/asset/content.h"
+#include "luaug/asset/texture.h"
 #include "luaug/core/id.h"
 #include "luaug/render/animation.h"
 #include "luaug/render/mesh_cache.h"
@@ -37,6 +39,18 @@ public:
     // own content directory, so a URN means the same thing to the engine as it
     // does in the file the developer wrote.
     void setContentRoot(std::filesystem::path root);
+
+    // Where a URN resolves when a pack is mounted. Optional and not owned: a
+    // host with no packs -- every example before M7, the capture harness --
+    // leaves it null and gets exactly the loose-file path it had. Two feeds,
+    // one library.
+    void setContentMounts(const asset::ContentMounts* mounts) noexcept { mounts_ = mounts; }
+
+    // What the device can sample. The default allows BC7, which is the whole
+    // point of shipping transcodable textures; a headless or capture run sets
+    // `forceUncompressed` so a golden does not depend on a GPU's format
+    // support.
+    void setTranscodeOptions(const asset::TranscodeOptions& options) noexcept { transcode_ = options; }
 
     // Loads every `MeshPart` content the world names and the library does not
     // yet hold. Call at the FrameStart safe point with a command list open and
@@ -72,6 +86,8 @@ public:
 
 private:
     std::filesystem::path contentRoot_;
+    const asset::ContentMounts* mounts_ = nullptr;
+    asset::TranscodeOptions transcode_;
     bool primitivesUploaded_ = false;
     // Content URNs that failed to load, so a broken file costs one attempt and
     // one message rather than one of each per frame forever. Sorted, for the

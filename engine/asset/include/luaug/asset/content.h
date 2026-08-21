@@ -50,7 +50,8 @@ inline constexpr std::string_view AssetScheme = "asset://";
 
 struct ResolvedContent
 {
-    enum class Source : core::u8 {
+    enum class Source : core::u8
+    {
         // Nothing mounted answers to this URN.
         Missing,
         // Bytes inside a mounted pack, already in the engine's own format.

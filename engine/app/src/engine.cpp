@@ -15,6 +15,7 @@
 #include "luaug/app/reload.h"
 #include "luaug/app/screenshot.h"
 #include "luaug/app/world_host.h"
+#include "luaug/asset/content.h"
 #include "luaug/core/build_info.h"
 #include "luaug/core/json_writer.h"
 #include "luaug/core/log.h"
@@ -352,6 +353,16 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     render::MeshLibrary meshLibrary;
     render::MeshCache meshCache;
     render::MeshLoader meshLoader;
+
+    // Where `asset://` resolves from. Two mounts and the order is the rule:
+    // the project's content DIRECTORY first, then its pack if one has been
+    // built, so a compiled asset wins over the source it was compiled from and
+    // a developer can still drop a loose file in to try something.
+    //
+    // A project with no pack behaves exactly as it did before M7 -- the loose
+    // path is not a fallback here, it is the dev-mode path ADR 0010 keeps
+    // forever.
+    asset::ContentMounts contentMounts;
     std::unique_ptr<render::IRenderer> renderer;
     render::ShaderLibrary shaders;
     render::DebugRenderer debugRenderer;
@@ -418,7 +429,28 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         std::error_code pathError;
         const bool isProject =
             !options.scriptPath.empty() && std::filesystem::is_directory(options.scriptPath, pathError);
-        meshLoader.setContentRoot(isProject ? options.scriptPath / "content" : platform::paths().contentDir);
+        const std::filesystem::path contentRoot =
+            isProject ? options.scriptPath / "content" : platform::paths().contentDir;
+        meshLoader.setContentRoot(contentRoot);
+
+        contentMounts.clear();
+        contentMounts.mountDirectory(contentRoot);
+        if (isProject) {
+            const std::filesystem::path pack = options.scriptPath / ".luaug" / "content.lpack";
+            if (std::filesystem::exists(pack, pathError)) {
+                if (auto error = contentMounts.mountPack(pack); error.has_value()) {
+                    // Named and survivable: a pack that will not open leaves the
+                    // loose mount standing, so a broken build is a message and a
+                    // slower load rather than a world with no meshes in it.
+                    core::logText(LogLevel::Warn, error->message);
+                }
+                else {
+                    const std::array<core::I18nArg, 1> mountArgs{core::I18nArg{"path", pack.string()}};
+                    core::log(LogLevel::Info, LUAUG_TR("app.info.pack_mounted"), mountArgs);
+                }
+            }
+        }
+        meshLoader.setContentMounts(&contentMounts);
         renderer = render::createDefaultRenderer();
         if (auto error = renderer->create(*device, shaders, colorFormat); error.has_value()) {
             core::logText(LogLevel::Warn, error->message);

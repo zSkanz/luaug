@@ -20,6 +20,7 @@
 
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_gpu.h>
+#include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <string>
@@ -810,8 +811,12 @@ void SdlGpuCmdList::uploadTexture(TextureHandle texture, std::span<const std::by
         std::memcpy(mapped, data.data(), data.size());
         SDL_UnmapGPUTransferBuffer(device, transfer);
 
-        const u32 mipWidth = entry->width >> mipLevel;
-        const u32 mipHeight = entry->height >> mipLevel;
+        // Clamped at one: a 64x64 texture's seventh mip is 1x1, and `>> 6`
+        // reaches zero one level later. A zero-sized region uploads nothing and
+        // reports nothing, which is the shape of a texture that is fine until
+        // somebody looks at its smallest level.
+        const u32 mipWidth = std::max(1u, entry->width >> mipLevel);
+        const u32 mipHeight = std::max(1u, entry->height >> mipLevel);
         const SDL_GPUTextureTransferInfo source{
             .transfer_buffer = transfer,
             .offset = 0,

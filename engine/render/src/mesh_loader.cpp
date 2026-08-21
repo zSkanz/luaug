@@ -1,8 +1,11 @@
 #include "luaug/render/mesh_loader.h"
 
+#include "luaug/asset/content.h"
 #include "luaug/asset/gltf.h"
 #include "luaug/asset/image.h"
+#include "luaug/asset/mesh_format.h"
 #include "luaug/asset/primitives.h"
+#include "luaug/asset/texture.h"
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
 #include "luaug/core/text_key.h"
@@ -53,6 +56,107 @@ constexpr std::string_view kAssetScheme = "asset://";
 
     cmd.uploadTexture(handle, image.pixels, 0);
     return handle;
+}
+
+[[nodiscard]] rhi::TextureFormat toRhi(asset::TextureFormat format) noexcept
+{
+    switch (format) {
+    case asset::TextureFormat::Bc1Rgb:
+        return rhi::TextureFormat::Bc1RgbaUnorm;
+    case asset::TextureFormat::Bc3Rgba:
+        return rhi::TextureFormat::Bc3RgbaUnorm;
+    case asset::TextureFormat::Bc5Rg:
+        return rhi::TextureFormat::Bc5RgUnorm;
+    case asset::TextureFormat::Bc7Rgba:
+        return rhi::TextureFormat::Bc7RgbaUnorm;
+    case asset::TextureFormat::Rgba8:
+    case asset::TextureFormat::Unknown:
+        break;
+    }
+    return rhi::TextureFormat::Rgba8Unorm;
+}
+
+// A transcoded texture, with every mip it carries. The block-compressed path is
+// the point of the pipeline: a BC7 texture is a quarter of the GPU memory an
+// RGBA8 one costs, and the memory ceiling is what M7's gate measures.
+[[nodiscard]] rhi::TextureHandle uploadTranscoded(rhi::IDevice& device, rhi::ICmdList& cmd,
+                                                  const asset::TextureAsset& texture, const char* debugName)
+{
+    if (!texture.valid())
+        return {};
+
+    const rhi::TextureHandle handle = device.createTexture({
+        .format = toRhi(texture.format),
+        .usage = rhi::TextureUsage::Sampled,
+        .width = texture.width,
+        .height = texture.height,
+        .layers = 1,
+        .mipLevels = static_cast<u32>(texture.mips.size()),
+        .debugName = debugName,
+    });
+    if (!handle.valid())
+        return {};
+
+    for (u32 level = 0; level < static_cast<u32>(texture.mips.size()); ++level) {
+        const asset::TextureMip& mip = texture.mips[level];
+        cmd.uploadTexture(handle, std::span<const std::byte>(texture.pixels.data() + mip.offset, mip.size), level);
+    }
+    return handle;
+}
+
+// Everything after "the geometry is on the GPU and the images are uploaded",
+// shared by the two feeds. A compiled mesh out of a pack and a glTF parsed on
+// the way in differ in how they arrive and in nothing after that -- and one
+// copy of this is what keeps them agreeing.
+void fillEntry(MeshLibrary::Entry& entry, const core::AABB& bounds, std::span<const asset::Submesh> submeshes,
+               std::span<const asset::MaterialDef> materials, std::span<const rhi::TextureHandle> images)
+{
+    entry.bounds = bounds;
+    entry.sectionCount = static_cast<u32>(submeshes.size());
+    entry.sectionMaterial.reserve(submeshes.size());
+    for (const asset::Submesh& submesh : submeshes)
+        entry.sectionMaterial.push_back(submesh.material);
+
+    const auto textureOf = [&](const asset::TextureRef& reference) -> rhi::TextureHandle {
+        if (!reference.present() || reference.image >= images.size())
+            return {};
+        // The importer records the UV set the file declared, and this vertex
+        // layout carries one. A material sampling TEXCOORD_1 would silently
+        // read TEXCOORD_0, so it is dropped instead -- untextured is a visible
+        // wrong, silently-wrong-texture is not.
+        if (reference.uvSet != 0)
+            return {};
+        return images[reference.image];
+    };
+
+    entry.materials.reserve(materials.size());
+    for (const asset::MaterialDef& source : materials) {
+        RenderMaterial material;
+        material.uniforms.baseColor[0] = source.baseColorFactor.r;
+        material.uniforms.baseColor[1] = source.baseColorFactor.g;
+        material.uniforms.baseColor[2] = source.baseColorFactor.b;
+        material.uniforms.baseColor[3] = source.baseColorAlpha;
+        material.uniforms.emissive[0] = source.emissiveFactor.r;
+        material.uniforms.emissive[1] = source.emissiveFactor.g;
+        material.uniforms.emissive[2] = source.emissiveFactor.b;
+        material.uniforms.metallicRoughnessNormalCutoff[0] = source.metallicFactor;
+        material.uniforms.metallicRoughnessNormalCutoff[1] = source.roughnessFactor;
+        material.uniforms.metallicRoughnessNormalCutoff[2] = source.normalScale;
+        material.uniforms.metallicRoughnessNormalCutoff[3] =
+            source.alphaMode == asset::AlphaMode::Mask ? source.alphaCutoff : 0.0f;
+
+        material.baseColor = textureOf(source.baseColor);
+        material.normal = textureOf(source.normal);
+        material.metallicRoughness = textureOf(source.metallicRoughness);
+        material.emissive = textureOf(source.emissive);
+
+        material.uniforms.textureFlags[0] = material.baseColor.valid() ? 1.0f : 0.0f;
+        material.uniforms.textureFlags[1] = material.normal.valid() ? 1.0f : 0.0f;
+        material.uniforms.textureFlags[2] = material.metallicRoughness.valid() ? 1.0f : 0.0f;
+        material.uniforms.textureFlags[3] = material.emissive.valid() ? 1.0f : 0.0f;
+
+        entry.materials.push_back(material);
+    }
 }
 
 } // namespace
@@ -126,7 +230,6 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
             return;
 
         const std::string urn(world.atoms().text(content));
-        const std::filesystem::path path = resolve(contentRoot_, urn);
 
         // Remembered as failed before anything else can go wrong, so every
         // early return below costs one attempt rather than one per frame.
@@ -136,109 +239,130 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
             failed_.insert(position, content);
         };
 
-        std::vector<std::byte> bytes;
-        if (!platform::readFile(path, bytes)) {
-            const std::array<core::I18nArg, 1> args{core::I18nArg{"path", path.string()}};
-            core::log(core::LogLevel::Warn, LUAUG_TR("render.err.mesh_file_missing"), args);
-            markFailed();
-            return;
-        }
-
-        asset::Model model;
-        if (auto error = asset::importGltf(bytes, path.parent_path(), {}, model); error.has_value()) {
-            core::logText(core::LogLevel::Warn, error->message);
-            markFailed();
-            return;
-        }
-
-        core::EngineError uploadError;
-        // A file with a skin gets the second stream and a file without gets
-        // exactly what M4 uploaded -- which is what keeps an unskinned draw
-        // byte-identical to the one the goldens recorded.
-        const MeshHandle handle = model.skinned()
-                                      ? cache.createSkinned(device, cmd, model.mesh, model.skin, &uploadError)
-                                      : cache.create(device, cmd, model.mesh, MeshUsage::Static, &uploadError);
-        if (!handle.valid()) {
-            core::logText(core::LogLevel::Warn, uploadError.message);
-            markFailed();
-            return;
-        }
+        // Two feeds, one library. A mounted pack answers with a compiled mesh
+        // -- meshopt streams and transcodable textures, nothing to parse; a
+        // content directory answers with the source file, parsed on the way in.
+        // ADR 0010 keeps the second forever as the dev-mode path, and the first
+        // is what a shipped game reads.
+        const asset::ResolvedContent resolved = mounts_ != nullptr ? mounts_->resolve(urn) : asset::ResolvedContent{};
 
         MeshLibrary::Entry entry;
-        entry.mesh = handle;
-        entry.bounds = model.mesh.bounds;
-        entry.sectionCount = static_cast<u32>(model.mesh.submeshes.size());
-        entry.sectionMaterial.reserve(model.mesh.submeshes.size());
-        for (const asset::Submesh& submesh : model.mesh.submeshes)
-            entry.sectionMaterial.push_back(submesh.material);
+        core::EngineError uploadError;
+        core::u32 triangles = 0;
 
-        // Images upload once each even when two materials share one, because
-        // the importer already decoded them once for the same reason.
-        std::vector<rhi::TextureHandle> images;
-        images.reserve(model.images.size());
-        for (const asset::Image& image : model.images) {
-            const rhi::TextureHandle texture = uploadImage(device, cmd, image, "material");
-            if (texture.valid())
-                textures_.push_back(texture);
-            images.push_back(texture);
+        if (resolved.source == asset::ResolvedContent::Source::Pack && resolved.kind == asset::AssetKind::Mesh) {
+            asset::CompiledMesh compiled;
+            if (auto error = asset::decodeMesh(resolved.bytes, compiled); error.has_value()) {
+                core::logText(core::LogLevel::Warn, error->message);
+                markFailed();
+                return;
+            }
+
+            // LOD 0 only, and the chain is in the file waiting for the selector
+            // that ships with streaming. Uploading the full-detail level is what
+            // keeps a packed mesh drawing exactly as the loose one did, which is
+            // the property that lets the two feeds be compared at all.
+            asset::Mesh geometry;
+            geometry.vertices = std::move(compiled.vertices);
+            geometry.indices = compiled.lods[0].indices;
+            geometry.submeshes = compiled.lods[0].submeshes;
+            geometry.bounds = compiled.bounds;
+            triangles = static_cast<core::u32>(geometry.indices.size() / 3);
+
+            const bool skinned = !compiled.joints.empty() && !compiled.skin.empty();
+            const MeshHandle handle = skinned ? cache.createSkinned(device, cmd, geometry, compiled.skin, &uploadError)
+                                              : cache.create(device, cmd, geometry, MeshUsage::Static, &uploadError);
+            if (!handle.valid()) {
+                core::logText(core::LogLevel::Warn, uploadError.message);
+                markFailed();
+                return;
+            }
+            entry.mesh = handle;
+
+            std::vector<rhi::TextureHandle> images;
+            images.reserve(compiled.images.size());
+            for (const asset::TextureSlot& slot : compiled.images) {
+                asset::TextureAsset texture;
+                const std::span<const std::byte> blob = mounts_->blob(slot.hash);
+                if (blob.empty() || asset::transcodeTexture(blob, transcode_, texture).has_value()) {
+                    // A material without its texture still draws, tinted. A
+                    // mesh refused for a missing texture would take the whole
+                    // world with it.
+                    images.push_back({});
+                    continue;
+                }
+                const rhi::TextureHandle uploaded = uploadTranscoded(device, cmd, texture, "material");
+                if (uploaded.valid())
+                    textures_.push_back(uploaded);
+                images.push_back(uploaded);
+            }
+
+            fillEntry(entry, geometry.bounds, geometry.submeshes, compiled.materials, images);
+            library.set(content, entry);
+
+            if (skeletons != nullptr && !compiled.joints.empty())
+                skeletons->set(content, SkeletonLibrary::Entry{std::move(compiled.joints), std::move(compiled.clips)});
         }
+        else {
+            const std::filesystem::path path =
+                resolved.source == asset::ResolvedContent::Source::Loose ? resolved.path : resolve(contentRoot_, urn);
 
-        const auto textureOf = [&](const asset::TextureRef& reference) -> rhi::TextureHandle {
-            if (!reference.present() || reference.image >= images.size())
-                return {};
-            // The importer records the UV set the file declared, and this
-            // vertex layout carries one. A material sampling TEXCOORD_1
-            // would silently read TEXCOORD_0, so it is dropped instead --
-            // untextured is a visible wrong, silently-wrong-texture is not.
-            if (reference.uvSet != 0)
-                return {};
-            return images[reference.image];
-        };
+            std::vector<std::byte> bytes;
+            if (!platform::readFile(path, bytes)) {
+                const std::array<core::I18nArg, 1> args{core::I18nArg{"path", path.string()}};
+                core::log(core::LogLevel::Warn, LUAUG_TR("render.err.mesh_file_missing"), args);
+                markFailed();
+                return;
+            }
 
-        entry.materials.reserve(model.materials.size());
-        for (const asset::MaterialDef& source : model.materials) {
-            RenderMaterial material;
-            material.uniforms.baseColor[0] = source.baseColorFactor.r;
-            material.uniforms.baseColor[1] = source.baseColorFactor.g;
-            material.uniforms.baseColor[2] = source.baseColorFactor.b;
-            material.uniforms.baseColor[3] = source.baseColorAlpha;
-            material.uniforms.emissive[0] = source.emissiveFactor.r;
-            material.uniforms.emissive[1] = source.emissiveFactor.g;
-            material.uniforms.emissive[2] = source.emissiveFactor.b;
-            material.uniforms.metallicRoughnessNormalCutoff[0] = source.metallicFactor;
-            material.uniforms.metallicRoughnessNormalCutoff[1] = source.roughnessFactor;
-            material.uniforms.metallicRoughnessNormalCutoff[2] = source.normalScale;
-            material.uniforms.metallicRoughnessNormalCutoff[3] =
-                source.alphaMode == asset::AlphaMode::Mask ? source.alphaCutoff : 0.0f;
+            asset::Model model;
+            if (auto error = asset::importGltf(bytes, path.parent_path(), {}, model); error.has_value()) {
+                core::logText(core::LogLevel::Warn, error->message);
+                markFailed();
+                return;
+            }
+            triangles = static_cast<core::u32>(model.mesh.indices.size() / 3);
 
-            material.baseColor = textureOf(source.baseColor);
-            material.normal = textureOf(source.normal);
-            material.metallicRoughness = textureOf(source.metallicRoughness);
-            material.emissive = textureOf(source.emissive);
+            // A file with a skin gets the second stream and a file without gets
+            // exactly what M4 uploaded -- which is what keeps an unskinned draw
+            // byte-identical to the one the goldens recorded.
+            const MeshHandle handle = model.skinned()
+                                          ? cache.createSkinned(device, cmd, model.mesh, model.skin, &uploadError)
+                                          : cache.create(device, cmd, model.mesh, MeshUsage::Static, &uploadError);
+            if (!handle.valid()) {
+                core::logText(core::LogLevel::Warn, uploadError.message);
+                markFailed();
+                return;
+            }
+            entry.mesh = handle;
 
-            material.uniforms.textureFlags[0] = material.baseColor.valid() ? 1.0f : 0.0f;
-            material.uniforms.textureFlags[1] = material.normal.valid() ? 1.0f : 0.0f;
-            material.uniforms.textureFlags[2] = material.metallicRoughness.valid() ? 1.0f : 0.0f;
-            material.uniforms.textureFlags[3] = material.emissive.valid() ? 1.0f : 0.0f;
+            // Images upload once each even when two materials share one, because
+            // the importer already decoded them once for the same reason.
+            std::vector<rhi::TextureHandle> images;
+            images.reserve(model.images.size());
+            for (const asset::Image& image : model.images) {
+                const rhi::TextureHandle texture = uploadImage(device, cmd, image, "material");
+                if (texture.valid())
+                    textures_.push_back(texture);
+                images.push_back(texture);
+            }
 
-            entry.materials.push_back(material);
-        }
+            fillEntry(entry, model.mesh.bounds, model.mesh.submeshes, model.materials, images);
+            library.set(content, entry);
 
-        library.set(content, entry);
-
-        // The skeleton half of the same file, handed to whoever asked for it.
-        // Read here rather than in a second pass because the file was already
-        // parsed once and parsing it again to find the joints would be the
-        // clearest kind of waste.
-        if (skeletons != nullptr && !model.joints.empty()) {
-            skeletons->set(content, SkeletonLibrary::Entry{std::move(model.joints), std::move(model.clips)});
+            // The skeleton half of the same file, handed to whoever asked for
+            // it. Read here rather than in a second pass because the file was
+            // already parsed once and parsing it again to find the joints would
+            // be the clearest kind of waste.
+            if (skeletons != nullptr && !model.joints.empty())
+                skeletons->set(content, SkeletonLibrary::Entry{std::move(model.joints), std::move(model.clips)});
         }
 
         ++loaded;
 
         const std::array<core::I18nArg, 2> args{
             core::I18nArg{"path", urn},
-            core::I18nArg{"triangles", static_cast<core::i64>(model.mesh.indices.size() / 3)},
+            core::I18nArg{"triangles", static_cast<core::i64>(triangles)},
         };
         core::log(core::LogLevel::Info, LUAUG_TR("render.info.mesh_loaded"), args);
     });

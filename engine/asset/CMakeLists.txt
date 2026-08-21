@@ -12,6 +12,7 @@
 luaug_add_module(asset
     LAYER 2
     SOURCES
+        src/content.cpp
         src/image.cpp
         src/gltf.cpp
         src/mesh_format.cpp
@@ -44,6 +45,7 @@ luaug_add_module_tests(asset
     MODULES
         asset
     SOURCES
+        tests/content_tests.cpp
         tests/image_tests.cpp
         tests/gltf_tests.cpp
         tests/mesh_format_tests.cpp
