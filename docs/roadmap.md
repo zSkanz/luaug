@@ -882,6 +882,29 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   The reduced-CPU row `perf-baselines.md` asks for stops being optional here —
   R16's logic is about the low end, and this is the milestone most able to
   forget it.
+- **Design constraint (not scope): the scene's depth must be samplable by a
+  later pass** (human decision, 2026-08-21). It has two known callers and
+  neither is built here, which is what makes it a constraint rather than work:
+  - **Screen-space ambient occlusion**, which is in this milestone's own post
+    chain and cannot be written without reading depth.
+  - **Intersection foam on water** — the white line where an ocean meets sand or
+    a hull. It is not geometry: it is the water fragment's depth compared against
+    the depth the opaque pass already wrote, foam drawn where the two are close.
+    The human named it, and it is the same caller M4's shader-per-material
+    constraint already names.
+
+  The pieces mostly exist. Depth is a `D32Float` attachment, sampling a
+  `D32Float` is already done every frame by the shadow map, and the sorted
+  blended pass water would ride in landed at M4.5. **What does not exist is
+  binding the scene's depth as a texture while it is also the depth attachment**
+  — a read-only depth state, or a copy. Deciding which while the pass list is
+  being rebuilt for IBL and post costs a decision; deciding it afterwards costs
+  the pass list.
+
+  **This is the freeze's first real test and that is fine.** If the binding needs
+  a call ADR 0037 does not have, that is an ADR — which is the freeze working
+  rather than failing. Record which way it went either way, because "we already
+  have depth" is exactly the kind of half-truth that reads as done.
 - **Deliverable:** `examples/02-meshes` and the M7 streaming example, both
   rendered through the new path, each shown beside its M4.5 render at the same
   camera and clock — so the difference is the only variable.
