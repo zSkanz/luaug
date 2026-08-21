@@ -40,7 +40,7 @@ constraint that decides most of the decisions below.
       conformant to reference easing tables checked in as test fixtures
 - [x] **miniaudio**: 2D sounds + basic 3D spatialization as `Sound` Instances,
       `AudioGroup` buses, `AudioService`
-- [ ] **Minimal skeletal animation**: glTF clip playback + linear blending
+- [x] **Minimal skeletal animation**: glTF clip playback + linear blending
       (`AnimationPlayer`/`AnimationTrack` per api-design.md) — no state machines,
       no IK; enough for idle/walk/jump
 - [ ] **Solid `Part` rendering** — added to the roadmap 2026-08-20 by human
@@ -62,24 +62,19 @@ constraint that decides most of the decisions below.
       decision, because it is baked into every golden recorded after it. The
       debug wire path stays — `render_world.cpp` says why, and it is still how
       anything is seen when the real path breaks.
-- [ ] **`@luaug/input`** — added to the roadmap 2026-08-20 by human decision,
-      **after this brief imported its scope**. Sugar over the IAS:
-      `input.action("Jump", Enum.KeyCode.Space, Enum.KeyCode.ButtonA)` builds
-      the context, action and bindings underneath. It exists because a raw
-      `IsKeyDown` beside the IAS was asked for and declined — a second input
-      path cannot sink, cannot be replayed and cannot be rebound, and
-      `KeyboardService` was deleted this milestone for being exactly that. Pure
-      Luau, no engine change, `Simulation` clock by default. **Broad and
-      practical, by human decision 2026-08-21** — the roadmap names the surface:
-      `input.down(keyCode)` for the one-liner, `input.action(name, ...keyCodes)`
-      for a bool across keyboard and gamepad, `input.direction2d` /
-      `direction1d` for the composite bindings, and `input.context(name)` as the
-      escape hatch. **Idempotent**, because a script that calls in a loop must
-      not grow the tree. Everything returns the real instances. Document how to
-      reach them — sugar that cannot be escaped is a wall — and document what
-      `input.down` costs in its own doc string: a key with no name is a key the
-      rebind screen cannot list, which is right for a prototype and wrong for a
-      shipped game.
+- [ ] **`InputService` gains a raw event surface** — human decision 2026-08-21,
+      **ADR 0041**, amending ADR 0029. `InputBegan` / `InputChanged` /
+      `InputEnded` carrying an `InputObject` and a UI-consumed flag, plus
+      `IsKeyDown`. Fed from the IAS's own dispatch and never from the OS, after
+      the UI sink flag `938522b6` built, and from the recorded stream in a
+      replay — so M6's gate still sees every input a game reads. On the
+      `Simulation` clock, so a handler that writes to the world replays by
+      construction; render-rate input stays an `InputContext` with
+      `Rate = Render`. New work is the `InputObject` datatype and
+      `Enum.UserInputType`. **The rebinding cost goes in the events' own doc
+      text**: a key handled here will not appear in a remapping screen and an
+      action will. **This replaces `@luaug/input`, which is dropped** — it
+      existed to make the simple case cheap and `IsKeyDown` makes it cheap.
 - [ ] **An action must be drivable by a non-device source** — a design
       constraint added to the roadmap 2026-08-20 by human decision, **after this
       brief imported its scope**. `InputBinding` is keyed by `KeyCode`, so only

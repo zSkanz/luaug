@@ -641,47 +641,37 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
     comment: it is how anything is seen when the real path is not working, so a
     bug in the culler must not be able to hide it. What changes is that it stops
     being the only way a `Part` is visible.
-- **`@luaug/input`, the sugar that keeps one input path** (human decision,
-  2026-08-20). Reading one key today costs a context, an action, a binding and
-  the parenting between them — fifteen lines for a jump — and that friction is
-  what makes somebody ask for a raw `IsKeyDown` beside the IAS. That request was
-  declined and this replaces it: **the ergonomics without a second path.** The
-  human asked for it to be broad and practical, so the surface is named rather
-  than left to taste:
+- **`InputService` gains the raw event surface a Roblox developer reaches for**
+  (human decision, 2026-08-21; **ADR 0041**, which amends ADR 0029's "only input
+  model" clause). `InputBegan`, `InputChanged`, `InputEnded` — each carrying an
+  `InputObject` (`UserInputType`, `KeyCode`, `Position`, `Delta`) and a second
+  argument saying whether the UI already consumed it — plus `IsKeyDown`. The
+  first line of this repository's README promises the developer experience a
+  Roblox developer already has, and a person arriving from that platform reaches
+  for `UserInputService.InputBegan`; no amount of sugar over a different model
+  answers that.
 
-  - `input.down(keyCode) -> boolean` — the one-liner, for when a key is all you
-    want. Derives a stable action name from the key code so repeated calls reuse
-    one action rather than creating one per frame.
-  - `input.action(name, ...keyCodes) -> InputAction` — a `Bool` action with one
-    binding per code, so a keyboard key and a gamepad button are one call and
-    one `if`.
-  - `input.direction2d(name, { up, down, left, right }) -> InputAction` and
-    `input.direction1d(name, { positive, negative })` — the composite bindings,
-    which are the ones with the most fields to fill by hand.
-  - `input.context(name) -> InputContext` — the escape hatch, for a caller who
-    wants their own priority, sink or `Rate`.
-
-  **Idempotent, because scripts re-run.** Calling `input.action("Jump", …)`
-  twice returns the same action and does not duplicate its bindings; the
-  implicit context is created once, named so it is findable in the explorer, and
-  reused. A hot reload rebuilds the world so nothing survives it, but a script
-  that calls in a loop must not grow the tree.
-
-  Everything returns the **real** instances, so `Pressed`, `GetPreferredBinding`,
-  `Priority` and `Sink` are all still there. Defaults are the safe ones: the
-  `Simulation` clock (ADR 0039), priority zero, not sinking. Document how to
-  reach the underlying instances — sugar that cannot be escaped is a wall.
-
-  **And document what `input.down` costs, in its own doc string.** A key with no
-  name is a key the rebind screen cannot list. It is the right tool for a
-  prototype and the wrong one for a shipped game, and saying so where it is read
-  is cheaper than a player discovering one control that will not remap.
-
-  Pure Luau, no engine change, in the namespace `api-design.md` §1 already
-  describes as engine-provided optional libraries that are opt-in.
-  `InputService:CreateAction` was the alternative and is not taken: the same
-  sugar costs public C++ surface and an api-dump row where a module costs
-  neither.
+  - **Fed from the IAS's dispatch, never from the OS.** Same source, same frame,
+    after the UI has consumed what it consumed — which is the `gameProcessedEvent`
+    Roblox has, and which `938522b6` already built the flag for. In a replay they
+    come from the recorded stream, so M6's own gate can still see every input a
+    game reads.
+  - **On the `Simulation` clock**, so a handler that writes to the world is
+    replayable by construction. Render-rate input for a camera is an
+    `InputContext` with `Rate = Render`, which `examples/03-physics-playground`
+    already demonstrates. Firing raw events at render rate was rejected: it makes
+    the easy path the non-deterministic one.
+  - **Rebinding is the cost that remains, and it is stated in the events' own
+    doc text.** A key handled here does not appear in a remapping screen; an
+    action does. Roblox has the identical split — `UserInputService` is not
+    rebindable there either — so it is a familiar cost rather than a new one.
+  - **The IAS stays and stays the recommended path for a shipped game**: it is
+    what the examples use, what a rebinding screen can enumerate, and what binds
+    a keyboard key and a gamepad button to one action.
+  - **New work:** the `InputObject` datatype and `Enum.UserInputType`.
+    `Enum.KeyCode` already spans keyboard, mouse and gamepad.
+  - **`@luaug/input` is dropped.** It existed to make the simple case cheap and
+    `IsKeyDown` makes it cheap; shipping both is two answers to one question.
 
 - **Design constraint (not scope): an action must be drivable by something that
   is not a physical device** (human decision, 2026-08-20). `InputBinding` is
