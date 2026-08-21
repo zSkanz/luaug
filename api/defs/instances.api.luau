@@ -9,10 +9,11 @@
 local Schema = require("../schema")
 
 --- The attribute value domain (§2.2). Written once because it widens as the
---- remaining datatypes ship -- `Vector2`, `UDim`, `UDim2` and `Rect` join it at
---- the milestone that declares them -- and three copies would widen at three
---- different times.
-local AttributeValue = "string | number | boolean | vector | CFrame | Color3"
+--- remaining datatypes ship, and three copies would widen at three different
+--- times. It widened once, at M6, when `Vector2`, `UDim`, `UDim2` and `Rect`
+--- were declared -- which is the whole of what §2.2's "as those datatypes ship"
+--- was waiting for.
+local AttributeValue = "string | number | boolean | vector | CFrame | Color3 | Vector2 | UDim | UDim2 | Rect"
 local OptionalAttributeValue = "(" .. AttributeValue .. ")?"
 local AttributeMap = "{ [string]: " .. AttributeValue .. " }"
 

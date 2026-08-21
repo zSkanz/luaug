@@ -33,7 +33,7 @@ namespace scene = luaug::scene;
 // say so at build time: the list of types the panel must render is exactly the
 // list of alternatives, and a new one that nothing here names is the silent
 // gap risk 6 describes.
-static_assert(std::variant_size_v<scene::Value> == 9, "every Value alternative needs an editor and a test row");
+static_assert(std::variant_size_v<scene::Value> == 13, "every Value alternative needs an editor and a test row");
 
 // Where the fixture's properties actually live. Generated accessors are plain
 // function pointers with no place to put state, so the real ones write into

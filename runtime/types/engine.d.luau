@@ -162,6 +162,68 @@ declare extern type Color3 with
     function __eq(self, other: Color3): boolean
 end
 
+declare extern type Vector2 with
+    --- The horizontal component. Uppercase, unlike `Vector3.x`: that one is lowercase because it is a
+    --- field of the Luau primitive itself (divergence #9), and this type is ours.
+    read X: number
+    --- The vertical component, growing downward in every screen-space coordinate the UI uses.
+    read Y: number
+    --- The vector's length.
+    read Magnitude: number
+    --- The same direction at length 1. The zero vector normalizes to zero rather than to NaN, which
+    --- matches Vector3 and is what stops a stationary input axis poisoning a frame.
+    read Unit: Vector2
+    --- The dot product with another vector.
+    function Dot(self, other: Vector2): number
+    --- Linear interpolation toward `goal`. `alpha` is not clamped, so a value outside 0-1 extrapolates.
+    function Lerp(self, goal: Vector2, alpha: number): Vector2
+    function __add(self, other: Vector2): Vector2
+    function __sub(self, other: Vector2): Vector2
+    function __unm(self): Vector2
+    function __mul(self, other: Vector2): Vector2
+    function __mul(self, scalar: number): Vector2
+    function __div(self, other: Vector2): Vector2
+    function __div(self, scalar: number): Vector2
+    function __eq(self, other: Vector2): boolean
+end
+
+declare extern type UDim with
+    --- The fraction of the parent's size along this axis. 1 is the whole parent; it is not clamped, so
+    --- a value past 1 or below 0 is legal and means what it says.
+    read Scale: number
+    --- The pixel offset added after the scale is resolved.
+    read Offset: number
+    function __add(self, other: UDim): UDim
+    function __sub(self, other: UDim): UDim
+    function __eq(self, other: UDim): boolean
+end
+
+declare extern type UDim2 with
+    --- The horizontal axis.
+    read X: UDim
+    --- The vertical axis.
+    read Y: UDim
+    --- Interpolates all four numbers independently. This is the operation a tween on a `Position`
+    --- performs, and it is on the type so that game code animating by hand and the engine animating by
+    --- tween produce the same intermediate values.
+    function Lerp(self, goal: UDim2, alpha: number): UDim2
+    function __add(self, other: UDim2): UDim2
+    function __sub(self, other: UDim2): UDim2
+    function __eq(self, other: UDim2): boolean
+end
+
+declare extern type Rect with
+    --- The corner given first.
+    read Min: Vector2
+    --- The corner given second.
+    read Max: Vector2
+    --- `Max.X - Min.X`, which is negative for an inverted rectangle rather than zero.
+    read Width: number
+    --- `Max.Y - Min.Y`, which is negative for an inverted rectangle rather than zero.
+    read Height: number
+    function __eq(self, other: Rect): boolean
+end
+
 declare extern type Random with
     --- The next number in [min, max), defaulting to [0, 1) -- half-open, like every other range in the
     --- engine. `min > max` raises `script.err.random_range`.
@@ -273,12 +335,12 @@ declare extern type Instance with
     function Destroy(self): ()
     --- The value of that attribute, or nil when it has never been set; attribute names are
     --- case-sensitive.
-    function GetAttribute(self, name: string): (string | number | boolean | vector | CFrame | Color3)?
+    function GetAttribute(self, name: string): (string | number | boolean | vector | CFrame | Color3 | Vector2 | UDim | UDim2 | Rect)?
     --- Sets that attribute, or removes it when value is nil; a table, an Instance or a function raises
     --- and leaves any previous value in place, and an empty name raises.
-    function SetAttribute(self, name: string, value: (string | number | boolean | vector | CFrame | Color3)?): ()
+    function SetAttribute(self, name: string, value: (string | number | boolean | vector | CFrame | Color3 | Vector2 | UDim | UDim2 | Rect)?): ()
     --- A fresh table of this instance's attributes, which the caller owns.
-    function GetAttributes(self): { [string]: string | number | boolean | vector | CFrame | Color3 }
+    function GetAttributes(self): { [string]: string | number | boolean | vector | CFrame | Color3 | Vector2 | UDim | UDim2 | Rect }
     --- The signal fired when that attribute changes; any name is accepted, because an attribute that
     --- has never been set is a reasonable thing to wait for.
     function GetAttributeChangedSignal(self, name: string): Signal<()>
@@ -840,6 +902,26 @@ declare Color3: {
     fromRGB: ((r: number, g: number, b: number) -> Color3),
     fromHSV: ((h: number, s: number, v: number) -> Color3),
     fromHex: ((hex: string) -> Color3),
+}
+
+declare Vector2: {
+    new: ((x: number?, y: number?) -> Vector2),
+    zero: Vector2,
+    one: Vector2,
+}
+
+declare UDim: {
+    new: ((scale: number?, offset: number?) -> UDim),
+}
+
+declare UDim2: {
+    new: ((xs: number?, xo: number?, ys: number?, yo: number?) -> UDim2),
+    fromScale: ((xs: number?, ys: number?) -> UDim2),
+    fromOffset: ((xo: number?, yo: number?) -> UDim2),
+}
+
+declare Rect: {
+    new: ((min: Vector2, max: Vector2) -> Rect),
 }
 
 declare Random: {

@@ -32,6 +32,14 @@ const char* valueTypeName(ValueType type) noexcept
         return "Instance";
     case ValueType::EnumItem:
         return "EnumItem";
+    case ValueType::Vector2:
+        return "Vector2";
+    case ValueType::UDim:
+        return "UDim";
+    case ValueType::UDim2:
+        return "UDim2";
+    case ValueType::Rect:
+        return "Rect";
     }
     return "nil";
 }

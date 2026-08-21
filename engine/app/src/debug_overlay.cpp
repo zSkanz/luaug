@@ -329,6 +329,49 @@ void drawEditor(scene::World& world, Inspector& inspector, core::InstanceId id, 
                               scene::Value{core::Color3{components[0], components[1], components[2]}});
         break;
     }
+    case EditorKind::Vector2: {
+        const core::Vec2 value = std::get<core::Vec2>(*current);
+        float components[2]{value.x, value.y};
+        if (ImGui::DragFloat2("##value", components, 0.5f))
+            inspector.enqueue(id, descriptor.name, scene::Value{core::Vec2{components[0], components[1]}});
+        break;
+    }
+    case EditorKind::UDim: {
+        const core::UDim value = std::get<core::UDim>(*current);
+        float scale = value.scale;
+        float offset = value.offset;
+        // Two widgets rather than a DragFloat2, because the two halves are not
+        // the same quantity: a scale moves in hundredths of a parent and an
+        // offset moves in pixels, and one shared step makes one of them useless.
+        bool changed = ImGui::DragFloat("##scale", &scale, 0.01f);
+        changed = ImGui::DragFloat("##offset", &offset, 1.0f) || changed;
+        if (changed)
+            inspector.enqueue(id, descriptor.name, scene::Value{core::UDim{scale, offset}});
+        break;
+    }
+    case EditorKind::UDim2: {
+        const core::UDim2 value = std::get<core::UDim2>(*current);
+        float scales[2]{value.x.scale, value.y.scale};
+        float offsets[2]{value.x.offset, value.y.offset};
+        bool changed = ImGui::DragFloat2("##scale", scales, 0.01f);
+        changed = ImGui::DragFloat2("##offset", offsets, 1.0f) || changed;
+        if (changed) {
+            inspector.enqueue(
+                id, descriptor.name,
+                scene::Value{core::UDim2{core::UDim{scales[0], offsets[0]}, core::UDim{scales[1], offsets[1]}}});
+        }
+        break;
+    }
+    case EditorKind::Rect: {
+        const core::Rect value = std::get<core::Rect>(*current);
+        float components[4]{value.min.x, value.min.y, value.max.x, value.max.y};
+        if (ImGui::DragFloat4("##value", components, 1.0f)) {
+            inspector.enqueue(id, descriptor.name,
+                              scene::Value{core::Rect{core::Vec2{components[0], components[1]},
+                                                      core::Vec2{components[2], components[3]}}});
+        }
+        break;
+    }
     case EditorKind::EnumCombo: {
         const scene::EnumValue value = std::get<scene::EnumValue>(*current);
         const scene::EnumDescriptor* enumDescriptor = world.enums().find(value.enumId);

@@ -403,10 +403,17 @@ int methodDestroy(lua_State* L)
         break;
     }
 
-    if (std::optional<scene::Value> cframe = toValue(L, index, scene::ValueType::CFrame))
-        return cframe;
-    if (std::optional<scene::Value> color = toValue(L, index, scene::ValueType::Color3))
-        return color;
+    // The userdata half of the domain, tried in turn because a tag test is a
+    // pointer comparison and there is no dispatch table from a tag to a
+    // `ValueType`. Every alternative `AttributeValue` names in the IDL has a
+    // line here, and the conformance suite round-trips one of each -- which is
+    // what says the two lists are the same list.
+    for (const scene::ValueType candidate :
+         {scene::ValueType::CFrame, scene::ValueType::Color3, scene::ValueType::Vector2, scene::ValueType::UDim,
+          scene::ValueType::UDim2, scene::ValueType::Rect}) {
+        if (std::optional<scene::Value> value = toValue(L, index, candidate))
+            return value;
+    }
     // A table, an Instance or a function: outside the domain, and the caller
     // raises `scene.err.attribute_type` leaving any previous value in place.
     return std::nullopt;

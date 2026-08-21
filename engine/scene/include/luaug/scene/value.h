@@ -35,9 +35,12 @@ struct EnumValue
 // Order matters: the index into the variant IS the wire tag, so it is written
 // into snapshots and compared by the world hash. Appending is safe; reordering
 // is a format break.
-using Value =
-    std::variant<std::monostate, // absent -- an unset attribute, or a nil Instance reference
-                 bool, f64, std::string, core::Vec3, core::CFrameD, core::Color3, core::InstanceId, EnumValue>;
+using Value = std::variant<std::monostate, // absent -- an unset attribute, or a nil Instance reference
+                           bool, f64, std::string, core::Vec3, core::CFrameD, core::Color3, core::InstanceId, EnumValue,
+                           // M6's screen-space four, appended in the order api-design.md
+                           // §2.3 lists them. Appended rather than grouped with the other
+                           // geometry, because the index IS the wire tag.
+                           core::Vec2, core::UDim, core::UDim2, core::Rect>;
 
 enum class ValueType : u8
 {
@@ -50,6 +53,10 @@ enum class ValueType : u8
     Color3 = 6,
     Instance = 7,
     EnumItem = 8,
+    Vector2 = 9,
+    UDim = 10,
+    UDim2 = 11,
+    Rect = 12,
 };
 
 [[nodiscard]] constexpr ValueType valueType(const Value& value) noexcept

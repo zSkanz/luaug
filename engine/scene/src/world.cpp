@@ -20,6 +20,13 @@ namespace {
     case ValueType::Vector3:
     case ValueType::CFrame:
     case ValueType::Color3:
+    // api-design.md §2.2 admits these four "as those datatypes ship", and they
+    // ship at M6. Nothing about them is a tree edge, which is the only reason
+    // `Instance` is excluded.
+    case ValueType::Vector2:
+    case ValueType::UDim:
+    case ValueType::UDim2:
+    case ValueType::Rect:
         return true;
     case ValueType::Instance:
     case ValueType::EnumItem:

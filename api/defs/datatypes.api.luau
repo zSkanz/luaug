@@ -5,11 +5,12 @@
 --- a value are PascalCase (ADR 0034). The schema's validator enforces both, so
 --- the split is not something a definition can get wrong quietly.
 ---
---- The M2 set only: `Vector3`, `CFrame`, `Color3`, `Random`, `Signal` and
---- `Connection`. `Vector2`, `UDim`, `UDim2`, `Rect`, `TweenInfo`,
---- `RaycastParams` and `RaycastResult` arrive with the milestone that gives
---- each one meaning; `Content` is an alias of `string` and is emitted by the
---- definition generator rather than declared here.
+--- The M2 set (`Vector3`, `CFrame`, `Color3`, `Random`, `Signal`,
+--- `Connection`), M5's `RaycastParams` and `RaycastResult`, and M6's
+--- screen-space four: `Vector2`, `UDim`, `UDim2` and `Rect`. `TweenInfo` lands
+--- with `TweenService`, the only thing that reads one. `Content` is an alias of
+--- `string` and is emitted by the definition generator rather than declared
+--- here.
 ---
 --- `Module` is `script` for every entry: a value type is bound in the VM by the
 --- `script` module (m2-kickoff §"module map"), not registered into the scene
@@ -684,6 +685,351 @@ local Datatypes: { Schema.Datatype } = {
                 Returns = { "boolean" },
                 Doc = "Exact and component-wise. Channels are not clamped, so two colours that would render "
                     .. "identically after clamping are still unequal if their stored values differ.",
+            },
+        } :: { Schema.Operator },
+    },
+    {
+        Name = "Vector2",
+        Module = "script",
+        Doc = "A two-component screen-space vector, in f32. Userdata rather than a primitive, because the "
+            .. "native Luau `vector` is three-wide and IS Vector3 (ADR 0013) -- which is why this is the one "
+            .. "vector type in the surface whose operators are the engine's rather than the language's. It "
+            .. "carries the arithmetic UI code actually writes: `+`, `-`, unary `-`, `*` and `/` with a scalar "
+            .. "on either side or component-wise with another Vector2, and an exact `==`.",
+        Constructors = {
+            {
+                Name = "new",
+                Parameters = {
+                    { Name = "x", Type = "number?", Default = "0" },
+                    { Name = "y", Type = "number?", Default = "0" },
+                },
+                Returns = { "Vector2" },
+                ThreadSafety = "Safe",
+                Doc = "A vector from two components, each defaulting to 0.",
+            },
+        } :: { Schema.Method },
+        Constants = {
+            {
+                Name = "zero",
+                Type = "Vector2",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "`Vector2.new(0, 0)`, as a constant rather than a call.",
+            },
+            {
+                Name = "one",
+                Type = "Vector2",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "`Vector2.new(1, 1)`, as a constant rather than a call.",
+            },
+        } :: { Schema.Property },
+        Properties = {
+            {
+                Name = "X",
+                Type = "number",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "The horizontal component. Uppercase, unlike `Vector3.x`: that one is lowercase because "
+                    .. "it is a field of the Luau primitive itself (divergence #9), and this type is ours.",
+            },
+            {
+                Name = "Y",
+                Type = "number",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "The vertical component, growing downward in every screen-space coordinate the UI uses.",
+            },
+            {
+                Name = "Magnitude",
+                Type = "number",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "The vector's length.",
+            },
+            {
+                Name = "Unit",
+                Type = "Vector2",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "The same direction at length 1. The zero vector normalizes to zero rather than to NaN, "
+                    .. "which matches Vector3 and is what stops a stationary input axis poisoning a frame.",
+            },
+        } :: { Schema.Property },
+        Methods = {
+            {
+                Name = "Dot",
+                Parameters = { { Name = "other", Type = "Vector2" } },
+                Returns = { "number" },
+                ThreadSafety = "Safe",
+                Doc = "The dot product with another vector.",
+            },
+            {
+                Name = "Lerp",
+                Parameters = {
+                    { Name = "goal", Type = "Vector2" },
+                    { Name = "alpha", Type = "number" },
+                },
+                Returns = { "Vector2" },
+                ThreadSafety = "Safe",
+                Doc = "Linear interpolation toward `goal`. `alpha` is not clamped, so a value outside 0-1 "
+                    .. "extrapolates.",
+            },
+        } :: { Schema.Method },
+        Operators = {
+            {
+                Name = "__add",
+                Parameters = { { Name = "other", Type = "Vector2" } },
+                Returns = { "Vector2" },
+                Doc = "Component-wise addition.",
+            },
+            {
+                Name = "__sub",
+                Parameters = { { Name = "other", Type = "Vector2" } },
+                Returns = { "Vector2" },
+                Doc = "Component-wise subtraction.",
+            },
+            {
+                Name = "__unm",
+                Parameters = {},
+                Returns = { "Vector2" },
+                Doc = "Negation.",
+            },
+            {
+                Name = "__mul",
+                Parameters = { { Name = "other", Type = "Vector2" } },
+                Returns = { "Vector2" },
+                Doc = "Component-wise multiplication.",
+            },
+            {
+                Name = "__mul",
+                Parameters = { { Name = "scalar", Type = "number" } },
+                Returns = { "Vector2" },
+                Doc = "Scaling. The scalar may be on either side, because `__mul` dispatches on either operand.",
+            },
+            {
+                Name = "__div",
+                Parameters = { { Name = "other", Type = "Vector2" } },
+                Returns = { "Vector2" },
+                Doc = "Component-wise division.",
+            },
+            {
+                Name = "__div",
+                Parameters = { { Name = "scalar", Type = "number" } },
+                Returns = { "Vector2" },
+                Doc = "Division by a scalar, on either side.",
+            },
+            {
+                Name = "__eq",
+                Parameters = { { Name = "other", Type = "Vector2" } },
+                Returns = { "boolean" },
+                Doc = "Exact, component-wise equality -- an identity test rather than a tolerance.",
+            },
+        } :: { Schema.Operator },
+    },
+    {
+        Name = "UDim",
+        Module = "script",
+        Doc = "One axis of a UI coordinate: a fraction of the parent (`Scale`) plus a pixel offset (`Offset`). "
+            .. 'The pair is what lets a layout written once be correct at every resolution -- "half the parent, minus '
+            .. 'eight pixels" is one value rather than a formula every caller re-derives when the window '
+            .. "resizes. Adds and subtracts component-wise.",
+        Constructors = {
+            {
+                Name = "new",
+                Parameters = {
+                    { Name = "scale", Type = "number?", Default = "0" },
+                    { Name = "offset", Type = "number?", Default = "0" },
+                },
+                Returns = { "UDim" },
+                ThreadSafety = "Safe",
+                Doc = "A UDim from a scale and an offset, both defaulting to 0.",
+            },
+        } :: { Schema.Method },
+        Properties = {
+            {
+                Name = "Scale",
+                Type = "number",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "The fraction of the parent's size along this axis. 1 is the whole parent; it is not "
+                    .. "clamped, so a value past 1 or below 0 is legal and means what it says.",
+            },
+            {
+                Name = "Offset",
+                Type = "number",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "The pixel offset added after the scale is resolved.",
+            },
+        } :: { Schema.Property },
+        Operators = {
+            {
+                Name = "__add",
+                Parameters = { { Name = "other", Type = "UDim" } },
+                Returns = { "UDim" },
+                Doc = "Adds both halves.",
+            },
+            {
+                Name = "__sub",
+                Parameters = { { Name = "other", Type = "UDim" } },
+                Returns = { "UDim" },
+                Doc = "Subtracts both halves.",
+            },
+            {
+                Name = "__eq",
+                Parameters = { { Name = "other", Type = "UDim" } },
+                Returns = { "boolean" },
+                Doc = "Exact equality of both halves.",
+            },
+        } :: { Schema.Operator },
+    },
+    {
+        Name = "UDim2",
+        Module = "script",
+        Doc = "A two-axis UI coordinate: a `UDim` per axis. Every `Position` and `Size` on a UIObject is one, "
+            .. "which is what makes a layout written once correct at every resolution.",
+        Constructors = {
+            {
+                Name = "new",
+                Parameters = {
+                    { Name = "xs", Type = "number?", Default = "0" },
+                    { Name = "xo", Type = "number?", Default = "0" },
+                    { Name = "ys", Type = "number?", Default = "0" },
+                    { Name = "yo", Type = "number?", Default = "0" },
+                },
+                Returns = { "UDim2" },
+                ThreadSafety = "Safe",
+                Doc = "Four numbers in axis order: x scale, x offset, y scale, y offset. There is deliberately "
+                    .. "no second overload taking two UDims -- one constructor with one argument order is what "
+                    .. "a frozen surface is for.",
+            },
+            {
+                Name = "fromScale",
+                Parameters = {
+                    { Name = "xs", Type = "number?", Default = "0" },
+                    { Name = "ys", Type = "number?", Default = "0" },
+                },
+                Returns = { "UDim2" },
+                ThreadSafety = "Safe",
+                Doc = "Scale on both axes, zero offsets -- the spelling for a purely relative layout.",
+            },
+            {
+                Name = "fromOffset",
+                Parameters = {
+                    { Name = "xo", Type = "number?", Default = "0" },
+                    { Name = "yo", Type = "number?", Default = "0" },
+                },
+                Returns = { "UDim2" },
+                ThreadSafety = "Safe",
+                Doc = "Pixels on both axes, zero scales -- the spelling for a fixed-size element.",
+            },
+        } :: { Schema.Method },
+        Properties = {
+            {
+                Name = "X",
+                Type = "UDim",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "The horizontal axis.",
+            },
+            {
+                Name = "Y",
+                Type = "UDim",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "The vertical axis.",
+            },
+        } :: { Schema.Property },
+        Methods = {
+            {
+                Name = "Lerp",
+                Parameters = {
+                    { Name = "goal", Type = "UDim2" },
+                    { Name = "alpha", Type = "number" },
+                },
+                Returns = { "UDim2" },
+                ThreadSafety = "Safe",
+                Doc = "Interpolates all four numbers independently. This is the operation a tween on a "
+                    .. "`Position` performs, and it is on the type so that game code animating by hand and the "
+                    .. "engine animating by tween produce the same intermediate values.",
+            },
+        } :: { Schema.Method },
+        Operators = {
+            {
+                Name = "__add",
+                Parameters = { { Name = "other", Type = "UDim2" } },
+                Returns = { "UDim2" },
+                Doc = "Adds both axes.",
+            },
+            {
+                Name = "__sub",
+                Parameters = { { Name = "other", Type = "UDim2" } },
+                Returns = { "UDim2" },
+                Doc = "Subtracts both axes.",
+            },
+            {
+                Name = "__eq",
+                Parameters = { { Name = "other", Type = "UDim2" } },
+                Returns = { "boolean" },
+                Doc = "Exact equality of all four numbers.",
+            },
+        } :: { Schema.Operator },
+    },
+    {
+        Name = "Rect",
+        Module = "script",
+        Doc = "A screen-space rectangle by two corners, in pixels. The corners are **not** sorted and not "
+            .. "validated: an `ImageLabel.SliceCenter` whose min is past its max is a mistake for its author "
+            .. "to see, not one for a constructor to silently correct.",
+        Constructors = {
+            {
+                Name = "new",
+                Parameters = {
+                    { Name = "min", Type = "Vector2" },
+                    { Name = "max", Type = "Vector2" },
+                },
+                Returns = { "Rect" },
+                ThreadSafety = "Safe",
+                Doc = "A rectangle from its two corners.",
+            },
+        } :: { Schema.Method },
+        Properties = {
+            {
+                Name = "Min",
+                Type = "Vector2",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "The corner given first.",
+            },
+            {
+                Name = "Max",
+                Type = "Vector2",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "The corner given second.",
+            },
+            {
+                Name = "Width",
+                Type = "number",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "`Max.X - Min.X`, which is negative for an inverted rectangle rather than zero.",
+            },
+            {
+                Name = "Height",
+                Type = "number",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "`Max.Y - Min.Y`, which is negative for an inverted rectangle rather than zero.",
+            },
+        } :: { Schema.Property },
+        Operators = {
+            {
+                Name = "__eq",
+                Parameters = { { Name = "other", Type = "Rect" } },
+                Returns = { "boolean" },
+                Doc = "Exact equality of both corners.",
             },
         } :: { Schema.Operator },
     },

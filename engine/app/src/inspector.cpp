@@ -70,6 +70,38 @@ struct ValueFormatter
         return std::string(buffer);
     }
 
+    [[nodiscard]] std::string operator()(const core::Vec2& value) const
+    {
+        char buffer[FormatBufferSize]{};
+        std::snprintf(buffer, sizeof(buffer), "%.3f, %.3f", static_cast<f64>(value.x), static_cast<f64>(value.y));
+        return std::string(buffer);
+    }
+
+    [[nodiscard]] std::string operator()(const core::UDim& value) const
+    {
+        char buffer[FormatBufferSize]{};
+        std::snprintf(buffer, sizeof(buffer), "%.3f, %.0f", static_cast<f64>(value.scale),
+                      static_cast<f64>(value.offset));
+        return std::string(buffer);
+    }
+
+    [[nodiscard]] std::string operator()(const core::UDim2& value) const
+    {
+        char buffer[FormatBufferSize]{};
+        std::snprintf(buffer, sizeof(buffer), "{%.3f, %.0f}, {%.3f, %.0f}", static_cast<f64>(value.x.scale),
+                      static_cast<f64>(value.x.offset), static_cast<f64>(value.y.scale),
+                      static_cast<f64>(value.y.offset));
+        return std::string(buffer);
+    }
+
+    [[nodiscard]] std::string operator()(const core::Rect& value) const
+    {
+        char buffer[FormatBufferSize]{};
+        std::snprintf(buffer, sizeof(buffer), "%.1f, %.1f -> %.1f, %.1f", static_cast<f64>(value.min.x),
+                      static_cast<f64>(value.min.y), static_cast<f64>(value.max.x), static_cast<f64>(value.max.y));
+        return std::string(buffer);
+    }
+
     [[nodiscard]] std::string operator()(core::InstanceId value) const
     {
         if (!value.valid())
@@ -132,6 +164,14 @@ EditorKind editorFor(scene::ValueType type) noexcept
         return EditorKind::InstanceRef;
     case scene::ValueType::EnumItem:
         return EditorKind::EnumCombo;
+    case scene::ValueType::Vector2:
+        return EditorKind::Vector2;
+    case scene::ValueType::UDim:
+        return EditorKind::UDim;
+    case scene::ValueType::UDim2:
+        return EditorKind::UDim2;
+    case scene::ValueType::Rect:
+        return EditorKind::Rect;
     }
 
     // `Nil` is a property holding nothing, and so is anything the switch above

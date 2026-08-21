@@ -80,6 +80,18 @@ public:
         number(value.b);
     }
 
+    void vec2(const core::Vec2& value) noexcept
+    {
+        number(value.x);
+        number(value.y);
+    }
+
+    void udim(const core::UDim& value) noexcept
+    {
+        number(value.scale);
+        number(value.offset);
+    }
+
     void cframe(const core::CFrameD& value) noexcept
     {
         number(value.position.x);
@@ -142,6 +154,24 @@ void hashValue(Hasher& hasher, const Value& value)
         const EnumValue& item = std::get<EnumValue>(value);
         hasher.pod(item.enumId);
         hasher.pod(item.value);
+        break;
+    }
+    case ValueType::Vector2:
+        hasher.vec2(std::get<core::Vec2>(value));
+        break;
+    case ValueType::UDim:
+        hasher.udim(std::get<core::UDim>(value));
+        break;
+    case ValueType::UDim2: {
+        const core::UDim2& udim2 = std::get<core::UDim2>(value);
+        hasher.udim(udim2.x);
+        hasher.udim(udim2.y);
+        break;
+    }
+    case ValueType::Rect: {
+        const core::Rect& rect = std::get<core::Rect>(value);
+        hasher.vec2(rect.min);
+        hasher.vec2(rect.max);
         break;
     }
     }

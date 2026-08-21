@@ -1,9 +1,9 @@
 // Engine math (architecture.md §2, ADR 0013).
 //
 // The list grows with its consumers: a vector type nobody constructs is a
-// vector type nobody has checked the sign conventions of. `Vec2` is still absent
-// for that reason. `AABB` and `Frustum` arrived at M4, which is the milestone
-// that culls.
+// vector type nobody has checked the sign conventions of. `AABB` and `Frustum`
+// arrived at M4, which is the milestone that culls; `Vec2`, `UDim`, `UDim2` and
+// `Rect` at M6, which is the milestone with a screen to lay out.
 //
 // **Conventions, stated once because getting them wrong is silent.** Matrices
 // are column-major in storage and column-vector in use: a transform applies as
@@ -440,5 +440,93 @@ struct Color3
 // (api-design.md §2.3).
 [[nodiscard]] Color3 fromHsv(f32 hue, f32 saturation, f32 value) noexcept;
 void toHsv(Color3 color, f32& hue, f32& saturation, f32& value) noexcept;
+
+// --- Screen space ------------------------------------------------------------
+//
+// The four types the UI milestone's coordinates are written in. They live here
+// rather than in `ui` for the same reason `Color3` does: a `scene::Value` has to
+// be able to hold one, and `scene` is L3 while `ui` is L5.
+//
+// f32 throughout, and deliberately: these are pixels and fractions of a screen,
+// where f64 would buy precision below the width of a photon. World coordinates
+// are the ones that needed f64 (ADR 0014), and a screen is not a world.
+
+// api-design.md §2.3. `Vector2` is userdata rather than a primitive -- the Luau
+// `vector` is three-wide and is spoken for (ADR 0013) -- so unlike `Vec3` this
+// carries no layout contract with the VM.
+struct Vec2
+{
+    f32 x = 0.0f;
+    f32 y = 0.0f;
+
+    [[nodiscard]] constexpr bool operator==(const Vec2&) const noexcept = default;
+};
+
+[[nodiscard]] constexpr Vec2 operator+(Vec2 a, Vec2 b) noexcept
+{
+    return {a.x + b.x, a.y + b.y};
+}
+
+[[nodiscard]] constexpr Vec2 operator-(Vec2 a, Vec2 b) noexcept
+{
+    return {a.x - b.x, a.y - b.y};
+}
+
+[[nodiscard]] constexpr Vec2 operator-(Vec2 v) noexcept
+{
+    return {-v.x, -v.y};
+}
+
+[[nodiscard]] constexpr Vec2 operator*(Vec2 v, f32 s) noexcept
+{
+    return {v.x * s, v.y * s};
+}
+
+[[nodiscard]] constexpr Vec2 operator*(f32 s, Vec2 v) noexcept
+{
+    return {v.x * s, v.y * s};
+}
+
+[[nodiscard]] constexpr f32 dot(Vec2 a, Vec2 b) noexcept
+{
+    return a.x * b.x + a.y * b.y;
+}
+
+[[nodiscard]] f32 length(Vec2 v) noexcept;
+
+// The zero vector normalizes to zero rather than to NaN, matching `Vec3`.
+[[nodiscard]] Vec2 normalize(Vec2 v) noexcept;
+
+// One axis of a UDim2: a fraction of the parent plus a pixel offset. The pair
+// is what lets a layout written once be correct at every resolution --
+// "half the parent, minus eight pixels" is one value rather than a formula
+// somebody re-derives on every resize.
+struct UDim
+{
+    f32 scale = 0.0f;
+    f32 offset = 0.0f;
+
+    [[nodiscard]] constexpr bool operator==(const UDim&) const noexcept = default;
+};
+
+struct UDim2
+{
+    UDim x{};
+    UDim y{};
+
+    [[nodiscard]] constexpr bool operator==(const UDim2&) const noexcept = default;
+};
+
+// A screen-space rectangle by two corners. `min` is not required to be
+// component-wise below `max`: `ImageLabel.SliceCenter` is an inset into a source
+// image and an inverted one is a caller's mistake to see, not one for a
+// constructor to silently correct.
+struct Rect
+{
+    Vec2 min{};
+    Vec2 max{};
+
+    [[nodiscard]] constexpr bool operator==(const Rect&) const noexcept = default;
+};
 
 } // namespace luaug::core

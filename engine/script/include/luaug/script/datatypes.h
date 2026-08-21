@@ -47,6 +47,9 @@ void pushColor3(lua_State* L, core::Color3 value);
 void pushVector3(lua_State* L, core::Vec3 value);
 [[nodiscard]] core::Vec3 checkVector3(lua_State* L, int index);
 
+void pushVector2(lua_State* L, core::Vec2 value);
+[[nodiscard]] core::Vec2 checkVector2(lua_State* L, int index);
+
 // An enum item by id and value. Exported because an engine-raised fire carries
 // one -- `DebugService.MessageOut` hands its handler an `Enum.LogLevel` -- and
 // the registry lookup that turns it back into a name is this module's.

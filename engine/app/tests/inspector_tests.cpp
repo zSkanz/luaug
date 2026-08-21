@@ -115,6 +115,12 @@ TEST_CASE("every ValueType the registry can hold gets a widget and a rendering")
         {scene::ValueType::Color3, EditorKind::Color, scene::Value{core::Color3{0.25f, 0.5f, 0.75f}}},
         {scene::ValueType::Instance, EditorKind::InstanceRef, scene::Value{subject}},
         {scene::ValueType::EnumItem, EditorKind::EnumCombo, scene::Value{scene::EnumValue{fixture.moodEnum, 7}}},
+        {scene::ValueType::Vector2, EditorKind::Vector2, scene::Value{core::Vec2{4.0f, 5.0f}}},
+        {scene::ValueType::UDim, EditorKind::UDim, scene::Value{core::UDim{0.5f, -8.0f}}},
+        {scene::ValueType::UDim2, EditorKind::UDim2,
+         scene::Value{core::UDim2{core::UDim{0.5f, -8.0f}, core::UDim{1.0f, 12.0f}}}},
+        {scene::ValueType::Rect, EditorKind::Rect,
+         scene::Value{core::Rect{core::Vec2{1.0f, 2.0f}, core::Vec2{3.0f, 4.0f}}}},
     };
 
     std::vector<std::string> renderings;

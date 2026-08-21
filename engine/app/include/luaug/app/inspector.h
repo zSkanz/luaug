@@ -95,6 +95,14 @@ enum class EditorKind : core::u8
     Vector3,
     CFrame,
     Color,
+    // M6's screen-space four. Each is a fixed count of floats and nothing else,
+    // so they are four kinds rather than one "N floats" kind: the row's label
+    // and the drag step differ, and a UDim2 whose four numbers are unlabelled is
+    // a widget nobody can use.
+    Vector2,
+    UDim,
+    UDim2,
+    Rect,
     // Displayed and never written. Reparenting from the panel is out of M4's
     // scope, and `Parent` is an Instance property -- so an editable reference
     // widget would be the one feature the brief excluded, arriving by accident.

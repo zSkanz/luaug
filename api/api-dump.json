@@ -561,7 +561,7 @@
               "Type": "string"
             }
           ],
-          "Returns": ["(string | number | boolean | vector | CFrame | Color3)?"]
+          "Returns": ["(string | number | boolean | vector | CFrame | Color3 | Vector2 | UDim | UDim2 | Rect)?"]
         },
         {
           "Name": "GetAttributeChangedSignal",
@@ -576,7 +576,7 @@
         {
           "Name": "GetAttributes",
           "Parameters": [],
-          "Returns": ["{ [string]: string | number | boolean | vector | CFrame | Color3 }"]
+          "Returns": ["{ [string]: string | number | boolean | vector | CFrame | Color3 | Vector2 | UDim | UDim2 | Rect }"]
         },
         {
           "Name": "GetChildren",
@@ -662,7 +662,7 @@
             },
             {
               "Name": "value",
-              "Type": "(string | number | boolean | vector | CFrame | Color3)?"
+              "Type": "(string | number | boolean | vector | CFrame | Color3 | Vector2 | UDim | UDim2 | Rect)?"
             }
           ],
           "Returns": []
@@ -1922,6 +1922,66 @@
       "Operators": []
     },
     {
+      "Name": "Rect",
+      "Constructors": [
+        {
+          "Name": "new",
+          "Parameters": [
+            {
+              "Name": "min",
+              "Type": "Vector2"
+            },
+            {
+              "Name": "max",
+              "Type": "Vector2"
+            }
+          ],
+          "Returns": ["Rect"],
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Constants": [],
+      "Properties": [
+        {
+          "Name": "Height",
+          "Type": "number",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Max",
+          "Type": "Vector2",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Min",
+          "Type": "Vector2",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Width",
+          "Type": "number",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Methods": [],
+      "Operators": [
+        {
+          "Name": "__eq",
+          "Parameters": [
+            {
+              "Name": "other",
+              "Type": "Rect"
+            }
+          ],
+          "Returns": ["boolean"]
+        }
+      ]
+    },
+    {
       "Name": "Signal",
       "Constructors": [
         {
@@ -1982,6 +2042,373 @@
         }
       ],
       "Operators": []
+    },
+    {
+      "Name": "UDim",
+      "Constructors": [
+        {
+          "Name": "new",
+          "Parameters": [
+            {
+              "Name": "scale",
+              "Type": "number?",
+              "Default": "0"
+            },
+            {
+              "Name": "offset",
+              "Type": "number?",
+              "Default": "0"
+            }
+          ],
+          "Returns": ["UDim"],
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Constants": [],
+      "Properties": [
+        {
+          "Name": "Offset",
+          "Type": "number",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Scale",
+          "Type": "number",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Methods": [],
+      "Operators": [
+        {
+          "Name": "__add",
+          "Parameters": [
+            {
+              "Name": "other",
+              "Type": "UDim"
+            }
+          ],
+          "Returns": ["UDim"]
+        },
+        {
+          "Name": "__eq",
+          "Parameters": [
+            {
+              "Name": "other",
+              "Type": "UDim"
+            }
+          ],
+          "Returns": ["boolean"]
+        },
+        {
+          "Name": "__sub",
+          "Parameters": [
+            {
+              "Name": "other",
+              "Type": "UDim"
+            }
+          ],
+          "Returns": ["UDim"]
+        }
+      ]
+    },
+    {
+      "Name": "UDim2",
+      "Constructors": [
+        {
+          "Name": "fromOffset",
+          "Parameters": [
+            {
+              "Name": "xo",
+              "Type": "number?",
+              "Default": "0"
+            },
+            {
+              "Name": "yo",
+              "Type": "number?",
+              "Default": "0"
+            }
+          ],
+          "Returns": ["UDim2"],
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "fromScale",
+          "Parameters": [
+            {
+              "Name": "xs",
+              "Type": "number?",
+              "Default": "0"
+            },
+            {
+              "Name": "ys",
+              "Type": "number?",
+              "Default": "0"
+            }
+          ],
+          "Returns": ["UDim2"],
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "new",
+          "Parameters": [
+            {
+              "Name": "xs",
+              "Type": "number?",
+              "Default": "0"
+            },
+            {
+              "Name": "xo",
+              "Type": "number?",
+              "Default": "0"
+            },
+            {
+              "Name": "ys",
+              "Type": "number?",
+              "Default": "0"
+            },
+            {
+              "Name": "yo",
+              "Type": "number?",
+              "Default": "0"
+            }
+          ],
+          "Returns": ["UDim2"],
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Constants": [],
+      "Properties": [
+        {
+          "Name": "X",
+          "Type": "UDim",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Y",
+          "Type": "UDim",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Methods": [
+        {
+          "Name": "Lerp",
+          "Parameters": [
+            {
+              "Name": "goal",
+              "Type": "UDim2"
+            },
+            {
+              "Name": "alpha",
+              "Type": "number"
+            }
+          ],
+          "Returns": ["UDim2"],
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Operators": [
+        {
+          "Name": "__add",
+          "Parameters": [
+            {
+              "Name": "other",
+              "Type": "UDim2"
+            }
+          ],
+          "Returns": ["UDim2"]
+        },
+        {
+          "Name": "__eq",
+          "Parameters": [
+            {
+              "Name": "other",
+              "Type": "UDim2"
+            }
+          ],
+          "Returns": ["boolean"]
+        },
+        {
+          "Name": "__sub",
+          "Parameters": [
+            {
+              "Name": "other",
+              "Type": "UDim2"
+            }
+          ],
+          "Returns": ["UDim2"]
+        }
+      ]
+    },
+    {
+      "Name": "Vector2",
+      "Constructors": [
+        {
+          "Name": "new",
+          "Parameters": [
+            {
+              "Name": "x",
+              "Type": "number?",
+              "Default": "0"
+            },
+            {
+              "Name": "y",
+              "Type": "number?",
+              "Default": "0"
+            }
+          ],
+          "Returns": ["Vector2"],
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Constants": [
+        {
+          "Name": "one",
+          "Type": "Vector2",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "zero",
+          "Type": "Vector2",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Properties": [
+        {
+          "Name": "Magnitude",
+          "Type": "number",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Unit",
+          "Type": "Vector2",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "X",
+          "Type": "number",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Y",
+          "Type": "number",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Methods": [
+        {
+          "Name": "Dot",
+          "Parameters": [
+            {
+              "Name": "other",
+              "Type": "Vector2"
+            }
+          ],
+          "Returns": ["number"],
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Lerp",
+          "Parameters": [
+            {
+              "Name": "goal",
+              "Type": "Vector2"
+            },
+            {
+              "Name": "alpha",
+              "Type": "number"
+            }
+          ],
+          "Returns": ["Vector2"],
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Operators": [
+        {
+          "Name": "__add",
+          "Parameters": [
+            {
+              "Name": "other",
+              "Type": "Vector2"
+            }
+          ],
+          "Returns": ["Vector2"]
+        },
+        {
+          "Name": "__div",
+          "Parameters": [
+            {
+              "Name": "other",
+              "Type": "Vector2"
+            }
+          ],
+          "Returns": ["Vector2"]
+        },
+        {
+          "Name": "__div",
+          "Parameters": [
+            {
+              "Name": "scalar",
+              "Type": "number"
+            }
+          ],
+          "Returns": ["Vector2"]
+        },
+        {
+          "Name": "__eq",
+          "Parameters": [
+            {
+              "Name": "other",
+              "Type": "Vector2"
+            }
+          ],
+          "Returns": ["boolean"]
+        },
+        {
+          "Name": "__mul",
+          "Parameters": [
+            {
+              "Name": "other",
+              "Type": "Vector2"
+            }
+          ],
+          "Returns": ["Vector2"]
+        },
+        {
+          "Name": "__mul",
+          "Parameters": [
+            {
+              "Name": "scalar",
+              "Type": "number"
+            }
+          ],
+          "Returns": ["Vector2"]
+        },
+        {
+          "Name": "__sub",
+          "Parameters": [
+            {
+              "Name": "other",
+              "Type": "Vector2"
+            }
+          ],
+          "Returns": ["Vector2"]
+        },
+        {
+          "Name": "__unm",
+          "Parameters": [],
+          "Returns": ["Vector2"]
+        }
+      ]
     },
     {
       "Name": "Vector3",

@@ -108,6 +108,17 @@ Vec3 normalize(Vec3 v) noexcept
     return len > 0.0f ? v * (1.0f / len) : Vec3{};
 }
 
+f32 length(Vec2 v) noexcept
+{
+    return std::sqrt(dot(v, v));
+}
+
+Vec2 normalize(Vec2 v) noexcept
+{
+    const f32 len = length(v);
+    return len > 0.0f ? v * (1.0f / len) : Vec2{};
+}
+
 Mat4 operator*(const Mat4& a, const Mat4& b) noexcept
 {
     Mat4 result;

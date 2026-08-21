@@ -22,6 +22,10 @@ namespace {
 
 using core::CFrameD;
 using core::Color3;
+using core::Rect;
+using core::UDim;
+using core::UDim2;
+using core::Vec2;
 using core::Vec3;
 
 constexpr f64 IdentityUp[3] = {0.0, 1.0, 0.0};
@@ -368,6 +372,348 @@ int cframeFromMatrix(lua_State* L)
     result.rotation.m[2][1] = back.y;
     result.rotation.m[2][2] = back.z;
     pushTagged(L, UserdataTag::CFrame, result);
+    return 1;
+}
+
+// --- Vector2 -----------------------------------------------------------------
+//
+// Userdata rather than a primitive: the Luau `vector` is three-wide and IS
+// Vector3 (ADR 0013), so a two-component type has nowhere else to live. That
+// makes Vector2 the one value type in this file whose arithmetic operators are
+// ours to write rather than the language's -- UI code adds and scales positions
+// constantly, and a type that could only be constructed would push every caller
+// back into pairs of loose numbers.
+
+int vector2GetX(lua_State* L)
+{
+    pushNumber(L, checkTagged<Vec2>(L, 1, UserdataTag::Vector2).x);
+    return 1;
+}
+
+int vector2GetY(lua_State* L)
+{
+    pushNumber(L, checkTagged<Vec2>(L, 1, UserdataTag::Vector2).y);
+    return 1;
+}
+
+int vector2GetMagnitude(lua_State* L)
+{
+    pushNumber(L, core::length(checkTagged<Vec2>(L, 1, UserdataTag::Vector2)));
+    return 1;
+}
+
+int vector2GetUnit(lua_State* L)
+{
+    pushTagged(L, UserdataTag::Vector2, core::normalize(checkTagged<Vec2>(L, 1, UserdataTag::Vector2)));
+    return 1;
+}
+
+int vector2Dot(lua_State* L)
+{
+    const Vec2& self = checkTagged<Vec2>(L, 1, UserdataTag::Vector2);
+    const Vec2& other = checkTagged<Vec2>(L, 2, UserdataTag::Vector2);
+    pushNumber(L, core::dot(self, other));
+    return 1;
+}
+
+int vector2Lerp(lua_State* L)
+{
+    const Vec2& self = checkTagged<Vec2>(L, 1, UserdataTag::Vector2);
+    const Vec2& goal = checkTagged<Vec2>(L, 2, UserdataTag::Vector2);
+    const f32 alpha = static_cast<f32>(luaL_checknumber(L, 3));
+    pushTagged(L, UserdataTag::Vector2, self + (goal - self) * alpha);
+    return 1;
+}
+
+int vector2Add(lua_State* L)
+{
+    pushTagged(L, UserdataTag::Vector2,
+               checkTagged<Vec2>(L, 1, UserdataTag::Vector2) + checkTagged<Vec2>(L, 2, UserdataTag::Vector2));
+    return 1;
+}
+
+int vector2Sub(lua_State* L)
+{
+    pushTagged(L, UserdataTag::Vector2,
+               checkTagged<Vec2>(L, 1, UserdataTag::Vector2) - checkTagged<Vec2>(L, 2, UserdataTag::Vector2));
+    return 1;
+}
+
+int vector2Unm(lua_State* L)
+{
+    pushTagged(L, UserdataTag::Vector2, -checkTagged<Vec2>(L, 1, UserdataTag::Vector2));
+    return 1;
+}
+
+// __mul and __div dispatch on either operand, so the scalar may be on either
+// side and the vector is whichever argument carries the tag. Two vectors
+// multiply component-wise, which is what the vector primitive does and
+// therefore what anybody who has written one line of this engine expects.
+int vector2Mul(lua_State* L)
+{
+    const Vec2* a = toTagged<Vec2>(L, 1, UserdataTag::Vector2);
+    const Vec2* b = toTagged<Vec2>(L, 2, UserdataTag::Vector2);
+    if (a != nullptr && b != nullptr) {
+        pushTagged(L, UserdataTag::Vector2, Vec2{a->x * b->x, a->y * b->y});
+        return 1;
+    }
+    if (a != nullptr) {
+        pushTagged(L, UserdataTag::Vector2, *a * static_cast<f32>(luaL_checknumber(L, 2)));
+        return 1;
+    }
+    pushTagged(L, UserdataTag::Vector2,
+               checkTagged<Vec2>(L, 2, UserdataTag::Vector2) * static_cast<f32>(luaL_checknumber(L, 1)));
+    return 1;
+}
+
+int vector2Div(lua_State* L)
+{
+    const Vec2* a = toTagged<Vec2>(L, 1, UserdataTag::Vector2);
+    const Vec2* b = toTagged<Vec2>(L, 2, UserdataTag::Vector2);
+    if (a != nullptr && b != nullptr) {
+        pushTagged(L, UserdataTag::Vector2, Vec2{a->x / b->x, a->y / b->y});
+        return 1;
+    }
+    if (a != nullptr) {
+        const f32 scalar = static_cast<f32>(luaL_checknumber(L, 2));
+        pushTagged(L, UserdataTag::Vector2, Vec2{a->x / scalar, a->y / scalar});
+        return 1;
+    }
+    // A scalar on the left divides component-wise rather than raising, which is
+    // what the vector primitive does; refusing here would make Vector2 the one
+    // vector in the engine with a narrower algebra than the other one.
+    const f32 scalar = static_cast<f32>(luaL_checknumber(L, 1));
+    const Vec2& v = checkTagged<Vec2>(L, 2, UserdataTag::Vector2);
+    pushTagged(L, UserdataTag::Vector2, Vec2{scalar / v.x, scalar / v.y});
+    return 1;
+}
+
+int vector2Eq(lua_State* L)
+{
+    const Vec2* a = toTagged<Vec2>(L, 1, UserdataTag::Vector2);
+    const Vec2* b = toTagged<Vec2>(L, 2, UserdataTag::Vector2);
+    lua_pushboolean(L, a != nullptr && b != nullptr && *a == *b);
+    return 1;
+}
+
+int vector2Tostring(lua_State* L)
+{
+    const Vec2& self = checkTagged<Vec2>(L, 1, UserdataTag::Vector2);
+    char text[64];
+    std::snprintf(text, sizeof(text), "%.6g, %.6g", static_cast<f64>(self.x), static_cast<f64>(self.y));
+    lua_pushstring(L, text);
+    return 1;
+}
+
+int vector2New(lua_State* L)
+{
+    pushTagged(L, UserdataTag::Vector2,
+               Vec2{static_cast<f32>(luaL_optnumber(L, 1, 0.0)), static_cast<f32>(luaL_optnumber(L, 2, 0.0))});
+    return 1;
+}
+
+// --- UDim --------------------------------------------------------------------
+//
+// One axis: a fraction of the parent plus a pixel offset. The pair is why
+// a layout written once is correct at every resolution, and why neither half is
+// optional -- "half the parent, minus eight pixels" is one value rather than a
+// formula every caller re-derives on resize.
+
+int udimGetScale(lua_State* L)
+{
+    pushNumber(L, checkTagged<UDim>(L, 1, UserdataTag::UDim).scale);
+    return 1;
+}
+
+int udimGetOffset(lua_State* L)
+{
+    pushNumber(L, checkTagged<UDim>(L, 1, UserdataTag::UDim).offset);
+    return 1;
+}
+
+int udimAdd(lua_State* L)
+{
+    const UDim& a = checkTagged<UDim>(L, 1, UserdataTag::UDim);
+    const UDim& b = checkTagged<UDim>(L, 2, UserdataTag::UDim);
+    pushTagged(L, UserdataTag::UDim, UDim{a.scale + b.scale, a.offset + b.offset});
+    return 1;
+}
+
+int udimSub(lua_State* L)
+{
+    const UDim& a = checkTagged<UDim>(L, 1, UserdataTag::UDim);
+    const UDim& b = checkTagged<UDim>(L, 2, UserdataTag::UDim);
+    pushTagged(L, UserdataTag::UDim, UDim{a.scale - b.scale, a.offset - b.offset});
+    return 1;
+}
+
+int udimEq(lua_State* L)
+{
+    const UDim* a = toTagged<UDim>(L, 1, UserdataTag::UDim);
+    const UDim* b = toTagged<UDim>(L, 2, UserdataTag::UDim);
+    lua_pushboolean(L, a != nullptr && b != nullptr && *a == *b);
+    return 1;
+}
+
+int udimTostring(lua_State* L)
+{
+    const UDim& self = checkTagged<UDim>(L, 1, UserdataTag::UDim);
+    char text[64];
+    std::snprintf(text, sizeof(text), "%.6g, %.6g", static_cast<f64>(self.scale), static_cast<f64>(self.offset));
+    lua_pushstring(L, text);
+    return 1;
+}
+
+int udimNew(lua_State* L)
+{
+    pushTagged(L, UserdataTag::UDim,
+               UDim{static_cast<f32>(luaL_optnumber(L, 1, 0.0)), static_cast<f32>(luaL_optnumber(L, 2, 0.0))});
+    return 1;
+}
+
+// --- UDim2 -------------------------------------------------------------------
+
+int udim2GetX(lua_State* L)
+{
+    pushTagged(L, UserdataTag::UDim, checkTagged<UDim2>(L, 1, UserdataTag::UDim2).x);
+    return 1;
+}
+
+int udim2GetY(lua_State* L)
+{
+    pushTagged(L, UserdataTag::UDim, checkTagged<UDim2>(L, 1, UserdataTag::UDim2).y);
+    return 1;
+}
+
+int udim2Lerp(lua_State* L)
+{
+    const UDim2& self = checkTagged<UDim2>(L, 1, UserdataTag::UDim2);
+    const UDim2& goal = checkTagged<UDim2>(L, 2, UserdataTag::UDim2);
+    const f32 alpha = static_cast<f32>(luaL_checknumber(L, 3));
+    const auto blend = [alpha](f32 from, f32 to) { return from + (to - from) * alpha; };
+    pushTagged(L, UserdataTag::UDim2,
+               UDim2{UDim{blend(self.x.scale, goal.x.scale), blend(self.x.offset, goal.x.offset)},
+                     UDim{blend(self.y.scale, goal.y.scale), blend(self.y.offset, goal.y.offset)}});
+    return 1;
+}
+
+int udim2Add(lua_State* L)
+{
+    const UDim2& a = checkTagged<UDim2>(L, 1, UserdataTag::UDim2);
+    const UDim2& b = checkTagged<UDim2>(L, 2, UserdataTag::UDim2);
+    pushTagged(L, UserdataTag::UDim2,
+               UDim2{UDim{a.x.scale + b.x.scale, a.x.offset + b.x.offset},
+                     UDim{a.y.scale + b.y.scale, a.y.offset + b.y.offset}});
+    return 1;
+}
+
+int udim2Sub(lua_State* L)
+{
+    const UDim2& a = checkTagged<UDim2>(L, 1, UserdataTag::UDim2);
+    const UDim2& b = checkTagged<UDim2>(L, 2, UserdataTag::UDim2);
+    pushTagged(L, UserdataTag::UDim2,
+               UDim2{UDim{a.x.scale - b.x.scale, a.x.offset - b.x.offset},
+                     UDim{a.y.scale - b.y.scale, a.y.offset - b.y.offset}});
+    return 1;
+}
+
+int udim2Eq(lua_State* L)
+{
+    const UDim2* a = toTagged<UDim2>(L, 1, UserdataTag::UDim2);
+    const UDim2* b = toTagged<UDim2>(L, 2, UserdataTag::UDim2);
+    lua_pushboolean(L, a != nullptr && b != nullptr && *a == *b);
+    return 1;
+}
+
+int udim2Tostring(lua_State* L)
+{
+    const UDim2& self = checkTagged<UDim2>(L, 1, UserdataTag::UDim2);
+    char text[128];
+    std::snprintf(text, sizeof(text), "{%.6g, %.6g}, {%.6g, %.6g}", static_cast<f64>(self.x.scale),
+                  static_cast<f64>(self.x.offset), static_cast<f64>(self.y.scale), static_cast<f64>(self.y.offset));
+    lua_pushstring(L, text);
+    return 1;
+}
+
+// Four numbers in the order the axes read, which is the order api-design.md
+// §2.3 states. There is deliberately no two-UDim overload: one constructor with
+// one argument order is what a frozen surface buys.
+int udim2New(lua_State* L)
+{
+    pushTagged(L, UserdataTag::UDim2,
+               UDim2{UDim{static_cast<f32>(luaL_optnumber(L, 1, 0.0)), static_cast<f32>(luaL_optnumber(L, 2, 0.0))},
+                     UDim{static_cast<f32>(luaL_optnumber(L, 3, 0.0)), static_cast<f32>(luaL_optnumber(L, 4, 0.0))}});
+    return 1;
+}
+
+int udim2FromScale(lua_State* L)
+{
+    pushTagged(L, UserdataTag::UDim2,
+               UDim2{UDim{static_cast<f32>(luaL_optnumber(L, 1, 0.0)), 0.0f},
+                     UDim{static_cast<f32>(luaL_optnumber(L, 2, 0.0)), 0.0f}});
+    return 1;
+}
+
+int udim2FromOffset(lua_State* L)
+{
+    pushTagged(L, UserdataTag::UDim2,
+               UDim2{UDim{0.0f, static_cast<f32>(luaL_optnumber(L, 1, 0.0))},
+                     UDim{0.0f, static_cast<f32>(luaL_optnumber(L, 2, 0.0))}});
+    return 1;
+}
+
+// --- Rect --------------------------------------------------------------------
+
+int rectGetMin(lua_State* L)
+{
+    pushTagged(L, UserdataTag::Vector2, checkTagged<Rect>(L, 1, UserdataTag::Rect).min);
+    return 1;
+}
+
+int rectGetMax(lua_State* L)
+{
+    pushTagged(L, UserdataTag::Vector2, checkTagged<Rect>(L, 1, UserdataTag::Rect).max);
+    return 1;
+}
+
+int rectGetWidth(lua_State* L)
+{
+    const Rect& self = checkTagged<Rect>(L, 1, UserdataTag::Rect);
+    pushNumber(L, self.max.x - self.min.x);
+    return 1;
+}
+
+int rectGetHeight(lua_State* L)
+{
+    const Rect& self = checkTagged<Rect>(L, 1, UserdataTag::Rect);
+    pushNumber(L, self.max.y - self.min.y);
+    return 1;
+}
+
+int rectEq(lua_State* L)
+{
+    const Rect* a = toTagged<Rect>(L, 1, UserdataTag::Rect);
+    const Rect* b = toTagged<Rect>(L, 2, UserdataTag::Rect);
+    lua_pushboolean(L, a != nullptr && b != nullptr && *a == *b);
+    return 1;
+}
+
+int rectTostring(lua_State* L)
+{
+    const Rect& self = checkTagged<Rect>(L, 1, UserdataTag::Rect);
+    char text[128];
+    std::snprintf(text, sizeof(text), "{%.6g, %.6g}, {%.6g, %.6g}", static_cast<f64>(self.min.x),
+                  static_cast<f64>(self.min.y), static_cast<f64>(self.max.x), static_cast<f64>(self.max.y));
+    lua_pushstring(L, text);
+    return 1;
+}
+
+// Two corners, and they are not sorted. An inverted SliceCenter is a mistake
+// for its caller to see rather than one for a constructor to hide (core/math.h).
+int rectNew(lua_State* L)
+{
+    pushTagged(L, UserdataTag::Rect,
+               Rect{checkTagged<Vec2>(L, 1, UserdataTag::Vector2), checkTagged<Vec2>(L, 2, UserdataTag::Vector2)});
     return 1;
 }
 
@@ -966,6 +1312,120 @@ void registerCFrame(lua_State* L, VmContext& ctx, core::AtomTable& atoms)
     lua_pop(L, 1);
 }
 
+// The arithmetic types need more than `installTagMetatable` offers: it writes
+// `__eq` and `__tostring` and nothing else, because until now no value type in
+// the surface had an operator. Rather than widen that helper to a parameter
+// list nobody could read, the two metatables that need operators build their
+// own between `beginTagMetatable` and `endTagMetatable`.
+void addOperator(lua_State* L, const char* event, lua_CFunction fn)
+{
+    lua_pushcfunction(L, fn, event);
+    lua_setfield(L, -2, event);
+}
+
+void registerVector2(lua_State* L, VmContext& ctx, core::AtomTable& atoms)
+{
+    MemberTable& getters = ctx.getters[static_cast<usize>(UserdataTag::Vector2)];
+    addMember(getters, atoms, "X", vector2GetX);
+    addMember(getters, atoms, "Y", vector2GetY);
+    addMember(getters, atoms, "Magnitude", vector2GetMagnitude);
+    addMember(getters, atoms, "Unit", vector2GetUnit);
+
+    MemberTable& methods = ctx.methods[static_cast<usize>(UserdataTag::Vector2)];
+    addMember(methods, atoms, "Dot", vector2Dot);
+    addMember(methods, atoms, "Lerp", vector2Lerp);
+
+    beginTagMetatable(L, UserdataTag::Vector2);
+    addOperator(L, "__eq", vector2Eq);
+    addOperator(L, "__tostring", vector2Tostring);
+    addOperator(L, "__add", vector2Add);
+    addOperator(L, "__sub", vector2Sub);
+    addOperator(L, "__unm", vector2Unm);
+    addOperator(L, "__mul", vector2Mul);
+    addOperator(L, "__div", vector2Div);
+    endTagMetatable(L);
+
+    const luaL_Reg constructors[] = {
+        {"new", vector2New},
+        {nullptr, nullptr},
+    };
+    luaL_register(L, "Vector2", constructors);
+    pushTagged(L, UserdataTag::Vector2, Vec2{});
+    lua_setfield(L, -2, "zero");
+    pushTagged(L, UserdataTag::Vector2, Vec2{1.0f, 1.0f});
+    lua_setfield(L, -2, "one");
+    lua_setreadonly(L, -1, true);
+    lua_pop(L, 1);
+}
+
+void registerUDim(lua_State* L, VmContext& ctx, core::AtomTable& atoms)
+{
+    MemberTable& getters = ctx.getters[static_cast<usize>(UserdataTag::UDim)];
+    addMember(getters, atoms, "Scale", udimGetScale);
+    addMember(getters, atoms, "Offset", udimGetOffset);
+
+    beginTagMetatable(L, UserdataTag::UDim);
+    addOperator(L, "__eq", udimEq);
+    addOperator(L, "__tostring", udimTostring);
+    addOperator(L, "__add", udimAdd);
+    addOperator(L, "__sub", udimSub);
+    endTagMetatable(L);
+
+    const luaL_Reg constructors[] = {
+        {"new", udimNew},
+        {nullptr, nullptr},
+    };
+    luaL_register(L, "UDim", constructors);
+    lua_setreadonly(L, -1, true);
+    lua_pop(L, 1);
+}
+
+void registerUDim2(lua_State* L, VmContext& ctx, core::AtomTable& atoms)
+{
+    MemberTable& getters = ctx.getters[static_cast<usize>(UserdataTag::UDim2)];
+    addMember(getters, atoms, "X", udim2GetX);
+    addMember(getters, atoms, "Y", udim2GetY);
+
+    MemberTable& methods = ctx.methods[static_cast<usize>(UserdataTag::UDim2)];
+    addMember(methods, atoms, "Lerp", udim2Lerp);
+
+    beginTagMetatable(L, UserdataTag::UDim2);
+    addOperator(L, "__eq", udim2Eq);
+    addOperator(L, "__tostring", udim2Tostring);
+    addOperator(L, "__add", udim2Add);
+    addOperator(L, "__sub", udim2Sub);
+    endTagMetatable(L);
+
+    const luaL_Reg constructors[] = {
+        {"new", udim2New},
+        {"fromScale", udim2FromScale},
+        {"fromOffset", udim2FromOffset},
+        {nullptr, nullptr},
+    };
+    luaL_register(L, "UDim2", constructors);
+    lua_setreadonly(L, -1, true);
+    lua_pop(L, 1);
+}
+
+void registerRect(lua_State* L, VmContext& ctx, core::AtomTable& atoms)
+{
+    MemberTable& getters = ctx.getters[static_cast<usize>(UserdataTag::Rect)];
+    addMember(getters, atoms, "Min", rectGetMin);
+    addMember(getters, atoms, "Max", rectGetMax);
+    addMember(getters, atoms, "Width", rectGetWidth);
+    addMember(getters, atoms, "Height", rectGetHeight);
+
+    installTagMetatable(L, UserdataTag::Rect, rectEq, rectTostring);
+
+    const luaL_Reg constructors[] = {
+        {"new", rectNew},
+        {nullptr, nullptr},
+    };
+    luaL_register(L, "Rect", constructors);
+    lua_setreadonly(L, -1, true);
+    lua_pop(L, 1);
+}
+
 void registerColor3(lua_State* L, VmContext& ctx, core::AtomTable& atoms)
 {
     MemberTable& getters = ctx.getters[static_cast<usize>(UserdataTag::Color3)];
@@ -1263,6 +1723,10 @@ void registerDatatypes(lua_State* L)
 
     registerCFrame(L, ctx, atoms);
     registerColor3(L, ctx, atoms);
+    registerVector2(L, ctx, atoms);
+    registerUDim(L, ctx, atoms);
+    registerUDim2(L, ctx, atoms);
+    registerRect(L, ctx, atoms);
     registerRandom(L, ctx, atoms);
     registerQueryTypes(L, ctx, atoms);
     registerEnumTypes(L, ctx, atoms);
@@ -1303,6 +1767,16 @@ void pushVector3(lua_State* L, core::Vec3 value)
     pushVec3(L, value);
 }
 
+void pushVector2(lua_State* L, core::Vec2 value)
+{
+    pushTagged(L, UserdataTag::Vector2, value);
+}
+
+core::Vec2 checkVector2(lua_State* L, int index)
+{
+    return checkTagged<Vec2>(L, index, UserdataTag::Vector2);
+}
+
 void pushEnumItem(lua_State* L, scene::EnumValue value)
 {
     pushEnumItemImpl(L, value);
@@ -1335,6 +1809,18 @@ void pushValue(lua_State* L, const scene::Value& value)
         return;
     case scene::ValueType::CFrame:
         pushTagged(L, UserdataTag::CFrame, std::get<core::CFrameD>(value));
+        return;
+    case scene::ValueType::Vector2:
+        pushTagged(L, UserdataTag::Vector2, std::get<core::Vec2>(value));
+        return;
+    case scene::ValueType::UDim:
+        pushTagged(L, UserdataTag::UDim, std::get<core::UDim>(value));
+        return;
+    case scene::ValueType::UDim2:
+        pushTagged(L, UserdataTag::UDim2, std::get<core::UDim2>(value));
+        return;
+    case scene::ValueType::Rect:
+        pushTagged(L, UserdataTag::Rect, std::get<core::Rect>(value));
         return;
     case scene::ValueType::Color3:
         pushTagged(L, UserdataTag::Color3, std::get<core::Color3>(value));
@@ -1407,6 +1893,30 @@ std::optional<scene::Value> toValue(lua_State* L, int index, scene::ValueType ex
         if (item == nullptr)
             return std::nullopt;
         return scene::Value{*item};
+    }
+    case scene::ValueType::Vector2: {
+        const Vec2* value = toTagged<Vec2>(L, index, UserdataTag::Vector2);
+        if (value == nullptr)
+            return std::nullopt;
+        return scene::Value{*value};
+    }
+    case scene::ValueType::UDim: {
+        const UDim* value = toTagged<UDim>(L, index, UserdataTag::UDim);
+        if (value == nullptr)
+            return std::nullopt;
+        return scene::Value{*value};
+    }
+    case scene::ValueType::UDim2: {
+        const UDim2* value = toTagged<UDim2>(L, index, UserdataTag::UDim2);
+        if (value == nullptr)
+            return std::nullopt;
+        return scene::Value{*value};
+    }
+    case scene::ValueType::Rect: {
+        const Rect* value = toTagged<Rect>(L, index, UserdataTag::Rect);
+        if (value == nullptr)
+            return std::nullopt;
+        return scene::Value{*value};
     }
     }
     return std::nullopt;

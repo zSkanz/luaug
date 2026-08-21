@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <ostream>
 #include <string>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include "scene_fixture.h"
@@ -16,6 +18,8 @@ using luaug::core::Vec3;
 using luaug::scene::Change;
 using luaug::scene::ChangeKind;
 using luaug::scene::Value;
+using luaug::scene::valueType;
+using luaug::scene::valueTypeName;
 using luaug::scene::World;
 using luaug::scene::testing::Fixture;
 
@@ -590,6 +594,46 @@ TEST_CASE("the world hash reflects observable state and nothing else")
     // instead of the text produces a hash that reproduces perfectly on one
     // machine and disagrees with another run of the same script.
     CHECK(buildAndHash(false) == buildAndHash(true));
+}
+
+// Not "does the hash change", which the case below covers -- "does every
+// alternative of `Value` reach the hasher at all". A `Value` alternative with no
+// arm in `hashValue` would hash its tag and nothing else, so two different
+// UDim2s would be indistinguishable to the determinism gate while every script
+// that read them disagreed. `-Wswitch` catches an omitted arm, and this catches
+// an arm that hashes nothing.
+TEST_CASE("every Value alternative reaches the hasher")
+{
+    static_assert(std::variant_size_v<Value> == 13, "a new Value alternative needs a row below");
+
+    // Two distinct values per alternative, chosen to differ in every field so
+    // that a partial hash -- one that reads `min` and forgets `max` -- fails
+    // here rather than in a replay six weeks from now.
+    const std::pair<Value, Value> pairs[] = {
+        {Value{false}, Value{true}},
+        {Value{1.0}, Value{2.0}},
+        {Value{std::string("a")}, Value{std::string("b")}},
+        {Value{luaug::core::Vec3{1.0f, 2.0f, 3.0f}}, Value{luaug::core::Vec3{3.0f, 2.0f, 1.0f}}},
+        {Value{luaug::core::Color3{0.1f, 0.2f, 0.3f}}, Value{luaug::core::Color3{0.3f, 0.2f, 0.1f}}},
+        {Value{luaug::core::Vec2{1.0f, 2.0f}}, Value{luaug::core::Vec2{2.0f, 1.0f}}},
+        {Value{luaug::core::UDim{0.5f, 8.0f}}, Value{luaug::core::UDim{0.5f, 9.0f}}},
+        {Value{luaug::core::UDim2{luaug::core::UDim{0.5f, 8.0f}, luaug::core::UDim{1.0f, 2.0f}}},
+         Value{luaug::core::UDim2{luaug::core::UDim{0.5f, 8.0f}, luaug::core::UDim{1.0f, 3.0f}}}},
+        {Value{luaug::core::Rect{luaug::core::Vec2{0.0f, 0.0f}, luaug::core::Vec2{4.0f, 4.0f}}},
+         Value{luaug::core::Rect{luaug::core::Vec2{0.0f, 0.0f}, luaug::core::Vec2{4.0f, 5.0f}}}},
+    };
+
+    for (const auto& [first, second] : pairs) {
+        Fixture fixture;
+        const InstanceId part = fixture.part("Brick");
+        const luaug::core::NameAtom name = fixture.atom("Probe");
+
+        CAPTURE(valueTypeName(valueType(first)));
+        REQUIRE(fixture.world.setAttribute(part, name, first));
+        const u64 withFirst = fixture.world.worldHash();
+        REQUIRE(fixture.world.setAttribute(part, name, second));
+        CHECK(fixture.world.worldHash() != withFirst);
+    }
 }
 
 TEST_CASE("the world hash changes when anything observable does")

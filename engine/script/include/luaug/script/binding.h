@@ -110,6 +110,13 @@ enum class UserdataTag : int
     RaycastParams = 10,
     RaycastResult = 11,
 
+    // M6's screen-space four (api-design.md §2.3). All four are trivially
+    // copyable value types like `Color3`, so none of them needs a destructor.
+    Vector2 = 12,
+    UDim = 13,
+    UDim2 = 14,
+    Rect = 15,
+
     // Not a tag. The count exists so a registration loop can assert it covered
     // everything, and so the budget remaining is a number someone can read.
     Count,

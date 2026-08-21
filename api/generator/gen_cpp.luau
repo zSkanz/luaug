@@ -105,6 +105,10 @@ local ScalarValueTypes: { [string]: string } = {
     ["vector"] = "Vector3",
     ["CFrame"] = "CFrame",
     ["Color3"] = "Color3",
+    ["Vector2"] = "Vector2",
+    ["UDim"] = "UDim",
+    ["UDim2"] = "UDim2",
+    ["Rect"] = "Rect",
 }
 
 --- `PropertyDesc::errKeyOnInvalidSet`, keyed by `ValueType`. One key per type
@@ -119,6 +123,10 @@ local InvalidSetKeys: { [string]: string } = {
     Color3 = "scene.err.expected_color3",
     Instance = "scene.err.expected_instance",
     EnumItem = "scene.err.expected_enum_item",
+    Vector2 = "scene.err.expected_vector2",
+    UDim = "scene.err.expected_udim",
+    UDim2 = "scene.err.expected_udim2",
+    Rect = "scene.err.expected_rect",
 }
 
 --- `Schema.ClassTag` -> `scene::ClassFlags`. The two lists are the same set
