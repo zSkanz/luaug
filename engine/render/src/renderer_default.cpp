@@ -1,5 +1,6 @@
 #include "luaug/core/i18n.h"
 #include "luaug/core/text_key.h"
+#include "luaug/render/environment.h"
 #include "luaug/render/renderer.h"
 #include "luaug/render/shader_types.h"
 #include "luaug/render/shadow.h"
@@ -8,6 +9,7 @@
 #include <array>
 #include <cmath>
 #include <memory>
+#include <vector>
 
 namespace luaug::render {
 namespace {
@@ -67,6 +69,63 @@ constexpr rhi::TextureFormat kShadowFormat = rhi::TextureFormat::D32Float;
     return std::span<const std::byte>(static_cast<const std::byte*>(data), size);
 }
 
+[[nodiscard]] u32 environmentLevelSize(u32 level) noexcept
+{
+    const u32 size = kEnvironmentBaseSize >> level;
+    return size > 0 ? size : 1u;
+}
+
+// The prefiltered environment's freshness, and the policy that keeps a
+// day/night cycle from putting a CPU prefilter in every frame.
+//
+// **A frame uploads exactly one level, always, whether or not anything
+// changed.** That is not the cheapest arrangement and it is the correct one:
+// `clock_differential` requires two frames that differ only in `ClockTime` to
+// issue the same NUMBER of commands, because what a clock changes is the values
+// a frame carries and not its shape. An upload that appeared only when the sky
+// had moved made a frame's shape depend on its history, and the gate said so
+// the first time it ran. One level per frame is about thirty kilobytes averaged
+// over the chain.
+//
+// Baking is what is conditional. A change marks every level dirty and each is
+// rebaked when the cursor reaches it, finest first from wherever the cursor
+// happens to be -- so a reflection sharpens over a few frames rather than
+// stalling one.
+//
+// The FIRST bake is whole, because an environment that arrived one level per
+// frame would light the first six frames of every run differently from the
+// seventh, and that is a difference a golden recorded at frame two and a
+// screenshot taken at frame thirty would disagree about.
+struct EnvironmentCache
+{
+    SkyParams target{};
+    bool everBaked = false;
+    bool dirty[kEnvironmentMipCount]{};
+    // Which level this frame uploads. Advances every frame regardless of
+    // anything, which is the whole point.
+    u32 cursor = 0;
+    Vec3 irradiance[9]{};
+    // Kept resident rather than rebuilt into one scratch buffer: the upload
+    // happens every frame and the bake does not, so the pixels have to outlive
+    // the bake that made them. About 171 KiB for the whole chain.
+    std::vector<core::u16> levels[kEnvironmentMipCount];
+    std::vector<core::u16> lut;
+
+    // True when `params` differs from what the chain was baked from by enough
+    // to be worth the work. The sun moving is the common case; the horizon
+    // colour changing is a script writing `Lighting.FogColor` and is rare, so it
+    // is tested exactly rather than with a threshold.
+    [[nodiscard]] bool stale(const SkyParams& params) const noexcept
+    {
+        if (!everBaked)
+            return true;
+        if (core::dot(params.sunDirection, target.sunDirection) < kEnvironmentRebuildCosine)
+            return true;
+        return !(params.horizonColor == target.horizonColor && params.zenithColor == target.zenithColor &&
+                 params.sunColor == target.sunColor);
+    }
+};
+
 class DefaultRenderer final : public IRenderer
 {
 public:
@@ -96,6 +155,11 @@ private:
     // makes no extra call at all, which is what keeps M4's goldens byte-exact.
     void drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world, const MeshCache& meshes, const Mat4& viewProjection,
                       rhi::PipelineHandle staticPipeline, rhi::PipelineHandle skinnedPipeline, Selection selection);
+
+    // Bakes whatever the environment owes this frame and uploads it. Called
+    // once per frame, inside the frame, because `uploadTexture` needs a command
+    // list and `create` has none.
+    void updateEnvironment(rhi::ICmdList& cmd, const SkyParams& params);
 
     bool valid_ = false;
     rhi::TextureFormat colorFormat_ = rhi::TextureFormat::Undefined;
@@ -128,8 +192,19 @@ private:
     rhi::TextureHandle whitePixel_{};
     rhi::TextureHandle flatNormalPixel_{};
     rhi::TextureHandle blackPixel_{};
+    // The prefiltered environment and the split-sum BRDF table: image-based
+    // lighting's two textures (ADR 0038, environment.h). Octahedral rather than
+    // a cubemap because the frozen RHI has no cube type, and CPU-prefiltered
+    // because it has no compute -- ADR 0043 records what that bought.
+    rhi::TextureHandle environmentMap_{};
+    rhi::TextureHandle brdfLut_{};
     rhi::SamplerHandle linearSampler_{};
     rhi::SamplerHandle shadowSampler_{};
+    // Trilinear and clamped: the mip index IS the roughness, so filtering
+    // between levels is the interpolation the split sum asks for rather than a
+    // quality setting.
+    rhi::SamplerHandle environmentSampler_{};
+    EnvironmentCache environment_;
 
     // The size the offscreen targets were built for. A window resize rebuilds
     // them rather than stretching, because a stretched HDR target is a bug that
@@ -137,6 +212,7 @@ private:
     u32 width_ = 0;
     u32 height_ = 0;
     bool defaultsUploaded_ = false;
+    bool brdfUploaded_ = false;
 };
 
 } // namespace
@@ -362,6 +438,12 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
     }
 
     linearSampler_ = device.createSampler({.debugName = "material"});
+    environmentSampler_ = device.createSampler({
+        .addressU = rhi::AddressMode::ClampToEdge,
+        .addressV = rhi::AddressMode::ClampToEdge,
+        .addressW = rhi::AddressMode::ClampToEdge,
+        .debugName = "environment",
+    });
     shadowSampler_ = device.createSampler({
         .addressU = rhi::AddressMode::ClampToEdge,
         .addressV = rhi::AddressMode::ClampToEdge,
@@ -405,6 +487,29 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
         .debugName = "shadow-map",
     });
     if (!shadowMap_.valid()) {
+        destroy(device);
+        return core::makeError(LUAUG_TR("render.err.target_create_failed"));
+    }
+
+    // The environment's mip chain is the roughness chain, so `mipLevels` is the
+    // number of roughness steps and not a filtering nicety. Written entirely by
+    // `uploadTexture`, which is the one frozen call that takes a level.
+    environmentMap_ = device.createTexture({
+        .format = kHdrFormat,
+        .usage = rhi::TextureUsage::Sampled,
+        .width = kEnvironmentBaseSize,
+        .height = kEnvironmentBaseSize,
+        .mipLevels = kEnvironmentMipCount,
+        .debugName = "environment",
+    });
+    brdfLut_ = device.createTexture({
+        .format = kHdrFormat,
+        .usage = rhi::TextureUsage::Sampled,
+        .width = kBrdfLutSize,
+        .height = kBrdfLutSize,
+        .debugName = "brdf-lut",
+    });
+    if (!environmentMap_.valid() || !brdfLut_.valid()) {
         destroy(device);
         return core::makeError(LUAUG_TR("render.err.target_create_failed"));
     }
@@ -458,12 +563,13 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
             device.destroy(*pipeline);
         *pipeline = {};
     }
-    for (rhi::TextureHandle* texture : {&hdr_, &depth_, &shadowMap_, &whitePixel_, &flatNormalPixel_, &blackPixel_}) {
+    for (rhi::TextureHandle* texture :
+         {&hdr_, &depth_, &shadowMap_, &whitePixel_, &flatNormalPixel_, &blackPixel_, &environmentMap_, &brdfLut_}) {
         if (texture->valid())
             device.destroy(*texture);
         *texture = {};
     }
-    for (rhi::SamplerHandle* sampler : {&linearSampler_, &shadowSampler_}) {
+    for (rhi::SamplerHandle* sampler : {&linearSampler_, &shadowSampler_, &environmentSampler_}) {
         if (sampler->valid())
             device.destroy(*sampler);
         *sampler = {};
@@ -472,7 +578,64 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
     width_ = 0;
     height_ = 0;
     defaultsUploaded_ = false;
+    brdfUploaded_ = false;
+    environment_ = EnvironmentCache{};
     valid_ = false;
+}
+
+void DefaultRenderer::updateEnvironment(rhi::ICmdList& cmd, const SkyParams& params)
+{
+    const auto uploadLevel = [&](u32 level) {
+        const std::vector<core::u16>& pixels = environment_.levels[level];
+        if (!pixels.empty())
+            cmd.uploadTexture(environmentMap_, asBytes(pixels.data(), pixels.size() * sizeof(core::u16)), level);
+    };
+    const auto bakeLevel = [&](u32 level) {
+        const u32 size = environmentLevelSize(level);
+        const f32 roughness =
+            kEnvironmentMipCount > 1 ? static_cast<f32>(level) / static_cast<f32>(kEnvironmentMipCount - 1) : 0.0f;
+        environment_.levels[level].assign(static_cast<core::usize>(size) * size * 4, 0);
+        bakeEnvironmentLevel(environment_.target, size, roughness, environmentSampleCount(level),
+                             environment_.levels[level]);
+        environment_.dirty[level] = false;
+        // Irradiance rides on level zero because it is the same projection of
+        // the same sky, and because a diffuse ambient lagging the specular one
+        // would read as a colour shift on every matte surface while the sun
+        // moves.
+        if (level == 0)
+            bakeIrradianceSh(environment_.target, environment_.irradiance);
+    };
+
+    if (!brdfUploaded_) {
+        // Independent of the environment -- it is the BRDF integrated against
+        // itself -- so it is baked once and never again.
+        environment_.lut.assign(static_cast<core::usize>(kBrdfLutSize) * kBrdfLutSize * 4, 0);
+        bakeBrdfLut(kBrdfLutSize, environment_.lut);
+        cmd.uploadTexture(brdfLut_, asBytes(environment_.lut.data(), environment_.lut.size() * sizeof(core::u16)), 0);
+        brdfUploaded_ = true;
+    }
+
+    if (environment_.stale(params)) {
+        environment_.target = params;
+        for (bool& level : environment_.dirty)
+            level = true;
+    }
+
+    if (!environment_.everBaked) {
+        for (u32 level = 0; level < kEnvironmentMipCount; ++level) {
+            bakeLevel(level);
+            uploadLevel(level);
+        }
+        environment_.everBaked = true;
+        environment_.cursor = 0;
+        return;
+    }
+
+    const u32 level = environment_.cursor;
+    environment_.cursor = (environment_.cursor + 1) % kEnvironmentMipCount;
+    if (environment_.dirty[level])
+        bakeLevel(level);
+    uploadLevel(level);
 }
 
 void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world, const MeshCache& meshes,
@@ -553,12 +716,14 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
                 const auto orDefault = [](rhi::TextureHandle handle, rhi::TextureHandle fallback) {
                     return handle.valid() ? handle : fallback;
                 };
-                const std::array<rhi::TextureBinding, 5> textures{
+                const std::array<rhi::TextureBinding, 7> textures{
                     rhi::TextureBinding{orDefault(material.baseColor, whitePixel_), linearSampler_},
                     rhi::TextureBinding{orDefault(material.normal, flatNormalPixel_), linearSampler_},
                     rhi::TextureBinding{orDefault(material.metallicRoughness, whitePixel_), linearSampler_},
                     rhi::TextureBinding{orDefault(material.emissive, blackPixel_), linearSampler_},
                     rhi::TextureBinding{shadowMap_, shadowSampler_},
+                    rhi::TextureBinding{environmentMap_, environmentSampler_},
+                    rhi::TextureBinding{brdfLut_, environmentSampler_},
                 };
                 cmd.bindTextures(rhi::ShaderStage::Fragment, 0, textures);
                 boundMaterial = draw.material;
@@ -609,6 +774,12 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         defaultsUploaded_ = true;
     }
 
+    // The sky, resolved once, and the one place its derived colours come from.
+    // Both the sky pass and the prefiltered environment read this struct, which
+    // is what stops a reflection from disagreeing with what it reflects.
+    const SkyParams sky = skyParamsFor(world.environment.sunDirection, world.environment.fogColor);
+    updateEnvironment(cmd, sky);
+
     const Mat4 sunMatrix = sunViewProjection(world.environment.sunDirection, world.camera.origin);
 
     // --- Shadow pass --------------------------------------------------------
@@ -648,27 +819,43 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     cmd.setScissor({.width = static_cast<core::i32>(target.width), .height = static_cast<core::i32>(target.height)});
 
     if (world.camera.valid) {
-        GpuSkyUniforms sky;
+        GpuSkyUniforms skyUniforms;
         // The sky shader turns a screen position back into a world direction,
         // so it needs the inverse. Computed once per frame rather than per
         // pixel, which is the only reason it is a uniform rather than a
         // derivation.
-        sky.inverseViewProjection = core::inverse(world.camera.viewProjection);
-        sky.sunDirectionSize[0] = world.environment.sunDirection.x;
-        sky.sunDirectionSize[1] = world.environment.sunDirection.y;
-        sky.sunDirectionSize[2] = world.environment.sunDirection.z;
-        sky.horizonColor[0] = world.environment.fogColor.r;
-        sky.horizonColor[1] = world.environment.fogColor.g;
-        sky.horizonColor[2] = world.environment.fogColor.b;
+        skyUniforms.inverseViewProjection = core::inverse(world.camera.viewProjection);
+        skyUniforms.sunDirectionSize[0] = sky.sunDirection.x;
+        skyUniforms.sunDirectionSize[1] = sky.sunDirection.y;
+        skyUniforms.sunDirectionSize[2] = sky.sunDirection.z;
+        skyUniforms.sunDirectionSize[3] = sky.sunAngularRadius;
+        skyUniforms.horizonColor[0] = sky.horizonColor.r;
+        skyUniforms.horizonColor[1] = sky.horizonColor.g;
+        skyUniforms.horizonColor[2] = sky.horizonColor.b;
+        skyUniforms.zenithColor[0] = sky.zenithColor.r;
+        skyUniforms.zenithColor[1] = sky.zenithColor.g;
+        skyUniforms.zenithColor[2] = sky.zenithColor.b;
+        skyUniforms.sunColor[0] = sky.sunColor.r;
+        skyUniforms.sunColor[1] = sky.sunColor.g;
+        skyUniforms.sunColor[2] = sky.sunColor.b;
+        // The disc's brightness relative to the sky around it, scaled by the day
+        // factor so a sun below the horizon leaves no disc behind.
+        skyUniforms.sunColor[3] = kSunDiscIntensity * sky.dayFactor;
         cmd.setPipeline(skyPipeline_);
-        cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&sky, sizeof(sky)));
+        cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&skyUniforms, sizeof(skyUniforms)));
         cmd.draw(3, 1, 0, 0);
 
         GpuFrameUniforms frame;
         frame.sunDirectionBrightness[0] = world.environment.sunDirection.x;
         frame.sunDirectionBrightness[1] = world.environment.sunDirection.y;
         frame.sunDirectionBrightness[2] = world.environment.sunDirection.z;
-        frame.sunDirectionBrightness[3] = world.environment.sunBrightness;
+        // The day factor is folded in here rather than tested in the shader: a
+        // sun below the horizon is a sun that lights nothing, and before M7.5 it
+        // went on lighting every upward-facing surface from underneath.
+        frame.sunDirectionBrightness[3] = world.environment.sunBrightness * sky.dayFactor;
+        frame.sunColorUnused[0] = sky.sunColor.r;
+        frame.sunColorUnused[1] = sky.sunColor.g;
+        frame.sunColorUnused[2] = sky.sunColor.b;
         frame.ambient[0] = world.environment.ambient.r;
         frame.ambient[1] = world.environment.ambient.g;
         frame.ambient[2] = world.environment.ambient.b;
@@ -684,6 +871,15 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
                                 ? 1.0f / (world.environment.fogEnd - world.environment.fogStart)
                                 : 0.0f;
         frame.sunViewProjection = sunMatrix;
+
+        frame.environmentParams[0] = static_cast<f32>(kEnvironmentMipCount);
+        frame.environmentParams[1] = 1.0f;
+        for (u32 index = 0; index < 9; ++index) {
+            frame.irradianceSh[index][0] = environment_.irradiance[index].x;
+            frame.irradianceSh[index][1] = environment_.irradiance[index].y;
+            frame.irradianceSh[index][2] = environment_.irradiance[index].z;
+            frame.irradianceSh[index][3] = 0.0f;
+        }
 
         const auto lightCount = static_cast<u32>(std::min<core::usize>(world.lights.size(), kMaxForwardLights));
         frame.lightCountUnused[0] = static_cast<f32>(lightCount);

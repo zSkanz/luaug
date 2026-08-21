@@ -72,5 +72,10 @@ float4 FragmentMain(Interpolants input) : SV_Target0
     // behind it would be answering a question nothing in this milestone asks.
     const float glow = pow(saturate(cosAngle), 64.0f) * 0.25f;
 
-    return float4(sky + SunColor.rgb * (disc + glow), 1.0f);
+    // `SunColor.w` is how much brighter the disc is than the sky around it, and
+    // at M7.5 it stopped being decoration: the same sky is prefiltered into the
+    // environment every surface reflects, and a disc at radiance 1 reflects as a
+    // pale smudge rather than as a highlight. The glow keeps the unscaled
+    // colour, because a glow that bright would be a second sun.
+    return float4(sky + SunColor.rgb * (disc * SunColor.w + glow), 1.0f);
 }

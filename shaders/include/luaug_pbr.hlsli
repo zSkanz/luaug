@@ -67,12 +67,18 @@ cbuffer GpuObjectUniforms : register(b0, space1)
 #endif
 
 #if defined(LUAUG_UNIFORMS_FRAME)
-// `render::GpuFrameUniforms`, 528 bytes: 80 of float4 rows, 64 of matrix, then
-// 8 * 48 of lights starting at offset 144.
+// `render::GpuFrameUniforms`, 704 bytes: 112 of float4 rows, 64 of matrix, 144
+// of irradiance, then 8 * 48 of lights starting at offset 320.
 cbuffer GpuFrameUniforms : register(b0, space3)
 {
-    // xyz points from the world TOWARDS the sun, w is its brightness.
+    // xyz points from the world TOWARDS the sun, w is its brightness -- with
+    // the day factor already in it, so a sun below the horizon lights nothing
+    // and this shader needs no test for that.
     float4 SunDirectionBrightness;
+    // rgb the sun's own colour, derived from its elevation. Before M7.5 the sun
+    // cast white light while the sky's disc was tinted, so a sunset lit a scene
+    // exactly like noon did.
+    float4 SunColorUnused;
     float4 Ambient;
     float4 FogColor;
     // x start, y end, z one over (end - start), w unused. z is zero when fog is
@@ -80,7 +86,13 @@ cbuffer GpuFrameUniforms : register(b0, space3)
     float4 FogRange;
     // x is how many entries of Lights are live.
     float4 LightCountUnused;
+    // x how many mip levels the prefiltered environment has, y how strongly it
+    // contributes, z and w unused.
+    float4 EnvironmentParams;
     column_major float4x4 SunViewProjection;
+    // Irradiance as nine SH coefficients, cosine-convolved and divided by pi on
+    // the CPU, so `evaluateIrradiance` multiplies straight by the albedo.
+    float4 IrradianceSh[9];
     GpuLight Lights[LUAUG_MAX_FORWARD_LIGHTS];
 };
 #endif

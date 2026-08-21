@@ -96,8 +96,15 @@ static_assert(sizeof(GpuObjectUniforms) == 208, "GpuObjectUniforms is a cbuffer 
 // Fragment stage, `b0 space3`.
 struct GpuFrameUniforms
 {
-    // xyz points from the world TOWARDS the sun, w is its brightness.
+    // xyz points from the world TOWARDS the sun, w is its brightness. The
+    // brightness already carries the day factor (`SkyParams::dayFactor`), so a
+    // sun below the horizon lights nothing and the shader needs no test for it.
     f32 sunDirectionBrightness[4]{0.0f, 1.0f, 0.0f, 2.0f};
+    // rgb the sun's OWN colour, w unused. Derived from its elevation rather
+    // than authored (environment.h), and new at M7.5: until then the sun cast
+    // white light while the sky's disc was tinted, so a sunset lit a scene
+    // exactly like noon did.
+    f32 sunColorUnused[4]{1.0f, 0.96f, 0.9f, 0.0f};
     f32 ambient[4]{0.15f, 0.16f, 0.2f, 0.0f};
     f32 fogColor[4]{0.6f, 0.7f, 0.85f, 0.0f};
     // x start, y end, z one over (end - start) precomputed because a fragment
@@ -108,11 +115,23 @@ struct GpuFrameUniforms
     // x is how many entries of `lights` are live. The shader loops to it rather
     // than to kMaxForwardLights, so an unlit scene costs nothing.
     f32 lightCountUnused[4]{0.0f, 0.0f, 0.0f, 0.0f};
+    // x how many mip levels the prefiltered environment has, y how strongly it
+    // contributes, z and w unused. `y` is a multiplier rather than a switch so
+    // that a scene can dial the environment down without the shader gaining a
+    // branch nothing else needs.
+    f32 environmentParams[4]{6.0f, 1.0f, 0.0f, 0.0f};
     core::Mat4 sunViewProjection;
+    // Irradiance as nine spherical-harmonic coefficients, cosine-convolved and
+    // already divided by pi, so the shader multiplies the evaluation straight
+    // by the diffuse albedo (environment.h). This is what replaces a flat
+    // ambient on the diffuse lobe; `ambient` above is ADDED to it rather than
+    // replaced by it, so `Lighting.Ambient` still means what it documents.
+    f32 irradianceSh[9][4]{};
     GpuLight lights[kMaxForwardLights];
 };
 
-static_assert(sizeof(GpuFrameUniforms) == 80 + 64 + 48 * kMaxForwardLights, "GpuFrameUniforms is a cbuffer layout");
+static_assert(sizeof(GpuFrameUniforms) == 112 + 64 + 144 + 48 * kMaxForwardLights,
+              "GpuFrameUniforms is a cbuffer layout");
 
 // Fragment stage, `b1 space3`. Per material rather than per frame, because it
 // changes with the bind set and the sort key already groups draws by material.

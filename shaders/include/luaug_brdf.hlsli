@@ -150,6 +150,84 @@ float3 evaluatePunctualLight(Surface surface, GpuLight light)
     return shadeDirect(surface, lightDirection, light.Color.rgb * (attenuation * cone));
 }
 
+// --- Image-based lighting ----------------------------------------------------
+//
+// The split-sum approximation (Karis 2013), and the reason M4's ambient looked
+// like the early 2010s: a prefiltered environment indexed by roughness, times a
+// two-term BRDF table indexed by (N·V, roughness). What it buys is that a metal
+// reflects something, and what it costs is Karis's own assumption -- view equals
+// normal equals reflection -- which is what makes the environment pre-integrable
+// at all and which shows up as reflections that do not stretch with view angle.
+//
+// The environment is an OCTAHEDRAL 2D texture rather than a cubemap, because the
+// frozen RHI (ADR 0037) has no cube texture type. `engine/render/src/
+// environment.cpp` bakes it, and the mapping below is that file's
+// `octahedralUv` written a second time; the two have to agree exactly or a
+// reflection lands in the wrong direction.
+
+// Unit direction to the [0, 1] square, y-up.
+float2 octahedralUv(float3 direction)
+{
+    const float3 d = normalize(direction);
+    const float norm = abs(d.x) + abs(d.y) + abs(d.z);
+    const float3 n = d / max(norm, 1e-6f);
+
+    float2 f = float2(n.x, n.z);
+    if (n.y < 0.0f)
+    {
+        f = float2((1.0f - abs(n.z)) * (n.x >= 0.0f ? 1.0f : -1.0f),
+                   (1.0f - abs(n.x)) * (n.z >= 0.0f ? 1.0f : -1.0f));
+    }
+    return f * 0.5f + 0.5f;
+}
+
+// Irradiance from nine spherical-harmonic coefficients. They arrive
+// cosine-convolved and already divided by pi (environment.h), so the result
+// multiplies straight by a diffuse albedo -- there is no further 1/pi here and
+// adding one is the classic way an SH ambient ends up a third too dark.
+float3 evaluateIrradiance(float4 coefficients[9], float3 n)
+{
+    float3 result = coefficients[0].rgb * 0.282095f;
+    result += coefficients[1].rgb * (0.488603f * n.y);
+    result += coefficients[2].rgb * (0.488603f * n.z);
+    result += coefficients[3].rgb * (0.488603f * n.x);
+    result += coefficients[4].rgb * (1.092548f * n.x * n.y);
+    result += coefficients[5].rgb * (1.092548f * n.y * n.z);
+    result += coefficients[6].rgb * (0.315392f * (3.0f * n.z * n.z - 1.0f));
+    result += coefficients[7].rgb * (1.092548f * n.x * n.z);
+    result += coefficients[8].rgb * (0.546274f * (n.x * n.x - n.y * n.y));
+    // An SH reconstruction can ring below zero where the source has a sharp
+    // feature -- and the sun's disc is exactly that. Negative irradiance is not
+    // a dim surface, it is a black hole in an otherwise lit wall.
+    return max(result, float3(0.0f, 0.0f, 0.0f));
+}
+
+// Both lobes of the environment. `occlusion` multiplies this and nothing else:
+// a surface's occlusion of the ENVIRONMENT says nothing about whether the sun
+// reaches it, and the sun has a shadow map that answers exactly that.
+float3 evaluateEnvironment(Surface surface, Texture2D environmentMap, SamplerState environmentSampler,
+                           Texture2D brdfLut, SamplerState brdfSampler, float4 irradiance[9], float mipCount,
+                           float intensity, float occlusion)
+{
+    const float3 diffuse = surface.DiffuseColor * evaluateIrradiance(irradiance, surface.Normal);
+
+    // `Alpha` is roughness squared, and the mip chain is indexed by the
+    // perceptual roughness the material authored -- taking the square root back
+    // out is what keeps the chain's steps even.
+    const float roughness = sqrt(surface.Alpha);
+    const float3 reflection = reflect(-surface.View, surface.Normal);
+    const float3 prefiltered =
+        environmentMap.SampleLevel(environmentSampler, octahedralUv(reflection), roughness * (mipCount - 1.0f)).rgb;
+
+    // The table supplies the Fresnel scale in R and the bias in G, which is the
+    // second half of the split sum. SampleLevel because the table has one mip
+    // and its derivatives are meaningless across a screen.
+    const float2 ab = brdfLut.SampleLevel(brdfSampler, float2(surface.NoV, roughness), 0.0f).rg;
+    const float3 specular = prefiltered * (surface.SpecularF0 * ab.x + ab.yyy);
+
+    return (diffuse + specular) * (intensity * occlusion);
+}
+
 // How much of the sun reaches this fragment: 1 lit, 0 fully occluded.
 //
 // The map is a single orthographic cascade fitted around the camera, sampled

@@ -15,6 +15,7 @@ luaug_add_module(render
     LAYER 4
     SOURCES
         src/debug_draw.cpp
+        src/environment.cpp
         src/shader_library.cpp
         src/debug_renderer.cpp
         src/render_world.cpp
@@ -30,6 +31,7 @@ luaug_add_module(render
     DEPS
         asset
         core
+        jobs
         platform
         rhi_api
         scene
@@ -56,6 +58,7 @@ luaug_add_module_tests(render
         rhi_null
     SOURCES
         tests/debug_draw_tests.cpp
+        tests/environment_tests.cpp
         tests/shader_library_tests.cpp
         tests/render_world_tests.cpp
         tests/mesh_cache_tests.cpp
