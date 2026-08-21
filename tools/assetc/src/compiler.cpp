@@ -4,6 +4,7 @@
 #include "luaug/asset/gltf.h"
 #include "luaug/asset/image.h"
 #include "luaug/asset/mesh_format.h"
+#include "luaug/assetc/exotic.h"
 #include "luaug/core/json.h"
 #include "luaug/core/json_writer.h"
 #include "luaug/platform/file.h"
@@ -48,6 +49,12 @@ using asset::AssetKind;
     }
 
     if (extension == ".gltf" || extension == ".glb") {
+        return SourceKind::Mesh;
+    }
+    // The exotic formats, through assimp (`exotic.h`). Classified as meshes
+    // because that is what they are; which importer reads one is decided at
+    // import time and is not a fact about the file.
+    if (isExoticMesh(extension)) {
         return SourceKind::Mesh;
     }
     if (extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".tga" ||
@@ -252,8 +259,12 @@ CompileResult compile(const CompileOptions& options)
         case SourceKind::Mesh: {
             asset::Model model;
             asset::GltfImportOptions importOptions;
-            if (const auto error = asset::importGltf(bytes, source.path.parent_path(), importOptions, model)) {
-                result.diagnostic = source.relative.generic_string() + ": " + error->message;
+            const std::string extension = lowercase(source.path.extension().string());
+            const auto imported = isExoticMesh(extension)
+                                      ? importExotic(bytes, source.path.parent_path(), extension, model)
+                                      : asset::importGltf(bytes, source.path.parent_path(), importOptions, model);
+            if (imported) {
+                result.diagnostic = source.relative.generic_string() + ": " + imported->message;
                 return result;
             }
 

@@ -13,11 +13,26 @@
 add_library(luaug_assetc_lib STATIC
     src/compiler.cpp
     src/texture.cpp
+    src/exotic.cpp
 )
 target_include_directories(luaug_assetc_lib PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_link_libraries(luaug_assetc_lib
     PUBLIC luaug::asset luaug::core
     PRIVATE luaug::warnings luaug::platform basis::encoder)
+
+# assimp, and ONLY here (ADR 0010). The engine reads `.lmesh`, a format assimp
+# has never heard of, and the layering gate reading real `#include` edges is what
+# keeps that true rather than a comment.
+#
+# The definition is always set so `exotic.cpp` compiles either way: with the
+# importer off it becomes a keyed error naming the extension, which is a better
+# answer than a link failure or a model silently treated as an opaque blob.
+if(LUAUG_ASSETC_ASSIMP)
+    target_compile_definitions(luaug_assetc_lib PRIVATE LUAUG_ASSETC_ASSIMP=1)
+    target_link_libraries(luaug_assetc_lib PRIVATE assimp::assimp)
+else()
+    target_compile_definitions(luaug_assetc_lib PRIVATE LUAUG_ASSETC_ASSIMP=0)
+endif()
 
 add_executable(assetc src/main.cpp)
 target_link_libraries(assetc PRIVATE luaug::warnings luaug_assetc_lib luaug::platform)
@@ -43,6 +58,7 @@ if(LUAUG_BUILD_TESTS)
     )
     target_compile_definitions(luaug_assetc_tests PRIVATE
         LUAUG_TEST_CATALOG="${CMAKE_SOURCE_DIR}/i18n/en.json"
-        LUAUG_ASSET_TEST_DATA="${CMAKE_SOURCE_DIR}/engine/asset/tests/data")
+        LUAUG_ASSET_TEST_DATA="${CMAKE_SOURCE_DIR}/engine/asset/tests/data"
+        LUAUG_ASSETC_ASSIMP=$<BOOL:${LUAUG_ASSETC_ASSIMP}>)
     add_test(NAME assetc COMMAND luaug_assetc_tests)
 endif()

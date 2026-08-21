@@ -2,13 +2,16 @@
 #include "luaug/asset/pack.h"
 #include "luaug/asset/texture.h"
 #include "luaug/assetc/compiler.h"
+#include "luaug/assetc/exotic.h"
 #include "luaug/core/i18n.h"
+#include "luaug/platform/file.h"
 
 #include <cstddef>
 #include <cstring>
 #include <doctest/doctest.h>
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -237,4 +240,116 @@ TEST_CASE("a directory that is not there is a diagnostic rather than an empty bu
     // designing against: a build that ran, said nothing, and produced nothing.
     CHECK_FALSE(result.ok);
     CHECK_FALSE(result.diagnostic.empty());
+}
+
+// ---------------------------------------------------------------------------
+// The exotic importer (roadmap M7: "assimp as the offline-CLI-only importer for
+// exotic formats").
+
+TEST_CASE("an OBJ is imported into the same shape a glTF is")
+{
+    // Written by the test rather than checked in, for the reason the audio test
+    // writes its own WAV: a fixture asset is a binary in git nobody can diff.
+    // An OBJ is text, which makes the expectations below readable beside it.
+    const std::filesystem::path root = std::filesystem::temp_directory_path() / "luaug-assetc-exotic";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    std::filesystem::create_directories(root, ec);
+
+    // A unit quad: four corners, two triangles, one material.
+    const std::string obj = "v 0 0 0\n"
+                            "v 1 0 0\n"
+                            "v 1 1 0\n"
+                            "v 0 1 0\n"
+                            "vn 0 0 1\n"
+                            "vt 0 0\n"
+                            "vt 1 0\n"
+                            "vt 1 1\n"
+                            "vt 0 1\n"
+                            "f 1/1/1 2/2/1 3/3/1\n"
+                            "f 1/1/1 3/3/1 4/4/1\n";
+    {
+        std::ofstream file(root / "quad.obj", std::ios::binary);
+        file << obj;
+    }
+
+    std::vector<std::byte> bytes;
+    REQUIRE(luaug::platform::readFile(root / "quad.obj", bytes));
+
+    luaug::asset::Model model;
+    const auto error = luaug::assetc::importExotic(bytes, root, ".obj", model);
+
+#if LUAUG_ASSETC_ASSIMP
+    if (error.has_value()) {
+        FAIL(error->message);
+    }
+    REQUIRE_FALSE(error.has_value());
+
+    // Two triangles, and the vertices JOINED: an OBJ stores one vertex per
+    // triangle corner, so six without `JoinIdenticalVertices` and four with it.
+    CHECK(model.mesh.indices.size() == 6);
+    CHECK(model.mesh.vertices.size() == 4);
+    REQUIRE(model.mesh.submeshes.size() == 1);
+    CHECK(model.mesh.submeshes[0].indexCount == 6);
+
+    // Every submesh names a material, even for a file that declares none: a
+    // draw with no material is a draw the renderer cannot make.
+    CHECK_FALSE(model.materials.empty());
+    CHECK(model.mesh.submeshes[0].material < model.materials.size());
+
+    // NOT metallic. glTF's default is fully metallic, which is right for a file
+    // that declares a PBR material and says nothing -- and wrong for one with no
+    // PBR model at all, which would make every imported OBJ look like a mirror.
+    CHECK(model.materials[0].metallicFactor == doctest::Approx(0.0));
+
+    // Normals and a tangent basis, both generated: the file has one normal and
+    // no tangents, and a mesh with neither renders black under a normal map.
+    CHECK(model.mesh.vertices[0].normal.z == doctest::Approx(1.0));
+    const auto handedness = static_cast<double>(model.mesh.vertices[0].tangent[3]);
+    CHECK((handedness == doctest::Approx(1.0) || handedness == doctest::Approx(-1.0)));
+
+    // The bounds are the quad's own, in the model's space.
+    CHECK(model.mesh.bounds.min.x == doctest::Approx(0.0));
+    CHECK(model.mesh.bounds.max.x == doctest::Approx(1.0));
+    CHECK(model.mesh.bounds.max.y == doctest::Approx(1.0));
+#else
+    // A build with the importer off says which extension it cannot read, rather
+    // than failing to link or treating the model as an opaque blob.
+    REQUIRE(error.has_value());
+    CHECK(error->message.find("assetc.err.exotic_disabled") != std::string::npos);
+#endif
+
+    std::filesystem::remove_all(root, ec);
+}
+
+TEST_CASE("a file that is not the format its name claims is refused by name")
+{
+    seedRealCatalog();
+
+    const std::string notAnObj = "this is not a wavefront object at all";
+    const auto* const data = reinterpret_cast<const std::byte*>(notAnObj.data());
+
+    luaug::asset::Model model;
+    const auto error =
+        luaug::assetc::importExotic(std::span<const std::byte>(data, notAnObj.size()), {}, ".fbx", model);
+    REQUIRE(error.has_value());
+    // Either "could not be imported" or "no geometry", both keyed and both
+    // naming the file rather than crashing on it. Which one depends on how far
+    // assimp gets before it gives up, and pinning that would be pinning
+    // upstream's parser rather than our behaviour.
+    CHECK(error->message.find("assetc.err.exotic") != std::string::npos);
+}
+
+TEST_CASE("the extensions the importer claims are a closed list")
+{
+    // Closed rather than "whatever assimp compiled with", because the build
+    // chooses which importers exist and a file that classifies as a mesh and
+    // then fails to import is a worse error than one that rides through as raw.
+    CHECK(luaug::assetc::isExoticMesh(".obj"));
+    CHECK(luaug::assetc::isExoticMesh(".fbx"));
+    CHECK(luaug::assetc::isExoticMesh(".dae"));
+    CHECK_FALSE(luaug::assetc::isExoticMesh(".gltf"));
+    CHECK_FALSE(luaug::assetc::isExoticMesh(".glb"));
+    CHECK_FALSE(luaug::assetc::isExoticMesh(".png"));
+    CHECK_FALSE(luaug::assetc::isExoticMesh(""));
 }
