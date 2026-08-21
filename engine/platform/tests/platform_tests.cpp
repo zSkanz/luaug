@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using luaug::core::engineCatalog;
@@ -141,9 +142,15 @@ TEST_CASE("the pump translates what the engine models and drops the rest")
     // A key the engine does not model. It must survive in the raw stream --
     // that is the contract sdl_interop.h promises the ImGui backend -- while
     // staying out of the translated one.
+    //
+    // It was SDL_SCANCODE_A until M6, and by then it had stopped being unmapped:
+    // M5 grew `Key` to a whole keyboard, so this case had spent a milestone
+    // pushing a key the engine DOES model and asserting nothing. Insert is
+    // unmodelled on purpose -- nothing in the surface names it, and if something
+    // ever does, this line is where the test says so.
     SDL_Event unmappedKey{};
     unmappedKey.type = SDL_EVENT_KEY_DOWN;
-    unmappedKey.key.scancode = SDL_SCANCODE_A;
+    unmappedKey.key.scancode = SDL_SCANCODE_INSERT;
     unmappedKey.key.down = true;
     REQUIRE(SDL_PushEvent(&unmappedKey));
 
@@ -156,7 +163,192 @@ TEST_CASE("the pump translates what the engine models and drops the rest")
         events, [](const auto& e) { return e.type == EventType::KeyDown && e.key == Key::Unknown; }));
 
     CHECK(std::ranges::any_of(
-        raw, [](const SDL_Event& e) { return e.type == SDL_EVENT_KEY_DOWN && e.key.scancode == SDL_SCANCODE_A; }));
+        raw, [](const SDL_Event& e) { return e.type == SDL_EVENT_KEY_DOWN && e.key.scancode == SDL_SCANCODE_INSERT; }));
+}
+
+// --- The device layer (M6) ---------------------------------------------------
+//
+// The Input Action System binds mouse buttons, wheel notches and gamepad
+// buttons and axes as first-class inputs (ADR 0029), so the translation of each
+// is a contract rather than a convenience. These cases push synthetic SDL
+// events, which is the only way to test a device layer with no device.
+
+TEST_CASE("the pump translates pointer, wheel and text events")
+{
+    using luaug::platform::EventType;
+    using luaug::platform::MouseButton;
+
+    HeadlessPlatform platform;
+    static_cast<void>(luaug::platform::pumpEvents());
+
+    SDL_Event motion{};
+    motion.type = SDL_EVENT_MOUSE_MOTION;
+    motion.motion.x = 120.0f;
+    motion.motion.y = 48.0f;
+    motion.motion.xrel = -3.0f;
+    motion.motion.yrel = 7.0f;
+    REQUIRE(SDL_PushEvent(&motion));
+
+    SDL_Event press{};
+    press.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    press.button.button = SDL_BUTTON_RIGHT;
+    press.button.down = true;
+    press.button.x = 120.0f;
+    press.button.y = 48.0f;
+    REQUIRE(SDL_PushEvent(&press));
+
+    // FLIPPED is what a natural-scrolling trackpad reports, and SDL documents
+    // the fix as multiplying by -1. The engine undoes it so that one convention
+    // reaches every consumer -- otherwise a binding saved on one machine scrolls
+    // the wrong way on another.
+    SDL_Event wheel{};
+    wheel.type = SDL_EVENT_MOUSE_WHEEL;
+    wheel.wheel.x = 0.0f;
+    wheel.wheel.y = 2.0f;
+    wheel.wheel.direction = SDL_MOUSEWHEEL_FLIPPED;
+    REQUIRE(SDL_PushEvent(&wheel));
+
+    const auto events = luaug::platform::pumpEvents();
+
+    const auto moved = std::ranges::find_if(events, [](const auto& e) { return e.type == EventType::MouseMoved; });
+    REQUIRE(moved != events.end());
+    CHECK(moved->pointerX == doctest::Approx(120.0));
+    CHECK(moved->pointerY == doctest::Approx(48.0));
+    CHECK(moved->pointerDeltaX == doctest::Approx(-3.0));
+    CHECK(moved->pointerDeltaY == doctest::Approx(7.0));
+
+    const auto down = std::ranges::find_if(events, [](const auto& e) { return e.type == EventType::MouseButtonDown; });
+    REQUIRE(down != events.end());
+    CHECK(down->button == MouseButton::Right);
+
+    const auto scrolled = std::ranges::find_if(events, [](const auto& e) { return e.type == EventType::MouseWheel; });
+    REQUIRE(scrolled != events.end());
+    CHECK(scrolled->wheelY == doctest::Approx(-2.0));
+}
+
+TEST_CASE("a gamepad axis is normalized by what the axis IS")
+{
+    using luaug::platform::EventType;
+    using luaug::platform::GamepadAxis;
+    using luaug::platform::GamepadButton;
+
+    HeadlessPlatform platform;
+    static_cast<void>(luaug::platform::pumpEvents());
+
+    // A stick at its most negative. SDL's range is -32768..32767, so dividing
+    // by the positive half overshoots -1 -- which is why the translation
+    // clamps, and why this case pushes the extreme rather than a round number.
+    SDL_Event stick{};
+    stick.type = SDL_EVENT_GAMEPAD_AXIS_MOTION;
+    stick.gaxis.axis = SDL_GAMEPAD_AXIS_LEFTX;
+    stick.gaxis.value = -32768;
+    REQUIRE(SDL_PushEvent(&stick));
+
+    // A trigger at rest. Over the same divisor a stick uses this would read
+    // -1: a resting input indistinguishable from a fully held one.
+    SDL_Event trigger{};
+    trigger.type = SDL_EVENT_GAMEPAD_AXIS_MOTION;
+    trigger.gaxis.axis = SDL_GAMEPAD_AXIS_LEFT_TRIGGER;
+    trigger.gaxis.value = 0;
+    REQUIRE(SDL_PushEvent(&trigger));
+
+    SDL_Event button{};
+    button.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+    button.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH;
+    button.gbutton.down = true;
+    REQUIRE(SDL_PushEvent(&button));
+
+    // A paddle: a real button on a minority of pads, and deliberately outside
+    // the engine's enum. It must be dropped rather than translated to Unknown.
+    SDL_Event paddle{};
+    paddle.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+    paddle.gbutton.button = SDL_GAMEPAD_BUTTON_LEFT_PADDLE1;
+    paddle.gbutton.down = true;
+    REQUIRE(SDL_PushEvent(&paddle));
+
+    const auto events = luaug::platform::pumpEvents();
+
+    const auto axes =
+        std::ranges::count_if(events, [](const auto& e) { return e.type == EventType::GamepadAxisMoved; });
+    REQUIRE(axes == 2);
+
+    for (const auto& event : events) {
+        if (event.type != EventType::GamepadAxisMoved)
+            continue;
+        if (event.gamepadAxis == GamepadAxis::LeftX)
+            CHECK(event.axisValue == doctest::Approx(-1.0));
+        if (event.gamepadAxis == GamepadAxis::LeftTrigger)
+            CHECK(event.axisValue == doctest::Approx(0.0));
+    }
+
+    CHECK(std::ranges::count_if(events, [](const auto& e) { return e.type == EventType::GamepadButtonDown; }) == 1);
+    CHECK(std::ranges::any_of(events, [](const auto& e) {
+        return e.type == EventType::GamepadButtonDown && e.gamepadButton == GamepadButton::South;
+    }));
+}
+
+TEST_CASE("every device enumerator round-trips through its name")
+{
+    using luaug::platform::GamepadAxis;
+    using luaug::platform::GamepadButton;
+    using luaug::platform::Key;
+    using luaug::platform::MouseButton;
+
+    // The recorded input stream the determinism gate replays is written in
+    // these names. A name table that fell behind its enum would produce a trace
+    // that reads fine and replays a different key -- so the tables are walked
+    // rather than spot-checked, and `Unknown` is required to name nothing.
+    for (int raw = 1; raw < static_cast<int>(Key::Count); ++raw) {
+        const auto key = static_cast<Key>(raw);
+        CAPTURE(raw);
+        const std::string_view name = luaug::platform::keyName(key);
+        CHECK_FALSE(name.empty());
+        CHECK(luaug::platform::keyFromName(name) == key);
+    }
+
+    for (int raw = 1; raw < static_cast<int>(MouseButton::Count); ++raw) {
+        const auto button = static_cast<MouseButton>(raw);
+        CAPTURE(raw);
+        const std::string_view name = luaug::platform::mouseButtonName(button);
+        CHECK_FALSE(name.empty());
+        CHECK(luaug::platform::mouseButtonFromName(name) == button);
+    }
+
+    for (int raw = 1; raw < static_cast<int>(GamepadButton::Count); ++raw) {
+        const auto button = static_cast<GamepadButton>(raw);
+        CAPTURE(raw);
+        const std::string_view name = luaug::platform::gamepadButtonName(button);
+        CHECK_FALSE(name.empty());
+        CHECK(luaug::platform::gamepadButtonFromName(name) == button);
+    }
+
+    for (int raw = 1; raw < static_cast<int>(GamepadAxis::Count); ++raw) {
+        const auto axis = static_cast<GamepadAxis>(raw);
+        CAPTURE(raw);
+        const std::string_view name = luaug::platform::gamepadAxisName(axis);
+        CHECK_FALSE(name.empty());
+        CHECK(luaug::platform::gamepadAxisFromName(name) == axis);
+    }
+
+    CHECK(luaug::platform::keyName(Key::Unknown).empty());
+    CHECK(luaug::platform::mouseButtonName(MouseButton::Unknown).empty());
+    CHECK(luaug::platform::gamepadButtonName(GamepadButton::Unknown).empty());
+    CHECK(luaug::platform::gamepadAxisName(GamepadAxis::Unknown).empty());
+
+    // The four namespaces share one spelling space in a recorded trace and in
+    // `Enum.KeyCode`, so a collision between them would make a name ambiguous.
+    std::vector<std::string_view> names;
+    for (int raw = 1; raw < static_cast<int>(Key::Count); ++raw)
+        names.push_back(luaug::platform::keyName(static_cast<Key>(raw)));
+    for (int raw = 1; raw < static_cast<int>(MouseButton::Count); ++raw)
+        names.push_back(luaug::platform::mouseButtonName(static_cast<MouseButton>(raw)));
+    for (int raw = 1; raw < static_cast<int>(GamepadButton::Count); ++raw)
+        names.push_back(luaug::platform::gamepadButtonName(static_cast<GamepadButton>(raw)));
+    for (int raw = 1; raw < static_cast<int>(GamepadAxis::Count); ++raw)
+        names.push_back(luaug::platform::gamepadAxisName(static_cast<GamepadAxis>(raw)));
+
+    std::ranges::sort(names);
+    CHECK(std::ranges::adjacent_find(names) == names.end());
 }
 
 // --- platform::readFile ------------------------------------------------------

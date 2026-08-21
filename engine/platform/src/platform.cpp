@@ -66,8 +66,15 @@ std::optional<core::EngineError> init(const InitOptions& options)
 
     // SDL_INIT_VIDEO implies SDL_INIT_EVENTS, so the window and the event pump
     // come up together -- which is the only combination this module offers.
+    //
+    // SDL_INIT_GAMEPAD is separate and is asked for as a SECOND call rather than
+    // ORed into the first, because a machine with no controller subsystem --
+    // which is every CI container -- must still get a window. A failure here is
+    // logged by SDL and ignored: the engine runs, and no gamepad event arrives,
+    // which is exactly what having no gamepad means.
     if (!SDL_Init(SDL_INIT_VIDEO))
         return core::makeError(LUAUG_TR("platform.err.init_failed"), {}, SDL_GetError());
+    (void)SDL_InitSubSystem(SDL_INIT_GAMEPAD);
 
     resolvePaths();
     g_initialized = true;

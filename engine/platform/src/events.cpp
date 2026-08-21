@@ -1,6 +1,8 @@
 #include "luaug/platform/event.h"
 #include "luaug/platform/sdl_interop.h"
 
+#include <algorithm>
+#include <cstring>
 #include <vector>
 
 namespace luaug::platform {
@@ -225,6 +227,174 @@ constexpr KeyNaming KeyNames[] = {
     {Key::Down, "Down"},
 };
 
+// Every gamepad SDL reports is opened, because an unopened one produces no
+// events at all: SDL only sends button and axis events for a gamepad somebody
+// holds a handle to. Kept as a flat list rather than a map -- a machine has a
+// handful of pads, and a linear scan over four entries beats a hash of one.
+std::vector<SDL_Gamepad*> g_gamepads;
+
+[[nodiscard]] MouseButton translateMouseButton(Uint8 button) noexcept
+{
+    switch (button) {
+    case SDL_BUTTON_LEFT:
+        return MouseButton::Left;
+    case SDL_BUTTON_MIDDLE:
+        return MouseButton::Middle;
+    case SDL_BUTTON_RIGHT:
+        return MouseButton::Right;
+    case SDL_BUTTON_X1:
+        return MouseButton::X1;
+    case SDL_BUTTON_X2:
+        return MouseButton::X2;
+    default:
+        return MouseButton::Unknown;
+    }
+}
+
+// An explicit table for the same reason `translateScancode` is one: the two
+// enumerations happen to agree in order today, and a silent reordering upstream
+// would turn a pin bump into a wrong-button bug nothing would catch.
+[[nodiscard]] GamepadButton translateGamepadButton(Uint8 button) noexcept
+{
+    switch (static_cast<SDL_GamepadButton>(button)) {
+    case SDL_GAMEPAD_BUTTON_SOUTH:
+        return GamepadButton::South;
+    case SDL_GAMEPAD_BUTTON_EAST:
+        return GamepadButton::East;
+    case SDL_GAMEPAD_BUTTON_WEST:
+        return GamepadButton::West;
+    case SDL_GAMEPAD_BUTTON_NORTH:
+        return GamepadButton::North;
+    case SDL_GAMEPAD_BUTTON_BACK:
+        return GamepadButton::Back;
+    case SDL_GAMEPAD_BUTTON_GUIDE:
+        return GamepadButton::Guide;
+    case SDL_GAMEPAD_BUTTON_START:
+        return GamepadButton::Start;
+    case SDL_GAMEPAD_BUTTON_LEFT_STICK:
+        return GamepadButton::LeftStick;
+    case SDL_GAMEPAD_BUTTON_RIGHT_STICK:
+        return GamepadButton::RightStick;
+    case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER:
+        return GamepadButton::LeftShoulder;
+    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER:
+        return GamepadButton::RightShoulder;
+    case SDL_GAMEPAD_BUTTON_DPAD_UP:
+        return GamepadButton::DpadUp;
+    case SDL_GAMEPAD_BUTTON_DPAD_DOWN:
+        return GamepadButton::DpadDown;
+    case SDL_GAMEPAD_BUTTON_DPAD_LEFT:
+        return GamepadButton::DpadLeft;
+    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT:
+        return GamepadButton::DpadRight;
+    default:
+        // Paddles, the touchpad button and the MISC range: real buttons on a
+        // minority of hardware, and deliberately not in our enum (event.h).
+        return GamepadButton::Unknown;
+    }
+}
+
+[[nodiscard]] GamepadAxis translateGamepadAxis(Uint8 axis) noexcept
+{
+    switch (static_cast<SDL_GamepadAxis>(axis)) {
+    case SDL_GAMEPAD_AXIS_LEFTX:
+        return GamepadAxis::LeftX;
+    case SDL_GAMEPAD_AXIS_LEFTY:
+        return GamepadAxis::LeftY;
+    case SDL_GAMEPAD_AXIS_RIGHTX:
+        return GamepadAxis::RightX;
+    case SDL_GAMEPAD_AXIS_RIGHTY:
+        return GamepadAxis::RightY;
+    case SDL_GAMEPAD_AXIS_LEFT_TRIGGER:
+        return GamepadAxis::LeftTrigger;
+    case SDL_GAMEPAD_AXIS_RIGHT_TRIGGER:
+        return GamepadAxis::RightTrigger;
+    default:
+        return GamepadAxis::Unknown;
+    }
+}
+
+// SDL reports a stick over the whole signed range and a trigger over the
+// positive half of it. Dividing both by 32767 would make a released trigger
+// read -1, so the two are normalized differently -- and the asymmetry lives
+// here, once, rather than in every caller that reads an axis.
+[[nodiscard]] float normalizeAxis(GamepadAxis axis, Sint16 raw) noexcept
+{
+    constexpr float PositiveRange = 32767.0f;
+    if (axis == GamepadAxis::LeftTrigger || axis == GamepadAxis::RightTrigger)
+        return std::clamp(static_cast<float>(raw) / PositiveRange, 0.0f, 1.0f);
+    // -32768 divided by 32767 is slightly past -1, which is why this clamps
+    // rather than trusting the division: an axis that can read -1.00003 makes
+    // every "is this exactly -1" comparison downstream wrong once in a while.
+    return std::clamp(static_cast<float>(raw) / PositiveRange, -1.0f, 1.0f);
+}
+
+struct MouseButtonNaming
+{
+    MouseButton button;
+    std::string_view name;
+};
+
+constexpr MouseButtonNaming MouseButtonNames[] = {
+    {MouseButton::Left, "MouseLeft"}, {MouseButton::Middle, "MouseMiddle"}, {MouseButton::Right, "MouseRight"},
+    {MouseButton::X1, "MouseX1"},     {MouseButton::X2, "MouseX2"},
+};
+
+struct GamepadButtonNaming
+{
+    GamepadButton button;
+    std::string_view name;
+};
+
+// Prefixed, because these names share a namespace with the key legends in the
+// recorded input stream and in `Enum.KeyCode`: "Start" alone would be a key on
+// some keyboard somewhere, and "South" alone means nothing to a reader.
+constexpr GamepadButtonNaming GamepadButtonNames[] = {
+    {GamepadButton::South, "ButtonSouth"},
+    {GamepadButton::East, "ButtonEast"},
+    {GamepadButton::West, "ButtonWest"},
+    {GamepadButton::North, "ButtonNorth"},
+    {GamepadButton::Back, "ButtonBack"},
+    {GamepadButton::Guide, "ButtonGuide"},
+    {GamepadButton::Start, "ButtonStart"},
+    {GamepadButton::LeftStick, "ButtonLeftStick"},
+    {GamepadButton::RightStick, "ButtonRightStick"},
+    {GamepadButton::LeftShoulder, "ButtonLeftShoulder"},
+    {GamepadButton::RightShoulder, "ButtonRightShoulder"},
+    {GamepadButton::DpadUp, "DpadUp"},
+    {GamepadButton::DpadDown, "DpadDown"},
+    {GamepadButton::DpadLeft, "DpadLeft"},
+    {GamepadButton::DpadRight, "DpadRight"},
+};
+
+struct GamepadAxisNaming
+{
+    GamepadAxis axis;
+    std::string_view name;
+};
+
+constexpr GamepadAxisNaming GamepadAxisNames[] = {
+    {GamepadAxis::LeftX, "LeftStickX"},        {GamepadAxis::LeftY, "LeftStickY"},
+    {GamepadAxis::RightX, "RightStickX"},      {GamepadAxis::RightY, "RightStickY"},
+    {GamepadAxis::LeftTrigger, "LeftTrigger"}, {GamepadAxis::RightTrigger, "RightTrigger"},
+};
+
+void openGamepad(SDL_JoystickID which)
+{
+    if (SDL_Gamepad* pad = SDL_OpenGamepad(which); pad != nullptr)
+        g_gamepads.push_back(pad);
+}
+
+void closeGamepad(SDL_JoystickID which)
+{
+    const auto found = std::find_if(g_gamepads.begin(), g_gamepads.end(),
+                                    [which](SDL_Gamepad* pad) { return SDL_GetGamepadID(pad) == which; });
+    if (found == g_gamepads.end())
+        return;
+    SDL_CloseGamepad(*found);
+    g_gamepads.erase(found);
+}
+
 void translate(const SDL_Event& raw, std::vector<Event>& out)
 {
     switch (raw.type) {
@@ -266,6 +436,111 @@ void translate(const SDL_Event& raw, std::vector<Event>& out)
         out.push_back(event);
         break;
     }
+    case SDL_EVENT_WINDOW_FOCUS_GAINED:
+    case SDL_EVENT_WINDOW_FOCUS_LOST: {
+        Event event;
+        event.type =
+            raw.type == SDL_EVENT_WINDOW_FOCUS_GAINED ? EventType::WindowFocusGained : EventType::WindowFocusLost;
+        event.windowId = raw.window.windowID;
+        out.push_back(event);
+        break;
+    }
+    case SDL_EVENT_TEXT_INPUT: {
+        if (raw.text.text == nullptr)
+            break;
+        Event event;
+        event.type = EventType::TextInput;
+        event.windowId = raw.text.windowID;
+        // Truncated at a byte boundary rather than at a codepoint one, and that
+        // is safe only because the buffer is larger than any single input event
+        // SDL produces: the cap exists to bound the struct, not to split text.
+        const std::size_t length = std::min(std::strlen(raw.text.text), std::size_t{kMaxTextInputBytes - 1});
+        std::memcpy(event.text, raw.text.text, length);
+        event.text[length] = '\0';
+        out.push_back(event);
+        break;
+    }
+    case SDL_EVENT_MOUSE_MOTION: {
+        Event event;
+        event.type = EventType::MouseMoved;
+        event.windowId = raw.motion.windowID;
+        event.pointerX = raw.motion.x;
+        event.pointerY = raw.motion.y;
+        event.pointerDeltaX = raw.motion.xrel;
+        event.pointerDeltaY = raw.motion.yrel;
+        out.push_back(event);
+        break;
+    }
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP: {
+        const MouseButton button = translateMouseButton(raw.button.button);
+        if (button == MouseButton::Unknown)
+            break;
+        Event event;
+        event.type = raw.type == SDL_EVENT_MOUSE_BUTTON_DOWN ? EventType::MouseButtonDown : EventType::MouseButtonUp;
+        event.windowId = raw.button.windowID;
+        event.button = button;
+        event.pointerX = raw.button.x;
+        event.pointerY = raw.button.y;
+        out.push_back(event);
+        break;
+    }
+    case SDL_EVENT_MOUSE_WHEEL: {
+        Event event;
+        event.type = EventType::MouseWheel;
+        event.windowId = raw.wheel.windowID;
+        // SDL reports FLIPPED for a natural-scrolling trackpad and documents
+        // the fix as multiplying by -1. Undone here so that every consumer sees
+        // one convention, which is what a binding stored in a save file needs.
+        const float sign = raw.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1.0f : 1.0f;
+        event.wheelX = raw.wheel.x * sign;
+        event.wheelY = raw.wheel.y * sign;
+        event.pointerX = raw.wheel.mouse_x;
+        event.pointerY = raw.wheel.mouse_y;
+        out.push_back(event);
+        break;
+    }
+    case SDL_EVENT_GAMEPAD_ADDED: {
+        openGamepad(raw.gdevice.which);
+        Event event;
+        event.type = EventType::GamepadAdded;
+        event.gamepadId = static_cast<u32>(raw.gdevice.which);
+        out.push_back(event);
+        break;
+    }
+    case SDL_EVENT_GAMEPAD_REMOVED: {
+        closeGamepad(raw.gdevice.which);
+        Event event;
+        event.type = EventType::GamepadRemoved;
+        event.gamepadId = static_cast<u32>(raw.gdevice.which);
+        out.push_back(event);
+        break;
+    }
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+    case SDL_EVENT_GAMEPAD_BUTTON_UP: {
+        const GamepadButton button = translateGamepadButton(raw.gbutton.button);
+        if (button == GamepadButton::Unknown)
+            break;
+        Event event;
+        event.type =
+            raw.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ? EventType::GamepadButtonDown : EventType::GamepadButtonUp;
+        event.gamepadId = static_cast<u32>(raw.gbutton.which);
+        event.gamepadButton = button;
+        out.push_back(event);
+        break;
+    }
+    case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
+        const GamepadAxis axis = translateGamepadAxis(raw.gaxis.axis);
+        if (axis == GamepadAxis::Unknown)
+            break;
+        Event event;
+        event.type = EventType::GamepadAxisMoved;
+        event.gamepadId = static_cast<u32>(raw.gaxis.which);
+        event.gamepadAxis = axis;
+        event.axisValue = normalizeAxis(axis, raw.gaxis.value);
+        out.push_back(event);
+        break;
+    }
     default:
         // Everything else stays in the raw stream only. Dropping it here is
         // not a loss: the module models what the engine reacts to, and the
@@ -295,6 +570,71 @@ Key keyFromName(std::string_view name) noexcept
             return naming.key;
     }
     return Key::Unknown;
+}
+
+std::string_view mouseButtonName(MouseButton button) noexcept
+{
+    for (const MouseButtonNaming& naming : MouseButtonNames) {
+        if (naming.button == button)
+            return naming.name;
+    }
+    return {};
+}
+
+MouseButton mouseButtonFromName(std::string_view name) noexcept
+{
+    for (const MouseButtonNaming& naming : MouseButtonNames) {
+        if (naming.name == name)
+            return naming.button;
+    }
+    return MouseButton::Unknown;
+}
+
+std::string_view gamepadButtonName(GamepadButton button) noexcept
+{
+    for (const GamepadButtonNaming& naming : GamepadButtonNames) {
+        if (naming.button == button)
+            return naming.name;
+    }
+    return {};
+}
+
+GamepadButton gamepadButtonFromName(std::string_view name) noexcept
+{
+    for (const GamepadButtonNaming& naming : GamepadButtonNames) {
+        if (naming.name == name)
+            return naming.button;
+    }
+    return GamepadButton::Unknown;
+}
+
+std::string_view gamepadAxisName(GamepadAxis axis) noexcept
+{
+    for (const GamepadAxisNaming& naming : GamepadAxisNames) {
+        if (naming.axis == axis)
+            return naming.name;
+    }
+    return {};
+}
+
+GamepadAxis gamepadAxisFromName(std::string_view name) noexcept
+{
+    for (const GamepadAxisNaming& naming : GamepadAxisNames) {
+        if (naming.name == name)
+            return naming.axis;
+    }
+    return GamepadAxis::Unknown;
+}
+
+void setTextInputEnabled(u32 windowId, bool enabled) noexcept
+{
+    SDL_Window* window = SDL_GetWindowFromID(static_cast<SDL_WindowID>(windowId));
+    if (window == nullptr)
+        return;
+    if (enabled)
+        (void)SDL_StartTextInput(window);
+    else
+        (void)SDL_StopTextInput(window);
 }
 
 std::span<const Event> pumpEvents()
