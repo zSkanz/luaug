@@ -37,4 +37,18 @@ namespace luaug::platform {
 // No transcoding and no newline translation: the bytes are the file's.
 [[nodiscard]] bool readTextFile(const std::filesystem::path& path, std::string& out);
 
+// Whether a file can be opened for reading.
+//
+// **Opens and closes rather than stats**, for the reason `readFile` exists at
+// all: inside an APK the content directory is a set of zip entries and no path
+// any C runtime can stat, so existence has to mean "can it be opened" and SDL
+// is what knows how. On every other platform this is a stat behind an open.
+//
+// It exists because the alternative was worse (D039): `ContentMounts::resolve`
+// READ THE WHOLE FILE to decide it existed, threw the bytes away, and then
+// started an asynchronous read of the same file. On a slow filesystem that
+// synchronous read was a frame hitch of tens of milliseconds inside the
+// streaming pump, and it was doing twice the IO to get there.
+[[nodiscard]] bool fileExists(const std::filesystem::path& path);
+
 } // namespace luaug::platform

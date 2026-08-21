@@ -7,6 +7,7 @@
 #include "luaug/script/input_events.h"
 #include "luaug/script/instance_binding.h"
 #include "luaug/script/modules.h"
+#include "luaug/script/net_module.h"
 #include "luaug/script/sandbox.h"
 #include "luaug/script/services.h"
 #include "luaug/script/signals.h"
@@ -209,6 +210,10 @@ std::optional<core::EngineError> ScriptRuntime::boot()
     // metatable, to already exist.
     registerServices(L);
     registerRequire(L);
+    // After `require` exists and before the sandbox seals: `@std/net` is
+    // reached through `require` and through nothing else, which is what keeps
+    // it off the exhaustive global list in api-design.md 1.1.
+    registerStdModules(L);
 
     sealGlobals(L);
     return std::nullopt;

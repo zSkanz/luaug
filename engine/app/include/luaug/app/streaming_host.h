@@ -19,8 +19,8 @@
 #include "luaug/scene/streaming_glue.h"
 
 #include <filesystem>
+#include <map>
 #include <memory>
-#include <unordered_map>
 #include <vector>
 
 namespace luaug::asset {
@@ -79,6 +79,14 @@ public:
     [[nodiscard]] std::vector<asset::StreamingManager::ChunkView> view() const { return m_manager.view(); }
     [[nodiscard]] u64 rebases() const noexcept { return m_rebases; }
 
+    // Wall-clock milliseconds the last `pump` spent, for the soak gate.
+    //
+    // The gate M7 owes is "zero hitches ATTRIBUTABLE to streaming", and this is
+    // the attribution. A whole-frame time cannot make that claim: on a shared CI
+    // runner most of a long frame is the runner, and a gate that fails on the
+    // host machine being busy is a gate everyone learns to re-run.
+    [[nodiscard]] f64 lastPumpMilliseconds() const noexcept { return m_lastPumpMs; }
+
     // Every chunk inside every focus's minimum ring is resident.
     [[nodiscard]] bool minimumRingResident() const noexcept { return m_manager.minimumRingResident(); }
 
@@ -89,6 +97,15 @@ private:
     asset::StreamingManager m_manager;
     std::unique_ptr<scene::StreamingGlue> m_glue;
     const asset::ContentMounts* m_mounts = nullptr;
+    // Every chunk's file, resolved ONCE when the index is read (D039).
+    //
+    // Resolution touches the filesystem -- it has to open the candidate to know
+    // whether it is there -- and doing that inside the pump put a filesystem
+    // call on the frame thread once per chunk load. On a slow filesystem that is
+    // ten to thirty milliseconds of hitch for a question whose answer was fixed
+    // when the project was built. Keyed by chunk id; an entry that is absent is
+    // a chunk whose file the index names and the build did not produce.
+    std::map<asset::ChunkId, std::filesystem::path> m_chunkPaths;
     scene::World* m_world = nullptr;
     // Half of `setWorld`'s identity check. The root matters as much as the
     // world: the same `World` re-rooted elsewhere is a different mount, and a
@@ -98,6 +115,7 @@ private:
     scene::PhysicsSync* m_physics = nullptr;
     bool m_active = false;
     u64 m_rebases = 0;
+    f64 m_lastPumpMs = 0.0;
 
     // Which chunk an outstanding read belongs to. The IO service answers with
     // its own handle and nothing else, and a chunk id does not fit in a

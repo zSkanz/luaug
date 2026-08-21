@@ -135,11 +135,11 @@ public:
     // is deliberate, so a caller can key its own bookkeeping before the
     // handshake finishes rather than after.
     [[nodiscard]] virtual std::optional<core::EngineError> connect(std::string_view host, u16 port,
-                                                                  PeerId& outPeer) = 0;
+                                                                   PeerId& outPeer) = 0;
     virtual void disconnect(PeerId peer) = 0;
 
     [[nodiscard]] virtual std::optional<core::EngineError> send(PeerId peer, std::span<const u8> payload,
-                                                               Delivery delivery, u8 channel) = 0;
+                                                                Delivery delivery, u8 channel) = 0;
 
     // Drains up to `timeoutMs` of waiting events into `out`, appending. Returns
     // with whatever it has when the time is spent; zero means "whatever is

@@ -129,6 +129,12 @@ public:
     // What the streaming host produced this frame, turned into deferred
     // signals. Here rather than in `engine.cpp` because firing one needs the
     // VM, and the VM is this class's.
+    // Resumes the coroutines whose `@std/net.request` calls have finished.
+    // Called every frame at the same safe point streaming advances at, and for
+    // the same reason: a completion must enter game code where the frame loop
+    // says, not where the socket did.
+    void publishNetworkResults();
+
     void publishStreamingResults(const std::vector<core::InstanceId>& streamedOut,
                                  const std::function<bool(core::DVec3, f64)>& areaResident);
 

@@ -1,5 +1,4 @@
 #include "luaug/app/soak.h"
-
 #include "luaug/core/i18n.h"
 
 #include <doctest/doctest.h>
@@ -22,10 +21,13 @@ void seedRealCatalog()
 }
 
 // One frame of a healthy world: fast, flat memory, flat instance count.
-void steady(SoakRecorder& recorder, int frames, f64 ms = 8.0, u64 instances = 4000)
+void steady(SoakRecorder& recorder, int frames, f64 ms = 8.0, u64 instances = 4000, f64 streamingMs = 0.5)
 {
     for (int i = 0; i < frames; ++i) {
-        recorder.sample({.frameMs = ms, .residentBytes = 512u * 1024u * 1024u, .instanceCount = instances});
+        recorder.sample({.frameMs = ms,
+                         .streamingMs = streamingMs,
+                         .residentBytes = 512u * 1024u * 1024u,
+                         .instanceCount = instances});
     }
 }
 
@@ -62,7 +64,7 @@ TEST_CASE("warm-up frames are not measured")
     // The startup burst: sixty frames that would each be a hitch and would each
     // drag the median. They are exactly what a soak must not describe.
     for (int i = 0; i < 60; ++i) {
-        recorder.sample({.frameMs = 200.0, .residentBytes = 0, .instanceCount = 0});
+        recorder.sample({.frameMs = 200.0, .streamingMs = 150.0, .residentBytes = 0, .instanceCount = 0});
     }
     steady(recorder, 400);
 
@@ -84,20 +86,58 @@ TEST_CASE("a run shorter than its warm-up fails rather than passes vacuously")
     CHECK(verdict.frames == 0);
 }
 
-TEST_CASE("one hitch fails the gate")
+TEST_CASE("one frame that spent too long INSIDE STREAMING fails the gate")
 {
     seedRealCatalog();
 
     SoakRecorder recorder(0);
     steady(recorder, 500);
-    recorder.sample({.frameMs = 41.0, .residentBytes = 0, .instanceCount = 4000});
+    recorder.sample({.frameMs = 41.0, .streamingMs = 38.0, .residentBytes = 0, .instanceCount = 4000});
     steady(recorder, 500);
 
     const SoakVerdict verdict = recorder.evaluate({});
     CHECK_FALSE(verdict.ok);
     CHECK(verdict.hitches == 1);
-    CHECK(verdict.worstMs == doctest::Approx(41.0));
+    CHECK(verdict.worstStreamingMs == doctest::Approx(38.0));
     CHECK(mentions(verdict, "engine.soak.err.hitches"));
+}
+
+TEST_CASE("a long frame that streaming did not cause is not a hitch")
+{
+    seedRealCatalog();
+
+    // The distinction the whole check exists for. This is the Tier-2 container
+    // on a busy host: eighteen slow frames out of eighteen thousand, none of
+    // them inside streaming. The first version of this gate failed on exactly
+    // this and was measuring the runner rather than the engine.
+    // Eighteen in EIGHTEEN THOUSAND, which is the ratio the container actually
+    // produced. The ratio is the test: at that rate the p99 backstop below does
+    // not notice, and at a rate a hundred times higher it should.
+    SoakRecorder recorder(0);
+    steady(recorder, 18000);
+    for (int i = 0; i < 18; ++i) {
+        recorder.sample({.frameMs = 83.0, .streamingMs = 0.4, .residentBytes = 0, .instanceCount = 4000});
+    }
+
+    const SoakVerdict verdict = recorder.evaluate({});
+    CHECK(verdict.hitches == 0);
+    CHECK(verdict.worstMs == doctest::Approx(83.0));
+    CHECK(verdict.ok);
+}
+
+TEST_CASE("frames that are ALL slow fail the backstop, whatever the cause")
+{
+    seedRealCatalog();
+
+    // The other half: a percentile tolerates noise and does not tolerate a
+    // machine that is uniformly slow, which is worth failing even unattributed.
+    SoakRecorder recorder(0);
+    steady(recorder, 1000, 90.0);
+
+    const SoakVerdict verdict = recorder.evaluate({});
+    CHECK_FALSE(verdict.ok);
+    CHECK(verdict.hitches == 0);
+    CHECK(mentions(verdict, "engine.soak.err.slow_frames"));
 }
 
 TEST_CASE("the declared ceiling is only asserted when it is declared")
@@ -124,6 +164,7 @@ TEST_CASE("a world that grows and never shrinks fails, with no hitch anywhere")
     SoakRecorder recorder(0);
     for (int i = 0; i < 1000; ++i) {
         recorder.sample({.frameMs = 12.0,
+                         .streamingMs = 0.5,
                          .residentBytes = 512u * 1024u * 1024u,
                          .instanceCount = 2000 + static_cast<u64>(i) * 10});
     }
@@ -171,12 +212,16 @@ TEST_CASE("the report carries the histogram the gate is required to assert")
 
     SoakRecorder recorder(0);
     steady(recorder, 100, 5.0);
-    steady(recorder, 10, 40.0);
+    steady(recorder, 10, 40.0, 4000, 40.0);
 
     const std::string report = recorder.report({});
     CHECK(report.find("\"histogram\"") != std::string::npos);
     CHECK(report.find("\"ok\": false") != std::string::npos);
     CHECK(report.find("\"hitches\": 10") != std::string::npos);
+    // The histogram is of WHOLE frames even though the hitch check is not: it is
+    // the evidence a human reads, and "the frames were slow" is what they are
+    // looking at when they open it.
+    CHECK(report.find("\"worstStreamingMs\": 40.000") != std::string::npos);
     // Every bucket edge is named, so a reader does not have to have this header.
     CHECK(report.find("\"upperMs\": 33.0") != std::string::npos);
     CHECK(report.find("\"upperMs\": null") != std::string::npos);

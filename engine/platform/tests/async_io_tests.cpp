@@ -66,6 +66,21 @@ struct Fixture
 // exactly the thing that differs between this machine and a CI runner.
 constexpr int MaxWaitMillis = 5000;
 
+// Waits until the submitter has actually handed a read to SDL.
+//
+// Needed since D038 moved admission onto its own thread: `readFileAsync` now
+// queues and returns, so "submitted" and "in flight" are two moments with a
+// scheduler between them. Every case below that reasons about QUEUE ORDER has
+// to pin the first one down first, or it is racing the submitter rather than
+// testing the queue.
+void waitUntilInFlight(u32 count)
+{
+    for (int i = 0; i < MaxWaitMillis && ioStats().inFlight < count; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    REQUIRE(ioStats().inFlight >= count);
+}
+
 [[nodiscard]] IoStatus pumpUntilSettled(IoRequest request)
 {
     for (int i = 0; i < MaxWaitMillis; ++i) {
@@ -193,6 +208,7 @@ TEST_CASE("priority decides which queued read is admitted next")
     // two wait, and the more urgent of them must go next even though it was
     // submitted last.
     const IoRequest first = readFileAsync(fixture.root / "first.bin", IoPriority::Normal, record("first"));
+    waitUntilInFlight(1);
     const IoRequest low = readFileAsync(fixture.root / "low.bin", IoPriority::Low, record("low"));
     const IoRequest critical = readFileAsync(fixture.root / "critical.bin", IoPriority::Critical, record("critical"));
     REQUIRE(first.valid());
@@ -220,6 +236,10 @@ TEST_CASE("raising a queued request's priority moves it up the queue")
     };
 
     const IoRequest blocker = readFileAsync(fixture.root / "blocker.bin", IoPriority::Normal, record("blocker"));
+    // The blocker has to be IN FLIGHT before the other two are queued, or the
+    // submitter may pick one of them first and this stops being a test about
+    // the queue. See `waitUntilInFlight`.
+    waitUntilInFlight(1);
     const IoRequest a = readFileAsync(fixture.root / "a.bin", IoPriority::Normal, record("a"));
     const IoRequest b = readFileAsync(fixture.root / "b.bin", IoPriority::Normal, record("b"));
     REQUIRE(blocker.valid());
@@ -245,6 +265,10 @@ TEST_CASE("cancelling a queued read releases it without reading anything")
     fixture.write("dropped.bin", "2");
 
     const IoRequest held = readFileAsync(fixture.root / "held.bin", IoPriority::Normal);
+    // The held read has to occupy the only in-flight place before the second is
+    // queued, or "queued" below counts a read the submitter simply has not got
+    // to yet (D038 put admission on its own thread).
+    waitUntilInFlight(1);
     const IoRequest dropped = readFileAsync(fixture.root / "dropped.bin", IoPriority::Normal);
     REQUIRE(held.valid());
     REQUIRE(dropped.valid());

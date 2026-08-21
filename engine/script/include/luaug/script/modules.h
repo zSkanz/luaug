@@ -96,7 +96,13 @@ public:
     struct Registered
     {
         std::string name;
+        // Luau source, for a module that ships as content (`@luaug/testing`).
         std::string source;
+        // A C opener that pushes the module table, for one that cannot be
+        // written in Luau because it is a binding (`@std/net`). Exactly one of
+        // the two is set, and `source` is checked first only because it came
+        // first -- a module is one kind or the other, never both.
+        int (*opener)(lua_State*) = nullptr;
         int resultRef = -1;
         bool loading = false;
     };
@@ -126,6 +132,15 @@ void registerRequire(lua_State* L);
 // cached like any other; the source is copied, because the caller's buffer has
 // no reason to outlive the call.
 void registerModule(lua_State* L, std::string_view name, std::string_view source);
+
+// The same, for a module whose body is C rather than Luau. `opener` is called
+// once, with the module table as its single return value; the result is cached
+// exactly as a source module's is, so `require("@std/net")` twice is one table.
+//
+// This exists because `@std/net` is a BINDING and cannot be written in Luau at
+// all, and because the alternative -- a global the shim reaches through -- would
+// put a name on a global list api-design.md 1.1 states is exhaustive.
+void registerNativeModule(lua_State* L, std::string_view name, int (*opener)(lua_State*));
 
 // Mounts each entry as a `Script` under `ScriptService`, with subdirectories as
 // `Folder`s (api-design.md §3). Sorted by path first, so the tree is the same

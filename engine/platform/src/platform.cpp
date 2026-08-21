@@ -1,6 +1,7 @@
 #include "luaug/platform/platform.h"
 
 #include "luaug/core/text_key.h"
+#include "luaug/platform/async_io.h"
 
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_filesystem.h>
@@ -10,13 +11,20 @@
 #include <chrono>
 
 #if defined(_WIN32)
-// windows.h before psapi.h: psapi's declarations use the Win32 typedefs.
+// windows.h FIRST: psapi.h declares its functions with the Win32 typedefs and
+// does not include them itself, so the other order is two hundred syntax errors
+// inside a system header.
+//
+// `clang-format off` is what holds it. `IncludeBlocks: Regroup` merges blocks
+// and sorts them, so a blank line does not survive and `psapi` sorts first --
+// which is exactly the broken order, and the gate would reinstate it on every
+// run.
+// clang-format off
 #include <windows.h>
-
 #include <psapi.h>
+// clang-format on
 #elif defined(__linux__)
 #include <cstdio>
-
 #include <unistd.h>
 #elif defined(__APPLE__)
 #include <mach/mach.h>
@@ -98,6 +106,13 @@ void shutdown()
 {
     if (!g_initialized)
         return;
+
+    // BEFORE `SDL_Quit`, and it has to be: the async IO service holds an SDL
+    // queue it must drain and destroy, and a submitter thread it must join.
+    // Leaving that to the static destructor means joining a thread after SDL is
+    // gone -- and, if nothing joins it at all, a joinable `std::thread` destroyed
+    // at exit, which is `std::terminate` and reads as a crash.
+    shutdownIo();
 
     SDL_Quit();
     g_initialized = false;

@@ -50,4 +50,17 @@ bool readTextFile(const std::filesystem::path& path, std::string& out)
     return true;
 }
 
+bool fileExists(const std::filesystem::path& path)
+{
+    // Open and close. `SDL_IOFromFile` routes through the asset manager on
+    // Android, so this answers correctly inside an APK where a stat cannot --
+    // and unlike `SDL_LoadFile` it does not move the file's bytes to find out.
+    SDL_IOStream* const stream = SDL_IOFromFile(toUtf8(path).c_str(), "rb");
+    if (stream == nullptr) {
+        return false;
+    }
+    (void)SDL_CloseIO(stream);
+    return true;
+}
+
 } // namespace luaug::platform

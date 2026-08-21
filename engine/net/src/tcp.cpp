@@ -148,6 +148,22 @@ constexpr int kSendFlags = 0;
     FD_ZERO(&set);
     FD_SET(handle, &set);
 
+    // The EXCEPT set, and only when waiting to write, because that is the case
+    // that means "an in-flight connect resolved". It has to be here (D035):
+    // Winsock reports a FAILED non-blocking connect in `exceptfds` and never in
+    // `writefds`, so a select watching only writability cannot see a refusal --
+    // it waits out the whole timeout and then reports one. Ten seconds to
+    // discover that nothing is listening on a loopback port that answered
+    // instantly.
+    //
+    // Harmless on POSIX, where a resolved connect is writable either way: an
+    // empty-but-present except set changes nothing, and a descriptor that turns
+    // up in both is still one `ready > 0`. The caller asks SO_ERROR which it
+    // was, which it already did.
+    fd_set except;
+    FD_ZERO(&except);
+    FD_SET(handle, &except);
+
     timeval timeout{};
     timeout.tv_sec = static_cast<decltype(timeout.tv_sec)>(timeoutMs / 1000u);
     timeout.tv_usec = static_cast<decltype(timeout.tv_usec)>((timeoutMs % 1000u) * 1000u);
@@ -159,7 +175,7 @@ constexpr int kSendFlags = 0;
 #endif
 
     for (;;) {
-        const int ready = forWrite ? ::select(nfds, nullptr, &set, nullptr, &timeout)
+        const int ready = forWrite ? ::select(nfds, nullptr, &set, &except, &timeout)
                                    : ::select(nfds, &set, nullptr, nullptr, &timeout);
         if (ready < 0 && interrupted(lastSocketError()))
             continue;

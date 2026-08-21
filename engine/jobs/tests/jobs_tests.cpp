@@ -278,3 +278,89 @@ TEST_CASE("domain names are stable")
     CHECK(std::strcmp(domainName(Domain::AssetIo), "asset") == 0);
     CHECK(std::strcmp(domainName(Domain::Tooling), "tooling") == 0);
 }
+
+TEST_CASE("scheduling into a sleeping pool wakes it, ten thousand times running")
+{
+    // D037. The pool deadlocked intermittently: `enqueue` incremented
+    // `readyCount` -- the wait predicate's state -- WITHOUT the graph mutex the
+    // condition variable waits on. A worker that had evaluated the predicate as
+    // false but had not yet registered on the variable missed the notify and
+    // slept forever with work in its own queue.
+    //
+    // The shape that provokes it is the one below and not a big fan-out: the
+    // workers have to be ASLEEP when the job arrives, so every iteration has to
+    // let the pool go idle before scheduling the next. A parallel-for keeps
+    // them awake and never reproduces it.
+    //
+    // Ten thousand iterations because it is a race, and a race that takes a
+    // machine-day to hit is a race a hundred iterations will not see. This runs
+    // in well under a second; with the fix reverted it hangs, usually inside
+    // the first thousand.
+    ScopedPool pool(4);
+
+    std::atomic<u32> ran{0};
+    for (u32 i = 0; i < 10000; ++i) {
+        // One job, scheduled and waited. Between iterations there is nothing to
+        // do, so every worker goes back to `wake.wait` -- which is exactly the
+        // window the bug lived in.
+        wait(schedule("wake", Domain::Tooling, [&ran]() noexcept { ran.fetch_add(1, std::memory_order_relaxed); }));
+    }
+
+    CHECK(ran.load() == 10000);
+}
+
+TEST_CASE("a dependent scheduled from a completion wakes a sleeping pool too")
+{
+    // The other enqueue path, and it is worth its own case: a dependent is
+    // enqueued from inside `complete`, on a worker thread, while the rest of
+    // the pool is asleep waiting for the chain to finish. Same lost wake-up,
+    // reached from the other side.
+    ScopedPool pool(4);
+
+    std::atomic<u32> order{0};
+    for (u32 i = 0; i < 2000; ++i) {
+        std::atomic<u32> first{0};
+        std::atomic<u32> second{0};
+
+        const JobHandle head = schedule("head", Domain::Tooling, [&first, &order]() noexcept {
+            first.store(order.fetch_add(1, std::memory_order_relaxed) + 1, std::memory_order_relaxed);
+        });
+        const JobHandle dependency[] = {head};
+        const JobHandle tail = schedule(
+            "tail", Domain::Tooling,
+            [&second, &order]() noexcept {
+                second.store(order.fetch_add(1, std::memory_order_relaxed) + 1, std::memory_order_relaxed);
+            },
+            dependency);
+
+        wait(tail);
+        CHECK(first.load() != 0);
+        CHECK(second.load() > first.load());
+    }
+}
+
+TEST_CASE("shutting a pool down never leaves a worker asleep")
+{
+    // The other half of D037, and the one that actually hung a build:
+    // `shutdown` stored `running = false` -- the other half of the worker's wait
+    // predicate -- WITHOUT the graph mutex the condition variable waits on. A
+    // worker that had evaluated the predicate and not yet registered missed the
+    // notify, slept through the shutdown, and left the main thread in `join`
+    // forever.
+    //
+    // The window is one instruction wide, so this is a thousand shots at it
+    // rather than a demonstration. Each iteration brings a pool up, gives every
+    // worker a moment to reach `wake.wait` by doing one job and waiting for it,
+    // and then tears the pool down -- which is when the race is live.
+    //
+    // A hang here is the FAILURE MODE, so this case has no assertion to fail:
+    // it either finishes or CTest's timeout ends the run. That is unusual enough
+    // to say out loud.
+    for (u32 i = 0; i < 1000; ++i) {
+        init(4);
+        std::atomic<u32> ran{0};
+        wait(schedule("tick", Domain::Tooling, [&ran]() noexcept { ran.fetch_add(1, std::memory_order_relaxed); }));
+        CHECK(ran.load() == 1);
+        shutdown();
+    }
+}

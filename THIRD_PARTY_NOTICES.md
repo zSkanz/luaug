@@ -29,10 +29,10 @@ vendored yet; the roadmap allows lazy vendoring so long as the row exists.
 | ktx | latest-tag | _not vendored yet_ | Apache-2.0 | https://github.com/KhronosGroup/KTX-Software | `third_party/ktx/` |
 | stb | master-2026-08-01 | `2c980bb59875` | MIT OR Public Domain | https://github.com/nothings/stb | `third_party/stb/` |
 | imgui | 1.92.9b-docking | `b48d1afbe8ee` | MIT | https://github.com/ocornut/imgui | `third_party/imgui/` |
-| recastnavigation | main | _not vendored yet_ | zlib | https://github.com/recastnavigation/recastnavigation | `third_party/recastnavigation/` |
+| recastnavigation | 1.6.0 | `6dc1667f5803` | zlib | https://github.com/recastnavigation/recastnavigation | `third_party/recastnavigation/` |
 | gamenetworkingsockets | 1.6.x | _not vendored yet_ | BSD-3-Clause | https://github.com/ValveSoftware/GameNetworkingSockets | `third_party/gamenetworkingsockets/` |
-| enet | latest-tag | _not vendored yet_ | MIT | https://github.com/lsalzman/enet | `third_party/enet/` |
-| assimp | 6.0.x | _not vendored yet_ | BSD-3-Clause | https://github.com/assimp/assimp | `third_party/assimp/` |
+| enet | 1.3.18 | `2662c0de09e3` | MIT | https://github.com/lsalzman/enet | `third_party/enet/` |
+| assimp | 6.0.5 | `392a658f9c27` | BSD-3-Clause | https://github.com/assimp/assimp | `third_party/assimp/` |
 | doctest | 2.5.3 | `2d0a9359a60c` | MIT | https://github.com/doctest/doctest | `third_party/doctest/` |
 | blake3 | 1.8.7 | `f3149ec5bb54` | CC0-1.0 OR Apache-2.0 | https://github.com/BLAKE3-team/BLAKE3 | `third_party/blake3/` |
 | xxhash | 0.8.3 | `e626a72bc232` | BSD-2-Clause | https://github.com/Cyan4973/xxHash | `third_party/xxhash/` |

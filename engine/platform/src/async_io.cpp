@@ -4,10 +4,12 @@
 #include <SDL3/SDL_stdinc.h>
 #include <algorithm>
 #include <array>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace luaug::platform {
@@ -42,6 +44,24 @@ struct Service
     std::mutex mutex;
     SDL_AsyncIOQueue* queue = nullptr;
     bool initialized = false;
+
+    // The submitter, and why it exists (D038).
+    //
+    // `SDL_LoadFileAsync` OPENS THE FILE SYNCHRONOUSLY and only the read is
+    // asynchronous. On a fast local disk that open is microseconds and nobody
+    // notices; on a bind-mounted container filesystem it measured five to a
+    // hundred and forty milliseconds -- on the frame thread, inside the
+    // streaming pump. An "async IO" service whose submit path can block for a
+    // tenth of a second is not one, and the machines where that bites -- a
+    // network share, a phone's storage, a cold cache -- are exactly the ones a
+    // streaming world exists for.
+    //
+    // So admission moved off the caller's thread entirely. `readFileAsync`
+    // queues and returns; this thread picks the most urgent request, RELEASES
+    // the mutex, and does the blocking open; `pumpIo` only ever harvests.
+    std::thread submitter;
+    std::condition_variable wake;
+    bool stopping = false;
     u32 maxInFlight = 4;
     u64 nextSequence = 1;
 
@@ -56,6 +76,24 @@ struct Service
     u32 inFlight = 0;
 
     IoStats stats;
+
+    // The safety net, and nothing more. `platform::shutdown` is what SHOULD
+    // stop this service and does; this exists because a `std::thread` still
+    // joinable when its destructor runs calls `std::terminate`, and a process
+    // that merely forgot to shut down deserves a leak rather than a crash
+    // report. It touches no SDL on purpose: by the time a static destructor
+    // runs, SDL may already be gone.
+    ~Service()
+    {
+        {
+            const std::lock_guard<std::mutex> lock(mutex);
+            stopping = true;
+        }
+        wake.notify_all();
+        if (submitter.joinable()) {
+            submitter.join();
+        }
+    }
 };
 
 Service& service()
@@ -83,39 +121,81 @@ void releaseSlotLocked(Service& s, u32 slot)
     s.freeSlots.push_back(slot);
 }
 
-// Caller holds the lock. Hands the highest-priority queued request to SDL,
-// repeating until the in-flight budget is full or nothing is left.
-void admitLocked(Service& s)
+// Caller holds the lock. The most urgent queued slot, or `MaxIoRequests` when
+// there is nothing to admit.
+[[nodiscard]] u32 pickLocked(Service& s)
 {
-    while (s.inFlight < s.maxInFlight && !s.queued.empty()) {
-        usize bestAt = 0;
-        for (usize i = 1; i < s.queued.size(); ++i) {
-            const Request& candidate = s.requests[s.queued[i]];
-            const Request& best = s.requests[s.queued[bestAt]];
-            const bool moreUrgent = candidate.priority < best.priority;
-            const bool sameBandButOlder = candidate.priority == best.priority && candidate.sequence < best.sequence;
-            if (moreUrgent || sameBandButOlder) {
-                bestAt = i;
+    if (s.inFlight >= s.maxInFlight || s.queued.empty()) {
+        return MaxIoRequests;
+    }
+
+    usize bestAt = 0;
+    for (usize i = 1; i < s.queued.size(); ++i) {
+        const Request& candidate = s.requests[s.queued[i]];
+        const Request& best = s.requests[s.queued[bestAt]];
+        const bool moreUrgent = candidate.priority < best.priority;
+        const bool sameBandButOlder = candidate.priority == best.priority && candidate.sequence < best.sequence;
+        if (moreUrgent || sameBandButOlder) {
+            bestAt = i;
+        }
+    }
+
+    const u32 slot = s.queued[bestAt];
+    s.queued.erase(s.queued.begin() + static_cast<std::ptrdiff_t>(bestAt));
+
+    // Counted as in flight from the moment it is PICKED rather than from the
+    // moment SDL takes it. The open below happens outside the lock, so without
+    // this a second pick would admit more work than the budget allows while the
+    // first is still opening -- and bounding exactly that is what the budget is.
+    s.requests[slot].inFlight = true;
+    s.inFlight += 1;
+    return slot;
+}
+
+// The submitter thread. See `Service::submitter`.
+void submitLoop()
+{
+    Service& s = service();
+    for (;;) {
+        u32 slot = MaxIoRequests;
+        std::string path;
+        {
+            std::unique_lock<std::mutex> lock(s.mutex);
+            s.wake.wait(lock, [&s] { return s.stopping || (s.inFlight < s.maxInFlight && !s.queued.empty()); });
+            if (s.stopping) {
+                return;
             }
+            slot = pickLocked(s);
+            if (slot >= MaxIoRequests) {
+                continue;
+            }
+            path = s.requests[slot].path;
         }
 
-        const u32 slot = s.queued[bestAt];
-        s.queued.erase(s.queued.begin() + static_cast<std::ptrdiff_t>(bestAt));
-
-        Request& request = s.requests[slot];
-        // The slot index is the userdata SDL hands back. It is an index rather
-        // than a pointer because the slot array never moves and an index
-        // survives being compared against a generation.
+        // OUTSIDE the lock, and that is the whole point of the thread: the open
+        // inside `SDL_LoadFileAsync` blocks, and a caller waiting on this mutex
+        // meanwhile would be waiting on a disk it never asked about.
         void* const userdata = reinterpret_cast<void*>(static_cast<std::uintptr_t>(slot));
-        if (!SDL_LoadFileAsync(request.path.c_str(), s.queue, userdata)) {
+        const bool issued = SDL_LoadFileAsync(path.c_str(), s.queue, userdata);
+
+        {
+            const std::lock_guard<std::mutex> lock(s.mutex);
+            if (issued) {
+                s.stats.issued += 1;
+                continue;
+            }
+            // Rolled back: `pickLocked`'s optimistic in-flight count has to come
+            // off again, or a failing path leaks the budget one request at a
+            // time until nothing can be issued at all.
+            Request& request = s.requests[slot];
+            request.inFlight = false;
+            if (s.inFlight > 0) {
+                s.inFlight -= 1;
+            }
             request.status = IoStatus::Failed;
             s.stats.failed += 1;
-            continue;
         }
-
-        request.inFlight = true;
-        s.inFlight += 1;
-        s.stats.issued += 1;
+        s.wake.notify_one();
     }
 }
 
@@ -148,7 +228,11 @@ bool initIo(u32 maxInFlight)
     s.queued.clear();
     s.inFlight = 0;
     s.nextSequence = 1;
+    s.stopping = false;
     s.initialized = true;
+
+    // Started last, so it cannot observe a half-built service.
+    s.submitter = std::thread(submitLoop);
     return true;
 }
 
@@ -170,7 +254,29 @@ void shutdownIo()
             releaseSlotLocked(s, slot);
         }
         s.queued.clear();
+        // Set under the mutex the submitter waits on, which is D037's rule and
+        // not a style choice: a flag flipped outside it can be missed between
+        // the predicate being evaluated and the wait being entered, and the
+        // thread then sleeps through the shutdown and hangs the join below.
+        s.stopping = true;
         queue = s.queue;
+        outstanding = s.inFlight;
+    }
+    s.wake.notify_all();
+
+    // Joined BEFORE the drain: a submitter still running could hand SDL another
+    // read while the drain below is counting down to zero, and the queue would
+    // be destroyed under it.
+    if (s.submitter.joinable()) {
+        s.submitter.join();
+    }
+    s.submitter = std::thread();
+
+    // Re-read after the join. A request the submitter admitted between the two
+    // locks above is in flight now and was not a moment ago, and draining one
+    // fewer than SDL holds is how its buffers leak.
+    {
+        const std::lock_guard<std::mutex> lock(s.mutex);
         outstanding = s.inFlight;
     }
 
@@ -243,7 +349,11 @@ IoRequest readFileAsync(const std::filesystem::path& path, IoPriority priority, 
     request.path.assign(reinterpret_cast<const char*>(utf8.c_str()), utf8.size());
 
     s.queued.push_back(slot);
-    admitLocked(s);
+
+    // The submitter is woken rather than the open being done here. That is the
+    // whole of D038: this function is called from the frame thread inside the
+    // streaming pump, and it must not be able to block on a filesystem.
+    s.wake.notify_one();
 
     return IoRequest{slot, request.generation};
 }
@@ -263,6 +373,7 @@ void pumpIo()
         IoCallback callback;
     };
     std::vector<Completed> completed;
+    bool wakeSubmitter = false;
 
     {
         const std::lock_guard<std::mutex> lock(s.mutex);
@@ -325,7 +436,15 @@ void pumpIo()
             }
         }
 
-        admitLocked(s);
+        // A completion freed a place in flight, so there may be room for the
+        // next queued read. Notified under the lock the predicate reads, which
+        // is the rule D037 was about.
+        if (!s.queued.empty()) {
+            wakeSubmitter = true;
+        }
+    }
+    if (wakeSubmitter) {
+        s.wake.notify_one();
     }
 
     for (Completed& entry : completed) {

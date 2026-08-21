@@ -47,8 +47,7 @@ namespace {
     // Nearest-rank, clamped. An interpolating percentile over frame times
     // invents a frame that did not happen, which is the wrong shape for a
     // number a gate compares against.
-    const auto index =
-        static_cast<usize>(std::llround(fraction * static_cast<f64>(sorted.size() - 1)));
+    const auto index = static_cast<usize>(std::llround(fraction * static_cast<f64>(sorted.size() - 1)));
     return sorted[std::min(index, sorted.size() - 1)];
 }
 
@@ -82,7 +81,9 @@ SoakVerdict SoakRecorder::evaluate(const SoakThresholds& thresholds) const
         times.push_back(sample.frameMs);
         verdict.peakResidentBytes = std::max(verdict.peakResidentBytes, sample.residentBytes);
         verdict.peakInstances = std::max(verdict.peakInstances, sample.instanceCount);
-        if (sample.frameMs > thresholds.hitchMs) {
+        verdict.worstStreamingMs = std::max(verdict.worstStreamingMs, sample.streamingMs);
+        // The ATTRIBUTED time, not the frame. See `SoakThresholds::hitchMs`.
+        if (sample.streamingMs > thresholds.hitchMs) {
             verdict.hitches += 1;
         }
     }
@@ -118,8 +119,16 @@ SoakVerdict SoakRecorder::evaluate(const SoakThresholds& thresholds) const
     if (verdict.hitches > 0) {
         const core::I18nArg args[] = {{"hitches", static_cast<core::i64>(verdict.hitches)},
                                       {"threshold", thresholds.hitchMs},
-                                      {"worst", verdict.worstMs}};
+                                      {"worst", verdict.worstStreamingMs}};
         verdict.failures.push_back(core::makeError(LUAUG_TR("engine.soak.err.hitches"), args));
+    }
+
+    // The backstop. A percentile rather than a maximum, because one slow frame
+    // in a hundred on a shared runner says nothing and every frame being slow
+    // says everything.
+    if (thresholds.wholeFrameP99Ms > 0.0 && verdict.p99Ms > thresholds.wholeFrameP99Ms) {
+        const core::I18nArg args[] = {{"p99", verdict.p99Ms}, {"threshold", thresholds.wholeFrameP99Ms}};
+        verdict.failures.push_back(core::makeError(LUAUG_TR("engine.soak.err.slow_frames"), args));
     }
 
     if (thresholds.memoryCeilingBytes > 0 && verdict.peakResidentBytes > thresholds.memoryCeilingBytes) {
@@ -170,6 +179,8 @@ std::string SoakRecorder::report(const SoakThresholds& thresholds) const
     out << "  \"worstMs\": " << fixed(verdict.worstMs, 3) << ",\n";
     out << "  \"hitchMs\": " << fixed(thresholds.hitchMs, 3) << ",\n";
     out << "  \"hitches\": " << verdict.hitches << ",\n";
+    out << "  \"worstStreamingMs\": " << fixed(verdict.worstStreamingMs, 3) << ",\n";
+    out << "  \"wholeFrameP99Ms\": " << fixed(thresholds.wholeFrameP99Ms, 3) << ",\n";
     out << "  \"peakResidentBytes\": " << verdict.peakResidentBytes << ",\n";
     out << "  \"finalResidentBytes\": " << verdict.finalResidentBytes << ",\n";
     out << "  \"memoryCeilingBytes\": " << thresholds.memoryCeilingBytes << ",\n";

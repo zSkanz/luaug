@@ -172,11 +172,18 @@ ResolvedContent ContentMounts::resolve(std::string_view urn) const
 
         std::filesystem::path candidate = mount->directory;
         candidate /= std::filesystem::path(relative);
-        // `platform::readFile` rather than `std::filesystem::exists`, because
-        // inside an APK the content directory is a set of zip entries and no
-        // path any C runtime can stat (file.h). Existence is "can it be read".
-        std::vector<std::byte> probe;
-        if (platform::readFile(candidate, probe)) {
+        // `platform::fileExists` -- an open and a close -- rather than
+        // `std::filesystem::exists`, because inside an APK the content
+        // directory is a set of zip entries and no path any C runtime can stat
+        // (file.h). Existence is "can it be opened".
+        //
+        // It used to be `platform::readFile`, which READ THE WHOLE FILE and
+        // threw the bytes away (D039). Every streamed chunk was therefore read
+        // twice -- once synchronously here, on the frame thread, inside the
+        // streaming pump, and once asynchronously by the caller that had just
+        // asked where it was. On a slow filesystem that first read was a hitch
+        // of tens of milliseconds.
+        if (platform::fileExists(candidate)) {
             result.source = ResolvedContent::Source::Loose;
             result.path = std::move(candidate);
             return result;

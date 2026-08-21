@@ -12,8 +12,10 @@ luaug_add_module(net_api
     LAYER 2
     INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include
     SOURCES
+        src/async_client.cpp
         src/digest.cpp
         src/enet_transport.cpp
+        src/http.cpp
         src/tcp.cpp
         src/websocket.cpp
         src/websocket_protocol.cpp
@@ -37,7 +39,9 @@ luaug_add_module_tests(net
     MODULES
         net_api
     SOURCES
+        tests/async_client_tests.cpp
         tests/digest_tests.cpp
+        tests/http_tests.cpp
         tests/transport_tests.cpp
         tests/websocket_client_tests.cpp
         tests/websocket_protocol_tests.cpp

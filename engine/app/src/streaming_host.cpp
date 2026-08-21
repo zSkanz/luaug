@@ -5,6 +5,7 @@
 #include "luaug/core/log.h"
 #include "luaug/core/text_key.h"
 #include "luaug/platform/file.h"
+#include "luaug/platform/platform.h"
 #include "luaug/scene/components.h"
 #include "luaug/scene/physics_sync.h"
 #include "luaug/scene/world.h"
@@ -50,6 +51,29 @@ bool StreamingHost::load(const asset::ContentMounts& mounts, const std::filesyst
     if (auto error = asset::readChunkIndex(text, index); error.has_value()) {
         core::logText(LogLevel::Warn, error->message);
         return false;
+    }
+
+    // Resolved here and never again (D039). Resolution opens the candidate file
+    // to decide whether it is there, and doing that inside the pump put a
+    // filesystem call on the frame thread once per chunk load -- ten to thirty
+    // milliseconds of hitch, in the container, for a question whose answer was
+    // settled when the project was built.
+    //
+    // A missing file is reported HERE too, once per chunk, rather than the first
+    // time a focus walks near it. A world whose index names files the build did
+    // not produce is a broken build, and hearing about it at boot is strictly
+    // better than hearing about it three minutes into a fly-through.
+    m_chunkPaths.clear();
+    for (const asset::ChunkIndexEntry& entry : index.chunks) {
+        const asset::ResolvedContent resolved = mounts.resolve(entry.urn);
+        if (resolved.source != asset::ResolvedContent::Source::Loose) {
+            // A chunk in a PACK would be resident already, which defeats the
+            // point (`asset/chunk.h`). Anything else is a file that is not there.
+            const core::I18nArg args[] = {{"content", entry.urn}};
+            core::log(LogLevel::Warn, LUAUG_TR("app.warn.chunk_missing"), args);
+            continue;
+        }
+        m_chunkPaths.emplace(entry.id, resolved.path);
     }
 
     m_manager.setIndex(std::move(index));
@@ -102,14 +126,10 @@ void StreamingHost::setWorld(scene::World* world, core::InstanceId streamRoot)
 
 void StreamingHost::beginRead(asset::ChunkId id, const asset::ChunkIndexEntry& entry)
 {
-    const asset::ResolvedContent resolved = m_mounts->resolve(entry.urn);
-    if (resolved.source != asset::ResolvedContent::Source::Loose) {
-        // A chunk in a pack would be resident already, which defeats the point
-        // (`asset/chunk.h`). Anything else is a world whose index names a file
-        // that is not there.
+    // A LOOKUP, not a resolution. See `load` for why.
+    const auto path = m_chunkPaths.find(id);
+    if (path == m_chunkPaths.end()) {
         m_manager.onChunkFailed(id);
-        const core::I18nArg args[] = {{"content", entry.urn}};
-        core::log(LogLevel::Warn, LUAUG_TR("app.warn.chunk_missing"), args);
         return;
     }
 
@@ -119,7 +139,7 @@ void StreamingHost::beginRead(asset::ChunkId id, const asset::ChunkIndexEntry& e
     }
 
     const platform::IoRequest request = platform::readFileAsync(
-        resolved.path,
+        path->second,
         priorityFor(core::distanceSquared(entry.bounds,
                                           m_manager.foci().empty() ? core::DVec3{} : m_manager.foci().front().position),
                     minRadius));
@@ -165,9 +185,17 @@ std::vector<asset::StreamingFocus> StreamingHost::collectFoci() const
 
 void StreamingHost::pump(f64 budgetMilliseconds)
 {
+    m_lastPumpMs = 0.0;
     if (!m_active || m_world == nullptr) {
         return;
     }
+
+    // Measured for the GATE rather than for the budget, which does its own
+    // accounting inside the manager. What M7 has to prove is "zero hitches
+    // ATTRIBUTABLE to streaming", and attribution needs a number that is only
+    // streaming: a whole-frame time on a shared CI runner is mostly the runner.
+    // R10 is not in the way -- nothing measured here reaches the simulation.
+    const u64 startedNs = platform::nowNs();
 
     // Completed reads first, so a chunk that arrived during the frame can
     // materialise in the same one rather than waiting for the next.
@@ -204,6 +232,8 @@ void StreamingHost::pump(f64 budgetMilliseconds)
         m_physics->setOrigin(foci.front().position);
         m_rebases += 1;
     }
+
+    m_lastPumpMs = static_cast<f64>(platform::nowNs() - startedNs) / 1.0e6;
 }
 
 std::vector<core::InstanceId> StreamingHost::drainStreamedOut()

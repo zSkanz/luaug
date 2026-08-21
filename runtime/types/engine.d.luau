@@ -689,9 +689,14 @@ declare extern type CharacterBody extends BasePart with
     --- WalkSpeed rather than normalised, so a shorter one walks slower. Call it every tick while
     --- moving; a character told nothing stops.
     function Move(self, direction: vector): ()
-    --- Launches the character upward at JumpSpeed at the next simulation tick, if it is Grounded.
-    --- Ignored in mid-air rather than queued: a jump that fires the moment you land is a jump you did
-    --- not ask for.
+    --- Launches the character upward at JumpSpeed at the next simulation tick, wherever it is. It does
+    --- NOT check Grounded, deliberately: `LinearVelocity` is read-only, so a mid-air check here would
+    --- make a double jump, a wall jump and a triple jump impossible to write at all. `if
+    --- character.Grounded then character:Jump() end` is the old behaviour in one line, in the game,
+    --- where a jump policy belongs -- and coyote time and jump buffering become counters beside it.
+    --- Calling it every frame is flying: that is the game's bug, and it is the same in every engine
+    --- that offers a mechanism rather than a policy. The TICK stays engine-side: the velocity is
+    --- applied at the next simulation step and never inside the call, or a replay diverges.
     function Jump(self): ()
 end
 

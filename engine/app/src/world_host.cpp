@@ -10,6 +10,7 @@
 #include "luaug/platform/platform.h"
 #include "luaug/render/debug_draw.h"
 #include "luaug/render/scene_types.h"
+#include "luaug/script/net_module.h"
 #include "luaug/ui/scene_types.h"
 
 #include <algorithm>
@@ -647,6 +648,15 @@ void WorldHost::pumpInput(std::span<const platform::Event> events)
         if (event.type == platform::EventType::WindowFocusLost)
             m_input.releaseAll(*m_world);
     }
+}
+
+void WorldHost::publishNetworkResults()
+{
+    // At a FRAME SAFE POINT, not where the worker finished. A response arrives
+    // on a thread of its own at a wall-clock moment; resuming the coroutine
+    // there would put game code into the frame wherever the socket happened to
+    // land it. Same rule and same reason as `resumeAreaWaiters` below (R10).
+    script::resumeNetWaiters(m_runtime->state());
 }
 
 void WorldHost::publishStats(const script::FrameStats& stats)

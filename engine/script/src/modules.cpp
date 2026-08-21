@@ -144,6 +144,16 @@ int requireRegistered(lua_State* L, ModuleRegistry::Registered& module, std::str
         raiseModuleError(L, LUAUG_TR("script.err.require_cycle"), module.name, from);
 
     module.loading = true;
+    if (module.opener != nullptr) {
+        // A native module cannot fail to COMPILE and does not need the pcall
+        // wrapper a source module gets: it raises the way any binding raises,
+        // and that propagates to the requirer already keyed.
+        module.loading = false;
+        module.opener(L);
+        module.resultRef = lua_ref(L, -1);
+        return 1;
+    }
+
     std::string error;
     const bool ok = evaluateModule(L, module.source, module.name, error);
     module.loading = false;
@@ -279,10 +289,27 @@ void registerModule(lua_State* L, std::string_view name, std::string_view source
     for (ModuleRegistry::Registered& module : modules.registered) {
         if (module.name == name) {
             module.source = std::string(source);
+            module.opener = nullptr;
             return;
         }
     }
-    modules.registered.push_back(ModuleRegistry::Registered{std::string(name), std::string(source), -1, false});
+    modules.registered.push_back(ModuleRegistry::Registered{.name = std::string(name), .source = std::string(source)});
+}
+
+void registerNativeModule(lua_State* L, std::string_view name, int (*opener)(lua_State*))
+{
+    ModuleRegistry& modules = registry(L);
+    for (ModuleRegistry::Registered& module : modules.registered) {
+        if (module.name == name) {
+            module.source.clear();
+            module.opener = opener;
+            return;
+        }
+    }
+    // `.source` named explicitly, empty, because Clang's -Wmissing-field-initializers
+    // counts a skipped designator as a missing one even where the default is what
+    // was wanted. Naming it costs a word and keeps the Tier-2 build clean.
+    modules.registered.push_back(ModuleRegistry::Registered{.name = std::string(name), .source = {}, .opener = opener});
 }
 
 void mountScripts(lua_State* L, std::span<const MountedScript> scripts)

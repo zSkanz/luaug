@@ -1,4 +1,4 @@
-#include "luaug/jobs/jobs.h"
+﻿#include "luaug/jobs/jobs.h"
 
 #include <algorithm>
 #include <array>
@@ -154,9 +154,29 @@ void enqueue(u32 slot)
         worker.queue.push_back(slot);
     }
 
-    // Incremented BEFORE the notify and read by the wait predicate, so a job
-    // enqueued between a worker's failed steal and its wait cannot be missed.
-    p.readyCount.fetch_add(1, std::memory_order_release);
+    // Incremented UNDER THE GRAPH LOCK, and that is the whole of D037.
+    //
+    // `readyCount` is read by the wait predicate of a `condition_variable`
+    // whose mutex is `p.mutex`, and a condition variable requires the
+    // predicate's state to change under that same mutex. It did not. A waiter
+    // evaluates the predicate while holding `p.mutex`, sees zero, and only THEN
+    // atomically releases the lock and registers on the variable -- and an
+    // enqueue landing in that window incremented an atomic nothing was
+    // serialising against and notified a variable nobody had registered on yet.
+    // The wake-up was lost and a worker slept forever with work in its own
+    // queue.
+    //
+    // The comment that used to be here was right about a DIFFERENT window --
+    // between a failed steal and the wait -- and concluded that a job "cannot be
+    // missed", which is the sentence that made this take a hung CI run to find.
+    //
+    // The cost is one uncontended graph-lock acquisition per enqueue. The graph
+    // lock is already taken twice per job; this is the third, and it buys the
+    // only thing that makes the sleep safe.
+    {
+        const std::lock_guard<std::mutex> lock(p.mutex);
+        p.readyCount.fetch_add(1, std::memory_order_release);
+    }
     p.wake.notify_all();
 }
 
@@ -375,7 +395,20 @@ void shutdown()
     while (tryRunOne()) {
     }
 
-    p.running.store(false, std::memory_order_release);
+    // Under the graph lock, and this is the half of D037 that actually hung the
+    // build. `running` is the other half of the worker's wait predicate, and it
+    // was stored without `p.mutex` -- so a worker that had evaluated the
+    // predicate (still running, nothing ready) but had not yet registered on the
+    // variable missed the notify and slept through the shutdown. The main thread
+    // then blocked in `join` forever.
+    //
+    // The hung process was exactly two threads, both waiting, both at zero CPU:
+    // this thread inside `join` and one worker inside `wake.wait`. That shape is
+    // what named the bug.
+    {
+        const std::lock_guard<std::mutex> lock(p.mutex);
+        p.running.store(false, std::memory_order_release);
+    }
     p.wake.notify_all();
 
     for (const std::unique_ptr<Worker>& worker : p.workers) {

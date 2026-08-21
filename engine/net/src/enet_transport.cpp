@@ -4,15 +4,13 @@
 // exposes a factory returning the interface for exactly that reason (R17): the
 // day GameNetworkingSockets or QUIC arrives beside this, nothing above has to
 // change, because nothing above ever knew what was underneath.
-#include "luaug/net/transport.h"
-
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
-
-#include <enet/enet.h>
+#include "luaug/net/transport.h"
 
 #include <algorithm>
 #include <cstdint>
+#include <enet/enet.h>
 #include <unordered_map>
 
 namespace luaug::net {
@@ -181,16 +179,22 @@ public:
             wait = 0;
             switch (event.type) {
             case ENET_EVENT_TYPE_CONNECT:
-                out.push_back({.kind = TransportEvent::Kind::Connected, .peer = track(event.peer)});
+                // Every field named, empty ones included. Clang counts a skipped
+                // designator as a missing initializer under `-Werror`, and the
+                // Tier-2 build is where that is discovered.
+                out.push_back(TransportEvent{
+                    .kind = TransportEvent::Kind::Connected, .peer = track(event.peer), .payload = {}, .channel = 0});
                 break;
             case ENET_EVENT_TYPE_DISCONNECT: {
                 const PeerId id = idOf(event.peer);
                 forget(event.peer);
-                out.push_back({.kind = TransportEvent::Kind::Disconnected, .peer = id});
+                out.push_back(TransportEvent{
+                    .kind = TransportEvent::Kind::Disconnected, .peer = id, .payload = {}, .channel = 0});
                 break;
             }
             case ENET_EVENT_TYPE_RECEIVE: {
-                TransportEvent message{.kind = TransportEvent::Kind::Message, .peer = idOf(event.peer)};
+                TransportEvent message{
+                    .kind = TransportEvent::Kind::Message, .peer = idOf(event.peer), .payload = {}, .channel = 0};
                 message.channel = event.channelID;
                 const auto* const bytes = reinterpret_cast<const u8*>(event.packet->data);
                 message.payload.assign(bytes, bytes + event.packet->dataLength);

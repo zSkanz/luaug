@@ -19,6 +19,7 @@
 #include "luaug/core/math.h"
 #include "luaug/core/name_atom.h"
 #include "luaug/input/input.h"
+#include "luaug/net/async_client.h"
 #include "luaug/platform/event.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/physics_sync.h"
@@ -29,6 +30,7 @@
 
 #include <array>
 #include <functional>
+#include <memory>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -148,6 +150,23 @@ public:
         u64 scheduledTick = 0;
     };
     std::vector<AreaWaiter> areaWaiters;
+
+    // `@std/net.request` (api-design.md 7), the same parking shape as the two
+    // waiters above and for the same reason -- except that what satisfies it is
+    // a socket rather than the world, so the condition is a TICKET rather than a
+    // predicate over world state.
+    struct NetWaiter
+    {
+        net::NetTicket ticket;
+        int threadRef = -1;
+    };
+    std::vector<NetWaiter> netWaiters;
+
+    // Created on the first `@std/net.request` and never before: it owns worker
+    // THREADS, and a project that never touches the network should not be paying
+    // for two of them. Owned here so it dies with the VM -- the coroutines
+    // waiting on its tickets die with the VM too.
+    std::unique_ptr<net::AsyncClient> netClient;
 
     // Resolved once at boot. `fireRunServiceEvent` runs four times a tick and
     // `publishMessage` runs per `print`; hashing a string literal on either path

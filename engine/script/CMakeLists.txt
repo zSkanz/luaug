@@ -20,6 +20,7 @@ luaug_add_module(script
         src/datatypes.cpp
         src/instance_binding.cpp
         src/modules.cpp
+        src/net_module.cpp
         src/services.cpp
         src/signals.cpp
         src/tasks.cpp
@@ -31,6 +32,7 @@ luaug_add_module(script
         audio
         core
         input
+        net_api
         physics_api
         platform
         scene

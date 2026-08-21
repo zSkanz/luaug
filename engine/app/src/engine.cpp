@@ -418,10 +418,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // it is a bare script (engine.h), so a lone script gets the engine's
     // content directory -- which is right: it has no project to have one.
     std::error_code pathError;
-    const bool isProject =
-        !options.scriptPath.empty() && std::filesystem::is_directory(options.scriptPath, pathError);
-    const std::filesystem::path contentRoot =
-        isProject ? options.scriptPath / "content" : platform::paths().contentDir;
+    const bool isProject = !options.scriptPath.empty() && std::filesystem::is_directory(options.scriptPath, pathError);
+    const std::filesystem::path contentRoot = isProject ? options.scriptPath / "content" : platform::paths().contentDir;
     meshLoader.setContentRoot(contentRoot);
 
     contentMounts.clear();
@@ -659,6 +657,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // the number the gate wants is a PEAK and a peak between two
                 // samples is a peak nobody saw.
                 soak.sample({.frameMs = frameMs,
+                             // The PREVIOUS frame's pump, because this sample is
+                             // taken before this frame's. Off by one frame and
+                             // deliberately so: every pump is counted exactly
+                             // once, which is the property a histogram needs.
+                             .streamingMs = streaming.lastPumpMilliseconds(),
                              .residentBytes = platform::residentBytes(),
                              .instanceCount = static_cast<core::u64>(host->world().instanceCount())});
             }
@@ -688,6 +691,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             streaming.setPhysics(host->physics());
             streaming.pump(2.0);
         }
+
+        // `@std/net` completions land here, at the same safe point, and for the
+        // same reason streaming advances here: a response arrives on a worker
+        // thread at a wall-clock moment, and resuming the coroutine there would
+        // put game code into the frame wherever the socket happened to land it.
+        host->publishNetworkResults();
 
         // Published UNCONDITIONALLY, and the conformance suite is what settled
         // it: a `LoadAreaAsync` in a project with no streamed world parked a
@@ -1217,9 +1226,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             core::logText(LogLevel::Error, failure.message);
         }
         if (!verdict.ok && !soakFailure.has_value()) {
-            const std::array<I18nArg, 2> failArgs{
-                I18nArg{"failures", static_cast<core::i64>(verdict.failures.size())},
-                I18nArg{"path", options.soakReportPath.string()}};
+            const std::array<I18nArg, 2> failArgs{I18nArg{"failures", static_cast<core::i64>(verdict.failures.size())},
+                                                  I18nArg{"path", options.soakReportPath.string()}};
             soakFailure = core::makeError(LUAUG_TR("engine.soak.err.failed"), failArgs);
         }
     }

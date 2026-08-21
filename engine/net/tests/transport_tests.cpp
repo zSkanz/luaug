@@ -53,8 +53,8 @@ constexpr u16 EchoPort = 47921;
 // test that passes on a fast machine and fails on a loaded CI runner, which is
 // the same class of flakiness `--rhi=null` exists to keep out of the soak gate.
 template <typename Predicate>
-bool pumpUntil(ITransport& a, ITransport& b, std::vector<TransportEvent>& eventsA,
-               std::vector<TransportEvent>& eventsB, Predicate predicate, int rounds = 400)
+bool pumpUntil(ITransport& a, ITransport& b, std::vector<TransportEvent>& eventsA, std::vector<TransportEvent>& eventsB,
+               Predicate predicate, int rounds = 400)
 {
     for (int i = 0; i < rounds; ++i) {
         if (predicate()) {
@@ -97,8 +97,7 @@ TEST_CASE("a message sent into the loopback comes back out of it")
     std::vector<TransportEvent> clientEvents;
 
     REQUIRE(pumpUntil(*server, *client, serverEvents, clientEvents, [&] {
-        return has(serverEvents, TransportEvent::Kind::Connected) &&
-               has(clientEvents, TransportEvent::Kind::Connected);
+        return has(serverEvents, TransportEvent::Kind::Connected) && has(clientEvents, TransportEvent::Kind::Connected);
     }));
 
     // The server learns the client's id from the event, not from anything it
