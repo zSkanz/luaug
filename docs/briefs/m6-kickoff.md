@@ -43,7 +43,7 @@ constraint that decides most of the decisions below.
 - [x] **Minimal skeletal animation**: glTF clip playback + linear blending
       (`AnimationPlayer`/`AnimationTrack` per api-design.md) — no state machines,
       no IK; enough for idle/walk/jump
-- [ ] **Solid `Part` rendering** — added to the roadmap 2026-08-20 by human
+- [x] **Solid `Part` rendering** — added to the roadmap 2026-08-20 by human
       decision, **after this brief imported its scope**, so it is appended rather
       than assumed to have been read. A `Part` has no solid path: it reaches the
       frame only as a debug wire box, so `Instance.new("Part")` is invisible and

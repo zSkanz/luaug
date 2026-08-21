@@ -43,6 +43,53 @@ constexpr f32 kDegreesToRadians = kPi / 180.0f;
     return false;
 }
 
+// The generated mesh for a `Part`'s shape, or null before the loader has
+// uploaded them -- which is the first frame of any run, and is why the debug
+// wire box is still reachable.
+[[nodiscard]] const MeshLibrary::Entry* primitiveEntry(const scene::World& world, const MeshLibrary& meshes,
+                                                       core::i32 shape) noexcept
+{
+    const char* name = primitiveContent(shape);
+    if (name == nullptr)
+        return nullptr;
+    const MeshLibrary::Entry* entry = meshes.find(world.atoms().lookup(name));
+    return entry != nullptr && entry->mesh.valid() ? entry : nullptr;
+}
+
+// What one unit mesh has to be scaled by to become this part.
+//
+// **Not simply `Size`**, and the two exceptions are both about agreeing with the
+// collider rather than with the size box:
+//
+//   `Ball` -- the physics shape is a SPHERE of the largest half-extent
+//   (jolt_physics.cpp), so a non-uniform `Size` gives a ball that sticks out of
+//   its own box. Rendering an ellipsoid there would mean seeing one thing and
+//   colliding with another, which is the worse of the two wrongs.
+//
+//   `Capsule` -- the unit mesh is built at the character aspect (radius 0.5,
+//   total height 2), so Y is halved. Its caps still stretch away from
+//   `Size.y == 2 * max(Size.x, Size.z)`; primitives.h records why and what the
+//   fix would be.
+[[nodiscard]] Vec3 primitiveScale(core::i32 shape, Vec3 size) noexcept
+{
+    switch (shape) {
+    case 1: {
+        const f32 diameter = std::fmax(size.x, std::fmax(size.y, size.z));
+        return Vec3{diameter, diameter, diameter};
+    }
+    case 2: {
+        const f32 diameter = std::fmax(size.x, size.z);
+        return Vec3{diameter, size.y, diameter};
+    }
+    case 3: {
+        const f32 diameter = std::fmax(size.x, size.z);
+        return Vec3{diameter, size.y * 0.5f, diameter};
+    }
+    default:
+        return size;
+    }
+}
+
 } // namespace
 
 u64 drawSortKey(u32 pass, u32 pipeline, u32 material, f32 depth) noexcept
@@ -63,6 +110,26 @@ u64 drawSortKey(u32 pass, u32 pipeline, u32 material, f32 depth) noexcept
     const u64 depthBits = static_cast<u64>(clamped * 100.0f);
 
     return passBits | pipelineBits | materialBits | (depthBits & 0xFFFFu);
+}
+
+const char* primitiveContent(core::i32 shape) noexcept
+{
+    // Indexed by `Enum.PartShape`'s own values, which enums.api.luau's header
+    // makes the contract.
+    switch (shape) {
+    case 0:
+        return "luaug://primitive/block";
+    case 1:
+        return "luaug://primitive/ball";
+    case 2:
+        return "luaug://primitive/cylinder";
+    case 3:
+        return "luaug://primitive/capsule";
+    case 4:
+        return "luaug://primitive/wedge";
+    default:
+        return nullptr;
+    }
 }
 
 void MeshLibrary::set(core::NameAtom content, const Entry& entry)
@@ -171,6 +238,16 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             const MeshLibrary::Entry* loaded = meshes.find(mesh->meshContent);
             if (loaded != nullptr && loaded->mesh.valid())
                 return;
+        }
+        // M6: a `Part` has a solid path now, so the wire box is what it falls
+        // back to rather than what it is. The path stays because it is still how
+        // anything is seen when the real one is not running -- and the guard is
+        // the camera, because a world with no camera is exactly the case the
+        // host draws with the debug path instead of with the renderer
+        // (`engine.cpp`'s `useRenderer`). Without that guard `examples/00-clear`
+        // went from three wire cubes to an empty screen.
+        else if (out.camera.valid && primitiveEntry(world, meshes, part.shape) != nullptr) {
+            return;
         }
         out.parts.push_back(RenderPart{
             .cframe = part.cframe,
@@ -360,6 +437,98 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
                 .boneCount = boneCount,
             });
         }
+    });
+
+    // --- Solid parts (M6) ---------------------------------------------------
+    //
+    // **The renderer changes not at all for this**, which is the answer M4's
+    // "engine-generated geometry must be able to reach the renderer" constraint
+    // was written to get: these are ordinary `DrawItem`s naming ordinary
+    // `MeshHandle`s, and colour, `Transparency` and the blended pass come free
+    // because of it.
+    //
+    // The material is the part's own colour rather than a file's, deduplicated
+    // across the frame by that colour so the sort key still groups draws that
+    // share a bind set. A linear scan for the same reason the mesh loop uses
+    // one: a scene has a handful of distinct colours, and an unordered
+    // container's iteration order must not reach observable output (R10).
+    struct ResolvedPartMaterial
+    {
+        Color3 color;
+        u32 slot;
+    };
+    std::vector<ResolvedPartMaterial> partMaterials;
+
+    world.parts().forEach([&](core::InstanceId id, const scene::PartComponent& part) {
+        if (!inWorld(world, id, root))
+            return;
+        // A `MeshPart` is a `BasePart` and is in this pool too; its geometry
+        // came from a file and the loop above already drew it.
+        if (world.meshParts().find(id) != nullptr)
+            return;
+
+        const MeshLibrary::Entry* entry = primitiveEntry(world, meshes, part.shape);
+        if (entry == nullptr)
+            return;
+
+        const f32 alpha = 1.0f - part.transparency;
+        if (alpha <= 0.0f)
+            return;
+
+        const Mat4 transform =
+            core::toRenderMatrix(part.cframe, origin) * core::scaling(primitiveScale(part.shape, part.size));
+        const AABB worldBounds = core::transformed(transform, entry->bounds);
+
+        ++out.candidateDraws;
+        const bool visible = core::intersects(out.camera.frustum, worldBounds);
+        if (!visible) {
+            ++out.culledDraws;
+            const Vec3 toCentre = core::center(worldBounds);
+            const f32 reach = shadowRadius + 0.5f * core::length(core::size(worldBounds));
+            if (core::length(toCentre) > reach)
+                return;
+        }
+
+        u32 materialSlot = 0;
+        bool found = false;
+        for (const ResolvedPartMaterial& candidate : partMaterials) {
+            if (candidate.color == part.color) {
+                materialSlot = candidate.slot;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            RenderMaterial material;
+            material.uniforms.baseColor[0] = part.color.r;
+            material.uniforms.baseColor[1] = part.color.g;
+            material.uniforms.baseColor[2] = part.color.b;
+            material.uniforms.baseColor[3] = 1.0f;
+            // Dielectric and fairly rough, which is what an untextured building
+            // block looks like. `RenderMaterial`'s own defaults are metallic 1
+            // and roughness 1, which is right for a glTF that forgot to say and
+            // wrong for a `Part` that has no way to.
+            material.uniforms.metallicRoughnessNormalCutoff[0] = 0.0f;
+            material.uniforms.metallicRoughnessNormalCutoff[1] = 0.7f;
+            materialSlot = static_cast<u32>(out.materials.size());
+            out.materials.push_back(material);
+            partMaterials.push_back(ResolvedPartMaterial{part.color, materialSlot});
+        }
+
+        const bool transparent = alpha < 1.0f;
+        const f32 depth = core::length(core::center(worldBounds));
+        const f32 sortDepth = transparent ? kMaxSortDepth - depth : depth;
+        out.draws.push_back(DrawItem{
+            .sortKey =
+                drawSortKey(transparent ? kTransparentPass : kOpaquePass, kStaticPipeline, materialSlot, sortDepth),
+            .transform = transform,
+            .mesh = entry->mesh,
+            .section = 0,
+            .material = materialSlot,
+            .alpha = alpha,
+            .transparent = transparent,
+            .inCameraFrustum = visible,
+        });
     });
 
     // `stable_sort`, and the stability is the contract: two draws with equal

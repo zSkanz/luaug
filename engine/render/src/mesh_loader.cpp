@@ -2,6 +2,7 @@
 
 #include "luaug/asset/gltf.h"
 #include "luaug/asset/image.h"
+#include "luaug/asset/primitives.h"
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
 #include "luaug/core/text_key.h"
@@ -69,6 +70,42 @@ void MeshLoader::destroy(rhi::IDevice& device)
     }
     textures_.clear();
     failed_.clear();
+}
+
+void MeshLoader::syncPrimitives(rhi::IDevice& device, rhi::ICmdList& cmd, scene::World& world, MeshCache& cache,
+                                MeshLibrary& library)
+{
+    if (primitivesUploaded_)
+        return;
+    primitivesUploaded_ = true;
+
+    for (core::i32 shape = 0; shape < static_cast<core::i32>(asset::PrimitiveShape::Count); ++shape) {
+        const char* name = primitiveContent(shape);
+        if (name == nullptr)
+            continue;
+
+        const asset::Mesh mesh = asset::makePrimitive(static_cast<asset::PrimitiveShape>(shape));
+        core::EngineError uploadError;
+        const MeshHandle handle = cache.create(device, cmd, mesh, MeshUsage::Static, &uploadError);
+        if (!handle.valid()) {
+            // A failure here leaves every `Part` on the debug wire path, which
+            // is exactly what that path is for -- so it is a warning and not a
+            // reason to refuse to draw a frame.
+            core::logText(core::LogLevel::Warn, uploadError.message);
+            continue;
+        }
+
+        MeshLibrary::Entry entry;
+        entry.mesh = handle;
+        entry.bounds = mesh.bounds;
+        entry.sectionCount = 1;
+        entry.sectionMaterial.push_back(0);
+        // No materials: a `Part`'s look is its own properties, and `extract`
+        // builds the material from them. An entry with an empty material list
+        // is already handled -- the mesh loop falls back to `RenderMaterial{}`
+        // for a section whose material the importer did not produce.
+        library.set(world.atoms().intern(name), entry);
+    }
 }
 
 u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world, core::InstanceId root,

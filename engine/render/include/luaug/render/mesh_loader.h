@@ -53,12 +53,26 @@ public:
     core::u32 sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world, core::InstanceId root,
                    MeshCache& cache, MeshLibrary& library, SkeletonLibrary* skeletons = nullptr);
 
+    // Builds and uploads the five `Enum.PartShape` solids and registers them in
+    // `library` under their reserved URNs (`primitiveContent`). Idempotent: the
+    // second call does nothing, which is what makes it safe to put at the top of
+    // a per-frame `sync`.
+    //
+    // It is here rather than in the renderer because this is the module that
+    // already turns geometry into GPU buffers -- and because the whole point of
+    // M4's constraint is that generated geometry takes the SAME route an
+    // imported mesh does. Interning the names needs a mutable atom table, which
+    // is why this takes the world rather than a const reference to one.
+    void syncPrimitives(rhi::IDevice& device, rhi::ICmdList& cmd, scene::World& world, MeshCache& cache,
+                        MeshLibrary& library);
+
     // Releases every GPU resource this loader created. The cache's meshes are
     // the cache's to free; the textures are this one's.
     void destroy(rhi::IDevice& device);
 
 private:
     std::filesystem::path contentRoot_;
+    bool primitivesUploaded_ = false;
     // Content URNs that failed to load, so a broken file costs one attempt and
     // one message rather than one of each per frame forever. Sorted, for the
     // same reason `MeshLibrary` is: R10 forbids an unordered container's order

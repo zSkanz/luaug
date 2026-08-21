@@ -467,7 +467,18 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Shape",
                 Type = "Enum.PartShape",
-                Doc = "Which primitive solid this part is.",
+                Doc = "Which primitive solid this part is. It drives BOTH the geometry that is drawn and the "
+                    .. "collider that is simulated, which is the point: a `Ball` that rolled like a box would be "
+                    .. "the kind of divergence nobody can see in a screenshot.\n\n**`Size` is the full extent, "
+                    .. "and two shapes read it slightly differently so that the mesh agrees with the collider.** "
+                    .. "A `Ball` is a sphere of the LARGEST half-extent, so a non-uniform `Size` gives a ball "
+                    .. "that sticks out of its own box rather than an ellipsoid you cannot collide with. A "
+                    .. "`Cylinder` and a `Capsule` stand along Y, take their diameter from the larger of X and Z, "
+                    .. "and take their full height from Y -- caps included. A capsule's caps are hemispheres the "
+                    .. "collider never stretches, so `Size.y == 2 * Size.x` is where the drawn shape and the "
+                    .. "simulated one agree exactly; away from it the drawn ends are slightly oval.\n\nA `Wedge` "
+                    .. "is a ramp with its tall face towards -Z, so an unrotated one is walked UP as you walk "
+                    .. "towards -Z. Its collider is deliberately the whole box (§2.2's physics notes).",
             },
         },
     },

@@ -14,6 +14,7 @@ luaug_add_module(asset
     SOURCES
         src/image.cpp
         src/gltf.cpp
+        src/primitives.cpp
     DEPS
         core
 )
@@ -35,6 +36,7 @@ luaug_add_module_tests(asset
     SOURCES
         tests/image_tests.cpp
         tests/gltf_tests.cpp
+        tests/primitive_tests.cpp
 )
 
 if(LUAUG_BUILD_TESTS)

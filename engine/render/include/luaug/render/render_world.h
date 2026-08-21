@@ -243,6 +243,15 @@ inline constexpr u32 kSkinnedPipeline = 1;
 // "walk the list in order" stays true in every backend.
 inline constexpr f32 kMaxSortDepth = 655.0f;
 
+// The reserved content URN a generated primitive is registered under, for one of
+// `Enum.PartShape`'s values. A scheme of its own rather than `asset://`, which
+// is the project's: nothing a game ships can collide with these, and a URN in a
+// log says immediately that the geometry came from arithmetic.
+//
+// Null for a value outside the enum, which is what makes the caller fall back to
+// the debug wire box rather than to a lookup of an empty string.
+[[nodiscard]] const char* primitiveContent(core::i32 shape) noexcept;
+
 // The mesh a `MeshPart` renders, and where the renderer keeps that mapping.
 //
 // `extract` needs to turn a `MeshPart`'s content URN into geometry, and it must

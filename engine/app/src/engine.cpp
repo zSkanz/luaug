@@ -773,6 +773,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // flicker they cannot reproduce.
             meshCache.beginFrame(*device);
             if (renderer != nullptr && renderer->valid())
+                meshLoader.syncPrimitives(*device, *cmd, host->world(), meshCache, meshLibrary);
+            if (renderer != nullptr && renderer->valid())
                 (void)meshLoader.sync(*device, *cmd, host->world(), host->workspace(), meshCache, meshLibrary,
                                       &host->skeletons());
 
