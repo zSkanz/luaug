@@ -23,6 +23,7 @@ luaug_add_module(ui
     DEPS
         core
         input
+        platform
         render
         scene
 )
@@ -40,3 +41,11 @@ luaug_add_module_tests(ui
         tests/glyph_tests.cpp
         tests/interaction_tests.cpp
 )
+
+if(LUAUG_BUILD_TESTS)
+    # The vendored face, straight off disk. The glyph tests supply it through the
+    # face provider -- the same seam a project uses -- so they exercise a real
+    # rasterisation without needing a content system.
+    target_compile_definitions(luaug_ui_tests PRIVATE
+        LUAUG_TEST_FONT="${LUAUG_THIRD_PARTY_DIR}/inter/docs/font-files/InterVariable.ttf")
+endif()

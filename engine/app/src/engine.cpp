@@ -16,6 +16,7 @@
 #include "luaug/app/screenshot.h"
 #include "luaug/app/soak.h"
 #include "luaug/app/streaming_host.h"
+#include "luaug/app/ui_text.h"
 #include "luaug/app/world_host.h"
 #include "luaug/asset/content.h"
 #include "luaug/core/build_info.h"
@@ -125,7 +126,7 @@ private:
 // smallest thing in the frame; an index buffer would save a third of its
 // bandwidth and cost a second upload.
 void buildUiGeometry(const ui::DrawList& list, core::Vec2 viewport, std::vector<render::UiVertex>& vertices,
-                     std::vector<render::UiScissorRun>& runs)
+                     std::vector<render::UiScissorRun>& runs, std::span<const rhi::TextureHandle> textures)
 {
     vertices.clear();
     runs.clear();
@@ -135,10 +136,16 @@ void buildUiGeometry(const ui::DrawList& list, core::Vec2 viewport, std::vector<
         return static_cast<core::u8>(clamped * 255.0f + 0.5f);
     };
 
+    // A run breaks on EITHER a clip change or a texture change: a draw carries
+    // one scissor and one texture, so either is a new draw. The draw list is
+    // already ordered by the tree, so runs stay contiguous rather than becoming
+    // buckets.
     core::u32 currentScissor = 0xffffffffu;
+    core::u32 currentTexture = 0xffffffffu;
     for (const ui::DrawQuad& quad : list.quads) {
-        if (quad.scissor != currentScissor) {
+        if (quad.scissor != currentScissor || quad.texture != currentTexture) {
             currentScissor = quad.scissor;
+            currentTexture = quad.texture;
             const core::Rect& clip = list.scissors[currentScissor];
             // Clamped to the target, because a scissor outside it is a
             // validation error on every backend rather than an empty draw.
@@ -152,6 +159,10 @@ void buildUiGeometry(const ui::DrawList& list, core::Vec2 viewport, std::vector<
                             static_cast<core::i32>(std::fmax(0.0f, bottom - top))},
                 .firstVertex = static_cast<core::u32>(vertices.size()),
                 .vertexCount = 0,
+                // Index zero is "no texture" and resolves to the renderer's own
+                // white pixel, so an out-of-range index degrades to an untinted
+                // quad rather than to an unbound read.
+                .texture = currentTexture < textures.size() ? textures[currentTexture] : rhi::TextureHandle{},
             });
         }
 
@@ -160,7 +171,7 @@ void buildUiGeometry(const ui::DrawList& list, core::Vec2 viewport, std::vector<
         const f32 halfX = (quad.max.x - quad.min.x) * 0.5f;
         const f32 halfY = (quad.max.y - quad.min.y) * 0.5f;
 
-        const auto corner = [&](f32 x, f32 y) {
+        const auto corner = [&](f32 x, f32 y, f32 u, f32 v) {
             return render::UiVertex{x,
                                     y,
                                     toByte(quad.color.r),
@@ -171,13 +182,15 @@ void buildUiGeometry(const ui::DrawList& list, core::Vec2 viewport, std::vector<
                                     y - (quad.min.y + halfY),
                                     halfX,
                                     halfY,
-                                    quad.cornerRadius};
+                                    quad.cornerRadius,
+                                    u,
+                                    v};
         };
 
-        const render::UiVertex a = corner(quad.min.x, quad.min.y);
-        const render::UiVertex b = corner(quad.max.x, quad.min.y);
-        const render::UiVertex c = corner(quad.max.x, quad.max.y);
-        const render::UiVertex d = corner(quad.min.x, quad.max.y);
+        const render::UiVertex a = corner(quad.min.x, quad.min.y, quad.uvMin.x, quad.uvMin.y);
+        const render::UiVertex b = corner(quad.max.x, quad.min.y, quad.uvMax.x, quad.uvMin.y);
+        const render::UiVertex c = corner(quad.max.x, quad.max.y, quad.uvMax.x, quad.uvMax.y);
+        const render::UiVertex d = corner(quad.min.x, quad.max.y, quad.uvMin.x, quad.uvMax.y);
         vertices.insert(vertices.end(), {a, b, c, a, c, d});
         runs.back().vertexCount += 6;
     }
@@ -379,6 +392,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     render::ShaderLibrary shaders;
     render::DebugRenderer debugRenderer;
     render::UiRenderer uiRenderer;
+    UiText uiText;
     // The size the UI was last laid out against, so a target that changes size
     // dirties every tree. Held here rather than derived, because "did this
     // change" is a question about the previous frame.
@@ -395,6 +409,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     ui::DrawList uiDrawList;
     std::vector<render::UiVertex> uiVertices;
     std::vector<render::UiScissorRun> uiRuns;
+    std::vector<rhi::TextureHandle> uiTextures;
     bool debugPassAttempted = false;
 
     // Mounts and the streamed world are set up HERE, outside `ensureDebugPass`,
@@ -441,6 +456,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         }
     }
     meshLoader.setContentMounts(&contentMounts);
+    // The same mounts the meshes come from, so `TextLabel.Font` can name a face
+    // out of the project the same way `MeshPart.MeshContent` names a model.
+    uiText.setMounts(&contentMounts);
 
     if (isProject) {
         // Mounted after the pack so a loose chunk overrides a built one,
@@ -963,7 +981,18 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             host->input().setKeyboardCapturedByUi(uiResult.textInputFocused);
 
             ui::buildDrawList(host->world(), host->uiService(), uiDrawList);
-            buildUiGeometry(uiDrawList, uiViewport, uiVertices, uiRuns);
+            // Index 0 is "no texture" and every entry after it is a texture the
+            // UI can name. The glyph atlas is index 1 when a face has been
+            // rasterised; images follow it.
+            // Index 0 is "no texture" and resolves to the renderer's white
+            // pixel; index 1 is the glyph atlas and everything after it is an
+            // image. The table is rebuilt each frame because a texture handle
+            // is four bytes and a stale one is a picture from a world that has
+            // been unloaded.
+            uiTextures.clear();
+            uiTextures.push_back(rhi::TextureHandle{});
+            uiTextures.push_back(uiText.atlasTexture());
+            buildUiGeometry(uiDrawList, uiViewport, uiVertices, uiRuns, uiTextures);
 
             frameDrawCalls = 0;
             frameTriangles = 0;
@@ -1015,7 +1044,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             if (debugRenderer.valid())
                 debugRenderer.upload(*device, *cmd, debugDraw);
             if (uiRenderer.valid())
-                uiRenderer.upload(*device, *cmd, uiVertices, uiRuns);
+                // The atlas first: `buildUiGeometry` has already written UVs
+                // into it, and uploading after the draw would show this frame's
+                // new glyphs as last frame's pixels.
+                uiText.sync(*device, *cmd);
+            uiRenderer.upload(*device, *cmd, uiVertices, uiRuns);
 
             // The real renderer owns the target when there is a camera to look
             // through. Without one -- an empty project, a world booting, a
@@ -1249,6 +1282,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         }
     }
 
+    uiText.destroy(*device);
     uiRenderer.destroy(*device);
     debugRenderer.destroy(*device);
     if (offscreen.valid())

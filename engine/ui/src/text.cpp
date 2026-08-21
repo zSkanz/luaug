@@ -34,18 +34,29 @@
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
 #include "luaug/core/text_key.h"
+#include "luaug/platform/file.h"
+#include "luaug/platform/platform.h"
 #include "luaug/ui/ui.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
-// The one translation unit that defines it. `stb_easy_font` is
-// implementation-in-header with no separate guard, so this include IS the
-// definition -- which is why nothing else in the module may include it.
+// The one translation unit that defines them. Both are
+// implementation-in-header, so these includes ARE the definitions -- which is
+// why nothing else in the module may include either.
+//
+// `stb_easy_font` is still here as the FALLBACK, and that is deliberate: a
+// build whose content directory has no font file still draws text, and a test
+// that runs without staged content still measures it. Text vanishing because an
+// asset is missing is the failure mode a fallback exists to prevent.
+#define STB_TRUETYPE_IMPLEMENTATION
 #include <stb_easy_font.h>
+#include <stb_truetype.h>
 
 namespace luaug::ui {
 namespace {
@@ -55,6 +66,10 @@ using core::Vec2;
 // What `stb_easy_font` draws at scale 1: capitals are seven pixels tall and a
 // line is twelve. Named because three places divide by them, and a magic 12 in
 // three files is a magic 12 nobody can change.
+// The default face's name, as `TextLabel.Font` spells it. An empty `Font` and
+// this name are the same request.
+constexpr std::string_view DefaultFaceName = "Inter";
+
 constexpr f32 BuiltInLineHeight = 12.0f;
 constexpr f32 BuiltInAscent = 7.0f;
 
@@ -77,15 +92,6 @@ constexpr u32 ReplacementCodepoint = 0x11000000u;
 // log line rather than a policy worth writing. M7's milestone -- the one with a
 // face large enough to need one -- is where a policy is measured.
 constexpr usize MaxGlyphEntries = 2048;
-
-[[nodiscard]] f32 scaleFor(f32 pixelSize) noexcept
-{
-    // A `TextSize` of 12 is the face's own size. Below about 6 the vector
-    // strokes collapse into each other, which is a property of the face rather
-    // than something to clamp here -- a caller asking for 3-pixel text gets
-    // 3-pixel text.
-    return pixelSize / BuiltInLineHeight;
-}
 
 // --- UTF-8 -------------------------------------------------------------------
 
@@ -145,6 +151,13 @@ struct GlyphQuad
     f32 minY = 0.0f;
     f32 maxX = 0.0f;
     f32 maxY = 0.0f;
+
+    // Where this quad samples the atlas. Meaningless for the built-in vector
+    // face, whose quads are solid rectangles -- the entry says which it is.
+    f32 u0 = 0.0f;
+    f32 v0 = 0.0f;
+    f32 u1 = 0.0f;
+    f32 v1 = 0.0f;
 };
 
 struct GlyphEntry
@@ -153,6 +166,21 @@ struct GlyphEntry
     f32 advance = 0.0f;
     u32 firstQuad = 0;
     u32 quadCount = 0;
+    // Whether the quads sample the atlas or are solid rectangles. The two faces
+    // differ here and nowhere else, which is what the M6 seam was built for.
+    bool textured = false;
+};
+
+// A shelf packer: glyphs go left to right on a row whose height is the tallest
+// glyph placed on it so far, and one that does not fit starts a new row. Not
+// the tightest packing there is, and it does not need to be -- UI glyphs at one
+// or two sizes are close to the same height, which is the case a shelf packer
+// wastes nothing on.
+struct AtlasPacker
+{
+    u32 cursorX = 0;
+    u32 cursorY = 0;
+    u32 rowHeight = 0;
 };
 
 struct GlyphStore
@@ -164,6 +192,14 @@ struct GlyphStore
     std::vector<GlyphEntry> entries;
     std::vector<GlyphQuad> quads;
     GlyphCacheStats stats;
+
+    // Single-channel coverage. Empty until a raster face has drawn something,
+    // and empty forever with the built-in one.
+    std::vector<core::u8> atlas;
+    u32 atlasWidth = 0;
+    u32 atlasHeight = 0;
+    u64 atlasVersion = 0;
+    AtlasPacker packer;
 };
 
 GlyphStore& store()
@@ -210,6 +246,270 @@ GlyphStore& store()
     if (codepoint < FirstFaceCodepoint || codepoint > LastFaceCodepoint)
         return 0.0f;
     return static_cast<f32>(stb_easy_font_charinfo[codepoint - FirstFaceCodepoint].advance & 15);
+}
+
+// --- The faces ---------------------------------------------------------------
+
+// A loaded face: the file's bytes, kept alive because `stbtt_fontinfo` points
+// into them, and the metrics every size scales from.
+struct Face
+{
+    u32 hash = 0;
+    std::string name;
+    std::vector<core::u8> data;
+    stbtt_fontinfo info{};
+    // Font units, from `hhea`. Scaled per size rather than stored per size,
+    // because the scale is one multiplication and a per-size copy is a cache.
+    int ascent = 0;
+    int descent = 0;
+    int lineGap = 0;
+    bool ready = false;
+    // This name could not be loaded and resolves to the default face.
+    //
+    // Recorded rather than simply not cached, and the difference is a file read
+    // per frame: a label drawn every frame with a typo in its font name would
+    // otherwise re-attempt the load every frame. Recorded rather than left as a
+    // not-ready face, because a not-ready face still has its OWN hash -- which
+    // would key its glyphs separately from the default face it is drawing with,
+    // and rasterise the same face twice.
+    bool fallsBack = false;
+};
+
+struct FaceTable
+{
+    // Stable addresses: `faceFor` hands out references and a caller holds one
+    // for the length of a `measureText`. A vector of values would move them all
+    // the next time a name is looked up.
+    std::vector<std::unique_ptr<Face>> faces;
+    FaceProvider provider = nullptr;
+    void* providerUser = nullptr;
+    // Names that were asked for and could not be loaded. Kept so the warning is
+    // once per name rather than once per frame -- a label drawn every frame with
+    // a typo in its font name would otherwise fill the log.
+    std::vector<u32> warned;
+    bool defaultAttempted = false;
+};
+
+FaceTable& faceTable()
+{
+    static FaceTable instance;
+    return instance;
+}
+
+// Where the default face lives beside the binary. Staged there by the build
+// (engine/app/CMakeLists.txt) for the same reason the message catalog is: the
+// engine resolves content relative to its own location, which is the shape a
+// packaged build uses.
+[[nodiscard]] std::filesystem::path defaultFacePath()
+{
+    return platform::paths().contentDir / "fonts" / "Inter.ttf";
+}
+
+// Loads a face's metrics. False leaves `ready` false, and the caller falls back.
+[[nodiscard]] bool initFace(Face& face)
+{
+    if (face.data.empty())
+        return false;
+    // Offset 0: the file is a single-face TTF rather than a collection. A
+    // collection would need `stbtt_GetFontOffsetForIndex`, and choosing WHICH
+    // face out of one is a decision nobody has been asked to make.
+    if (stbtt_InitFont(&face.info, face.data.data(), 0) == 0)
+        return false;
+    stbtt_GetFontVMetrics(&face.info, &face.ascent, &face.descent, &face.lineGap);
+    face.ready = true;
+    return true;
+}
+
+// The face for a name, loading it on first use. Never null: a name that cannot
+// be loaded resolves to the default, and a default that cannot be loaded
+// resolves to a face with `ready == false`, which is the built-in vector
+// fallback.
+[[nodiscard]] Face& faceFor(std::string_view name)
+{
+    FaceTable& table = faceTable();
+    const u32 hash = faceHash(name);
+
+    for (const std::unique_ptr<Face>& known : table.faces) {
+        if (known->hash != hash || known->name != name)
+            continue;
+        // A name that failed to load resolves to the DEFAULT face, every time,
+        // rather than to the empty entry that remembers it failed.
+        return known->fallsBack ? faceFor({}) : *known;
+    }
+
+    Face face;
+    face.hash = hash;
+    face.name = std::string(name);
+
+    // An empty name and the default's own name are the same request. Anything
+    // else goes to the provider, which is the app's content mounts.
+    const bool wantsDefault = name.empty() || name == DefaultFaceName;
+    if (wantsDefault) {
+        std::vector<std::byte> bytes;
+        if (platform::readFile(defaultFacePath(), bytes)) {
+            face.data.resize(bytes.size());
+            std::memcpy(face.data.data(), bytes.data(), bytes.size());
+        }
+    }
+    else if (table.provider != nullptr) {
+        (void)table.provider(table.providerUser, name, face.data);
+    }
+
+    if (!initFace(face) && !wantsDefault) {
+        // Named face, not loadable: fall back to the default rather than to
+        // nothing. A label that vanished because its font name had a typo is a
+        // bug report about the label.
+        if (std::find(table.warned.begin(), table.warned.end(), hash) == table.warned.end()) {
+            table.warned.push_back(hash);
+            const core::I18nArg args[] = {{"font", std::string(name)}};
+            core::log(core::LogLevel::Warn, LUAUG_TR("ui.warn.font_missing"), args);
+        }
+        face.fallsBack = true;
+        table.faces.push_back(std::make_unique<Face>(std::move(face)));
+        return faceFor({});
+    }
+
+    if (!face.ready && wantsDefault && !table.defaultAttempted) {
+        // Once, and only for the default: a build whose content directory has no
+        // font still draws text, with the built-in vector face, and should say
+        // so rather than looking subtly wrong.
+        table.defaultAttempted = true;
+        const core::I18nArg args[] = {{"path", defaultFacePath().string()}};
+        core::log(core::LogLevel::Warn, LUAUG_TR("ui.warn.default_font_missing"), args);
+    }
+
+    table.faces.push_back(std::make_unique<Face>(std::move(face)));
+    return *table.faces.back();
+}
+
+// The multiplier between a cached glyph's units and pixels.
+//
+// ONE for a raster face and `pixelSize / 12` for the built-in vector one, and
+// the difference is the whole reason the cache key has a size in it: a vector
+// glyph is cached once and scaled, a raster glyph is rasterised at the size it
+// will be drawn. Every caller multiplies by this and neither has to know which
+// kind of face it is looking at.
+[[nodiscard]] f32 scaleFor(const Face& face, f32 pixelSize) noexcept
+{
+    if (face.ready) {
+        return 1.0f;
+    }
+    // A `TextSize` of 12 is the built-in face's own size. Below about 6 the
+    // vector strokes collapse into each other, which is a property of the face
+    // rather than something to clamp here -- a caller asking for 3-pixel text
+    // gets 3-pixel text.
+    return pixelSize / BuiltInLineHeight;
+}
+
+// The distance from one baseline to the next, in pixels.
+[[nodiscard]] f32 lineHeightOf(const Face& face, f32 pixelSize) noexcept
+{
+    if (!face.ready) {
+        return BuiltInLineHeight * scaleFor(face, pixelSize);
+    }
+    // `ascent - descent + lineGap`, which is the face's own opinion about line
+    // spacing. `descent` is negative in font units, hence the subtraction.
+    const f32 scale = stbtt_ScaleForPixelHeight(&face.info, pixelSize);
+    return static_cast<f32>(face.ascent - face.descent + face.lineGap) * scale;
+}
+
+[[nodiscard]] f32 ascentOf(const Face& face, f32 pixelSize) noexcept
+{
+    if (!face.ready) {
+        return BuiltInAscent * scaleFor(face, pixelSize);
+    }
+    return static_cast<f32>(face.ascent) * stbtt_ScaleForPixelHeight(&face.info, pixelSize);
+}
+
+// --- The atlas ---------------------------------------------------------------
+
+// Square and fixed. 1024x1024 of single-channel coverage is one megabyte and
+// holds several thousand glyphs at UI sizes, which is more distinct glyphs than
+// a HUD has. Growing it would mean reuploading everything and re-deriving every
+// cached UV, and the store already has a clear-and-refill path for the case
+// where it genuinely fills up.
+constexpr u32 AtlasSize = 1024;
+
+// Rasterises one codepoint into the atlas at `pixelSize`, filling `entry`.
+// False means it did not fit, which the caller answers by clearing the store.
+[[nodiscard]] bool rasteriseGlyph(Face& face, f32 pixelSize, u32 codepoint, GlyphEntry& entry, GlyphStore& cache)
+{
+    const f32 scale = stbtt_ScaleForPixelHeight(&face.info, pixelSize);
+    const int glyph = stbtt_FindGlyphIndex(&face.info, static_cast<int>(codepoint));
+    if (glyph == 0) {
+        return false;
+    }
+
+    int advanceUnits = 0;
+    int bearingUnits = 0;
+    stbtt_GetGlyphHMetrics(&face.info, glyph, &advanceUnits, &bearingUnits);
+    entry.advance = static_cast<f32>(advanceUnits) * scale;
+
+    int x0 = 0;
+    int y0 = 0;
+    int x1 = 0;
+    int y1 = 0;
+    stbtt_GetGlyphBitmapBox(&face.info, glyph, scale, scale, &x0, &y0, &x1, &y1);
+    const auto width = static_cast<u32>(x1 - x0);
+    const auto height = static_cast<u32>(y1 - y0);
+
+    entry.textured = true;
+    if (width == 0 || height == 0) {
+        // A space, and every other glyph with no ink. It has an advance and no
+        // quad, which is exactly right -- and it must still be CACHED, or every
+        // space in a paragraph is a rasterisation.
+        entry.quadCount = 0;
+        return true;
+    }
+
+    if (cache.atlas.empty()) {
+        cache.atlas.assign(static_cast<usize>(AtlasSize) * AtlasSize, 0u);
+        cache.atlasWidth = AtlasSize;
+        cache.atlasHeight = AtlasSize;
+    }
+
+    // One texel of padding on each side, so bilinear sampling at the edge of a
+    // glyph cannot reach into its neighbour. Without it, text at a fractional
+    // scale grows faint marks nobody can account for.
+    constexpr u32 Padding = 1;
+    AtlasPacker& packer = cache.packer;
+    if (packer.cursorX + width + Padding * 2 > cache.atlasWidth) {
+        packer.cursorX = 0;
+        packer.cursorY += packer.rowHeight;
+        packer.rowHeight = 0;
+    }
+    if (packer.cursorY + height + Padding * 2 > cache.atlasHeight) {
+        return false;
+    }
+
+    const u32 originX = packer.cursorX + Padding;
+    const u32 originY = packer.cursorY + Padding;
+    stbtt_MakeGlyphBitmap(&face.info, cache.atlas.data() + static_cast<usize>(originY) * cache.atlasWidth + originX,
+                          static_cast<int>(width), static_cast<int>(height), static_cast<int>(cache.atlasWidth), scale,
+                          scale, glyph);
+
+    packer.cursorX += width + Padding * 2;
+    packer.rowHeight = std::max(packer.rowHeight, height + Padding * 2);
+    ++cache.atlasVersion;
+
+    // The quad is in PIXELS at this size, measured from the top-left of the
+    // line rather than from the baseline: everything downstream places text from
+    // the top of its box, and converting once here beats converting at every
+    // call site.
+    const f32 ascentPixels = static_cast<f32>(face.ascent) * scale;
+    entry.firstQuad = static_cast<u32>(cache.quads.size());
+    entry.quadCount = 1;
+    cache.quads.push_back(GlyphQuad{
+        .minX = static_cast<f32>(x0),
+        .minY = ascentPixels + static_cast<f32>(y0),
+        .maxX = static_cast<f32>(x0) + static_cast<f32>(width),
+        .maxY = ascentPixels + static_cast<f32>(y0) + static_cast<f32>(height),
+        .u0 = static_cast<f32>(originX) / static_cast<f32>(cache.atlasWidth),
+        .v0 = static_cast<f32>(originY) / static_cast<f32>(cache.atlasHeight),
+        .u1 = static_cast<f32>(originX + width) / static_cast<f32>(cache.atlasWidth),
+        .v1 = static_cast<f32>(originY + height) / static_cast<f32>(cache.atlasHeight),
+    });
+    return true;
 }
 
 // Appends the quads for one printable ASCII codepoint, in face units.
@@ -266,7 +566,7 @@ void fillReplacementGlyph(GlyphEntry& entry, std::vector<GlyphQuad>& quads)
 // time anything asked. Returns an INDEX rather than a pointer, because filling
 // may reallocate and a caller that held a pointer across the call would be
 // holding a dangling one -- which is the classic way a cache becomes a crash.
-[[nodiscard]] usize glyphIndex(u32 face, f32 pixelSize, u32 codepoint)
+[[nodiscard]] usize glyphIndex(Face& face, f32 pixelSize, u32 codepoint)
 {
     GlyphStore& cache = store();
     const bool drawable = codepoint >= FirstFaceCodepoint && codepoint <= LastFaceCodepoint;
@@ -277,7 +577,7 @@ void fillReplacementGlyph(GlyphEntry& entry, std::vector<GlyphQuad>& quads)
     // The one exception is a byte sequence that is not a character at all: those
     // all decode to `ReplacementCodepoint` and share one entry, because "this is
     // not text" is one fact however many times it happens.
-    const u64 key = glyphKey(face, pixelSize, codepoint);
+    const u64 key = glyphKey(face.hash, pixelSize, codepoint);
 
     const auto position = std::lower_bound(cache.entries.begin(), cache.entries.end(), key,
                                            [](const GlyphEntry& entry, u64 value) { return entry.key < value; });
@@ -293,6 +593,12 @@ void fillReplacementGlyph(GlyphEntry& entry, std::vector<GlyphQuad>& quads)
         core::log(core::LogLevel::Warn, LUAUG_TR("ui.warn.glyph_cache_cleared"), args);
         cache.entries.clear();
         cache.quads.clear();
+        // The atlas goes with them. Its packer hands out places by cursor, so
+        // keeping the pixels while dropping the entries that name them would
+        // leave a megabyte of coverage nothing can find and no room for more.
+        cache.atlas.clear();
+        cache.packer = AtlasPacker{};
+        ++cache.atlasVersion;
         ++cache.stats.clears;
         cache.stats.entries = 0;
         return glyphIndex(face, pixelSize, codepoint);
@@ -300,10 +606,40 @@ void fillReplacementGlyph(GlyphEntry& entry, std::vector<GlyphQuad>& quads)
 
     GlyphEntry entry;
     entry.key = key;
-    if (drawable) {
-        fillFaceGlyph(codepoint, entry, cache.quads);
+    bool filled = false;
+    if (face.ready) {
+        filled = rasteriseGlyph(face, pixelSize, codepoint, entry, cache);
+        if (!filled && !cache.atlas.empty() && cache.entries.size() > 0) {
+            // The atlas is full rather than the codepoint being absent. Clearing
+            // is the same answer the entry limit gets and for the same reason:
+            // this is a signal that something is asking for a new size every
+            // frame, not a routine eviction.
+            const core::I18nArg args[] = {{"entries", static_cast<core::i64>(cache.entries.size())}};
+            core::log(core::LogLevel::Warn, LUAUG_TR("ui.warn.glyph_cache_cleared"), args);
+            cache.entries.clear();
+            cache.quads.clear();
+            cache.atlas.clear();
+            cache.packer = AtlasPacker{};
+            ++cache.atlasVersion;
+            ++cache.stats.clears;
+            cache.stats.entries = 0;
+            return glyphIndex(face, pixelSize, codepoint);
+        }
+        if (!filled) {
+            // The face has no glyph for this codepoint. The visible box, same
+            // as the built-in face gives -- a player seeing boxes knows the
+            // font is missing glyphs.
+            fillReplacementGlyph(entry, cache.quads);
+            entry.textured = false;
+            ++cache.stats.missingGlyphs;
+            filled = true;
+        }
     }
-    else {
+    else if (drawable) {
+        fillFaceGlyph(codepoint, entry, cache.quads);
+        filled = true;
+    }
+    if (!filled) {
         fillReplacementGlyph(entry, cache.quads);
         ++cache.stats.missingGlyphs;
     }
@@ -317,7 +653,7 @@ void fillReplacementGlyph(GlyphEntry& entry, std::vector<GlyphQuad>& quads)
 // The advance of one run, in face units. Every width in this file goes through
 // the cache, so a measurement and a draw can never disagree about how wide a
 // character is.
-[[nodiscard]] f32 widthOf(std::string_view run, u32 face, f32 pixelSize)
+[[nodiscard]] f32 widthOf(std::string_view run, Face& face, f32 pixelSize)
 {
     f32 total = 0.0f;
     usize index = 0;
@@ -340,7 +676,7 @@ struct Line
 // Breaks `text` into lines at `maxWidth`, at spaces, and mid-word only for a
 // word wider than the box. A word cut at a random letter is worse than one that
 // overhangs, which is what `TextWrapped`'s doc promises.
-void breakLines(std::string_view text, u32 face, f32 pixelSize, f32 scale, f32 maxWidth, std::vector<Line>& out)
+void breakLines(std::string_view text, Face& face, f32 pixelSize, f32 scale, f32 maxWidth, std::vector<Line>& out)
 {
     out.clear();
     if (text.empty()) {
@@ -409,26 +745,29 @@ void resetGlyphCache() noexcept
     GlyphStore& cache = store();
     cache.entries.clear();
     cache.quads.clear();
+    cache.atlas.clear();
+    cache.packer = AtlasPacker{};
+    ++cache.atlasVersion;
     cache.stats = GlyphCacheStats{};
 }
 
 TextRunMetrics measureText(std::string_view text, std::string_view font, f32 pixelSize, f32 maxWidth)
 {
-    // `font` reaches the cache's key and nothing else, which is exactly what
-    // `Inert` on the property declares: there is one face, and naming another
-    // gets you the same glyphs under a different key. When M7 hands over a real
-    // face, this parameter is already where it has to be.
-    const u32 face = faceHash(font);
-    const f32 scale = scaleFor(pixelSize);
+    // `font` SELECTS the face now rather than only keying the cache, which is
+    // what took `TextLabel.Font` off the `Inert` list (roadmap M7). An empty
+    // name is the default face; a name the provider cannot resolve falls back to
+    // it and warns once.
+    Face& face = faceFor(font);
+    const f32 scale = scaleFor(face, pixelSize);
     std::vector<Line> lines;
     breakLines(text, face, pixelSize, scale, maxWidth, lines);
 
     TextRunMetrics metrics;
     metrics.lineCount = static_cast<u32>(lines.size());
-    metrics.ascent = BuiltInAscent * scale;
+    metrics.ascent = ascentOf(face, pixelSize);
     for (const Line& line : lines)
         metrics.size.x = std::fmax(metrics.size.x, line.width);
-    metrics.size.y = static_cast<f32>(lines.size()) * BuiltInLineHeight * scale;
+    metrics.size.y = static_cast<f32>(lines.size()) * lineHeightOf(face, pixelSize);
     return metrics;
 }
 
@@ -436,12 +775,12 @@ void buildTextGeometry(std::string_view text, std::string_view font, f32 pixelSi
                        i32 horizontalAlignment, i32 verticalAlignment, core::Color3 color, f32 alpha, u32 scissor,
                        std::vector<DrawQuad>& out)
 {
-    const u32 face = faceHash(font);
-    const f32 scale = scaleFor(pixelSize);
+    Face& face = faceFor(font);
+    const f32 scale = scaleFor(face, pixelSize);
     std::vector<Line> lines;
     breakLines(text, face, pixelSize, scale, maxWidth, lines);
 
-    const f32 lineHeight = BuiltInLineHeight * scale;
+    const f32 lineHeight = lineHeightOf(face, pixelSize);
     const f32 totalHeight = static_cast<f32>(lines.size()) * lineHeight;
     const f32 boxWidth = box.max.x - box.min.x;
     const f32 boxHeight = box.max.y - box.min.y;
@@ -475,7 +814,13 @@ void buildTextGeometry(std::string_view text, std::string_view font, f32 pixelSi
                 glyph.max = Vec2{x + (pen + shape.maxX) * scale, y + shape.maxY * scale};
                 glyph.color = color;
                 glyph.alpha = alpha;
-                glyph.texture = 0;
+                // Texture 1 is the glyph atlas by convention (`ui.h`). A vector
+                // glyph is a solid rectangle and samples nothing, which is
+                // texture 0 -- the two faces differ here and in the metrics, and
+                // nowhere else.
+                glyph.texture = entry.textured ? 1u : 0u;
+                glyph.uvMin = Vec2{shape.u0, shape.v0};
+                glyph.uvMax = Vec2{shape.u1, shape.v1};
                 glyph.scissor = scissor;
                 out.push_back(glyph);
             }
@@ -485,6 +830,25 @@ void buildTextGeometry(std::string_view text, std::string_view font, f32 pixelSi
         }
         y += lineHeight;
     }
+}
+
+GlyphAtlas glyphAtlas() noexcept
+{
+    const GlyphStore& cache = store();
+    return GlyphAtlas{cache.atlas, cache.atlasWidth, cache.atlasHeight, cache.atlasVersion};
+}
+
+void setFaceProvider(FaceProvider provider, void* user) noexcept
+{
+    FaceTable& table = faceTable();
+    table.provider = provider;
+    table.providerUser = user;
+    // Loaded faces are dropped, not kept: a provider that has just been
+    // installed may resolve a name the previous one could not, and a cached
+    // fallback would be the wrong face for the rest of the process.
+    table.faces.clear();
+    table.warned.clear();
+    resetGlyphCache();
 }
 
 } // namespace luaug::ui

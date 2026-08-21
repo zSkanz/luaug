@@ -52,9 +52,20 @@ struct UiVertex
     core::f32 halfX = 0.0f;
     core::f32 halfY = 0.0f;
     core::f32 radius = 0.0f;
+
+    // Where this vertex samples the run's texture, normalised.
+    //
+    // On EVERY vertex rather than on a second pipeline, and for the reason the
+    // corner radius is: a run is hundreds of quads and most of them sample
+    // nothing, so a textured pipeline and an untextured one would be two
+    // pipelines, two sorts and a state change per element. An untextured quad
+    // carries the same eight bytes and samples a one-pixel white texture, which
+    // multiplies by one.
+    core::f32 u = 0.0f;
+    core::f32 v = 0.0f;
 };
 
-static_assert(sizeof(UiVertex) == 32, "the ui2d vertex layout is an ABI decision the shader shares");
+static_assert(sizeof(UiVertex) == 40, "the ui2d vertex layout is an ABI decision the shader shares");
 
 // One run of quads sharing a clip rectangle. The draw list is already ordered,
 // so a run is a contiguous span rather than a bucket -- which is what makes
@@ -64,6 +75,14 @@ struct UiScissorRun
     rhi::Rect scissor;
     core::u32 firstVertex = 0;
     core::u32 vertexCount = 0;
+
+    // What this run samples. Invalid -- the common case -- binds the renderer's
+    // own one-pixel white texture, so an untextured run costs one bind of a
+    // texture that multiplies by one rather than a branch in the shader.
+    //
+    // A run breaks on a texture change as well as on a scissor change: a draw
+    // binds one texture, so two textures is two draws whatever the clip does.
+    rhi::TextureHandle texture{};
 };
 
 class UiRenderer
@@ -104,6 +123,12 @@ private:
 
     // Grown, never shrunk, like the debug renderer's. A HUD's vertex count is
     // stable frame to frame and a menu opening doubles it once.
+    // The one-pixel white every untextured run samples, and the sampler every
+    // run uses. See `create` for why they exist at all.
+    rhi::TextureHandle whitePixel_{};
+    rhi::SamplerHandle sampler_{};
+    bool whiteUploaded_ = false;
+
     core::u32 capacityVertices_ = 0;
     core::u32 pendingVertices_ = 0;
     std::vector<UiScissorRun> runs_;

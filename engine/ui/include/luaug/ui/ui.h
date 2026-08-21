@@ -130,6 +130,41 @@ struct GlyphCacheStats
     u64 missingGlyphs = 0;
 };
 
+// The glyph atlas: single-channel COVERAGE, one byte a texel, row-major.
+//
+// Coverage rather than colour, because a glyph has no colour of its own -- the
+// label's `TextColor3` supplies it, and the shader multiplies. One byte a texel
+// rather than four is the difference between a one-megabyte atlas and a four-
+// megabyte one for the same text.
+//
+// Empty until something has been rasterised, and empty forever on a build whose
+// content has no font: the fallback face draws vector rectangles and samples
+// nothing.
+struct GlyphAtlas
+{
+    std::span<const core::u8> pixels;
+    u32 width = 0;
+    u32 height = 0;
+    // Rises whenever a glyph is added. What an uploader compares against, so a
+    // frame that added no glyphs costs no upload -- which is every frame after
+    // the first few.
+    u64 version = 0;
+};
+
+[[nodiscard]] GlyphAtlas glyphAtlas() noexcept;
+
+// Supplies the bytes of a named face, for `TextLabel.Font`.
+//
+// A CALLBACK because `ui` has no content mounts and must not grow any: resolving
+// `asset://fonts/thing.ttf` is the asset system's job, and the app is what joins
+// the two. Null -- the default -- means only the built-in default face exists,
+// which is what a test or a headless run wants.
+//
+// Returning false means "no such face"; the caller falls back to the default and
+// says so once per name rather than once per frame.
+using FaceProvider = bool (*)(void* user, std::string_view name, std::vector<core::u8>& out);
+void setFaceProvider(FaceProvider provider, void* user) noexcept;
+
 [[nodiscard]] const GlyphCacheStats& glyphCacheStats() noexcept;
 
 // Empties the store and zeroes the counters. For the tests, and for a future

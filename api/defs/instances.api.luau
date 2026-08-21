@@ -1227,13 +1227,15 @@ local Classes: { Schema.Class } = {
                 Name = "Font",
                 Type = "Content",
                 Default = '""',
-                Inert = true,
-                Doc = "The typeface, as an `asset://` URI to a TrueType file. **Stored and not yet read** "
-                    .. "(M7): a TrueType face needs a FILE, and which font this engine ships is a licence "
-                    .. "decision a human makes (R6), so v1 draws every label in the built-in vector face. "
-                    .. "Empty already means that face, so the default behaviour is the only behaviour until "
-                    .. "the asset pipeline can hand a font over. ADR 0040 and `engine/ui/src/text.cpp` have "
-                    .. "the reasoning.",
+                Doc = "The typeface, as an `asset://` URI to a TrueType file. Empty is the engine's own "
+                    .. "default face -- **Inter**, OFL 1.1, vendored and staged beside the binary -- and so is "
+                    .. "the literal name `Inter`.\n\nA name that cannot be resolved falls back to the default and "
+                    .. "says so ONCE rather than once a frame: a label that vanished because its font name had "
+                    .. "a typo is a bug report about the label. A build whose content directory has no font at "
+                    .. "all falls back further, to a built-in vector face that is ASCII only, one weight and no "
+                    .. "kerning -- text still draws, which is the point of having a fallback.\n\nGlyphs are "
+                    .. "rasterised on demand and cached by face, size and codepoint, so a `TextSize` a tween is "
+                    .. "animating costs one entry per quarter-pixel rather than one per frame.",
             },
             {
                 Name = "HorizontalAlignment",

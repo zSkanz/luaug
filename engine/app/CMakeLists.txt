@@ -16,6 +16,7 @@ luaug_add_module(app
         src/bench.cpp
         src/screenshot.cpp
         src/soak.cpp
+        src/ui_text.cpp
         src/streaming_host.cpp
         src/debug_overlay.cpp
         src/inspector.cpp
@@ -100,6 +101,14 @@ add_custom_command(TARGET luaug_host POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_SOURCE_DIR}/runtime/conformance"
         "$<TARGET_FILE_DIR:luaug_host>/content/runtime/conformance"
+    # The default typeface (roadmap M7, human decision 2026-08-20). Content
+    # rather than an array compiled into the binary: it is 868 KB of data the
+    # engine READS, a packaged build ships it beside the executable like every
+    # other asset, and a byte array nobody can open is a byte array nobody can
+    # check against upstream.
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/third_party/inter/docs/font-files/InterVariable.ttf"
+        "$<TARGET_FILE_DIR:luaug_host>/content/fonts/Inter.ttf"
     COMMENT "Staging the engine message catalog, the @luaug modules and the conformance runner")
 
 luaug_add_module_tests(app

@@ -1754,8 +1754,7 @@
         {
           "Name": "Font",
           "Type": "Content",
-          "Default": "\"\"",
-          "Inert": true
+          "Default": "\"\""
         },
         {
           "Name": "HorizontalAlignment",

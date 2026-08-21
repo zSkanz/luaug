@@ -34,7 +34,7 @@ std::optional<core::EngineError> UiRenderer::create(rhi::IDevice& device, const 
     const std::array<rhi::VertexBufferLayout, 1> buffers{
         rhi::VertexBufferLayout{.slot = 0, .strideBytes = kVertexStride}};
 
-    const std::array<rhi::VertexAttribute, 4> attributes{
+    const std::array<rhi::VertexAttribute, 5> attributes{
         rhi::VertexAttribute{
             .location = 0,
             .bufferSlot = 0,
@@ -61,6 +61,12 @@ std::optional<core::EngineError> UiRenderer::create(rhi::IDevice& device, const 
             .bufferSlot = 0,
             .format = rhi::VertexFormat::Float1,
             .offsetBytes = offsetof(UiVertex, radius),
+        },
+        rhi::VertexAttribute{
+            .location = 4,
+            .bufferSlot = 0,
+            .format = rhi::VertexFormat::Float2,
+            .offsetBytes = offsetof(UiVertex, u),
         },
     };
 
@@ -89,11 +95,37 @@ std::optional<core::EngineError> UiRenderer::create(rhi::IDevice& device, const 
     if (!pipeline_.valid())
         return core::makeError(LUAUG_TR("render.err.ui_pipeline_failed"));
 
+    // The one-pixel white texture every untextured run samples, and the sampler
+    // every run uses. One pixel of white multiplies by one, which is what lets
+    // a coloured quad and a glyph and a picture share one pipeline.
+    //
+    // Its pixel is written on the first frame rather than here, for the reason
+    // `renderer_default` writes its own defaults there: `create` runs outside a
+    // frame and has no command list.
+    whitePixel_ = device.createTexture({
+        .format = rhi::TextureFormat::Rgba8Unorm,
+        .usage = rhi::TextureUsage::Sampled,
+        .width = 1,
+        .height = 1,
+        .debugName = "ui2d-white",
+    });
+    // CLAMPED, not repeated. A glyph sampled past its cell would fetch its
+    // neighbour in the atlas, which is how text acquires faint marks nobody can
+    // explain; tiling is a quad-level decision (`ScaleType`), not a sampler one.
+    sampler_ = device.createSampler(
+        {.addressU = rhi::AddressMode::ClampToEdge, .addressV = rhi::AddressMode::ClampToEdge, .debugName = "ui2d"});
+    if (!whitePixel_.valid() || !sampler_.valid())
+        return core::makeError(LUAUG_TR("render.err.ui_pipeline_failed"));
+
     return std::nullopt;
 }
 
 void UiRenderer::destroy(rhi::IDevice& device)
 {
+    if (whitePixel_.valid())
+        device.destroy(whitePixel_);
+    if (sampler_.valid())
+        device.destroy(sampler_);
     if (vertices_.valid())
         device.destroy(vertices_);
     if (pipeline_.valid())
@@ -107,6 +139,9 @@ void UiRenderer::destroy(rhi::IDevice& device)
     fragmentShader_ = {};
     pipeline_ = {};
     vertices_ = {};
+    whitePixel_ = {};
+    sampler_ = {};
+    whiteUploaded_ = false;
     capacityVertices_ = 0;
     pendingVertices_ = 0;
     runs_.clear();
@@ -115,6 +150,12 @@ void UiRenderer::destroy(rhi::IDevice& device)
 void UiRenderer::upload(rhi::IDevice& device, rhi::ICmdList& cmd, std::span<const UiVertex> vertices,
                         std::span<const UiScissorRun> runs)
 {
+    if (!whiteUploaded_ && whitePixel_.valid()) {
+        const std::array<std::byte, 4> white{std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}};
+        cmd.uploadTexture(whitePixel_, white, 0);
+        whiteUploaded_ = true;
+    }
+
     pendingVertices_ = static_cast<core::u32>(vertices.size());
     runs_.assign(runs.begin(), runs.end());
     if (pendingVertices_ == 0)
@@ -165,9 +206,24 @@ void UiRenderer::render(rhi::ICmdList& cmd, core::Vec2 viewport)
     const std::array<rhi::BufferHandle, 1> buffers{vertices_};
     cmd.bindVertexBuffers(0, buffers);
 
+    rhi::TextureHandle bound{};
     for (const UiScissorRun& run : runs_) {
         if (run.vertexCount == 0)
             continue;
+
+        // Rebound only when it CHANGES. Most frames are one texture -- white for
+        // the panels, the atlas for the text -- so this is two binds rather than
+        // one per run, and a run already breaks on a texture change.
+        const rhi::TextureHandle texture = run.texture.valid() ? run.texture : whitePixel_;
+        if (!(texture == bound)) {
+            // The sampler travels WITH the texture: `TextureBinding` is one
+            // pair, which is SDL_GPU's own shape and the reason `rhi` has no
+            // separate sampler bind.
+            const std::array<rhi::TextureBinding, 1> textures{rhi::TextureBinding{texture, sampler_}};
+            cmd.bindTextures(rhi::ShaderStage::Fragment, 0, textures);
+            bound = texture;
+        }
+
         cmd.setScissor(run.scissor);
         cmd.draw(run.vertexCount, 1, run.firstVertex, 0);
     }

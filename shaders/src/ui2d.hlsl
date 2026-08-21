@@ -6,11 +6,13 @@
 // it, which is what `UICorner`'s own doc promises.
 //
 // Everything the UI draws is one of these. A `Frame`'s background is a quad, a
-// `TextLabel`'s glyphs are quads -- the built-in vector face emits axis-aligned
-// rectangles rather than sampled bitmaps (engine/ui/src/text.cpp) -- and a
-// nine-slice patch will be nine of them. There is deliberately no texture and no
-// UV: nothing in v1's UI samples one, and a sampler bound for a future caller is
-// a sampler the capture gate would record every frame for nothing.
+// `TextLabel`'s glyphs are quads sampling a glyph atlas, an `ImageLabel` is a
+// quad sampling a picture, and a nine-slice patch is nine of them.
+//
+// ONE PIPELINE, and the texture is what makes that possible: an untextured quad
+// samples a one-pixel white texture and multiplies by one. A textured pipeline
+// beside an untextured one would be two pipelines, two sorts and a state change
+// per element, to save a fetch that hits the same texel every time.
 //
 // Register spaces are SDL_GPU's, not a style choice: a vertex shader's uniform
 // buffers live at b[n] in space1 (SDL_gpu.h, SDL_CreateGPUShader), which is why
@@ -29,6 +31,9 @@ cbuffer Ui2dProjection : register(b0, space1)
     float4 ScreenToClip;
 };
 
+Texture2D<float4> UiTexture : register(t0, space2);
+SamplerState UiSampler : register(s0, space2);
+
 struct VertexInput
 {
     float2 Position : TEXCOORD0;
@@ -38,6 +43,7 @@ struct VertexInput
     // without knowing where on the screen the quad is.
     float4 LocalHalf : TEXCOORD2;
     float Radius : TEXCOORD3;
+    float2 Uv : TEXCOORD4;
 };
 
 struct Interpolants
@@ -45,6 +51,7 @@ struct Interpolants
     float4 Color : TEXCOORD0;
     float4 LocalHalf : TEXCOORD1;
     float Radius : TEXCOORD2;
+    float2 Uv : TEXCOORD3;
     float4 Position : SV_Position;
 };
 
@@ -56,6 +63,7 @@ Interpolants VertexMain(VertexInput input)
     output.Color = input.Color;
     output.LocalHalf = input.LocalHalf;
     output.Radius = input.Radius;
+    output.Uv = input.Uv;
     return output;
 }
 
@@ -71,7 +79,11 @@ float roundedRectDistance(float2 local, float2 half, float radius)
 
 float4 FragmentMain(Interpolants input) : SV_Target0
 {
-    float4 color = input.Color;
+    // The tint TIMES the texture, including its alpha. A glyph atlas is
+    // coverage in alpha and white in colour, so a label's colour comes from the
+    // vertex; a picture carries its own colour, so a white tint leaves it alone.
+    // One multiplication serves both, which is why there is one shader.
+    float4 color = input.Color * UiTexture.Sample(UiSampler, input.Uv);
 
     // A radius of zero is a square corner and the overwhelmingly common case, so
     // it costs one compare rather than a second pipeline.
