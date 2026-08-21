@@ -58,9 +58,12 @@ text is still stb_truetype with the same documented shaping gap.
 
 **Clay stays vendored and pinned.** Removing a dependency is a human decision
 (R5, MASTER_PROMPT §10), and this ADR does not make it — it records that v1's
-layout does not call it. The question "remove the row, or keep it for a UI
-feature that is genuinely flow-shaped" is in `PROGRESS.md` under
-`Blocked — needs human`.
+layout does not call it. The question "remove the row, or keep it for a UI feature
+that is genuinely flow-shaped" went to the human on 2026-08-21 and was answered:
+**remove it.** A vendored dependency nobody calls still enters every build, every
+notices file and every future reader's half hour, and "not used yet" and "does
+not fit the model" are different states. `third_party/clay/`, its manifest row
+and its notices row went with the answer, in the M6 session that owned the build.
 
 ## Consequences
 The layout is testable as arithmetic, which is the main thing this buys: a case
@@ -74,7 +77,9 @@ The cost is the code, and the honest accounting is that it is less code than the
 translation would have been. The risk it takes on is that a future UI feature
 IS flow-shaped — a grid, a flexbox-style `UIListLayout` growth model — and has
 to be written rather than configured. `UIGridLayout` is already outside v1
-(M6 brief, NOT-in-scope 4), and if it arrives, Clay is still in the manifest.
+(M6 brief, NOT-in-scope 4). If one arrives, this ADR is what says Clay was
+considered and why it did not fit, and re-vendoring is an ADR and a manifest row
+rather than a rediscovery.
 
 **What this ADR does not say:** that ADR 0011 was wrong to choose Clay. The
 choice was made from a research report, before anything in this engine had a

@@ -350,8 +350,10 @@ Instance (abstract)
                     VerticalAlignment, SortOrder, Wraps), UIPadding, UICorner
 ```
 
-Clay is the internal layout solver behind UDim2 + UIListLayout +
-AutomaticSize; it is never exposed. **Not in v1 (documented honestly):**
+Layout is computed directly -- two passes over each dirty `ScreenGui` -- and no
+solver is exposed or vendored. It was to have been Clay; ADR 0040 records why a
+`UDim2` placement turned out to be arithmetic rather than a constraint problem.
+**Not in v1 (documented honestly):**
 Terrain, ParticleEmitter, SurfaceGui/billboards, RichText, video, and every
 constraint except the rigid weld — no `HingeConstraint`, `SpringConstraint` or
 `Motor6D`, and no solver joint of any kind.

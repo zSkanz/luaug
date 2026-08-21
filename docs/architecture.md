@@ -36,7 +36,7 @@ LuauG/
 │  ├─ manifest.json                   # {name, version, upstream URL, commit SHA, license, patches[]}
 │  ├─ patches/luau/*.patch            # local patches, applied by vendor tool, ideally empty
 │  ├─ luau/  sdl3/  sdl_shadercross/  jolt/  box2d/  miniaudio/  fastgltf/
-│  ├─ meshoptimizer/  basis_universal/ ktx/  stb/  imgui/  clay/  recastnavigation/
+│  ├─ meshoptimizer/  basis_universal/ ktx/  stb/  imgui/  recastnavigation/
 │  ├─ gamenetworkingsockets/  enet/   assimp/  doctest/  blake3/  xxhash/
 ├─ engine/                            # one dir per C++ module (§2); each contains
 │  ├─ core/      #   include/luaug/core/  src/  tests/  CMakeLists.txt
@@ -366,7 +366,11 @@ passes over each dirty `ScreenGui`, bottom-up for `AutomaticSize` and top-down
 for every absolute rectangle. It was to have compiled to Clay; ADR 0040 records
 why it does not, and the short version is that a `UDim2` placement is arithmetic
 rather than a constraint, and that Clay cannot express an unclamped scale or a
-fractional anchor point. Text: stb_truetype atlas, kerning only in v1 (complex-script shaping
+fractional anchor point. **Clay was un-vendored at M6** by the same reasoning: a
+dependency nobody calls still enters every build, every notices file and every
+future reader's half hour, and "not used yet" and "does not fit the model" are
+different states. The ADR stays if a genuinely flow-shaped feature ever wants it
+back. Text: stb_truetype atlas, kerning only in v1 (complex-script shaping
 is a flagged i18n gap; HarfBuzz seam post-v1). Produces a 2D draw list
 consumed by render's ui2d pass; hit-testing routes through an engine-owned
 high-priority `InputContext` with Sink.

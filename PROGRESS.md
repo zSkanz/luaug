@@ -166,8 +166,9 @@ scope. The ones most likely to be mistaken for bugs:
   ADR 0039 (an `InputContext` declares its dispatch rate; the IAS's enums are
   total) and ADR 0040 (a UDim2 placement is arithmetic, so v1 does not call
   Clay). The second is the one a reviewer should read: it is the milestone
-  declining to use a dependency the same milestone vendored, and it does not
-  remove it, because that is not the agent's call.
+  declining to use a dependency the same milestone vendored. It did not remove
+  it, because that is not the agent's call -- and the human answered on
+  2026-08-21, so it is removed now.
 - **The renderer submits one draw call per visible object, and that is the
   engine's real ceiling for a crowd.** Measured 2026-08-20 against a
   survivors-like horde: two thousand enemies run at 11.1 ms a frame, of which
@@ -252,9 +253,9 @@ scope. The ones most likely to be mistaken for bugs:
   fit the model". A vendored dependency nobody calls still enters every build,
   every notices file and every future reader's half hour. The ADR stays in the
   tree if a genuinely flow-shaped feature (`UIGridLayout` was the example) ever
-  wants it back. **Executing it is the M6 session's**, since it touches the
-  manifest, the CMake and `THIRD_PARTY_NOTICES.md` while that session owns the
-  build.
+  wants it back. **Done 2026-08-21**: `third_party/clay/`, its manifest row and
+  its notices row are gone, and ADR 0040 carries the answer so that re-vendoring
+  is an ADR and a manifest row rather than a rediscovery.
 
 - **The Android run of `examples/02-meshes` is due.** Deferred by the human
   until M4.5 closed, and M4.5 and M5 have both closed since. It is a device
