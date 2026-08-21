@@ -30,9 +30,20 @@
 #ifndef LUAUG_PBR_HLSLI
 #define LUAUG_PBR_HLSLI
 
-// Mirrors `render::kMaxForwardLights`. A macro rather than a `static const`
-// because it is an array bound.
-#define LUAUG_MAX_FORWARD_LIGHTS 8
+// Mirrors `render/clusters.h`. Macros rather than `static const` because they
+// are array and loop bounds, and because the cluster lookup below indexes
+// textures with them.
+#define LUAUG_CLUSTER_TILES_X 16
+#define LUAUG_CLUSTER_TILES_Y 9
+#define LUAUG_CLUSTER_SLICES 24
+#define LUAUG_CLUSTER_GRID_WIDTH (LUAUG_CLUSTER_TILES_X * LUAUG_CLUSTER_SLICES)
+#define LUAUG_CLUSTER_GRID_HEIGHT LUAUG_CLUSTER_TILES_Y
+#define LUAUG_MAX_LIGHTS_PER_CLUSTER 64
+#define LUAUG_MAX_CLUSTERED_LIGHTS 256
+#define LUAUG_LIGHT_INDEX_WIDTH 128
+#define LUAUG_LIGHT_INDEX_HEIGHT 128
+// `offset * 256 + count`, which a float carries exactly.
+#define LUAUG_CLUSTER_OFFSET_SHIFT 256.0f
 
 // Mirrors `render::GpuLight`, 48 bytes. Four-float rows because a constant
 // buffer packs to 16 and the array stride has to come out at 48 on every
@@ -67,8 +78,8 @@ cbuffer GpuObjectUniforms : register(b0, space1)
 #endif
 
 #if defined(LUAUG_UNIFORMS_FRAME)
-// `render::GpuFrameUniforms`, 960 bytes: 176 of float4 rows, 256 of cascade
-// matrices, 144 of irradiance, then 8 * 48 of lights starting at offset 576.
+// `render::GpuFrameUniforms`, 608 bytes: 208 of float4 rows, 256 of cascade
+// matrices, then 144 of irradiance.
 cbuffer GpuFrameUniforms : register(b0, space3)
 {
     // xyz points from the world TOWARDS the sun, w is its brightness -- with
@@ -84,11 +95,16 @@ cbuffer GpuFrameUniforms : register(b0, space3)
     // x start, y end, z one over (end - start), w unused. z is zero when fog is
     // off, which zeroes the fog factor without the shader testing for it.
     float4 FogRange;
-    // x is how many entries of Lights are live.
+    // x is how many lights the frame carries at all; a scene with none skips the
+    // cluster lookup entirely.
     float4 LightCountUnused;
     // x how many mip levels the prefiltered environment has, y how strongly it
     // contributes, z and w unused.
     float4 EnvironmentParams;
+    // x and y are the exponential depth slicing's scale and bias.
+    float4 ClusterParams;
+    // x width in pixels, y height, z 1/width, w 1/height.
+    float4 ViewportParams;
     // One lane per cascade: where it stops in view-space metres, one of its
     // shadow texels in world metres, and its orthographic depth range in metres.
     float4 CascadeFar;
@@ -101,7 +117,6 @@ cbuffer GpuFrameUniforms : register(b0, space3)
     // Irradiance as nine SH coefficients, cosine-convolved and divided by pi on
     // the CPU, so `evaluateIrradiance` multiplies straight by the albedo.
     float4 IrradianceSh[9];
-    GpuLight Lights[LUAUG_MAX_FORWARD_LIGHTS];
 };
 #endif
 

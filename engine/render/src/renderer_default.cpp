@@ -1,5 +1,6 @@
 #include "luaug/core/i18n.h"
 #include "luaug/core/text_key.h"
+#include "luaug/render/clusters.h"
 #include "luaug/render/environment.h"
 #include "luaug/render/renderer.h"
 #include "luaug/render/shader_types.h"
@@ -195,12 +196,24 @@ private:
     // because it has no compute -- ADR 0043 records what that bought.
     rhi::TextureHandle environmentMap_{};
     rhi::TextureHandle brdfLut_{};
+    // The clustered light tables (clusters.h). Uploaded whole every frame --
+    // ninety kilobytes between them -- because `uploadTexture` writes a whole
+    // mip and because a frame whose command shape depended on whether the lights
+    // moved is exactly what `clock_differential` refuses.
+    rhi::TextureHandle clusterGrid_{};
+    rhi::TextureHandle lightIndices_{};
+    rhi::TextureHandle lightData_{};
+    ClusterGrid clusters_;
     rhi::SamplerHandle linearSampler_{};
     rhi::SamplerHandle shadowSampler_{};
     // Trilinear and clamped: the mip index IS the roughness, so filtering
     // between levels is the interpolation the split sum asks for rather than a
     // quality setting.
     rhi::SamplerHandle environmentSampler_{};
+    // Point and clamped: the cluster tables are looked up by exact texel, and
+    // filtering between two light offsets would be a light index that does not
+    // exist.
+    rhi::SamplerHandle pointSampler_{};
     EnvironmentCache environment_;
 
     // The size the offscreen targets were built for. A window resize rebuilds
@@ -409,6 +422,15 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
         .addressW = rhi::AddressMode::ClampToEdge,
         .debugName = "environment",
     });
+    pointSampler_ = device.createSampler({
+        .minFilter = rhi::Filter::Nearest,
+        .magFilter = rhi::Filter::Nearest,
+        .mipmapMode = rhi::MipmapMode::Nearest,
+        .addressU = rhi::AddressMode::ClampToEdge,
+        .addressV = rhi::AddressMode::ClampToEdge,
+        .addressW = rhi::AddressMode::ClampToEdge,
+        .debugName = "cluster",
+    });
     // Point, not linear: `Gather` fetches the four texels itself and the shader
     // does the bilinear comparison, which is what makes a hardware comparison
     // sampler unnecessary (ADR 0043).
@@ -480,7 +502,29 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
         .height = kBrdfLutSize,
         .debugName = "brdf-lut",
     });
-    if (!environmentMap_.valid() || !brdfLut_.valid()) {
+    clusterGrid_ = device.createTexture({
+        .format = rhi::TextureFormat::R32Float,
+        .usage = rhi::TextureUsage::Sampled,
+        .width = kClusterGridWidth,
+        .height = kClusterGridHeight,
+        .debugName = "cluster-grid",
+    });
+    lightIndices_ = device.createTexture({
+        .format = rhi::TextureFormat::R32Float,
+        .usage = rhi::TextureUsage::Sampled,
+        .width = kLightIndexTextureWidth,
+        .height = kLightIndexTextureHeight,
+        .debugName = "cluster-light-indices",
+    });
+    lightData_ = device.createTexture({
+        .format = rhi::TextureFormat::Rgba32Float,
+        .usage = rhi::TextureUsage::Sampled,
+        .width = 3,
+        .height = kMaxClusteredLights,
+        .debugName = "cluster-light-data",
+    });
+    if (!environmentMap_.valid() || !brdfLut_.valid() || !clusterGrid_.valid() || !lightIndices_.valid() ||
+        !lightData_.valid()) {
         destroy(device);
         return core::makeError(LUAUG_TR("render.err.target_create_failed"));
     }
@@ -540,7 +584,7 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
             device.destroy(*texture);
         *texture = {};
     }
-    for (rhi::SamplerHandle* sampler : {&linearSampler_, &shadowSampler_, &environmentSampler_}) {
+    for (rhi::SamplerHandle* sampler : {&linearSampler_, &shadowSampler_, &environmentSampler_, &pointSampler_}) {
         if (sampler->valid())
             device.destroy(*sampler);
         *sampler = {};
@@ -693,7 +737,7 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
                 const auto orDefault = [](rhi::TextureHandle handle, rhi::TextureHandle fallback) {
                     return handle.valid() ? handle : fallback;
                 };
-                const std::array<rhi::TextureBinding, 7> textures{
+                const std::array<rhi::TextureBinding, 10> textures{
                     rhi::TextureBinding{orDefault(material.baseColor, whitePixel_), linearSampler_},
                     rhi::TextureBinding{orDefault(material.normal, flatNormalPixel_), linearSampler_},
                     rhi::TextureBinding{orDefault(material.metallicRoughness, whitePixel_), linearSampler_},
@@ -701,6 +745,9 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
                     rhi::TextureBinding{shadowMap_, shadowSampler_},
                     rhi::TextureBinding{environmentMap_, environmentSampler_},
                     rhi::TextureBinding{brdfLut_, environmentSampler_},
+                    rhi::TextureBinding{clusterGrid_, pointSampler_},
+                    rhi::TextureBinding{lightIndices_, pointSampler_},
+                    rhi::TextureBinding{lightData_, pointSampler_},
                 };
                 cmd.bindTextures(rhi::ShaderStage::Fragment, 0, textures);
                 boundMaterial = draw.material;
@@ -756,6 +803,15 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     // is what stops a reflection from disagreeing with what it reflects.
     const SkyParams sky = skyParamsFor(world.environment.sunDirection, world.environment.fogColor);
     updateEnvironment(cmd, sky);
+
+    // The clustered light assignment, and its three tables. Built on the CPU
+    // because the frozen RHI has no compute, and uploaded unconditionally
+    // because a frame's command shape must not depend on whether the lights
+    // moved -- the same rule the environment upload obeys, for the same reason.
+    buildClusters(world.camera, world.lights, clusters_);
+    cmd.uploadTexture(clusterGrid_, asBytes(clusters_.grid.data(), clusters_.grid.size() * sizeof(f32)), 0);
+    cmd.uploadTexture(lightIndices_, asBytes(clusters_.indices.data(), clusters_.indices.size() * sizeof(f32)), 0);
+    cmd.uploadTexture(lightData_, asBytes(clusters_.lightData.data(), clusters_.lightData.size() * sizeof(f32)), 0);
 
     // The cascade fit, from the camera basis. `inverse(view)` is the camera's own
     // frame; the camera sits at the origin of this space, so only its axes are
@@ -907,23 +963,15 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             frame.irradianceSh[index][3] = 0.0f;
         }
 
-        const auto lightCount = static_cast<u32>(std::min<core::usize>(world.lights.size(), kMaxForwardLights));
-        frame.lightCountUnused[0] = static_cast<f32>(lightCount);
-        for (u32 index = 0; index < lightCount; ++index) {
-            const RenderLight& light = world.lights[index];
-            GpuLight& gpu = frame.lights[index];
-            gpu.positionRange[0] = light.position.x;
-            gpu.positionRange[1] = light.position.y;
-            gpu.positionRange[2] = light.position.z;
-            gpu.positionRange[3] = light.range;
-            gpu.color[0] = light.color.r * light.brightness;
-            gpu.color[1] = light.color.g * light.brightness;
-            gpu.color[2] = light.color.b * light.brightness;
-            gpu.directionCosAngle[0] = light.direction.x;
-            gpu.directionCosAngle[1] = light.direction.y;
-            gpu.directionCosAngle[2] = light.direction.z;
-            gpu.directionCosAngle[3] = light.kind == LightKind::Spot ? light.spotCosHalfAngle : -1.0f;
-        }
+        // The lights themselves are in the tables uploaded above; what the block
+        // carries is how to find them.
+        frame.lightCountUnused[0] = static_cast<f32>(clusters_.lightCount);
+        frame.clusterParams[0] = clusters_.sliceScale;
+        frame.clusterParams[1] = clusters_.sliceBias;
+        frame.viewportParams[0] = static_cast<f32>(target.width);
+        frame.viewportParams[1] = static_cast<f32>(target.height);
+        frame.viewportParams[2] = 1.0f / static_cast<f32>(target.width);
+        frame.viewportParams[3] = 1.0f / static_cast<f32>(target.height);
 
         cmd.setPipeline(pbrPipeline_);
         cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&frame, sizeof(frame)));

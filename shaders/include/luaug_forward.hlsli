@@ -14,7 +14,7 @@
 // pipelines (M6 brief, Decision 11) -- one shader with a branch would make every
 // static mesh in every world carry joint and weight attributes it never reads.
 //
-// **Every one of the seven fragment texture slots must always have something
+// **Every one of the ten fragment texture slots must always have something
 // bound.** The material's `TextureFlags` are multipliers rather than branches
 // (`shader_types.h` says why), so the sample happens whether the material has
 // that texture or not, and a slot the renderer leaves empty is an unbound
@@ -49,6 +49,82 @@ SamplerState EnvironmentSampler : register(s5, space2);
 // bias in G. Independent of the environment, so it is baked once.
 Texture2D BrdfLut : register(t6, space2);
 SamplerState BrdfSampler : register(s6, space2);
+// The clustered light tables (clusters.h). Three textures because the frozen
+// RHI has no storage buffer and a fragment shader's only bulk-data route is a
+// sampled texture; point-sampled at texel centres, which is an exact fetch.
+//
+// The samplers are declared and used rather than skipped: SDL_GPU's binding
+// model is texture-and-sampler PAIRS, and a shader that declared a texture
+// alone would report a resource count the device then rejects.
+Texture2D<float> ClusterGridTexture : register(t7, space2);
+SamplerState ClusterGridSampler : register(s7, space2);
+Texture2D<float> LightIndexTexture : register(t8, space2);
+SamplerState LightIndexSampler : register(s8, space2);
+Texture2D LightDataTexture : register(t9, space2);
+SamplerState LightDataSampler : register(s9, space2);
+
+// An exact texel fetch through a point sampler.
+float clusterFetch1(Texture2D<float> texture, SamplerState pointSampler, uint x, uint y, uint width, uint height)
+{
+    const float2 uv = (float2(float(x), float(y)) + 0.5f) / float2(float(width), float(height));
+    return texture.SampleLevel(pointSampler, uv, 0.0f).r;
+}
+
+float4 clusterFetch4(Texture2D texture, SamplerState pointSampler, uint x, uint y, uint width, uint height)
+{
+    const float2 uv = (float2(float(x), float(y)) + 0.5f) / float2(float(width), float(height));
+    return texture.SampleLevel(pointSampler, uv, 0.0f);
+}
+
+// Every light that reaches this fragment's cluster, and no others. That bound --
+// not the frame's total -- is what a fragment pays for, and it is the whole
+// point of clustering: M4 iterated eight unculled lights on every pixel of every
+// draw whether they reached it or not.
+float3 evaluateClusteredLights(Surface surface, float2 pixel, float viewDepth)
+{
+    if (LightCountUnused.x <= 0.0f)
+    {
+        return float3(0.0f, 0.0f, 0.0f);
+    }
+
+    const uint tileX = min((uint)(pixel.x * ViewportParams.z * float(LUAUG_CLUSTER_TILES_X)),
+                           (uint)(LUAUG_CLUSTER_TILES_X - 1));
+    const uint tileY = min((uint)(pixel.y * ViewportParams.w * float(LUAUG_CLUSTER_TILES_Y)),
+                           (uint)(LUAUG_CLUSTER_TILES_Y - 1));
+    // Olsson and Assarsson's exponential slicing, and the logarithm is the whole
+    // reason one grid serves a near plane at 0.1 and a far one in the hundreds.
+    const float rawSlice = log2(max(viewDepth, 1e-6f)) * ClusterParams.x + ClusterParams.y;
+    const uint slice = (uint)clamp(rawSlice, 0.0f, float(LUAUG_CLUSTER_SLICES - 1));
+
+    const float packed = clusterFetch1(ClusterGridTexture, ClusterGridSampler, slice * LUAUG_CLUSTER_TILES_X + tileX,
+                                       tileY, LUAUG_CLUSTER_GRID_WIDTH, LUAUG_CLUSTER_GRID_HEIGHT);
+    const uint offset = (uint)(packed / LUAUG_CLUSTER_OFFSET_SHIFT);
+    const uint count = min((uint)(packed - float(offset) * LUAUG_CLUSTER_OFFSET_SHIFT),
+                           (uint)LUAUG_MAX_LIGHTS_PER_CLUSTER);
+
+    float3 color = float3(0.0f, 0.0f, 0.0f);
+    for (uint i = 0u; i < count; ++i)
+    {
+        const uint entry = offset + i;
+        const float encoded = clusterFetch1(LightIndexTexture, LightIndexSampler, entry % LUAUG_LIGHT_INDEX_WIDTH,
+                                            entry / LUAUG_LIGHT_INDEX_WIDTH, LUAUG_LIGHT_INDEX_WIDTH,
+                                            LUAUG_LIGHT_INDEX_HEIGHT);
+        const uint lightIndex = (uint)(encoded + 0.5f);
+
+        // `GpuLight`'s own three rows, rebuilt from three texels. The struct is
+        // unchanged; only where its bytes come from is.
+        GpuLight light;
+        light.PositionRange =
+            clusterFetch4(LightDataTexture, LightDataSampler, 0u, lightIndex, 3u, LUAUG_MAX_CLUSTERED_LIGHTS);
+        light.Color =
+            clusterFetch4(LightDataTexture, LightDataSampler, 1u, lightIndex, 3u, LUAUG_MAX_CLUSTERED_LIGHTS);
+        light.DirectionCosAngle =
+            clusterFetch4(LightDataTexture, LightDataSampler, 2u, lightIndex, 3u, LUAUG_MAX_CLUSTERED_LIGHTS);
+
+        color += evaluatePunctualLight(surface, light);
+    }
+    return color;
+}
 
 struct Interpolants
 {
@@ -141,14 +217,7 @@ float4 shadeForward(Interpolants input)
     const float3 sunRadiance = SunColorUnused.rgb * (SunDirectionBrightness.w * shadow);
     float3 color = shadeDirect(surface, sunDirection, sunRadiance);
 
-    // Bounded by the live count rather than by the array size, so an unlit scene
-    // costs nothing. `min` because a count larger than the array would read past
-    // the block.
-    const uint lightCount = min((uint)LightCountUnused.x, (uint)LUAUG_MAX_FORWARD_LIGHTS);
-    for (uint i = 0; i < lightCount; ++i)
-    {
-        color += evaluatePunctualLight(surface, Lights[i]);
-    }
+    color += evaluateClusteredLights(surface, input.Position.xy, input.ViewDepth);
 
     // The environment, on both lobes, and this is what M7.5 exists for: until
     // now `Lighting.Ambient` was applied flat to both, which `pbr.hlsl`'s own

@@ -40,14 +40,12 @@ using core::u32;
 // camera-relative translation, and `sunViewProjection` must be built in the same
 // space.
 //
-// The most lights one draw is shaded by. A forward pass pays for every light in
-// its block on every fragment, so this is a budget rather than a limit of the
-// design: the clustered pass ADR 0027 describes is what removes it, and that is
-// a later milestone. `extract` sorts nothing by light yet, so the first eight in
-// dense order are what a draw gets -- documented because "the lights past eight
-// silently stopped mattering" is otherwise a very confusing afternoon.
-inline constexpr u32 kMaxForwardLights = 8;
-
+// The clustered pass replaced `kMaxForwardLights` at M7.5 (clusters.h). What is
+// left of the old shape is `GpuLight` itself, which the shader now rebuilds from
+// three texels of a light table instead of reading out of this block -- the
+// frozen RHI has no storage buffer, so a fragment shader's only route to bulk
+// data is a sampled texture.
+//
 // A light as the fragment shader reads it. Four-float rows because a constant
 // buffer packs to 16 bytes and a struct that ignores that is a struct whose
 // second element is at the wrong offset on some backend.
@@ -112,14 +110,23 @@ struct GpuFrameUniforms
     // (`end <= start`) z is zero, which makes the fog factor zero without the
     // shader needing to know why.
     f32 fogRange[4]{200.0f, 0.0f, 0.0f, 0.0f};
-    // x is how many entries of `lights` are live. The shader loops to it rather
-    // than to kMaxForwardLights, so an unlit scene costs nothing.
+    // x is how many lights the frame carries at all. The shader does not loop to
+    // it -- it loops to its own cluster's count -- but a scene with none skips
+    // the cluster lookup entirely.
     f32 lightCountUnused[4]{0.0f, 0.0f, 0.0f, 0.0f};
     // x how many mip levels the prefiltered environment has, y how strongly it
     // contributes, z and w unused. `y` is a multiplier rather than a switch so
     // that a scene can dial the environment down without the shader gaining a
     // branch nothing else needs.
     f32 environmentParams[4]{6.0f, 1.0f, 0.0f, 0.0f};
+    // x and y are the exponential depth slicing's scale and bias, so a fragment
+    // turns its own view depth into a cluster slice with one multiply-add and a
+    // logarithm (clusters.h). z and w unused.
+    f32 clusterParams[4]{};
+    // x width in pixels, y height, z 1/width, w 1/height. The fragment stage
+    // needs it to turn `SV_Position` into a cluster tile, and it is the first
+    // time this block has carried anything about the target's size.
+    f32 viewportParams[4]{};
     // Per cascade, one lane each: where the cascade stops in view-space metres,
     // one of its shadow texels in world metres, and its orthographic depth range
     // in metres. The last two are what let a filter radius and a depth bias be
@@ -138,11 +145,9 @@ struct GpuFrameUniforms
     // ambient on the diffuse lobe; `ambient` above is ADDED to it rather than
     // replaced by it, so `Lighting.Ambient` still means what it documents.
     f32 irradianceSh[9][4]{};
-    GpuLight lights[kMaxForwardLights];
 };
 
-static_assert(sizeof(GpuFrameUniforms) == 176 + 256 + 144 + 48 * kMaxForwardLights,
-              "GpuFrameUniforms is a cbuffer layout");
+static_assert(sizeof(GpuFrameUniforms) == 208 + 256 + 144, "GpuFrameUniforms is a cbuffer layout");
 
 // Fragment stage, `b1 space3`. Per material rather than per frame, because it
 // changes with the bind set and the sort key already groups draws by material.
