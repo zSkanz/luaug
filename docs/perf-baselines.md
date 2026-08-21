@@ -331,6 +331,114 @@ interesting again in M4, when a reload has meshes and pipelines behind it.
 The Linux number being lower than the Windows one is not a portability finding
 either: it is a container with no window, no device and a warm page cache.
 
+### M7.5 — the renderer's second half, and the first scene it is CPU-bound on
+
+Captured with `luaug-host <project> --headless --width=1920 --height=1080
+--frames=300 --exit --frame-stats`, median of the 289 frames after ten warm-up
+frames, three runs. The spread across the three runs of the horde scene was 2%
+(3.716, 3.693 and 3.768 ms).
+
+**Two numbers per row now, and the second one is the point.** `DrawCalls` and
+`VisibleObjects` were the same number until this milestone: a run of objects that
+share a mesh and a material is one call now, so "how many objects are visible"
+and "how many calls were issued" stopped being the same question. The roadmap's
+gate for the instanced path is exactly the two of them side by side, and a row
+where they are equal is a row where instancing did nothing.
+
+**The horde, and the control that makes it a measurement.**
+`tests/perf/horde` is two thousand enemies sharing one mesh and one material,
+chasing a circling player, positions written from Luau every tick, under a
+shadow-casting sun. It was measured outside the repository at M2 and is committed
+now, because M7.5 is where the answer became a number something defends.
+
+| Horde, 2,000 enemies | Frame | Draw calls | Visible objects |
+|---|---|---|---|
+| Instanced, as shipped | **3.72 ms** | **22** | 4,002 |
+| Same build, instanced path disabled | 30.99 ms | 15,390 | 4,002 |
+| Instanced, pinned to two cores | 4.07 ms | 22 | 4,002 |
+
+The control row is the same binary with one constant raised past any real run --
+the same sort, the same passes, the same shaders. That is what makes it a control
+rather than a comparison against history, which would have been comparing two
+different renderers.
+
+**The reduced-CPU row says this frame is nearly single-threaded.** Two cores cost
+about a tenth of it rather than half, so what this workload wants is one fast
+core rather than many. R16's concern is about the low end, and the answer this
+scene gives is specific: a device with fewer cores does not suffer here, and a
+device with a slower core suffers proportionally.
+
+**Per-feature cost, each measured by disabling that pass alone and rebuilding.**
+The whole M7.5 chain is about a millisecond at 1080p on the reference machine.
+
+| Feature | Cost | Against |
+|---|---|---|
+| Three extra shadow cascades | 0.22 - 0.28 ms | One cascade, which is what M4 shipped |
+| Depth prepass | 0.20 - 0.22 ms | No prepass; it is a second geometry submission and it is what makes depth samplable |
+| FXAA | 0.19 ms | The tonemap resolving straight to the swapchain |
+| Bloom | at the noise floor | Nine passes over five levels |
+| Automatic exposure | 0.09 - 0.18 ms | Three passes, the last of them 1×1 |
+| Ambient occlusion | at the noise floor | Sixteen taps at half resolution plus two blur passes |
+| **Whole chain** | **about 0.9 ms** | |
+
+**The measurement's own noise floor is about 0.08 ms**, and the ranges above are
+the two independent sweeps rather than an average of them. The sweep was run
+twice, on different builds of the same tree, and the three large rows agreed to
+within 0.06 ms while the three small ones did not -- bloom came out at 0.13 ms
+once and at MINUS 0.02 ms the other time, which is the measurement saying it
+cannot resolve that pass rather than the pass being free. The two smallest rows are at the edge of what
+this method can resolve, and they are reported as such rather than to three
+decimals of false precision. A GPU timestamp query would resolve them properly
+and the RHI has none; adding one is an ADR the milestone that needs it should
+write.
+
+| Milestone | Scene | Preset | Metric | Value | Budget/Gate |
+|---|---|---|---|---|---|
+| M7.5 | `tests/perf/horde` (2,000 enemies, one mesh, one material, 1080p) | `win-msvc-dev` | median frame | **3.72 ms** | — |
+| M7.5 | `tests/perf/horde` | `win-msvc-dev` | draw calls / visible objects | **22 / 4,002** | not equal, which is the gate |
+| M7.5 | `tests/perf/horde`, instanced path disabled | `win-msvc-dev` | median frame | 30.99 ms | the control |
+| M7.5 | `tests/perf/horde`, two cores | `win-msvc-dev` | median frame | 4.07 ms | the reduced-CPU row |
+| M7.5 | `examples/02-meshes` (1080p) | `win-msvc-dev` | median frame | **1.51 ms** | — |
+| M7.5 | `examples/02-meshes` with a frozen sun | `win-msvc-dev` | median frame | 1.41 ms | isolates the environment prefilter |
+| M7.5 | `examples/02-meshes` | `win-msvc-dev` | draw calls / visible objects | 61 / 11 | eleven objects across six passes |
+
+**`examples/02-meshes` went from 0.46 ms at M4.5 to 1.51 ms**, and that is not a
+regression in the sense the 10% clause means. M4.5's frame was a shadow pass, a
+sky, a forward pass and a tonemap; this one is a shadow ATLAS of four cascades, a
+depth prepass, ambient occlusion and two blurs, the forward pass, three exposure
+passes, nine bloom passes, a tonemap and an anti-aliasing resolve. Eleven objects
+and seventy-two triangles do not move that number -- **the passes do**, and the
+per-feature table above is what says which.
+
+**It was 2.98 ms until the measurement was read properly**, and the story is
+worth the paragraph because the diagnosis is the M2 horde's diagnosis exactly.
+The frame cost 2.96 ms at 320x180 and 2.96 ms at 1920x1080 -- identical, which is
+what says the cost is not fragments. It was the CPU environment prefilter, which
+this milestone had priced at zero:
+
+| | `examples/02-meshes`, 1080p |
+|---|---|
+| As first written | 2.98 ms |
+| The same scene with its sun FROZEN | 1.41 ms |
+| Shipped | **1.51 ms** |
+
+The frozen-sun row is the control: it isolates the prefilter from everything else
+the milestone added. Three things closed the gap and all three were found by that
+one comparison. `evaluateSky` called `pow` twice per evaluation and a full
+prefilter is a quarter of a million evaluations. The rebuild threshold was half a
+degree, which in a ninety-second day meant the chain never got ahead of the sun.
+And **the job pool M7 built had no caller at all** -- nothing in the engine ever
+called `jobs::init`, so every `parallelFor` in it had been taking the documented
+serial path.
+
+What remains is about 0.10 ms a frame for an environment that follows a moving
+sun, against 1.41 ms for a frozen one.
+
+The comparison the 10% clause is actually for is the horde row, and there is no
+M7 number to compare it against because the scene did not exist in the repository
+then. The control row is what stands in for one: same build, same scene, one
+constant.
+
 **Why the budgets are so loose.** They are catastrophe detectors, not
 instruments. A CI runner's speed varies by more than the regression anyone would
 want to catch, so a budget tight enough to notice 10% would be red every other

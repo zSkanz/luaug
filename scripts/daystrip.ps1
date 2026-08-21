@@ -8,7 +8,8 @@
 # shadow.
 #
 # Every frame comes from a separate host run. `ClockTime` in that scene is a
-# function of the tick count, so `--frames=N` selects the hour, and the host
+# function of the tick count divided by the hold, so `--frames=N` selects the
+# hour and gives the automatic exposure time to settle on it; the host
 # writes its screenshot at exit.
 #
 #   scripts/daystrip.ps1                       # 8 frames -> docs/images/daystrip.png
@@ -56,7 +57,11 @@ for ($index = 0; $index -lt $Frames; $index++) {
     # Frame N of the strip is host run N+1: the scene applies its hour on the
     # boot drain, so one frame is hour zero of the strip rather than nothing.
     $shot = Join-Path $work ("frame-{0:d2}.png" -f $index)
-    & $host_exe $scene --headless "--frames=$($index + 1)" --exit `
+    # Each hour is HELD for `FramesPerHour` frames in the scene, because
+    # automatic exposure adapts over frames: a clock that jumped three hours
+    # every frame produced a strip whose night frames were still exposed for the
+    # afternoon, which showed the harness rather than the renderer.
+    & $host_exe $scene --headless "--frames=$(($index + 1) * 40)" --exit `
         "--width=$Width" "--height=$Height" "--screenshot=$shot" | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Error "the host exited $LASTEXITCODE rendering frame $index"

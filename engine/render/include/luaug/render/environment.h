@@ -77,6 +77,11 @@ struct SkyParams
     // scene at midnight is lit by its ambient and its lamps rather than by a sun
     // below the horizon.
     f32 dayFactor = 1.0f;
+    // The disc's two edges, precomputed. Derived from `sunAngularRadius` and
+    // held here because a full prefilter calls `evaluateSky` a quarter of a
+    // million times and two cosines of a constant is two cosines too many.
+    f32 discCosOuter = 0.9998f;
+    f32 discCosInner = 0.99984f;
 };
 
 // The derivation, and the one place it happens.
@@ -150,10 +155,19 @@ void bakeBrdfLut(u32 size, std::span<u16> out);
 // How different two skies have to be before the chain is worth rebuilding.
 //
 // A day/night cycle changes the sky every frame, and a full rebuild every frame
-// would put the prefilter in the frame budget. This is the threshold on the sun
-// direction that says "enough": about half a degree, which at the 90-second day
-// `examples/02-meshes` runs is roughly every fifth frame -- and a rebuild is one
-// mip, not six.
-inline constexpr f32 kEnvironmentRebuildCosine = 0.99996f;
+// would put the prefilter in the frame budget -- which, measured rather than
+// assumed, is exactly where it was: two and a half milliseconds a frame in
+// `examples/02-meshes`, whose ninety-second day moves the sun six degrees a
+// second.
+//
+// About one degree. At half a degree the chain never got ahead of the sun: a
+// rebuild every fifth frame marks all six levels dirty and the cursor bakes one
+// per frame, so it baked one every frame forever. At one degree it rebuilds
+// every tenth, which is six bakes per ten frames instead of ten.
+//
+// What a degree of staleness looks like is a mirror reflection whose sun steps
+// rather than slides, once every tenth of a second, at a size the disc is four
+// times too large to make subtle. Nothing rougher than a mirror can show it.
+inline constexpr f32 kEnvironmentRebuildCosine = 0.99985f;
 
 } // namespace luaug::render

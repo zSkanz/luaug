@@ -139,7 +139,7 @@ workspace.CurrentCamera = camera
 
 Lighting.ClockTime = 10
 Lighting.GeographicLatitude = 30
-Lighting.Ambient = Color3.fromRGB(46, 50, 62)
+Lighting.Ambient = Color3.fromRGB(12, 13, 16)
 Lighting.Brightness = 2.4
 Lighting.FogColor = Color3.fromRGB(160, 178, 200)
 Lighting.FogStart = 90

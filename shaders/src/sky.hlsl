@@ -48,8 +48,13 @@ float4 FragmentMain(Interpolants input) : SV_Target0
     // Gradient by height, biased towards the horizon: a linear blend in `y`
     // spends most of the visible sky on the zenith colour and leaves the horizon
     // as a thin band, which reads as a hard line rather than as sky.
+    // `sqrt` rather than `pow(height, 0.45)`, and the reason is on the CPU side:
+    // `environment.cpp` evaluates this same function a quarter of a million
+    // times per prefilter, where two `pow` calls per evaluation cost two and a
+    // half milliseconds a frame. The two must agree or a reflection disagrees
+    // with the sky it reflects, so the exponent moved here too.
     const float height = saturate(direction.y);
-    const float3 gradient = lerp(HorizonColor.rgb, ZenithColor.rgb, pow(height, 0.45f));
+    const float3 gradient = lerp(HorizonColor.rgb, ZenithColor.rgb, sqrt(height));
 
     // Below the horizon the gradient is mirrored and darkened rather than left
     // undefined: there is no ground plane in this pass, and a camera tilted down

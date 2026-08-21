@@ -56,6 +56,26 @@ Interpolants VertexMain(uint vertexId : SV_VertexID)
     return output;
 }
 
+// What the frame's average luminance is mapped onto: the exposure "key".
+//
+// **Photography's answer is 0.18, and 0.18 is wrong here**, for a reason worth
+// stating rather than fudging: 0.18 is middle grey in PHOTOMETRIC units, and
+// this engine's radiance unit is arbitrary. `Lighting.Brightness` defaults to
+// 2.6 because 2.6 looked right, not because it is 2.6 of anything. The constant
+// that maps an arbitrary unit onto display grey is therefore a CALIBRATION, and
+// calibrating it against 0.18 would be borrowing a number from a scale nothing
+// here is on.
+//
+// 0.45 is that calibration, and the method was: every scene in the repository
+// was authored against the fixed exposure of 1.0 this pass replaced, so the key
+// is chosen to leave those scenes at the level they were authored at. That makes
+// automatic exposure a STABILISER -- it holds a scene's level as its light
+// changes -- rather than a change of level applied to all existing content.
+//
+// The day the engine gains photometric lights, this becomes 0.18 and every
+// scene's brightness becomes a number in lux.
+static const float LuaugExposureKey = 0.45f;
+
 // Khronos PBR Neutral, linear Rec.709 in, [0, 1] linear Rec.709 out. Ported
 // unchanged from the reference implementation so a difference against the glTF
 // viewer is a bug in our lighting rather than in our curve.
@@ -101,14 +121,11 @@ float4 FragmentMain(Interpolants input) : SV_Target0
 
     // **Exposure is automatic, with the artist control on top.** The measured
     // value is the frame's adapted geometric-mean luminance; dividing by it maps
-    // that mean onto middle grey, which is what an exposure meter does. The
+    // that mean onto the key below, which is what an exposure meter does. The
     // compensation is in EV stops, which is the unit a person who has used a
     // camera already knows -- and it is `Lighting.ExposureCompensation`.
-    //
-    // Middle grey at 0.18 is the photographic convention and it is what makes
-    // "correctly exposed" mean the same thing here as it does anywhere else.
     const float measured = max(ExposureTexture.SampleLevel(ExposureSampler, float2(0.5f, 0.5f), 0.0f), 1e-4f);
-    const float exposure = (0.18f / measured) * exp2(ExposureBloom.x);
+    const float exposure = (LuaugExposureKey / measured) * exp2(ExposureBloom.x);
     const float3 exposed = max(scene * exposure, float3(0.0f, 0.0f, 0.0f));
 
     return float4(encodeSrgb(tonemapPbrNeutral(exposed)), 1.0f);

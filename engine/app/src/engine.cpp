@@ -23,6 +23,7 @@
 #include "luaug/core/json_writer.h"
 #include "luaug/core/log.h"
 #include "luaug/core/text_key.h"
+#include "luaug/jobs/jobs.h"
 #include "luaug/platform/event.h"
 #include "luaug/platform/platform.h"
 #include "luaug/platform/window.h"
@@ -273,6 +274,19 @@ void submitWorld(const render::RenderWorld& snapshot, render::DebugDraw& draw)
 
 std::optional<core::EngineError> run(const EngineOptions& options)
 {
+    // **The job pool, started here, and it had no caller until M7.5.** M7 built
+    // it -- work stealing, dependencies, `parallelFor`, `StableCommit` -- and
+    // nothing in the engine ever called `init`, so every `parallelFor` in it had
+    // been taking `jobs.h`'s documented serial path. That is a legitimate mode
+    // and it is not the shipping one; the environment prefilter was the first
+    // caller to notice, at two and a half milliseconds a frame.
+    //
+    // Zero means one worker per hardware thread less this one (jobs.h). Nothing
+    // sim-visible runs on it, and the render-side work that does partitions by
+    // DATA -- so the answer does not depend on how many workers this machine
+    // has, which is what R10 asks of a pool at all.
+    jobs::init();
+
     if (const auto error = platform::init({.headless = options.headless}); error.has_value())
         return error;
 
@@ -283,7 +297,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // including the early returns.
     struct PlatformScope
     {
-        ~PlatformScope() { platform::shutdown(); }
+        ~PlatformScope()
+        {
+            platform::shutdown();
+            jobs::shutdown();
+        }
     } platformScope;
 
     platform::WindowPtr window;

@@ -5,6 +5,30 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
+- **M7.5 — Looking Like an Engine — done and awaiting review.**
+  The brief is [`docs/briefs/m7.5-kickoff.md`](docs/briefs/m7.5-kickoff.md), with
+  fifteen decisions, eleven Findings and a filled Gate Record. **Every scope item
+  and every gate item is done**: four cascades in one atlas with a
+  world-constant filter and a blend band, clustered forward shading on a 16×9×24
+  grid, image-based lighting by the split sum, the post chain — depth prepass,
+  ambient occlusion, automatic exposure, bloom, FXAA — instanced draws, and both
+  design constraints answered while the pass list was open.
+  **The number that is not about looking**: the horde scene goes from
+  30.99 ms and **15,390 draw calls** to 3.72 ms and
+  **22**, for the same 4,002 visible objects. The whole new chain costs about a
+  millisecond at 1080p, priced per feature.
+  **The deliverable is a pair of pictures** in `docs/images/m7.5/`, the
+  `milestone/m7` build beside this one at the same camera and clock. The day
+  strip is the one to look at: in M7 the sky is the same pale blue at every hour
+  and there is no sunrise or sunset at all.
+  **The RHI freeze held for everything except one additive field.** ADR 0038
+  predicted four places it would break and three of the predictions were wrong in
+  the useful direction — the technique changed instead of the interface.
+  **ADR 0043 is PROPOSED and needs the human**, because ADR 0037 requires a
+  human-approved ADR to touch the frozen surface and this touches it.
+  **One defect recorded (D041)** and seven more found and fixed inside the
+  milestone; five of the eight were found by looking at a picture or a number
+  rather than by a test.
 - **M7 — Scaling the World — COMPLETE, signed off 2026-08-21**, tagged
   `milestone/m7`.
   The brief is [`docs/briefs/m7-kickoff.md`](docs/briefs/m7-kickoff.md), with a
@@ -41,12 +65,9 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   D030, D031, D032, and the ground half of D028 — of which five were found by a
   person playing the deliverable rather than by a test.
 - **M5 — Feeling the World: Jolt Physics + Character — COMPLETE, signed off
-  2026-08-20**, tagged `milestone/m5`. Signed after a review round that found
-  something: two `CharacterBody` were reported as passing through each other,
-  which did not reproduce — and the investigation found the real defect
-  underneath, a character that ignored `CollisionGroup` (D025). The Gate Record
-  is in [`docs/briefs/m5-kickoff.md`](docs/briefs/m5-kickoff.md), with seventeen
-  Findings and the section written for a reviewer.
+  2026-08-20**, tagged `milestone/m5`. Its Gate Record, its seventeen Findings
+  and the review round that found D025 are in
+  [`docs/briefs/m5-kickoff.md`](docs/briefs/m5-kickoff.md).
 - **M4.5 — Correcting the World — COMPLETE, signed off 2026-08-20**, tagged
   `milestone/m4.5`. **M4 — Seeing the World — signed off 2026-08-20**
   (`milestone/m4`), its five gate items green against re-recorded artifacts.
@@ -131,8 +152,17 @@ quietly.
 - **D026 — the capture gate records an upload's SIZE and not its contents**, so
   the quads a frame draws are invisible to the blocking render gate. What holds
   the line meanwhile is in the row.
-- **M7.5 is next** — Looking Like an Engine: shadows, lights, reflections
-  (ADR 0038). Not started, and not in the session that closed M7.
+- **ADR 0043 is PROPOSED and needs a human.** ADR 0037 requires a human-approved
+  ADR to touch the frozen RHI, and M7.5 touches it: one additive field,
+  `VertexBufferLayout::perInstance`, defaulting to false. The alternatives that
+  needed nothing new are in the ADR and each fails on a number. A rejection is
+  contained -- the fallback is a change to `render` alone.
+- **The job pool M7 built had no caller until now**, and that is worth carrying
+  forward rather than burying in a Finding: nothing in the engine called
+  `jobs::init`, so every `parallelFor` had been serial since M7. It is started
+  in `engine.cpp` now. What has NOT been done is give it the other callers M7
+  built it for -- asset decode, and the Jolt integration ADR 0025 leaves as a
+  determinism question.
 - **macOS is unverified for M7**, as it was for M6: CI has executed zero steps
   since 2026-08-21 (the quota signature described above), so the `milestone/m7`
   tag carries a Tier-1 and Tier-2 result and no Tier-3 one. That is a gap in
@@ -256,61 +286,28 @@ Entries for the planning session and for M0 through M4 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
 
-- **2026-08-21 (session 12 continued, Claude Opus): M7 finished — scope, gate,
-  and nine defects.** Streaming, `StreamingService` and `examples/05-streaming`;
-  the soak gate; `@std/net` and `ITransport` over ENet; the nav seam; runtime
-  LOD; the asset determinism gate; Inter and the UI texture path; images with
-  three scale types; scroll bars; decoded audio; convex-hull collision; the
-  assimp importer.
+- **2026-08-21 (session 13, Claude Opus): M7.5 built — the renderer's second
+  half.** Four cascades in one atlas with a world-constant filter and a blend
+  band; clustered forward shading, so the light count stops being eight; image-
+  based lighting by the split sum, with the SKY as the environment so a metal
+  reflects the hour the script set; a depth prepass, ambient occlusion, automatic
+  exposure, bloom and FXAA; instanced draws. Fifteen decisions, twelve Findings,
+  a filled Gate Record, and ADR 0043 proposed.
 
-  **A human reported the deliverable losing frame rate — 100 fps to 35 over five
-  minutes — and that one report opened seven of the nine defects.** Reproduced
-  by counting instances rather than by trusting the frame rate: the world grew
-  by a thousand instances every fifteen seconds because `setWorld` rebuilt the
-  streaming glue every frame and threw away the record of what was resident.
-  Building the gate that would have caught it found the next two; making that
-  gate measure what it CLAIMS -- time inside streaming rather than whole frames
-  -- found two more.
+  **The number that is not about looking**: the horde scene goes from 30.99 ms
+  and 15,390 draw calls to 3.72 ms and 22, for the same 4,002 visible objects.
 
-  **And the last one was the build itself.** M6 Finding 17 had been recorded four
-  times as "a stale object after a struct changed size, use `--clean-first`".
-  The fifth time somebody touched a header and read the output: `ninja: no work
-  to do`. A localised MSVC emits the `/showIncludes` prefix in the console
-  codepage while CMake writes it as UTF-8, so **no header dependency had ever
-  been recorded** and every incremental Windows build in the project had been
-  unreliable. `chcp 65001`, verified by touching a header and watching the
-  object rebuild; the Windows stage went 45 s to 109 s on the first run after,
-  which is the sound of two milestones of staleness clearing.
+  **Six of the eight defects were found by looking at a picture or a number**,
+  which is what a milestone whose output is pixels should expect. A pool of light
+  clipped into hard bands found a cluster-index layout that seven passing unit
+  tests could not see (D041). A frame that cost the same at 320x180 and at 1080p
+  found a CPU prefilter priced at zero — and behind it, that **the job pool M7
+  built had never been started by anything**. An instrumented shader that drew
+  its own contrast found the second of three separate bugs all wearing "the
+  anti-aliasing does nothing".
 
-  The lesson is in the brief: a workaround that always works is
-  indistinguishable from an explanation, and it stops the search.
-
-- **2026-08-21 (session 12, Claude Opus): M7 started; the substrate and the
-  offline pipeline are in.** The brief with its eleven decisions, then
-  `engine/jobs` (work-stealing pool, dependencies, `parallelFor`, and
-  `StableCommit` as R10's commit rule made into a type), `platform`'s async IO
-  with a priority queue SDL does not have, `core::ContentHash` on a vendored
-  BLAKE3, the `.lpack` container, the `.lmesh` format with LOD chains and
-  meshlets, basis_universal in two targets, `tools/assetc`, and
-  `luaug build-assets --verify`. Five stages green throughout; 36 ctest targets
-  on Windows and 35 in the container.
-
-  **The proof the pipeline is real is a differential, not a screenshot**:
-  `examples/02-meshes` renders byte-identically -- 0 differing pixels at
-  1280x720 -- with its `content/` directory REMOVED and only the pack mounted.
-  A screenshot would have proved something drew; that removal is what proves
-  the pack drew it.
-
-  Learned, and the one to keep: **a bounds-checked reader is not a safe reader,
-  because the allocation happens first.** Every offset in the mesh format was
-  checked before it was followed and the corruption case still threw
-  `bad_alloc` -- a flipped bit in a section's element COUNT reached
-  `vector::resize` before anything compared it against the bytes the section
-  had. A count is an input too, and it is the one that does not look like a
-  pointer. The second: **D018 reproduced and was cheaper to look at than to
-  quarantine.** Two commands on the hung process -- one socket in `LISTEN`, two
-  threads waiting -- and it was `::accept` with no deadline, turning the state a
-  FAILING test leaves behind into a suite that hangs forever.
+  And a golden was nearly re-recorded against a defect, which is M4's mistake
+  exactly. What said otherwise was that the re-record came out byte-identical.
 
 - **2026-08-21 (session 11, Claude Opus): M6 built and signed off.** Moved to
   the archive with the rest of M6.

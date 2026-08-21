@@ -78,6 +78,22 @@ struct RenderCamera
     Frustum frustum;
     f32 nearPlane = 0.1f;
     f32 farPlane = 5000.0f;
+    // A sub-pixel offset folded into the projection, in NDC units. Zero
+    // everywhere, and that is the point.
+    //
+    // **A jitterable projection is a renderer OUTPUT, not private state of an
+    // anti-aliasing pass** (roadmap, M7.5's second design constraint, human
+    // decision 2026-08-21). Temporal anti-aliasing and every temporal upscaler
+    // need exactly two things -- a per-pixel motion vector and this -- and
+    // declaring them here rather than inside whichever pass first wants them is
+    // what makes that later work days instead of a milestone.
+    //
+    // The other half deliberately does NOT ship: writing a velocity target on
+    // every forward draw and carrying a previous transform on every `DrawItem`
+    // is renderer-wide bandwidth for a consumer that does not exist, which is
+    // the speculative abstraction the review bar forbids. What it would take is
+    // written down in the M7.5 brief, Decision 10.
+    core::Vec2 jitter;
 };
 
 enum class LightKind : core::u8

@@ -290,9 +290,16 @@ struct GpuLuminanceUniforms
     // goldens are the reason that matters (R10 in spirit).
     f32 texelRate[4]{};
     // x the lowest and y the highest average luminance the automatic exposure
-    // will accept, so a frame that is nearly black does not open all the way up
-    // and one looking at the sun does not close to nothing.
-    f32 range[4]{0.02f, 8.0f, 0.0f, 0.0f};
+    // will accept.
+    //
+    // **The lower bound is what keeps midnight from looking like noon**, and it
+    // is the whole reason this is a clamp rather than a guard. A meter with no
+    // floor exposes a night scene up until it matches a day one, which removes
+    // the day/night cycle the automatic exposure was added to serve -- the exact
+    // failure the day strip showed on its first run. Against a key of 0.45 this
+    // allows a gain between 0.15 and 3, so a night scene lands about a stop and
+    // a half below a day one instead of level with it.
+    f32 range[4]{0.15f, 3.0f, 0.0f, 0.0f};
 };
 
 static_assert(sizeof(GpuLuminanceUniforms) == 32, "GpuLuminanceUniforms is a cbuffer layout");

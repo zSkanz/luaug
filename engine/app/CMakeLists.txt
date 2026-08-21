@@ -25,6 +25,7 @@ luaug_add_module(app
         asset
         audio
         core
+        jobs
         platform
         rhi_api
         net_api

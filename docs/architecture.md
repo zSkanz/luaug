@@ -271,7 +271,8 @@ namespace luaug::render {
   struct RenderWorld;           // POD snapshot: visible meshes, lights, camera, sky, ui2d lists
   RenderWorld* extract(const scene::World&, float alpha, FrameArena&); // interpolated transforms
   class IRenderer { public: virtual void render(rhi::IDevice&, const RenderWorld&) = 0; };
-  // renderer_default (v1): CSM shadows → depth → clustered forward → sky/fog → tonemap → ui2d → imgui
+  // renderer_default (v1): CSM shadow atlas → depth prepass → SSAO → sky +
+  //   clustered forward → auto-exposure → bloom → tonemap → FXAA → ui2d → imgui
   DebugDraw& debugDraw();       // lines/boxes/spheres/text, dev builds; available from M1
 }
 ```

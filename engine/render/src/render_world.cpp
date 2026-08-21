@@ -210,6 +210,12 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         const f32 aspect = viewportAspect > 0.0f ? viewportAspect : 1.0f;
         out.camera.projection =
             core::perspective(camera->fieldOfView * kDegreesToRadians, aspect, camera->nearPlane, camera->farPlane);
+        // The jitter, folded into the projection's translation row -- which is
+        // where a sub-pixel offset belongs, because it must move the whole frustum
+        // rather than the geometry inside it. Zero everywhere today, so this is a
+        // pair of additions of zero and every golden is unchanged.
+        out.camera.projection.m[2][0] += out.camera.jitter.x;
+        out.camera.projection.m[2][1] += out.camera.jitter.y;
         out.camera.viewProjection = out.camera.projection * out.camera.view;
         out.camera.frustum = core::frustumFromViewProjection(out.camera.viewProjection);
     }

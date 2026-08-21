@@ -169,8 +169,30 @@ screen metrics: `SafeAreaInsets: Rect` (read), `DisplayScale: number` (read).
 **`Lighting`** — day/night + environment. Props: `ClockTime: number` (0–24),
 `GeographicLatitude`, `Ambient: Color3`, `Brightness: number`,
 `FogColor: Color3`, `FogStart: number`, `FogEnd: number`,
-`SunDirection: vector` (read, derived). Child class: `Sky`
-(`SkyboxContent: Content` HDRI/cubemap, `SunAngularSize`).
+`ExposureCompensation: number`, `SunDirection: vector` (read, derived). Child
+class: `Sky` (`SkyboxContent: Content` HDRI/cubemap, `SunAngularSize`).
+
+Three of those changed meaning at M7.5 when the renderer gained image-based
+lighting, and the change is worth stating because a scene authored against the
+old ones will look different:
+
+- **`Ambient` is no longer the whole environment.** It was applied flat to both
+  the diffuse and the specular lobe, which `pbr.hlsl` itself called "the
+  degenerate case of the split-sum approximation where the environment is one
+  colour". There is a real environment now — the sky, prefiltered by roughness —
+  so `Ambient` is ADDED to the diffuse lobe only, and keeps its documented
+  meaning: a stand-in for bounced light there is still none of.
+- **`FogColor` still says what distance fades towards**, and the sky's horizon
+  band still borrows it. What is derived on top is elevation: the whole sky
+  scales towards black at night and the horizon warms as the sun drops.
+- **`Brightness` is the sun's strength and no longer its colour.** The sun has a
+  colour now, derived from its elevation rather than authored, so a low sun casts
+  warm light where it used to cast white.
+
+`ExposureCompensation` is in EV stops, on top of the exposure the renderer
+measures from the frame itself: zero means whatever it measured, +1 is twice the
+light and -1 is half. It is not clamped -- a scene that deliberately blows out is
+making a picture rather than a mistake.
 
 **`PhysicsService`** — the sim tick grid, plus physics controls beyond
 per-part props.

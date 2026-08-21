@@ -252,6 +252,11 @@ SkyParams skyParamsFor(Vec3 sunDirection, Color3 fogColor) noexcept
     const Color3 tint = core::lerp(params.sunColor, Color3{1.0f, 1.0f, 1.0f}, height);
     params.horizonColor = scale(modulate(fogColor, tint), 0.05f + 0.95f * params.dayFactor);
 
+    // Two cosines of a constant, hoisted out of the quarter-million calls to
+    // `evaluateSky` that a full prefilter makes.
+    params.discCosOuter = std::cos(params.sunAngularRadius);
+    params.discCosInner = std::cos(params.sunAngularRadius * 0.9f);
+
     return params;
 }
 
@@ -262,17 +267,30 @@ Vec3 evaluateSky(const SkyParams& params, Vec3 direction) noexcept
     // Biased towards the horizon: a linear blend in y spends most of the visible
     // sky on the zenith colour and leaves the horizon as a thin band, which
     // reads as a hard line rather than as sky.
+    // `sqrt` rather than the `pow(height, 0.45)` this started as, and the change
+    // is worth naming because it moved the milestone's largest single cost. A
+    // `pow` is tens of nanoseconds; a full prefilter is a quarter of a million
+    // sky evaluations, and two `pow` calls in each of them came to two and a
+    // half milliseconds a frame in a scene whose sun moves. The exponent goes
+    // 0.45 to 0.5, which shifts the gradient by less than the eight-bit output
+    // can represent. `sky.hlsl` matches.
     const f32 height = saturate(d.y);
-    const Color3 gradient = core::lerp(params.horizonColor, params.zenithColor, std::pow(height, 0.45f));
+    const Color3 gradient = core::lerp(params.horizonColor, params.zenithColor, std::sqrt(height));
 
     const f32 below = saturate(-d.y);
     const Color3 sky = core::lerp(gradient, scale(params.horizonColor, 0.35f), std::sqrt(below));
 
     const f32 cosAngle = core::dot(d, params.sunDirection);
-    const f32 cosOuter = std::cos(params.sunAngularRadius);
-    const f32 cosInner = std::cos(params.sunAngularRadius * 0.9f);
-    const f32 disc = smoothstep(cosOuter, cosInner, cosAngle);
-    const f32 glow = std::pow(saturate(cosAngle), 64.0f) * 0.25f;
+    const f32 disc = smoothstep(params.discCosOuter, params.discCosInner, cosAngle);
+    // The sixty-fourth power as six squarings. The second `pow` this function
+    // used to call, and the same reasoning as the first.
+    const f32 forward = saturate(cosAngle);
+    const f32 forward2 = forward * forward;
+    const f32 forward4 = forward2 * forward2;
+    const f32 forward8 = forward4 * forward4;
+    const f32 forward16 = forward8 * forward8;
+    const f32 forward32 = forward16 * forward16;
+    const f32 glow = forward32 * forward32 * 0.25f;
 
     // The disc is far brighter than the sky, and that is not decoration: it is
     // what puts a highlight in a mirror. A disc at radiance 1 reflects as a pale
@@ -318,7 +336,13 @@ u32 environmentSampleCount(u32 level) noexcept
 {
     // Cheap at the mirror end because there is nothing to integrate, and
     // bounded at the rough end because the levels there are sixteen texels.
-    static constexpr u32 kCounts[kEnvironmentMipCount]{1, 32, 64, 96, 128, 128};
+    //
+    // Halved from {1, 32, 64, 96, 128, 128} once the prefilter was measured
+    // rather than assumed: it was the largest single cost in a frame whose sun
+    // moves. What fewer samples buy is noise, and noise in a GGX prefilter of a
+    // sky shows at the SHARP end -- the sun's disc -- which is level zero and
+    // takes one sample either way.
+    static constexpr u32 kCounts[kEnvironmentMipCount]{1, 24, 32, 48, 64, 64};
     return kCounts[level < kEnvironmentMipCount ? level : kEnvironmentMipCount - 1];
 }
 

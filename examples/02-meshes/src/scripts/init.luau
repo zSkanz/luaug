@@ -98,7 +98,7 @@ lampLight.Parent = lamp
 
 Lighting.ClockTime = 8
 Lighting.GeographicLatitude = 35
-Lighting.Ambient = Color3.fromRGB(38, 42, 56)
+Lighting.Ambient = Color3.fromRGB(10, 11, 15)
 Lighting.Brightness = 2.6
 Lighting.FogColor = Color3.fromRGB(150, 178, 214)
 Lighting.FogStart = 40
