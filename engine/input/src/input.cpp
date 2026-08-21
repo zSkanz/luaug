@@ -347,6 +347,17 @@ void InputSystem::dispatch(scene::World& world, Rate rate)
 
     m_consumed.fill(false);
 
+    // The UI's claim on the pointer, applied before any context resolves --
+    // which is what makes it behave like the highest-priority sinking context
+    // without being one. Mouse codes only: a key pressed while the pointer rests
+    // over a HUD is still the game's.
+    if (m_uiCapturedPointer) {
+        for (i32 code = MouseButtonFirst; code < MouseButtonFirst + MouseButtonCount; ++code)
+            m_consumed[static_cast<usize>(code)] = true;
+        m_consumed[static_cast<usize>(MouseMovement)] = true;
+        m_consumed[static_cast<usize>(MouseWheel)] = true;
+    }
+
     for (const auto& [priority, contextId] : m_contexts) {
         const scene::InputContextComponent* context = world.inputContexts().find(contextId);
         if (context == nullptr)

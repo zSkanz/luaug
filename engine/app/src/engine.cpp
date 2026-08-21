@@ -342,6 +342,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // dirties every tree. Held here rather than derived, because "did this
     // change" is a question about the previous frame.
     core::Vec2 lastUiViewport;
+    // The pointer and keyboard facts the UI needs, gathered from this frame's
+    // events. Edges rather than states: a press is a frame on which the button
+    // went down, and the UI needs the edge to tell a click from a hold.
+    bool uiPointerDown = false;
+    bool lastUiPointerDown = false;
+    std::string uiTypedText;
+    bool uiBackspace = false;
+    bool uiSubmit = false;
     render::DebugDraw debugDraw;
     ui::DrawList uiDrawList;
     std::vector<render::UiVertex> uiVertices;
@@ -685,6 +693,37 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // one snapshot.
             host->pumpInput(events);
 
+            // The UI's own reading of the same events. Gathered here rather
+            // than from the device snapshot because two of the three are
+            // EVENTS with no resting state: a typed character and a Return do
+            // not persist, and a snapshot cannot express them.
+            uiTypedText.clear();
+            uiBackspace = false;
+            uiSubmit = false;
+            for (const platform::Event& event : events) {
+                switch (event.type) {
+                case platform::EventType::MouseButtonDown:
+                    if (event.button == platform::MouseButton::Left)
+                        uiPointerDown = true;
+                    break;
+                case platform::EventType::MouseButtonUp:
+                    if (event.button == platform::MouseButton::Left)
+                        uiPointerDown = false;
+                    break;
+                case platform::EventType::TextInput:
+                    uiTypedText.append(event.text);
+                    break;
+                case platform::EventType::KeyDown:
+                    if (event.key == platform::Key::Backspace)
+                        uiBackspace = true;
+                    else if (event.key == platform::Key::Return)
+                        uiSubmit = true;
+                    break;
+                default:
+                    break;
+                }
+            }
+
             // After the pump and with the span it returned: the overlay reads
             // the untranslated stream behind these, which is only valid until
             // the next pump.
@@ -754,6 +793,23 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 lastUiViewport = uiViewport;
             }
             ui::layout(host->world(), host->uiService(), uiViewport);
+
+            // Interaction reads the rectangles the layout just produced, and it
+            // runs here rather than beside the event pump for that reason: a hit
+            // test against last frame's rectangles is a click that lands where a
+            // button used to be.
+            const input::DeviceState& devices = host->input().snapshot();
+            ui::InteractionInput interaction;
+            interaction.pointer = devices.pointer;
+            interaction.pressed = uiPointerDown && !lastUiPointerDown;
+            interaction.released = !uiPointerDown && lastUiPointerDown;
+            interaction.text = uiTypedText;
+            interaction.backspace = uiBackspace;
+            interaction.submit = uiSubmit;
+            lastUiPointerDown = uiPointerDown;
+            host->input().setPointerCapturedByUi(
+                ui::updateInteraction(host->world(), host->uiService(), interaction).pointerOverUi);
+
             ui::buildDrawList(host->world(), host->uiService(), uiDrawList);
             buildUiGeometry(uiDrawList, uiViewport, uiVertices, uiRuns);
 

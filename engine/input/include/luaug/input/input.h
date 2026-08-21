@@ -156,6 +156,18 @@ public:
     // never in a headless run, because there is no render frame to dispatch on.
     void dispatchRenderRate(scene::World& world);
 
+    // Whether the UI took the pointer this frame.
+    //
+    // This is architecture.md §2's "engine-owned high-priority InputContext with
+    // Sink", without the Instance: a context in the tree would be an object a
+    // game can see, reparent and destroy, and destroying it would silently turn
+    // off every button. A flag has the same effect and nothing to break.
+    //
+    // It consumes the MOUSE codes only. A key pressed while the pointer happens
+    // to rest over a HUD is still a key the game gets, which is what stops a
+    // health bar from eating the jump button.
+    void setPointerCapturedByUi(bool captured) noexcept { m_uiCapturedPointer = captured; }
+
     // Clears every held input and dispatches, so that anything down is released.
     // Called when the window loses focus: an alt-tab that left a key held is how
     // a character keeps walking into a wall while its window is in the
@@ -173,6 +185,7 @@ private:
     core::Vec2 m_simWheel;
     core::Vec2 m_renderPointerDelta;
     core::Vec2 m_renderWheel;
+    bool m_uiCapturedPointer = false;
 
     // Reused across dispatches so a steady-state frame allocates nothing.
     // A context and its priority, sorted highest first by a STABLE sort, so

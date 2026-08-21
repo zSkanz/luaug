@@ -17,6 +17,7 @@ luaug_add_module(ui
         src/layout.cpp
         src/text.cpp
         src/draw.cpp
+        src/interaction.cpp
         src/native_accessors.cpp
         generated/class_descriptors.gen.cpp
     DEPS
@@ -36,4 +37,5 @@ luaug_add_module_tests(ui
         ui
     SOURCES
         tests/layout_tests.cpp
+        tests/interaction_tests.cpp
 )

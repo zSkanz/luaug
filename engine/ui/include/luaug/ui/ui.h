@@ -133,6 +133,51 @@ void layout(scene::World& world, core::InstanceId uiService, core::Vec2 windowSi
 [[nodiscard]] const LayoutStats& layoutStats() noexcept;
 void resetLayoutStats() noexcept;
 
+// --- Interaction -------------------------------------------------------------
+
+// What the UI needs to know about the pointer and the keyboard this frame.
+//
+// Handed in rather than read, because `ui` is L5 and `platform` is L1: the host
+// already has both, and a module that reached for a device would be a module
+// that behaves differently in a replay.
+struct InteractionInput
+{
+    core::Vec2 pointer;
+    bool pressed = false;
+    bool released = false;
+    // UTF-8, as the platform delivered it this frame. Empty for most frames.
+    std::string_view text;
+    bool backspace = false;
+    bool submit = false;
+};
+
+// The answer the host needs back: whether the UI took the pointer.
+//
+// **This is the "engine-owned high-priority InputContext with Sink" of
+// architecture.md §2, without the Instance.** A context in the tree would be
+// visible to `GetChildren`, to a tree walk and to a serializer -- an object a
+// game can see, reparent and destroy, whose destruction would silently turn off
+// every button. A flag the host passes to `input` is the same behaviour with
+// nothing to break.
+struct InteractionResult
+{
+    // True while the pointer is over any visible element. `input` marks the
+    // mouse codes consumed for that frame, so a button over the world does not
+    // also shoot the gun.
+    bool pointerOverUi = false;
+};
+
+// Fires `Activated`, `PointerEntered` and `PointerExited`, moves focus between
+// `TextInput`s, and edits the focused one's text. Reads the rectangles the
+// layout produced; computes no layout of its own.
+[[nodiscard]] InteractionResult updateInteraction(scene::World& world, core::InstanceId uiService,
+                                                  const InteractionInput& input);
+
+// The topmost visible element under a point, or an invalid id. Exposed for the
+// tests, which is the only reason it is not private: a hit test is easier to
+// believe as a case than as a consequence.
+[[nodiscard]] core::InstanceId hitTest(const scene::World& world, core::InstanceId uiService, core::Vec2 point);
+
 // Walks every enabled `ScreenGui` in `DisplayOrder` and emits its quads in
 // draw order -- `ZIndex`, then document order. Reads the rectangles the layout
 // produced and computes nothing: a draw list that laid anything out would make
