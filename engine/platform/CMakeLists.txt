@@ -10,6 +10,7 @@ luaug_add_module(platform
     LAYER 1
     SOURCES
         src/platform.cpp
+        src/async_io.cpp
         src/file.cpp
         src/window.cpp
         src/events.cpp
@@ -34,6 +35,7 @@ endif()
 luaug_add_module_tests(platform
     SOURCES
         tests/platform_tests.cpp
+        tests/async_io_tests.cpp
         tests/console_tests.cpp
         tests/crash_tests.cpp
     DEPS

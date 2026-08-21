@@ -199,12 +199,27 @@ directly (besides `rhi_sdlgpu` and `app` glue).
 namespace luaug::platform {
   struct Window;  Window* createWindow(const WindowDesc&);
   std::span<const Event> pumpEvents();          // raw input, window, drop, quit
-  IoRequest readFileAsync(PathView, IoPriority, IoCallback);   // SDL_AsyncIO on a dedicated IO queue
+  bool initIo(u32 maxInFlight); void shutdownIo();             // SDL_AsyncIO, one completion queue
+  IoRequest readFileAsync(const path&, IoPriority, IoCallback = {});
+  void pumpIo();                                               // completions land HERE and nowhere else
+  bool takeIoResult(IoRequest, std::vector<std::byte>&); void cancelIo(IoRequest);
+  void setIoPriority(IoRequest, IoPriority);                   // a chunk the focus turned towards
   WatchHandle watchDirectory(PathView, WatchCallback);         // hot-reload feed
   Paths paths();                // projectDir, userDataDir, cacheDir
   u64 nowNs(); void setThreadName(const char*);
 }
 ```
+
+**Two things about the IO service are M7 corrections to this sketch.**
+**Priority is ours**: SDL_AsyncIO has a completion queue and no notion of
+priority at all, so requests wait in a priority order this module maintains and
+only `maxInFlight` reach SDL at a time -- which also bounds how much memory
+in-flight reads can hold. And **completions land during `pumpIo()`**: the
+callback firing from the IO thread would put an arbitrary thread and an
+arbitrary moment between a read and the world, which R10 forbids for anything
+the simulation can see. `cancelIo` on a read SDL already started marks it
+abandoned rather than pretending to stop it, because SDL_AsyncIO has no cancel
+and a pretend one means a buffer nobody frees.
 
 **rhi_api** (headers-only; deps: core, platform for native window handles) —
 ~40 calls with **LuauG semantics over the concepts common to

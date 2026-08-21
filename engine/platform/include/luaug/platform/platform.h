@@ -51,10 +51,13 @@ void shutdown();
 // a fixed dt down precisely so nothing below it needs the real time.
 [[nodiscard]] u64 nowNs() noexcept;
 
-// `setThreadName` from architecture.md §2 is absent on purpose: M1 is
-// single-threaded, SDL3 has no setter for it (only SDL_GetThreadName), so it
-// would mean per-platform code with no caller and no way to test it. It lands
-// with `jobs`, which is the first module that will have threads to name.
+// `setThreadName` from architecture.md §2 is absent on purpose: SDL3 has no
+// setter for it, only SDL_GetThreadName, so it would mean per-platform code
+// with no way to test it. This note used to say it would land with `jobs`, and
+// M7 shipped `jobs` without it -- because `jobs` is L1 like this module and may
+// not include it, so the name would have to be set by `app` or by `jobs` making
+// OS calls of its own. Neither is worth the #ifdefs for a string a profiler
+// shows.
 
 struct Paths
 {
