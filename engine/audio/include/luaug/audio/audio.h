@@ -25,6 +25,7 @@
 // and both are zero in a healthy run.
 #pragma once
 
+#include "luaug/asset/content.h"
 #include "luaug/core/error.h"
 #include "luaug/core/id.h"
 #include "luaug/core/math.h"
@@ -53,6 +54,14 @@ struct AudioStats
     // False when no device could be opened and the null backend is in use --
     // every CI runner, and any machine with no sound card. Not an error: a game
     // that cannot open a device still has to run.
+    // How many distinct `Sound.Content` files have been decoded, and how many
+    // were asked for and could not be.
+    //
+    // Here because "is this the real sound or the placeholder tone" is a
+    // question a person listening cannot always answer -- a short file and a
+    // short tone are hard to tell apart on laptop speakers -- and a number is.
+    u32 clipsLoaded = 0;
+    u32 clipsMissing = 0;
     bool deviceOpen = false;
 };
 
@@ -72,6 +81,11 @@ public:
     // Info. `headless` skips the attempt entirely: a headless run has no reason
     // to hold an audio device open, and on a CI runner the attempt is a wasted
     // second and a log line nobody reads.
+    // Where `Sound.Content` is resolved from. Null -- the state of a test and
+    // of a world that has gone away -- makes every sound the placeholder tone,
+    // which is what this class did for all of M6.
+    void setContentMounts(const asset::ContentMounts* mounts) noexcept;
+
     [[nodiscard]] std::optional<core::EngineError> start(bool headless);
     void stop();
 

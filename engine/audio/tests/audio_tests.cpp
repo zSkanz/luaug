@@ -3,7 +3,10 @@
 #include "luaug/scene/world.h"
 
 #include <algorithm>
+#include <cmath>
 #include <doctest/doctest.h>
+#include <filesystem>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <vector>
@@ -167,4 +170,139 @@ TEST_CASE("a headless system reports no device and counts no underruns")
     CHECK_FALSE(stats.deviceOpen);
     CHECK(stats.underruns == 0);
     CHECK(stats.droppedCommands == 0);
+}
+
+// ---------------------------------------------------------------------------
+// `Sound.Content` (roadmap M7: it stops being `Inert`).
+
+namespace {
+
+// A WAV written by the test rather than checked into the repository.
+//
+// Deliberately: a fixture asset is a binary in git that nobody can diff and that
+// ADR 0032 exists to keep out, and a tone is forty lines of arithmetic. It also
+// means the test states its own expectations -- the length below is not a fact
+// about a file somebody has to go and open.
+void writeTone(const std::filesystem::path& path, luaug::core::u32 rate, luaug::core::u32 frames)
+{
+    std::vector<char> bytes;
+    const auto put = [&bytes](const void* data, std::size_t size) {
+        const auto* const at = static_cast<const char*>(data);
+        bytes.insert(bytes.end(), at, at + size);
+    };
+    const auto putU32 = [&put](luaug::core::u32 value) { put(&value, sizeof(value)); };
+    const auto putU16 = [&put](luaug::core::u16 value) { put(&value, sizeof(value)); };
+
+    const luaug::core::u32 dataBytes = frames * 2u;
+    put("RIFF", 4);
+    putU32(36u + dataBytes);
+    put("WAVE", 4);
+    put("fmt ", 4);
+    putU32(16u);
+    putU16(1u); // PCM
+    putU16(1u); // mono
+    putU32(rate);
+    putU32(rate * 2u);
+    putU16(2u);
+    putU16(16u);
+    put("data", 4);
+    putU32(dataBytes);
+    for (luaug::core::u32 frame = 0; frame < frames; ++frame) {
+        const double phase = 2.0 * 3.14159265358979 * 440.0 * frame / static_cast<double>(rate);
+        const auto sample = static_cast<luaug::core::i16>(20000.0 * std::sin(phase));
+        putU16(static_cast<luaug::core::u16>(sample));
+    }
+
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream file(path, std::ios::binary);
+    file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+}
+
+// A content directory with one sound in it, removed on the way out.
+struct ContentFixture
+{
+    std::filesystem::path root;
+    luaug::asset::ContentMounts mounts;
+
+    ContentFixture()
+    {
+        std::error_code ec;
+        root = std::filesystem::temp_directory_path(ec) / "luaug-audio-content";
+        std::filesystem::remove_all(root, ec);
+        writeTone(root / "sfx" / "tone.wav", 44100u, 11025u);
+        mounts.mountDirectory(root);
+    }
+
+    ~ContentFixture()
+    {
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+    }
+};
+
+} // namespace
+
+TEST_CASE("a sound whose content resolves plays the file rather than the tone")
+{
+    Fixture fixture;
+    ContentFixture content;
+    fixture.system.setContentMounts(&content.mounts);
+
+    const InstanceId id = fixture.make("Sound");
+    scene::SoundComponent& sound = fixture.sound(id);
+    sound.content = "asset://sfx/tone.wav";
+    sound.playing = true;
+    fixture.system.tick(*fixture.world, Tick);
+    fixture.system.update(*fixture.world, InstanceId{});
+
+    // Decoded exactly once, however many frames run: the cache is what stops a
+    // sound re-decoding its file sixty times a second.
+    CHECK(fixture.system.stats().clipsLoaded == 1);
+    CHECK(fixture.system.stats().clipsMissing == 0);
+
+    fixture.system.tick(*fixture.world, Tick);
+    fixture.system.update(*fixture.world, InstanceId{});
+    CHECK(fixture.system.stats().clipsLoaded == 1);
+}
+
+TEST_CASE("a sound whose content names nothing still plays, as the placeholder")
+{
+    // The decision M6 made and M7 keeps: a sound that went silent because a file
+    // was missing is a bug report about the sound. It is counted rather than
+    // hidden, which is what makes "did my audio load" answerable.
+    Fixture fixture;
+    ContentFixture content;
+    fixture.system.setContentMounts(&content.mounts);
+
+    const InstanceId id = fixture.make("Sound");
+    scene::SoundComponent& sound = fixture.sound(id);
+    sound.content = "asset://sfx/absent.wav";
+    sound.playing = true;
+    fixture.system.tick(*fixture.world, Tick);
+    fixture.system.update(*fixture.world, InstanceId{});
+
+    CHECK(fixture.system.stats().clipsLoaded == 0);
+    CHECK(fixture.system.stats().clipsMissing == 1);
+}
+
+TEST_CASE("swapping the mounts drops what was decoded against the old ones")
+{
+    // A voice holds a raw pointer into a clip for the length of an audio
+    // callback, so the cache can never drop one underneath it -- which makes
+    // replacing the mounts the only moment a clip may go away, and it has to
+    // take the voices with it.
+    Fixture fixture;
+    ContentFixture content;
+    fixture.system.setContentMounts(&content.mounts);
+
+    const InstanceId id = fixture.make("Sound");
+    scene::SoundComponent& sound = fixture.sound(id);
+    sound.content = "asset://sfx/tone.wav";
+    sound.playing = true;
+    fixture.system.tick(*fixture.world, Tick);
+    fixture.system.update(*fixture.world, InstanceId{});
+    REQUIRE(fixture.system.stats().clipsLoaded == 1);
+
+    fixture.system.setContentMounts(nullptr);
+    CHECK(fixture.system.stats().clipsLoaded == 0);
 }

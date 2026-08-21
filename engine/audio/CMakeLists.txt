@@ -17,6 +17,7 @@ luaug_add_module(audio
         src/native_accessors.cpp
         generated/class_descriptors.gen.cpp
     DEPS
+        asset
         core
         scene
 )

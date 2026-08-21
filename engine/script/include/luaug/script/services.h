@@ -89,6 +89,8 @@ struct FrameStats
     // counter a script cannot read is a gate a human has to take on trust.
     f64 audioUnderruns = 0.0;
     f64 audioVoices = 0.0;
+    f64 audioClipsLoaded = 0.0;
+    f64 audioClipsMissing = 0.0;
 
     // How many of this frame's draws used a level of detail COARSER than zero
     // (roadmap M7: "basic LOD switching").

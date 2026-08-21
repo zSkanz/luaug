@@ -323,6 +323,16 @@ int debugServiceGetStat(lua_State* L)
         lua_pushnumber(L, frame.audioVoices);
         return 1;
     }
+    if (name == "AudioClipsLoaded") {
+        lua_pushnumber(L, frame.audioClipsLoaded);
+        return 1;
+    }
+    if (name == "AudioClipsMissing") {
+        // The number that answers "is this the real sound or the placeholder
+        // tone", which a person listening on laptop speakers often cannot.
+        lua_pushnumber(L, frame.audioClipsMissing);
+        return 1;
+    }
     if (name == "MeshLodDraws") {
         // Zero on a scene whose meshes have one level, which is the truthful
         // answer and not a missing one -- the same reasoning `PhysicsBodies`

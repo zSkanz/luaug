@@ -657,6 +657,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             .luaMemoryKb = static_cast<f64>(lua_totalbytes(host->runtime().state(), 0)) / 1024.0,
             .audioUnderruns = static_cast<f64>(host->audio().stats().underruns),
             .audioVoices = static_cast<f64>(host->audio().stats().activeVoices),
+            .audioClipsLoaded = static_cast<f64>(host->audio().stats().clipsLoaded),
+            .audioClipsMissing = static_cast<f64>(host->audio().stats().clipsMissing),
             .meshLodDraws = static_cast<f64>(frameLodDraws),
         });
 
@@ -800,6 +802,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // ticks rather than inside one. The listener is
         // `Workspace.CurrentCamera` -- a game with two ideas about where the
         // player is hearing from is a game with a bug.
+        // The same mounts the meshes and the UI read from, so `Sound.Content`
+        // names a file the same way everything else does. Set every frame
+        // rather than at boot because the world -- and with it the audio system
+        // -- can be replaced by a reload; the call is an identity check when
+        // nothing changed.
+        host->audio().setContentMounts(&contentMounts);
         host->audio().update(host->world(), host->currentCamera());
 
         // The physics wireframe (roadmap M5, "Jolt debug-draw bridge"): what the

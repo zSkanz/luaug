@@ -1544,13 +1544,15 @@ local Classes: { Schema.Class } = {
                 Name = "Content",
                 Type = "Content",
                 Default = '""',
-                Inert = true,
-                Doc = "The audio, as an `asset://` URI. **Stored and not yet read** (M7): the asset pipeline "
-                    .. "cannot decode and hand over a buffer until it can stream one, so a sound with a "
-                    .. "content id plays a generated tone of its declared length rather than the file. "
-                    .. "Everything ELSE on this class is real -- the timeline, the events, the mixing, the "
-                    .. "spatialization -- which is what makes the gap a documented one rather than a class "
-                    .. "that does nothing.",
+                Doc = "The audio, as an `asset://` URI. WAV, MP3, FLAC and Ogg Vorbis, decoded once and "
+                    .. "cached: a sound does not re-read its file sixty times a second.\n\nA URI that "
+                    .. "names nothing still PLAYS, as a generated tone whose pitch comes from a hash of the "
+                    .. "id. A sound that went silent because a file was missing is a bug report about the "
+                    .. "sound; a placeholder that is audibly a placeholder is one about the file. "
+                    .. '`DebugService:GetStat("AudioClipsMissing")` is how a script asks which it '
+                    .. "got.\n\nWhere in the file the sound is comes from `TimePosition` every frame "
+                    .. "rather than from a cursor the mixer keeps, so the audio is a function of the "
+                    .. "simulation and a replay reproduces it (M6 brief, Decision 9).",
             },
             {
                 Name = "Playing",

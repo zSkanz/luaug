@@ -3,6 +3,7 @@
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
 #include "luaug/core/text_key.h"
+#include "luaug/platform/file.h"
 #include "luaug/scene/world.h"
 
 #include <algorithm>
@@ -10,18 +11,28 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <memory>
 #include <mutex>
+#include <span>
+#include <string>
+#include <utility>
 #include <vector>
 
 // The one translation unit that defines miniaudio. Nothing else in the engine
 // includes it, which is what makes ADR 0009's "the public API never leaks
 // miniaudio concepts" structural rather than a promise.
 //
-// The feature switches are not tidiness. Decoding, the node graph and the
-// high-level engine are all things v1 does not use -- `Sound.Content` is
-// `Inert` until M7 -- and every one of them is compiled code, a thread, or an
-// allocation the soak would have to account for.
-#define MA_NO_DECODING
+// The feature switches are not tidiness. Every one of them is compiled code, a
+// thread, or an allocation the soak would have to account for.
+//
+// **DECODING is on from M7**, because `Sound.Content` reads a file now. The node
+// graph, the resource manager and the high-level engine stay off: this mixer
+// owns its own voices and its own lock (see `dataCallback`), and miniaudio's
+// resource manager would bring a second thread and a second cache to do a job
+// that is already done.
+//
+// ENCODING stays off for the reason `assetc` links the basis ENCODER and the
+// engine only the transcoder: the runtime must not be able to write audio.
 #define MA_NO_ENCODING
 #define MA_NO_GENERATION
 #define MA_NO_RESOURCE_MANAGER
@@ -50,12 +61,42 @@ constexpr f64 kPlaceholderDuration = 1.0;
 // critical section is a memcpy of a few hundred bytes at 60 Hz against a
 // callback that runs at about 100 Hz, and a mutex held that briefly is simpler
 // than a ring nobody can prove correct.
+// One decoded sound, in the mixer's own format: interleaved f32 at `kSampleRate`
+// and `kChannels`. Converted at DECODE time rather than in the callback, so the
+// audio thread does a copy and a multiply and never a resample.
+//
+// Held by `shared_ptr` so a voice can keep one alive across a frame in which the
+// cache was touched. The audio thread reads through a raw pointer; what makes
+// that safe is that a clip is never mutated after it is decoded and never
+// evicted while the system lives.
+struct Clip
+{
+    std::vector<f32> samples;
+    u32 frames = 0;
+};
+
 struct Voice
 {
     f32 amplitude = 0.0f;
     f32 frequency = 440.0f;
     f64 phase = 0.0;
     f64 phaseStep = 0.0;
+
+    // The decoded audio, or null for a sound whose content could not be
+    // resolved -- which still plays the placeholder tone, because a sound that
+    // went silent because a file was missing is a bug report about the sound.
+    const Clip* clip = nullptr;
+    // Where in the clip this voice is, in FRAMES, taken from the sound's own
+    // `TimePosition` every frame.
+    //
+    // Taken rather than accumulated, and that is the whole reason the audio here
+    // can be reasoned about: the timeline is the SIM clock's (M6 brief, Decision
+    // 9), so the mixer is a function of simulation state rather than a second
+    // clock that drifts against it. A cursor the callback advanced on its own
+    // would make "where is this sound" have two answers.
+    f64 cursor = 0.0;
+    f64 cursorStep = 1.0;
+    bool looped = false;
 };
 
 // A stable pitch per content id, so two different sounds are audibly different
@@ -86,6 +127,23 @@ struct AudioSystem::Impl
     std::atomic<u64> underruns{0};
     std::atomic<u64> dropped{0};
     std::atomic<u32> activeVoices{0};
+    std::atomic<u32> clipsLoaded{0};
+    std::atomic<u32> clipsMissing{0};
+
+    // Where `Sound.Content` is resolved from, and what has been decoded.
+    //
+    // Sorted by URN and never evicted while the system lives. Never evicted is
+    // the load-bearing half: the audio thread holds a raw pointer into a clip
+    // for the length of a callback, and a cache that could drop one underneath
+    // it would be a crash at the worst possible moment. A sound bank is
+    // megabytes, not gigabytes, and a game that outgrows this needs streaming
+    // audio rather than a smarter cache.
+    const asset::ContentMounts* mounts = nullptr;
+    std::vector<std::pair<std::string, std::shared_ptr<Clip>>> clips;
+
+    // Decodes on the first ask and answers from the cache after. Null for a URN
+    // that names nothing, which plays the placeholder tone.
+    [[nodiscard]] const Clip* clipFor(std::string_view content);
 
     static void dataCallback(ma_device* device, void* output, const void* input, ma_uint32 frameCount)
     {
@@ -124,6 +182,34 @@ struct AudioSystem::Impl
         for (Voice& voice : self->voices) {
             if (voice.amplitude <= 0.0f)
                 continue;
+
+            if (voice.clip != nullptr) {
+                for (ma_uint32 frame = 0; frame < frameCount; ++frame) {
+                    // Nearest sample rather than interpolated. At playback speed
+                    // one -- which is every sound in every game most of the time
+                    // -- the cursor lands exactly on a frame and this is a copy;
+                    // at other speeds it is a repitch whose artefacts are below
+                    // what a game mix reveals. Interpolation is a quality
+                    // decision and M7 has no quality dial to hang it on.
+                    const auto index = static_cast<core::usize>(voice.cursor);
+                    if (index >= voice.clip->frames) {
+                        if (!voice.looped) {
+                            break;
+                        }
+                        // Wrapped by the CLIP's length rather than reset to
+                        // zero: a loop that restarted at the buffer boundary
+                        // would click once per buffer instead of once per loop.
+                        voice.cursor = std::fmod(voice.cursor, static_cast<f64>(voice.clip->frames));
+                        continue;
+                    }
+                    const core::usize at = index * kChannels;
+                    samples[frame * kChannels] += voice.clip->samples[at] * voice.amplitude;
+                    samples[frame * kChannels + 1] += voice.clip->samples[at + 1] * voice.amplitude;
+                    voice.cursor += voice.cursorStep;
+                }
+                continue;
+            }
+
             for (ma_uint32 frame = 0; frame < frameCount; ++frame) {
                 // The widening is written out: `voice.phase` is f64 and the
                 // amplitude f32, and `-Wdouble-promotion` is an error on
@@ -285,8 +371,20 @@ void AudioSystem::update(scene::World& world, core::InstanceId listener)
 
         Voice voice;
         voice.amplitude = std::fmin(gain, 4.0f);
-        voice.frequency = placeholderPitch(sound.content) * sound.playbackSpeed;
-        voice.phaseStep = 6.283185307179586 * static_cast<f64>(voice.frequency) / static_cast<f64>(kSampleRate);
+        voice.clip = m_impl->clipFor(sound.content);
+        if (voice.clip != nullptr) {
+            // The cursor comes from the SOUND, every frame. See `Voice::cursor`.
+            voice.cursor = sound.timePosition * static_cast<f64>(kSampleRate);
+            voice.cursorStep = static_cast<f64>(sound.playbackSpeed);
+            voice.looped = sound.looped;
+        }
+        else {
+            // The placeholder tone, unchanged. A sound whose file is missing is
+            // audibly a placeholder rather than silent, which is the same
+            // reasoning M6 shipped and the reason it is still here.
+            voice.frequency = placeholderPitch(sound.content) * sound.playbackSpeed;
+            voice.phaseStep = 6.283185307179586 * static_cast<f64>(voice.frequency) / static_cast<f64>(kSampleRate);
+        }
         next.push_back(voice);
     });
 
@@ -311,12 +409,100 @@ void AudioSystem::update(scene::World& world, core::InstanceId listener)
     }
 }
 
+const Clip* AudioSystem::Impl::clipFor(std::string_view content)
+{
+    const auto at = std::lower_bound(clips.begin(), clips.end(), content,
+                                     [](const auto& entry, std::string_view key) { return entry.first < key; });
+    if (at != clips.end() && at->first == content) {
+        return at->second.get();
+    }
+    if (mounts == nullptr) {
+        return nullptr;
+    }
+
+    // A failed decode is CACHED as a null clip, so a sound naming a missing file
+    // costs one lookup a frame rather than one decode attempt a frame.
+    std::shared_ptr<Clip> clip;
+    const asset::ResolvedContent resolved = mounts->resolve(content);
+    std::vector<std::byte> owned;
+    std::span<const std::byte> bytes = resolved.bytes;
+    if (bytes.empty() && resolved.source == asset::ResolvedContent::Source::Loose) {
+        if (platform::readFile(resolved.path, owned)) {
+            bytes = owned;
+        }
+    }
+
+    if (!bytes.empty()) {
+        // Decoded straight into the MIXER's format -- f32, stereo, 48 kHz -- so
+        // the callback never resamples. miniaudio does the conversion as part of
+        // the decode, which is one pass over the data instead of two.
+        ma_decoder_config config = ma_decoder_config_init(ma_format_f32, kChannels, kSampleRate);
+        ma_decoder decoder{};
+        if (ma_decoder_init_memory(bytes.data(), bytes.size(), &config, &decoder) == MA_SUCCESS) {
+            ma_uint64 frames = 0;
+            if (ma_decoder_get_length_in_pcm_frames(&decoder, &frames) == MA_SUCCESS && frames > 0) {
+                clip = std::make_shared<Clip>();
+                clip->samples.resize(static_cast<core::usize>(frames) * kChannels);
+                ma_uint64 read = 0;
+                (void)ma_decoder_read_pcm_frames(&decoder, clip->samples.data(), frames, &read);
+                clip->frames = static_cast<u32>(read);
+                clip->samples.resize(static_cast<core::usize>(clip->frames) * kChannels);
+                if (clip->frames == 0) {
+                    clip.reset();
+                }
+            }
+            ma_decoder_uninit(&decoder);
+        }
+        if (clip == nullptr) {
+            const core::I18nArg args[] = {{"content", std::string(content)}};
+            core::log(core::LogLevel::Warn, LUAUG_TR("audio.warn.undecodable"), args);
+        }
+    }
+    else {
+        const core::I18nArg args[] = {{"content", std::string(content)}};
+        core::log(core::LogLevel::Warn, LUAUG_TR("audio.warn.content_missing"), args);
+    }
+
+    const bool decoded = clip != nullptr;
+    const auto inserted = clips.insert(at, {std::string(content), std::move(clip)});
+    if (decoded) {
+        clipsLoaded.fetch_add(1, std::memory_order_relaxed);
+    }
+    else {
+        clipsMissing.fetch_add(1, std::memory_order_relaxed);
+    }
+    return inserted->second.get();
+}
+
+void AudioSystem::setContentMounts(const asset::ContentMounts* mounts) noexcept
+{
+    if (m_impl == nullptr) {
+        return;
+    }
+    // Under the lock: the audio thread reads a clip pointer a voice holds, and
+    // swapping the mounts is what invalidates the answers behind those pointers.
+    const std::lock_guard<std::mutex> lock(m_impl->mutex);
+    if (m_impl->mounts == mounts) {
+        return;
+    }
+    m_impl->mounts = mounts;
+    // Every voice is dropped with the cache, because a voice holds a raw pointer
+    // into it. One frame of silence when a world is swapped; a dangling read
+    // otherwise.
+    m_impl->voices.clear();
+    m_impl->clips.clear();
+    m_impl->clipsLoaded.store(0, std::memory_order_relaxed);
+    m_impl->clipsMissing.store(0, std::memory_order_relaxed);
+}
+
 AudioStats AudioSystem::stats() const noexcept
 {
     AudioStats out;
     if (m_impl == nullptr)
         return out;
     out.underruns = m_impl->underruns.load(std::memory_order_relaxed);
+    out.clipsLoaded = m_impl->clipsLoaded.load(std::memory_order_relaxed);
+    out.clipsMissing = m_impl->clipsMissing.load(std::memory_order_relaxed);
     out.droppedCommands = m_impl->dropped.load(std::memory_order_relaxed);
     out.activeVoices = m_impl->activeVoices.load(std::memory_order_relaxed);
     out.deviceOpen = m_impl->deviceStarted;

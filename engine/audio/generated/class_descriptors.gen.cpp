@@ -74,7 +74,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .type = scene::ValueType::String,
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
-            .inert = true,
+            .inert = false,
             .docKey = {},
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
             .get = native::getSoundContent,

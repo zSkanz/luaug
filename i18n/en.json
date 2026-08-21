@@ -80,6 +80,8 @@
   "scene.err.collision_groups_full": "There is no room for another collision group; a world holds at most 1024.",
   "scene.err.unknown_collision_group": "No collision group by that name is registered.",
   "physics.jolt.err.assert": "Jolt reported a broken assumption at {file}:{line} -- {expression} {message}",
+  "audio.warn.content_missing": "The sound {content} is not in any mounted content directory, so it plays the placeholder tone instead of the file.",
+  "audio.warn.undecodable": "The sound {content} could not be decoded; it plays the placeholder tone instead. Supported formats are WAV, MP3, FLAC and Ogg Vorbis.",
   "audio.info.no_device": "No audio device could be opened; the game runs and makes no sound.",
   "asset.image.err.decode_failed": "Could not decode the image.",
   "asset.image.err.bad_pixels": "The image data does not match the requested size.",
