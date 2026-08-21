@@ -643,32 +643,46 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
     being the only way a `Part` is visible.
 - **`@luaug/input`, the sugar that keeps one input path** (human decision,
   2026-08-20). Reading one key today costs a context, an action, a binding and
-  the parenting between them — real friction for the simple case, and the
-  friction is what makes somebody ask for a raw `IsKeyDown` beside the IAS. That
-  request was declined and this is what replaces it: **the ergonomics without a
-  second path.**
+  the parenting between them — fifteen lines for a jump — and that friction is
+  what makes somebody ask for a raw `IsKeyDown` beside the IAS. That request was
+  declined and this replaces it: **the ergonomics without a second path.** The
+  human asked for it to be broad and practical, so the surface is named rather
+  than left to taste:
 
-      local input = require("@luaug/input")
-      local jump = input.action("Jump", Enum.KeyCode.Space, Enum.KeyCode.ButtonA)
+  - `input.down(keyCode) -> boolean` — the one-liner, for when a key is all you
+    want. Derives a stable action name from the key code so repeated calls reuse
+    one action rather than creating one per frame.
+  - `input.action(name, ...keyCodes) -> InputAction` — a `Bool` action with one
+    binding per code, so a keyboard key and a gamepad button are one call and
+    one `if`.
+  - `input.direction2d(name, { up, down, left, right }) -> InputAction` and
+    `input.direction1d(name, { positive, negative })` — the composite bindings,
+    which are the ones with the most fields to fill by hand.
+  - `input.context(name) -> InputContext` — the escape hatch, for a caller who
+    wants their own priority, sink or `Rate`.
 
-  One call builds the context, the action and the bindings underneath, so a
-  caller who never learns what an `InputContext` is still gets sinking,
-  determinism, replay and rebinding — the three things a raw path structurally
-  cannot give. **A menu that stops the character stops it for this caller too**,
-  which is the whole argument: a second input model means a key that works in
-  the menu and not in the game, and `KeyboardService` was deleted this milestone
-  for being exactly that.
+  **Idempotent, because scripts re-run.** Calling `input.action("Jump", …)`
+  twice returns the same action and does not duplicate its bindings; the
+  implicit context is created once, named so it is findable in the explorer, and
+  reused. A hot reload rebuilds the world so nothing survives it, but a script
+  that calls in a loop must not grow the tree.
+
+  Everything returns the **real** instances, so `Pressed`, `GetPreferredBinding`,
+  `Priority` and `Sink` are all still there. Defaults are the safe ones: the
+  `Simulation` clock (ADR 0039), priority zero, not sinking. Document how to
+  reach the underlying instances — sugar that cannot be escaped is a wall.
+
+  **And document what `input.down` costs, in its own doc string.** A key with no
+  name is a key the rebind screen cannot list. It is the right tool for a
+  prototype and the wrong one for a shipped game, and saying so where it is read
+  is cheaper than a player discovering one control that will not remap.
 
   Pure Luau, no engine change, in the namespace `api-design.md` §1 already
-  describes as "engine-provided optional Luau libraries… optional things are
-  opt-in". `InputService:CreateAction(name, ...keycodes)` was the alternative
-  and is not taken: the same sugar costs public C++ surface and an api-dump row
-  where a module costs neither.
+  describes as engine-provided optional libraries that are opt-in.
+  `InputService:CreateAction` was the alternative and is not taken: the same
+  sugar costs public C++ surface and an api-dump row where a module costs
+  neither.
 
-  Name what it defaults to, since defaulting is the point: the `Simulation`
-  clock (ADR 0039's safe default), priority zero, not sinking — and say in the
-  doc how to reach the underlying instances, because sugar that cannot be
-  escaped is a wall.
 - **Design constraint (not scope): an action must be drivable by something that
   is not a physical device** (human decision, 2026-08-20). `InputBinding` is
   keyed by `KeyCode`, so today only hardware can feed an `InputAction`. A

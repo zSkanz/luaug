@@ -69,8 +69,17 @@ constraint that decides most of the decisions below.
       `IsKeyDown` beside the IAS was asked for and declined — a second input
       path cannot sink, cannot be replayed and cannot be rebound, and
       `KeyboardService` was deleted this milestone for being exactly that. Pure
-      Luau, no engine change, `Simulation` clock by default. Document how to
-      reach the underlying instances: sugar that cannot be escaped is a wall.
+      Luau, no engine change, `Simulation` clock by default. **Broad and
+      practical, by human decision 2026-08-21** — the roadmap names the surface:
+      `input.down(keyCode)` for the one-liner, `input.action(name, ...keyCodes)`
+      for a bool across keyboard and gamepad, `input.direction2d` /
+      `direction1d` for the composite bindings, and `input.context(name)` as the
+      escape hatch. **Idempotent**, because a script that calls in a loop must
+      not grow the tree. Everything returns the real instances. Document how to
+      reach them — sugar that cannot be escaped is a wall — and document what
+      `input.down` costs in its own doc string: a key with no name is a key the
+      rebind screen cannot list, which is right for a prototype and wrong for a
+      shipped game.
 - [ ] **An action must be drivable by a non-device source** — a design
       constraint added to the roadmap 2026-08-20 by human decision, **after this
       brief imported its scope**. `InputBinding` is keyed by `KeyCode`, so only
