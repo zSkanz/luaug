@@ -100,6 +100,17 @@ void installConsole(lua_State* L)
 
 } // namespace
 
+// The eight the engine reserves (architecture.md §6). Named here rather than in
+// the header because the DebugShell reads a row's name off the runtime and
+// nothing else needs the table.
+constexpr std::string_view kReservedCategories[] = {
+    "engine", "modules", "bindings", "signals+tasks", "ui", "net", "assets", "repl",
+};
+
+constexpr core::u32 kReplCategory = 7;
+constexpr core::u32 kFirstScriptCategory = 32;
+constexpr core::u32 kCategoryCount = 256;
+
 struct ScriptRuntime::Impl
 {
     lua_State* state = nullptr;
@@ -114,6 +125,15 @@ struct ScriptRuntime::Impl
     TaskScheduler tasks;
     ServiceState services;
     ModuleRegistry modules;
+
+    // Which memory category each entry script's chunk was given, in assignment
+    // order. architecture.md §6 reserves 0..7 for the engine and hands 32..255
+    // out per Script instance; this is that pool, and it recycles from the
+    // start when it runs out -- coalescing the oldest, which is §6's own word
+    // for it, because a world that reloads two hundred scripts should not stop
+    // attributing memory to any of them.
+    std::vector<std::pair<std::string, core::u32>> scriptCategories;
+    core::u32 nextCategory = kFirstScriptCategory;
 
     // The bag a host has not replaced. It dies with the VM, which is exactly
     // right for a world nobody is going to reload -- and it means `SaveState`
@@ -247,7 +267,65 @@ MethodCoverage ScriptRuntime::methodCoverage() const noexcept
     return m_impl->state == nullptr ? MethodCoverage{} : script::methodCoverage(m_impl->state);
 }
 
+std::optional<core::EngineError> ScriptRuntime::evaluate(std::string_view source)
+{
+    return runSource(source, "repl", kReplCategory);
+}
+
+std::vector<ScriptRuntime::MemoryCategory> ScriptRuntime::memoryByCategory() const
+{
+    std::vector<MemoryCategory> rows;
+    if (m_impl->state == nullptr)
+        return rows;
+
+    for (core::u32 category = 0; category < kCategoryCount; ++category) {
+        const core::usize bytes = lua_totalbytes(m_impl->state, static_cast<int>(category));
+        if (bytes == 0)
+            continue;
+
+        std::string_view name;
+        if (category < std::size(kReservedCategories)) {
+            name = kReservedCategories[category];
+        }
+        else {
+            for (const auto& [chunk, assigned] : m_impl->scriptCategories) {
+                if (assigned == category) {
+                    name = chunk;
+                    break;
+                }
+            }
+        }
+        rows.push_back(MemoryCategory{category, name, bytes});
+    }
+    return rows;
+}
+
 std::optional<core::EngineError> ScriptRuntime::runSource(std::string_view source, std::string_view chunkName)
+{
+    // An entry script gets a category of its own, from the pool §6 describes, so
+    // that "which script is holding this memory" is a question the shell can
+    // answer. Assigned by CHUNK NAME rather than per call, so a hot reload
+    // re-uses the same row and the number stays comparable across one.
+    core::u32 category = kFirstScriptCategory;
+    bool found = false;
+    for (const auto& [chunk, assigned] : m_impl->scriptCategories) {
+        if (chunk == chunkName) {
+            category = assigned;
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        category = m_impl->nextCategory;
+        m_impl->nextCategory =
+            m_impl->nextCategory + 1 >= kCategoryCount ? kFirstScriptCategory : m_impl->nextCategory + 1;
+        m_impl->scriptCategories.emplace_back(std::string(chunkName), category);
+    }
+    return runSource(source, chunkName, category);
+}
+
+std::optional<core::EngineError> ScriptRuntime::runSource(std::string_view source, std::string_view chunkName,
+                                                          core::u32 category)
 {
     lua_State* L = m_impl->state;
     if (L == nullptr)
@@ -284,6 +362,9 @@ std::optional<core::EngineError> ScriptRuntime::runSource(std::string_view sourc
     // distance from the mistake.
     lua_State* thread = lua_newthread(L);
     luaL_sandboxthread(thread);
+    // Everything this thread allocates is attributed here, which is what makes
+    // the DebugShell's memory table per-script rather than one number.
+    lua_setmemcat(thread, static_cast<int>(category));
 
     const int loadStatus = luau_load(thread, chunk.c_str(), bytecode, bytecodeSize, 0);
     std::free(bytecode);

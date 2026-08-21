@@ -18,9 +18,11 @@
 #include <array>
 #include <cfloat>
 #include <cstdio>
+#include <deque>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_sdlgpu3.h>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -471,7 +473,118 @@ void drawWriteLog(scene::World& world, const Inspector& inspector)
     }
 }
 
-void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector)
+// --- The console and the memory table (D017) ---------------------------------
+//
+// `architecture.md` §app names five panes for the DebugShell -- explorer,
+// properties, profiler with the memcat table, log/REPL, streaming map, physics
+// wireframe -- and two of them had never been written. The audit that found that
+// is what D017 is; this is the pane.
+
+// The last few hundred log lines, and the sink that fills them.
+//
+// Bounded and dropping the oldest, because a shell that grew with the log would
+// be a memory leak with a scrollbar. Process-global like the sink it installs:
+// `core::setLogSink` takes one function and there is one console.
+struct ConsoleLog
+{
+    static constexpr core::usize kMaxLines = 400;
+
+    struct Line
+    {
+        core::LogLevel level = core::LogLevel::Info;
+        std::string text;
+    };
+
+    std::mutex mutex;
+    std::deque<Line> lines;
+    bool installed = false;
+    // The sink that was there first. Chained rather than replaced, so the
+    // console pane and the log FILE both get every line -- a shell that ate the
+    // log would be the last place anybody looked for it.
+    core::LogSink previous;
+};
+
+ConsoleLog& console()
+{
+    static ConsoleLog instance;
+    return instance;
+}
+
+void drawMemory(script::ScriptRuntime& runtime)
+{
+    const std::vector<script::ScriptRuntime::MemoryCategory> rows = runtime.memoryByCategory();
+
+    core::usize total = 0;
+    for (const auto& row : rows)
+        total += row.bytes;
+    ImGui::Text("script heap: %.1f KB across %d categories", static_cast<double>(total) / 1024.0,
+                static_cast<int>(rows.size()));
+
+    if (!ImGui::BeginTable("memcat", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+        return;
+
+    ImGui::TableSetupColumn("cat", ImGuiTableColumnFlags_WidthFixed, 32.0f);
+    ImGui::TableSetupColumn("what");
+    ImGui::TableSetupColumn("KB", ImGuiTableColumnFlags_WidthFixed, 64.0f);
+    ImGui::TableHeadersRow();
+
+    for (const auto& row : rows) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::Text("%u", row.category);
+        ImGui::TableNextColumn();
+        // A category with no name is one the pool assigned and whose script has
+        // since been replaced -- worth showing as a number rather than hiding,
+        // because that is exactly the leak the table is for.
+        ImGui::TextUnformatted(row.name.empty() ? "(recycled)" : std::string(row.name).c_str());
+        ImGui::TableNextColumn();
+        ImGui::Text("%.1f", static_cast<double>(row.bytes) / 1024.0);
+    }
+    ImGui::EndTable();
+}
+
+void drawConsole(script::ScriptRuntime* runtime)
+{
+    ConsoleLog& log = console();
+
+    if (ImGui::BeginChild("log", ImVec2(0.0f, 160.0f), ImGuiChildFlags_Borders)) {
+        std::lock_guard<std::mutex> lock(log.mutex);
+        for (const ConsoleLog::Line& line : log.lines) {
+            const ImVec4 colour = line.level == core::LogLevel::Error   ? ImVec4(1.0f, 0.45f, 0.4f, 1.0f)
+                                  : line.level == core::LogLevel::Warn  ? ImVec4(1.0f, 0.85f, 0.4f, 1.0f)
+                                  : line.level == core::LogLevel::Debug ? ImVec4(0.6f, 0.65f, 0.75f, 1.0f)
+                                                                        : ImVec4(0.85f, 0.88f, 0.92f, 1.0f);
+            ImGui::PushStyleColor(ImGuiCol_Text, colour);
+            ImGui::TextUnformatted(line.text.c_str());
+            ImGui::PopStyleColor();
+        }
+        // Only while already at the bottom, so scrolling back to read something
+        // is not undone by the next log line.
+        if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
+            ImGui::SetScrollHereY(1.0f);
+    }
+    ImGui::EndChild();
+
+    static std::array<char, 512> input{};
+    ImGui::SetNextItemWidth(-1.0f);
+    const bool submitted = ImGui::InputText("##repl", input.data(), input.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+    if (!submitted)
+        return;
+
+    const std::string_view source{input.data()};
+    if (!source.empty() && runtime != nullptr) {
+        // Echoed first, so the log reads as a session rather than as a list of
+        // answers with no questions.
+        core::logText(core::LogLevel::Info, std::string("> ").append(source));
+        if (const std::optional<core::EngineError> error = runtime->evaluate(source); error.has_value())
+            core::logText(core::LogLevel::Error, error->message);
+    }
+    input.fill(0);
+    ImGui::SetKeyboardFocusHere(-1);
+}
+
+void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,
+               script::ScriptRuntime* runtime)
 {
     ImGui::SetNextWindowBgAlpha(0.85f);
     ImGui::SetNextWindowSize(ImVec2(420.0f, 520.0f), ImGuiCond_FirstUseEver);
@@ -492,6 +605,17 @@ void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, I
             drawProperties(*world, *inspector);
             drawWriteLog(*world, *inspector);
         }
+
+        if (runtime != nullptr) {
+            ImGui::SeparatorText("memory");
+            drawMemory(*runtime);
+        }
+
+        // The console draws even with no VM: the LOG half is the half a person
+        // wants when the VM failed to boot, which is the moment they most want
+        // it. The input line simply does nothing.
+        ImGui::SeparatorText("console");
+        drawConsole(runtime);
     }
     ImGui::End();
 }
@@ -609,7 +733,7 @@ void DebugOverlay::render(rhi::ICmdList& cmd, rhi::TextureHandle target, const F
     ImGui_ImplSDLGPU3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
-    drawShell(frame, world_, root_, inspector_);
+    drawShell(frame, world_, root_, inspector_, runtime_);
     ImGui::Render();
 
     ImDrawData* drawData = ImGui::GetDrawData();
@@ -659,5 +783,28 @@ void DebugOverlay::render(rhi::ICmdList&, rhi::TextureHandle, const Frame&)
 {}
 
 #endif
+
+void DebugOverlay::captureLog()
+{
+    ConsoleLog& log = console();
+    if (log.installed)
+        return;
+    log.installed = true;
+
+    log.previous = core::setLogSink([](core::LogLevel level, std::string_view text) {
+        ConsoleLog& sink = console();
+        {
+            std::lock_guard<std::mutex> lock(sink.mutex);
+            sink.lines.push_back(ConsoleLog::Line{level, std::string(text)});
+            while (sink.lines.size() > ConsoleLog::kMaxLines)
+                sink.lines.pop_front();
+        }
+        // Chained rather than replaced: the console pane and the log FILE both
+        // get every line. A shell that ate the log would be the last place
+        // anybody looked for it.
+        if (sink.previous)
+            sink.previous(level, text);
+    });
+}
 
 } // namespace luaug::app

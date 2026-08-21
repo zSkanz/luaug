@@ -49,6 +49,14 @@ public:
     // `task.wait`.
     [[nodiscard]] std::optional<core::EngineError> runSource(std::string_view source, std::string_view chunkName);
 
+private:
+    // The same thing with the memory category chosen rather than derived. The
+    // public overload assigns one per chunk name from §6's pool; the REPL passes
+    // its own reserved 7.
+    [[nodiscard]] std::optional<core::EngineError> runSource(std::string_view source, std::string_view chunkName,
+                                                             core::u32 category);
+
+public:
     // Runs the engine phase's deferred work: converts the scene's POD facts
     // into signal fires, then drains the queue to fixpoint (api-design.md
     // §3.1). Every resumption point calls this.
@@ -127,6 +135,35 @@ public:
     // Where `require` gets file-backed module source. Unset means only the
     // registered `@luaug/…` modules resolve, which is what a test wants.
     void setModuleLoader(const ModuleLoader& loader);
+
+    // One row of the memory table architecture.md §app names and §6 lays out:
+    // 0 engine misc, 1 the module registry, 2 bindings and userdata, 3 signals
+    // and tasks, 4 UI, 5 net buffers, 6 asset sources, 7 the REPL, and one per
+    // entry script from the 32..255 pool.
+    struct MemoryCategory
+    {
+        core::u32 category = 0;
+        // The engine's own name for a reserved category, or the chunk name of
+        // the script the category was assigned to.
+        std::string_view name;
+        core::usize bytes = 0;
+    };
+
+    // The categories that hold anything, in category order. Empty ones are
+    // omitted: a table where seven rows are permanently zero is a table nobody
+    // reads, and the reserved names are in this header for the day something
+    // allocates into them.
+    [[nodiscard]] std::vector<MemoryCategory> memoryByCategory() const;
+
+    // Runs one chunk as the DebugShell's REPL, on its own sandboxed thread and
+    // in the REPL's own memory category, exactly as an entry script runs.
+    //
+    // Dev-only by construction rather than by a flag: nothing calls it but the
+    // shell, and the shell is not built into a shipped game (architecture.md
+    // §app). It is `runSource` with a name and a category, which is the point --
+    // a REPL that took a different path into the VM would be a second path to
+    // keep honest.
+    [[nodiscard]] std::optional<core::EngineError> evaluate(std::string_view source);
 
     // What the boot-time method cross-check found. Zeroed until `boot` runs.
     // Exposed rather than logged so that a test can assert the two halves

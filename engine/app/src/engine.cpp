@@ -460,8 +460,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // `game`, which is where the tree the explorer walks starts. Re-pointed
     // after every reload, because a reload destroys this world and builds
     // another (ADR 0024).
-    if (overlay.has_value())
+    if (overlay.has_value()) {
         overlay->setInspectionTarget(&host->world(), host->runtime().dataModel(), &inspector);
+        overlay->setScriptTarget(&host->runtime());
+        // After the console sink is installed, so the shell chains to it rather
+        // than replacing it (D017).
+        overlay->captureLog();
+    }
 
     // The dev-server connection, if `luaug dev` started this process. Nothing
     // listens here: the engine dials out (ADR 0035), and the whole path is
@@ -615,8 +620,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     // to nothing. The overlay's pointer is re-aimed for the
                     // blunter reason: the world it held has been destroyed.
                     inspector.onWorldChanged();
-                    if (overlay.has_value())
+                    if (overlay.has_value()) {
                         overlay->setInspectionTarget(&host->world(), host->runtime().dataModel(), &inspector);
+                        // And the VM, for the same blunt reason: the runtime the
+                        // console evaluated in has been destroyed with the world.
+                        overlay->setScriptTarget(&host->runtime());
+                    }
                     replyOk("reloaded", command.id, [&reloaded, &host](core::JsonWriter& writer) {
                         writer.field("ok", reloaded.ok);
                         writer.field("ms", reloaded.spanMs);

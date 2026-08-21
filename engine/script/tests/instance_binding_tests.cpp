@@ -660,3 +660,90 @@ TEST_CASE("the pivot is a PVInstance concept, and PivotOffset is what gives it m
         )") == "");
     }
 }
+
+// --- The DebugShell's two missing panes (D017) --------------------------------
+//
+// `architecture.md` §app names a memory-category table and a log/REPL pane, and
+// neither had ever been written. The panes themselves are ImGui and a windowed
+// run; what is testable is the surface underneath them, and that is where the
+// claims live.
+
+TEST_CASE("the REPL runs a chunk in the VM the game is running in")
+{
+    Fixture fixture;
+    REQUIRE(fixture.booted);
+
+    // It is `runSource` with a name and a category, deliberately: a REPL that
+    // took a different path into the VM would be a second path to keep honest.
+    CHECK_FALSE(fixture.runtime->evaluate("local part = Instance.new('Part') part.Name = 'FromRepl'").has_value());
+
+    const luaug::scene::World& world = *fixture.world;
+    bool found = false;
+    world.parts().forEach([&](luaug::core::InstanceId id, const luaug::scene::PartComponent&) {
+        if (world.atoms().text(world.name(id)) == "FromRepl")
+            found = true;
+    });
+    CHECK(found);
+}
+
+TEST_CASE("a REPL chunk that does not compile is an error rather than a crash")
+{
+    Fixture fixture;
+    REQUIRE(fixture.booted);
+    CHECK(fixture.runtime->evaluate("this is not luau").has_value());
+    // And the VM survives it: the next line still runs.
+    CHECK_FALSE(fixture.runtime->evaluate("local x = 1").has_value());
+}
+
+TEST_CASE("the memory table names a category per script and reports bytes")
+{
+    Fixture fixture;
+    REQUIRE(fixture.booted);
+
+    CHECK_FALSE(fixture.runtime->runSource("local held = table.create(4096, 'x')", "leaky.luau").has_value());
+
+    const std::vector<luaug::script::ScriptRuntime::MemoryCategory> rows = fixture.runtime->memoryByCategory();
+    REQUIRE_FALSE(rows.empty());
+
+    bool sawScript = false;
+    for (const auto& row : rows) {
+        CHECK(row.bytes > 0);
+        if (row.name == "leaky.luau") {
+            sawScript = true;
+            // The pool starts at 32; anything below it is one of the engine's
+            // own eight (architecture.md §6).
+            CHECK(row.category >= 32);
+        }
+    }
+    CHECK(sawScript);
+}
+
+TEST_CASE("two scripts get two categories, and a reload reuses one")
+{
+    // Per chunk NAME rather than per call, so a hot reload re-uses the row and
+    // the number stays comparable across one -- which is the whole point of a
+    // per-script table for leak triage.
+    Fixture fixture;
+    REQUIRE(fixture.booted);
+
+    CHECK_FALSE(fixture.runtime->runSource("local a = 1", "one.luau").has_value());
+    CHECK_FALSE(fixture.runtime->runSource("local b = 2", "two.luau").has_value());
+
+    luaug::core::u32 first = 0;
+    luaug::core::u32 second = 0;
+    for (const auto& row : fixture.runtime->memoryByCategory()) {
+        if (row.name == "one.luau")
+            first = row.category;
+        if (row.name == "two.luau")
+            second = row.category;
+    }
+    CHECK(first != 0);
+    CHECK(second != 0);
+    CHECK(first != second);
+
+    CHECK_FALSE(fixture.runtime->runSource("local a = 3", "one.luau").has_value());
+    for (const auto& row : fixture.runtime->memoryByCategory()) {
+        if (row.name == "one.luau")
+            CHECK(row.category == first);
+    }
+}

@@ -21,6 +21,7 @@
 #include "luaug/core/id.h"
 #include "luaug/platform/event.h"
 #include "luaug/rhi/types.h"
+#include "luaug/script/runtime.h"
 
 #include <span>
 
@@ -94,6 +95,23 @@ public:
         inspector_ = inspector;
     }
 
+    // The VM the console pane evaluates in and reads the memory table off
+    // (D017). Null -- the default -- draws neither pane, which is the state of a
+    // host with no world and of every test with no VM.
+    //
+    // Re-point this after a reload, for the same reason `setInspectionTarget`
+    // says: the reload destroys the runtime this points at.
+    void setScriptTarget(script::ScriptRuntime* runtime) noexcept { runtime_ = runtime; }
+
+    // Takes over the process log sink and keeps the last few hundred lines for
+    // the console pane, chaining to whatever sink was installed so the console
+    // and the log FILE both get every line. Called once, by the host, after the
+    // console sink is installed.
+    //
+    // The ring is bounded and drops the oldest: a shell that grew with the log
+    // would be a memory leak with a scrollbar.
+    void captureLog();
+
     // Draws the panel into `target` in a render pass of its own, so it sits on
     // top of whatever the frame already rendered.
     //
@@ -114,6 +132,7 @@ private:
     scene::World* world_ = nullptr;
     core::InstanceId root_;
     Inspector* inspector_ = nullptr;
+    script::ScriptRuntime* runtime_ = nullptr;
 };
 
 } // namespace luaug::app

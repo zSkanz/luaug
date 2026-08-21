@@ -98,7 +98,7 @@ remains here is UI's own use of it.
 
 ### Carried debts this milestone pays
 
-- [ ] **D017 — the `DebugShell` has no memory-category table and no log/REPL
+- [x] **D017 — the `DebugShell` has no memory-category table and no log/REPL
       pane**, both named by `architecture.md` §app. Scheduled here by the M5
       close, because this is the milestone that gives the shell its remaining
       panes.
