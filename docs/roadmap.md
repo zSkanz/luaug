@@ -709,6 +709,19 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   same decision from the other side: `stb_easy_font` is ASCII, and a game in
   Portuguese already needs á ç ã õ, so the cache is sized and the
   missing-glyph behaviour is chosen here rather than discovered by a player.
+- **D027 — a character does not ride a moving platform** (human, 2026-08-21,
+  found by playing `examples/04-obby`). Scheduled here because this is where it
+  was found and where the deliverable that shows it ships; the seam it belongs to
+  is M5's. Two halves, and the second reaches past platforms: `GetGroundVelocity`
+  is called nowhere in the engine, so a character never inherits its ground's
+  motion — and it would read zero anyway, because kinematic bodies are moved with
+  `SetPositionAndRotation`, which teleports. Jolt derives no velocity from a
+  teleport; `MoveKinematic` is the call that takes a target and a delta and
+  computes one. **Until that changes, every script-moved kinematic body in the
+  engine has zero velocity**: a closing door does not push, a piston does not
+  launch, a conveyor does not carry. The roadmap called the obby's moving
+  platforms "a deliberate integration stressor" — this is the stress showing, and
+  it worked.
 - **Deliverable:** `examples/04-obby` — main menu (tweened), HUD, checkpoints,
   moving platforms (tweens on physics-kinematic parts — a deliberate
   integration stressor), sounds, an animated character, fully playable
