@@ -7,6 +7,7 @@
 #include "luaug/platform/platform.h"
 #include "luaug/render/debug_draw.h"
 #include "luaug/render/scene_types.h"
+#include "luaug/ui/scene_types.h"
 
 #include <algorithm>
 #include <array>
@@ -201,6 +202,7 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
     scene::generated::registerClasses(m_classes, m_atoms);
     render::registerSceneTypes(m_classes, m_atoms);
     input::registerSceneTypes(m_classes, m_atoms);
+    ui::registerSceneTypes(m_classes, m_atoms);
 
     // Enums have one owner and no hierarchy, so they are independent of the
     // above; they stay with `scene`, which holds the registry.

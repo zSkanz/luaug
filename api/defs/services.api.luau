@@ -737,6 +737,35 @@ local Classes: { Schema.Class } = {
             },
         } :: { Schema.Method },
     },
+    {
+        Name = "UIService",
+        Extends = "Instance",
+        Module = "ui",
+        Tags = { "Service", "NotCreatable" } :: { Schema.ClassTag },
+        Doc = "The parent of every `ScreenGui` and the source of the two numbers a layout needs about the "
+            .. "screen it is on (§2.1). It takes the PlayerGui role without taking the Player: there is no "
+            .. "`Players` service in v1 and a UI does not need one.",
+        Properties = {
+            {
+                Name = "SafeAreaInsets",
+                Type = "Rect",
+                ReadOnly = true,
+                Transient = true,
+                Doc = "How far in from each window edge it is safe to draw, in pixels -- what a notch, a "
+                    .. "rounded corner or a system gesture bar takes away. Zero on a desktop window, which is "
+                    .. "why a HUD that ignores it looks fine until it does not.",
+            },
+            {
+                Name = "DisplayScale",
+                Type = "number",
+                ReadOnly = true,
+                Transient = true,
+                Doc = "The window's pixel density relative to its logical size: 2 on a doubled display. UI "
+                    .. "coordinates are in PIXELS, so this is what a game multiplies by when it wants a "
+                    .. "measurement to mean the same physical size on two screens.",
+            },
+        } :: { Schema.Property },
+    },
 }
 
 local Definition: Schema.Definition = {

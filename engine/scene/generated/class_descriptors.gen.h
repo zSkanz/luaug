@@ -52,6 +52,12 @@ inline constexpr EnumId InputRateEnumId = 11;
 inline constexpr EnumId EasingStyleEnumId = 12;
 inline constexpr EnumId EasingDirectionEnumId = 13;
 inline constexpr EnumId PlaybackStateEnumId = 14;
+inline constexpr EnumId FillDirectionEnumId = 15;
+inline constexpr EnumId HorizontalAlignmentEnumId = 16;
+inline constexpr EnumId VerticalAlignmentEnumId = 17;
+inline constexpr EnumId SortOrderEnumId = 18;
+inline constexpr EnumId AutomaticSizeEnumId = 19;
+inline constexpr EnumId ScaleTypeEnumId = 20;
 
 } // namespace generated
 

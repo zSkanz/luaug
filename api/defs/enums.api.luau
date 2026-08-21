@@ -488,6 +488,88 @@ local Definition: Schema.Definition = {
                 },
             } :: { Schema.EnumItem },
         },
+        {
+            Name = "FillDirection",
+            Doc = "Which way a `UIListLayout` stacks its siblings (§2.2).",
+            Items = {
+                { Name = "Horizontal", Value = 0 },
+                { Name = "Vertical", Value = 1 },
+            } :: { Schema.EnumItem },
+        },
+        {
+            Name = "HorizontalAlignment",
+            Doc = "Alignment along the X axis. One vocabulary for two jobs (§2.5, divergence #23): a "
+                .. "`TextLabel` aligns its text with it and a `UIListLayout` aligns its children with it, and "
+                .. "there is deliberately no `TextXAlignment` beside it.",
+            Items = {
+                { Name = "Left", Value = 0 },
+                { Name = "Center", Value = 1 },
+                { Name = "Right", Value = 2 },
+            } :: { Schema.EnumItem },
+        },
+        {
+            Name = "VerticalAlignment",
+            Doc = "Alignment along the Y axis, and the same one vocabulary as `HorizontalAlignment`.",
+            Items = {
+                { Name = "Top", Value = 0 },
+                { Name = "Center", Value = 1 },
+                { Name = "Bottom", Value = 2 },
+            } :: { Schema.EnumItem },
+        },
+        {
+            Name = "SortOrder",
+            Doc = "What order a `UIListLayout` lays its children out in (§2.2).",
+            Items = {
+                {
+                    Name = "Name",
+                    Value = 0,
+                    Doc = "By `Name`, ordinal by code point. Stable across runs, which document order also is "
+                        .. "-- the difference is that this one survives the children being rebuilt in a "
+                        .. "different order.",
+                },
+                {
+                    Name = "LayoutOrder",
+                    Value = 1,
+                    Doc = "By each child's `LayoutOrder`, ties broken by document order. The usual choice, and "
+                        .. "the only one that lets a list be reordered without renaming anything.",
+                },
+            } :: { Schema.EnumItem },
+        },
+        {
+            Name = "AutomaticSize",
+            Doc = "Which axes a `UIObject` sizes to fit its contents on, overriding that half of `Size` "
+                .. "(§2.2). Text and lists are what need it: a label whose box is smaller than its words is "
+                .. "the commonest UI defect there is.",
+            Items = {
+                { Name = "None", Value = 0 },
+                { Name = "X", Value = 1 },
+                { Name = "Y", Value = 2 },
+                { Name = "XY", Value = 3 },
+            } :: { Schema.EnumItem },
+        },
+        {
+            Name = "ScaleType",
+            Doc = "How an `ImageLabel` fits its image into its box (§2.2).",
+            Items = {
+                {
+                    Name = "Stretch",
+                    Value = 0,
+                    Doc = "The whole image into the whole box, aspect ratio and all.",
+                },
+                {
+                    Name = "Slice",
+                    Value = 1,
+                    Doc = "Nine-slice: the four corners are drawn at their own size, the four edges stretch "
+                        .. "along one axis and the middle stretches along both. `SliceCenter` says where the "
+                        .. "cuts are. This is how a panel or a button keeps its rounded corners at any size.",
+                },
+                {
+                    Name = "Tile",
+                    Value = 2,
+                    Doc = "Repeated at its own size until the box is full.",
+                },
+            } :: { Schema.EnumItem },
+        },
     },
 }
 

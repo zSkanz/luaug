@@ -338,4 +338,118 @@ struct InputBindingComponent
     std::string image;
 };
 
+// --- UI (M6) -----------------------------------------------------------------
+//
+// The same arrangement again: `scene` (L3) owns the pools, `ui` (L5) owns the
+// meaning. This is the third module to store here and the first at L5, which is
+// worth noticing -- the pattern is now the rule rather than the exception, and
+// the type-erased registry architecture.md §4 said would be "a problem to solve
+// when M4 brings the first one" has still not paid for itself: thirteen classes
+// cost nine structs and nine pool members, and a registry would cost an
+// indirection on every property read in the engine.
+
+// `ScreenGui`. One screen-space tree, and the unit of layout: the dirty flag
+// that decides whether the solver runs at all lives here.
+struct ScreenGuiComponent
+{
+    f32 displayOrder = 0.0f;
+    bool enabled = true;
+    bool screenInsets = true;
+    // Set by any layout-affecting write anywhere beneath this tree, cleared by
+    // the layout that answers it. NOT a property: no script can read it, and a
+    // script that could would be reading the engine's opinion of its own work.
+    bool layoutDirty = true;
+};
+
+// `UIObject`, and therefore attached to every element on screen.
+//
+// The two `absolute*` fields are OUTPUTS of the solver rather than state a
+// script owns, which is why their properties are read-only. They live here
+// rather than in a parallel array because the layout writes them and the draw
+// list reads them, and a second structure indexed the same way would be a
+// second thing to keep in step.
+struct UIObjectComponent
+{
+    core::UDim2 position;
+    core::UDim2 size;
+    core::Vec2 anchorPoint;
+    core::Color3 backgroundColor{1.0f, 1.0f, 1.0f};
+    core::Vec2 absolutePosition;
+    core::Vec2 absoluteSize;
+    f32 rotation = 0.0f;
+    f32 backgroundTransparency = 0.0f;
+    f32 zIndex = 0.0f;
+    f32 layoutOrder = 0.0f;
+    // `Enum.AutomaticSize`: 0 None, 1 X, 2 Y, 3 XY.
+    i32 automaticSize = 0;
+    bool visible = true;
+    bool clipsDescendants = false;
+};
+
+struct TextLabelComponent
+{
+    std::string text;
+    // An `asset://` URI to a TrueType file; empty means the built-in face.
+    std::string font;
+    core::Color3 textColor{0.0f, 0.0f, 0.0f};
+    f32 textSize = 14.0f;
+    // `Enum.HorizontalAlignment` / `Enum.VerticalAlignment`.
+    i32 horizontalAlignment = 1;
+    i32 verticalAlignment = 1;
+    bool textWrapped = false;
+    bool textScaled = false;
+};
+
+struct TextInputComponent
+{
+    std::string placeholderText;
+    // Which field the keyboard is reaching, and the caret's position in BYTES
+    // rather than in codepoints -- the text is UTF-8 and the editor moves by
+    // whole sequences, so a byte index is exact where a character index would
+    // need a second walk to use.
+    u32 caret = 0;
+    bool focused = false;
+};
+
+struct ImageLabelComponent
+{
+    std::string image;
+    core::Rect sliceCenter;
+    core::Color3 imageColor{1.0f, 1.0f, 1.0f};
+    // `Enum.ScaleType`: 0 Stretch, 1 Slice, 2 Tile.
+    i32 scaleType = 0;
+};
+
+struct ScrollFrameComponent
+{
+    core::UDim2 canvasSize;
+    core::Vec2 canvasPosition;
+    f32 scrollBarThickness = 12.0f;
+};
+
+struct UIListLayoutComponent
+{
+    core::UDim padding;
+    // `Enum.FillDirection`: 0 Horizontal, 1 Vertical.
+    i32 fillDirection = 1;
+    i32 horizontalAlignment = 0;
+    i32 verticalAlignment = 0;
+    // `Enum.SortOrder`: 0 Name, 1 LayoutOrder.
+    i32 sortOrder = 1;
+    bool wraps = false;
+};
+
+struct UIPaddingComponent
+{
+    core::UDim paddingTop;
+    core::UDim paddingBottom;
+    core::UDim paddingLeft;
+    core::UDim paddingRight;
+};
+
+struct UICornerComponent
+{
+    core::UDim cornerRadius{0.0f, 8.0f};
+};
+
 } // namespace luaug::scene

@@ -80,3 +80,4 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0037](0037-rhi-interface-frozen-at-m4.md) | The RHI interface is frozen at the end of M4 |
 | [0038](0038-visual-fidelity-is-a-v1-target.md) | What the renderer draws is judged against a stated reference, and visual fidelity is a v1 target |
 | [0039](0039-input-context-rate-and-total-enums.md) | An InputContext declares its dispatch rate, and the IAS's enums are total |
+| [0040](0040-udim2-layout-is-arithmetic-not-a-solver.md) | UDim2 layout is arithmetic, not a constraint problem; v1 does not call Clay |

@@ -2174,6 +2174,151 @@ void registerEnums(EnumRegistry& enums, core::AtomTable& atoms)
     playbackStateDesc.docKey = {};
     playbackStateDesc.items = playbackStateItems;
     enums.registerEnum(playbackStateDesc);
+
+    // --- FillDirection ---
+    static std::array<EnumItemDesc, 2> fillDirectionItems;
+    fillDirectionItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Horizontal"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Vertical"),
+            .value = 1,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor fillDirectionDesc;
+    fillDirectionDesc.name = atoms.intern("FillDirection");
+    fillDirectionDesc.docKey = {};
+    fillDirectionDesc.items = fillDirectionItems;
+    enums.registerEnum(fillDirectionDesc);
+
+    // --- HorizontalAlignment ---
+    static std::array<EnumItemDesc, 3> horizontalAlignmentItems;
+    horizontalAlignmentItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Left"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Center"),
+            .value = 1,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Right"),
+            .value = 2,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor horizontalAlignmentDesc;
+    horizontalAlignmentDesc.name = atoms.intern("HorizontalAlignment");
+    horizontalAlignmentDesc.docKey = {};
+    horizontalAlignmentDesc.items = horizontalAlignmentItems;
+    enums.registerEnum(horizontalAlignmentDesc);
+
+    // --- VerticalAlignment ---
+    static std::array<EnumItemDesc, 3> verticalAlignmentItems;
+    verticalAlignmentItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Top"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Center"),
+            .value = 1,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Bottom"),
+            .value = 2,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor verticalAlignmentDesc;
+    verticalAlignmentDesc.name = atoms.intern("VerticalAlignment");
+    verticalAlignmentDesc.docKey = {};
+    verticalAlignmentDesc.items = verticalAlignmentItems;
+    enums.registerEnum(verticalAlignmentDesc);
+
+    // --- SortOrder ---
+    static std::array<EnumItemDesc, 2> sortOrderItems;
+    sortOrderItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Name"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("LayoutOrder"),
+            .value = 1,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor sortOrderDesc;
+    sortOrderDesc.name = atoms.intern("SortOrder");
+    sortOrderDesc.docKey = {};
+    sortOrderDesc.items = sortOrderItems;
+    enums.registerEnum(sortOrderDesc);
+
+    // --- AutomaticSize ---
+    static std::array<EnumItemDesc, 4> automaticSizeItems;
+    automaticSizeItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("None"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("X"),
+            .value = 1,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Y"),
+            .value = 2,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("XY"),
+            .value = 3,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor automaticSizeDesc;
+    automaticSizeDesc.name = atoms.intern("AutomaticSize");
+    automaticSizeDesc.docKey = {};
+    automaticSizeDesc.items = automaticSizeItems;
+    enums.registerEnum(automaticSizeDesc);
+
+    // --- ScaleType ---
+    static std::array<EnumItemDesc, 3> scaleTypeItems;
+    scaleTypeItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Stretch"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Slice"),
+            .value = 1,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Tile"),
+            .value = 2,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor scaleTypeDesc;
+    scaleTypeDesc.name = atoms.intern("ScaleType");
+    scaleTypeDesc.docKey = {};
+    scaleTypeDesc.items = scaleTypeItems;
+    enums.registerEnum(scaleTypeDesc);
 }
 
 } // namespace luaug::scene::generated

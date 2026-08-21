@@ -1,0 +1,142 @@
+// The in-game UI: layout, text and the 2D draw list (architecture.md §2 `ui`,
+// ADR 0011 as amended by ADR 0040).
+//
+// Three stages, and they are separate because they run at different times and
+// for different reasons:
+//
+//   1. **Layout** turns the Instance tree into rectangles. It runs only for a
+//      `ScreenGui` something marked dirty, which is why every layout-affecting
+//      property setter in `native_accessors.cpp` walks up to mark one.
+//
+//   2. **Text** measures runs and turns them into geometry. Layout needs the
+//      measurement (a label that sizes to its text) and drawing needs the
+//      geometry, and both come out of one walk over the same face. v1's face is
+//      the vector one vendored inside stb, for the reason `text.cpp` states at
+//      length: a TrueType face needs a FILE, and shipping one is a licence
+//      decision that belongs to a human (R6).
+//
+//   3. **The draw list** is a flat, ordered array of coloured and textured
+//      quads. `render` consumes it; nothing here knows what a GPU is.
+//
+// **Coordinates are window pixels, y down, origin top-left**, throughout. That
+// is the convention every UI system in the world uses and the opposite of the
+// world's; the conversion happens once, in the 2D pass's projection.
+#pragma once
+
+#include "luaug/core/id.h"
+#include "luaug/core/math.h"
+#include "luaug/core/types.h"
+
+#include <span>
+#include <string_view>
+#include <vector>
+
+namespace luaug::scene {
+class World;
+}
+
+namespace luaug::ui {
+
+using core::f32;
+using core::i32;
+using core::u32;
+using core::u64;
+using core::usize;
+
+// What `TextLabel` needs a font to answer, and the only thing layout asks of
+// the text system. Separated from the atlas so that a headless run -- which has
+// no GPU and therefore no atlas texture -- still measures text and therefore
+// still lays out identically. A layout that depended on whether there was a
+// screen would be a layout the determinism gate could not check.
+struct TextRunMetrics
+{
+    // The tight box the run occupies, in pixels.
+    core::Vec2 size;
+    // Distance from the top of the box to the first line's baseline. Drawing
+    // needs it; layout does not, and it is here because both come out of one
+    // walk over the glyphs.
+    f32 ascent = 0.0f;
+    u32 lineCount = 0;
+};
+
+// --- The draw list -----------------------------------------------------------
+
+// One quad. Everything the 2D pass draws is one of these: a background, a
+// nine-slice patch, a glyph. A single shape rather than a tagged union of three
+// because they differ only in which texture they sample and over what UVs, and
+// a pass that sorts one array is a pass that batches.
+struct DrawQuad
+{
+    // Top-left and bottom-right in window pixels.
+    core::Vec2 min;
+    core::Vec2 max;
+    // Source rectangle in the texture, normalized. Equal corners mean "no
+    // texture": the shader multiplies by white and the quad is a flat colour.
+    core::Vec2 uvMin;
+    core::Vec2 uvMax;
+    core::Color3 color{1.0f, 1.0f, 1.0f};
+    f32 alpha = 1.0f;
+    // Which texture the quad samples: 0 is none, 1 is the glyph atlas. Image
+    // textures join it when `ImageLabel` can name one the pipeline has loaded,
+    // which is M7's asset work.
+    u32 texture = 0;
+    // The scissor rectangle this quad is clipped to, as an index into
+    // `DrawList::scissors`. 0 is "the whole window", which is why that entry is
+    // always present.
+    u32 scissor = 0;
+};
+
+struct DrawList
+{
+    std::vector<DrawQuad> quads;
+    // Index 0 is the whole window. A `ClipsDescendants` element pushes one.
+    std::vector<core::Rect> scissors;
+
+    void clear()
+    {
+        quads.clear();
+        scissors.clear();
+    }
+};
+
+// Measures a run at a size, optionally wrapped to a width.
+//
+// `maxWidth` of 0 means no wrapping. Wrapping breaks at spaces, and mid-word
+// only for a word wider than the box: a word cut at a random letter is worse
+// than one that overhangs.
+[[nodiscard]] TextRunMetrics measureText(std::string_view text, std::string_view font, f32 pixelSize, f32 maxWidth);
+
+// The quads one run draws, aligned inside `box`. Appended rather than returned,
+// because a draw list is built by appending and a label is one of many.
+void buildTextGeometry(std::string_view text, std::string_view font, f32 pixelSize, f32 maxWidth, core::Rect box,
+                       i32 horizontalAlignment, i32 verticalAlignment, core::Color3 color, f32 alpha, u32 scissor,
+                       std::vector<DrawQuad>& out);
+
+// How many times the solver has run, and over how many elements. A COUNTER
+// rather than a duration, and the milestone's benchmark asserts the first is
+// zero on an idle frame: at this scale a timing assertion measures the clock,
+// and "~zero microseconds" is the shape of gate that passes while doing
+// nothing.
+struct LayoutStats
+{
+    u64 solverRuns = 0;
+    u64 elementsLaidOut = 0;
+};
+
+// Lays out every dirty `ScreenGui` under `uiService`, writing `AbsolutePosition`
+// and `AbsoluteSize` into each element's component and clearing the dirty flag.
+//
+// `windowSize` is the drawable size in pixels. A change to it dirties every
+// tree, because a scale is a fraction of something that just changed.
+void layout(scene::World& world, core::InstanceId uiService, core::Vec2 windowSize);
+
+[[nodiscard]] const LayoutStats& layoutStats() noexcept;
+void resetLayoutStats() noexcept;
+
+// Walks every enabled `ScreenGui` in `DisplayOrder` and emits its quads in
+// draw order -- `ZIndex`, then document order. Reads the rectangles the layout
+// produced and computes nothing: a draw list that laid anything out would make
+// "what is on screen" depend on when it was asked.
+void buildDrawList(const scene::World& world, core::InstanceId uiService, DrawList& out);
+
+} // namespace luaug::ui

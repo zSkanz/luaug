@@ -115,6 +115,13 @@ struct EngineState
     bool pointerVisible = true;
     // `Enum.InputDeviceType`: 0 KeyboardMouse, 1 Gamepad, 2 Touch.
     i32 lastInputDeviceType = 0;
+
+    // `UIService`'s two read-only numbers (M6). Both are properties of the
+    // WINDOW, written by the host each frame, and both are zero-ish on a
+    // desktop -- which is exactly why a HUD that ignores the insets looks fine
+    // until somebody runs it on a phone.
+    core::Rect safeAreaInsets;
+    f32 displayScale = 1.0f;
     std::string engineVersion;
     std::string luauVersion;
 };
@@ -337,6 +344,26 @@ public:
     [[nodiscard]] ComponentPool<InputBindingComponent>& inputBindings() noexcept { return m_inputBindings; }
     [[nodiscard]] const ComponentPool<InputBindingComponent>& inputBindings() const noexcept { return m_inputBindings; }
 
+    // The ui module's classes (M6).
+    [[nodiscard]] ComponentPool<ScreenGuiComponent>& screenGuis() noexcept { return m_screenGuis; }
+    [[nodiscard]] const ComponentPool<ScreenGuiComponent>& screenGuis() const noexcept { return m_screenGuis; }
+    [[nodiscard]] ComponentPool<UIObjectComponent>& uiObjects() noexcept { return m_uiObjects; }
+    [[nodiscard]] const ComponentPool<UIObjectComponent>& uiObjects() const noexcept { return m_uiObjects; }
+    [[nodiscard]] ComponentPool<TextLabelComponent>& textLabels() noexcept { return m_textLabels; }
+    [[nodiscard]] const ComponentPool<TextLabelComponent>& textLabels() const noexcept { return m_textLabels; }
+    [[nodiscard]] ComponentPool<TextInputComponent>& textInputs() noexcept { return m_textInputs; }
+    [[nodiscard]] const ComponentPool<TextInputComponent>& textInputs() const noexcept { return m_textInputs; }
+    [[nodiscard]] ComponentPool<ImageLabelComponent>& imageLabels() noexcept { return m_imageLabels; }
+    [[nodiscard]] const ComponentPool<ImageLabelComponent>& imageLabels() const noexcept { return m_imageLabels; }
+    [[nodiscard]] ComponentPool<ScrollFrameComponent>& scrollFrames() noexcept { return m_scrollFrames; }
+    [[nodiscard]] const ComponentPool<ScrollFrameComponent>& scrollFrames() const noexcept { return m_scrollFrames; }
+    [[nodiscard]] ComponentPool<UIListLayoutComponent>& listLayouts() noexcept { return m_listLayouts; }
+    [[nodiscard]] const ComponentPool<UIListLayoutComponent>& listLayouts() const noexcept { return m_listLayouts; }
+    [[nodiscard]] ComponentPool<UIPaddingComponent>& uiPaddings() noexcept { return m_uiPaddings; }
+    [[nodiscard]] const ComponentPool<UIPaddingComponent>& uiPaddings() const noexcept { return m_uiPaddings; }
+    [[nodiscard]] ComponentPool<UICornerComponent>& uiCorners() noexcept { return m_uiCorners; }
+    [[nodiscard]] const ComponentPool<UICornerComponent>& uiCorners() const noexcept { return m_uiCorners; }
+
 private:
     void linkChild(InstanceRecord& parentRecord, core::InstanceId parentId, core::InstanceId childId);
     void unlinkChild(core::InstanceId childId);
@@ -368,6 +395,15 @@ private:
     ComponentPool<WorkspaceComponent> m_workspaces;
     ComponentPool<ModelComponent> m_models;
     ComponentPool<ScriptComponent> m_scripts;
+    ComponentPool<ScreenGuiComponent> m_screenGuis;
+    ComponentPool<UIObjectComponent> m_uiObjects;
+    ComponentPool<TextLabelComponent> m_textLabels;
+    ComponentPool<TextInputComponent> m_textInputs;
+    ComponentPool<ImageLabelComponent> m_imageLabels;
+    ComponentPool<ScrollFrameComponent> m_scrollFrames;
+    ComponentPool<UIListLayoutComponent> m_listLayouts;
+    ComponentPool<UIPaddingComponent> m_uiPaddings;
+    ComponentPool<UICornerComponent> m_uiCorners;
     ComponentPool<InputContextComponent> m_inputContexts;
     ComponentPool<InputActionComponent> m_inputActions;
     ComponentPool<InputBindingComponent> m_inputBindings;

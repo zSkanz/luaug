@@ -993,6 +993,473 @@ local Classes: { Schema.Class } = {
             },
         } :: { Schema.Property },
     },
+    {
+        Name = "ScreenGui",
+        Extends = "Instance",
+        Module = "ui",
+        Storage = "ScreenGui",
+        Doc = "The root of one screen-space UI tree, parented to `UIService` (§2.2). Everything under it is "
+            .. "laid out against the window and drawn over the world.\n\nIt is the unit of layout: a write "
+            .. "that changes a layout marks the nearest ScreenGui dirty, and a screen nothing changed does not "
+            .. "run the solver at all. That is a design constraint rather than an optimisation -- the "
+            .. "milestone's benchmark asserts ZERO solver invocations on an idle frame, because \"about zero "
+            .. 'microseconds" is a measurement of the clock.',
+        Properties = {
+            {
+                Name = "Enabled",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether this tree is laid out and drawn at all. A disabled ScreenGui costs one boolean "
+                    .. "read per frame; it does not cost a layout.",
+            },
+            {
+                Name = "DisplayOrder",
+                Type = "number",
+                Default = "0",
+                Doc = "Which ScreenGui draws on top when two overlap, highest last. `ZIndex` orders WITHIN a "
+                    .. "tree and this orders BETWEEN trees, so a HUD and a modal never have to agree on a "
+                    .. "shared numbering.",
+            },
+            {
+                Name = "ScreenInsets",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether this tree lays out inside `UIService.SafeAreaInsets` rather than against the "
+                    .. "whole window. On by default: a full-bleed background is the exception and a HUD "
+                    .. "clipped by a notch is the failure.",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "UIObject",
+        Extends = "Instance",
+        Module = "ui",
+        Tags = { "Abstract", "NotCreatable" } :: { Schema.ClassTag },
+        Storage = "UIObject",
+        Doc = "Anything that occupies a rectangle on screen (§2.2). Every property here is one the layout "
+            .. "solver or the 2D pass reads, which is what makes it the base rather than a convenience.\n\n"
+            .. "Coordinates are `UDim2`: a fraction of the parent plus a pixel offset, on each axis. That "
+            .. "pair is what lets one layout be correct at every resolution, and it is why the goldens this "
+            .. "milestone records are taken at two.",
+        Properties = {
+            {
+                Name = "Position",
+                Type = "UDim2",
+                Default = "UDim2.new()",
+                Doc = "Where this object's `AnchorPoint` sits inside its parent.",
+            },
+            {
+                Name = "Size",
+                Type = "UDim2",
+                Default = "UDim2.new()",
+                Doc = "How big it is, relative to its parent plus an offset. Overridden on an axis that "
+                    .. "`AutomaticSize` covers.",
+            },
+            {
+                Name = "AnchorPoint",
+                Type = "Vector2",
+                Default = "Vector2.zero",
+                Doc = "Which point of THIS object `Position` places, in fractions of its own size. (0,0) is "
+                    .. "its top-left corner and (0.5,0.5) its middle -- which is what makes centring "
+                    .. "something one property rather than an arithmetic apology.",
+            },
+            {
+                Name = "Rotation",
+                Type = "number",
+                Default = "0",
+                Doc = "Degrees clockwise about the anchor point. It rotates the DRAWING and not the layout: a "
+                    .. "rotated element still occupies its unrotated rectangle, which is what stops one "
+                    .. "spinning icon reflowing a list every frame.",
+            },
+            {
+                Name = "BackgroundColor",
+                Type = "Color3",
+                Default = "Color3.new(1, 1, 1)",
+                Doc = "The fill behind the object's own content. No `3` suffix (§2.5, divergence #11).",
+            },
+            {
+                Name = "BackgroundTransparency",
+                Type = "number",
+                Default = "0",
+                Doc = "0 opaque, 1 invisible. A fully transparent background still lays out and still hit-tests "
+                    .. "-- `Visible` is the property that stops both.",
+            },
+            {
+                Name = "Visible",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether this object and its descendants are laid out, drawn and hit-tested. All three "
+                    .. "together: an invisible element that still swallowed clicks is the defect this "
+                    .. "sentence exists to rule out.",
+            },
+            {
+                Name = "ZIndex",
+                Type = "number",
+                Default = "0",
+                Doc = "Draw order within this ScreenGui, highest last, ties broken by document order. It does "
+                    .. "not affect layout and does not nest: one flat ordering across the tree, because a "
+                    .. "per-parent stacking context is the part of CSS nobody can hold in their head.",
+            },
+            {
+                Name = "LayoutOrder",
+                Type = "number",
+                Default = "0",
+                Doc = "Where this child sits in a `UIListLayout` whose `SortOrder` is `LayoutOrder`. Ignored "
+                    .. "otherwise.",
+            },
+            {
+                Name = "AutomaticSize",
+                Type = "Enum.AutomaticSize",
+                Default = "Enum.AutomaticSize.None",
+                Doc = "Which axes size themselves to fit the contents, overriding that half of `Size`.",
+            },
+            {
+                Name = "ClipsDescendants",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether descendants are clipped to this object's rectangle. What a scrolling list needs "
+                    .. "and what a drop shadow must not have.",
+            },
+            {
+                Name = "AbsolutePosition",
+                Type = "Vector2",
+                ReadOnly = true,
+                Transient = true,
+                Doc = "Where the solver put this object's top-left corner, in window pixels. Read-only "
+                    .. "because it is an OUTPUT: writing it would be arguing with the layout rather than "
+                    .. "changing it. Valid after the layout that produced it, which is the frame the "
+                    .. "property was read in.",
+            },
+            {
+                Name = "AbsoluteSize",
+                Type = "Vector2",
+                ReadOnly = true,
+                Transient = true,
+                Doc = "The size the solver gave it, in window pixels.",
+            },
+        } :: { Schema.Property },
+        Events = {
+            {
+                Name = "Activated",
+                Parameters = {},
+                Doc = "Fired when a pointer press and release both land on this object. Device-neutral by "
+                    .. "design (§2.5, divergence #17): a click, a tap and a bound gamepad button all produce "
+                    .. "it, which is why there is no `MouseButton1Click`.",
+            },
+            {
+                Name = "PointerEntered",
+                Parameters = {},
+                Doc = "Fired when the pointer moves onto this object. Replaces `MouseEnter`, and is named for "
+                    .. "a pointer rather than a mouse because a finger is one too.",
+            },
+            {
+                Name = "PointerExited",
+                Parameters = {},
+                Doc = "Fired when the pointer moves off it.",
+            },
+        } :: { Schema.Event },
+    },
+    {
+        Name = "Frame",
+        Extends = "UIObject",
+        Module = "ui",
+        Doc = "A rectangle and nothing else: a background, a border of children, and the layout it imposes on "
+            .. "them. The element every UI is mostly made of.",
+    },
+    {
+        Name = "TextLabel",
+        Extends = "UIObject",
+        Module = "ui",
+        Storage = "TextLabel",
+        Doc = "Text in a box (§2.2). No RichText in v1, and no complex-script shaping -- codepoints are laid "
+            .. "out left to right with kerning, which ADR 0011 records as a flagged i18n gap with a HarfBuzz "
+            .. "seam behind it.",
+        Properties = {
+            {
+                Name = "Text",
+                Type = "string",
+                Default = '""',
+                Doc = "What it says. UTF-8, and a codepoint the font has no glyph for draws the font's "
+                    .. "`.notdef` box rather than nothing: a label that silently drops characters is the "
+                    .. "failure mode that ships.",
+            },
+            {
+                Name = "TextColor",
+                Type = "Color3",
+                Default = "Color3.new(0, 0, 0)",
+                Doc = "No `3` suffix (§2.5, divergence #11).",
+            },
+            {
+                Name = "TextSize",
+                Type = "number",
+                Default = "14",
+                Doc = "The em size in pixels. An atlas is rasterized per font and integer size, so a "
+                    .. "fractional one is rounded for rasterization and the layout still uses what was asked "
+                    .. "for.",
+            },
+            {
+                Name = "Font",
+                Type = "Content",
+                Default = '""',
+                Inert = true,
+                Doc = "The typeface, as an `asset://` URI to a TrueType file. **Stored and not yet read** "
+                    .. "(M7): a TrueType face needs a FILE, and which font this engine ships is a licence "
+                    .. "decision a human makes (R6), so v1 draws every label in the built-in vector face. "
+                    .. "Empty already means that face, so the default behaviour is the only behaviour until "
+                    .. "the asset pipeline can hand a font over. ADR 0040 and `engine/ui/src/text.cpp` have "
+                    .. "the reasoning.",
+            },
+            {
+                Name = "HorizontalAlignment",
+                Type = "Enum.HorizontalAlignment",
+                Default = "Enum.HorizontalAlignment.Center",
+                Doc = "Where the text sits across the box. One alignment vocabulary shared with the layouts "
+                    .. "(§2.5, divergence #23).",
+            },
+            {
+                Name = "VerticalAlignment",
+                Type = "Enum.VerticalAlignment",
+                Default = "Enum.VerticalAlignment.Center",
+                Doc = "Where it sits down the box.",
+            },
+            {
+                Name = "TextWrapped",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether lines break at the box's width. Breaks at spaces, and mid-word only for a word "
+                    .. "wider than the box -- a word cut in half at a random letter is worse than one that "
+                    .. "overhangs.",
+            },
+            {
+                Name = "TextScaled",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether `TextSize` is ignored and the text is rasterized at whatever size fills the "
+                    .. "box. Re-rasterized rather than scaled: there is no distance field in v1, and a "
+                    .. 'stretched bitmap is what "scaled text" usually means and looks like.',
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "TextButton",
+        Extends = "TextLabel",
+        Module = "ui",
+        Doc = "A `TextLabel` that is meant to be pressed. It adds no property: `Activated`, `PointerEntered` "
+            .. "and `PointerExited` are on `UIObject` because anything can be pressed, and what makes this a "
+            .. "button is that it is the class a reader recognizes as one.",
+    },
+    {
+        Name = "TextInput",
+        Extends = "TextLabel",
+        Module = "ui",
+        Storage = "TextInput",
+        Doc = "A single-line editable field (§2.2). Typed text, backspace and a caret; no selection, no "
+            .. "clipboard, no undo and no IME composition beyond what the platform delivers as text.",
+        Properties = {
+            {
+                Name = "PlaceholderText",
+                Type = "string",
+                Default = '""',
+                Doc = "Drawn in place of `Text` while it is empty and the field is unfocused.",
+            },
+        } :: { Schema.Property },
+        Events = {
+            {
+                Name = "Focused",
+                Parameters = {},
+                Doc = "Fired when this field starts receiving keystrokes. Focus is taken by a press and "
+                    .. "released by a press elsewhere; there is deliberately no settable `Focused` property "
+                    .. "beside this, because two fields could then both believe they had it.",
+            },
+            {
+                Name = "FocusLost",
+                Parameters = { { Name = "submitted", Type = "boolean" } },
+                Doc = "Fired when it stops. `submitted` is true when the field was left by pressing Return "
+                    .. 'rather than by clicking away -- the difference between "the player finished" and '
+                    .. '"the player went somewhere else".',
+            },
+        } :: { Schema.Event },
+    },
+    {
+        Name = "ImageLabel",
+        Extends = "UIObject",
+        Module = "ui",
+        Storage = "ImageLabel",
+        Doc = "A picture in a box (§2.2).",
+        Properties = {
+            {
+                Name = "Image",
+                Type = "Content",
+                Default = '""',
+                Inert = true,
+                Doc = "The picture, as an `asset://` URI. **Stored and not yet read** (M7): the asset "
+                    .. "pipeline cannot hand a texture to the 2D pass until it can stream one, so a named "
+                    .. "image draws as a flat `ImageColor` rectangle. Empty draws nothing but still fills the "
+                    .. "background.",
+            },
+            {
+                Name = "ImageColor",
+                Type = "Color3",
+                Default = "Color3.new(1, 1, 1)",
+                Doc = "Multiplied into the image, so one white glyph sheet can be drawn in any colour. White "
+                    .. "leaves it alone.",
+            },
+            {
+                Name = "ScaleType",
+                Type = "Enum.ScaleType",
+                Default = "Enum.ScaleType.Stretch",
+                Doc = "How the picture fits the box.",
+            },
+            {
+                Name = "SliceCenter",
+                Type = "Rect",
+                Default = "Rect.new(Vector2.zero, Vector2.zero)",
+                Doc = "For `ScaleType.Slice`, where the nine-slice cuts are, in SOURCE pixels. An inverted or "
+                    .. "empty rectangle is kept as given rather than corrected: a slice quietly fixed up is a "
+                    .. "panel that draws wrong with no way to find out why.",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "ImageButton",
+        Extends = "ImageLabel",
+        Module = "ui",
+        Doc = "An `ImageLabel` that is meant to be pressed, and the same argument `TextButton` carries: it "
+            .. "adds nothing, and it is the class a reader recognizes.",
+    },
+    {
+        Name = "ScrollFrame",
+        Extends = "UIObject",
+        Module = "ui",
+        Storage = "ScrollFrame",
+        Doc = "A `Frame` whose contents can be larger than it is (§2.2). It clips its descendants whatever "
+            .. "`ClipsDescendants` says -- a scrolling region that did not clip would not be one.",
+        Properties = {
+            {
+                Name = "CanvasSize",
+                Type = "UDim2",
+                Default = "UDim2.new()",
+                Doc = "How big the scrollable area is. Children lay out against this rather than against the "
+                    .. "frame's own size.",
+            },
+            {
+                Name = "CanvasPosition",
+                Type = "Vector2",
+                Default = "Vector2.zero",
+                Doc = "How far the canvas is scrolled, in pixels. Clamped to what the canvas allows on the "
+                    .. "next layout, so a write past the end settles at the end rather than showing "
+                    .. "emptiness.",
+            },
+            {
+                Name = "ScrollBarThickness",
+                Type = "number",
+                Default = "12",
+                Doc = "In pixels; zero draws no bar and still scrolls, which is what a touch surface wants.",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "UIListLayout",
+        Extends = "Instance",
+        Module = "ui",
+        Storage = "UIListLayout",
+        Doc = "Stacks its parent's `UIObject` children in a line (§2.2). A modifier rather than a container: "
+            .. "it is parented BESIDE the things it arranges, so adding one to a Frame does not reparent "
+            .. "anything.\n\nA child laid out by one keeps its `Size` and loses its `Position` -- the layout "
+            .. "decides where each one goes, which is what a layout is.",
+        Properties = {
+            {
+                Name = "FillDirection",
+                Type = "Enum.FillDirection",
+                Default = "Enum.FillDirection.Vertical",
+                Doc = "Which way the line runs.",
+            },
+            {
+                Name = "Padding",
+                Type = "UDim",
+                Default = "UDim.new()",
+                Doc = "The gap BETWEEN children, not around them -- `UIPadding` is what puts space around the "
+                    .. "outside. Scale is a fraction of the parent along the fill direction.",
+            },
+            {
+                Name = "HorizontalAlignment",
+                Type = "Enum.HorizontalAlignment",
+                Default = "Enum.HorizontalAlignment.Left",
+                Doc = "Where the line sits across the parent.",
+            },
+            {
+                Name = "VerticalAlignment",
+                Type = "Enum.VerticalAlignment",
+                Default = "Enum.VerticalAlignment.Top",
+                Doc = "Where it sits down the parent.",
+            },
+            {
+                Name = "SortOrder",
+                Type = "Enum.SortOrder",
+                Default = "Enum.SortOrder.LayoutOrder",
+                Doc = "What order the children go in.",
+            },
+            {
+                Name = "Wraps",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether the line breaks into a second one when it runs out of room, rather than "
+                    .. "overflowing.",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "UIPadding",
+        Extends = "Instance",
+        Module = "ui",
+        Storage = "UIPadding",
+        Doc = "Insets its parent's content on each side (§2.2). Like `UIListLayout`, a modifier parented "
+            .. "beside what it affects.",
+        Properties = {
+            {
+                Name = "PaddingTop",
+                Type = "UDim",
+                Default = "UDim.new()",
+                Doc = "Scale is a fraction of the parent's own height.",
+            },
+            {
+                Name = "PaddingBottom",
+                Type = "UDim",
+                Default = "UDim.new()",
+                Doc = "Scale is a fraction of the parent's own height.",
+            },
+            {
+                Name = "PaddingLeft",
+                Type = "UDim",
+                Default = "UDim.new()",
+                Doc = "Scale is a fraction of the parent's own width.",
+            },
+            {
+                Name = "PaddingRight",
+                Type = "UDim",
+                Default = "UDim.new()",
+                Doc = "Scale is a fraction of the parent's own width.",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "UICorner",
+        Extends = "Instance",
+        Module = "ui",
+        Storage = "UICorner",
+        Doc = "Rounds its parent's corners (§2.2). It changes the DRAWING and not the layout or the hit test: "
+            .. "a rounded button is still a rectangle to the solver and to the pointer, which is what keeps "
+            .. "a corner radius from being a geometry problem.",
+        Properties = {
+            {
+                Name = "CornerRadius",
+                Type = "UDim",
+                Default = "UDim.new(0, 8)",
+                Doc = "Scale is a fraction of the parent's SHORTER side, so a pill shape is "
+                    .. "`UDim.new(0.5, 0)` whatever the box's proportions.",
+            },
+        } :: { Schema.Property },
+    },
 }
 
 local Definition: Schema.Definition = {

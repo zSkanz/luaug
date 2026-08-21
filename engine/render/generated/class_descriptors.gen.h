@@ -54,6 +54,12 @@ inline constexpr scene::EnumId InputRateEnumId = 11;
 inline constexpr scene::EnumId EasingStyleEnumId = 12;
 inline constexpr scene::EnumId EasingDirectionEnumId = 13;
 inline constexpr scene::EnumId PlaybackStateEnumId = 14;
+inline constexpr scene::EnumId FillDirectionEnumId = 15;
+inline constexpr scene::EnumId HorizontalAlignmentEnumId = 16;
+inline constexpr scene::EnumId VerticalAlignmentEnumId = 17;
+inline constexpr scene::EnumId SortOrderEnumId = 18;
+inline constexpr scene::EnumId AutomaticSizeEnumId = 19;
+inline constexpr scene::EnumId ScaleTypeEnumId = 20;
 
 } // namespace generated
 

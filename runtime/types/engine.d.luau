@@ -69,6 +69,24 @@ end
 declare extern type EnumPlaybackState extends EnumItem with
 end
 
+declare extern type EnumFillDirection extends EnumItem with
+end
+
+declare extern type EnumHorizontalAlignment extends EnumItem with
+end
+
+declare extern type EnumVerticalAlignment extends EnumItem with
+end
+
+declare extern type EnumSortOrder extends EnumItem with
+end
+
+declare extern type EnumAutomaticSize extends EnumItem with
+end
+
+declare extern type EnumScaleType extends EnumItem with
+end
+
 declare extern type Vector3 with
     --- The X component. Lowercase because it is a field of the VM primitive itself, like a string's
     --- length, and not a member of a type this project defines -- the one documented exception to the
@@ -727,6 +745,180 @@ declare extern type InputBinding extends Instance with
     read DeviceType: EnumInputDeviceType
 end
 
+declare extern type ScreenGui extends Instance with
+    --- Whether this tree is laid out and drawn at all. A disabled ScreenGui costs one boolean read per
+    --- frame; it does not cost a layout.
+    Enabled: boolean
+    --- Which ScreenGui draws on top when two overlap, highest last. `ZIndex` orders WITHIN a tree and
+    --- this orders BETWEEN trees, so a HUD and a modal never have to agree on a shared numbering.
+    DisplayOrder: number
+    --- Whether this tree lays out inside `UIService.SafeAreaInsets` rather than against the whole
+    --- window. On by default: a full-bleed background is the exception and a HUD clipped by a notch is
+    --- the failure.
+    ScreenInsets: boolean
+end
+
+declare extern type UIObject extends Instance with
+    --- Where this object's `AnchorPoint` sits inside its parent.
+    Position: UDim2
+    --- How big it is, relative to its parent plus an offset. Overridden on an axis that `AutomaticSize`
+    --- covers.
+    Size: UDim2
+    --- Which point of THIS object `Position` places, in fractions of its own size. (0,0) is its
+    --- top-left corner and (0.5,0.5) its middle -- which is what makes centring something one property
+    --- rather than an arithmetic apology.
+    AnchorPoint: Vector2
+    --- Degrees clockwise about the anchor point. It rotates the DRAWING and not the layout: a rotated
+    --- element still occupies its unrotated rectangle, which is what stops one spinning icon reflowing
+    --- a list every frame.
+    Rotation: number
+    --- The fill behind the object's own content. No `3` suffix (§2.5, divergence #11).
+    BackgroundColor: Color3
+    --- 0 opaque, 1 invisible. A fully transparent background still lays out and still hit-tests --
+    --- `Visible` is the property that stops both.
+    BackgroundTransparency: number
+    --- Whether this object and its descendants are laid out, drawn and hit-tested. All three together:
+    --- an invisible element that still swallowed clicks is the defect this sentence exists to rule out.
+    Visible: boolean
+    --- Draw order within this ScreenGui, highest last, ties broken by document order. It does not
+    --- affect layout and does not nest: one flat ordering across the tree, because a per-parent
+    --- stacking context is the part of CSS nobody can hold in their head.
+    ZIndex: number
+    --- Where this child sits in a `UIListLayout` whose `SortOrder` is `LayoutOrder`. Ignored otherwise.
+    LayoutOrder: number
+    --- Which axes size themselves to fit the contents, overriding that half of `Size`.
+    AutomaticSize: EnumAutomaticSize
+    --- Whether descendants are clipped to this object's rectangle. What a scrolling list needs and what
+    --- a drop shadow must not have.
+    ClipsDescendants: boolean
+    --- Where the solver put this object's top-left corner, in window pixels. Read-only because it is an
+    --- OUTPUT: writing it would be arguing with the layout rather than changing it. Valid after the
+    --- layout that produced it, which is the frame the property was read in.
+    read AbsolutePosition: Vector2
+    --- The size the solver gave it, in window pixels.
+    read AbsoluteSize: Vector2
+    --- Fired when a pointer press and release both land on this object. Device-neutral by design
+    --- (§2.5, divergence #17): a click, a tap and a bound gamepad button all produce it, which is why
+    --- there is no `MouseButton1Click`.
+    read Activated: Signal<()>
+    --- Fired when the pointer moves onto this object. Replaces `MouseEnter`, and is named for a pointer
+    --- rather than a mouse because a finger is one too.
+    read PointerEntered: Signal<()>
+    --- Fired when the pointer moves off it.
+    read PointerExited: Signal<()>
+end
+
+declare extern type Frame extends UIObject with
+end
+
+declare extern type TextLabel extends UIObject with
+    --- What it says. UTF-8, and a codepoint the font has no glyph for draws the font's `.notdef` box
+    --- rather than nothing: a label that silently drops characters is the failure mode that ships.
+    Text: string
+    --- No `3` suffix (§2.5, divergence #11).
+    TextColor: Color3
+    --- The em size in pixels. An atlas is rasterized per font and integer size, so a fractional one is
+    --- rounded for rasterization and the layout still uses what was asked for.
+    TextSize: number
+    --- The typeface, as an `asset://` URI to a TrueType file. **Stored and not yet read** (M7): a
+    --- TrueType face needs a FILE, and which font this engine ships is a licence decision a human makes
+    --- (R6), so v1 draws every label in the built-in vector face. Empty already means that face, so the
+    --- default behaviour is the only behaviour until the asset pipeline can hand a font over. ADR 0040
+    --- and `engine/ui/src/text.cpp` have the reasoning.
+    Font: Content
+    --- Where the text sits across the box. One alignment vocabulary shared with the layouts (§2.5,
+    --- divergence #23).
+    HorizontalAlignment: EnumHorizontalAlignment
+    --- Where it sits down the box.
+    VerticalAlignment: EnumVerticalAlignment
+    --- Whether lines break at the box's width. Breaks at spaces, and mid-word only for a word wider
+    --- than the box -- a word cut in half at a random letter is worse than one that overhangs.
+    TextWrapped: boolean
+    --- Whether `TextSize` is ignored and the text is rasterized at whatever size fills the box.
+    --- Re-rasterized rather than scaled: there is no distance field in v1, and a stretched bitmap is
+    --- what "scaled text" usually means and looks like.
+    TextScaled: boolean
+end
+
+declare extern type TextButton extends TextLabel with
+end
+
+declare extern type TextInput extends TextLabel with
+    --- Drawn in place of `Text` while it is empty and the field is unfocused.
+    PlaceholderText: string
+    --- Fired when this field starts receiving keystrokes. Focus is taken by a press and released by a
+    --- press elsewhere; there is deliberately no settable `Focused` property beside this, because two
+    --- fields could then both believe they had it.
+    read Focused: Signal<()>
+    --- Fired when it stops. `submitted` is true when the field was left by pressing Return rather than
+    --- by clicking away -- the difference between "the player finished" and "the player went somewhere
+    --- else".
+    read FocusLost: Signal<boolean>
+end
+
+declare extern type ImageLabel extends UIObject with
+    --- The picture, as an `asset://` URI. **Stored and not yet read** (M7): the asset pipeline cannot
+    --- hand a texture to the 2D pass until it can stream one, so a named image draws as a flat
+    --- `ImageColor` rectangle. Empty draws nothing but still fills the background.
+    Image: Content
+    --- Multiplied into the image, so one white glyph sheet can be drawn in any colour. White leaves it
+    --- alone.
+    ImageColor: Color3
+    --- How the picture fits the box.
+    ScaleType: EnumScaleType
+    --- For `ScaleType.Slice`, where the nine-slice cuts are, in SOURCE pixels. An inverted or empty
+    --- rectangle is kept as given rather than corrected: a slice quietly fixed up is a panel that draws
+    --- wrong with no way to find out why.
+    SliceCenter: Rect
+end
+
+declare extern type ImageButton extends ImageLabel with
+end
+
+declare extern type ScrollFrame extends UIObject with
+    --- How big the scrollable area is. Children lay out against this rather than against the frame's
+    --- own size.
+    CanvasSize: UDim2
+    --- How far the canvas is scrolled, in pixels. Clamped to what the canvas allows on the next layout,
+    --- so a write past the end settles at the end rather than showing emptiness.
+    CanvasPosition: Vector2
+    --- In pixels; zero draws no bar and still scrolls, which is what a touch surface wants.
+    ScrollBarThickness: number
+end
+
+declare extern type UIListLayout extends Instance with
+    --- Which way the line runs.
+    FillDirection: EnumFillDirection
+    --- The gap BETWEEN children, not around them -- `UIPadding` is what puts space around the outside.
+    --- Scale is a fraction of the parent along the fill direction.
+    Padding: UDim
+    --- Where the line sits across the parent.
+    HorizontalAlignment: EnumHorizontalAlignment
+    --- Where it sits down the parent.
+    VerticalAlignment: EnumVerticalAlignment
+    --- What order the children go in.
+    SortOrder: EnumSortOrder
+    --- Whether the line breaks into a second one when it runs out of room, rather than overflowing.
+    Wraps: boolean
+end
+
+declare extern type UIPadding extends Instance with
+    --- Scale is a fraction of the parent's own height.
+    PaddingTop: UDim
+    --- Scale is a fraction of the parent's own height.
+    PaddingBottom: UDim
+    --- Scale is a fraction of the parent's own width.
+    PaddingLeft: UDim
+    --- Scale is a fraction of the parent's own width.
+    PaddingRight: UDim
+end
+
+declare extern type UICorner extends Instance with
+    --- Scale is a fraction of the parent's SHORTER side, so a pill shape is `UDim.new(0.5, 0)` whatever
+    --- the box's proportions.
+    CornerRadius: UDim
+end
+
 declare extern type DataModel extends Instance with
     --- The version of the engine runtime executing this VM, as `luaug.toml` pins it. Read-only: the
     --- runtime is chosen before the VM exists, so nothing a script does can change it.
@@ -749,6 +941,7 @@ declare extern type DataModel extends Instance with
     function GetService(self, name: "PhysicsService"): PhysicsService
     function GetService(self, name: "InputService"): InputService
     function GetService(self, name: "TweenService"): TweenService
+    function GetService(self, name: "UIService"): UIService
     --- Returns the service of this name, creating it on the first request. Services are singletons:
     --- every later call returns the same instance, and it is an ordinary child of `game` once created.
     --- A string literal gives an exactly typed result; a name computed at runtime gives the general
@@ -1002,6 +1195,17 @@ declare extern type TweenService extends Instance with
     function GetValue(self, alpha: number, easingStyle: EnumEasingStyle, easingDirection: EnumEasingDirection): number
 end
 
+declare extern type UIService extends Instance with
+    --- How far in from each window edge it is safe to draw, in pixels -- what a notch, a rounded corner
+    --- or a system gesture bar takes away. Zero on a desktop window, which is why a HUD that ignores it
+    --- looks fine until it does not.
+    read SafeAreaInsets: Rect
+    --- The window's pixel density relative to its logical size: 2 on a doubled display. UI coordinates
+    --- are in PIXELS, so this is what a game multiplies by when it wants a measurement to mean the same
+    --- physical size on two screens.
+    read DisplayScale: number
+end
+
 declare Enum: {
     PartShape: {
         Block: EnumPartShape,
@@ -1195,6 +1399,41 @@ declare Enum: {
         Cancelled: EnumPlaybackState,
         GetEnumItems: (self: any) -> { EnumPlaybackState },
     },
+    FillDirection: {
+        Horizontal: EnumFillDirection,
+        Vertical: EnumFillDirection,
+        GetEnumItems: (self: any) -> { EnumFillDirection },
+    },
+    HorizontalAlignment: {
+        Left: EnumHorizontalAlignment,
+        Center: EnumHorizontalAlignment,
+        Right: EnumHorizontalAlignment,
+        GetEnumItems: (self: any) -> { EnumHorizontalAlignment },
+    },
+    VerticalAlignment: {
+        Top: EnumVerticalAlignment,
+        Center: EnumVerticalAlignment,
+        Bottom: EnumVerticalAlignment,
+        GetEnumItems: (self: any) -> { EnumVerticalAlignment },
+    },
+    SortOrder: {
+        Name: EnumSortOrder,
+        LayoutOrder: EnumSortOrder,
+        GetEnumItems: (self: any) -> { EnumSortOrder },
+    },
+    AutomaticSize: {
+        None: EnumAutomaticSize,
+        X: EnumAutomaticSize,
+        Y: EnumAutomaticSize,
+        XY: EnumAutomaticSize,
+        GetEnumItems: (self: any) -> { EnumAutomaticSize },
+    },
+    ScaleType: {
+        Stretch: EnumScaleType,
+        Slice: EnumScaleType,
+        Tile: EnumScaleType,
+        GetEnumItems: (self: any) -> { EnumScaleType },
+    },
 }
 
 declare Vector3: {
@@ -1293,7 +1532,18 @@ declare Instance: {
         & (("SpotLight") -> SpotLight)
         & (("InputContext") -> InputContext)
         & (("InputAction") -> InputAction)
-        & (("InputBinding") -> InputBinding),
+        & (("InputBinding") -> InputBinding)
+        & (("ScreenGui") -> ScreenGui)
+        & (("Frame") -> Frame)
+        & (("TextLabel") -> TextLabel)
+        & (("TextButton") -> TextButton)
+        & (("TextInput") -> TextInput)
+        & (("ImageLabel") -> ImageLabel)
+        & (("ImageButton") -> ImageButton)
+        & (("ScrollFrame") -> ScrollFrame)
+        & (("UIListLayout") -> UIListLayout)
+        & (("UIPadding") -> UIPadding)
+        & (("UICorner") -> UICorner),
 }
 
 declare game: DataModel

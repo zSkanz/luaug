@@ -357,9 +357,12 @@ namespace luaug::input {
 **ui** (deps: core, scene, input, render, asset) — Roblox-style GUI instances
 (`ScreenGui`, `Frame`, `TextLabel`, `TextButton`, `TextInput`, `ImageLabel`,
 `ImageButton`, `ScrollFrame`, layout modifiers — the api-design v1 set) with
-familiar `UDim2`/anchor properties; **Clay is the internal layout solver**
-(UDim2 + list layouts + AutomaticSize compile to Clay configs; Clay is never
-exposed). Text: stb_truetype atlas, kerning only in v1 (complex-script shaping
+familiar `UDim2`/anchor properties; **the layout is computed directly** -- two
+passes over each dirty `ScreenGui`, bottom-up for `AutomaticSize` and top-down
+for every absolute rectangle. It was to have compiled to Clay; ADR 0040 records
+why it does not, and the short version is that a `UDim2` placement is arithmetic
+rather than a constraint, and that Clay cannot express an unclamped scale or a
+fractional anchor point. Text: stb_truetype atlas, kerning only in v1 (complex-script shaping
 is a flagged i18n gap; HarfBuzz seam post-v1). Produces a 2D draw list
 consumed by render's ui2d pass; hit-testing routes through an engine-owned
 high-priority `InputContext` with Sink.

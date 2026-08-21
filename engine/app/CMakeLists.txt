@@ -29,6 +29,7 @@ luaug_add_module(app
         render
         scene
         script
+        ui
     PUBLIC_DEPS
         luaug::luau
         luaug::build_info

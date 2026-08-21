@@ -268,11 +268,16 @@ local EventPrefixes = { "Pre", "Post" }
 local ServiceNameExceptions = { Workspace = true, Lighting = true }
 
 --- Events whose names are neither past-tense facts nor `Pre*`/`Post*` phases.
---- Both are frozen public surface in §2.1, so the rule grows a named exception
---- rather than the names growing a suffix -- which is the same trade the
---- service list above makes. A new name landing here is a decision someone has
---- to make in this file, which is the point.
-local EventNameExceptions = { Heartbeat = true, MessageOut = true }
+--- All three are frozen public surface in §2.1 and §2.2, so the rule grows a
+--- named exception rather than the names growing a suffix -- which is the same
+--- trade the service list above makes. A new name landing here is a decision
+--- someone has to make in this file, which is the point.
+---
+--- `FocusLost` is M6's, and it is the one that reads worst: "lost" is past
+--- tense in English and not in this pattern's grammar. It stays because §2.2
+--- names it, and because `FocusEnded` beside `Focused` would be two words for
+--- one pair of facts.
+local EventNameExceptions = { Heartbeat = true, MessageOut = true, FocusLost = true }
 
 local function isPascalCase(name: string): boolean
     return string.match(name, PascalCase) ~= nil

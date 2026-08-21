@@ -415,6 +415,14 @@
       "Events": []
     },
     {
+      "Name": "Frame",
+      "Extends": "UIObject",
+      "Tags": [],
+      "Properties": [],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "HotReloadService",
       "Extends": "Instance",
       "Tags": ["DevOnly", "NotCreatable", "Service"],
@@ -463,6 +471,44 @@
           "Parameters": []
         }
       ]
+    },
+    {
+      "Name": "ImageButton",
+      "Extends": "ImageLabel",
+      "Tags": [],
+      "Properties": [],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "ImageLabel",
+      "Extends": "UIObject",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Image",
+          "Type": "Content",
+          "Default": "\"\"",
+          "Inert": true
+        },
+        {
+          "Name": "ImageColor",
+          "Type": "Color3",
+          "Default": "Color3.new(1, 1, 1)"
+        },
+        {
+          "Name": "ScaleType",
+          "Type": "Enum.ScaleType",
+          "Default": "Enum.ScaleType.Stretch"
+        },
+        {
+          "Name": "SliceCenter",
+          "Type": "Rect",
+          "Default": "Rect.new(Vector2.zero, Vector2.zero)"
+        }
+      ],
+      "Methods": [],
+      "Events": []
     },
     {
       "Name": "InputAction",
@@ -1210,6 +1256,30 @@
       ]
     },
     {
+      "Name": "ScreenGui",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "DisplayOrder",
+          "Type": "number",
+          "Default": "0"
+        },
+        {
+          "Name": "Enabled",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
+          "Name": "ScreenInsets",
+          "Type": "boolean",
+          "Default": "true"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "Script",
       "Extends": "Instance",
       "Tags": ["NotCreatable"],
@@ -1228,6 +1298,30 @@
       "Extends": "Instance",
       "Tags": ["NotCreatable", "Service"],
       "Properties": [],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "ScrollFrame",
+      "Extends": "UIObject",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "CanvasPosition",
+          "Type": "Vector2",
+          "Default": "Vector2.zero"
+        },
+        {
+          "Name": "CanvasSize",
+          "Type": "UDim2",
+          "Default": "UDim2.new()"
+        },
+        {
+          "Name": "ScrollBarThickness",
+          "Type": "number",
+          "Default": "12"
+        }
+      ],
       "Methods": [],
       "Events": []
     },
@@ -1310,6 +1404,92 @@
       "Events": []
     },
     {
+      "Name": "TextButton",
+      "Extends": "TextLabel",
+      "Tags": [],
+      "Properties": [],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "TextInput",
+      "Extends": "TextLabel",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "PlaceholderText",
+          "Type": "string",
+          "Default": "\"\""
+        }
+      ],
+      "Methods": [],
+      "Events": [
+        {
+          "Name": "FocusLost",
+          "Parameters": [
+            {
+              "Name": "submitted",
+              "Type": "boolean"
+            }
+          ]
+        },
+        {
+          "Name": "Focused",
+          "Parameters": []
+        }
+      ]
+    },
+    {
+      "Name": "TextLabel",
+      "Extends": "UIObject",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Font",
+          "Type": "Content",
+          "Default": "\"\"",
+          "Inert": true
+        },
+        {
+          "Name": "HorizontalAlignment",
+          "Type": "Enum.HorizontalAlignment",
+          "Default": "Enum.HorizontalAlignment.Center"
+        },
+        {
+          "Name": "Text",
+          "Type": "string",
+          "Default": "\"\""
+        },
+        {
+          "Name": "TextColor",
+          "Type": "Color3",
+          "Default": "Color3.new(0, 0, 0)"
+        },
+        {
+          "Name": "TextScaled",
+          "Type": "boolean",
+          "Default": "false"
+        },
+        {
+          "Name": "TextSize",
+          "Type": "number",
+          "Default": "14"
+        },
+        {
+          "Name": "TextWrapped",
+          "Type": "boolean",
+          "Default": "false"
+        },
+        {
+          "Name": "VerticalAlignment",
+          "Type": "Enum.VerticalAlignment",
+          "Default": "Enum.VerticalAlignment.Center"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "TweenService",
       "Extends": "Instance",
       "Tags": ["NotCreatable", "Service"],
@@ -1354,6 +1534,198 @@
           "ThreadSafety": "Safe"
         }
       ],
+      "Events": []
+    },
+    {
+      "Name": "UICorner",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "CornerRadius",
+          "Type": "UDim",
+          "Default": "UDim.new(0, 8)"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "UIListLayout",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "FillDirection",
+          "Type": "Enum.FillDirection",
+          "Default": "Enum.FillDirection.Vertical"
+        },
+        {
+          "Name": "HorizontalAlignment",
+          "Type": "Enum.HorizontalAlignment",
+          "Default": "Enum.HorizontalAlignment.Left"
+        },
+        {
+          "Name": "Padding",
+          "Type": "UDim",
+          "Default": "UDim.new()"
+        },
+        {
+          "Name": "SortOrder",
+          "Type": "Enum.SortOrder",
+          "Default": "Enum.SortOrder.LayoutOrder"
+        },
+        {
+          "Name": "VerticalAlignment",
+          "Type": "Enum.VerticalAlignment",
+          "Default": "Enum.VerticalAlignment.Top"
+        },
+        {
+          "Name": "Wraps",
+          "Type": "boolean",
+          "Default": "false"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "UIObject",
+      "Extends": "Instance",
+      "Tags": ["Abstract", "NotCreatable"],
+      "Properties": [
+        {
+          "Name": "AbsolutePosition",
+          "Type": "Vector2",
+          "ReadOnly": true,
+          "Transient": true
+        },
+        {
+          "Name": "AbsoluteSize",
+          "Type": "Vector2",
+          "ReadOnly": true,
+          "Transient": true
+        },
+        {
+          "Name": "AnchorPoint",
+          "Type": "Vector2",
+          "Default": "Vector2.zero"
+        },
+        {
+          "Name": "AutomaticSize",
+          "Type": "Enum.AutomaticSize",
+          "Default": "Enum.AutomaticSize.None"
+        },
+        {
+          "Name": "BackgroundColor",
+          "Type": "Color3",
+          "Default": "Color3.new(1, 1, 1)"
+        },
+        {
+          "Name": "BackgroundTransparency",
+          "Type": "number",
+          "Default": "0"
+        },
+        {
+          "Name": "ClipsDescendants",
+          "Type": "boolean",
+          "Default": "false"
+        },
+        {
+          "Name": "LayoutOrder",
+          "Type": "number",
+          "Default": "0"
+        },
+        {
+          "Name": "Position",
+          "Type": "UDim2",
+          "Default": "UDim2.new()"
+        },
+        {
+          "Name": "Rotation",
+          "Type": "number",
+          "Default": "0"
+        },
+        {
+          "Name": "Size",
+          "Type": "UDim2",
+          "Default": "UDim2.new()"
+        },
+        {
+          "Name": "Visible",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
+          "Name": "ZIndex",
+          "Type": "number",
+          "Default": "0"
+        }
+      ],
+      "Methods": [],
+      "Events": [
+        {
+          "Name": "Activated",
+          "Parameters": []
+        },
+        {
+          "Name": "PointerEntered",
+          "Parameters": []
+        },
+        {
+          "Name": "PointerExited",
+          "Parameters": []
+        }
+      ]
+    },
+    {
+      "Name": "UIPadding",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "PaddingBottom",
+          "Type": "UDim",
+          "Default": "UDim.new()"
+        },
+        {
+          "Name": "PaddingLeft",
+          "Type": "UDim",
+          "Default": "UDim.new()"
+        },
+        {
+          "Name": "PaddingRight",
+          "Type": "UDim",
+          "Default": "UDim.new()"
+        },
+        {
+          "Name": "PaddingTop",
+          "Type": "UDim",
+          "Default": "UDim.new()"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "UIService",
+      "Extends": "Instance",
+      "Tags": ["NotCreatable", "Service"],
+      "Properties": [
+        {
+          "Name": "DisplayScale",
+          "Type": "number",
+          "ReadOnly": true,
+          "Transient": true
+        },
+        {
+          "Name": "SafeAreaInsets",
+          "Type": "Rect",
+          "ReadOnly": true,
+          "Transient": true
+        }
+      ],
+      "Methods": [],
       "Events": []
     },
     {
@@ -3100,6 +3472,27 @@
   ],
   "Enums": [
     {
+      "Name": "AutomaticSize",
+      "Items": [
+        {
+          "Name": "None",
+          "Value": 0
+        },
+        {
+          "Name": "X",
+          "Value": 1
+        },
+        {
+          "Name": "XY",
+          "Value": 3
+        },
+        {
+          "Name": "Y",
+          "Value": 2
+        }
+      ]
+    },
+    {
       "Name": "CharacterState",
       "Items": [
         {
@@ -3196,6 +3589,36 @@
         {
           "Name": "Sine",
           "Value": 1
+        }
+      ]
+    },
+    {
+      "Name": "FillDirection",
+      "Items": [
+        {
+          "Name": "Horizontal",
+          "Value": 0
+        },
+        {
+          "Name": "Vertical",
+          "Value": 1
+        }
+      ]
+    },
+    {
+      "Name": "HorizontalAlignment",
+      "Items": [
+        {
+          "Name": "Center",
+          "Value": 1
+        },
+        {
+          "Name": "Left",
+          "Value": 0
+        },
+        {
+          "Name": "Right",
+          "Value": 2
         }
       ]
     },
@@ -3766,6 +4189,53 @@
         {
           "Name": "Server",
           "Value": 1
+        }
+      ]
+    },
+    {
+      "Name": "ScaleType",
+      "Items": [
+        {
+          "Name": "Slice",
+          "Value": 1
+        },
+        {
+          "Name": "Stretch",
+          "Value": 0
+        },
+        {
+          "Name": "Tile",
+          "Value": 2
+        }
+      ]
+    },
+    {
+      "Name": "SortOrder",
+      "Items": [
+        {
+          "Name": "LayoutOrder",
+          "Value": 1
+        },
+        {
+          "Name": "Name",
+          "Value": 0
+        }
+      ]
+    },
+    {
+      "Name": "VerticalAlignment",
+      "Items": [
+        {
+          "Name": "Bottom",
+          "Value": 2
+        },
+        {
+          "Name": "Center",
+          "Value": 1
+        },
+        {
+          "Name": "Top",
+          "Value": 0
         }
       ]
     }
