@@ -709,6 +709,28 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   same decision from the other side: `stb_easy_font` is ASCII, and a game in
   Portuguese already needs á ç ã õ, so the cache is sized and the
   missing-glyph behaviour is chosen here rather than discovered by a player.
+- **D031 — D027's fix is never reached, because the platform is a static body**
+  (human, 2026-08-21, confirmed by playing a build newer than the fix).
+  `physics_sync.cpp:122` picks `Kinematic` only for a part an active `Weld`
+  drives, so an `Anchored` part a *tween* moves is `Static` — and Jolt neither
+  moves a static body nor derives velocity from one, so `MoveKinematic` is handed
+  a target and nothing happens. The example already states the intent the
+  classification does not implement.
+
+  **The human chose the narrow fix**: an anchored part becomes `Kinematic` when
+  its `CFrame` is written and returns to `Static` after N ticks without a write.
+  The wide one — `Anchored` meaning kinematic always — was rejected on cost:
+  `jolt_physics.cpp:89` splits the broadphase into `NonMoving` and `Moving`, and
+  the static layer exists precisely so that it is never re-fitted. Making every
+  floor and wall kinematic would put a world of never-moving bodies into the
+  layer that is updated every tick. Moving only what is written moves exactly the
+  count that has to be moving anyway.
+
+  Two things to settle rather than discover: **hysteresis**, since a part written
+  every other tick would otherwise oscillate between broadphase layers; and the
+  **transition cost**, which is measured rather than estimated — a row in
+  `perf-baselines.md` with N platforms transitioning, beside the physics numbers.
+
 - **D027 — a character does not ride a moving platform** (human, 2026-08-21,
   found by playing `examples/04-obby`). Scheduled here because this is where it
   was found and where the deliverable that shows it ships; the seam it belongs to
