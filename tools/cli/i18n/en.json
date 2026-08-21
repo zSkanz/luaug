@@ -1,11 +1,17 @@
 {
   "$comment": "CLI catalog — English (the only launch locale, ADR 0019). Separate from the engine's i18n/en.json because the CLI and the engine ship and translate separately (api-design.md §6). Keys are cli.*. tools/repo/i18nlint.luau checks that every key the CLI names exists here, and that no user-facing string is written at a call site (rule R3).",
 
-  "cli.usage": "Usage: luaug <command> [options]\n\n  dev [path]       run the project with a watcher attached; a saved file rebuilds the world\n  test [path]      run the conformance suite on the headless engine\n  check [path]     luau-analyze, StyLua and the i18n lint\n  fmt [path]       format every Luau file with StyLua\n  new <name>       scaffold a project from the starter template\n\n  --help           this text\n  --version        the CLI and engine versions",
+  "cli.usage": "Usage: luaug <command> [options]\n\n  dev [path]       run the project with a watcher attached; a saved file rebuilds the world\n  test [path]      run the conformance suite on the headless engine\n  check [path]     luau-analyze, StyLua and the i18n lint\n  fmt [path]       format every Luau file with StyLua\n  build-assets     compile the content directory into a pack and a manifest\n  new <name>       scaffold a project from the starter template\n\n  --help           this text\n  --version        the CLI and engine versions",
   "cli.err.unknown_command": "Unknown command \"{command}\". Run luaug --help for the list.",
   "cli.err.no_command": "No command given. Run luaug --help for the list.",
   "cli.err.unknown_option": "Unknown option \"{option}\" for luaug {command}.",
   "cli.err.no_engine": "Could not find luaug-host. Build the engine, or set LUAUG_HOST to its path.",
+  "cli.assets.err.no_content": "There is no content directory at {path}.",
+  "cli.assets.err.no_compiler": "The asset compiler (assetc) was not found. Build it, or set LUAUG_ASSETC.",
+  "cli.assets.err.failed": "The asset build failed; nothing was written.",
+  "cli.assets.err.not_deterministic": "Two builds of the same content produced different bytes. That is a defect in the pipeline, not in the content.",
+  "cli.assets.deterministic": "Verified: two builds of this content are byte-identical.",
+  "cli.assets.done": "Wrote {pack} and {manifest}.",
   "cli.err.not_a_project": "{path} is not a LuauG project: no luaug.toml and no src/scripts.",
   "cli.err.no_version": "Could not read the LuauG version from {path}. luaug runs from the engine source tree; this one has no project() declaration to read.",
   "cli.err.no_lute_version": "{path} did not report a version, so the Lute half of --version has nothing to show.",

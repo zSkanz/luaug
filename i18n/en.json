@@ -105,6 +105,10 @@
   "asset.mesh.err.empty": "A mesh with no vertices or no indices cannot be compiled.",
   "asset.mesh.err.image_count": "The mesh was given a different number of texture hashes than it has images.",
   "asset.mesh.err.too_large": "The mesh claims more vertices or indices than this engine will load.",
+  "asset.texture.err.malformed": "The texture is not a readable KTX2 file.",
+  "asset.texture.err.hdr_unsupported": "That texture is HDR, and this engine has no HDR texture path.",
+  "asset.texture.err.transcode_failed": "Could not transcode the texture to {format}.",
+  "asset.texture.err.encode_failed": "Could not encode the texture ({code}).",
 
   "render.err.shader_format_unknown": "The graphics device reports no shader format, so no shaders can be loaded.",
   "render.err.shader_manifest_missing": "No shader manifest at {path}. Build the shaders, or check that content shipped beside the executable.",

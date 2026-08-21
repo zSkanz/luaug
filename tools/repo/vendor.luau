@@ -47,6 +47,13 @@ type Dependency = {
     upstream: string,
     path: string,
     patches: { string },
+    -- Optional narrowing (ADR 0042). When present, only these upstream paths
+    -- are checked out. What lands is still EXACTLY upstream's bytes at the
+    -- pinned commit -- git's own pathspec does the selecting -- so a reviewer
+    -- can still diff a vendored file against upstream. What is given up is
+    -- "the whole tree", and it is given up only for a tree whose non-compiled
+    -- payload dwarfs its source.
+    include: { string }?,
 }
 
 -- The second kind of row (ADR 0032): a build-time release artifact fetched and
@@ -131,7 +138,23 @@ local function readManifest(): { Dependency }
             end
         end
 
+        -- Optional (ADR 0042): absent means the whole upstream tree, which is
+        -- what every row but one asks for.
+        local include: { string }? = nil
+        local declaredInclude = json.asArray((row :: json.Object).include)
+        if declaredInclude then
+            local paths: { string } = {}
+            for _, pathspec in declaredInclude do
+                if typeof(pathspec) ~= "string" then
+                    fail(`{context}: "include" entries must be strings`)
+                end
+                table.insert(paths, pathspec :: string)
+            end
+            include = paths
+        end
+
         table.insert(result, {
+            include = include,
             name = expectString(row :: json.Object, "name", context),
             version = expectString(row :: json.Object, "version", context),
             commit = expectString(row :: json.Object, "commit", context),
@@ -195,7 +218,23 @@ local function readBinaries(): { Binary }
             })
         end
 
+        -- Optional (ADR 0042): absent means the whole upstream tree, which is
+        -- what every row but one asks for.
+        local include: { string }? = nil
+        local declaredInclude = json.asArray((row :: json.Object).include)
+        if declaredInclude then
+            local paths: { string } = {}
+            for _, pathspec in declaredInclude do
+                if typeof(pathspec) ~= "string" then
+                    fail(`{context}: "include" entries must be strings`)
+                end
+                table.insert(paths, pathspec :: string)
+            end
+            include = paths
+        end
+
         table.insert(result, {
+            include = include,
             name = expectString(row :: json.Object, "name", context),
             version = expectString(row :: json.Object, "version", context),
             license = expectString(row :: json.Object, "license", context),
@@ -310,7 +349,7 @@ local function syncOne(dependency: Dependency)
     -- it. The tree stopped being byte-identical to the pinned commit -- which
     -- is ADR 0021's whole claim -- and nothing noticed for four milestones,
     -- because compilers do not care and no patch had ever been applied.
-    runGit({
+    local checkoutArgs = {
         "-c",
         "core.autocrlf=false",
         "-c",
@@ -321,8 +360,17 @@ local function syncOne(dependency: Dependency)
         "--quiet",
         "FETCH_HEAD",
         "--",
-        ":/",
-    }, `{dependency.name} checkout`)
+    }
+    local include = dependency.include
+    if include ~= nil and #include > 0 then
+        for _, pathspec in include do
+            table.insert(checkoutArgs, `:/{pathspec}`)
+        end
+        info(`{dependency.name}: narrowed to {#include} upstream path(s) — ADR 0042`)
+    else
+        table.insert(checkoutArgs, ":/")
+    end
+    runGit(checkoutArgs, `{dependency.name} checkout`)
 
     fs.removeDirectory(scratch, { recursive = true })
     applyPatches(dependency)

@@ -25,7 +25,7 @@ vendored yet; the roadmap allows lazy vendoring so long as the row exists.
 | fastgltf | 0.9.0 | `0d1b67a28c49` | MIT | https://github.com/spnda/fastgltf | `third_party/fastgltf/` |
 | simdjson | 3.12.3 | `7382dc2be88e` | Apache-2.0 OR MIT | https://github.com/simdjson/simdjson | `third_party/simdjson/` |
 | meshoptimizer | 1.2 | `9d9890c73011` | MIT | https://github.com/zeux/meshoptimizer | `third_party/meshoptimizer/` |
-| basis_universal | 2.5x | _not vendored yet_ | Apache-2.0 | https://github.com/BinomialLLC/basis_universal | `third_party/basis_universal/` |
+| basis_universal | 2.50 | `9bebe16726b3` | Apache-2.0 | https://github.com/BinomialLLC/basis_universal | `third_party/basis_universal/` |
 | ktx | latest-tag | _not vendored yet_ | Apache-2.0 | https://github.com/KhronosGroup/KTX-Software | `third_party/ktx/` |
 | stb | master-2026-08-01 | `2c980bb59875` | MIT OR Public Domain | https://github.com/nothings/stb | `third_party/stb/` |
 | imgui | 1.92.9b-docking | `b48d1afbe8ee` | MIT | https://github.com/ocornut/imgui | `third_party/imgui/` |

@@ -17,6 +17,7 @@ luaug_add_module(asset
         src/mesh_format.cpp
         src/pack.cpp
         src/primitives.cpp
+        src/texture.cpp
     DEPS
         core
         platform
@@ -33,6 +34,12 @@ target_include_directories(luaug_asset SYSTEM PRIVATE "${LUAUG_THIRD_PARTY_DIR}/
 # the same instinct applies one layer down.
 target_link_libraries(luaug_asset PRIVATE fastgltf::fastgltf meshoptimizer)
 
+# The basis TRANSCODER and never the encoder (ADR 0010, third_party/CMakeLists).
+# The engine reads textures; only the offline `assetc` tool writes them, and
+# keeping the encoder out of this link line is what makes that a property of the
+# build rather than a promise.
+target_link_libraries(luaug_asset PRIVATE basis::transcoder)
+
 luaug_add_module_tests(asset
     MODULES
         asset
@@ -42,6 +49,7 @@ luaug_add_module_tests(asset
         tests/mesh_format_tests.cpp
         tests/pack_tests.cpp
         tests/primitive_tests.cpp
+        tests/texture_tests.cpp
 )
 
 if(LUAUG_BUILD_TESTS)

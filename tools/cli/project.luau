@@ -119,6 +119,35 @@ local function findEngine(): string?
     return nil
 end
 
+--- The same search, for a host TOOL rather than for the engine: `assetc` and
+--- anything else `tools/` builds. Kept as one function because "where did the
+--- build put it" has exactly one answer and two copies of it would drift the
+--- first time a preset was renamed.
+local function findTool(base: string): string?
+    local name = executableName(base)
+
+    local explicit = process.env[`LUAUG_{string.upper(base)}`]
+    if explicit ~= nil and explicit ~= "" and fs.exists(explicit) then
+        return explicit
+    end
+
+    local buildRoot = process.env.LUAUG_BUILD_ROOT
+    if buildRoot ~= nil and buildRoot ~= "" then
+        for _, preset in { "win-msvc-dev", "linux-clang-dev", "macos-clang-dev", "win-msvc-debug" } do
+            local candidate = joined(buildRoot, preset, "tools", base, name)
+            if fs.exists(candidate) then
+                return candidate
+            end
+        end
+    end
+
+    local beside = joined(path.format(process.cwd()), name)
+    if fs.exists(beside) then
+        return beside
+    end
+    return nil
+end
+
 --- Every directory under `root` that holds Luau the engine mounts or requires,
 --- deepest last. One watch per directory, because `fs.watch` reports the
 --- top-level entry rather than the changed file and inotify may not report a
@@ -188,6 +217,7 @@ return {
     isProject = isProject,
     devPort = devPort,
     findEngine = findEngine,
+    findTool = findTool,
     executableName = executableName,
     sourceDirectories = sourceDirectories,
     sourceSnapshot = sourceSnapshot,

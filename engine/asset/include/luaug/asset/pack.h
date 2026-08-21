@@ -63,6 +63,11 @@ enum class AssetKind : u32
     Raw = 5,
 };
 
+// Stable, lowercase, and written into the content manifest -- so it is a name
+// a tool may compare against rather than an integer that moves when the enum
+// grows.
+[[nodiscard]] const char* assetKindName(AssetKind kind) noexcept;
+
 // How a blob is stored. Only `None` exists in v1 -- the mesh format already
 // carries meshopt-compressed streams and a texture is already a compressed
 // container, so a second general-purpose pass over them would spend CPU to save

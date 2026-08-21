@@ -86,6 +86,11 @@ add_subdirectory(engine/app)
 # Repo tooling, after third_party so it can link what it vendors.
 add_subdirectory(tools/imgcmp)
 
+# The offline asset compiler, after every engine module it links (M7). It sits
+# with the other tools rather than under engine/ because it is not part of the
+# runtime: it is what `luaug build-assets` drives.
+add_subdirectory(tools/assetc)
+
 # Standalone native samples, after every module they may link. They consume the
 # engine and nothing in the engine consumes them, so they come last.
 add_subdirectory(samples)

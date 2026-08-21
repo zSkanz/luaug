@@ -57,6 +57,25 @@ void writeU64(std::vector<std::byte>& out, u64 value)
 
 } // namespace
 
+const char* assetKindName(AssetKind kind) noexcept
+{
+    switch (kind) {
+    case AssetKind::Mesh:
+        return "mesh";
+    case AssetKind::Texture:
+        return "texture";
+    case AssetKind::Prefab:
+        return "prefab";
+    case AssetKind::Chunk:
+        return "chunk";
+    case AssetKind::Raw:
+        return "raw";
+    case AssetKind::Unknown:
+        break;
+    }
+    return "unknown";
+}
+
 void PackWriter::add(const ContentHash& hash, AssetKind kind, std::span<const std::byte> bytes)
 {
     if (contains(hash)) {

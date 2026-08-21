@@ -311,6 +311,28 @@ quietly.
   its notices row are gone, and ADR 0040 carries the answer so that re-vendoring
   is an ADR and a manifest row rather than a rediscovery.
 
+- **A vendored tree was narrowed rather than carried whole, and that is a
+  policy question rather than an implementation one (ADR 0042).**
+  `basis_universal` at `v2_50` is **302 MB**, of which about 275 MB is test
+  images, WebGL demos, Python wheels and **49 MB of prebuilt binaries** — none
+  of it compiled here, and the last of it is exactly what ADR 0032 exists to
+  keep out of git history. ADR 0021 says a vendored tree is "exact upstream
+  content at the pinned commit"; applying that rule literally would have
+  violated the reasoning of the other ADR, and 302 MB per pin bump is paid by
+  every future clone forever.
+
+  **What was done**: the manifest row gained an `include` list of eight upstream
+  paths, and the vendor tool passes them to git as pathspecs **on the checkout
+  itself** — so what landed is still byte-exact upstream at the pinned commit,
+  and what was given up is only "the whole tree". 13 MB instead of 302 MB.
+
+  **What a human may want to remake**: whether narrowing should exist at all.
+  The alternative is an ADR 0032 fetched artifact, which does not fit today
+  because rule 4 there says anything the engine LINKS is vendored as source and
+  the basis transcoder is linked into the runtime. Widening the row back to the
+  whole tree is deleting one line. Written up rather than assumed, because
+  changing what "vendored" means is not the agent's call to make quietly.
+
 - **The Android run of `examples/02-meshes` is due.** Deferred by the human
   until M4.5 closed, and M4.5 and M5 have both closed since. It is a device
   checkpoint rather than milestone work, and it is here so that it is asked for

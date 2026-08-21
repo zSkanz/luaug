@@ -527,6 +527,104 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/blake3/c/blake3.c")
     add_library(blake3::blake3 ALIAS blake3)
 endif()
 
+# ---------------------------------------------------------------------------
+# basis_universal (ADR 0010: one transcodable texture per platform, in a KTX2
+# container). Vendored narrowed -- ADR 0042 and the manifest row say why.
+#
+# TWO targets, and the split is a rule rather than a convenience: the engine
+# must never be able to WRITE a texture. `basis_transcoder` is linked into
+# `luaug_asset` and reads KTX2; `basis_encoder` is linked only into the offline
+# `assetc` tool. Upstream ships both halves from one tree and one CMakeLists,
+# which is exactly how an encoder ends up in a shipped game by accident.
+#
+# SSE is OFF, and it is the same decision BLAKE3's SIMD switches got a few
+# hundred lines up. `basisu_kernels_sse.cpp` is a second implementation of the
+# encoder's inner loops, and an asset whose BYTES depend on what the build
+# machine could compile is an asset whose content hash is not a name. The cost
+# is offline encode time, which is the cheapest time this project has.
+#
+# OpenCL is OFF for the same reason plus a second one: it would make the asset
+# build depend on a GPU driver being installed.
+# ---------------------------------------------------------------------------
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/basis_universal/transcoder/basisu_transcoder.cpp")
+    # ONE zstd, shared by both, and it is the full build rather than the
+    # decode-only one. Upstream compiles `zstddeclib.c` into the transcoder and
+    # `zstd.c` into the encoder, which is right for two separate programs and a
+    # duplicate-symbol wall for one binary that links both -- and `assetc` links
+    # both, because it writes packs the engine reads. The full amalgamation is a
+    # superset, so this is the same decode path plus a compressor the runtime
+    # never calls.
+    add_library(basis_zstd STATIC basis_universal/zstd/zstd.c)
+    target_include_directories(basis_zstd SYSTEM PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/basis_universal/zstd")
+
+    add_library(basis_transcoder STATIC
+        basis_universal/transcoder/basisu_transcoder.cpp)
+    # Both the root and the subdirectory: upstream's own sources reach sideways
+    # with `../zstd/zstd.h`, and consumers include `basisu_transcoder.h` by its
+    # bare name.
+    target_include_directories(basis_transcoder SYSTEM PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/basis_universal"
+        "${CMAKE_CURRENT_SOURCE_DIR}/basis_universal/transcoder")
+    target_compile_definitions(basis_transcoder PUBLIC
+        BASISD_SUPPORT_KTX2=1
+        BASISD_SUPPORT_KTX2_ZSTD=1
+        BASISU_SUPPORT_SSE=0
+        BASISU_SUPPORT_OPENCL=0)
+    target_link_libraries(basis_transcoder PUBLIC basis_zstd)
+    add_library(basis::transcoder ALIAS basis_transcoder)
+
+    add_library(basis_encoder STATIC
+        basis_universal/encoder/basisu_backend.cpp
+        basis_universal/encoder/basisu_basis_file.cpp
+        basis_universal/encoder/basisu_bc7e_scalar.cpp
+        basis_universal/encoder/basisu_bc7enc.cpp
+        basis_universal/encoder/basisu_bc15_spmd.cpp
+        basis_universal/encoder/basisu_comp.cpp
+        basis_universal/encoder/basisu_dds_export.cpp
+        basis_universal/encoder/basisu_enc.cpp
+        basis_universal/encoder/basisu_etc.cpp
+        basis_universal/encoder/basisu_frontend.cpp
+        basis_universal/encoder/basisu_gpu_texture.cpp
+        # Compiled even with SSE off, and it must be: with `BASISU_SUPPORT_SSE=0`
+        # these two files are not empty, they provide the no-op `detect_sse41`
+        # that `basisu_encoder_init` calls unconditionally. Leaving them out is
+        # a link error rather than a smaller binary.
+        basis_universal/encoder/basisu_kernels_sse.cpp
+        basis_universal/encoder/basisu_bc15_spmd_sse.cpp
+        basis_universal/encoder/basisu_opencl.cpp
+        basis_universal/encoder/basisu_pvrtc1_4.cpp
+        basis_universal/encoder/basisu_resample_filters.cpp
+        basis_universal/encoder/basisu_resampler.cpp
+        basis_universal/encoder/basisu_ssim.cpp
+        basis_universal/encoder/basisu_uastc_enc.cpp
+        basis_universal/encoder/basisu_uastc_hdr_4x4_enc.cpp
+        basis_universal/encoder/basisu_astc_hdr_6x6_enc.cpp
+        basis_universal/encoder/basisu_astc_hdr_common.cpp
+        basis_universal/encoder/basisu_astc_ldr_common.cpp
+        basis_universal/encoder/basisu_astc_ldr_encode.cpp
+        basis_universal/encoder/basisu_astc_ldr_fencode.cpp
+        basis_universal/encoder/basisu_xbc7_encode.cpp
+        basis_universal/encoder/basisu_tinyexr.cpp
+        basis_universal/encoder/jpgd.cpp
+        basis_universal/encoder/pvpngreader.cpp
+        basis_universal/encoder/3rdparty/android_astc_decomp.cpp)
+    target_include_directories(basis_encoder SYSTEM PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/basis_universal"
+        "${CMAKE_CURRENT_SOURCE_DIR}/basis_universal/encoder"
+        "${CMAKE_CURRENT_SOURCE_DIR}/basis_universal/transcoder")
+    target_compile_definitions(basis_encoder PUBLIC
+        BASISD_SUPPORT_KTX2=1
+        BASISD_SUPPORT_KTX2_ZSTD=1
+        BASISU_SUPPORT_SSE=0
+        BASISU_SUPPORT_OPENCL=0)
+    if(MSVC)
+        target_compile_definitions(basis_encoder PRIVATE _CRT_SECURE_NO_WARNINGS)
+    endif()
+    target_link_libraries(basis_encoder PUBLIC basis_zstd)
+    add_library(basis::encoder ALIAS basis_encoder)
+endif()
+
 # Restored so nothing above this directory inherits the ceiling. Our own build
 # does not shell out to git during configure today, and this is what keeps that
 # from becoming a silent dependency if it ever does.

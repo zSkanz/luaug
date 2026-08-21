@@ -1,0 +1,99 @@
+// `assetc` -- argv plumbing and exit codes. The work is in the library beside
+// it, so the tests exercise the same code the binary runs (the `imgcmp` shape).
+#include "luaug/assetc/compiler.h"
+#include "luaug/core/i18n.h"
+#include "luaug/core/log.h"
+#include "luaug/platform/platform.h"
+
+#include <cstring>
+#include <iostream>
+#include <string>
+
+namespace {
+
+using luaug::assetc::CompileOptions;
+using luaug::assetc::CompileResult;
+
+// This tool's own console output is developer-facing diagnostics rather than
+// engine messages, so it is printed directly; every ENGINE error it relays
+// arrives already key-prefixed through `core::makeError` and stays that way
+// (R3). The catalog is loaded beside the binary for exactly that reason -- a
+// relayed error should read as prose rather than as a bare key.
+void usage()
+{
+    std::cout << "usage: assetc --input <content-dir> --output <pack> --manifest <json>\n"
+                 "\n"
+                 "  Compiles a content directory into one .lpack and its manifest.\n"
+                 "  Deterministic: the same inputs produce the same bytes.\n";
+}
+
+[[nodiscard]] bool flagValue(int argc, char** argv, int& index, const char* name, std::string& out)
+{
+    if (std::strcmp(argv[index], name) != 0) {
+        return false;
+    }
+    if (index + 1 >= argc) {
+        std::cout << "assetc: " << name << " needs a value\n";
+        return false;
+    }
+    out = argv[++index];
+    return true;
+}
+
+} // namespace
+
+int main(int argc, char** argv)
+{
+    std::string input;
+    std::string output;
+    std::string manifest;
+
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--help") == 0) {
+            usage();
+            return 0;
+        }
+        if (flagValue(argc, argv, i, "--input", input) || flagValue(argc, argv, i, "--output", output) ||
+            flagValue(argc, argv, i, "--manifest", manifest)) {
+            continue;
+        }
+        std::cout << "assetc: unknown option " << argv[i] << "\n";
+        usage();
+        return 2;
+    }
+
+    if (input.empty() || output.empty() || manifest.empty()) {
+        usage();
+        return 2;
+    }
+
+    // Best effort: a missing catalog degrades a relayed engine error to its
+    // key, which is still identifiable. It must not stop a build.
+    (void)luaug::core::engineCatalog().loadFromFile(
+        (luaug::platform::paths().contentDir / "i18n" / "en.json").string());
+
+    CompileOptions options;
+    options.inputRoot = input;
+
+    const CompileResult result = luaug::assetc::compile(options);
+    if (!result.ok) {
+        std::cout << "assetc: " << result.diagnostic << "\n";
+        return 1;
+    }
+
+    std::string diagnostic;
+    if (!luaug::assetc::writeFile(output, result.pack, diagnostic)) {
+        std::cout << "assetc: " << diagnostic << "\n";
+        return 1;
+    }
+    const std::span<const std::byte> manifestBytes(reinterpret_cast<const std::byte*>(result.manifest.data()),
+                                                   result.manifest.size());
+    if (!luaug::assetc::writeFile(manifest, manifestBytes, diagnostic)) {
+        std::cout << "assetc: " << diagnostic << "\n";
+        return 1;
+    }
+
+    std::cout << "assetc: " << result.meshCount << " mesh(es), " << result.textureCount << " texture(s), "
+              << result.rawCount << " raw file(s) -> " << result.pack.size() << " bytes\n";
+    return 0;
+}
