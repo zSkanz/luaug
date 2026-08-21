@@ -87,10 +87,6 @@ struct AudioSystem::Impl
     std::atomic<u64> dropped{0};
     std::atomic<u32> activeVoices{0};
 
-    // Set while `update` is swapping the voice list, so a callback that arrives
-    // mid-swap knows it is looking at a stale frame rather than a torn one.
-    std::atomic<bool> voicesFresh{false};
-
     static void dataCallback(ma_device* device, void* output, const void* input, ma_uint32 frameCount)
     {
         (void)input;
@@ -100,14 +96,29 @@ struct AudioSystem::Impl
         if (self == nullptr)
             return;
 
-        // An underrun in this design's terms: the callback ran and the main
-        // thread had not published a frame since the last one. It means the
-        // simulation is not keeping up with the mixer, which is exactly the
-        // thing the soak is watching for.
-        if (!self->voicesFresh.exchange(false))
+        // **An underrun is a callback that could not get the voices**, and the
+        // lock is never waited on (D032).
+        //
+        // The first definition counted a callback that arrived with no NEW frame
+        // published since the last one, and that is the ordinary case rather
+        // than a fault: the device asks for buffers faster than the simulation
+        // produces ticks, so most callbacks legitimately mix the same voices
+        // again. A sixty-second soak on a real device counted 1,348 of them and
+        // every one was the mixer working correctly -- a gate reporting a
+        // catastrophe for the normal case, which is worse than no gate.
+        //
+        // What starvation actually is here: the simulation holding the voice
+        // list when the device needs it. `try_lock` says so exactly, and a
+        // callback that loses the race outputs the silence the buffer was
+        // already cleared to -- which is what an underrun SOUNDS like, and is
+        // the honest thing to do rather than block. **An audio callback must
+        // never wait on a game thread**; the old `lock_guard` did, and a stall
+        // in the simulation would have stalled the device with it.
+        std::unique_lock<std::mutex> lock(self->mutex, std::try_to_lock);
+        if (!lock.owns_lock()) {
             self->underruns.fetch_add(1, std::memory_order_relaxed);
-
-        std::lock_guard<std::mutex> lock(self->mutex);
+            return;
+        }
         self->activeVoices.store(static_cast<u32>(self->voices.size()), std::memory_order_relaxed);
 
         for (Voice& voice : self->voices) {
@@ -298,7 +309,6 @@ void AudioSystem::update(scene::World& world, core::InstanceId listener)
             next[index].phase = m_impl->voices[index].phase;
         m_impl->voices.swap(next);
     }
-    m_impl->voicesFresh.store(true);
 }
 
 AudioStats AudioSystem::stats() const noexcept

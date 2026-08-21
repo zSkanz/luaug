@@ -189,18 +189,26 @@ if(LUAUG_BUILD_TESTS)
         COMMAND luaug_host --replay=${CMAKE_SOURCE_DIR}/tests/determinism)
     set_tests_properties(determinism PROPERTIES TIMEOUT 300)
 
-    # M6's end-to-end gate: `examples/04-obby` driven by a recorded input stream,
-    # headless, from the menu to the finish flag. The whole stack is in the
-    # loop -- input dispatch, UI hit-testing and layout, tweens driving kinematic
-    # platforms, physics, audio, animation -- which is what makes it worth more
-    # than the five system gates it does not replace.
+    # Three of M6's gate items, and all three are replays with a FACT to prove
+    # rather than only a hash to compare. The scenario manifest names an
+    # attribute the run has to end having set, because a hash alone cannot gate
+    # any of them: three runs that all fall in the same hole agree perfectly.
     #
-    # It uses the same replay harness as `determinism`, and its scenario names an
-    # ATTRIBUTE the run has to end with. A hash comparison alone could not gate
-    # this: three runs that all fall in the same hole agree perfectly.
-    add_test(NAME obby_replay
+    #   obby      -- `examples/04-obby` driven by a recorded input stream from
+    #                the menu to the finish flag. The whole stack is in the loop:
+    #                input dispatch, UI layout and hit-testing, tweens driving
+    #                kinematic platforms, physics, audio and animation. It is
+    #                worth more than the five system gates it does not replace.
+    #   audiosoak -- sixty seconds of continuous mixing with the underrun counter
+    #                still zero, and the harder half: an exact, predictable
+    #                number of `Ended` events off the SIM timeline. The
+    #                real-device half is a windowed run recorded by hand, since
+    #                only a machine with speakers can say the device opened.
+    #   animation -- three clips at three speeds, their `TimePosition` driven into
+    #                the world so the replay hash covers clip sampling at all.
+    add_test(NAME replay_gates
         COMMAND luaug_host --replay=${CMAKE_SOURCE_DIR}/tests/replay)
-    set_tests_properties(obby_replay PROPERTIES TIMEOUT 300)
+    set_tests_properties(replay_gates PROPERTIES TIMEOUT 300)
 
     # The perf threshold (roadmap M2: the 10k-parts / 1k-listeners churn
     # benchmark "with a CI threshold", and the 500-instance gate scene). Both

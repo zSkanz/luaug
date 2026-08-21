@@ -165,9 +165,9 @@ decision rather than against a hope.
 - [x] tween output vs. easing fixture tables
 - [x] input replay of a full obby run completes to the finish flag in CI
       headless (the E2E gate for the whole stack so far)
-- [ ] audio smoke test (device opens, buffer underrun counter zero in a 60 s
+- [x] audio smoke test (device opens, buffer underrun counter zero in a 60 s
       soak)
-- [ ] animation clip sampling determinism covered by the replay hash
+- [x] animation clip sampling determinism covered by the replay hash
 - [x] the M5 example migrated to the Action System with no regression
 
 And the standing items every gate here carries: both tiers green through
