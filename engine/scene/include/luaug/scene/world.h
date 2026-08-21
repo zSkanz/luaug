@@ -106,6 +106,15 @@ struct EngineState
     f64 requestedFixedTimestep = 1.0 / 60.0;
     bool paused = false;
     bool overlayVisible = false;
+
+    // `InputService`'s own state (M6). The pointer position is a SNAPSHOT taken
+    // once per frame, like M5's keyboard: two reads inside one tick agree, and a
+    // recorded input stream can hand the same answer back with no mouse.
+    core::Vec2 pointerPosition;
+    bool pointerLocked = false;
+    bool pointerVisible = true;
+    // `Enum.InputDeviceType`: 0 KeyboardMouse, 1 Gamepad, 2 Touch.
+    i32 lastInputDeviceType = 0;
     std::string engineVersion;
     std::string luauVersion;
 };
@@ -319,6 +328,15 @@ public:
     [[nodiscard]] ComponentPool<LightingComponent>& lighting() noexcept { return m_lighting; }
     [[nodiscard]] const ComponentPool<LightingComponent>& lighting() const noexcept { return m_lighting; }
 
+    // The input module's classes (M6). Same arrangement as the render pools
+    // above: the storage is here, the meaning is not.
+    [[nodiscard]] ComponentPool<InputContextComponent>& inputContexts() noexcept { return m_inputContexts; }
+    [[nodiscard]] const ComponentPool<InputContextComponent>& inputContexts() const noexcept { return m_inputContexts; }
+    [[nodiscard]] ComponentPool<InputActionComponent>& inputActions() noexcept { return m_inputActions; }
+    [[nodiscard]] const ComponentPool<InputActionComponent>& inputActions() const noexcept { return m_inputActions; }
+    [[nodiscard]] ComponentPool<InputBindingComponent>& inputBindings() noexcept { return m_inputBindings; }
+    [[nodiscard]] const ComponentPool<InputBindingComponent>& inputBindings() const noexcept { return m_inputBindings; }
+
 private:
     void linkChild(InstanceRecord& parentRecord, core::InstanceId parentId, core::InstanceId childId);
     void unlinkChild(core::InstanceId childId);
@@ -350,6 +368,9 @@ private:
     ComponentPool<WorkspaceComponent> m_workspaces;
     ComponentPool<ModelComponent> m_models;
     ComponentPool<ScriptComponent> m_scripts;
+    ComponentPool<InputContextComponent> m_inputContexts;
+    ComponentPool<InputActionComponent> m_inputActions;
+    ComponentPool<InputBindingComponent> m_inputBindings;
     ComponentPool<MeshPartComponent> m_meshParts;
     ComponentPool<CameraComponent> m_cameras;
     ComponentPool<PointLightComponent> m_pointLights;

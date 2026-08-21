@@ -866,6 +866,22 @@ void enqueueSceneChanges(lua_State* L, std::span<const scene::Change> changes)
             break;
         }
 
+        case scene::ChangeKind::InstanceEventNoArgs: {
+            // Zero arguments, which is the whole difference from the kind
+            // below. `InputAction.StateChanged` is here rather than carrying
+            // its value because `scene::Change` is 16 bytes of POD by design --
+            // that shape is what keeps L3 free of Luau values -- and a fire
+            // whose argument had to be rebuilt at drain time would be a fire
+            // that captured nothing (api-design.md §3.1). The handler reads
+            // `GetState()`, which is the same value: input dispatches once per
+            // tick, so nothing can have moved in between.
+            const SignalId id = eventSignal(change.name);
+            if (!id.valid())
+                break;
+            enqueueFire(L, id, lua_gettop(L) + 1, 0);
+            break;
+        }
+
         case scene::ChangeKind::InstanceEvent: {
             // The generic one-Instance-argument event: `Touched`, `TouchEnded`,
             // `Landed`. The name is in the change rather than in the enumerator,

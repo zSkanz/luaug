@@ -26,6 +26,7 @@ luaug_add_module(script
         src/runtime.cpp
     DEPS
         core
+        input
         physics_api
         platform
         scene

@@ -522,9 +522,10 @@ TEST_CASE("the boot-time method cross-check reports both directions")
     // `HotReloadService` brought `SaveState`, `LoadState` and `IsReload`; 56
     // once M5 brought `ApplyImpulse`, `CharacterBody:Move`/`Jump`, the three
     // `PhysicsService` collision-group calls, the three `Workspace` queries and
-    // `KeyboardService:IsKeyDown`.
-    CHECK(coverage.declared == 56);
-    CHECK(coverage.bound == 56);
+    // `KeyboardService:IsKeyDown`; 59 once M6 brought `InputAction:GetState`,
+    // `InputAction:GetPreferredBinding` and `InputService:GetPointerPosition`.
+    CHECK(coverage.declared == 59);
+    CHECK(coverage.bound == 59);
     CHECK(coverage.declaredWithoutBinding == 0);
 }
 

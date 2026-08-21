@@ -55,6 +55,12 @@ void pushVector2(lua_State* L, core::Vec2 value);
 // the registry lookup that turns it back into a name is this module's.
 void pushEnumItem(lua_State* L, scene::EnumValue value);
 
+// The reverse, raising if the slot is not an enum item at all. Which ENUM it
+// belongs to is the caller's to check: every item shares one userdata tag
+// (binding.h, rule 1), so the tag can only say "an enum item", and the caller is
+// the one that knows which enum it wanted and can name it in the error.
+[[nodiscard]] scene::EnumValue checkEnumItem(lua_State* L, int index);
+
 // A `RaycastParams` as the query bindings need to read it, without exposing the
 // userdata payload: the filter is a view into the object's own storage and is
 // valid only while it is on the stack, which is the whole life of a query.

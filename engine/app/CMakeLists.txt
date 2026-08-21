@@ -24,6 +24,7 @@ luaug_add_module(app
         platform
         rhi_api
         net_api
+        input
         physics_api
         render
         scene

@@ -59,6 +59,15 @@ enum class ChangeKind : u8
     // that has one. The event's name is data here rather than an enumerator for
     // the same reason a property's name is.
     InstanceEvent,
+
+    // The same, carrying NOTHING. `Destroying` is the shape, and M6's
+    // `InputAction.Pressed`, `Released` and `StateChanged` are three more of it.
+    //
+    // A separate kind rather than `InstanceEvent` with an invalid `other`,
+    // because those are different arities and not a value: `Landed` with an
+    // invalid `other` fires with one nil argument, which is right for a
+    // character that landed on nothing and wrong for a button that was pressed.
+    InstanceEventNoArgs,
 };
 
 // 16 bytes, trivially copyable, and deliberately not a variant: one shape means

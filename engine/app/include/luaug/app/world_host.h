@@ -14,6 +14,7 @@
 #include "luaug/app/preserved.h"
 #include "luaug/core/error.h"
 #include "luaug/core/name_atom.h"
+#include "luaug/input/input.h"
 #include "luaug/physics/backends.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/enum_registry.h"
@@ -155,6 +156,18 @@ public:
     // than a device read inside the binding.
     void setKeyboard(std::span<const bool> down);
 
+    // The Input Action System (M6). The host owns it for the reason it owns the
+    // physics mirror: `scene` cannot hold it without L3 depending on
+    // `platform`, and a process-global would make two worlds in one process
+    // share a keyboard.
+    //
+    // `pumpInput` folds a frame's events into the device snapshot and is the
+    // only caller that reads a device at all; `tick` and `preRender` dispatch.
+    // A replay drives `input().setSnapshot` instead of pumping, which is what
+    // makes the replay a replay of INPUT rather than of the API underneath it.
+    void pumpInput(std::span<const platform::Event> events);
+    [[nodiscard]] input::InputSystem& input() noexcept { return m_input; }
+
     [[nodiscard]] scene::PhysicsSync* physics() noexcept { return m_physics ? &*m_physics : nullptr; }
     [[nodiscard]] const scene::PhysicsSync* physics() const noexcept { return m_physics ? &*m_physics : nullptr; }
     [[nodiscard]] script::ScriptRuntime& runtime() noexcept { return *m_runtime; }
@@ -206,6 +219,7 @@ private:
     // reference to this and tears its world down in its own destructor.
     physics::PhysicsResult m_backend;
     std::optional<scene::PhysicsSync> m_physics;
+    input::InputSystem m_input;
 
     std::filesystem::path m_root;
     core::InstanceId m_workspace;

@@ -340,9 +340,17 @@ namespace luaug::input {
   void pumpFrame(std::span<const platform::Event>);   // device snapshots + timestamped queue
   void dispatchRenderRate();                          // fires UI/camera-priority contexts (§3)
   void dispatchSimTick(u64 tick);                     // drains queue ≤ tick time → action signals (deterministic)
-  // Resolution: contexts sorted by Priority; Sink=true stops fallthrough;
-  // per-action processors (deadzone, scale); GetPreferredBinding(device) for glyph prompts.
-  void saveBindings(Writer&); void loadBindings(Reader&);   // rebinding persistence
+  // Resolution: contexts sorted by Priority (STABLE, so a tie reproduces -- R10);
+  // Sink=true consumes the inputs a context names, per input rather than per context;
+  // per-binding Scale; GetPreferredBinding(device) for glyph prompts.
+  //
+  // Which CLOCK a context is dispatched on is the context's own `Rate` property and
+  // is NOT derived from Priority (ADR 0039): priority orders fallthrough, and one
+  // number cannot answer two questions.
+  //
+  // No saveBindings/loadBindings. An earlier draft of this sketch had them; v1 has
+  // no caller, rebinding is a property write, and persistence is the game
+  // serializing an ordinary Instance (ADR 0039).
 }
 ```
 

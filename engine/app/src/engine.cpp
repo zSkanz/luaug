@@ -625,6 +625,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 }
             }
             host->setKeyboard(keyboard);
+            // The Input Action System reads the same events, from the same
+            // pump, on the same frame. The M5 scaffold above it is what M6's
+            // gate deletes; until it does, the two coexist and neither reads a
+            // device the other cannot see.
+            host->pumpInput(events);
 
             // After the pump and with the span it returned: the overlay reads
             // the untranslated stream behind these, which is only valid until

@@ -47,6 +47,10 @@ inline constexpr scene::EnumId CharacterStateEnumId = 4;
 inline constexpr scene::EnumId RotationOrderEnumId = 5;
 inline constexpr scene::EnumId LogLevelEnumId = 6;
 inline constexpr scene::EnumId RunContextEnumId = 7;
+inline constexpr scene::EnumId KeyCodeEnumId = 8;
+inline constexpr scene::EnumId InputActionTypeEnumId = 9;
+inline constexpr scene::EnumId InputDeviceTypeEnumId = 10;
+inline constexpr scene::EnumId InputRateEnumId = 11;
 
 } // namespace generated
 

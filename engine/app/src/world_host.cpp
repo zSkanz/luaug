@@ -3,6 +3,7 @@
 #include "luaug/core/build_info.h"
 #include "luaug/core/json.h"
 #include "luaug/core/log.h"
+#include "luaug/input/scene_types.h"
 #include "luaug/platform/platform.h"
 #include "luaug/render/debug_draw.h"
 #include "luaug/render/scene_types.h"
@@ -199,6 +200,7 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
     // it is the only place this sequence can be written down.
     scene::generated::registerClasses(m_classes, m_atoms);
     render::registerSceneTypes(m_classes, m_atoms);
+    input::registerSceneTypes(m_classes, m_atoms);
 
     // Enums have one owner and no hierarchy, so they are independent of the
     // above; they stay with `scene`, which holds the registry.
@@ -504,6 +506,13 @@ void WorldHost::tick()
     state.tick += 1;
     state.simTime = static_cast<f64>(state.tick) * state.fixedTimestep;
 
+    // Step 5a of architecture.md §3's frame: gameplay action signals, resolved
+    // deterministically, BEFORE `PreAnimation`. Ahead of the first drain on
+    // purpose -- a `Pressed` raised here is drained by the same drain the
+    // phase's own handlers go through, so a script that jumps on a press sees
+    // the press in the tick it happened rather than in the next one.
+    m_input.dispatchSimTick(*m_world, state.tick);
+
     // Each resumption point runs its engine phase, then drains (api-design.md
     // §3.1). `task` timers resume in their own phase between `PostSimulation`
     // and `Heartbeat`, and anything they defer drains at `Heartbeat`.
@@ -534,6 +543,21 @@ void WorldHost::setKeyboard(std::span<const bool> down)
     m_runtime->setKeyboard(down);
 }
 
+void WorldHost::pumpInput(std::span<const platform::Event> events)
+{
+    m_input.pumpFrame(events);
+
+    // Losing focus releases everything held. An alt-tab that left W down is how
+    // a character keeps walking into a wall while its window is in the
+    // background, and the release has to happen HERE rather than at the next
+    // dispatch: the window may stay unfocused for minutes, and the game should
+    // not spend them running forward.
+    for (const platform::Event& event : events) {
+        if (event.type == platform::EventType::WindowFocusLost)
+            m_input.releaseAll(*m_world);
+    }
+}
+
 void WorldHost::publishStats(const script::FrameStats& stats)
 {
     script::publishFrameStats(m_runtime->state(), stats);
@@ -541,6 +565,10 @@ void WorldHost::publishStats(const script::FrameStats& stats)
 
 void WorldHost::preRender(f64 renderDt)
 {
+    // Step 3 of the frame: the render-rate half of the dispatch split
+    // (ADR 0039), before `PreRender` fires, so a camera handler reads the look
+    // delta the frame it happened.
+    m_input.dispatchRenderRate(*m_world);
     m_runtime->firePhase(core::Phase::PreRender, renderDt);
     m_runtime->drain(core::Phase::PreRender);
 }

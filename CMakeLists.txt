@@ -76,6 +76,7 @@ add_subdirectory(engine/asset)
 add_subdirectory(engine/physics)
 add_subdirectory(engine/scene)
 add_subdirectory(engine/render)
+add_subdirectory(engine/input)
 add_subdirectory(engine/script)
 add_subdirectory(engine/app)
 

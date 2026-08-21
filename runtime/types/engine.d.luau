@@ -48,6 +48,18 @@ end
 declare extern type EnumRunContext extends EnumItem with
 end
 
+declare extern type EnumKeyCode extends EnumItem with
+end
+
+declare extern type EnumInputActionType extends EnumItem with
+end
+
+declare extern type EnumInputDeviceType extends EnumItem with
+end
+
+declare extern type EnumInputRate extends EnumItem with
+end
+
 declare extern type Vector3 with
     --- The X component. Lowercase because it is a field of the VM primitive itself, like a string's
     --- length, and not a member of a type this project defines -- the one documented exception to the
@@ -573,6 +585,95 @@ declare extern type SpotLight extends Instance with
     Shadows: boolean
 end
 
+declare extern type InputContext extends Instance with
+    --- Whether this context and its actions take part in resolution at all. A disabled context consumes
+    --- nothing, so a lower-priority one bound to the same key starts firing the tick this goes false --
+    --- which is exactly what closing a menu should do.
+    Enabled: boolean
+    --- Resolution order, highest first. It orders FALLTHROUGH and nothing else -- in particular it does
+    --- not decide which clock the context is dispatched on, which is `Rate` (ADR 0039). Ties are broken
+    --- by a stable order the engine reproduces on every run (R10), so two contexts at the same priority
+    --- never swap places between one run and the next.
+    Priority: number
+    --- Whether this context CONSUMES the inputs its bindings name, hiding them from every
+    --- lower-priority context. A modal dialog sinks; a HUD does not. Sinking is per input and not per
+    --- context: a sinking context that binds Escape hides Escape and leaves W alone.
+    Sink: boolean
+    --- Which clock this context is dispatched on (ADR 0039). `Simulation` by default, because that is
+    --- the safe one: an action nobody thought about fires where R10 holds and where the input replay
+    --- can see it. `Render` is for camera look and for UI, and an action read from a Render context is
+    --- frame-rate-dependent by construction.
+    Rate: EnumInputRate
+end
+
+declare extern type InputAction extends Instance with
+    --- What this action produces, and therefore what `GetState` returns. It belongs to the action
+    --- rather than to the binding, because one action may be driven by a key, a stick and an on-screen
+    --- button at once and all three have to answer in the same currency.
+    Type: EnumInputActionType
+    --- Whether this action resolves. A disabled action consumes nothing even inside a sinking context,
+    --- so disabling one hands its input back to whatever is underneath.
+    Enabled: boolean
+    --- Fired on the tick a `Bool` action becomes true. Never fires for any other action type: an axis
+    --- has no moment of being pressed.
+    read Pressed: Signal<()>
+    --- Fired on the tick a `Bool` action becomes false, including when the action or its context is
+    --- disabled while it was held -- a held key that stops being delivered has been released as far as
+    --- the game is concerned, and leaving it stuck true is how a character keeps running after a menu
+    --- opens.
+    read Released: Signal<()>
+    --- Fired on any tick this action's value changed, whatever its type. It carries NO arguments and
+    --- the handler reads `GetState()` -- the same arrangement `Destroying` and
+    --- `GetPropertyChangedSignal` use, and for the same reason (ADR 0039): the queue between the engine
+    --- and the VM carries POD facts, an action's value is one of four types, and a signal whose
+    --- argument had to be rebuilt at drain time would be a fire that captured nothing. Input dispatches
+    --- once per tick, so the value read in the handler is the value that caused the fire.
+    read StateChanged: Signal<()>
+    --- This action's value as of the current tick -- a boolean for `Bool`, a number for `Direction1D`,
+    --- a `Vector2` for `Direction2D` and `ViewportPosition`, and a `vector` for `Direction3D`. It is a
+    --- SNAPSHOT: two calls inside one tick agree, and a recorded input stream hands the same answers
+    --- back with no hardware attached, which is what makes the replay gate a replay of input rather
+    --- than of a bot.
+    function GetState(self): boolean | number | Vector2 | vector
+    --- The binding a prompt should draw for this action -- "Press [E]". With a device type, the first
+    --- child binding belonging to that family in document order; without one, the family of
+    --- `InputService.LastInputDeviceType`, so a prompt follows whatever the player last touched. nil
+    --- when the action has no binding for that device.
+    function GetPreferredBinding(self, deviceType: EnumInputDeviceType?): InputBinding?
+end
+
+declare extern type InputBinding extends Instance with
+    --- The input this binding names. `Unknown` means unbound, which is why the enum carries that item:
+    --- an unset binding is expressible without the property being nullable, and the engine's value
+    --- domain stays a closed set (ADR 0039).
+    KeyCode: EnumKeyCode
+    --- The composite key for +Y, on a `Direction1D` or `Direction2D` action. The four composites are
+    --- how a keyboard drives an axis: W/A/S/D is one binding, not four.
+    Up: EnumKeyCode
+    --- The composite key for -Y.
+    Down: EnumKeyCode
+    --- The composite key for -X.
+    Left: EnumKeyCode
+    --- The composite key for +X.
+    Right: EnumKeyCode
+    --- What this binding's value is multiplied by before it reaches the action. Mouse look wants a
+    --- small one and a stick wants 1; a negative one inverts an axis, which is what a settings screen's
+    --- "invert Y" writes.
+    Scale: number
+    --- What a prompt shows for this binding. A localization key is allowed and is the intended use
+    --- (§6): a binding that says "ui.prompt.interact" translates and one that says "Interact" does
+    --- not. Empty means the engine has nothing to offer and the prompt should fall back to the key's
+    --- own name.
+    DisplayName: string
+    --- A glyph for this binding, as an `asset://` URI. Empty means none.
+    Image: Content
+    --- Which device family this binding belongs to, DERIVED from `KeyCode` (ADR 0039). It is read-only
+    --- because a settable one could disagree with the key beside it -- `DeviceType = Gamepad` on a
+    --- binding whose KeyCode is W is a statement the engine would then have to choose whether to
+    --- believe. Anything that is not a gamepad input reports `KeyboardMouse`, `Unknown` included.
+    read DeviceType: EnumInputDeviceType
+end
+
 declare extern type DataModel extends Instance with
     --- The version of the engine runtime executing this VM, as `luaug.toml` pins it. Read-only: the
     --- runtime is chosen before the VM exists, so nothing a script does can change it.
@@ -594,6 +695,7 @@ declare extern type DataModel extends Instance with
     function GetService(self, name: "HotReloadService"): HotReloadService
     function GetService(self, name: "KeyboardService"): KeyboardService
     function GetService(self, name: "PhysicsService"): PhysicsService
+    function GetService(self, name: "InputService"): InputService
     --- Returns the service of this name, creating it on the first request. Services are singletons:
     --- every later call returns the same instance, and it is an ordinary child of `game` once created.
     --- A string literal gives an exactly typed result; a name computed at runtime gives the general
@@ -817,6 +919,29 @@ declare extern type PhysicsService extends Instance with
     function GetRegisteredCollisionGroups(self): {string}
 end
 
+declare extern type InputService extends Instance with
+    --- Whether the pointer is locked to the window and reporting motion instead of position -- what a
+    --- first-person camera wants. While it is locked, `GetPointerPosition` keeps reporting the position
+    --- the pointer had when it was locked, because there is no other honest answer, and a `Direction2D`
+    --- action bound to `MouseMovement` is the way to read the motion.
+    PointerLocked: boolean
+    --- Whether the system cursor is drawn. Independent of `PointerLocked`, because the two are separate
+    --- wishes: a strategy game hides the cursor during a cutscene without locking it.
+    PointerVisible: boolean
+    --- The device family the player most recently used, which is what a HUD switches its prompts on. It
+    --- changes on a real input and not on a resting one: a gamepad stick drifting inside its dead zone
+    --- does not steal the prompts from a keyboard.
+    read LastInputDeviceType: EnumInputDeviceType
+    --- Fired when `LastInputDeviceType` changes, so a prompt redraws once rather than polling.
+    read InputDeviceChanged: Signal<EnumInputDeviceType>
+    --- Fired when the game window gains or loses keyboard focus. Losing focus releases every held
+    --- input, so an alt-tab does not leave a character walking into a wall.
+    read WindowFocusChanged: Signal<boolean>
+    --- The pointer in window pixels, origin at the top left, as of the current tick. A snapshot like
+    --- every other input read: two calls inside one tick agree.
+    function GetPointerPosition(self): Vector2
+end
+
 declare Enum: {
     PartShape: {
         Block: EnumPartShape,
@@ -864,6 +989,122 @@ declare Enum: {
         Client: EnumRunContext,
         Server: EnumRunContext,
         GetEnumItems: (self: any) -> { EnumRunContext },
+    },
+    KeyCode: {
+        Unknown: EnumKeyCode,
+        Escape: EnumKeyCode,
+        F1: EnumKeyCode,
+        F2: EnumKeyCode,
+        F3: EnumKeyCode,
+        F4: EnumKeyCode,
+        F5: EnumKeyCode,
+        F6: EnumKeyCode,
+        F7: EnumKeyCode,
+        F8: EnumKeyCode,
+        F9: EnumKeyCode,
+        F10: EnumKeyCode,
+        F11: EnumKeyCode,
+        F12: EnumKeyCode,
+        A: EnumKeyCode,
+        B: EnumKeyCode,
+        C: EnumKeyCode,
+        D: EnumKeyCode,
+        E: EnumKeyCode,
+        F: EnumKeyCode,
+        G: EnumKeyCode,
+        H: EnumKeyCode,
+        I: EnumKeyCode,
+        J: EnumKeyCode,
+        K: EnumKeyCode,
+        L: EnumKeyCode,
+        M: EnumKeyCode,
+        N: EnumKeyCode,
+        O: EnumKeyCode,
+        P: EnumKeyCode,
+        Q: EnumKeyCode,
+        R: EnumKeyCode,
+        S: EnumKeyCode,
+        T: EnumKeyCode,
+        U: EnumKeyCode,
+        V: EnumKeyCode,
+        W: EnumKeyCode,
+        X: EnumKeyCode,
+        Y: EnumKeyCode,
+        Z: EnumKeyCode,
+        Digit0: EnumKeyCode,
+        Digit1: EnumKeyCode,
+        Digit2: EnumKeyCode,
+        Digit3: EnumKeyCode,
+        Digit4: EnumKeyCode,
+        Digit5: EnumKeyCode,
+        Digit6: EnumKeyCode,
+        Digit7: EnumKeyCode,
+        Digit8: EnumKeyCode,
+        Digit9: EnumKeyCode,
+        Space: EnumKeyCode,
+        Return: EnumKeyCode,
+        Tab: EnumKeyCode,
+        Backspace: EnumKeyCode,
+        LeftShift: EnumKeyCode,
+        RightShift: EnumKeyCode,
+        LeftControl: EnumKeyCode,
+        RightControl: EnumKeyCode,
+        LeftAlt: EnumKeyCode,
+        RightAlt: EnumKeyCode,
+        Left: EnumKeyCode,
+        Right: EnumKeyCode,
+        Up: EnumKeyCode,
+        Down: EnumKeyCode,
+        MouseLeft: EnumKeyCode,
+        MouseMiddle: EnumKeyCode,
+        MouseRight: EnumKeyCode,
+        MouseX1: EnumKeyCode,
+        MouseX2: EnumKeyCode,
+        MouseMovement: EnumKeyCode,
+        MouseWheel: EnumKeyCode,
+        ButtonSouth: EnumKeyCode,
+        ButtonEast: EnumKeyCode,
+        ButtonWest: EnumKeyCode,
+        ButtonNorth: EnumKeyCode,
+        ButtonBack: EnumKeyCode,
+        ButtonGuide: EnumKeyCode,
+        ButtonStart: EnumKeyCode,
+        ButtonLeftStick: EnumKeyCode,
+        ButtonRightStick: EnumKeyCode,
+        ButtonLeftShoulder: EnumKeyCode,
+        ButtonRightShoulder: EnumKeyCode,
+        DpadUp: EnumKeyCode,
+        DpadDown: EnumKeyCode,
+        DpadLeft: EnumKeyCode,
+        DpadRight: EnumKeyCode,
+        LeftStickX: EnumKeyCode,
+        LeftStickY: EnumKeyCode,
+        RightStickX: EnumKeyCode,
+        RightStickY: EnumKeyCode,
+        LeftTrigger: EnumKeyCode,
+        RightTrigger: EnumKeyCode,
+        LeftThumbstick: EnumKeyCode,
+        RightThumbstick: EnumKeyCode,
+        GetEnumItems: (self: any) -> { EnumKeyCode },
+    },
+    InputActionType: {
+        Bool: EnumInputActionType,
+        Direction1D: EnumInputActionType,
+        Direction2D: EnumInputActionType,
+        Direction3D: EnumInputActionType,
+        ViewportPosition: EnumInputActionType,
+        GetEnumItems: (self: any) -> { EnumInputActionType },
+    },
+    InputDeviceType: {
+        KeyboardMouse: EnumInputDeviceType,
+        Gamepad: EnumInputDeviceType,
+        Touch: EnumInputDeviceType,
+        GetEnumItems: (self: any) -> { EnumInputDeviceType },
+    },
+    InputRate: {
+        Simulation: EnumInputRate,
+        Render: EnumInputRate,
+        GetEnumItems: (self: any) -> { EnumInputRate },
     },
 }
 
@@ -956,7 +1197,10 @@ declare Instance: {
         & (("CharacterBody") -> CharacterBody)
         & (("Camera") -> Camera)
         & (("PointLight") -> PointLight)
-        & (("SpotLight") -> SpotLight),
+        & (("SpotLight") -> SpotLight)
+        & (("InputContext") -> InputContext)
+        & (("InputAction") -> InputAction)
+        & (("InputBinding") -> InputBinding),
 }
 
 declare game: DataModel

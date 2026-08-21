@@ -37,6 +37,8 @@
 #include "luaug/core/types.h"
 #include "luaug/scene/types.h"
 
+#include <string>
+
 namespace luaug::scene {
 
 // `BasePart`'s structural half (M2 brief, Decision 6). The physics half --
@@ -276,6 +278,64 @@ struct ModelComponent
 struct ScriptComponent
 {
     bool enabled = true;
+};
+
+// --- Input (M6) --------------------------------------------------------------
+//
+// The three Input Action System classes' storage. It lives here for the same
+// reason the render module's does: `scene` (L3) owns the pools, `input` (L4)
+// owns the meaning, and scene never interprets a byte of it. See the note above
+// the render components for why this is not a type-erased registry.
+
+// `InputContext`. A group of actions that are live together, and the unit
+// resolution walks.
+struct InputContextComponent
+{
+    // Resolution order, highest first. It orders FALLTHROUGH only; the clock is
+    // `rate` (ADR 0039), and conflating the two would change an action's
+    // determinism class whenever somebody re-tuned a number.
+    f32 priority = 0.0f;
+    // `Enum.InputRate`: 0 Simulation, 1 Render.
+    i32 rate = 0;
+    bool enabled = true;
+    bool sink = false;
+};
+
+// `InputAction`. Its resolved value lives here rather than in `input`'s own
+// storage so that a snapshot of the world carries it: an action's state is
+// simulation state, and a replay that restored the tree without it would resume
+// with every key released.
+struct InputActionComponent
+{
+    // The value as of the last dispatch. One field per shape rather than a
+    // variant: the whole struct is 20 bytes either way, and a POD component is
+    // what makes the pool memcpy-able.
+    core::Vec3 axis;
+    // `Enum.InputActionType`: 0 Bool, 1 Direction1D, 2 Direction2D,
+    // 3 Direction3D, 4 ViewportPosition.
+    i32 type = 0;
+    bool enabled = true;
+    bool pressed = false;
+};
+
+// `InputBinding`. Every field is `Enum.KeyCode`'s value except the three at the
+// end; `0` is `Unknown`, which is why the enum carries that item at all -- an
+// unbound binding is expressible without a nullable property (ADR 0039).
+struct InputBindingComponent
+{
+    i32 keyCode = 0;
+    i32 up = 0;
+    i32 down = 0;
+    i32 left = 0;
+    i32 right = 0;
+    // What this binding's value is multiplied by before it reaches the action.
+    f32 scale = 1.0f;
+    // A localization key is the intended value (§6), which is why this is a
+    // string rather than a `TextKey`: the catalog is resolved when a prompt
+    // draws, not when a binding is built.
+    std::string displayName;
+    // An `asset://` URI, empty for none.
+    std::string image;
 };
 
 } // namespace luaug::scene

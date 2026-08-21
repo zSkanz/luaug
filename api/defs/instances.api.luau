@@ -791,6 +791,208 @@ local Classes: { Schema.Class } = {
             },
         },
     },
+    {
+        Name = "InputContext",
+        Extends = "Instance",
+        Module = "input",
+        Storage = "InputContext",
+        Doc = "A group of `InputAction` children that are live together (§2.4, ADR 0029). A menu opening is one "
+            .. "context enabled and another disabled, rather than a pile of conditionals inside every handler. "
+            .. "Parent it anywhere -- the convention is under the Script that owns it -- because a context is "
+            .. "reached by being enabled, not by where it sits.",
+        Properties = {
+            {
+                Name = "Enabled",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether this context and its actions take part in resolution at all. A disabled context "
+                    .. "consumes nothing, so a lower-priority one bound to the same key starts firing the tick "
+                    .. "this goes false -- which is exactly what closing a menu should do.",
+            },
+            {
+                Name = "Priority",
+                Type = "number",
+                Default = "0",
+                Doc = "Resolution order, highest first. It orders FALLTHROUGH and nothing else -- in particular "
+                    .. "it does not decide which clock the context is dispatched on, which is `Rate` (ADR 0039). "
+                    .. "Ties are broken by a stable order the engine reproduces on every run (R10), so two "
+                    .. "contexts at the same priority never swap places between one run and the next.",
+            },
+            {
+                Name = "Sink",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether this context CONSUMES the inputs its bindings name, hiding them from every "
+                    .. "lower-priority context. A modal dialog sinks; a HUD does not. Sinking is per input and "
+                    .. "not per context: a sinking context that binds Escape hides Escape and leaves W alone.",
+            },
+            {
+                Name = "Rate",
+                Type = "Enum.InputRate",
+                Default = "Enum.InputRate.Simulation",
+                Doc = "Which clock this context is dispatched on (ADR 0039). `Simulation` by default, because "
+                    .. "that is the safe one: an action nobody thought about fires where R10 holds and where the "
+                    .. "input replay can see it. `Render` is for camera look and for UI, and an action read from "
+                    .. "a Render context is frame-rate-dependent by construction.",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "InputAction",
+        Extends = "Instance",
+        Module = "input",
+        Storage = "InputAction",
+        Doc = "A named thing the player can do, decoupled from the input that does it (§2.4, ADR 0029). Game "
+            .. "code connects to the action; `InputBinding` children say what drives it. That indirection is "
+            .. "the whole point: rebinding is a property write, and a prompt can ask the action what key to "
+            .. "draw.\n\nParent it to an `InputContext`. An action outside one is inert -- resolution walks "
+            .. "contexts, so an action nothing groups is an action nothing dispatches.",
+        Properties = {
+            {
+                Name = "Type",
+                Type = "Enum.InputActionType",
+                Default = "Enum.InputActionType.Bool",
+                Doc = "What this action produces, and therefore what `GetState` returns. It belongs to the "
+                    .. "action rather than to the binding, because one action may be driven by a key, a stick "
+                    .. "and an on-screen button at once and all three have to answer in the same currency.",
+            },
+            {
+                Name = "Enabled",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether this action resolves. A disabled action consumes nothing even inside a sinking "
+                    .. "context, so disabling one hands its input back to whatever is underneath.",
+            },
+        } :: { Schema.Property },
+        Methods = {
+            {
+                Name = "GetState",
+                Parameters = {},
+                Returns = { "boolean | number | Vector2 | vector" },
+                Doc = "This action's value as of the current tick -- a boolean for `Bool`, a number for "
+                    .. "`Direction1D`, a `Vector2` for `Direction2D` and `ViewportPosition`, and a `vector` for "
+                    .. "`Direction3D`. It is a SNAPSHOT: two calls inside one tick agree, and a recorded input "
+                    .. "stream hands the same answers back with no hardware attached, which is what makes the "
+                    .. "replay gate a replay of input rather than of a bot.",
+            },
+            {
+                Name = "GetPreferredBinding",
+                Parameters = { { Name = "deviceType", Type = "Enum.InputDeviceType?", Default = "nil" } },
+                Returns = { "InputBinding?" },
+                Doc = 'The binding a prompt should draw for this action -- "Press [E]". With a device type, '
+                    .. "the first child binding belonging to that family in document order; without one, the "
+                    .. "family of `InputService.LastInputDeviceType`, so a prompt follows whatever the player "
+                    .. "last touched. nil when the action has no binding for that device.",
+            },
+        } :: { Schema.Method },
+        Events = {
+            {
+                Name = "Pressed",
+                Parameters = {},
+                Doc = "Fired on the tick a `Bool` action becomes true. Never fires for any other action type: "
+                    .. "an axis has no moment of being pressed.",
+            },
+            {
+                Name = "Released",
+                Parameters = {},
+                Doc = "Fired on the tick a `Bool` action becomes false, including when the action or its "
+                    .. "context is disabled while it was held -- a held key that stops being delivered has been "
+                    .. "released as far as the game is concerned, and leaving it stuck true is how a character "
+                    .. "keeps running after a menu opens.",
+            },
+            {
+                Name = "StateChanged",
+                Parameters = {},
+                Doc = "Fired on any tick this action's value changed, whatever its type. It carries NO "
+                    .. "arguments and the handler reads `GetState()` -- the same arrangement `Destroying` and "
+                    .. "`GetPropertyChangedSignal` use, and for the same reason (ADR 0039): the queue between "
+                    .. "the engine and the VM carries POD facts, an action's value is one of four types, and a "
+                    .. "signal whose argument had to be rebuilt at drain time would be a fire that captured "
+                    .. "nothing. Input dispatches once per tick, so the value read in the handler is the value "
+                    .. "that caused the fire.",
+            },
+        } :: { Schema.Event },
+    },
+    {
+        Name = "InputBinding",
+        Extends = "Instance",
+        Module = "input",
+        Storage = "InputBinding",
+        Doc = "One physical input that drives its parent `InputAction` (§2.4). An action may have several, and "
+            .. "they are ORed: a key, a gamepad stick and a UI button on one action are three ways to do one "
+            .. "thing.\n\nWhich fields matter depends on the parent's `Type`. A `Bool` action reads `KeyCode`; "
+            .. "a `Direction2D` action reads either `KeyCode` naming a 2D source such as `LeftThumbstick`, or "
+            .. "the four composite keys. A binding whose fields do not suit its parent is inert rather than an "
+            .. "error -- an action's type is a property somebody can change after the binding was built.",
+        Properties = {
+            {
+                Name = "KeyCode",
+                Type = "Enum.KeyCode",
+                Default = "Enum.KeyCode.Unknown",
+                Doc = "The input this binding names. `Unknown` means unbound, which is why the enum carries "
+                    .. "that item: an unset binding is expressible without the property being nullable, and the "
+                    .. "engine's value domain stays a closed set (ADR 0039).",
+            },
+            {
+                Name = "Up",
+                Type = "Enum.KeyCode",
+                Default = "Enum.KeyCode.Unknown",
+                Doc = "The composite key for +Y, on a `Direction1D` or `Direction2D` action. The four "
+                    .. "composites are how a keyboard drives an axis: W/A/S/D is one binding, not four.",
+            },
+            {
+                Name = "Down",
+                Type = "Enum.KeyCode",
+                Default = "Enum.KeyCode.Unknown",
+                Doc = "The composite key for -Y.",
+            },
+            {
+                Name = "Left",
+                Type = "Enum.KeyCode",
+                Default = "Enum.KeyCode.Unknown",
+                Doc = "The composite key for -X.",
+            },
+            {
+                Name = "Right",
+                Type = "Enum.KeyCode",
+                Default = "Enum.KeyCode.Unknown",
+                Doc = "The composite key for +X.",
+            },
+            {
+                Name = "Scale",
+                Type = "number",
+                Default = "1",
+                Doc = "What this binding's value is multiplied by before it reaches the action. Mouse look "
+                    .. "wants a small one and a stick wants 1; a negative one inverts an axis, which is what a "
+                    .. 'settings screen\'s "invert Y" writes.',
+            },
+            {
+                Name = "DisplayName",
+                Type = "string",
+                Default = '""',
+                Doc = "What a prompt shows for this binding. A localization key is allowed and is the intended "
+                    .. 'use (§6): a binding that says "ui.prompt.interact" translates and one that says '
+                    .. '"Interact" does not. Empty means the engine has nothing to offer and the prompt '
+                    .. "should fall back to the key's own name.",
+            },
+            {
+                Name = "Image",
+                Type = "Content",
+                Default = '""',
+                Doc = "A glyph for this binding, as an `asset://` URI. Empty means none.",
+            },
+            {
+                Name = "DeviceType",
+                Type = "Enum.InputDeviceType",
+                ReadOnly = true,
+                Doc = "Which device family this binding belongs to, DERIVED from `KeyCode` (ADR 0039). It is "
+                    .. "read-only because a settable one could disagree with the key beside it -- "
+                    .. "`DeviceType = Gamepad` on a binding whose KeyCode is W is a statement the engine would "
+                    .. "then have to choose whether to believe. Anything that is not a gamepad input reports "
+                    .. "`KeyboardMouse`, `Unknown` included.",
+            },
+        } :: { Schema.Property },
+    },
 }
 
 local Definition: Schema.Definition = {

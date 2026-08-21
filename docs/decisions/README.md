@@ -78,3 +78,5 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0035](0035-engine-is-a-websocket-client-of-the-dev-server.md) | The engine is a WebSocket client of the dev server; only the dev server listens |
 | [0036](0036-simdjson-vendored-for-fastgltf.md) | simdjson is vendored for fastgltf, and fastgltf's downloader is made unreachable |
 | [0037](0037-rhi-interface-frozen-at-m4.md) | The RHI interface is frozen at the end of M4 |
+| [0038](0038-visual-fidelity-is-a-v1-target.md) | What the renderer draws is judged against a stated reference, and visual fidelity is a v1 target |
+| [0039](0039-input-context-rate-and-total-enums.md) | An InputContext declares its dispatch rate, and the IAS's enums are total |

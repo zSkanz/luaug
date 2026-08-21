@@ -1782,6 +1782,11 @@ void pushEnumItem(lua_State* L, scene::EnumValue value)
     pushEnumItemImpl(L, value);
 }
 
+scene::EnumValue checkEnumItem(lua_State* L, int index)
+{
+    return checkTagged<scene::EnumValue>(L, index, UserdataTag::EnumItem);
+}
+
 core::Vec3 checkVector3(lua_State* L, int index)
 {
     return checkVec3(L, index);

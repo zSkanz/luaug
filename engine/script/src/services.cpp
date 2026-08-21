@@ -1,5 +1,6 @@
 #include "luaug/script/services.h"
 
+#include "luaug/input/input.h"
 #include "luaug/platform/event.h"
 #include "luaug/scene/world.h"
 #include "luaug/script/datatypes.h"
@@ -703,6 +704,84 @@ int keyboardIsKeyDown(lua_State* L)
     return 1;
 }
 
+// --- InputService and InputAction (M6) ---------------------------------------
+
+int inputActionGetState(lua_State* L)
+{
+    const core::InstanceId id = checkInstance(L, 1);
+    const World& w = world(L);
+    const scene::InputActionComponent* action = w.inputActions().find(id);
+    if (action == nullptr) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+
+    // The value as of the last dispatch, in the currency the action's own type
+    // names. A snapshot: two calls inside one tick agree, which is what makes a
+    // recorded input stream able to answer with no hardware attached.
+    switch (static_cast<input::ActionType>(action->type)) {
+    case input::ActionType::Bool:
+        lua_pushboolean(L, action->pressed ? 1 : 0);
+        return 1;
+    case input::ActionType::Direction1D:
+        lua_pushnumber(L, static_cast<f64>(action->axis.x));
+        return 1;
+    case input::ActionType::Direction2D:
+    case input::ActionType::ViewportPosition:
+        pushVector2(L, core::Vec2{action->axis.x, action->axis.y});
+        return 1;
+    case input::ActionType::Direction3D:
+        // Declared and not driveable in v1: no binding in api-design.md §2.4's
+        // list names three axes. The zero vector rather than an error, because
+        // the item exists so that code written today keeps meaning the same
+        // thing when it does become driveable.
+        pushVector3(L, action->axis);
+        return 1;
+    }
+
+    lua_pushboolean(L, 0);
+    return 1;
+}
+
+int inputActionGetPreferredBinding(lua_State* L)
+{
+    const core::InstanceId id = checkInstance(L, 1);
+    World& w = world(L);
+
+    // Without an argument, the family the player last used -- so a prompt
+    // follows the pad the moment somebody picks one up.
+    auto wanted = static_cast<input::DeviceType>(w.engineState().lastInputDeviceType);
+    if (!lua_isnoneornil(L, 2)) {
+        const scene::EnumValue item = checkEnumItem(L, 2);
+        const scene::EnumDescriptor* descriptor = w.enums().find(item.enumId);
+        if (descriptor == nullptr || w.atoms().text(descriptor->name) != "InputDeviceType")
+            luaL_argerror(L, 2, "Enum.InputDeviceType");
+        wanted = static_cast<input::DeviceType>(item.value);
+    }
+
+    // Child order, which is the order the bindings were created and therefore
+    // the same on every run (R10). "First match" is a promise a prompt relies
+    // on: the glyph must not change between two frames nothing touched.
+    for (core::InstanceId bindingId = w.firstChild(id); bindingId.valid(); bindingId = w.nextSibling(bindingId)) {
+        const scene::InputBindingComponent* binding = w.inputBindings().find(bindingId);
+        if (binding == nullptr)
+            continue;
+        if (input::deviceOf(binding->keyCode) == wanted) {
+            pushInstance(L, bindingId);
+            return 1;
+        }
+    }
+
+    lua_pushnil(L);
+    return 1;
+}
+
+int inputServiceGetPointerPosition(lua_State* L)
+{
+    pushVector2(L, world(L).engineState().pointerPosition);
+    return 1;
+}
+
 // `WaitForChild` is here rather than in `instance_binding.cpp` because it parks
 // on a tree state and only the resumption phase this file owns can wake it.
 constexpr InstanceMethodBinding ServiceMethods[] = {
@@ -734,6 +813,10 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"HotReloadService", "IsReload", hotReloadIsReload},
 
     {"KeyboardService", "IsKeyDown", keyboardIsKeyDown},
+
+    {"InputAction", "GetState", inputActionGetState},
+    {"InputAction", "GetPreferredBinding", inputActionGetPreferredBinding},
+    {"InputService", "GetPointerPosition", inputServiceGetPointerPosition},
 
     {"Workspace", "Raycast", workspaceRaycast},
     {"Workspace", "Spherecast", workspaceSpherecast},

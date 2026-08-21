@@ -673,6 +673,64 @@ local Classes: { Schema.Class } = {
             .. "shipped before any physics did because `FixedTimestep` is a scheduler property that physics merely "
             .. "names, and everything about scheduling and timing is expressed against it.",
     },
+    {
+        Name = "InputService",
+        Extends = "Instance",
+        Module = "input",
+        Tags = { "Service", "NotCreatable" } :: { Schema.ClassTag },
+        Doc = "The host of the Input Action System (§2.4, ADR 0029) and the only place device-wide state is "
+            .. "readable. There is no UserInputService, no ContextActionService and no Mouse: one input model, "
+            .. "rebindable and promptable by default (divergence #3).",
+        Properties = {
+            {
+                Name = "PointerLocked",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether the pointer is locked to the window and reporting motion instead of position -- "
+                    .. "what a first-person camera wants. While it is locked, `GetPointerPosition` keeps "
+                    .. "reporting the position the pointer had when it was locked, because there is no other "
+                    .. "honest answer, and a `Direction2D` action bound to `MouseMovement` is the way to read "
+                    .. "the motion.",
+            },
+            {
+                Name = "PointerVisible",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether the system cursor is drawn. Independent of `PointerLocked`, because the two are "
+                    .. "separate wishes: a strategy game hides the cursor during a cutscene without locking it.",
+            },
+            {
+                Name = "LastInputDeviceType",
+                Type = "Enum.InputDeviceType",
+                ReadOnly = true,
+                Doc = "The device family the player most recently used, which is what a HUD switches its "
+                    .. "prompts on. It changes on a real input and not on a resting one: a gamepad stick "
+                    .. "drifting inside its dead zone does not steal the prompts from a keyboard.",
+            },
+        } :: { Schema.Property },
+        Methods = {
+            {
+                Name = "GetPointerPosition",
+                Parameters = {},
+                Returns = { "Vector2" },
+                Doc = "The pointer in window pixels, origin at the top left, as of the current tick. A "
+                    .. "snapshot like every other input read: two calls inside one tick agree.",
+            },
+        } :: { Schema.Method },
+        Events = {
+            {
+                Name = "InputDeviceChanged",
+                Parameters = { { Name = "deviceType", Type = "Enum.InputDeviceType" } },
+                Doc = "Fired when `LastInputDeviceType` changes, so a prompt redraws once rather than polling.",
+            },
+            {
+                Name = "WindowFocusChanged",
+                Parameters = { { Name = "focused", Type = "boolean" } },
+                Doc = "Fired when the game window gains or loses keyboard focus. Losing focus releases every "
+                    .. "held input, so an alt-tab does not leave a character walking into a wall.",
+            },
+        } :: { Schema.Event },
+    },
 }
 
 local Definition: Schema.Definition = {

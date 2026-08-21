@@ -248,6 +248,15 @@ u64 World::worldHash() const
             hasher.number(character->verticalVelocity);
             hasher.pod(character->groundPart);
         }
+        // An action's resolved value is simulation state and no property
+        // exposes it -- `GetState` is a METHOD, so the walk below cannot see it.
+        // Leaving it out would let two runs agree on every hashed number while
+        // one of them had a key held, which is one tick from disagreeing about
+        // everything the player did next.
+        if (const InputActionComponent* action = m_inputActions.find(id); action != nullptr) {
+            hasher.vec3(action->axis);
+            hasher.flag(action->pressed);
+        }
 
         // Class-specific state, reached through the same generated accessors a
         // script would use. Hashing the components directly would be faster and

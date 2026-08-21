@@ -465,6 +465,187 @@
       ]
     },
     {
+      "Name": "InputAction",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Enabled",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
+          "Name": "Type",
+          "Type": "Enum.InputActionType",
+          "Default": "Enum.InputActionType.Bool"
+        }
+      ],
+      "Methods": [
+        {
+          "Name": "GetPreferredBinding",
+          "Parameters": [
+            {
+              "Name": "deviceType",
+              "Type": "Enum.InputDeviceType?",
+              "Default": "nil"
+            }
+          ],
+          "Returns": ["InputBinding?"]
+        },
+        {
+          "Name": "GetState",
+          "Parameters": [],
+          "Returns": ["boolean | number | Vector2 | vector"]
+        }
+      ],
+      "Events": [
+        {
+          "Name": "Pressed",
+          "Parameters": []
+        },
+        {
+          "Name": "Released",
+          "Parameters": []
+        },
+        {
+          "Name": "StateChanged",
+          "Parameters": []
+        }
+      ]
+    },
+    {
+      "Name": "InputBinding",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "DeviceType",
+          "Type": "Enum.InputDeviceType",
+          "ReadOnly": true
+        },
+        {
+          "Name": "DisplayName",
+          "Type": "string",
+          "Default": "\"\""
+        },
+        {
+          "Name": "Down",
+          "Type": "Enum.KeyCode",
+          "Default": "Enum.KeyCode.Unknown"
+        },
+        {
+          "Name": "Image",
+          "Type": "Content",
+          "Default": "\"\""
+        },
+        {
+          "Name": "KeyCode",
+          "Type": "Enum.KeyCode",
+          "Default": "Enum.KeyCode.Unknown"
+        },
+        {
+          "Name": "Left",
+          "Type": "Enum.KeyCode",
+          "Default": "Enum.KeyCode.Unknown"
+        },
+        {
+          "Name": "Right",
+          "Type": "Enum.KeyCode",
+          "Default": "Enum.KeyCode.Unknown"
+        },
+        {
+          "Name": "Scale",
+          "Type": "number",
+          "Default": "1"
+        },
+        {
+          "Name": "Up",
+          "Type": "Enum.KeyCode",
+          "Default": "Enum.KeyCode.Unknown"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "InputContext",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Enabled",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
+          "Name": "Priority",
+          "Type": "number",
+          "Default": "0"
+        },
+        {
+          "Name": "Rate",
+          "Type": "Enum.InputRate",
+          "Default": "Enum.InputRate.Simulation"
+        },
+        {
+          "Name": "Sink",
+          "Type": "boolean",
+          "Default": "false"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "InputService",
+      "Extends": "Instance",
+      "Tags": ["NotCreatable", "Service"],
+      "Properties": [
+        {
+          "Name": "LastInputDeviceType",
+          "Type": "Enum.InputDeviceType",
+          "ReadOnly": true
+        },
+        {
+          "Name": "PointerLocked",
+          "Type": "boolean",
+          "Default": "false"
+        },
+        {
+          "Name": "PointerVisible",
+          "Type": "boolean",
+          "Default": "true"
+        }
+      ],
+      "Methods": [
+        {
+          "Name": "GetPointerPosition",
+          "Parameters": [],
+          "Returns": ["Vector2"]
+        }
+      ],
+      "Events": [
+        {
+          "Name": "InputDeviceChanged",
+          "Parameters": [
+            {
+              "Name": "deviceType",
+              "Type": "Enum.InputDeviceType"
+            }
+          ]
+        },
+        {
+          "Name": "WindowFocusChanged",
+          "Parameters": [
+            {
+              "Name": "focused",
+              "Type": "boolean"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "Name": "Instance",
       "Tags": ["Abstract", "NotCreatable"],
       "Properties": [
@@ -2776,6 +2957,442 @@
         {
           "Name": "Precise",
           "Value": 3
+        }
+      ]
+    },
+    {
+      "Name": "InputActionType",
+      "Items": [
+        {
+          "Name": "Bool",
+          "Value": 0
+        },
+        {
+          "Name": "Direction1D",
+          "Value": 1
+        },
+        {
+          "Name": "Direction2D",
+          "Value": 2
+        },
+        {
+          "Name": "Direction3D",
+          "Value": 3
+        },
+        {
+          "Name": "ViewportPosition",
+          "Value": 4
+        }
+      ]
+    },
+    {
+      "Name": "InputDeviceType",
+      "Items": [
+        {
+          "Name": "Gamepad",
+          "Value": 1
+        },
+        {
+          "Name": "KeyboardMouse",
+          "Value": 0
+        },
+        {
+          "Name": "Touch",
+          "Value": 2
+        }
+      ]
+    },
+    {
+      "Name": "InputRate",
+      "Items": [
+        {
+          "Name": "Render",
+          "Value": 1
+        },
+        {
+          "Name": "Simulation",
+          "Value": 0
+        }
+      ]
+    },
+    {
+      "Name": "KeyCode",
+      "Items": [
+        {
+          "Name": "A",
+          "Value": 14
+        },
+        {
+          "Name": "B",
+          "Value": 15
+        },
+        {
+          "Name": "Backspace",
+          "Value": 53
+        },
+        {
+          "Name": "ButtonBack",
+          "Value": 75
+        },
+        {
+          "Name": "ButtonEast",
+          "Value": 72
+        },
+        {
+          "Name": "ButtonGuide",
+          "Value": 76
+        },
+        {
+          "Name": "ButtonLeftShoulder",
+          "Value": 80
+        },
+        {
+          "Name": "ButtonLeftStick",
+          "Value": 78
+        },
+        {
+          "Name": "ButtonNorth",
+          "Value": 74
+        },
+        {
+          "Name": "ButtonRightShoulder",
+          "Value": 81
+        },
+        {
+          "Name": "ButtonRightStick",
+          "Value": 79
+        },
+        {
+          "Name": "ButtonSouth",
+          "Value": 71
+        },
+        {
+          "Name": "ButtonStart",
+          "Value": 77
+        },
+        {
+          "Name": "ButtonWest",
+          "Value": 73
+        },
+        {
+          "Name": "C",
+          "Value": 16
+        },
+        {
+          "Name": "D",
+          "Value": 17
+        },
+        {
+          "Name": "Digit0",
+          "Value": 40
+        },
+        {
+          "Name": "Digit1",
+          "Value": 41
+        },
+        {
+          "Name": "Digit2",
+          "Value": 42
+        },
+        {
+          "Name": "Digit3",
+          "Value": 43
+        },
+        {
+          "Name": "Digit4",
+          "Value": 44
+        },
+        {
+          "Name": "Digit5",
+          "Value": 45
+        },
+        {
+          "Name": "Digit6",
+          "Value": 46
+        },
+        {
+          "Name": "Digit7",
+          "Value": 47
+        },
+        {
+          "Name": "Digit8",
+          "Value": 48
+        },
+        {
+          "Name": "Digit9",
+          "Value": 49
+        },
+        {
+          "Name": "Down",
+          "Value": 63
+        },
+        {
+          "Name": "DpadDown",
+          "Value": 83
+        },
+        {
+          "Name": "DpadLeft",
+          "Value": 84
+        },
+        {
+          "Name": "DpadRight",
+          "Value": 85
+        },
+        {
+          "Name": "DpadUp",
+          "Value": 82
+        },
+        {
+          "Name": "E",
+          "Value": 18
+        },
+        {
+          "Name": "Escape",
+          "Value": 1
+        },
+        {
+          "Name": "F",
+          "Value": 19
+        },
+        {
+          "Name": "F1",
+          "Value": 2
+        },
+        {
+          "Name": "F10",
+          "Value": 11
+        },
+        {
+          "Name": "F11",
+          "Value": 12
+        },
+        {
+          "Name": "F12",
+          "Value": 13
+        },
+        {
+          "Name": "F2",
+          "Value": 3
+        },
+        {
+          "Name": "F3",
+          "Value": 4
+        },
+        {
+          "Name": "F4",
+          "Value": 5
+        },
+        {
+          "Name": "F5",
+          "Value": 6
+        },
+        {
+          "Name": "F6",
+          "Value": 7
+        },
+        {
+          "Name": "F7",
+          "Value": 8
+        },
+        {
+          "Name": "F8",
+          "Value": 9
+        },
+        {
+          "Name": "F9",
+          "Value": 10
+        },
+        {
+          "Name": "G",
+          "Value": 20
+        },
+        {
+          "Name": "H",
+          "Value": 21
+        },
+        {
+          "Name": "I",
+          "Value": 22
+        },
+        {
+          "Name": "J",
+          "Value": 23
+        },
+        {
+          "Name": "K",
+          "Value": 24
+        },
+        {
+          "Name": "L",
+          "Value": 25
+        },
+        {
+          "Name": "Left",
+          "Value": 60
+        },
+        {
+          "Name": "LeftAlt",
+          "Value": 58
+        },
+        {
+          "Name": "LeftControl",
+          "Value": 56
+        },
+        {
+          "Name": "LeftShift",
+          "Value": 54
+        },
+        {
+          "Name": "LeftStickX",
+          "Value": 86
+        },
+        {
+          "Name": "LeftStickY",
+          "Value": 87
+        },
+        {
+          "Name": "LeftThumbstick",
+          "Value": 92
+        },
+        {
+          "Name": "LeftTrigger",
+          "Value": 90
+        },
+        {
+          "Name": "M",
+          "Value": 26
+        },
+        {
+          "Name": "MouseLeft",
+          "Value": 64
+        },
+        {
+          "Name": "MouseMiddle",
+          "Value": 65
+        },
+        {
+          "Name": "MouseMovement",
+          "Value": 69
+        },
+        {
+          "Name": "MouseRight",
+          "Value": 66
+        },
+        {
+          "Name": "MouseWheel",
+          "Value": 70
+        },
+        {
+          "Name": "MouseX1",
+          "Value": 67
+        },
+        {
+          "Name": "MouseX2",
+          "Value": 68
+        },
+        {
+          "Name": "N",
+          "Value": 27
+        },
+        {
+          "Name": "O",
+          "Value": 28
+        },
+        {
+          "Name": "P",
+          "Value": 29
+        },
+        {
+          "Name": "Q",
+          "Value": 30
+        },
+        {
+          "Name": "R",
+          "Value": 31
+        },
+        {
+          "Name": "Return",
+          "Value": 51
+        },
+        {
+          "Name": "Right",
+          "Value": 61
+        },
+        {
+          "Name": "RightAlt",
+          "Value": 59
+        },
+        {
+          "Name": "RightControl",
+          "Value": 57
+        },
+        {
+          "Name": "RightShift",
+          "Value": 55
+        },
+        {
+          "Name": "RightStickX",
+          "Value": 88
+        },
+        {
+          "Name": "RightStickY",
+          "Value": 89
+        },
+        {
+          "Name": "RightThumbstick",
+          "Value": 93
+        },
+        {
+          "Name": "RightTrigger",
+          "Value": 91
+        },
+        {
+          "Name": "S",
+          "Value": 32
+        },
+        {
+          "Name": "Space",
+          "Value": 50
+        },
+        {
+          "Name": "T",
+          "Value": 33
+        },
+        {
+          "Name": "Tab",
+          "Value": 52
+        },
+        {
+          "Name": "U",
+          "Value": 34
+        },
+        {
+          "Name": "Unknown",
+          "Value": 0
+        },
+        {
+          "Name": "Up",
+          "Value": 62
+        },
+        {
+          "Name": "V",
+          "Value": 35
+        },
+        {
+          "Name": "W",
+          "Value": 36
+        },
+        {
+          "Name": "X",
+          "Value": 37
+        },
+        {
+          "Name": "Y",
+          "Value": 38
+        },
+        {
+          "Name": "Z",
+          "Value": 39
         }
       ]
     },

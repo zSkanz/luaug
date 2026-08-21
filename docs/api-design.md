@@ -528,7 +528,7 @@ change how it falls.
 | `RaycastParams` / `RaycastResult` | `RaycastParams.new { Filter = {Instance}, FilterType = Enum.RaycastFilterType.Exclude, CollisionGroup = "Default" }` (table constructor); result: `Instance`, `Position`, `Normal`, `Distance`. Both are read-only once built: a params object mutated between two casts is a question that means something different depending on when the engine looked at it. The filter covers a named instance's **descendants**, so filtering a `Model` filters its parts, and each word means what it says at the edges — an empty `Exclude` filter hits everything and an empty `Include` filter hits nothing. `CollisionGroup` is the empty string for "any group". **`RaycastResult.Material` is not in M5**: `BasePart.Material` is not either, and a field that reported a value nothing sets would be worse than one that is absent — both arrive with the surface-material work. Note for `--!strict` callers: Luau table types are invariant, so `Filter = { part }` needs `:: { Instance }` — the annotation a `{Instance}` field costs. |
 | `Random` | `Random.new(seed?)`: `NextNumber(min?, max?)`, `NextInteger(min, max)`, `NextUnitVector()`, `Clone()`. `NextNumber()` is [0, 1) and `NextNumber(min, max)` is [min, max) — half-open, like every other range in the engine; `NextInteger(min, max)` is inclusive at **both** ends, which is the one place the engine is not half-open and the reason it is spelled out. `min > max`, or a non-integer bound to `NextInteger`, raises `script.err.random_range`. `NextUnitVector` is uniform over the sphere, not merely unit length. The seed is any number, truncated toward zero. Deterministic streams (R10) — see the note below the table. |
 | `Content` | A type alias of `string` in v1 (`asset://…`, `save://…` URIs); reserved to become opaque later. It is a real exported type name, generated into `engine.d.luau` (§5), so `local c: Content = "asset://models/tree.glb"` type-checks — which is what makes the alias worth having before it becomes opaque. |
-| `Enum` | Global `Enum` namespace; `EnumItem` = `Name`, `Value`, `EnumType` — and `EnumType` is the enum **object**, not its name as a string, so `Enum.PartShape.Ball.EnumType == Enum.PartShape`. `Enum.X:GetEnumItems()` returns a **fresh** array on every call, in declaration order (fresh so a caller may sort it; ordered because R10 forbids container order reaching observable order). v1 enums: `EasingStyle` (Linear, Sine, Quad, Cubic, Quart, Quint, Exponential, Circular, Back, Bounce, Elastic), `EasingDirection`, `KeyCode` (keys + mouse + gamepad buttons), `InputActionType` (Bool, Direction1D, Direction2D, Direction3D, ViewportPosition), `InputDeviceType` (KeyboardMouse, Gamepad, Touch), `PartShape`, `Material` (small v1 set), `CollisionFidelity` (Default, Hull, Box, Precise), `RotationOrder` (XYZ, XZY, YXZ, YZX, ZXY, ZYX — all six permutations; YXZ wherever an `order` parameter is omitted), `RaycastFilterType` (Include, Exclude), `StreamingMode` (Default, Atomic, Persistent), `PlaybackState`, `CharacterState` (Grounded, Airborne), `AutomaticSize`, `FillDirection`, `HorizontalAlignment`, `VerticalAlignment`, `SortOrder`, `ScaleType` (Stretch, Slice, Tile), `WindowMode`, `LogLevel` (Trace, Debug, Info, Warning, Error — ascending severity, and `Value` orders them), `RunContext` (Client, Server — declared and carrying both items in v1, but nothing reads them; §2.1). |
+| `Enum` | Global `Enum` namespace; `EnumItem` = `Name`, `Value`, `EnumType` — and `EnumType` is the enum **object**, not its name as a string, so `Enum.PartShape.Ball.EnumType == Enum.PartShape`. `Enum.X:GetEnumItems()` returns a **fresh** array on every call, in declaration order (fresh so a caller may sort it; ordered because R10 forbids container order reaching observable order). v1 enums: `EasingStyle` (Linear, Sine, Quad, Cubic, Quart, Quint, Exponential, Circular, Back, Bounce, Elastic), `EasingDirection`, `KeyCode` (keys + mouse + gamepad buttons), `InputActionType` (Bool, Direction1D, Direction2D, Direction3D, ViewportPosition), `InputDeviceType` (KeyboardMouse, Gamepad, Touch), `InputRate` (Simulation, Render — ADR 0039), `PartShape`, `Material` (small v1 set), `CollisionFidelity` (Default, Hull, Box, Precise), `RotationOrder` (XYZ, XZY, YXZ, YZX, ZXY, ZYX — all six permutations; YXZ wherever an `order` parameter is omitted), `RaycastFilterType` (Include, Exclude), `StreamingMode` (Default, Atomic, Persistent), `PlaybackState`, `CharacterState` (Grounded, Airborne), `AutomaticSize`, `FillDirection`, `HorizontalAlignment`, `VerticalAlignment`, `SortOrder`, `ScaleType` (Stretch, Slice, Tile), `WindowMode`, `LogLevel` (Trace, Debug, Info, Warning, Error — ascending severity, and `Value` orders them), `RunContext` (Client, Server — declared and carrying both items in v1, but nothing reads them; §2.1). |
 
 **What `typeof` returns.** `typeof(Vector3.new(1, 2, 3))` is **`"vector"`** —
 Vector3 *is* the VM primitive (divergence #9, §9), which is why every signature
@@ -638,18 +638,49 @@ same sequence independently of the original.
 ### 2.4 Input Action System (the only input path — ADR 0029)
 
 - `InputContext : Instance` — `Enabled: boolean`, `Priority: number`,
-  `Sink: boolean`; children are InputActions. Parented anywhere (convention:
-  under the Script that owns it).
+  `Sink: boolean`, `Rate: Enum.InputRate`; children are InputActions. Parented
+  anywhere (convention: under the Script that owns it).
 - `InputAction : Instance` — `Type: Enum.InputActionType`,
   `Enabled: boolean`; `GetState() → boolean | number | Vector2 | vector`;
-  signals `Pressed`, `Released` (Bool), `StateChanged(newValue)` (all types).
+  signals `Pressed`, `Released` (Bool), `StateChanged` (all types).
 - `InputBinding : Instance` (child of an InputAction) —
-  `KeyCode: Enum.KeyCode?`, composites `Up/Down/Left/Right: Enum.KeyCode?`
-  (Direction2D), `Scale: number`, `UIButton: ImageButton | TextButton?`,
-  `DisplayName: string` (a localization key is allowed), `Image: Content?`,
-  `DeviceType: Enum.InputDeviceType?` (per-device preferred binding).
+  `KeyCode: Enum.KeyCode`, composites `Up/Down/Left/Right: Enum.KeyCode`
+  (Direction1D and Direction2D), `Scale: number`,
+  `UIButton: ImageButton | TextButton?`, `DisplayName: string` (a localization
+  key is allowed), `Image: Content`, `DeviceType: Enum.InputDeviceType`
+  (read-only, derived from `KeyCode`).
 - `InputAction:GetPreferredBinding(deviceType?) → InputBinding?` for prompt
   glyphs ("Press [E]").
+
+**`Priority` orders fallthrough; `Rate` picks the clock, and they are different
+questions** (ADR 0039). A `Simulation` context — the default — is dispatched on
+the sim tick, where R10 holds and the input replay can see it; a `Render` one is
+dispatched per rendered frame, for camera look and UI, and is *not* part of the
+recorded input stream, because a render frame is not a unit the replay has. A
+gameplay decision taken from a `Render` action is frame-rate-dependent by
+construction. Deriving the rate from `Priority` instead would make a
+low-priority render-rate context inexpressible and would let somebody change an
+action's determinism class by re-tuning a number about layering.
+
+**The enum-typed members are total rather than optional**, also ADR 0039. The
+engine's property value domain is a closed set in which only an `Instance` can
+be nil, so `Enum.KeyCode` carries an explicit `Unknown` item — that is what
+"unbound" means — and `DeviceType` is derived from `KeyCode` rather than stored,
+so a binding cannot claim to be a gamepad binding for the `W` key.
+`UIButton` stays genuinely optional, because an Instance reference can be nil.
+
+**`StateChanged` carries no arguments**, like `Destroying` and the signal from
+`GetPropertyChangedSignal`, and the handler reads `GetState()`. Same reason as
+in §2.2: it keeps the signal's type independent of the value's — and here also
+because the queue between the engine and the VM carries POD facts, so an
+argument would have to be rebuilt at drain time rather than captured at fire
+time (§3.1). Input dispatches once per tick, so the value the handler reads is
+the value that caused the fire.
+
+**Runtime rebinding is a property write** — `binding.KeyCode = Enum.KeyCode.J`
+— and persistence is the game's: an `InputBinding` is an ordinary Instance and a
+settings screen serializes it like any other state. The engine ships no
+save/load pair for bindings in v1.
 
 ### 2.5 Deliberate divergences vs Roblox (the migration guide reuses this table)
 

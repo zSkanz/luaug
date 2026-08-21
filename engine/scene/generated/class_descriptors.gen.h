@@ -45,6 +45,10 @@ inline constexpr EnumId CharacterStateEnumId = 4;
 inline constexpr EnumId RotationOrderEnumId = 5;
 inline constexpr EnumId LogLevelEnumId = 6;
 inline constexpr EnumId RunContextEnumId = 7;
+inline constexpr EnumId KeyCodeEnumId = 8;
+inline constexpr EnumId InputActionTypeEnumId = 9;
+inline constexpr EnumId InputDeviceTypeEnumId = 10;
+inline constexpr EnumId InputRateEnumId = 11;
 
 } // namespace generated
 
