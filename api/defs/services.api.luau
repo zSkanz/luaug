@@ -766,6 +766,37 @@ local Classes: { Schema.Class } = {
             },
         } :: { Schema.Property },
     },
+    {
+        Name = "AudioService",
+        Extends = "Instance",
+        Module = "audio",
+        Tags = { "Service", "NotCreatable" } :: { Schema.ClassTag },
+        Doc = "Mixing and the listener (§2.1). **The listener is `Workspace.CurrentCamera`** and is not "
+            .. "settable: a game with two ideas about where the player is hearing from is a game with a bug, "
+            .. "and the camera is already the one thing that answers that question.",
+        Properties = {
+            {
+                Name = "MasterVolume",
+                Type = "number",
+                Default = "1",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "Multiplied into every sound, after its own volume and its group's. The one a settings "
+                    .. "screen writes.",
+            },
+        } :: { Schema.Property },
+        Methods = {
+            {
+                Name = "PlayLocal",
+                Parameters = { { Name = "content", Type = "Content" } },
+                Returns = { "Sound" },
+                ThreadSafety = "Unsafe",
+                Doc = "Creates a 2D `Sound`, plays it, and destroys it when it ends. For the fire-and-forget "
+                    .. "case -- a click, a pickup -- where holding an instance to clean up later is all "
+                    .. "ceremony. The `Sound` is returned so that the volume can still be set on the tick it "
+                    .. "starts; keeping it past `Ended` is holding a destroyed instance.",
+            },
+        } :: { Schema.Method },
+    },
 }
 
 local Definition: Schema.Definition = {

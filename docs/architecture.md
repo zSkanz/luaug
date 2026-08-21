@@ -104,9 +104,9 @@ L0  core
 L1  jobs, platform
 L2  rhi_api (+rhi_sdlgpu, rhi_capture, rhi_null, rhi_bgfx later),
     physics_api (+physics_jolt, +physics_box2d later),
-    net_api (+net_gns, +net_enet), audio, asset
-L3  scene            (may include physics_api only — interface headers, no impl)
-L4  render (renderer_default behind IRenderer), input, nav (seam only, ADR 0022)
+    net_api (+net_gns, +net_enet), asset
+L3  scene            (may include physics_api only -- interface headers, no impl)
+L4  render (renderer_default behind IRenderer), audio, input, nav (seam only, ADR 0022)
 L5  ui, script
 L6  app
 ```
@@ -283,7 +283,11 @@ under the single-threaded one, which is exactly why the sorts had to be written
 at M5: M7 wires the pool, and the milestone that discovers a thousand recorded
 traces are worthless is not one anybody wants.
 
-**audio** (deps: core, jobs, platform) — miniaudio. **The module itself is the
+**audio** (deps: core, jobs, platform, scene) — miniaudio. **At L4 from M6, not
+L2**: it owns the `Sound` and `AudioGroup` classes, and a module that registers a
+class into scene's registry has to be able to see scene. ADR 0009's seam is
+unchanged by the move -- the seam is the module boundary, not its layer -- and
+`render` sits at L4 for the same reason. miniaudio. **The module itself is the
 swappable seam** (ADR 0009): one implementation in v1, selected at build time;
 the public Luau API never leaks miniaudio concepts; FMOD/Wwise arrive post-v1
 as alternative module implementations, not as a "mixer backend" layer.

@@ -452,4 +452,33 @@ struct UICornerComponent
     core::UDim cornerRadius{0.0f, 8.0f};
 };
 
+// --- Audio (M6) --------------------------------------------------------------
+
+struct AudioGroupComponent
+{
+    f32 volume = 1.0f;
+};
+
+// `Sound`. The timeline is the SIMULATION's (M6 brief, Decision 9): every field
+// here is advanced by the tick and read by the mixer, never the other way round.
+// A field the mixer wrote would be the wall clock entering the world.
+struct SoundComponent
+{
+    // An `asset://` URI. Stored and not yet decoded (M7).
+    std::string content;
+    core::InstanceId group;
+    // Seconds. f64 because it is compared against `simTime`-shaped quantities
+    // and a 32-bit second drifts visibly over a long track.
+    f64 timePosition = 0.0;
+    f32 volume = 0.5f;
+    f32 playbackSpeed = 1.0f;
+    f32 rollOffMinDistance = 8.0f;
+    f32 rollOffMaxDistance = 80.0f;
+    bool playing = false;
+    bool looped = false;
+    // Whether `Loaded` has been raised. One shot: the event is a past-tense fact
+    // and a sound is loaded once.
+    bool loadedFired = false;
+};
+
 } // namespace luaug::scene

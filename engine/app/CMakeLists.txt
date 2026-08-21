@@ -20,6 +20,7 @@ luaug_add_module(app
         src/dev_control.cpp
     DEPS
         asset
+        audio
         core
         platform
         rhi_api

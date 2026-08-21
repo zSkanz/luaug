@@ -919,6 +919,67 @@ declare extern type UICorner extends Instance with
     CornerRadius: UDim
 end
 
+declare extern type AudioGroup extends Instance with
+    --- A multiplier, not a level in decibels: 0 is silent, 1 is unchanged, and above 1 is louder and
+    --- will clip if the material was already near full scale. Nesting is not supported -- a group
+    --- parented to a group is just an instance parented to an instance, and only a `Sound`'s own
+    --- `Group` is read.
+    Volume: number
+end
+
+declare extern type Sound extends Instance with
+    --- The audio, as an `asset://` URI. **Stored and not yet read** (M7): the asset pipeline cannot
+    --- decode and hand over a buffer until it can stream one, so a sound with a content id plays a
+    --- generated tone of its declared length rather than the file. Everything ELSE on this class is
+    --- real -- the timeline, the events, the mixing, the spatialization -- which is what makes the gap
+    --- a documented one rather than a class that does nothing.
+    Content: Content
+    --- Whether the timeline is advancing. Writing it is the same as calling `Play` or `Stop`, and
+    --- reading it is how a script asks without keeping its own flag.
+    Playing: boolean
+    --- Whether reaching the end wraps to the start instead of stopping. A looped sound never fires
+    --- `Ended`, because it never does.
+    Looped: boolean
+    --- A multiplier, combined with the group's and with the listener distance. The default is half
+    --- rather than full because a game with several sounds at once and every one at 1 is a game that
+    --- clips, and the first thing anybody does is turn them all down.
+    Volume: number
+    --- How fast the timeline runs, and therefore the pitch. 2 is an octave up and half the duration.
+    --- Zero is refused rather than treated as a pause -- `Playing` is what pauses, and a speed of zero
+    --- would be a sound that never ends.
+    PlaybackSpeed: number
+    --- Where the timeline is, in seconds. Writable, which is how a script seeks; the write lands on the
+    --- next tick like every other, and past the end it stops or wraps exactly as arriving there would.
+    TimePosition: number
+    --- How far the listener can be before a positional sound starts getting quieter. Inside it the
+    --- sound is at full `Volume`; ignored entirely for a 2D sound.
+    RollOffMinDistance: number
+    --- How far the listener can be before a positional sound is silent. Between the two distances it
+    --- fades linearly -- linear rather than inverse-square because a game's audible range is a design
+    --- decision rather than a physical one, and an inverse square makes the far half of it inaudible.
+    RollOffMaxDistance: number
+    --- The bus this sound's volume is multiplied by, or nil for none.
+    Group: AudioGroup?
+    --- Fired on the tick the timeline reaches the end of a sound that is not `Looped`. From the SIM
+    --- timeline rather than from the mixer, so it lands on the same tick in a replay, in a headless
+    --- run, and on a machine whose audio buffer is four times the size.
+    read Ended: Signal<()>
+    --- Fired when this sound's `Content` has been decoded and is ready to play. **Fires immediately in
+    --- v1**, because a sound has nothing to load until M7's asset pipeline -- declared now so that code
+    --- written today does not have to change when it does.
+    read Loaded: Signal<()>
+    --- Starts it from `TimePosition`, which is 0 for a sound that has never played and wherever `Stop`
+    --- left it otherwise. Playing one that is already playing is a no-op rather than a restart --
+    --- restarting is `TimePosition = 0` and then this.
+    function Play(self): ()
+    --- Stops the timeline where it is. `Play` resumes from there.
+    function Pause(self): ()
+    --- Stops it and rewinds to the start. `Ended` does NOT fire: it is a past-tense fact about reaching
+    --- the end, and code that awards something when a jingle finishes must not be fooled by one that
+    --- was cut off.
+    function Stop(self): ()
+end
+
 declare extern type DataModel extends Instance with
     --- The version of the engine runtime executing this VM, as `luaug.toml` pins it. Read-only: the
     --- runtime is chosen before the VM exists, so nothing a script does can change it.
@@ -942,6 +1003,7 @@ declare extern type DataModel extends Instance with
     function GetService(self, name: "InputService"): InputService
     function GetService(self, name: "TweenService"): TweenService
     function GetService(self, name: "UIService"): UIService
+    function GetService(self, name: "AudioService"): AudioService
     --- Returns the service of this name, creating it on the first request. Services are singletons:
     --- every later call returns the same instance, and it is an ordinary child of `game` once created.
     --- A string literal gives an exactly typed result; a name computed at runtime gives the general
@@ -1204,6 +1266,17 @@ declare extern type UIService extends Instance with
     --- are in PIXELS, so this is what a game multiplies by when it wants a measurement to mean the same
     --- physical size on two screens.
     read DisplayScale: number
+end
+
+declare extern type AudioService extends Instance with
+    --- Multiplied into every sound, after its own volume and its group's. The one a settings screen
+    --- writes.
+    MasterVolume: number
+    --- Creates a 2D `Sound`, plays it, and destroys it when it ends. For the fire-and-forget case -- a
+    --- click, a pickup -- where holding an instance to clean up later is all ceremony. The `Sound` is
+    --- returned so that the volume can still be set on the tick it starts; keeping it past `Ended` is
+    --- holding a destroyed instance.
+    function PlayLocal(self, content: Content): Sound
 end
 
 declare Enum: {
@@ -1543,7 +1616,9 @@ declare Instance: {
         & (("ScrollFrame") -> ScrollFrame)
         & (("UIListLayout") -> UIListLayout)
         & (("UIPadding") -> UIPadding)
-        & (("UICorner") -> UICorner),
+        & (("UICorner") -> UICorner)
+        & (("AudioGroup") -> AudioGroup)
+        & (("Sound") -> Sound),
 }
 
 declare game: DataModel

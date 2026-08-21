@@ -430,6 +430,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         .fixedTimestep = scheduler.timing().fixedDt,
         .reloadState = &reloadState,
         .isReload = false,
+        .headless = options.headless,
         .preserved = nullptr,
         .conformanceRoot = options.conformanceRoot,
     };
@@ -637,6 +638,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // tick settled on, never one being written.
         for (u32 step = 0; step < frame.simTicks; ++step)
             host->tick();
+
+        // What the speakers do is a consequence of the simulation and never an
+        // input to it (M6 brief, Decision 9), which is why this is after the
+        // ticks rather than inside one. The listener is
+        // `Workspace.CurrentCamera` -- a game with two ideas about where the
+        // player is hearing from is a game with a bug.
+        host->audio().update(host->world(), host->currentCamera());
 
         // The physics wireframe (roadmap M5, "Jolt debug-draw bridge"): what the
         // SOLVER thinks the world looks like, which is the only picture that can

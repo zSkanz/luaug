@@ -2,6 +2,46 @@
   "Version": "0.0.1",
   "Classes": [
     {
+      "Name": "AudioGroup",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Volume",
+          "Type": "number",
+          "Default": "1"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "AudioService",
+      "Extends": "Instance",
+      "Tags": ["NotCreatable", "Service"],
+      "Properties": [
+        {
+          "Name": "MasterVolume",
+          "Type": "number",
+          "Default": "1"
+        }
+      ],
+      "Methods": [
+        {
+          "Name": "PlayLocal",
+          "Parameters": [
+            {
+              "Name": "content",
+              "Type": "Content"
+            }
+          ],
+          "Returns": ["Sound"],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Events": []
+    },
+    {
       "Name": "BasePart",
       "Extends": "PVInstance",
       "Tags": ["Abstract"],
@@ -1324,6 +1364,90 @@
       ],
       "Methods": [],
       "Events": []
+    },
+    {
+      "Name": "Sound",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Content",
+          "Type": "Content",
+          "Default": "\"\"",
+          "Inert": true
+        },
+        {
+          "Name": "Group",
+          "Type": "AudioGroup?",
+          "Default": "nil"
+        },
+        {
+          "Name": "Looped",
+          "Type": "boolean",
+          "Default": "false"
+        },
+        {
+          "Name": "PlaybackSpeed",
+          "Type": "number",
+          "Default": "1"
+        },
+        {
+          "Name": "Playing",
+          "Type": "boolean",
+          "Default": "false"
+        },
+        {
+          "Name": "RollOffMaxDistance",
+          "Type": "number",
+          "Default": "80"
+        },
+        {
+          "Name": "RollOffMinDistance",
+          "Type": "number",
+          "Default": "8"
+        },
+        {
+          "Name": "TimePosition",
+          "Type": "number",
+          "Default": "0",
+          "Transient": true
+        },
+        {
+          "Name": "Volume",
+          "Type": "number",
+          "Default": "0.5"
+        }
+      ],
+      "Methods": [
+        {
+          "Name": "Pause",
+          "Parameters": [],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Play",
+          "Parameters": [],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Stop",
+          "Parameters": [],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Events": [
+        {
+          "Name": "Ended",
+          "Parameters": []
+        },
+        {
+          "Name": "Loaded",
+          "Parameters": []
+        }
+      ]
     },
     {
       "Name": "SpotLight",

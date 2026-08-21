@@ -1,5 +1,6 @@
 #include "luaug/app/world_host.h"
 
+#include "luaug/audio/scene_types.h"
 #include "luaug/core/build_info.h"
 #include "luaug/core/json.h"
 #include "luaug/core/log.h"
@@ -202,6 +203,7 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
     scene::generated::registerClasses(m_classes, m_atoms);
     render::registerSceneTypes(m_classes, m_atoms);
     input::registerSceneTypes(m_classes, m_atoms);
+    audio::registerSceneTypes(m_classes, m_atoms);
     ui::registerSceneTypes(m_classes, m_atoms);
 
     // Enums have one owner and no hierarchy, so they are independent of the
@@ -257,6 +259,12 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
     // state" and answers with the defaults, rather than as an error.
     m_lighting = m_world->findFirstChildOfClass(m_runtime->dataModel(), m_classes.findId(m_atoms.lookup("Lighting")));
     m_uiService = m_world->findFirstChildOfClass(m_runtime->dataModel(), m_classes.findId(m_atoms.lookup("UIService")));
+
+    // The mixer opens a device on a windowed run and none on a headless one:
+    // a headless run has no reason to hold one, and on a CI runner the attempt
+    // costs a second and a log line nobody reads. The TIMELINE runs either way,
+    // which is what makes `Ended` land on the same tick in both.
+    (void)m_audio.start(options.headless);
 
 #if LUAUG_PHYSICS_JOLT
     // The one hand-written switch over what the build compiled in (ADR 0023),
@@ -515,6 +523,11 @@ void WorldHost::tick()
     // phase's own handlers go through, so a script that jumps on a press sees
     // the press in the tick it happened rather than in the next one.
     m_input.dispatchSimTick(*m_world, state.tick);
+
+    // The sound timeline, beside the input dispatch and for the same reason:
+    // both are simulation state advanced by the tick, and both raise their
+    // events into the drain the phases below go through.
+    m_audio.tick(*m_world, state.fixedTimestep);
 
     // Each resumption point runs its engine phase, then drains (api-design.md
     // §3.1). `task` timers resume in their own phase between `PostSimulation`

@@ -33,11 +33,12 @@ TEST_CASE("an empty world still boots, with game and its boot services")
 
     CHECK(host.workspace().valid());
     CHECK(host.world().alive(host.runtime().dataModel()));
-    // `Workspace`, `ScriptService`, `Lighting` and -- from M6 -- `UIService`
-    // exist from boot; nothing else does until it is asked for. The last two are
-    // there for one reason: the frame reads both whether or not a script asks,
-    // so "created on first GetService" cannot be true of either.
-    CHECK(host.world().childCount(host.runtime().dataModel()) == 4);
+    // `Workspace`, `ScriptService`, `Lighting` and -- from M6 -- `UIService` and
+    // `AudioService` exist from boot; nothing else does until it is asked for.
+    // The last three are there for one reason: the frame reads all of them
+    // whether or not a script asks, so "created on first GetService" cannot be
+    // true of any of them.
+    CHECK(host.world().childCount(host.runtime().dataModel()) == 5);
 }
 
 // --- The M4.5 gate addition: `Lighting` resolution, at the HOST --------------

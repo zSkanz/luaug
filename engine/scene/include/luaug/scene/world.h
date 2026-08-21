@@ -122,6 +122,11 @@ struct EngineState
     // until somebody runs it on a phone.
     core::Rect safeAreaInsets;
     f32 displayScale = 1.0f;
+
+    // `AudioService.MasterVolume` (M6). Here for the same reason
+    // `PhysicsService.FixedTimestep` is: one of each service per world, and a
+    // component around a single float would be ceremony.
+    f32 masterVolume = 1.0f;
     std::string engineVersion;
     std::string luauVersion;
 };
@@ -364,6 +369,12 @@ public:
     [[nodiscard]] ComponentPool<UICornerComponent>& uiCorners() noexcept { return m_uiCorners; }
     [[nodiscard]] const ComponentPool<UICornerComponent>& uiCorners() const noexcept { return m_uiCorners; }
 
+    // The audio module's classes (M6).
+    [[nodiscard]] ComponentPool<SoundComponent>& sounds() noexcept { return m_sounds; }
+    [[nodiscard]] const ComponentPool<SoundComponent>& sounds() const noexcept { return m_sounds; }
+    [[nodiscard]] ComponentPool<AudioGroupComponent>& audioGroups() noexcept { return m_audioGroups; }
+    [[nodiscard]] const ComponentPool<AudioGroupComponent>& audioGroups() const noexcept { return m_audioGroups; }
+
 private:
     void linkChild(InstanceRecord& parentRecord, core::InstanceId parentId, core::InstanceId childId);
     void unlinkChild(core::InstanceId childId);
@@ -395,6 +406,8 @@ private:
     ComponentPool<WorkspaceComponent> m_workspaces;
     ComponentPool<ModelComponent> m_models;
     ComponentPool<ScriptComponent> m_scripts;
+    ComponentPool<SoundComponent> m_sounds;
+    ComponentPool<AudioGroupComponent> m_audioGroups;
     ComponentPool<ScreenGuiComponent> m_screenGuis;
     ComponentPool<UIObjectComponent> m_uiObjects;
     ComponentPool<TextLabelComponent> m_textLabels;

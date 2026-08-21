@@ -764,6 +764,72 @@ int inputServiceGetPointerPosition(lua_State* L)
     return 1;
 }
 
+// --- Sound and AudioService (M6) ---------------------------------------------
+
+int soundPlay(lua_State* L)
+{
+    const core::InstanceId id = checkInstance(L, 1);
+    if (scene::SoundComponent* sound = world(L).sounds().find(id); sound != nullptr) {
+        // From wherever `TimePosition` is, which is 0 for a sound that has never
+        // played and wherever `Pause` left it otherwise. Playing one that is
+        // already playing is a no-op rather than a restart: restarting is
+        // `TimePosition = 0` and then this, and a `Play` that silently rewound
+        // would make a repeated call cut its own sound off.
+        sound->playing = true;
+    }
+    return 0;
+}
+
+int soundPause(lua_State* L)
+{
+    const core::InstanceId id = checkInstance(L, 1);
+    if (scene::SoundComponent* sound = world(L).sounds().find(id); sound != nullptr)
+        sound->playing = false;
+    return 0;
+}
+
+int soundStop(lua_State* L)
+{
+    const core::InstanceId id = checkInstance(L, 1);
+    if (scene::SoundComponent* sound = world(L).sounds().find(id); sound != nullptr) {
+        sound->playing = false;
+        // Rewound, which is the whole difference from `Pause`. `Ended` is NOT
+        // raised: it is a past-tense fact about reaching the end, and code that
+        // awards something when a jingle finishes must not be fooled by one that
+        // was cut off.
+        sound->timePosition = 0.0;
+    }
+    return 0;
+}
+
+int audioServicePlayLocal(lua_State* L)
+{
+    World& w = world(L);
+    size_t length = 0;
+    const char* text = luaL_checklstring(L, 2, &length);
+
+    const scene::ClassId soundClass = w.classes().findId(w.atoms().intern("Sound"));
+    if (soundClass == scene::InvalidClass) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    const core::InstanceId id = w.create(soundClass);
+    if (scene::SoundComponent* sound = w.sounds().find(id); sound != nullptr) {
+        sound->content = std::string(text, length);
+        sound->playing = true;
+    }
+
+    // Parented to the service, which is what makes it 2D: positional is "parented
+    // to a BasePart" and nothing else. It is a real instance in the tree rather
+    // than a hidden voice, so a script can still turn it down on the tick it
+    // starts -- and `AudioService`'s doc says keeping it past `Ended` is holding
+    // a destroyed instance.
+    (void)w.setParent(id, checkInstance(L, 1));
+    pushInstance(L, id);
+    return 1;
+}
+
 // `WaitForChild` is here rather than in `instance_binding.cpp` because it parks
 // on a tree state and only the resumption phase this file owns can wake it.
 constexpr InstanceMethodBinding ServiceMethods[] = {
@@ -800,6 +866,11 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
 
     {"TweenService", "Create", tweenServiceCreate},
     {"TweenService", "GetValue", tweenServiceGetValue},
+
+    {"Sound", "Play", soundPlay},
+    {"Sound", "Pause", soundPause},
+    {"Sound", "Stop", soundStop},
+    {"AudioService", "PlayLocal", audioServicePlayLocal},
 
     {"Workspace", "Raycast", workspaceRaycast},
     {"Workspace", "Spherecast", workspaceSpherecast},
@@ -863,6 +934,12 @@ void registerServices(lua_State* L)
     // registered by `ui` and an engine built without that module has none.
     if (const ClassId uiClass = w.classes().findId(atoms.intern("UIService")); uiClass != scene::InvalidClass)
         (void)getServiceOfClass(L, uiClass);
+
+    // And `AudioService`, for the third instance of the same reason: the mixer
+    // reads `MasterVolume` every frame whether or not a script asks for the
+    // service.
+    if (const ClassId audioClass = w.classes().findId(atoms.intern("AudioService")); audioClass != scene::InvalidClass)
+        (void)getServiceOfClass(L, audioClass);
 
     // Whatever the boot tree raised is consumed rather than queued: nothing can
     // have connected yet, and a fire nobody could have subscribed to is a fire

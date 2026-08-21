@@ -36,12 +36,17 @@ local Layers: { [string]: number } = {
     rhi = 2,
     physics = 2,
     net = 2,
-    audio = 2,
     asset = 2,
 
     scene = 3,
 
     render = 4,
+    -- architecture.md §2 put `audio` at L2 with the other backend seams, and M6
+    -- moved it: the module that owns `Sound` has to be able to read a
+    -- `SoundComponent` and the listener's transform, and L2 cannot see `scene`.
+    -- The seam ADR 0009 names is unchanged -- it is the module boundary, not the
+    -- layer -- and `render` sits here for exactly the same reason.
+    audio = 4,
     input = 4,
     nav = 4,
 

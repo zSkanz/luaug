@@ -12,6 +12,7 @@
 #pragma once
 
 #include "luaug/app/preserved.h"
+#include "luaug/audio/audio.h"
 #include "luaug/core/error.h"
 #include "luaug/core/name_atom.h"
 #include "luaug/input/input.h"
@@ -61,6 +62,13 @@ struct WorldHostOptions
     // Whether this world is the product of a reload, which is the whole of what
     // `HotReloadService:IsReload` answers.
     bool isReload = false;
+
+    // Whether the process has a window. The only thing the host does with it is
+    // decide whether to open an audio device: a headless run has no reason to
+    // hold one, and on a CI runner the attempt costs a second and a log line
+    // nobody reads. The sound TIMELINE runs either way, which is what makes
+    // `Ended` land on the same tick in both.
+    bool headless = true;
 
     // The `PreserveOnReload` instances the outgoing world was carrying. They go
     // into the tree after the project is mounted and **before** the entry
@@ -152,6 +160,19 @@ public:
     // milestones lighting scenes with defaults.
     [[nodiscard]] core::InstanceId uiService() const noexcept { return m_uiService; }
 
+    // The mixer and the sound timeline (M6). Owned here beside the physics
+    // mirror and the input system, and for the same reasons.
+    [[nodiscard]] audio::AudioSystem& audio() noexcept { return m_audio; }
+
+    // `Workspace.CurrentCamera`, which is the audio listener (§2.1). Resolved
+    // per call rather than cached: it is a property a script may reassign, and a
+    // cached id is how M4 spent four milestones lighting scenes with defaults.
+    [[nodiscard]] core::InstanceId currentCamera() const noexcept
+    {
+        const scene::WorkspaceComponent* component = m_world->workspaces().find(m_workspace);
+        return component == nullptr ? core::InstanceId{} : component->currentCamera;
+    }
+
     // The physics mirror, or null in a build with no physics backend. The world
     // owns it because a hot reload rebuilds the world, and a simulation that
     // outlived the tree it mirrors would be holding bodies for parts that no
@@ -225,6 +246,7 @@ private:
     core::InstanceId m_workspace;
     core::InstanceId m_lighting;
     core::InstanceId m_uiService;
+    audio::AudioSystem m_audio;
     PreserveReport m_preserveReport;
     render::DebugDraw* m_gizmos = nullptr;
 

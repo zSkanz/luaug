@@ -26,6 +26,7 @@ luaug_add_module(script
         src/reload_state.cpp
         src/runtime.cpp
     DEPS
+        audio
         core
         input
         physics_api

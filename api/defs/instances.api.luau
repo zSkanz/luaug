@@ -1460,6 +1460,166 @@ local Classes: { Schema.Class } = {
             },
         } :: { Schema.Property },
     },
+    {
+        Name = "AudioGroup",
+        Extends = "Instance",
+        Module = "audio",
+        Storage = "AudioGroup",
+        Doc = "A mixing bus (§2.1, §2.2). A `Sound` whose `Group` names one has its volume multiplied by the "
+            .. 'group\'s, which is how "turn the music down" is one property rather than a loop over every '
+            .. "music track.\n\nNamed `AudioGroup` rather than `SoundGroup` for the reason §2.5's divergence 19 "
+            .. "gives: the service is `AudioService`, and one prefix across a family beats two.",
+        Properties = {
+            {
+                Name = "Volume",
+                Type = "number",
+                Default = "1",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "A multiplier, not a level in decibels: 0 is silent, 1 is unchanged, and above 1 is "
+                    .. "louder and will clip if the material was already near full scale. Nesting is not "
+                    .. "supported -- a group parented to a group is just an instance parented to an instance, "
+                    .. "and only a `Sound`'s own `Group` is read.",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "Sound",
+        Extends = "Instance",
+        Module = "audio",
+        Storage = "Sound",
+        Doc = "One sound, playing or not (§2.2). **Parent it to a `BasePart` and it is positional**; parent it "
+            .. "anywhere else and it is 2D. That is the whole of the 3D switch, and it is a property of where "
+            .. "the instance sits rather than a flag that could disagree with it.\n\n**Its timeline is the "
+            .. "SimClock's, not the mixer's** (M6 brief, Decision 9). `TimePosition` advances by "
+            .. "`FixedTimestep * PlaybackSpeed` per tick and `Ended` fires from that timeline, so a replay "
+            .. "reproduces both exactly and a headless run with no audio device produces the same `Ended` on "
+            .. "the same tick as a run with speakers. What the speakers do is downstream of the simulation and "
+            .. "never an input to it -- otherwise a script reading `TimePosition` would be reading the wall "
+            .. "clock through a side door (R10).",
+        Properties = {
+            {
+                Name = "Content",
+                Type = "Content",
+                Default = '""',
+                Inert = true,
+                Doc = "The audio, as an `asset://` URI. **Stored and not yet read** (M7): the asset pipeline "
+                    .. "cannot decode and hand over a buffer until it can stream one, so a sound with a "
+                    .. "content id plays a generated tone of its declared length rather than the file. "
+                    .. "Everything ELSE on this class is real -- the timeline, the events, the mixing, the "
+                    .. "spatialization -- which is what makes the gap a documented one rather than a class "
+                    .. "that does nothing.",
+            },
+            {
+                Name = "Playing",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether the timeline is advancing. Writing it is the same as calling `Play` or `Stop`, "
+                    .. "and reading it is how a script asks without keeping its own flag.",
+            },
+            {
+                Name = "Looped",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether reaching the end wraps to the start instead of stopping. A looped sound never "
+                    .. "fires `Ended`, because it never does.",
+            },
+            {
+                Name = "Volume",
+                Type = "number",
+                Default = "0.5",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "A multiplier, combined with the group's and with the listener distance. The default is "
+                    .. "half rather than full because a game with several sounds at once and every one at 1 is "
+                    .. "a game that clips, and the first thing anybody does is turn them all down.",
+            },
+            {
+                Name = "PlaybackSpeed",
+                Type = "number",
+                Default = "1",
+                ErrorKey = "scene.err.number_above_zero",
+                Doc = "How fast the timeline runs, and therefore the pitch. 2 is an octave up and half the "
+                    .. "duration. Zero is refused rather than treated as a pause -- `Playing` is what pauses, "
+                    .. "and a speed of zero would be a sound that never ends.",
+            },
+            {
+                Name = "TimePosition",
+                Type = "number",
+                Default = "0",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Transient = true,
+                Doc = "Where the timeline is, in seconds. Writable, which is how a script seeks; the write "
+                    .. "lands on the next tick like every other, and past the end it stops or wraps exactly as "
+                    .. "arriving there would.",
+            },
+            {
+                Name = "RollOffMinDistance",
+                Type = "number",
+                Default = "8",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "How far the listener can be before a positional sound starts getting quieter. Inside "
+                    .. "it the sound is at full `Volume`; ignored entirely for a 2D sound.",
+            },
+            {
+                Name = "RollOffMaxDistance",
+                Type = "number",
+                Default = "80",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "How far the listener can be before a positional sound is silent. Between the two "
+                    .. "distances it fades linearly -- linear rather than inverse-square because a game's "
+                    .. "audible range is a design decision rather than a physical one, and an inverse square "
+                    .. "makes the far half of it inaudible.",
+            },
+            {
+                Name = "Group",
+                Type = "AudioGroup?",
+                Default = "nil",
+                Doc = "The bus this sound's volume is multiplied by, or nil for none.",
+            },
+        } :: { Schema.Property },
+        Methods = {
+            {
+                Name = "Play",
+                Parameters = {},
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Starts it from `TimePosition`, which is 0 for a sound that has never played and "
+                    .. "wherever `Stop` left it otherwise. Playing one that is already playing is a no-op "
+                    .. "rather than a restart -- restarting is `TimePosition = 0` and then this.",
+            },
+            {
+                Name = "Pause",
+                Parameters = {},
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Stops the timeline where it is. `Play` resumes from there.",
+            },
+            {
+                Name = "Stop",
+                Parameters = {},
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Stops it and rewinds to the start. `Ended` does NOT fire: it is a past-tense fact about "
+                    .. "reaching the end, and code that awards something when a jingle finishes must not be "
+                    .. "fooled by one that was cut off.",
+            },
+        } :: { Schema.Method },
+        Events = {
+            {
+                Name = "Ended",
+                Parameters = {},
+                Doc = "Fired on the tick the timeline reaches the end of a sound that is not `Looped`. From "
+                    .. "the SIM timeline rather than from the mixer, so it lands on the same tick in a replay, "
+                    .. "in a headless run, and on a machine whose audio buffer is four times the size.",
+            },
+            {
+                Name = "Loaded",
+                Parameters = {},
+                Doc = "Fired when this sound's `Content` has been decoded and is ready to play. **Fires "
+                    .. "immediately in v1**, because a sound has nothing to load until M7's asset pipeline -- "
+                    .. "declared now so that code written today does not have to change when it does.",
+            },
+        } :: { Schema.Event },
+    },
 }
 
 local Definition: Schema.Definition = {

@@ -10,6 +10,7 @@
 // question these files exist to answer (M2 brief, ruling R-D).
 #pragma once
 
+#include "luaug/audio/scene_types.h"
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
 #include "luaug/core/name_atom.h"
@@ -55,6 +56,7 @@ struct Fixture
         // whose class nothing declared as a mismatch. `render`'s classes are
         // still absent, and can be -- none of them has a method.
         input::registerSceneTypes(classes, atoms);
+        audio::registerSceneTypes(classes, atoms);
         scene::generated::registerEnums(enums, atoms);
         world.emplace(classes, enums, atoms, 1234u);
         runtime.emplace(*world);

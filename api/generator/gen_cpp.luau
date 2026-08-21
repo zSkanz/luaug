@@ -78,6 +78,7 @@ type Module = {
 local Modules: { Module } = {
     { Name = "scene", Layer = 3 },
     { Name = "render", Layer = 4 },
+    { Name = "audio", Layer = 4 },
     { Name = "input", Layer = 4 },
     { Name = "ui", Layer = 5 },
 }

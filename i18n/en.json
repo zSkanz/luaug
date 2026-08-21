@@ -70,6 +70,7 @@
   "scene.err.collision_groups_full": "There is no room for another collision group; a world holds at most 1024.",
   "scene.err.unknown_collision_group": "No collision group by that name is registered.",
   "physics.jolt.err.assert": "Jolt reported a broken assumption at {file}:{line} -- {expression} {message}",
+  "audio.info.no_device": "No audio device could be opened; the game runs and makes no sound.",
   "asset.image.err.decode_failed": "Could not decode the image.",
   "asset.image.err.bad_pixels": "The image data does not match the requested size.",
   "asset.image.err.encode_failed": "Could not encode the image as PNG.",
