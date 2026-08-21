@@ -13,6 +13,7 @@ luaug_add_module(net_api
     INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include
     SOURCES
         src/digest.cpp
+        src/enet_transport.cpp
         src/tcp.cpp
         src/websocket.cpp
         src/websocket_protocol.cpp
@@ -27,11 +28,17 @@ if(WIN32)
     target_link_libraries(luaug_net_api PUBLIC ws2_32)
 endif()
 
+# ENet, PRIVATE: `transport.h` exposes a factory and no ENet type, so nothing
+# that links `net_api` needs its headers -- which is the R17 rule holding in the
+# build graph rather than only in the header.
+target_link_libraries(luaug_net_api PRIVATE enet::enet)
+
 luaug_add_module_tests(net
     MODULES
         net_api
     SOURCES
         tests/digest_tests.cpp
+        tests/transport_tests.cpp
         tests/websocket_client_tests.cpp
         tests/websocket_protocol_tests.cpp
 )

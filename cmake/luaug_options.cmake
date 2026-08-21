@@ -24,6 +24,13 @@ cmake_dependent_option(LUAUG_LUAU_COMPILER
 # `rhi_null` is not a debugging convenience: headless logic tests and the future
 # dedicated server need an IDevice that renders nothing, so it is part of the
 # normal build rather than something a preset turns on.
+# The exotic-format importer in `assetc` (ADR 0010: offline tool only, never the
+# runtime). ON by default because a pipeline that cannot read an FBX is a
+# pipeline most people cannot use -- and an option at all because assimp is the
+# largest single compile in this tree and somebody iterating on the engine has
+# no reason to pay for it.
+option(LUAUG_ASSETC_ASSIMP "Build assimp into assetc for exotic mesh formats" ON)
+
 option(LUAUG_RHI_SDLGPU "Build the SDL3 GPU render backend (the v1 default)" ON)
 option(LUAUG_RHI_NULL "Build the no-op render backend" ON)
 option(LUAUG_RHI_CAPTURE "Build the command-stream recording render backend" ON)

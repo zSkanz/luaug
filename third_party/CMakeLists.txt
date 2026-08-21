@@ -625,6 +625,94 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/basis_universal/transcoder/basisu_transco
     add_library(basis::encoder ALIAS basis_encoder)
 endif()
 
+# ---------------------------------------------------------------------------
+# ENet -- the one implementation behind `ITransport` (ADR 0012, M7).
+#
+# Built here rather than through upstream's own CMakeLists for the usual
+# reason: theirs installs targets, defines an `enet` name we would have to
+# work around, and runs its own platform checks. Six C files and one include
+# directory is the whole library, which is exactly why ADR 0012 named it as the
+# alternative -- GameNetworkingSockets brings protobuf and OpenSSL, and the
+# manifest row beside this one says why that row is still `TBD`.
+add_library(luaug_enet STATIC
+    enet/callbacks.c
+    enet/compress.c
+    enet/host.c
+    enet/list.c
+    enet/packet.c
+    enet/peer.c
+    enet/protocol.c
+    $<$<BOOL:${WIN32}>:enet/win32.c>
+    $<$<NOT:$<BOOL:${WIN32}>>:enet/unix.c>)
+target_include_directories(luaug_enet SYSTEM PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/enet/include")
+if(WIN32)
+    target_link_libraries(luaug_enet PUBLIC ws2_32 winmm)
+else()
+    # Upstream's configure probes for these; without them `unix.c` compiles the
+    # wrong branch and fails at link on `socklen_t` and `MSG_NOSIGNAL`.
+    target_compile_definitions(luaug_enet PRIVATE
+        HAS_FCNTL=1
+        HAS_POLL=1
+        HAS_GETADDRINFO=1
+        HAS_GETNAMEINFO=1
+        HAS_GETHOSTBYNAME_R=1
+        HAS_GETHOSTBYADDR_R=1
+        HAS_INET_PTON=1
+        HAS_INET_NTOP=1
+        HAS_MSGHDR_FLAGS=1
+        HAS_SOCKLEN_T=1)
+endif()
+# Silenced rather than patched. ENet compares an `ENetProtocolCommand` with an
+# `ENetProtocolFlag` on purpose -- the two share a byte in the wire format -- and
+# MSVC 2026 warns on every one of the nine sites. R13 says a vendored tree is
+# never edited in place, and a diagnostic we would not act on is not worth a
+# patch file that has to be rebased at every pin bump.
+if(MSVC)
+    target_compile_options(luaug_enet PRIVATE /w)
+else()
+    target_compile_options(luaug_enet PRIVATE -w)
+endif()
+
+add_library(enet::enet ALIAS luaug_enet)
+
+# ---------------------------------------------------------------------------
+# Recast/Detour is VENDORED AND NOT BUILT, and that is the M7 scope bullet:
+# "vendored, seam defined, no integration" (ADR 0022). There is deliberately no
+# target here. `engine/nav` carries the header that says what the seam is; a
+# build target with no caller would be compile time bought for nothing, and
+# would make the layering gate's answer to "who links Recast" a target instead
+# of the honest "nobody yet".
+
+# ---------------------------------------------------------------------------
+# assimp -- the OFFLINE importer, for `assetc` and never for the runtime
+# (ADR 0010). Upstream's CMakeLists is used as-is because assimp's build is a
+# code generator plus a configured header plus its own contrib tree, and
+# reproducing that by hand is how a vendored build starts diverging from
+# upstream. What we control is the OPTION set.
+#
+# The narrow importer list is the decision worth reading. assimp's default is
+# roughly sixty importers; each is compile time on every clean build and attack
+# surface in a tool whose whole job is to read files somebody else made. glTF
+# stays OFF because fastgltf is the runtime pipeline's importer and M4 proved
+# it -- two importers for one format is two behaviours for one format.
+if(LUAUG_ASSETC_ASSIMP)
+    set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+    set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
+    set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+    set(ASSIMP_BUILD_ZLIB ON CACHE BOOL "" FORCE)
+    set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
+    set(ASSIMP_BUILD_ALL_EXPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
+    set(ASSIMP_NO_EXPORT ON CACHE BOOL "" FORCE)
+    set(ASSIMP_BUILD_FBX_IMPORTER ON CACHE BOOL "" FORCE)
+    set(ASSIMP_BUILD_OBJ_IMPORTER ON CACHE BOOL "" FORCE)
+    set(ASSIMP_BUILD_COLLADA_IMPORTER ON CACHE BOOL "" FORCE)
+    set(ASSIMP_BUILD_PLY_IMPORTER ON CACHE BOOL "" FORCE)
+    set(ASSIMP_BUILD_STL_IMPORTER ON CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    add_subdirectory(assimp ${CMAKE_BINARY_DIR}/third_party/assimp SYSTEM)
+endif()
+
 # Restored so nothing above this directory inherits the ceiling. Our own build
 # does not shell out to git during configure today, and this is what keeps that
 # from becoming a silent dependency if it ever does.

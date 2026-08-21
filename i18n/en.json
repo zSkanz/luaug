@@ -164,6 +164,13 @@
   "engine.reload.err.script_failed": "Reload refused: {count} entry script(s) would not compile. The previous world is still running.",
   "engine.reload.err.no_scripts": "Reload refused: no entry scripts were found under {path}. The previous world is still running.",
 
+  "net.err.transport_init_failed": "The network transport could not be initialised; no connection can be opened.",
+  "net.err.transport_open_failed": "The transport could not open on port {port}; the port may already be in use.",
+  "net.err.transport_not_open": "The transport is not open.",
+  "net.err.transport_no_peer_slot": "No peer slot was free for a connection to {host}:{port}; the host is already holding as many peers as it was configured for.",
+  "net.err.transport_unknown_peer": "That peer is not connected to this transport.",
+  "net.err.transport_bad_channel": "Channel {channel} does not exist; this transport was opened with {channels}.",
+  "net.err.transport_send_failed": "The message could not be queued for sending.",
   "net.err.handshake_failed": "The WebSocket handshake failed: {detail}.",
   "net.err.handshake_no_status": "The server's response has no status line.",
   "net.err.handshake_bad_status": "The server answered \"{status}\" where a 101 upgrade was required.",
