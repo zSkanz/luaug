@@ -5,7 +5,8 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- **M7 — Scaling the World — SCOPE AND GATE COMPLETE, awaiting human review.**
+- **M7 — Scaling the World — COMPLETE, signed off 2026-08-21**, tagged
+  `milestone/m7`.
   The brief is [`docs/briefs/m7-kickoff.md`](docs/briefs/m7-kickoff.md), with a
   filled Gate Record and eleven Findings. **Every scope item and every gate item
   is done**: the offline pipeline, the job system and async IO, the per-World
@@ -130,9 +131,12 @@ quietly.
 - **D026 — the capture gate records an upload's SIZE and not its contents**, so
   the quads a frame draws are invisible to the blocking render gate. What holds
   the line meanwhile is in the row.
-- **M7 is done and unreviewed.** The scope and the gate are complete and the
-  Gate Record is filled; what is left is a human reading it. Nothing here should
-  write "COMPLETE" or tag `milestone/m7` before that.
+- **M7.5 is next** — Looking Like an Engine: shadows, lights, reflections
+  (ADR 0038). Not started, and not in the session that closed M7.
+- **macOS is unverified for M7**, as it was for M6: CI has executed zero steps
+  since 2026-08-21 (the quota signature described above), so the `milestone/m7`
+  tag carries a Tier-1 and Tier-2 result and no Tier-3 one. That is a gap in
+  the evidence rather than a failure, and clearing Actions is what closes it.
 - **What M7 deliberately does not have** is listed at the end of its Gate
   Record, and the two worth carrying forward are: no shipped example has a mesh
   dense enough to exercise LOD selection, so `MeshLodDraws` reads zero until one
