@@ -1310,6 +1310,53 @@
       "Events": []
     },
     {
+      "Name": "TweenService",
+      "Extends": "Instance",
+      "Tags": ["NotCreatable", "Service"],
+      "Properties": [],
+      "Methods": [
+        {
+          "Name": "Create",
+          "Parameters": [
+            {
+              "Name": "instance",
+              "Type": "Instance"
+            },
+            {
+              "Name": "tweenInfo",
+              "Type": "TweenInfo"
+            },
+            {
+              "Name": "goals",
+              "Type": "{ [string]: any }"
+            }
+          ],
+          "Returns": ["Tween"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "GetValue",
+          "Parameters": [
+            {
+              "Name": "alpha",
+              "Type": "number"
+            },
+            {
+              "Name": "easingStyle",
+              "Type": "Enum.EasingStyle"
+            },
+            {
+              "Name": "easingDirection",
+              "Type": "Enum.EasingDirection"
+            }
+          ],
+          "Returns": ["number"],
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Events": []
+    },
+    {
       "Name": "Weld",
       "Extends": "Instance",
       "Tags": [],
@@ -2205,6 +2252,152 @@
       "Operators": []
     },
     {
+      "Name": "Tween",
+      "Constructors": [],
+      "Constants": [],
+      "Properties": [
+        {
+          "Name": "Completed",
+          "Type": "Signal<EnumPlaybackState>",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Instance",
+          "Type": "Instance?",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "PlaybackState",
+          "Type": "Enum.PlaybackState",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "TweenInfo",
+          "Type": "TweenInfo",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Methods": [
+        {
+          "Name": "Cancel",
+          "Parameters": [],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Pause",
+          "Parameters": [],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Play",
+          "Parameters": [],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Operators": []
+    },
+    {
+      "Name": "TweenInfo",
+      "Constructors": [
+        {
+          "Name": "new",
+          "Parameters": [
+            {
+              "Name": "time",
+              "Type": "number?",
+              "Default": "1"
+            },
+            {
+              "Name": "easingStyle",
+              "Type": "Enum.EasingStyle?",
+              "Default": "Enum.EasingStyle.Quad"
+            },
+            {
+              "Name": "easingDirection",
+              "Type": "Enum.EasingDirection?",
+              "Default": "Enum.EasingDirection.Out"
+            },
+            {
+              "Name": "repeatCount",
+              "Type": "number?",
+              "Default": "0"
+            },
+            {
+              "Name": "reverses",
+              "Type": "boolean?",
+              "Default": "false"
+            },
+            {
+              "Name": "delayTime",
+              "Type": "number?",
+              "Default": "0"
+            }
+          ],
+          "Returns": ["TweenInfo"],
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Constants": [],
+      "Properties": [
+        {
+          "Name": "DelayTime",
+          "Type": "number",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "EasingDirection",
+          "Type": "Enum.EasingDirection",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "EasingStyle",
+          "Type": "Enum.EasingStyle",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "RepeatCount",
+          "Type": "number",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Reverses",
+          "Type": "boolean",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Time",
+          "Type": "number",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Methods": [],
+      "Operators": [
+        {
+          "Name": "__eq",
+          "Parameters": [
+            {
+              "Name": "other",
+              "Type": "TweenInfo"
+            }
+          ],
+          "Returns": ["boolean"]
+        }
+      ]
+    },
+    {
       "Name": "UDim",
       "Constructors": [
         {
@@ -2941,6 +3134,72 @@
       ]
     },
     {
+      "Name": "EasingDirection",
+      "Items": [
+        {
+          "Name": "In",
+          "Value": 0
+        },
+        {
+          "Name": "InOut",
+          "Value": 2
+        },
+        {
+          "Name": "Out",
+          "Value": 1
+        }
+      ]
+    },
+    {
+      "Name": "EasingStyle",
+      "Items": [
+        {
+          "Name": "Back",
+          "Value": 8
+        },
+        {
+          "Name": "Bounce",
+          "Value": 9
+        },
+        {
+          "Name": "Circular",
+          "Value": 7
+        },
+        {
+          "Name": "Cubic",
+          "Value": 3
+        },
+        {
+          "Name": "Elastic",
+          "Value": 10
+        },
+        {
+          "Name": "Exponential",
+          "Value": 6
+        },
+        {
+          "Name": "Linear",
+          "Value": 0
+        },
+        {
+          "Name": "Quad",
+          "Value": 2
+        },
+        {
+          "Name": "Quart",
+          "Value": 4
+        },
+        {
+          "Name": "Quint",
+          "Value": 5
+        },
+        {
+          "Name": "Sine",
+          "Value": 1
+        }
+      ]
+    },
+    {
       "Name": "InputActionType",
       "Items": [
         {
@@ -3423,6 +3682,35 @@
         {
           "Name": "Wedge",
           "Value": 4
+        }
+      ]
+    },
+    {
+      "Name": "PlaybackState",
+      "Items": [
+        {
+          "Name": "Begin",
+          "Value": 0
+        },
+        {
+          "Name": "Cancelled",
+          "Value": 5
+        },
+        {
+          "Name": "Completed",
+          "Value": 4
+        },
+        {
+          "Name": "Delayed",
+          "Value": 1
+        },
+        {
+          "Name": "Paused",
+          "Value": 3
+        },
+        {
+          "Name": "Playing",
+          "Value": 2
         }
       ]
     },

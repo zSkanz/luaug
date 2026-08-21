@@ -526,9 +526,10 @@ TEST_CASE("the boot-time method cross-check reports both directions")
     // `InputAction:GetState`, `InputAction:GetPreferredBinding` and
     // `InputService:GetPointerPosition` and DELETED `KeyboardService` -- the
     // scaffold M5 tagged `DevOnly` so that its removal would be structural
-    // rather than a promise. This number going down by one is that removal.
-    CHECK(coverage.declared == 58);
-    CHECK(coverage.bound == 58);
+    // rather than a promise. That number going DOWN by one is the removal; 60
+    // once `TweenService:Create` and `:GetValue` landed beside it.
+    CHECK(coverage.declared == 60);
+    CHECK(coverage.bound == 60);
     CHECK(coverage.declaredWithoutBinding == 0);
 }
 

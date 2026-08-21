@@ -687,6 +687,29 @@ void registerSignals(lua_State* L)
     lua_pop(L, 1);
 }
 
+SignalId createScriptSignal(lua_State* L)
+{
+    SignalRecord record;
+    record.kind = SignalKind::Script;
+    return system(L).signals.insert(std::move(record));
+}
+
+void pushSignalObject(lua_State* L, SignalId id)
+{
+    pushSignal(L, id);
+}
+
+void fireSignal(lua_State* L, SignalId id, int first, int count)
+{
+    if (id.valid())
+        enqueueFire(L, id, first, count);
+}
+
+void closeScriptSignal(lua_State* L, SignalId id)
+{
+    closeSignal(L, id);
+}
+
 void pushInstanceEvent(lua_State* L, core::InstanceId owner, u16 slot)
 {
     pushSignal(L, ownedSignal(L, owner, SignalKind::Event, slot));

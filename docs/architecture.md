@@ -415,6 +415,9 @@ Frame:
       SimTick(tick++):
         a. input::dispatchSimTick(tick)              (gameplay action signals, deterministic)
         b. RP PreAnimation                           (animation clip sampling after drain)
+           tween step                                (property tweens, on the SimClock -- after the
+                                                      drain, so a tween started by a handler in this
+                                                      phase begins on the next tick)
         c. RP PreSimulation                          [parallel window A seam]
         d. physics.step(fixedDt)  → drainContacts → enqueue Touched signals
         e. scene systems: transform hierarchy sync, character update, weld

@@ -10,6 +10,7 @@
 #include "luaug/script/services.h"
 #include "luaug/script/signals.h"
 #include "luaug/script/tasks.h"
+#include "luaug/script/tweens.h"
 
 #include <lua.h>
 #include <luacode.h>
@@ -289,6 +290,12 @@ std::optional<core::EngineError> ScriptRuntime::runSource(std::string_view sourc
 
     lua_pop(L, 1); // the thread
     return std::nullopt;
+}
+
+void ScriptRuntime::stepTweens(f64 fixedDt)
+{
+    if (m_impl->state != nullptr)
+        script::stepTweens(m_impl->state, fixedDt);
 }
 
 void ScriptRuntime::drain(core::Phase)

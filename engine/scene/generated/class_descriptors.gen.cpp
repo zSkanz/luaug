@@ -1252,6 +1252,31 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     physicsServiceDesc.properties = physicsServiceProperties;
     physicsServiceDesc.methods = physicsServiceMethods;
     classes.registerClass(physicsServiceDesc);
+
+    // --- TweenService ---
+    static std::array<MethodDesc, 2> tweenServiceMethods;
+    tweenServiceMethods = {{
+        MethodDesc{
+            .name = atoms.intern("Create"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .docKey = {},
+        },
+        MethodDesc{
+            .name = atoms.intern("GetValue"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Safe,
+            .docKey = {},
+        },
+    }};
+    ClassDescriptor tweenServiceDesc;
+    tweenServiceDesc.name = atoms.intern("TweenService");
+    tweenServiceDesc.super = instanceClass;
+    tweenServiceDesc.flags = ClassFlags::Service | ClassFlags::NotCreatable;
+    tweenServiceDesc.defaultName = atoms.intern("TweenService");
+    tweenServiceDesc.docKey = {};
+    tweenServiceDesc.methods = tweenServiceMethods;
+    classes.registerClass(tweenServiceDesc);
 }
 
 // Registered in declaration order, so an enum's `EnumId` is its position in
@@ -2019,6 +2044,136 @@ void registerEnums(EnumRegistry& enums, core::AtomTable& atoms)
     inputRateDesc.docKey = {};
     inputRateDesc.items = inputRateItems;
     enums.registerEnum(inputRateDesc);
+
+    // --- EasingStyle ---
+    static std::array<EnumItemDesc, 11> easingStyleItems;
+    easingStyleItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Linear"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Sine"),
+            .value = 1,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Quad"),
+            .value = 2,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Cubic"),
+            .value = 3,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Quart"),
+            .value = 4,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Quint"),
+            .value = 5,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Exponential"),
+            .value = 6,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Circular"),
+            .value = 7,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Back"),
+            .value = 8,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Bounce"),
+            .value = 9,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Elastic"),
+            .value = 10,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor easingStyleDesc;
+    easingStyleDesc.name = atoms.intern("EasingStyle");
+    easingStyleDesc.docKey = {};
+    easingStyleDesc.items = easingStyleItems;
+    enums.registerEnum(easingStyleDesc);
+
+    // --- EasingDirection ---
+    static std::array<EnumItemDesc, 3> easingDirectionItems;
+    easingDirectionItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("In"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Out"),
+            .value = 1,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("InOut"),
+            .value = 2,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor easingDirectionDesc;
+    easingDirectionDesc.name = atoms.intern("EasingDirection");
+    easingDirectionDesc.docKey = {};
+    easingDirectionDesc.items = easingDirectionItems;
+    enums.registerEnum(easingDirectionDesc);
+
+    // --- PlaybackState ---
+    static std::array<EnumItemDesc, 6> playbackStateItems;
+    playbackStateItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Begin"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Delayed"),
+            .value = 1,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Playing"),
+            .value = 2,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Paused"),
+            .value = 3,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Completed"),
+            .value = 4,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Cancelled"),
+            .value = 5,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor playbackStateDesc;
+    playbackStateDesc.name = atoms.intern("PlaybackState");
+    playbackStateDesc.docKey = {};
+    playbackStateDesc.items = playbackStateItems;
+    enums.registerEnum(playbackStateDesc);
 }
 
 } // namespace luaug::scene::generated

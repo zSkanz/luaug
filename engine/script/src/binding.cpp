@@ -75,6 +75,10 @@ const char* typeName(UserdataTag tag) noexcept
         return "UDim2";
     case UserdataTag::Rect:
         return "Rect";
+    case UserdataTag::TweenInfo:
+        return "TweenInfo";
+    case UserdataTag::Tween:
+        return "Tween";
     case UserdataTag::Enum:
         return "Enum";
     case UserdataTag::Enums:
@@ -193,6 +197,11 @@ void endTagMetatable(lua_State* L)
 {
     lua_setreadonly(L, -1, true);
     lua_pop(L, 1);
+}
+
+void addMember(MemberTable& table, core::AtomTable& atoms, const char* name, lua_CFunction fn)
+{
+    table.push_back(MemberEntry{atoms.intern(name), fn});
 }
 
 void installTagMetatable(lua_State* L, UserdataTag tag, lua_CFunction equals, lua_CFunction tostring)

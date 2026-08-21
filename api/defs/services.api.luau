@@ -695,6 +695,48 @@ local Classes: { Schema.Class } = {
             },
         } :: { Schema.Event },
     },
+    {
+        Name = "TweenService",
+        Extends = "Instance",
+        Module = "scene",
+        Tags = { "Service", "NotCreatable" } :: { Schema.ClassTag },
+        Doc = "Property animation (§2.1). It exists so that "
+            .. '"move this over half a second, easing out" is one call rather than a `Heartbeat` handler '
+            .. "with a timer in it -- and so that the engine, not the game, owns the arithmetic that makes "
+            .. "two such animations agree.",
+        Methods = {
+            {
+                Name = "Create",
+                Parameters = {
+                    { Name = "instance", Type = "Instance" },
+                    { Name = "tweenInfo", Type = "TweenInfo" },
+                    { Name = "goals", Type = "{ [string]: any }" },
+                },
+                Returns = { "Tween" },
+                ThreadSafety = "Unsafe",
+                Doc = "A tween that will move each named property of `instance` to its goal. Created stopped: "
+                    .. "`Play` starts it.\n\nEvery goal is validated NOW rather than at the first write -- a "
+                    .. "property the class does not have, a read-only one, or a value of the wrong type raises "
+                    .. "here, where the caller is. The alternative is a tween that plays for half a second and "
+                    .. "then reports a typo. Only properties the engine can interpolate are accepted: numbers, "
+                    .. "vectors, CFrames, Color3s, Vector2s, UDims, UDim2s and Rects. A boolean or a string "
+                    .. "goal raises, because there is no halfway between two of either.",
+            },
+            {
+                Name = "GetValue",
+                Parameters = {
+                    { Name = "alpha", Type = "number" },
+                    { Name = "easingStyle", Type = "Enum.EasingStyle" },
+                    { Name = "easingDirection", Type = "Enum.EasingDirection" },
+                },
+                Returns = { "number" },
+                ThreadSafety = "Safe",
+                Doc = "The eased value of `alpha` under that curve -- the same arithmetic a tween uses, "
+                    .. "exposed so a game can ease something the tween system does not own. `alpha` is not "
+                    .. "clamped, and several styles leave 0-1 on purpose (`Back`, `Elastic`).",
+            },
+        } :: { Schema.Method },
+    },
 }
 
 local Definition: Schema.Definition = {

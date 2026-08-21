@@ -51,6 +51,9 @@ inline constexpr scene::EnumId KeyCodeEnumId = 8;
 inline constexpr scene::EnumId InputActionTypeEnumId = 9;
 inline constexpr scene::EnumId InputDeviceTypeEnumId = 10;
 inline constexpr scene::EnumId InputRateEnumId = 11;
+inline constexpr scene::EnumId EasingStyleEnumId = 12;
+inline constexpr scene::EnumId EasingDirectionEnumId = 13;
+inline constexpr scene::EnumId PlaybackStateEnumId = 14;
 
 } // namespace generated
 

@@ -522,10 +522,17 @@ void WorldHost::tick()
     // pushes a part in `PreSimulation` and reads where it ended up in
     // `PostSimulation`, and the contacts the step produced are drained by the
     // `PostSimulation` drain rather than a frame later.
-    for (const core::Phase phase : {core::Phase::PreAnimation, core::Phase::PreSimulation}) {
-        m_runtime->firePhase(phase, state.fixedTimestep);
-        m_runtime->drain(phase);
-    }
+    m_runtime->firePhase(core::Phase::PreAnimation, state.fixedTimestep);
+    m_runtime->drain(core::Phase::PreAnimation);
+
+    // Tweens step here, in `PreAnimation`'s half of the tick, because that is
+    // what they are: a property animated on the SimClock. After the drain, so a
+    // tween started by a handler in this phase begins on the next tick rather
+    // than half-advancing on the tick it was created in.
+    m_runtime->stepTweens(state.fixedTimestep);
+
+    m_runtime->firePhase(core::Phase::PreSimulation, state.fixedTimestep);
+    m_runtime->drain(core::Phase::PreSimulation);
 
     if (m_physics.has_value())
         m_physics->step(state.fixedTimestep);

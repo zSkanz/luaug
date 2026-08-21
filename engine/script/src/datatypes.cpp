@@ -2,6 +2,7 @@
 
 #include "luaug/scene/world.h"
 #include "luaug/script/instance_binding.h"
+#include "luaug/script/tweens.h"
 
 #include <lua.h>
 #include <lualib.h>
@@ -1259,11 +1260,6 @@ int vectorNew(lua_State* L)
 
 // --- Registration ------------------------------------------------------------
 
-void addMember(MemberTable& table, core::AtomTable& atoms, const char* name, lua_CFunction fn)
-{
-    table.push_back(MemberEntry{atoms.intern(name), fn});
-}
-
 void registerCFrame(lua_State* L, VmContext& ctx, core::AtomTable& atoms)
 {
     MemberTable& getters = ctx.getters[static_cast<usize>(UserdataTag::CFrame)];
@@ -1730,6 +1726,7 @@ void registerDatatypes(lua_State* L)
     registerRandom(L, ctx, atoms);
     registerQueryTypes(L, ctx, atoms);
     registerEnumTypes(L, ctx, atoms);
+    registerTweenTypes(L);
     registerVector(L);
 }
 

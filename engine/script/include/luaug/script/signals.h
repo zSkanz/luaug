@@ -213,6 +213,22 @@ public:
 // Runs during boot with everything else, before the sandbox.
 void registerSignals(lua_State* L);
 
+// A plain, unowned signal -- the same thing `Signal.new()` produces. Exported
+// for `Tween.Completed`, which is a signal on a value type rather than on an
+// Instance: it has no owner to be closed with, so it is created here, pushed
+// when the property is read, and closed when the tween is collected.
+[[nodiscard]] SignalId createScriptSignal(lua_State* L);
+void pushSignalObject(lua_State* L, SignalId id);
+
+// Enqueues a fire on any signal, with `count` arguments already on the stack.
+// `fireInstanceEvent` above is this plus an owner lookup.
+void fireSignal(lua_State* L, SignalId id, int first, int count);
+
+// Disconnects everything and marks the record closed, the way `Signal:Destroy`
+// does. A signal nothing can fire again should say so rather than accumulating
+// connections nobody will ever call.
+void closeScriptSignal(lua_State* L, SignalId id);
+
 // The signal object for one of an instance's declared events, created on first
 // use and cached per (instance, slot) so that `part.ChildAdded` is the same
 // object every time -- a script that connects in one place and disconnects in

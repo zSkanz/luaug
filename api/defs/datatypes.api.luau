@@ -1274,6 +1274,169 @@ local Datatypes: { Schema.Datatype } = {
             },
         } :: { Schema.Method },
     },
+    {
+        Name = "TweenInfo",
+        Module = "script",
+        Doc = "How a tween moves: how long, along what curve, how many times, and after what delay (§2.3). "
+            .. "Immutable, like every value type here -- a `TweenInfo` handed to two tweens cannot be changed "
+            .. "under one of them.\n\nThe time is in SimClock seconds, the same seconds `task.wait` counts, so "
+            .. "a tween is a whole number of ticks and a replay reproduces it exactly (ADR 0039's sibling "
+            .. "argument: a system whose whole purpose is writing properties must not read the wall clock to "
+            .. "decide what to write).",
+        Constructors = {
+            {
+                Name = "new",
+                Parameters = {
+                    { Name = "time", Type = "number?", Default = "1" },
+                    { Name = "easingStyle", Type = "Enum.EasingStyle?", Default = "Enum.EasingStyle.Quad" },
+                    {
+                        Name = "easingDirection",
+                        Type = "Enum.EasingDirection?",
+                        Default = "Enum.EasingDirection.Out",
+                    },
+                    { Name = "repeatCount", Type = "number?", Default = "0" },
+                    { Name = "reverses", Type = "boolean?", Default = "false" },
+                    { Name = "delayTime", Type = "number?", Default = "0" },
+                },
+                Returns = { "TweenInfo" },
+                ThreadSafety = "Safe",
+                Doc = "The defaults are a one-second Quad-Out with no repeat, no reverse and no delay, which is "
+                    .. "the tween most UI wants. A negative `time` or `delayTime` raises; a negative "
+                    .. "`repeatCount` means repeat forever, which is the one negative number here that means "
+                    .. "something.",
+            },
+        } :: { Schema.Method },
+        Properties = {
+            {
+                Name = "Time",
+                Type = "number",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "Seconds for ONE traversal, not counting delay, repeats or the return half of a reverse.",
+            },
+            {
+                Name = "EasingStyle",
+                Type = "Enum.EasingStyle",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "The curve.",
+            },
+            {
+                Name = "EasingDirection",
+                Type = "Enum.EasingDirection",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "Which end the curve eases.",
+            },
+            {
+                Name = "RepeatCount",
+                Type = "number",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "How many EXTRA traversals follow the first. 0 plays once; 2 plays three times; a "
+                    .. "negative number repeats until something cancels it.",
+            },
+            {
+                Name = "Reverses",
+                Type = "boolean",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "Whether each traversal is followed by the same traversal backwards. A reversing tween "
+                    .. "takes twice `Time` per repeat and ends where it started.",
+            },
+            {
+                Name = "DelayTime",
+                Type = "number",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "Seconds before the first traversal begins, and before each repeat. Nothing is written "
+                    .. "during a delay -- the property keeps whatever it had.",
+            },
+        } :: { Schema.Property },
+        Operators = {
+            {
+                Name = "__eq",
+                Parameters = { { Name = "other", Type = "TweenInfo" } },
+                Returns = { "boolean" },
+                Doc = "Exact, field by field.",
+            },
+        } :: { Schema.Operator },
+    },
+    {
+        Name = "Tween",
+        Module = "script",
+        Doc = "A running property animation, returned by `TweenService:Create`. A value type rather than an "
+            .. "Instance, like `AnimationTrack` (§2.2): nothing parents a tween, nothing finds one in the "
+            .. "tree, and a class in the hierarchy that no tree ever holds would be a class every tree walk "
+            .. "has to know is not there.\n\nA tween writes through the SAME property setter a script writes "
+            .. "through, so a tweened value fires `GetPropertyChangedSignal`, is filtered when it does not "
+            .. "change, and is refused when it is out of range -- exactly as an assignment is. It steps on the "
+            .. "sim tick, which is what makes it reproducible.\n\nIt keeps its target alive only as a "
+            .. "reference: a tween on a destroyed instance stops and reports `Cancelled` rather than raising.",
+        Properties = {
+            {
+                Name = "Instance",
+                Type = "Instance?",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "What this tween is animating, or nil once that instance has been destroyed.",
+            },
+            {
+                Name = "TweenInfo",
+                Type = "TweenInfo",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "The timing it was created with.",
+            },
+            {
+                Name = "PlaybackState",
+                Type = "Enum.PlaybackState",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "Where it is in its life.",
+            },
+            {
+                Name = "Completed",
+                Type = "Signal<EnumPlaybackState>",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "Fires once, carrying the state that ended the tween -- `Completed` for one that "
+                    .. "reached its end, `Cancelled` for one that was stopped. It is a PROPERTY here rather "
+                    .. "than an event because a `Tween` is a value type and only classes declare events; the "
+                    .. "signal it holds behaves like any other. The distinction between the two end states "
+                    .. "matters more than it looks: code that awards a checkpoint on a finished animation "
+                    .. "must not award it on an interrupted one.",
+            },
+        } :: { Schema.Property },
+        Methods = {
+            {
+                Name = "Play",
+                Parameters = {},
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Starts it, or resumes a paused one from where it stopped. Playing a tween that is "
+                    .. "already playing is a no-op rather than a restart -- restarting is what a fresh "
+                    .. "`Create` is for, and a `Play` that silently rewound would make a hover effect stutter "
+                    .. "every frame the pointer moved.",
+            },
+            {
+                Name = "Pause",
+                Parameters = {},
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Stops it where it is, leaving the property at its current value. `Play` resumes.",
+            },
+            {
+                Name = "Cancel",
+                Parameters = {},
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Ends it before its time. The property keeps whatever value it had reached: cancelling "
+                    .. "is not undoing, and a tween that snapped back would be impossible to interrupt "
+                    .. "gracefully. `Completed` fires with `Cancelled`.",
+            },
+        } :: { Schema.Method },
+    },
 }
 
 local Definition: Schema.Definition = {

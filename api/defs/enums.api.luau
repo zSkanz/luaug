@@ -409,6 +409,85 @@ local Definition: Schema.Definition = {
                 },
             } :: { Schema.EnumItem },
         },
+        {
+            Name = "EasingStyle",
+            Doc = "The shape of a tween's progress curve (§2.1). The set is the one tutorials and design tools "
+                .. "already speak, so a curve named in one transfers to the other; the formulas are the "
+                .. "published ones and `tests/fixtures/easing.luau` pins them as literal numbers rather than as "
+                .. "a re-derivation.",
+            Items = {
+                {
+                    Name = "Linear",
+                    Value = 0,
+                    Doc = "No easing at all: alpha is the progress. The only style whose direction changes "
+                        .. "nothing.",
+                },
+                { Name = "Sine", Value = 1 },
+                { Name = "Quad", Value = 2 },
+                { Name = "Cubic", Value = 3 },
+                { Name = "Quart", Value = 4 },
+                { Name = "Quint", Value = 5 },
+                { Name = "Exponential", Value = 6 },
+                { Name = "Circular", Value = 7 },
+                {
+                    Name = "Back",
+                    Value = 8,
+                    Doc = "Overshoots the far end and comes back. Values outside 0-1 are the point of it, so a "
+                        .. "property tweened with this one has to tolerate them.",
+                },
+                { Name = "Bounce", Value = 9, Doc = "Settles by bouncing, like something dropped." },
+                {
+                    Name = "Elastic",
+                    Value = 10,
+                    Doc = "Oscillates past both ends before settling. Like `Back`, it leaves 0-1.",
+                },
+            } :: { Schema.EnumItem },
+        },
+        {
+            Name = "EasingDirection",
+            Doc = "Which end of a tween the easing applies to (§2.1).",
+            Items = {
+                { Name = "In", Value = 0, Doc = "Eased at the start, abrupt at the end." },
+                { Name = "Out", Value = 1, Doc = "Abrupt at the start, eased at the end. The usual choice." },
+                {
+                    Name = "InOut",
+                    Value = 2,
+                    Doc = "Eased at both ends: the `In` curve over the first half, mirrored over the second.",
+                },
+            } :: { Schema.EnumItem },
+        },
+        {
+            Name = "PlaybackState",
+            Doc = "Where a `Tween` is in its life (§2.1). A state rather than a pair of booleans, because "
+                .. '"finished" and "stopped early" are different facts and code that acts on one usually '
+                .. "must not act on the other.",
+            Items = {
+                { Name = "Begin", Value = 0, Doc = "Created and never played." },
+                {
+                    Name = "Delayed",
+                    Value = 1,
+                    Doc = "Playing, inside its `TweenInfo.DelayTime`, and not yet writing anything.",
+                },
+                { Name = "Playing", Value = 2 },
+                {
+                    Name = "Paused",
+                    Value = 3,
+                    Doc = "Stopped where it was. `Play` resumes from there rather than restarting.",
+                },
+                {
+                    Name = "Completed",
+                    Value = 4,
+                    Doc = "Reached its end. The goal values have been written exactly, not approached: a tween "
+                        .. "that stopped at 0.9999 of the way would leave a property somebody has to explain.",
+                },
+                {
+                    Name = "Cancelled",
+                    Value = 5,
+                    Doc = "Stopped before its end by `Cancel`. The property keeps whatever value it had reached "
+                        .. "-- cancelling is not undoing.",
+                },
+            } :: { Schema.EnumItem },
+        },
     },
 }
 

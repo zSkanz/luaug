@@ -49,6 +49,9 @@ inline constexpr EnumId KeyCodeEnumId = 8;
 inline constexpr EnumId InputActionTypeEnumId = 9;
 inline constexpr EnumId InputDeviceTypeEnumId = 10;
 inline constexpr EnumId InputRateEnumId = 11;
+inline constexpr EnumId EasingStyleEnumId = 12;
+inline constexpr EnumId EasingDirectionEnumId = 13;
+inline constexpr EnumId PlaybackStateEnumId = 14;
 
 } // namespace generated
 

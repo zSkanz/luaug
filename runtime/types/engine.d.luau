@@ -60,6 +60,15 @@ end
 declare extern type EnumInputRate extends EnumItem with
 end
 
+declare extern type EnumEasingStyle extends EnumItem with
+end
+
+declare extern type EnumEasingDirection extends EnumItem with
+end
+
+declare extern type EnumPlaybackState extends EnumItem with
+end
+
 declare extern type Vector3 with
     --- The X component. Lowercase because it is a field of the VM primitive itself, like a string's
     --- length, and not a member of a type this project defines -- the one documented exception to the
@@ -274,6 +283,50 @@ declare extern type RaycastResult with
     --- How far along the cast the hit is, in metres. The direction passed to a cast is not normalised
     --- -- its length is the range -- so this is a distance rather than a fraction.
     read Distance: number
+end
+
+declare extern type TweenInfo with
+    --- Seconds for ONE traversal, not counting delay, repeats or the return half of a reverse.
+    read Time: number
+    --- The curve.
+    read EasingStyle: EnumEasingStyle
+    --- Which end the curve eases.
+    read EasingDirection: EnumEasingDirection
+    --- How many EXTRA traversals follow the first. 0 plays once; 2 plays three times; a negative number
+    --- repeats until something cancels it.
+    read RepeatCount: number
+    --- Whether each traversal is followed by the same traversal backwards. A reversing tween takes
+    --- twice `Time` per repeat and ends where it started.
+    read Reverses: boolean
+    --- Seconds before the first traversal begins, and before each repeat. Nothing is written during a
+    --- delay -- the property keeps whatever it had.
+    read DelayTime: number
+    function __eq(self, other: TweenInfo): boolean
+end
+
+declare extern type Tween with
+    --- What this tween is animating, or nil once that instance has been destroyed.
+    read Instance: Instance?
+    --- The timing it was created with.
+    read TweenInfo: TweenInfo
+    --- Where it is in its life.
+    read PlaybackState: EnumPlaybackState
+    --- Fires once, carrying the state that ended the tween -- `Completed` for one that reached its end,
+    --- `Cancelled` for one that was stopped. It is a PROPERTY here rather than an event because a
+    --- `Tween` is a value type and only classes declare events; the signal it holds behaves like any
+    --- other. The distinction between the two end states matters more than it looks: code that awards a
+    --- checkpoint on a finished animation must not award it on an interrupted one.
+    read Completed: Signal<EnumPlaybackState>
+    --- Starts it, or resumes a paused one from where it stopped. Playing a tween that is already
+    --- playing is a no-op rather than a restart -- restarting is what a fresh `Create` is for, and a
+    --- `Play` that silently rewound would make a hover effect stutter every frame the pointer moved.
+    function Play(self): ()
+    --- Stops it where it is, leaving the property at its current value. `Play` resumes.
+    function Pause(self): ()
+    --- Ends it before its time. The property keeps whatever value it had reached: cancelling is not
+    --- undoing, and a tween that snapped back would be impossible to interrupt gracefully. `Completed`
+    --- fires with `Cancelled`.
+    function Cancel(self): ()
 end
 
 declare extern type Instance with
@@ -695,6 +748,7 @@ declare extern type DataModel extends Instance with
     function GetService(self, name: "HotReloadService"): HotReloadService
     function GetService(self, name: "PhysicsService"): PhysicsService
     function GetService(self, name: "InputService"): InputService
+    function GetService(self, name: "TweenService"): TweenService
     --- Returns the service of this name, creating it on the first request. Services are singletons:
     --- every later call returns the same instance, and it is an ordinary child of `game` once created.
     --- A string literal gives an exactly typed result; a name computed at runtime gives the general
@@ -933,6 +987,21 @@ declare extern type InputService extends Instance with
     function GetPointerPosition(self): Vector2
 end
 
+declare extern type TweenService extends Instance with
+    --- A tween that will move each named property of `instance` to its goal. Created stopped: `Play`
+    --- starts it. Every goal is validated NOW rather than at the first write -- a property the class
+    --- does not have, a read-only one, or a value of the wrong type raises here, where the caller is.
+    --- The alternative is a tween that plays for half a second and then reports a typo. Only properties
+    --- the engine can interpolate are accepted: numbers, vectors, CFrames, Color3s, Vector2s, UDims,
+    --- UDim2s and Rects. A boolean or a string goal raises, because there is no halfway between two of
+    --- either.
+    function Create(self, instance: Instance, tweenInfo: TweenInfo, goals: { [string]: any }): Tween
+    --- The eased value of `alpha` under that curve -- the same arithmetic a tween uses, exposed so a
+    --- game can ease something the tween system does not own. `alpha` is not clamped, and several
+    --- styles leave 0-1 on purpose (`Back`, `Elastic`).
+    function GetValue(self, alpha: number, easingStyle: EnumEasingStyle, easingDirection: EnumEasingDirection): number
+end
+
 declare Enum: {
     PartShape: {
         Block: EnumPartShape,
@@ -1097,6 +1166,35 @@ declare Enum: {
         Render: EnumInputRate,
         GetEnumItems: (self: any) -> { EnumInputRate },
     },
+    EasingStyle: {
+        Linear: EnumEasingStyle,
+        Sine: EnumEasingStyle,
+        Quad: EnumEasingStyle,
+        Cubic: EnumEasingStyle,
+        Quart: EnumEasingStyle,
+        Quint: EnumEasingStyle,
+        Exponential: EnumEasingStyle,
+        Circular: EnumEasingStyle,
+        Back: EnumEasingStyle,
+        Bounce: EnumEasingStyle,
+        Elastic: EnumEasingStyle,
+        GetEnumItems: (self: any) -> { EnumEasingStyle },
+    },
+    EasingDirection: {
+        In: EnumEasingDirection,
+        Out: EnumEasingDirection,
+        InOut: EnumEasingDirection,
+        GetEnumItems: (self: any) -> { EnumEasingDirection },
+    },
+    PlaybackState: {
+        Begin: EnumPlaybackState,
+        Delayed: EnumPlaybackState,
+        Playing: EnumPlaybackState,
+        Paused: EnumPlaybackState,
+        Completed: EnumPlaybackState,
+        Cancelled: EnumPlaybackState,
+        GetEnumItems: (self: any) -> { EnumPlaybackState },
+    },
 }
 
 declare Vector3: {
@@ -1166,6 +1264,10 @@ declare RaycastParams: {
 
 declare Signal: {
     new: (<T...>() -> Signal<T...>),
+}
+
+declare TweenInfo: {
+    new: ((time: number?, easingStyle: EnumEasingStyle?, easingDirection: EnumEasingDirection?, repeatCount: number?, reverses: boolean?, delayTime: number?) -> TweenInfo),
 }
 
 declare task: {

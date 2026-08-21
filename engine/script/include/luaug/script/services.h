@@ -23,6 +23,7 @@
 #include "luaug/scene/physics_sync.h"
 #include "luaug/script/binding.h"
 #include "luaug/script/reload_state.h"
+#include "luaug/script/tweens.h"
 
 #include <array>
 #include <string_view>
@@ -153,6 +154,11 @@ public:
     // which is the same answer an empty world gives -- so every reader checks
     // rather than assuming.
     scene::PhysicsSync* physics = nullptr;
+
+    // Every live tween in this VM (api-design.md §2.1). Per-VM rather than
+    // process-global for the same reason everything else here is: two worlds in
+    // one process must not share one.
+    TweenSystem tweens;
 };
 
 // Creates `game` and the two services that exist from boot, installs the

@@ -10,6 +10,7 @@ luaug_add_module(core
         src/json_writer.cpp
         src/log.cpp
         src/error.cpp
+        src/easing.cpp
         src/math.cpp
         src/phase.cpp
         src/name_atom.cpp

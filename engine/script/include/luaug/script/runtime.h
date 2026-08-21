@@ -54,6 +54,11 @@ public:
     // §3.1). Every resumption point calls this.
     void drain(core::Phase phase);
 
+    // Advances every playing tween by one tick (api-design.md §2.1). Called
+    // from the sim tick between the `PreAnimation` drain and `PreSimulation`,
+    // so a handler in that phase reads the value this tick produced.
+    void stepTweens(f64 fixedDt);
+
     // Resumes whatever `task.wait` and `task.delay` are due at the world's
     // current tick. Between `PostSimulation` and `Heartbeat`, per
     // architecture.md §3. Takes no time argument: a deadline is a tick index and

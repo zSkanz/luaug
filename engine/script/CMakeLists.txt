@@ -21,6 +21,7 @@ luaug_add_module(script
         src/services.cpp
         src/signals.cpp
         src/tasks.cpp
+        src/tweens.cpp
         src/sandbox.cpp
         src/reload_state.cpp
         src/runtime.cpp

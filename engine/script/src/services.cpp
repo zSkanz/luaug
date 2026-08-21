@@ -6,6 +6,7 @@
 #include "luaug/script/datatypes.h"
 #include "luaug/script/instance_binding.h"
 #include "luaug/script/signals.h"
+#include "luaug/script/tweens.h"
 
 #include <lua.h>
 #include <lualib.h>
@@ -796,6 +797,9 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"InputAction", "GetState", inputActionGetState},
     {"InputAction", "GetPreferredBinding", inputActionGetPreferredBinding},
     {"InputService", "GetPointerPosition", inputServiceGetPointerPosition},
+
+    {"TweenService", "Create", tweenServiceCreate},
+    {"TweenService", "GetValue", tweenServiceGetValue},
 
     {"Workspace", "Raycast", workspaceRaycast},
     {"Workspace", "Spherecast", workspaceSpherecast},

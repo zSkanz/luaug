@@ -117,6 +117,13 @@ enum class UserdataTag : int
     UDim2 = 14,
     Rect = 15,
 
+    // `TweenInfo` is a value type like the four above it; `Tween` is a HANDLE,
+    // whose payload is an index into the VM's tween table. Both are userdata
+    // rather than Instances because nothing parents a tween and nothing finds
+    // one in the tree (api-design.md §2.2's note on `AnimationTrack`).
+    TweenInfo = 16,
+    Tween = 17,
+
     // Not a tag. The count exists so a registration loop can assert it covered
     // everything, and so the budget remaining is a number someone can read.
     Count,
@@ -261,6 +268,11 @@ void endTagMetatable(lua_State* L);
 // The common case: no metamethods beyond the shared three plus whichever of
 // `__eq` and `__tostring` the type wants. Either may be null.
 void installTagMetatable(lua_State* L, UserdataTag tag, lua_CFunction equals, lua_CFunction tostring);
+
+// Appends one entry to a tag's getter or method table. Two lines, and exported
+// rather than repeated: every datatype's registration is a run of these, and
+// they now live in three translation units rather than one.
+void addMember(MemberTable& table, core::AtomTable& atoms, const char* name, lua_CFunction fn);
 
 // Raises a Luau error carrying the key-prefixed catalog text, which is what
 // lets a conformance spec match on a stable identifier while the prose stays
