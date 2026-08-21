@@ -62,6 +62,15 @@ constraint that decides most of the decisions below.
       decision, because it is baked into every golden recorded after it. The
       debug wire path stays — `render_world.cpp` says why, and it is still how
       anything is seen when the real path breaks.
+- [ ] **`@luaug/input`** — added to the roadmap 2026-08-20 by human decision,
+      **after this brief imported its scope**. Sugar over the IAS:
+      `input.action("Jump", Enum.KeyCode.Space, Enum.KeyCode.ButtonA)` builds
+      the context, action and bindings underneath. It exists because a raw
+      `IsKeyDown` beside the IAS was asked for and declined — a second input
+      path cannot sink, cannot be replayed and cannot be rebound, and
+      `KeyboardService` was deleted this milestone for being exactly that. Pure
+      Luau, no engine change, `Simulation` clock by default. Document how to
+      reach the underlying instances: sugar that cannot be escaped is a wall.
 - [ ] `examples/04-obby` — main menu (tweened), HUD, checkpoints, moving
       platforms (tweens on physics-kinematic parts), sounds, an animated
       character, fully playable start→finish

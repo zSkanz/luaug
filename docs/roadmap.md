@@ -633,6 +633,34 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
     comment: it is how anything is seen when the real path is not working, so a
     bug in the culler must not be able to hide it. What changes is that it stops
     being the only way a `Part` is visible.
+- **`@luaug/input`, the sugar that keeps one input path** (human decision,
+  2026-08-20). Reading one key today costs a context, an action, a binding and
+  the parenting between them — real friction for the simple case, and the
+  friction is what makes somebody ask for a raw `IsKeyDown` beside the IAS. That
+  request was declined and this is what replaces it: **the ergonomics without a
+  second path.**
+
+      local input = require("@luaug/input")
+      local jump = input.action("Jump", Enum.KeyCode.Space, Enum.KeyCode.ButtonA)
+
+  One call builds the context, the action and the bindings underneath, so a
+  caller who never learns what an `InputContext` is still gets sinking,
+  determinism, replay and rebinding — the three things a raw path structurally
+  cannot give. **A menu that stops the character stops it for this caller too**,
+  which is the whole argument: a second input model means a key that works in
+  the menu and not in the game, and `KeyboardService` was deleted this milestone
+  for being exactly that.
+
+  Pure Luau, no engine change, in the namespace `api-design.md` §1 already
+  describes as "engine-provided optional Luau libraries… optional things are
+  opt-in". `InputService:CreateAction(name, ...keycodes)` was the alternative
+  and is not taken: the same sugar costs public C++ surface and an api-dump row
+  where a module costs neither.
+
+  Name what it defaults to, since defaulting is the point: the `Simulation`
+  clock (ADR 0039's safe default), priority zero, not sinking — and say in the
+  doc how to reach the underlying instances, because sugar that cannot be
+  escaped is a wall.
 - **Deliverable:** `examples/04-obby` — main menu (tweened), HUD, checkpoints,
   moving platforms (tweens on physics-kinematic parts — a deliberate
   integration stressor), sounds, an animated character, fully playable
