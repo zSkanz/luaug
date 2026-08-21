@@ -64,7 +64,7 @@
   "platform.window.title": "LuauG {version}",
 
   "engine.frame.warn.catch_up_clamped": "Frame took {ms} ms; dropped simulated time after {ticks} catch-up ticks.",
-  "engine.frame.info.stats": "{frames} measured frames: median {median} ms, worst {worst} ms, {draws} draws, {triangles} triangles.",
+  "engine.frame.info.stats": "{frames} measured frames: median {median} ms, worst {worst} ms, {draws} draws for {objects} visible objects, {triangles} triangles.",
   "engine.close.warn.grace_expired": "A BindToClose handler was still running after {seconds} s; the shutdown is going ahead without it.",
   "engine.soak.info.report": "Soak: {frames} frames, median {median} ms, p99 {p99} ms, worst {worst} ms, peak {peak} MiB, instances {early} -> {late}. Report written to {path}.",
   "engine.soak.err.no_frames": "The soak recorded no frames after warm-up; it was shorter than the warm-up window and proves nothing.",

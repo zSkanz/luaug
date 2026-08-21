@@ -100,6 +100,12 @@ struct FrameStats
     // to count them -- and it is the difference between "LOD switching shipped"
     // and "LOD switching shipped and is choosing something".
     f64 meshLodDraws = 0.0;
+    // How many objects the camera could see, and how many of the frame's calls
+    // were instanced. `drawCalls` and `visibleObjects` were the same number
+    // until M7.5 gave the renderer a way to draw a run of them at once; the
+    // roadmap's gate for that item is the pair.
+    f64 visibleObjects = 0.0;
+    f64 instancedDraws = 0.0;
 };
 
 // A coroutine parked on `WaitForChild`. Kept apart from the timer list because

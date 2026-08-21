@@ -33,6 +33,19 @@ struct RenderTarget
     core::u32 height = 0;
 };
 
+// The counters a frame leaves behind, for `DebugService` and the perf table.
+struct RendererStats
+{
+    // Calls issued: `drawIndexed` and `draw`, across every pass of the frame.
+    core::u32 drawCalls = 0;
+    // How many of those were instanced, and how many objects they covered. A
+    // frame where `instances` is far larger than `instancedDraws` is a frame the
+    // instanced path did something in; a frame where they are equal is one where
+    // it did not, which is the gate's own test.
+    core::u32 instancedDraws = 0;
+    core::u32 instances = 0;
+};
+
 class IRenderer
 {
 public:
@@ -65,6 +78,15 @@ public:
     // worth keeping as a caster, and the number belongs to the pass list rather
     // than to the host -- a renderer with cascades would answer differently.
     [[nodiscard]] virtual core::f32 shadowRadius() const noexcept = 0;
+
+    // What the last frame actually submitted.
+    //
+    // Counted by the renderer rather than derived from the snapshot, and that
+    // distinction IS the number: with instancing, a run of objects that share a
+    // mesh and a material is one call, so "how many objects are visible" and
+    // "how many calls were issued" stopped being the same question at M7.5.
+    // The roadmap's gate for that item is exactly the two of them side by side.
+    [[nodiscard]] virtual RendererStats stats() const noexcept = 0;
 
 protected:
     IRenderer() = default;

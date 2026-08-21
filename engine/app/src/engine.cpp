@@ -361,6 +361,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // with the same draw count is a different problem from one that got slower
     // because it drew more.
     core::u32 frameDrawCalls = 0;
+    // How many objects the camera could see, which stopped being the same
+    // number as `frameDrawCalls` at M7.5: a run of objects sharing a mesh and a
+    // material is now one call. The roadmap's gate for the instanced path is
+    // exactly these two side by side -- if they are equal, it did nothing.
+    core::u32 frameVisibleObjects = 0;
+    core::u32 frameInstancedDraws = 0;
     core::u64 frameTriangles = 0;
     core::u32 frameLodDraws = 0;
     std::vector<f64> frameTimesMs;
@@ -660,6 +666,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             .audioClipsLoaded = static_cast<f64>(host->audio().stats().clipsLoaded),
             .audioClipsMissing = static_cast<f64>(host->audio().stats().clipsMissing),
             .meshLodDraws = static_cast<f64>(frameLodDraws),
+            .visibleObjects = static_cast<f64>(frameVisibleObjects),
+            .instancedDraws = static_cast<f64>(frameInstancedDraws),
         });
 
         if (options.frameStats || !options.soakReportPath.empty()) {
@@ -1015,7 +1023,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 uiTextures.push_back(image);
             buildUiGeometry(uiDrawList, uiViewport, uiVertices, uiRuns, uiTextures);
 
-            frameDrawCalls = 0;
+            frameVisibleObjects = 0;
             frameTriangles = 0;
             frameLodDraws = 0;
             // The SAME level the renderer will choose, from the same function.
@@ -1039,13 +1047,22 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 if (draw.section >= range.sectionCount ||
                     range.firstSection + draw.section >= resolved->sections.size())
                     continue;
-                ++frameDrawCalls;
+                ++frameVisibleObjects;
                 if (level > 0)
                     ++frameLodDraws;
                 frameTriangles += resolved->sections[range.firstSection + draw.section].indexCount / 3u;
             }
 
             submitWorld(snapshot, debugDraw);
+
+            // Read AFTER submission, because that is when the renderer knows.
+            // Counted by the renderer rather than derived from the snapshot: a
+            // draw call is a thing a backend issues, and inferring it from the
+            // draw list is exactly the assumption instancing invalidated.
+            const render::RendererStats rendererStats =
+                renderer != nullptr && renderer->valid() ? renderer->stats() : render::RendererStats{};
+            frameDrawCalls = rendererStats.drawCalls;
+            frameInstancedDraws = rendererStats.instancedDraws;
 
             // Everything in the buffer is in world coordinates until here: the
             // wire boxes above, and whatever `DebugService` recorded during the
@@ -1250,11 +1267,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
         const f64 median = measured[measured.size() / 2];
         const f64 worst = measured.back();
-        const std::array<I18nArg, 5> stats{
+        const std::array<I18nArg, 6> stats{
             I18nArg{"frames", static_cast<core::i64>(measured.size())},
             I18nArg{"median", median},
             I18nArg{"worst", worst},
             I18nArg{"draws", static_cast<core::i64>(frameDrawCalls)},
+            I18nArg{"objects", static_cast<core::i64>(frameVisibleObjects)},
             I18nArg{"triangles", static_cast<core::i64>(frameTriangles)},
         };
         core::log(LogLevel::Info, LUAUG_TR("engine.frame.info.stats"), stats);

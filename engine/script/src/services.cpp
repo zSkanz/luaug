@@ -333,6 +333,16 @@ int debugServiceGetStat(lua_State* L)
         lua_pushnumber(L, frame.audioClipsMissing);
         return 1;
     }
+    if (name == "VisibleObjects") {
+        // Not the same number as `DrawCalls` since M7.5, and the difference is
+        // the point: a run of objects sharing a mesh and a material is one call.
+        lua_pushnumber(L, frame.visibleObjects);
+        return 1;
+    }
+    if (name == "InstancedDraws") {
+        lua_pushnumber(L, frame.instancedDraws);
+        return 1;
+    }
     if (name == "MeshLodDraws") {
         // Zero on a scene whose meshes have one level, which is the truthful
         // answer and not a missing one -- the same reasoning `PhysicsBodies`

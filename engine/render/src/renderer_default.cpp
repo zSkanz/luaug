@@ -52,6 +52,18 @@ constexpr f32 kBloomKnee = 0.6f;
 // the intensity is what stops it from becoming fog.
 constexpr f32 kBloomIntensity = 0.05f;
 
+// The most instances one frame may draw through the instanced path, and the one
+// vertex buffer they all live in. Five megabytes, allocated once: the alternative
+// is a buffer resized mid-frame, which is a stall.
+constexpr u32 kMaxInstances = 65536;
+
+// Below this a run is not worth batching: one instanced call costs a uniform
+// push, a vertex-buffer bind and a draw, which is what two ordinary draws cost
+// anyway.
+constexpr u32 kMinInstanceBatch = 3;
+
+constexpr u32 kNoBatch = 0xFFFFFFFFu;
+
 // The occlusion pass's sampling radius in world metres, its self-occlusion bias,
 // and how strongly it darkens.
 constexpr f32 kOcclusionRadius = 0.6f;
@@ -130,6 +142,32 @@ void fullscreenPass(rhi::ICmdList& cmd, rhi::PipelineHandle pipeline, rhi::Textu
     return size > 0 ? size : 1u;
 }
 
+// A run of draws that share a mesh, a section, a material and a level of
+// detail, collapsed into one call (ADR 0043).
+//
+// **Culled as a WHOLE**, and that is the trade this design makes. Building a
+// separate instance list per pass would let each cascade reject each object, at
+// the cost of six lists per frame; culling whole batches instead keeps one list
+// and draws a batch into any pass that any of it reaches. What that spends is
+// vertex work on instances that are clipped -- which is the cheap side of a
+// frame that was measured to be CPU-bound on submission.
+struct InstanceBatch
+{
+    // The first draw of the run, which is the one that carries its mesh,
+    // section and material.
+    u32 firstDraw = 0;
+    u32 firstInstance = 0;
+    u32 count = 0;
+    u32 lod = 0;
+    // The union of the run's bounds, for the per-pass tests.
+    Vec3 boundsCenter;
+    f32 boundsRadius = 0.0f;
+    // Whether ANY of the run is in the camera's frustum. The forward passes draw
+    // the batch if this holds, because a batch is one call and cannot be drawn
+    // in pieces.
+    bool anyVisible = false;
+};
+
 // The prefiltered environment's freshness, and the policy that keeps a
 // day/night cycle from putting a CPU prefilter in every frame.
 //
@@ -191,6 +229,7 @@ public:
                 const MeshCache& meshes) override;
     [[nodiscard]] bool valid() const noexcept override { return valid_; }
     [[nodiscard]] f32 shadowRadius() const noexcept override { return kShadowRadius; }
+    [[nodiscard]] RendererStats stats() const noexcept override { return stats_; }
 
 private:
     [[nodiscard]] std::optional<core::EngineError> ensureTargets(rhi::IDevice& device, u32 width, u32 height);
@@ -226,6 +265,10 @@ private:
                       rhi::PipelineHandle staticPipeline, rhi::PipelineHandle skinnedPipeline, Selection selection,
                       const CullSphere* cull = nullptr);
 
+    // Groups the sorted draw list into instanced runs and fills the staging
+    // buffer. Runs before any render pass, because the upload has to.
+    void buildInstanceBatches(const RenderWorld& world, const MeshCache& meshes);
+
     // Bakes whatever the environment owes this frame and uploads it. Called
     // once per frame, inside the frame, because `uploadTexture` needs a command
     // list and `create` has none.
@@ -252,6 +295,11 @@ private:
     // thickness away here.
     rhi::PipelineHandle depthPrepassPipeline_{};
     rhi::PipelineHandle depthPrepassSkinnedPipeline_{};
+    // The instanced variants: same shading, same state, a second vertex stream
+    // that steps per instance.
+    rhi::PipelineHandle shadowInstancedPipeline_{};
+    rhi::PipelineHandle depthPrepassInstancedPipeline_{};
+    rhi::PipelineHandle pbrInstancedPipeline_{};
     rhi::PipelineHandle skyPipeline_{};
     rhi::PipelineHandle ssaoPipeline_{};
     rhi::PipelineHandle ssaoBlurPipeline_{};
@@ -309,6 +357,17 @@ private:
     rhi::TextureHandle lightIndices_{};
     rhi::TextureHandle lightData_{};
     ClusterGrid clusters_;
+    // The per-instance vertex stream, and the plan that indexes it. Rebuilt
+    // every frame, uploaded once before any render pass -- uploading inside one
+    // is what `rhi.err.upload_inside_pass` refuses, and rightly.
+    rhi::BufferHandle instanceBuffer_{};
+    std::vector<GpuInstance> instanceStaging_;
+    std::vector<InstanceBatch> batches_;
+    // Per draw: which batch covers it, or `kNoBatch`.
+    std::vector<u32> batchOf_;
+    // What the frame actually submitted, for the stat that says whether any of
+    // this did anything.
+    RendererStats stats_;
     rhi::SamplerHandle linearSampler_{};
     rhi::SamplerHandle shadowSampler_{};
     // Trilinear and clamped: the mip index IS the roughness, so filtering
@@ -357,6 +416,10 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
     const rhi::ShaderHandle skyFragment = load("sky", rhi::ShaderStage::Fragment);
     const rhi::ShaderHandle tonemapVertex = load("tonemap", rhi::ShaderStage::Vertex);
     const rhi::ShaderHandle tonemapFragment = load("tonemap", rhi::ShaderStage::Fragment);
+    const rhi::ShaderHandle shadowInstancedVertex = load("shadow_instanced", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle shadowInstancedFragment = load("shadow_instanced", rhi::ShaderStage::Fragment);
+    const rhi::ShaderHandle pbrInstancedVertex = load("pbr_instanced", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle pbrInstancedFragment = load("pbr_instanced", rhi::ShaderStage::Fragment);
     const rhi::ShaderHandle ssaoVertex = load("ssao", rhi::ShaderStage::Vertex);
     const rhi::ShaderHandle ssaoFragment = load("ssao", rhi::ShaderStage::Fragment);
     const rhi::ShaderHandle ssaoBlurVertex = load("ssao_blur", rhi::ShaderStage::Vertex);
@@ -374,10 +437,26 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
     const rhi::ShaderHandle fxaaVertex = load("fxaa", rhi::ShaderStage::Vertex);
     const rhi::ShaderHandle fxaaFragment = load("fxaa", rhi::ShaderStage::Fragment);
 
-    for (const rhi::ShaderHandle handle :
-         {ssaoVertex, ssaoFragment, ssaoBlurVertex, ssaoBlurFragment, bloomDownVertex, bloomDownFragment, bloomUpVertex,
-          bloomUpFragment, luminanceDownVertex, luminanceDownFragment, luminanceReduceVertex, luminanceReduceFragment,
-          luminanceAdaptVertex, luminanceAdaptFragment, fxaaVertex, fxaaFragment}) {
+    for (const rhi::ShaderHandle handle : {shadowInstancedVertex,
+                                           shadowInstancedFragment,
+                                           pbrInstancedVertex,
+                                           pbrInstancedFragment,
+                                           ssaoVertex,
+                                           ssaoFragment,
+                                           ssaoBlurVertex,
+                                           ssaoBlurFragment,
+                                           bloomDownVertex,
+                                           bloomDownFragment,
+                                           bloomUpVertex,
+                                           bloomUpFragment,
+                                           luminanceDownVertex,
+                                           luminanceDownFragment,
+                                           luminanceReduceVertex,
+                                           luminanceReduceFragment,
+                                           luminanceAdaptVertex,
+                                           luminanceAdaptFragment,
+                                           fxaaVertex,
+                                           fxaaFragment}) {
         if (!handle.valid()) {
             destroy(device);
             return error.key.hash != 0 ? error : core::makeError(LUAUG_TR("render.err.shader_format_unknown"));
@@ -593,6 +672,69 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
         });
     };
 
+    // The per-INSTANCE stream, at slot 1: the model matrix as four columns and
+    // the instance's alpha. `perInstance` is the one field ADR 0043 added to the
+    // frozen RHI, and this is its only caller.
+    const std::array<rhi::VertexBufferLayout, 2> instancedBuffers{
+        rhi::VertexBufferLayout{.slot = 0, .strideBytes = 48},
+        rhi::VertexBufferLayout{.slot = 1, .strideBytes = sizeof(GpuInstance), .perInstance = true},
+    };
+    const std::array<rhi::VertexAttribute, 9> instancedAttributes{
+        rhi::VertexAttribute{.location = 0, .bufferSlot = 0, .format = rhi::VertexFormat::Float3, .offsetBytes = 0},
+        rhi::VertexAttribute{.location = 1, .bufferSlot = 0, .format = rhi::VertexFormat::Float3, .offsetBytes = 12},
+        rhi::VertexAttribute{.location = 2, .bufferSlot = 0, .format = rhi::VertexFormat::Float4, .offsetBytes = 24},
+        rhi::VertexAttribute{.location = 3, .bufferSlot = 0, .format = rhi::VertexFormat::Float2, .offsetBytes = 40},
+        rhi::VertexAttribute{.location = 4, .bufferSlot = 1, .format = rhi::VertexFormat::Float4, .offsetBytes = 0},
+        rhi::VertexAttribute{.location = 5, .bufferSlot = 1, .format = rhi::VertexFormat::Float4, .offsetBytes = 16},
+        rhi::VertexAttribute{.location = 6, .bufferSlot = 1, .format = rhi::VertexFormat::Float4, .offsetBytes = 32},
+        rhi::VertexAttribute{.location = 7, .bufferSlot = 1, .format = rhi::VertexFormat::Float4, .offsetBytes = 48},
+        rhi::VertexAttribute{.location = 8, .bufferSlot = 1, .format = rhi::VertexFormat::Float4, .offsetBytes = 64},
+    };
+    // The depth-only instanced pass reads position and the four model columns
+    // and nothing else, so its locations are 0 through 4 -- the numbers are the
+    // shader's declaration order, not the vertex's.
+    const std::array<rhi::VertexAttribute, 5> shadowInstancedAttributes{
+        rhi::VertexAttribute{.location = 0, .bufferSlot = 0, .format = rhi::VertexFormat::Float3, .offsetBytes = 0},
+        rhi::VertexAttribute{.location = 1, .bufferSlot = 1, .format = rhi::VertexFormat::Float4, .offsetBytes = 0},
+        rhi::VertexAttribute{.location = 2, .bufferSlot = 1, .format = rhi::VertexFormat::Float4, .offsetBytes = 16},
+        rhi::VertexAttribute{.location = 3, .bufferSlot = 1, .format = rhi::VertexFormat::Float4, .offsetBytes = 32},
+        rhi::VertexAttribute{.location = 4, .bufferSlot = 1, .format = rhi::VertexFormat::Float4, .offsetBytes = 48},
+    };
+
+    shadowInstancedPipeline_ = device.createGraphicsPipeline({
+        .vertexShader = shadowInstancedVertex,
+        .fragmentShader = shadowInstancedFragment,
+        .vertexBuffers = instancedBuffers,
+        .vertexAttributes = shadowInstancedAttributes,
+        .rasterizer = {.cullMode = rhi::CullMode::Front},
+        .depthStencil = {.depthTest = true, .depthWrite = true, .depthCompare = rhi::CompareOp::LessOrEqual},
+        .colorTargets = {},
+        .depthStencilFormat = kShadowFormat,
+        .debugName = "shadow_instanced",
+    });
+    depthPrepassInstancedPipeline_ = device.createGraphicsPipeline({
+        .vertexShader = shadowInstancedVertex,
+        .fragmentShader = shadowInstancedFragment,
+        .vertexBuffers = instancedBuffers,
+        .vertexAttributes = shadowInstancedAttributes,
+        .rasterizer = {.cullMode = rhi::CullMode::Back},
+        .depthStencil = {.depthTest = true, .depthWrite = true, .depthCompare = rhi::CompareOp::LessOrEqual},
+        .colorTargets = {},
+        .depthStencilFormat = kDepthFormat,
+        .debugName = "depth_prepass_instanced",
+    });
+    pbrInstancedPipeline_ = device.createGraphicsPipeline({
+        .vertexShader = pbrInstancedVertex,
+        .fragmentShader = pbrInstancedFragment,
+        .vertexBuffers = instancedBuffers,
+        .vertexAttributes = instancedAttributes,
+        .rasterizer = {.cullMode = rhi::CullMode::Back},
+        .depthStencil = {.depthTest = true, .depthWrite = true, .depthCompare = rhi::CompareOp::LessOrEqual},
+        .colorTargets = hdrTarget,
+        .depthStencilFormat = kDepthFormat,
+        .debugName = "pbr_instanced",
+    });
+
     ssaoPipeline_ = fullscreen(ssaoVertex, ssaoFragment, occlusionTarget, "ssao");
     ssaoBlurPipeline_ = fullscreen(ssaoBlurVertex, ssaoBlurFragment, occlusionTarget, "ssao_blur");
     bloomDownPipeline_ = fullscreen(bloomDownVertex, bloomDownFragment, hdrTarget, "bloom_down");
@@ -610,7 +752,8 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
         !pbrSkinnedBlendPipeline_.valid() || !depthPrepassPipeline_.valid() || !depthPrepassSkinnedPipeline_.valid() ||
         !ssaoPipeline_.valid() || !ssaoBlurPipeline_.valid() || !bloomDownPipeline_.valid() ||
         !bloomUpPipeline_.valid() || !luminanceDownPipeline_.valid() || !luminanceReducePipeline_.valid() ||
-        !luminanceAdaptPipeline_.valid() || !fxaaPipeline_.valid()) {
+        !luminanceAdaptPipeline_.valid() || !fxaaPipeline_.valid() || !shadowInstancedPipeline_.valid() ||
+        !depthPrepassInstancedPipeline_.valid() || !pbrInstancedPipeline_.valid()) {
         destroy(device);
         return core::makeError(LUAUG_TR("render.err.pipeline_create_failed"));
     }
@@ -702,6 +845,16 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
         .height = kBrdfLutSize,
         .debugName = "brdf-lut",
     });
+    instanceBuffer_ = device.createBuffer({
+        .usage = rhi::BufferUsage::Vertex,
+        .sizeBytes = kMaxInstances * static_cast<u32>(sizeof(GpuInstance)),
+        .debugName = "instances",
+    });
+    if (!instanceBuffer_.valid()) {
+        destroy(device);
+        return core::makeError(LUAUG_TR("render.err.target_create_failed"));
+    }
+
     clusterGrid_ = device.createTexture({
         .format = rhi::TextureFormat::R32Float,
         .usage = rhi::TextureUsage::Sampled,
@@ -851,11 +1004,27 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
         device.destroy(shaders_[index]);
     shaderCount_ = 0;
 
-    for (rhi::PipelineHandle* pipeline :
-         {&shadowPipeline_, &pbrPipeline_, &pbrBlendPipeline_, &skyPipeline_, &tonemapPipeline_,
-          &shadowSkinnedPipeline_, &pbrSkinnedPipeline_, &pbrSkinnedBlendPipeline_, &depthPrepassPipeline_,
-          &depthPrepassSkinnedPipeline_, &ssaoPipeline_, &ssaoBlurPipeline_, &bloomDownPipeline_, &bloomUpPipeline_,
-          &luminanceDownPipeline_, &luminanceReducePipeline_, &luminanceAdaptPipeline_, &fxaaPipeline_}) {
+    for (rhi::PipelineHandle* pipeline : {&shadowPipeline_,
+                                          &pbrPipeline_,
+                                          &pbrBlendPipeline_,
+                                          &skyPipeline_,
+                                          &tonemapPipeline_,
+                                          &shadowSkinnedPipeline_,
+                                          &pbrSkinnedPipeline_,
+                                          &pbrSkinnedBlendPipeline_,
+                                          &depthPrepassPipeline_,
+                                          &depthPrepassSkinnedPipeline_,
+                                          &ssaoPipeline_,
+                                          &ssaoBlurPipeline_,
+                                          &bloomDownPipeline_,
+                                          &bloomUpPipeline_,
+                                          &luminanceDownPipeline_,
+                                          &luminanceReducePipeline_,
+                                          &luminanceAdaptPipeline_,
+                                          &fxaaPipeline_,
+                                          &shadowInstancedPipeline_,
+                                          &depthPrepassInstancedPipeline_,
+                                          &pbrInstancedPipeline_}) {
         if (pipeline->valid())
             device.destroy(*pipeline);
         *pipeline = {};
@@ -873,6 +1042,10 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
             device.destroy(level);
         level = {};
     }
+    if (instanceBuffer_.valid())
+        device.destroy(instanceBuffer_);
+    instanceBuffer_ = {};
+
     for (rhi::SamplerHandle* sampler : {&linearSampler_, &shadowSampler_, &environmentSampler_, &pointSampler_}) {
         if (sampler->valid())
             device.destroy(*sampler);
@@ -887,6 +1060,93 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
     exposureIndex_ = 0;
     environment_ = EnvironmentCache{};
     valid_ = false;
+}
+
+void DefaultRenderer::buildInstanceBatches(const RenderWorld& world, const MeshCache& meshes)
+{
+    batches_.clear();
+    instanceStaging_.clear();
+    batchOf_.assign(world.draws.size(), kNoBatch);
+    if (!world.camera.valid)
+        return;
+
+    // The SAME level the submission will choose, from the same function and the
+    // same camera -- a batch whose members disagreed about their level of detail
+    // would draw one mesh with another's index range.
+    const f32 pixelsPerUnit = height_ > 0 ? 0.5f * static_cast<f32>(height_) * world.camera.projection.m[1][1] : 0.0f;
+
+    const auto instanceable = [&](const DrawItem& draw) {
+        // Transparent draws are never batched: their ORDER is their
+        // correctness, and `drawSortKey` zeroes their mesh field for exactly
+        // that reason. Skinned draws are not batched either -- a joint palette
+        // is per draw and there is no room for one in a vertex stream.
+        return !draw.transparent && draw.boneCount == 0;
+    };
+
+    for (core::usize index = 0; index < world.draws.size();) {
+        const DrawItem& first = world.draws[index];
+        if (!instanceable(first)) {
+            ++index;
+            continue;
+        }
+        const MeshCache::Resolved* resolved = meshes.resolve(first.mesh);
+        if (resolved == nullptr || resolved->lods.empty()) {
+            ++index;
+            continue;
+        }
+        const u32 lod = selectMeshLod(*resolved, first.transform, pixelsPerUnit);
+
+        core::usize last = index + 1;
+        while (last < world.draws.size()) {
+            const DrawItem& next = world.draws[last];
+            if (!instanceable(next) || !(next.mesh == first.mesh) || next.section != first.section ||
+                next.material != first.material)
+                break;
+            if (selectMeshLod(*resolved, next.transform, pixelsPerUnit) != lod)
+                break;
+            ++last;
+        }
+
+        const auto count = static_cast<u32>(last - index);
+        if (count < kMinInstanceBatch || instanceStaging_.size() + count > static_cast<core::usize>(kMaxInstances)) {
+            index = last;
+            continue;
+        }
+
+        InstanceBatch batch;
+        batch.firstDraw = static_cast<u32>(index);
+        batch.firstInstance = static_cast<u32>(instanceStaging_.size());
+        batch.count = count;
+        batch.lod = lod;
+
+        // The union sphere, grown one member at a time. Conservative in the
+        // direction that never drops geometry, which is the only direction a
+        // cull may be wrong in.
+        batch.boundsCenter = world.draws[index].boundsCenter;
+        batch.boundsRadius = world.draws[index].boundsRadius;
+        for (core::usize member = index; member < last; ++member) {
+            const DrawItem& draw = world.draws[member];
+            batchOf_[member] = static_cast<u32>(batches_.size());
+            batch.anyVisible = batch.anyVisible || draw.inCameraFrustum;
+
+            GpuInstance instance;
+            instance.model = draw.transform;
+            instance.alphaUnused[0] = draw.alpha;
+            instanceStaging_.push_back(instance);
+
+            const Vec3 offset = draw.boundsCenter - batch.boundsCenter;
+            const f32 distance = core::length(offset);
+            if (distance + draw.boundsRadius > batch.boundsRadius) {
+                const f32 grown = 0.5f * (batch.boundsRadius + distance + draw.boundsRadius);
+                if (distance > 1e-6f)
+                    batch.boundsCenter = batch.boundsCenter + offset * ((grown - batch.boundsRadius) / distance);
+                batch.boundsRadius = grown;
+            }
+        }
+
+        batches_.push_back(batch);
+        index = last;
+    }
 }
 
 void DefaultRenderer::updateEnvironment(rhi::ICmdList& cmd, const SkyParams& params)
@@ -949,7 +1209,13 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
                                    rhi::PipelineHandle skinnedPipeline, Selection selection, const CullSphere* cull)
 {
     const bool depthOnly = selection == Selection::Shadow || selection == Selection::Prepass;
-    bool onSkinnedPipeline = false;
+    // Which pipeline is currently set. Three variants now rather than two, so a
+    // handle is clearer than a bool -- and `extract`'s sort keeps runs of each
+    // together, so this switches a handful of times per pass whatever the scene.
+    rhi::PipelineHandle currentPipeline = staticPipeline;
+    const rhi::PipelineHandle instancedPipeline = selection == Selection::Shadow    ? shadowInstancedPipeline_
+                                                  : selection == Selection::Prepass ? depthPrepassInstancedPipeline_
+                                                                                    : pbrInstancedPipeline_;
 
     // Pixels per world unit at one metre, from the projection itself rather
     // than from a field-of-view nobody stored: `projection[1][1]` IS
@@ -968,21 +1234,34 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
     // be the backend doing work bgfx would have to repeat.
     u32 boundMaterial = 0xFFFFFFFFu;
 
-    for (const DrawItem& draw : world.draws) {
+    for (core::usize drawIndex = 0; drawIndex < world.draws.size(); ++drawIndex) {
+        const DrawItem& draw = world.draws[drawIndex];
+
+        // A batched run is drawn once, by its first member, and every other
+        // member is skipped -- one call cannot be issued in pieces, which is
+        // also why a batch is culled as a whole.
+        const u32 batchIndex = drawIndex < batchOf_.size() ? batchOf_[drawIndex] : kNoBatch;
+        const InstanceBatch* batch = batchIndex == kNoBatch ? nullptr : &batches_[batchIndex];
+        if (batch != nullptr && batch->firstDraw != drawIndex)
+            continue;
+
         // The shadow pass takes everything; the forward passes take only what
         // the camera can see. A caster behind the camera still casts into the
         // frame -- including a half-transparent one, which still occludes. The
         // roadmap leaves whether it *should* as a separate question, and this
         // milestone does not open it.
-        if (selection != Selection::Shadow && !draw.inCameraFrustum)
+        const bool visible = batch != nullptr ? batch->anyVisible : draw.inCameraFrustum;
+        if (selection != Selection::Shadow && !visible)
             continue;
         if ((selection == Selection::Opaque || selection == Selection::Prepass) && draw.transparent)
             continue;
         if (selection == Selection::Transparent && !draw.transparent)
             continue;
         if (cull != nullptr) {
-            const Vec3 offset = draw.boundsCenter - cull->centre;
-            const f32 reach = cull->radius + draw.boundsRadius;
+            const Vec3 centre = batch != nullptr ? batch->boundsCenter : draw.boundsCenter;
+            const f32 radius = batch != nullptr ? batch->boundsRadius : draw.boundsRadius;
+            const Vec3 offset = centre - cull->centre;
+            const f32 reach = cull->radius + radius;
             if (core::dot(offset, offset) > reach * reach)
                 continue;
         }
@@ -991,7 +1270,8 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
         if (resolved == nullptr || resolved->lods.empty())
             continue;
 
-        const MeshLodRange& level = resolved->lods[selectMeshLod(*resolved, draw.transform, pixelsPerUnit)];
+        const u32 lod = batch != nullptr ? batch->lod : selectMeshLod(*resolved, draw.transform, pixelsPerUnit);
+        const MeshLodRange& level = resolved->lods[lod];
         if (draw.section >= level.sectionCount || level.firstSection + draw.section >= resolved->sections.size())
             continue;
         const MeshSection& section = resolved->sections[level.firstSection + draw.section];
@@ -1003,19 +1283,28 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
         // whose file failed to load has no skin buffer while a track already
         // exists -- and drawing that through the skinned pipeline would read an
         // unbound vertex buffer.
-        const bool skinnedDraw = draw.boneCount > 0 && resolved->skin.valid() && skinnedPipeline.valid();
-        if (skinnedDraw != onSkinnedPipeline) {
-            cmd.setPipeline(skinnedDraw ? skinnedPipeline : staticPipeline);
-            onSkinnedPipeline = skinnedDraw;
+        const bool skinnedDraw =
+            batch == nullptr && draw.boneCount > 0 && resolved->skin.valid() && skinnedPipeline.valid();
+        const rhi::PipelineHandle wanted = batch != nullptr ? instancedPipeline
+                                           : skinnedDraw    ? skinnedPipeline
+                                                            : staticPipeline;
+        if (!(wanted == currentPipeline)) {
+            cmd.setPipeline(wanted);
+            currentPipeline = wanted;
         }
 
         if (depthOnly) {
-            const GpuShadowUniforms uniforms{viewProjection, draw.transform};
+            // The instanced path reads its model matrix from the vertex stream,
+            // so the block carries only the view-projection -- but it is pushed
+            // per batch rather than per pass, because an ordinary draw between
+            // two batches overwrites the same slot.
+            const GpuShadowUniforms uniforms{viewProjection, batch != nullptr ? Mat4{} : draw.transform};
             cmd.bindUniforms(rhi::ShaderStage::Vertex, 0, asBytes(&uniforms, sizeof(uniforms)));
         }
         else {
-            GpuObjectUniforms uniforms{viewProjection, draw.transform, normalMatrixOf(draw.transform)};
-            uniforms.instanceAlphaUnused[0] = draw.alpha;
+            GpuObjectUniforms uniforms{viewProjection, batch != nullptr ? Mat4{} : draw.transform,
+                                       batch != nullptr ? Mat4{} : normalMatrixOf(draw.transform)};
+            uniforms.instanceAlphaUnused[0] = batch != nullptr ? 1.0f : draw.alpha;
             cmd.bindUniforms(rhi::ShaderStage::Vertex, 0, asBytes(&uniforms, sizeof(uniforms)));
 
             if (draw.material != boundMaterial && draw.material < world.materials.size()) {
@@ -1046,7 +1335,11 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
             }
         }
 
-        if (skinnedDraw) {
+        if (batch != nullptr) {
+            const std::array<rhi::BufferHandle, 2> vertexBuffers{resolved->vertices, instanceBuffer_};
+            cmd.bindVertexBuffers(0, vertexBuffers);
+        }
+        else if (skinnedDraw) {
             // The palette, one upload per draw. Per draw rather than per
             // skeleton because `bindUniforms` is the only route the frozen RHI
             // gives (ADR 0037) and it is scoped to the next draw -- which is why
@@ -1065,7 +1358,15 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
             cmd.bindVertexBuffers(0, vertexBuffers);
         }
         cmd.bindIndexBuffer(resolved->indices, rhi::IndexType::U32);
-        cmd.drawIndexed(section.indexCount, 1, resolved->firstIndex + section.firstIndex, resolved->vertexOffset, 0);
+        cmd.drawIndexed(section.indexCount, batch != nullptr ? batch->count : 1,
+                        resolved->firstIndex + section.firstIndex, resolved->vertexOffset,
+                        batch != nullptr ? batch->firstInstance : 0);
+
+        ++stats_.drawCalls;
+        if (batch != nullptr) {
+            ++stats_.instancedDraws;
+            stats_.instances += batch->count;
+        }
     }
 }
 
@@ -1100,6 +1401,15 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     // because the frozen RHI has no compute, and uploaded unconditionally
     // because a frame's command shape must not depend on whether the lights
     // moved -- the same rule the environment upload obeys, for the same reason.
+    // Grouped and uploaded BEFORE any render pass begins, because
+    // `rhi.err.upload_inside_pass` refuses the alternative and is right to: the
+    // GPU is rasterizing into the target by then.
+    stats_ = RendererStats{};
+    buildInstanceBatches(world, meshes);
+    if (!instanceStaging_.empty()) {
+        cmd.upload(instanceBuffer_, asBytes(instanceStaging_.data(), instanceStaging_.size() * sizeof(GpuInstance)), 0);
+    }
+
     buildClusters(world.camera, world.lights, clusters_);
     cmd.uploadTexture(clusterGrid_, asBytes(clusters_.grid.data(), clusters_.grid.size() * sizeof(f32)), 0);
     cmd.uploadTexture(lightIndices_, asBytes(clusters_.indices.data(), clusters_.indices.size() * sizeof(f32)), 0);

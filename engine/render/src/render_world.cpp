@@ -92,14 +92,22 @@ constexpr f32 kDegreesToRadians = kPi / 180.0f;
 
 } // namespace
 
-u64 drawSortKey(u32 pass, u32 pipeline, u32 material, f32 depth) noexcept
+u64 drawSortKey(u32 pass, u32 pipeline, u32 material, u32 geometry, f32 depth) noexcept
 {
-    // 8 bits of pass, 16 of pipeline, 24 of material, 16 of depth. Most
-    // significant first, so a single integer compare orders a frame by the thing
-    // that costs most to change: the pass, then the pipeline, then the bind set.
+    // 8 bits of pass, 8 of pipeline, 16 of material, 16 of mesh, 16 of depth.
+    // Most significant first, so a single integer compare orders a frame by the
+    // thing that costs most to change: the pass, then the pipeline, then the
+    // bind set, then the vertex buffers.
+    //
+    // The geometry field -- mesh and section together -- is what makes an
+    // instanced run contiguous (ADR 0043). Its cost is that the opaque pass no
+    // longer walks strictly front-to-back within one material, which was worth
+    // something for early-Z and is now worth nothing, because the depth prepass
+    // provides it exactly.
     const u64 passBits = static_cast<u64>(pass & 0xFFu) << 56;
-    const u64 pipelineBits = static_cast<u64>(pipeline & 0xFFFFu) << 40;
-    const u64 materialBits = static_cast<u64>(material & 0xFFFFFFu) << 16;
+    const u64 pipelineBits = static_cast<u64>(pipeline & 0xFFu) << 48;
+    const u64 materialBits = static_cast<u64>(material & 0xFFFFu) << 32;
+    const u64 geometryBits = static_cast<u64>(geometry & 0xFFFFu) << 16;
 
     // Quantized deliberately. A sub-millimetre wobble in a camera position must
     // not be able to reorder two draws, because the capture golden hashes the
@@ -109,7 +117,7 @@ u64 drawSortKey(u32 pass, u32 pipeline, u32 material, f32 depth) noexcept
     const f32 clamped = depth < 0.0f ? 0.0f : (depth > 655.0f ? 655.0f : depth);
     const u64 depthBits = static_cast<u64>(clamped * 100.0f);
 
-    return passBits | pipelineBits | materialBits | (depthBits & 0xFFFFu);
+    return passBits | pipelineBits | materialBits | geometryBits | (depthBits & 0xFFFFu);
 }
 
 const char* primitiveContent(core::i32 shape) noexcept
@@ -425,8 +433,10 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             // every future backend would repeat.
             const f32 sortDepth = transparent ? kMaxSortDepth - depth : depth;
             out.draws.push_back(DrawItem{
+                // Zero for a transparent draw: see `drawSortKey`.
                 .sortKey = drawSortKey(transparent ? kTransparentPass : kOpaquePass,
-                                       boneCount > 0 ? kSkinnedPipeline : kStaticPipeline, materialSlot, sortDepth),
+                                       boneCount > 0 ? kSkinnedPipeline : kStaticPipeline, materialSlot,
+                                       transparent ? 0u : drawGeometryKey(entry->mesh.index, section), sortDepth),
                 .transform = transform,
                 .mesh = entry->mesh,
                 .section = section,
@@ -522,8 +532,8 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         const f32 depth = core::length(core::center(worldBounds));
         const f32 sortDepth = transparent ? kMaxSortDepth - depth : depth;
         out.draws.push_back(DrawItem{
-            .sortKey =
-                drawSortKey(transparent ? kTransparentPass : kOpaquePass, kStaticPipeline, materialSlot, sortDepth),
+            .sortKey = drawSortKey(transparent ? kTransparentPass : kOpaquePass, kStaticPipeline, materialSlot,
+                                   transparent ? 0u : drawGeometryKey(entry->mesh.index, 0), sortDepth),
             .transform = transform,
             .mesh = entry->mesh,
             .section = 0,

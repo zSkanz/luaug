@@ -234,7 +234,27 @@ struct RenderWorld
 // `depth` is the distance from the camera in metres; it is quantized to 16 bits
 // so that a sub-millimetre wobble in a camera position cannot reorder two draws
 // and change a golden command stream.
-[[nodiscard]] u64 drawSortKey(u32 pass, u32 pipeline, u32 material, f32 depth) noexcept;
+// `geometry` is what makes an instanced run CONTIGUOUS, and it is why this
+// gained a parameter at M7.5. Build it with `drawGeometryKey`: it is the mesh
+// AND the section, because a mesh with two sections and one material used to
+// interleave its two halves by depth -- which chopped every run into pieces of
+// one and made the instanced path draw nothing at all. That was measured rather
+// than reasoned: the horde scene reported 15,390 draws for 4,002 visible
+// objects, and the two sections of its enemy were why.
+//
+// **It is zero for a transparent draw**, deliberately. Grouping by geometry
+// above depth would destroy the back-to-front order the blended pass IS, so the
+// transparent pass sorts exactly as it did and is never instanced.
+[[nodiscard]] u64 drawSortKey(u32 pass, u32 pipeline, u32 material, u32 geometry, f32 depth) noexcept;
+
+// Mesh and section packed into the sixteen bits `drawSortKey` has for them:
+// twelve of mesh and four of section. Four thousand distinct meshes in one frame
+// and sixteen sections in one mesh; past either, two draws share a key and their
+// runs are merely shorter, which costs performance and never correctness.
+[[nodiscard]] constexpr u32 drawGeometryKey(u32 meshIndex, u32 section) noexcept
+{
+    return ((meshIndex & 0xFFFu) << 4) | (section & 0xFu);
+}
 
 // The two passes a draw can belong to, and the values `drawSortKey`'s `pass`
 // argument takes. Opaque first because a `u64` compare orders the frame and the

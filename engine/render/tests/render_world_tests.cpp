@@ -215,25 +215,45 @@ TEST_CASE("extraction clears first, so one buffer serves every frame")
     CHECK(snapshot.parts.empty());
 }
 
-TEST_CASE("drawSortKey: the pass outranks the pipeline, which outranks the material")
+TEST_CASE("drawSortKey: pass, then pipeline, then material, then mesh, then depth")
 {
     // Asserted on the key rather than on a sorted list, because a sorted list
     // only proves that *something* was consistent. These are the ordering
     // contract every backend inherits.
-    CHECK(render::drawSortKey(0, 9, 9, 600.0f) < render::drawSortKey(1, 0, 0, 0.0f));
-    CHECK(render::drawSortKey(0, 0, 9, 600.0f) < render::drawSortKey(0, 1, 0, 0.0f));
-    CHECK(render::drawSortKey(0, 0, 0, 600.0f) < render::drawSortKey(0, 0, 1, 0.0f));
-    CHECK(render::drawSortKey(0, 0, 0, 1.0f) < render::drawSortKey(0, 0, 0, 2.0f));
+    CHECK(render::drawSortKey(0, 9, 9, 9, 600.0f) < render::drawSortKey(1, 0, 0, 0, 0.0f));
+    CHECK(render::drawSortKey(0, 0, 9, 9, 600.0f) < render::drawSortKey(0, 1, 0, 0, 0.0f));
+    CHECK(render::drawSortKey(0, 0, 0, 9, 600.0f) < render::drawSortKey(0, 0, 1, 0, 0.0f));
+
+    // The geometry field, added at M7.5, and the property that makes an
+    // instanced run possible at all: two pieces of geometry sharing one material
+    // must NOT interleave by depth, or a run of one is chopped into pieces by
+    // draws of the other (ADR 0043).
+    CHECK(render::drawSortKey(0, 0, 0, 0, 600.0f) < render::drawSortKey(0, 0, 0, 1, 0.0f));
+
+    // And SECTION is part of it, which is the half that was missing and was
+    // caught by measuring rather than by reading: a mesh with two sections and
+    // one material interleaved its halves by depth, so every run was one draw
+    // long and the instanced path drew nothing.
+    CHECK(render::drawGeometryKey(7, 0) != render::drawGeometryKey(7, 1));
+    CHECK(render::drawGeometryKey(7, 1) < render::drawGeometryKey(8, 0));
+    CHECK(render::drawGeometryKey(4095, 15) <= 0xFFFFu);
+    CHECK(render::drawSortKey(0, 0, 0, 0, 1.0f) < render::drawSortKey(0, 0, 0, 0, 2.0f));
 
     // Quantized, so a sub-millimetre camera wobble cannot reorder two draws and
     // change a golden command stream. One unit is a centimetre.
-    CHECK(render::drawSortKey(0, 0, 0, 1.0f) == render::drawSortKey(0, 0, 0, 1.000001f));
-    CHECK(render::drawSortKey(0, 0, 0, 1.0f) != render::drawSortKey(0, 0, 0, 1.02f));
+    CHECK(render::drawSortKey(0, 0, 0, 0, 1.0f) == render::drawSortKey(0, 0, 0, 0, 1.000001f));
+    CHECK(render::drawSortKey(0, 0, 0, 0, 1.0f) != render::drawSortKey(0, 0, 0, 0, 1.02f));
 
     // Saturating rather than wrapping: a draw beyond the quantization range must
     // sort last, not first.
-    CHECK(render::drawSortKey(0, 0, 0, 5000.0f) >= render::drawSortKey(0, 0, 0, 654.0f));
-    CHECK(render::drawSortKey(0, 0, 0, -5.0f) == render::drawSortKey(0, 0, 0, 0.0f));
+    CHECK(render::drawSortKey(0, 0, 0, 0, 5000.0f) >= render::drawSortKey(0, 0, 0, 0, 654.0f));
+    CHECK(render::drawSortKey(0, 0, 0, 0, -5.0f) == render::drawSortKey(0, 0, 0, 0, 0.0f));
+
+    // Each field is bounded, and a value past its width must not climb into the
+    // one above it -- a material index of 65,536 that reordered the passes would
+    // be a scene drawn in the wrong order for a reason nobody could see.
+    CHECK(render::drawSortKey(0, 0, 65536, 0, 0.0f) < render::drawSortKey(0, 1, 0, 0, 0.0f));
+    CHECK(render::drawSortKey(0, 0, 0, 65536, 0.0f) < render::drawSortKey(0, 0, 1, 0, 0.0f));
 }
 
 TEST_CASE("extraction resolves the camera, and answers nothing without one")

@@ -66,9 +66,12 @@ changes signature, and no other struct or enumeration is touched.
 
 Every backend implements it:
 
-- `rhi_sdlgpu` maps it to `SDL_GPU_VERTEXINPUTRATE_INSTANCE` with
-  `instance_step_rate = 1`, which is the field it was already writing a constant
-  into.
+- `rhi_sdlgpu` maps it to `SDL_GPU_VERTEXINPUTRATE_INSTANCE`, leaving
+  `instance_step_rate` at zero -- SDL_gpu.h:1651 calls that field "Reserved for
+  future use. Must be set to 0" and asserts on anything else. The rate is implied
+  by the input rate, and one step per instance is the only one SDL_GPU offers.
+  Which is also why the RHI field is a `bool` and not a count: an interface that
+  offered a step rate would be offering something no backend here can honour.
 - `rhi_capture` records the count of per-instance streams on the
   `createGraphicsPipeline` line, so a golden can see that a pipeline is instanced
   — a capture backend that could not see the change would make the render

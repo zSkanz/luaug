@@ -399,10 +399,12 @@ PipelineHandle SdlGpuDevice::createGraphicsPipeline(const GraphicsPipelineDesc& 
             .slot = layout.slot,
             .pitch = layout.strideBytes,
             .input_rate = layout.perInstance ? SDL_GPU_VERTEXINPUTRATE_INSTANCE : SDL_GPU_VERTEXINPUTRATE_VERTEX,
-            // SDL documents this as ignored for a per-vertex stream, and one is
-            // the only rate a per-instance one has a caller for: a step of two
-            // would read every other transform.
-            .instance_step_rate = layout.perInstance ? 1u : 0u,
+            // Zero, always. SDL_gpu.h:1651 calls this field "Reserved for future
+            // use. Must be set to 0" and asserts on anything else -- the rate is
+            // implied by `input_rate`, and one step per instance is the only one
+            // SDL_GPU offers. Setting it to 1 for a per-instance stream looks
+            // more correct and aborts the process.
+            .instance_step_rate = 0,
         });
     }
 
