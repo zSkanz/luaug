@@ -276,7 +276,15 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
 - **Gate:** capture-stream goldens for 3 camera angles × 2 lighting states
   (blocking); Tier-2 lavapipe image goldens attempted (non-blocking); frame
   time baseline at 1080p recorded; GPU validation clean; Tier-3 compile gate
-  becomes blocking.
+  becomes blocking. **The last item was met at M4 and narrowed back on
+  2026-08-20 by human decision**, on the condition its own commit named: GitHub
+  reported 80% of the month's Actions quota consumed, macOS is charged at 10x on
+  a private repository and is about two thirds of the cost of every push. It runs
+  on a milestone tag or a manual dispatch again. Windows and Linux stay blocking
+  on every push, and the Linux tier is the one that must — it catches what a
+  local run cannot, a transitive header graph being a property of the runner
+  rather than of the code (`758b322c`). The cost is stated rather than glossed: a
+  macOS-only break is found at the tag rather than at the commit that caused it.
 
 ### M4.5 — Correcting the World: the Environment the Renderer Never Read (S)
 

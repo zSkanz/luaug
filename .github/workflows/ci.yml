@@ -556,26 +556,27 @@ jobs:
   # finishes in under three.
   # ---------------------------------------------------------------------------
   build-macos:
-    # **Blocking from M4**, which is the roadmap's own gate item: "Tier-3 compile
-    # gate becomes blocking". It ran on a milestone tag or a manual dispatch
-    # until now, which gave up finding a macOS-only break at the commit that
-    # caused it -- and M4 is the milestone that added a shader toolchain, a new
-    # module and the first code with no Windows equivalent, so that trade stops
-    # paying.
+    # **Narrowed back on 2026-08-20, deliberately.** It became blocking at M4,
+    # which was the roadmap's own gate item, and the comment that made it blocking
+    # named the condition for undoing it: "if the quota becomes the binding
+    # constraint, narrowing this back is a decision to take deliberately rather
+    # than by letting a red macOS be ignored." GitHub reported 80% of the month's
+    # Actions quota consumed, the human took the decision, and this is it -- not a
+    # red job being tolerated, and not `[skip ci]` on the pushes that matter.
     #
-    # The cost is real and is the reason it was not blocking before: macOS
-    # minutes are charged at 10x on a private repository. The mitigation is the
-    # `changes` filter -- a documentation-only push does not build at all -- plus
-    # the 20-minute timeout above against a job whose observed wall time is under
-    # three minutes. If the quota becomes the binding constraint, narrowing this
-    # back is a decision to take deliberately rather than by letting a red macOS
-    # be ignored.
+    # macOS is charged at 10x on a private repository and is roughly two thirds of
+    # the cost of every push; Windows is 2x and is covered locally with the same
+    # toolchain by `scripts/localgate.ps1`; the Linux tier is 1x and is the one
+    # that is NOT redundant -- it caught a missing `<algorithm>` include in
+    # 758b322c that neither local tier could, because a transitive header graph is
+    # a property of the runner's libstdc++ rather than of the code. So the Linux
+    # and Windows jobs stay on every push and this one goes back to a milestone tag
+    # or a manual dispatch.
     #
-    # Gated exactly as `build-test` is, and for the reason stated there: only a
-    # literal `false` from `changes` stops it, and a tag push is skipped because
-    # the tag points at a commit this job already built when it landed.
-    needs: changes
-    if: ${{ !cancelled() && !startsWith(github.ref, 'refs/tags/') && needs.changes.outputs.code != 'false' }}
+    # What that costs is stated rather than glossed: a macOS-only break is now
+    # found at the milestone tag rather than at the commit that caused it. That was
+    # the trade before M4 and it is the trade again.
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/milestone/') }}
     runs-on: macos-latest
     # Was 45, which at 10x is 450 charged minutes for a job whose observed wall
     # time is 168 s. This is the largest single tail risk in the file; 20 still
