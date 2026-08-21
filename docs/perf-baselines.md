@@ -176,6 +176,24 @@ to a file and taxes every configuration to enable.
 | M6 | `tests/bench/platforms200` | `win-msvc-dev` | physics: apply / step / writeback | 0.14 / 0.29 / 0.08 ms | — |
 | M6 | `tests/bench/churn10k` **after D031** (the same scene: two thirds of its anchored parts are written every tick, so two thirds of them are now KINEMATIC) | `win-msvc-dev` | mean sim tick | **7.32 ms** | 16 ms |
 | M6 | `tests/bench/churn10k` | `win-msvc-dev` | physics: apply / step / writeback | 0.43 / 3.89 / 0.78 ms | — |
+| M6 | `examples/04-obby` (the deliverable: the course, two tweened platforms, a skinned rig, a `ScreenGui` with a list layout, five sounds) | `win-msvc-dev` | median frame, 1080p | **0.53 ms** | 16.7 ms — a 60 fps frame |
+| M6 | `examples/04-obby` | `win-msvc-dev` | worst frame | 1.84 ms | — |
+| M6 | `examples/04-obby` | `win-msvc-dev` | draws / triangles | 15 / 172 — solid parts now, where M5's playground was 0 / 0 |
+| M6 | `luaug_ui_tests` (a laid-out tree, then two more frames touching nothing) | `win-msvc-dev` | `layoutStats().solverRuns` on an idle frame | **0** | 0 — asserted, not measured |
+
+**UI cost is relayout and not draw, and the roadmap asked for the two to be
+measured separately.** The draw half is in the obby row above: fifteen draws for
+a course, a HUD and a menu, of which one is the whole UI -- the 2D pass is one
+draw per scissor RUN, so a panel with a list layout and four labels is one.
+
+The relayout half is a COUNTER rather than a duration, and deliberately: at this
+scale a timing assertion measures the clock, and "about zero microseconds" is the
+shape of gate that passes while doing nothing. `LayoutStats::solverRuns` counts
+solver passes, a `ScreenGui` runs one only when something marked it dirty, and
+`luaug_ui_tests` asserts that two further frames over an untouched tree run
+**zero**. A static HUD costs nothing per frame, which is the claim, and a
+regression that dirtied a tree on every property read would show as a number that
+climbs rather than as a millisecond nobody would notice.
 
 **What D031's motion switch costs, and it is `churn10k` that priced it rather
 than the scene built for the purpose.** Four hundred platforms with four hundred

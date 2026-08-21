@@ -554,4 +554,176 @@ time.
 
 ## Gate Record
 
-(filled at milestone end, before human review)
+Filled 2026-08-21, before human review. Every command below was run on the
+reference machine recorded in `docs/perf-baselines.md`; the Linux rows come from
+the Tier-2 container `scripts/localgate.ps1` builds.
+
+### 1. UI capture goldens at two resolutions
+
+```
+$ ctest --preset win-msvc-dev -R capture_gate_ui
+capture_gate_ui_1280x720 ....... Passed
+capture_gate_ui_640x360 ........ Passed
+```
+
+The same scene at two sizes, byte-for-byte against a committed command stream.
+What it proves is scaling: the `UDim.Scale` half of every rectangle halves and
+the `UDim.Offset` half does not, which shows in the scissors and the viewport the
+stream records.
+
+**What these two cannot see, said plainly**: `upload` records a buffer's SIZE and
+not its contents (D026), so the QUADS are invisible to them. The rectangles
+themselves are asserted exactly by `luaug_ui_tests` — 28 cases including the
+alignment ones D029 produced — and the pixels by the screenshots in §7.
+
+### 2. Tween output against reference easing tables
+
+```
+$ luaug-host --run-tests=tests/conformance --rhi=null
+[info] Conformance: 1081 cases, 1081 passed, 0 failed.
+```
+
+Twenty-one of them are `tests/conformance/tween`, and the fixture they read —
+`easing_reference.luau` — was computed from the published formulas by an
+implementation written separately from the engine's and then frozen as literals.
+That is what makes it a fixture rather than a golden: a table generated from
+`core/easing.cpp` would certify whatever that file happened to do, which is the
+shape of gate M4.5 spent a milestone learning to distrust.
+
+Eleven styles times three directions at nine alphas, plus the two facts that
+matter more than any of them: every curve is exactly 0 at 0 and exactly 1 at 1,
+and nothing is clamped — two of the eleven overshoot on purpose, and the obby's
+menu uses one of them.
+
+### 3. An input replay of a full obby run reaches the finish flag, headless
+
+```
+$ luaug-host --replay=tests/replay
+[info] Replay animation: 900 ticks, hash 9edd547f49a7dbab, identical across 3 runs of this build.
+[info] Replay audiosoak: 3600 ticks, hash d5c1f7c1a4e1b469, identical across 3 runs of this build.
+[info] Replay obby: 1100 ticks, hash e4ded6a68312367e, identical across 3 runs of this build.
+[info] Determinism: 3 scenarios reproduced.
+```
+
+**This is the milestone's E2E gate and the whole stack is in the loop**: input
+dispatch resolving actions, UI layout and hit-testing, tweens driving kinematic
+platforms, the physics that carries a character on one, audio on the sim
+timeline, and an animation track sampling a clip. Any one of them broken and the
+run does not reach the flag.
+
+`scenario.json` gains `requireAttribute` for it, and that is the point rather
+than a detail: **a hash comparison alone could not gate this.** Three runs that
+all fall in the same hole agree perfectly. The scenario names the fact —
+`ObbyFinished` — and the game sets it on the tick the flag is touched rather than
+on the way out, so a run that never got there cannot claim it.
+
+The recording is authored rather than captured and its timings are arithmetic:
+the character walks 5 m/s, which is one metre every twelve ticks, so each jump is
+taken exactly one metre before a platform's edge. `tests/replay/obby/inputs.txt`
+says so in its own comments.
+
+### 4. Audio: the device opens and the underrun counter is zero in a 60 s soak
+
+**The CI half**, in the run above: `audiosoak`, 3,600 ticks with five voices,
+three of which end and are rewound and replayed from their own `Ended` handlers —
+a voice retired and re-allocated 203 times over the minute. Headless with the
+null backend, so no device opens and the counter is trivially zero; what this
+half really gates is the harder claim, that `Ended` comes off the **sim**
+timeline and therefore produces a predictable count on a machine with no
+speakers at all.
+
+**The real-device half**, which only a machine with speakers can do:
+
+```
+$ luaug-host tests/replay/audiosoak --frames=7000 --exit
+[info] audio soak: 59.9s, 203 endings against 207 expected, 0 underruns, 5 voices
+[info] audio soak: 59.9s, 203 endings against 207 expected, 0 underruns, 5 voices
+```
+
+Zero in two of three runs and one in the third. **And that number is only
+meaningful because the gate found its own counter was wrong** (D032): the first
+version reported **1,348 underruns** in the same sixty seconds, and every one of
+them was the mixer working correctly — it counted a callback that arrived with no
+new voice frame, which is most callbacks, because the device asks at ~82 Hz and
+the simulation publishes at 60. A gate that reports a catastrophe for the
+ordinary case is worse than no gate. It counts a callback that could not get the
+voices now, and the callback no longer blocks on the game thread to find out.
+
+The four endings of slack are arithmetic too: `Ended` is deferred, so the handler
+that rewinds and replays runs a tick after the sound finished, and every cycle
+costs that tick.
+
+### 5. Animation clip sampling covered by the replay hash
+
+`animation` in §3's run. **The pose does not live in the world**, so a hash over
+the ECS would reproduce perfectly whatever animation did — including nothing. The
+scene drives three tracks' `TimePosition` into three parts' positions, which is
+not a trick: `TimePosition` is the clip's clock, it advances by
+`FixedTimestep * Speed`, and every joint's sample is a pure function of it.
+
+Three tracks and not one: normal speed, double speed, and looping. The second
+catches a `Speed` that stopped scaling the clock and the third catches a loop
+that RESETS instead of wrapping — which loses a fraction of a tick each time
+round and drifts against everything else in the scene.
+
+What the hash cannot cover is the sampling arithmetic itself, and that is covered
+where it can be: fourteen cases in `luaug_render_tests` assert palette matrices by
+hand, and `capture_gate_skinned` records the uploaded palette bytes across four
+frames and would fail on a pose that stopped moving.
+
+### 6. The M5 example migrated to the Action System, with no regression
+
+`examples/03-physics-playground` runs on `InputContext`/`InputAction`/
+`InputBinding`, and `KeyboardService` — the scaffold M5 shipped and tagged
+`DevOnly` so that its removal would be structural rather than a promise — is
+gone. The method cross-check counts it: 56 bound methods at M5, 58 at M6 after
+three `InputAction`/`InputService` methods arrived and `KeyboardService`'s one
+left, and 67 now.
+
+The migration is also the milestone's clearest demonstration of ADR 0039: the
+two camera actions sit in their own context at `Enum.InputRate.Render` while
+movement and jump stay on `Simulation`, where the replay can see them. That split
+is one property on a context.
+
+### 7. Everything else, on both tiers
+
+```
+$ scripts/localgate.ps1
+  ok    docs     (5.9 s)
+  ok    luau     (5.1 s)
+  ok    format   (10 s)
+  ok    windows  (32.5 s)   34 tests
+  ok    linux    (39.5 s)   33 tests
+```
+
+Windows runs one test the container does not: `screenshot_gate` is labelled
+`gpu-golden` and excluded from CI, because a pixel golden is tied to the GPU that
+recorded it.
+
+**Counts, for a reviewer deciding where to look**: 1,081 conformance cases
+(1,059 at the start of the milestone), and on the C++ side 31 input, 19 UI
+layout, 9 glyph, 14 animation, 26 physics and 6 primitive cases among the 34
+ctest targets.
+
+**Six capture goldens re-recorded during the milestone**, each for a stated
+reason: four more shaders and three more pipelines at boot (skinning), five
+primitive meshes uploaded at boot (solid parts), and a wider UI vertex (rounded
+corners). A golden that did not change when those landed would have meant they
+had not.
+
+### 8. What this record does not claim
+
+**macOS.** Tier 3 builds only on CI and only at a `milestone/*` tag, which is
+not pushed until the human signs.
+
+**The pixels of the UI at 640x360.** The two goldens see scissors, viewports and
+draw counts; the screenshot gate covers one scene at one size and is excluded
+from CI. D026 is the row that carries the gap.
+
+**A shipped game's audio.** `Sound.Content` is stored and not read (M7): every
+sound in this milestone is a generated tone of its declared length. The timeline,
+the events, the mixing, the spatialization and the group volumes are real; the
+file is not.
+
+**The DebugShell's two new panes as pictures.** They are ImGui in a windowed run,
+which nothing here can screenshot. Four cases cover the surface underneath them.

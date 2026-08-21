@@ -5,17 +5,18 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- **M6 — Playing the World — IN PROGRESS.** The brief is
+- **M6 — Playing the World — BUILT, awaiting human sign-off.** The brief is
   [`docs/briefs/m6-kickoff.md`](docs/briefs/m6-kickoff.md), with its fifteen
-  decisions and its Findings. **Four of the five systems are in and the fifth is
-  half in**: the Input Action System (ADR 0039), TweenService, the whole UI
-  (layout — ADR 0040 — plus the 2D render pass, hit-testing and text focus), and
-  audio. Animation has its ASSET half: glTF skins, weights and clips load and are
-  tested. It has no runtime and no skinned draw.
-  **Not started**: `AnimationPlayer`/`AnimationTrack`, the skinned pipeline,
-  D017, and `examples/04-obby`. Two of the six gate items are recorded (the UI
-  goldens at two resolutions, the tween easing fixtures) and one is done without
-  a record yet (the M5 example migrated to the Action System).
+  decisions, its Findings and a filled Gate Record. **Every scope item and every
+  gate item is done**: the five systems, solid `Part` rendering, `InputService`'s
+  raw event surface (ADR 0041), the non-device input seam, `examples/04-obby`,
+  D017, and the six gates. Nothing is tagged: `milestone/m6` waits for the human,
+  which is §6's rule and not a formality.
+  **Three ADRs**: 0039 (a context declares its dispatch rate), 0040 (a `UDim2`
+  placement is arithmetic, so v1 does not call Clay — and Clay is un-vendored),
+  0041 (`InputService` gains raw events, fed from the IAS's own pipeline).
+  **Ten defects closed** — D017, D021, D022, D027, D029, D030, D031, D032, and
+  half of D028 — of which six were found by a person playing the deliverable.
 - **M5 — Feeling the World: Jolt Physics + Character — COMPLETE, signed off
   2026-08-20**, tagged `milestone/m5`. Signed after a review round that found
   something: two `CharacterBody` were reported as passing through each other,
@@ -32,7 +33,7 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   first macOS build of Jolt. Two red runs preceded the first green one and both
   found something a local tier cannot see (D023, D024).
 
-### M6 so far: what a game can do that it could not
+### M6: what a game can do that it could not
 
 - **Input is one model, and the scaffold is gone.** `InputContext` →
   `InputAction` → `InputBinding`, resolved in priority order with per-input
@@ -57,8 +58,34 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   tick in a replay, in a headless run, and on a machine with a different audio
   buffer. The underrun counter the roadmap's gate names does not exist in
   miniaudio; this engine defines one and defines what it counts.
-- **A glTF skeleton loads**, sorted parents-first with the vertex stream
-  remapped to match — neither of which the file gives you.
+- **A skinned character animates and casts a shadow that walks.** glTF skins
+  and clips load (parents-first, with the vertex stream remapped — neither of
+  which the file gives you), `AnimationPlayer`/`AnimationTrack` play and blend
+  them on the SimClock, and there is a skinned pipeline for the forward pass AND
+  the shadow one. Without the second, a character's shadow stands still while it
+  walks: a bug nobody can photograph, because the image is correct everywhere
+  except on the ground.
+- **`Instance.new("Part")` is visible.** Five generated solids, one per
+  `Enum.PartShape`, through `MeshCache` like any imported mesh — and the renderer
+  changed not one line, which is what M4's "engine-generated geometry must reach
+  the renderer" constraint was written to get. `Part.Shape` is honoured rather
+  than marked `Inert`.
+- **A person arriving from a familiar platform finds `InputBegan`** (ADR 0041),
+  fed from the IAS's own dispatch and never from the OS: it sinks like an action,
+  replays like an action, and carries whether the UI already took it. And a HUD
+  button drives a real action through four virtual `KeyCode`s, which is the
+  roadmap's non-device seam with its proving caller.
+- **A character rides a moving platform**, which took two defects to reach:
+  kinematic bodies are MOVED rather than teleported so they have a velocity at
+  all (D027), and an anchored part something is writing becomes kinematic for
+  twelve ticks (D031). Both were found by a person playing the obby.
+- **A label in Portuguese says what is missing.** Text is decoded as UTF-8 and a
+  codepoint the face cannot draw gets a visible box rather than mojibake, out of
+  a glyph store keyed by face, size and codepoint — a cache and not a bake, so
+  M7's user font is a widening rather than a rewrite.
+- **`examples/04-obby` is a game**, playable start to finish, and it is the
+  milestone's E2E gate: a recorded input stream drives it headless to the finish
+  flag with the whole stack in the loop.
 - **D021 is fixed**: a range refusal names its range.
 - **Four value types** -- `Vector2`, `UDim`, `UDim2`, `Rect` -- with the
   attribute domain §2.2 widened by them, and a world-hash case that requires
@@ -130,45 +157,41 @@ scope. The ones most likely to be mistaken for bugs:
   half, and the crash handler is in place for the next occurrence — the next
   report should carry `luaug-crash-<pid>.dmp` and `luaug.log` from beside
   whatever was being run.
-- **D017 — the `DebugShell` has no memory-category table and no log/REPL pane**,
-  both named by `architecture.md` §app. Scheduled with M6.
 - **D018 — `luaug_net_tests` hung once** on Windows and passed on a re-run. §12
   quarantines on the second occurrence; this is the entry that makes a second
   one countable.
 - **The build agreeing is not evidence that the build read your file.** A
   break-verification restored with `Copy-Item` kept the source's old timestamp,
   Ninja rebuilt nothing, and a passing fix was reported as failing against code
-  that was no longer on disk. Restore with `cp` and `touch`.
-- **D021 — a range refusal reports the key for a type.** `FixedTimestep = 1/10`
-  raises "it takes a number" about a number. Every M5 property with a range is
-  affected; the fix is a per-property error-key override in the IDL.
-- **D022 — a `Part` never reaches the solid renderer.** Scheduled with M7.5.
-- **M6's next step, written out so it is not re-derived**: the animation
-  RUNTIME. The clips load; nothing plays them. The design question it has to
-  answer first, because it is the reason this was not simply written: an
-  `AnimationTrack` needs the clip data (owned by `render`'s mesh library, L4),
-  a signal (owned by `script`, L5) and a home for its state. The shape that fits
-  the engine already exists — `scene` holds an injected `IPhysics3D*` and `app`
-  wires it — so a `scene::ClipProvider*` implemented by `render` and read by a
-  track system in `script` is the answer that needs no layering change.
-  `script` already has `asset` among its declared deps (architecture.md §2) and
-  does not link it yet, which is the other half of the same plumbing.
-- **The `AnimationPlayer`/`AnimationTrack` IDL was written and then reverted**,
-  deliberately. `api/defs/instances.api.luau`'s own header says a class whose
-  behaviour belongs to a later milestone arrives WITH it, because a property
-  that accepts a write and changes nothing is worse than a missing one — it
-  type-checks. The definitions are cheap to rewrite and were not worth shipping
-  ahead of the runtime.
-- After the runtime, in the brief's order: the skinned pipeline (a second vertex
-  stream and a `pbr_skinned` variant — Decision 11), D017, `examples/04-obby`,
-  and the three gate items that need it.
-- **Two of M6's decisions went against a document, and both are ADRs.**
-  ADR 0039 (an `InputContext` declares its dispatch rate; the IAS's enums are
-  total) and ADR 0040 (a UDim2 placement is arithmetic, so v1 does not call
-  Clay). The second is the one a reviewer should read: it is the milestone
-  declining to use a dependency the same milestone vendored. It did not remove
-  it, because that is not the agent's call -- and the human answered on
-  2026-08-21, so it is removed now.
+  that was no longer on disk. Restore with `cp` and `touch`. **M6 found the same
+  shape from the other end**: a `DrawQuad` that grew by one field left a stale
+  object behind and produced a segfault in a test that had nothing to do with the
+  change. `--clean-first` on the module was the answer, and "a mysterious crash
+  right after a struct changed size" is now a known first thing to check.
+- **D028's remaining half — `Touched` for a character's SIDE contacts.** The
+  ground half is fixed; a wall walked into still fires nothing, because the
+  character's non-ground contacts are not on the `IPhysics3D` seam. That is a
+  seam widening rather than a fix.
+- **D026 — the capture gate records an upload's SIZE and not its contents**, so
+  the quads a frame draws are invisible to the blocking render gate. What holds
+  the line meanwhile is in the row.
+- **M7's first step, written out so it is not re-derived**: the asset pipeline is
+  what four `Inert` markers now name. `TextLabel.Font`, `ImageLabel.Image`,
+  `ImageLabel.ScaleType`, `ImageLabel.SliceCenter`, `ScrollFrame.ScrollBarThickness`
+  and `MeshPart.CollisionFidelity` are each stored, read back, and acted on by
+  nothing — and `tools/repo/inertcheck.luau` is the gate that will not let a
+  seventh join them quietly.
+- **Three of M6's decisions went against a document, and all three are ADRs.**
+  0039 (an `InputContext` declares its dispatch rate; the IAS's enums are total),
+  0040 (a `UDim2` placement is arithmetic, so v1 does not call Clay), and 0041
+  (`InputService` gains the raw event surface ADR 0029 had ruled out). 0040 is
+  the one a reviewer should read for the process: the milestone declined to use a
+  dependency it had vendored, did NOT remove it because that is not the agent's
+  call, and the human answered on 2026-08-21 — so Clay is un-vendored now. 0041
+  is the one to read for the judgement: the technical objection to raw events was
+  never to events, it was to events read from the OS, and every part of it
+  dissolved once they came out of the IAS's own pipeline. What changed the answer
+  was a PRODUCT argument the agent had not weighed.
 - **The renderer submits one draw call per visible object, and that is the
   engine's real ceiling for a crowd.** Measured 2026-08-20 against a
   survivors-like horde: two thousand enemies run at 11.1 ms a frame, of which
@@ -236,16 +259,17 @@ scope. The ones most likely to be mistaken for bugs:
   **Three consequences the human named, and one of them binds M6 rather than
   M7.** They are recorded in the roadmap so they are not rediscovered:
   - **The glyph store must be a CACHE, not a boot-time bake** — keyed by face,
-    size and codepoint, filled on demand. Baking works only while there is one
-    face at one size, which stops being true the moment a game supplies a font.
-    **This is M6's to get right**, because M7 hands it user faces and a bake
-    becomes a rewrite.
-  - **Unicode stops being optional.** `stb_easy_font` is ASCII; a game in
-    Portuguese needs á ç ã õ and a game in Japanese needs far more. That decides
-    whether the cache holds 128 entries or thousands, and whether a missing glyph
-    falls back or draws nothing.
+    size and codepoint, filled on demand. **Done at M6**: the key is all three,
+    the bound is 2,048 entries with a clear-on-full policy and a log line, and
+    sizes are quantized to a quarter pixel so a tweened `TextSize` does not mint
+    an entry per frame.
+  - **Unicode stops being optional.** **Done at M6**: text is decoded as UTF-8
+    into codepoints and one the face cannot draw gets a visible replacement box —
+    not nothing, not a question mark, and not the mojibake reading the bytes one
+    at a time produced. `missingGlyphs` counts distinct characters the face could
+    not draw, so a label full of boxes is a number before it is a bug report.
   - **`TextLabel.Font` stops being `Inert`** when the face lands, and the marker
-    goes with it.
+    goes with it. Still M7's.
 
 - **ANSWERED 2026-08-20 — the Clay row is removed.** ADR 0040 established that a
   `UDim2` placement is arithmetic and that Clay cannot express an unclamped scale
@@ -261,13 +285,16 @@ scope. The ones most likely to be mistaken for bugs:
   until M4.5 closed, and M4.5 and M5 have both closed since. It is a device
   checkpoint rather than milestone work, and it is here so that it is asked for
   rather than forgotten.
-- **A judgement I made that a reviewer may want to remake.** `churn10k` reads
-  4.96 ms/tick where M2 recorded 2.02, and the Gate Record calls that a changed
-  measurement rather than a regression: the benchmark's scene now holds ten
-  thousand rigid bodies where it held none. It is under its 16 ms budget either
-  way and the physics half is itemised in the baselines. If the answer is
-  "that is a regression", §8 wants an ADR and the work is the mirror's
-  dirty-flag design.
+- **A judgement I made that a reviewer may want to remake, and M6 moved the
+  number again.** `churn10k` read 2.02 ms/tick at M2, 4.96 at M5 when its scene
+  became ten thousand rigid bodies, and **7.32 now**: two thirds of its anchored
+  parts are written every tick, so D031 makes two thirds of them kinematic bodies
+  in the broadphase layer Jolt re-fits each tick. That is the semantic the fix
+  exists to provide, applied to a scene that was never written to be a physics
+  test. It is under its 16 ms budget at every step and itemised in the baselines.
+  If the answer is "that is a regression", §8 wants an ADR; the two candidate
+  answers are the mirror's dirty-flag design and a `churn10k` whose moving parts
+  stop being anchored.
 - **One decision worth a word, and it is cheap either way.** Jolt's
   `CROSS_PLATFORM_DETERMINISTIC` build switch is off, which is ADR 0025's level B
   rather than an oversight — upstream documents it as buying determinism across
@@ -286,104 +313,21 @@ Entries for the planning session and for M0 through M4 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
 
-- **2026-08-20 (session 10, Claude Opus): M5 built, awaiting sign-off.** Ran the
-  §2 boot sequence green, spent the ledger's named first action on the
-  clang-format gate over a quiet tree (205 of 205 files moved, in a commit that
-  did nothing else), then wrote `docs/briefs/m5-kickoff.md` and worked its build
-  order: Jolt vendored at the tag the manifest has named since planning, the
-  `physics_api` seam and a Jolt behind it, the Instance↔body mirror in `scene`
-  where architecture.md always put it, `CharacterBody` on a `CharacterVirtual`,
-  the query family, `Weld`/`WeldConstraint` (added to the milestone by the human
-  mid-session, and appended to the brief rather than assumed to have been read),
-  the keyboard scaffold and the recorded input stream the determinism gate
-  replays, the Jolt debug-draw bridge, `examples/03-physics-playground`, and
-  D016.
-  Learned, and the one to keep: **physics arriving changed what every scene
-  already in the repository meant.** An unanchored `BasePart` is a rigid body, so
-  on the first green build the mesh example rained its own scenery and a
-  property-churn benchmark quietly became a ten-thousand-body physics benchmark
-  under a name that says otherwise. The fix is one line per scene; the discipline
-  is that `capture_gate_meshes` then passes against the UNCHANGED M4.5 golden,
-  which is what says the change is inert rather than re-recorded.
-  Also learned: **a picture of two things at once catches what neither test
-  can** — the debug-draw bridge, on the frame it first drew, showed the
-  character's collider floating half a body above the character's own box, with
-  every test passing. **A check on a moving thing names a window, not a moment**:
-  three cases in a row failed by measuring after the thing they tested.
-  **A sleeping contact is not an ended contact.** **A gate that can pass while
-  doing nothing keeps being built by accident** — the twelfth, and the first
-  caught in the session that wrote it: a conformance run reported 938 passed over
-  a suite that had just lost seventeen cases to a syntax error. And **the Linux
-  tier found an ABI defect, not just a warning**: Jolt compiled `-fno-rtti` emits
-  no typeinfo, which MSVC hides by emitting RTTI per translation unit.
-  **Signed off by the human 2026-08-20** ("tá aprovado"), after a review round
-  that found something and after the answer changed what the milestone shipped:
-  two `CharacterBody` were reported as passing through each other, on a reading
-  of Jolt correct in every particular. It did not reproduce -- this backend gives
-  every character an inner rigid body, and that is what the other one's sweep
-  finds -- and the investigation found the real defect underneath, a character
-  whose sweep was handed a filter that accepts every layer, so `CharacterBody`
-  was the one thing in the world outside the collidability matrix (D025).
-  The general shape, which is the one to keep: **a report whose reasoning is
-  sound can still have the wrong conclusion, and the way to find out is to run
-  it rather than to argue with it.** Two probes and a break-verification cost
-  twenty minutes and turned a wrong fix into a right one. The near-miss is that
-  registering every character in `CharacterVsCharacterCollisionSimple`, which is
-  what was asked for and would have "worked", would have reintroduced the same
-  defect by a different door: its list has no filter at all.
-  Also learned: **the build agreeing is not evidence that the build read your
-  file** -- a restore with `Copy-Item` kept the old timestamp, Ninja rebuilt
-  nothing, and a working fix reported itself as broken. And **the bench harness
-  was the thirteenth gate found able to pass while doing nothing**, caught by
-  writing a scene that failed its own assertions and watching it report a
-  respectable number anyway.
-  Closed with one thing measured that nobody asked for as work: **the renderer
-  submits one draw call per visible object**, which is the engine's real ceiling
-  for a crowd -- two thousand enemies at 11.1 ms, of which 1.8 ms is the entire
-  simulation, and the same frame costs the same at 320x180 as at 4K. Instanced
-  draws are now named M7.5 scope with that number attached.
-  Next: **open M6 in a new session** (§6). Its first action is in Now/Next.
-
-- **2026-08-20 (session 9, Claude Opus): M4.5, awaiting sign-off.** Ran the §2
-  boot sequence, found the repo green, wrote `docs/briefs/m4.5-kickoff.md`, and
-  worked its build order. `Lighting` became a boot service; the capture backend
-  learned to record what a uniform block CONTAINS rather than how big it is;
-  `clock_differential` renders one scene at two clock times and requires the
-  frames to differ; the shadow grid moves in whole texels; `Transparency` fades
-  through a sorted blended pass; `PVInstance` arrived with a pivot that can
-  hinge; the crash handler and log file `architecture.md` §app promised at M0
-  exist and are tested by a process that faults on purpose; `Property.Inert`
-  makes a stored-and-unread property say so; `docs/defects.md` is append-only and
-  gate-enforced. Every M4 artifact re-recorded. The human amended the scope twice
-  mid-session (the `PrimaryPart` retraction, then `PVInstance`); both are in the
-  brief, the second appended with the note that it arrived after the brief was
-  written.
-  Learned, and the one to keep: **the blocking render gate recorded the SIZE of
-  every uniform block and never its contents.** Every matrix, light and material
-  colour a frame carries goes through that one call, so six goldens across three
-  camera angles and two lighting states were green for a whole milestone while
-  the sun stood still. Behind it sits the more general thing: **a golden asserts
-  stability, not correctness, and it feels like the other one.** Re-record it
-  against a defect and it certifies the defect. What catches that is a
-  differential -- change one input the output must depend on, require the output
-  to change -- and it costs one CTest.
-  Also learned: **the test was at the level that was easy to write.** M4's
-  environment assertions all passed against a `Lighting` id the test built
-  itself, so the resolving step -- the broken one -- was the only step nothing
-  covered. **A plausible default hides a defect for a milestone**: an unresolved
-  `Lighting` renders a lit scene rather than a black one. **The tail carries what
-  the median cannot see** -- re-measuring moved the median not at all and the
-  worst frame by a factor of four on two cores. **The debug path had been drawing
-  in the wrong space since M4**, found by looking at a screenshot rather than by
-  any test, because the boxes were present and a test that counts them passes.
-  And **an audit scoped to one module is not an audit**: the sweep that "found"
-  `Model.PrimaryPart` unread searched `engine/render` for a value consumed in
-  `engine/script`.
-  **Signed off by the human the same day** ("aprovado para finalizar"), which is
-  what closed it; tagged `milestone/m4.5`, and `milestone/m4` stands with it.
-  Next: **open M5 in a new session** (§6) and make its first act the clang-format
-  gate, on a quiet tree.
-
-<!-- Format for future entries:
-- **YYYY-MM-DD (session N):** did X; learned Y; Next: <literal first action>.
--->
+- **2026-08-21 (session 11, Claude Opus): M6 built, awaiting sign-off.** Picked
+  up mid-milestone with four systems in, and finished it: the animation runtime
+  and the skinned pipeline, solid `Part` rendering, `InputService`'s raw event
+  surface, the non-device input seam, the glyph cache, Clay's removal,
+  `examples/04-obby` with its end-to-end replay gate, the audio soak, the
+  animation determinism scene, D017's two DebugShell panes, and the Gate Record.
+  Learned, and the one to keep: **the deliverable is the test that finds what the
+  tests do not.** Six of the ten defects closed this milestone were found by a
+  person playing the obby — a character that does not ride a platform, a
+  classification that made the fix for it unreachable, a menu 16 px off centre, a
+  `UICorner` that drew nothing. Every one of them had passing unit tests around
+  it. The second lesson is inside the fourth: `UICorner` was born in exactly the
+  state `Inert` was built at M4.5 to make visible, and nobody marked it, because
+  the marker depended on somebody remembering. `tools/repo/inertcheck.luau` is
+  the mechanical half, and run once against the whole tree it found five more.
+  The third: **a gate can be wrong about the thing it gates.** The audio soak
+  reported 1,348 underruns on a real device and every one of them was the mixer
+  working correctly.
