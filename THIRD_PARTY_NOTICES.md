@@ -21,7 +21,7 @@ vendored yet; the roadmap allows lazy vendoring so long as the row exists.
 | spirv_cross | sdl-shadercross-pin | `1a6169566c73` | Apache-2.0 | https://github.com/KhronosGroup/SPIRV-Cross | `third_party/spirv_cross/` |
 | jolt | 5.6.0 | `e77f175595e6` | MIT | https://github.com/jrouwe/JoltPhysics | `third_party/jolt/` |
 | box2d | 3.1.1 | _not vendored yet_ | MIT | https://github.com/erincatto/box2d | `third_party/box2d/` |
-| miniaudio | 0.11.25 | _not vendored yet_ | MIT-0 OR Unlicense | https://github.com/mackron/miniaudio | `third_party/miniaudio/` |
+| miniaudio | 0.11.25 | `9634bedb5b5a` | MIT-0 OR Unlicense | https://github.com/mackron/miniaudio | `third_party/miniaudio/` |
 | fastgltf | 0.9.0 | `0d1b67a28c49` | MIT | https://github.com/spnda/fastgltf | `third_party/fastgltf/` |
 | simdjson | 3.12.3 | `7382dc2be88e` | Apache-2.0 OR MIT | https://github.com/simdjson/simdjson | `third_party/simdjson/` |
 | meshoptimizer | 1.2 | `9d9890c73011` | MIT | https://github.com/zeux/meshoptimizer | `third_party/meshoptimizer/` |
@@ -29,7 +29,7 @@ vendored yet; the roadmap allows lazy vendoring so long as the row exists.
 | ktx | latest-tag | _not vendored yet_ | Apache-2.0 | https://github.com/KhronosGroup/KTX-Software | `third_party/ktx/` |
 | stb | master-2026-08-01 | `2c980bb59875` | MIT OR Public Domain | https://github.com/nothings/stb | `third_party/stb/` |
 | imgui | 1.92.9b-docking | `b48d1afbe8ee` | MIT | https://github.com/ocornut/imgui | `third_party/imgui/` |
-| clay | pinned-commit | _not vendored yet_ | zlib | https://github.com/nicbarker/clay | `third_party/clay/` |
+| clay | v0.14 | `b25a31c1a152` | zlib | https://github.com/nicbarker/clay | `third_party/clay/` |
 | recastnavigation | main | _not vendored yet_ | zlib | https://github.com/recastnavigation/recastnavigation | `third_party/recastnavigation/` |
 | gamenetworkingsockets | 1.6.x | _not vendored yet_ | BSD-3-Clause | https://github.com/ValveSoftware/GameNetworkingSockets | `third_party/gamenetworkingsockets/` |
 | enet | latest-tag | _not vendored yet_ | MIT | https://github.com/lsalzman/enet | `third_party/enet/` |
