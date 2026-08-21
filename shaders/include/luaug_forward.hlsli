@@ -35,6 +35,9 @@ Texture2D MetallicRoughnessTexture : register(t2, space2);
 SamplerState MetallicRoughnessSampler : register(s2, space2);
 Texture2D EmissiveTexture : register(t3, space2);
 SamplerState EmissiveSampler : register(s3, space2);
+// The four cascades, as a 2x2 atlas (shadow.h says why). Sampled with `Gather`
+// and an explicit bilinear comparison rather than through a comparison sampler,
+// so the sampler here is a plain point one.
 Texture2D<float> ShadowMap : register(t4, space2);
 SamplerState ShadowSampler : register(s4, space2);
 // The prefiltered environment, octahedral, one mip per roughness step. See
@@ -60,6 +63,11 @@ struct Interpolants
     // a vertex-stage block (b0 space1) and the fragment stage cannot see it.
     // Constant across a triangle, so the interpolation is a formality.
     float InstanceAlpha : TEXCOORD4;
+    // Distance along the camera's forward axis, in metres, which is what the
+    // cascade splits are stated in. Carried rather than derived from
+    // `SV_Position`, which would need the projection this stage is not given --
+    // and for a perspective matrix it is exactly the clip w.
+    float ViewDepth : TEXCOORD5;
     float4 Position : SV_Position;
 };
 
@@ -128,7 +136,8 @@ float4 shadeForward(Interpolants input)
     // elevation rather than authored (environment.h).
     const float3 sunDirection = normalize(SunDirectionBrightness.xyz);
     const float sunNol = saturate(dot(normal, sunDirection));
-    const float shadow = sampleSunShadow(ShadowMap, ShadowSampler, SunViewProjection, input.ShadingPosition, sunNol);
+    const float shadow =
+        sampleSunShadow(ShadowMap, ShadowSampler, input.ShadingPosition, normal, sunNol, input.ViewDepth);
     const float3 sunRadiance = SunColorUnused.rgb * (SunDirectionBrightness.w * shadow);
     float3 color = shadeDirect(surface, sunDirection, sunRadiance);
 

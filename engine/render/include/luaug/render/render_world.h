@@ -166,6 +166,13 @@ struct DrawItem
     // a submission that re-derived the answer could disagree with the order it
     // is walking.
     bool transparent = false;
+    // The draw's world bounds as a sphere, in the snapshot's camera-relative
+    // space. A sphere rather than the box it came from, because every consumer
+    // is a distance test: the shadow pass rejects a caster against a cascade's
+    // own sphere, which is what keeps four cascades from costing four times the
+    // submission. Conservative in the direction that never drops geometry.
+    Vec3 boundsCenter;
+    f32 boundsRadius = 0.0f;
     // Whether the camera can see it. False items are still in the list because
     // **a caster outside the view still casts into it**: dropping them from the
     // snapshot removed the shadows of everything behind the camera, which is a

@@ -120,7 +120,18 @@ struct GpuFrameUniforms
     // that a scene can dial the environment down without the shader gaining a
     // branch nothing else needs.
     f32 environmentParams[4]{6.0f, 1.0f, 0.0f, 0.0f};
-    core::Mat4 sunViewProjection;
+    // Per cascade, one lane each: where the cascade stops in view-space metres,
+    // one of its shadow texels in world metres, and its orthographic depth range
+    // in metres. The last two are what let a filter radius and a depth bias be
+    // stated in metres and mean the same thing in every cascade.
+    f32 cascadeFar[4]{};
+    f32 cascadeTexelWorld[4]{};
+    f32 cascadeDepthRange[4]{};
+    // x the filter radius in world metres, y the normal offset in shadow texels,
+    // z the fraction of a cascade that blends into the next, w the residual
+    // depth bias in world metres.
+    f32 shadowParams[4]{};
+    core::Mat4 cascadeViewProjection[4];
     // Irradiance as nine spherical-harmonic coefficients, cosine-convolved and
     // already divided by pi, so the shader multiplies the evaluation straight
     // by the diffuse albedo (environment.h). This is what replaces a flat
@@ -130,7 +141,7 @@ struct GpuFrameUniforms
     GpuLight lights[kMaxForwardLights];
 };
 
-static_assert(sizeof(GpuFrameUniforms) == 112 + 64 + 144 + 48 * kMaxForwardLights,
+static_assert(sizeof(GpuFrameUniforms) == 176 + 256 + 144 + 48 * kMaxForwardLights,
               "GpuFrameUniforms is a cbuffer layout");
 
 // Fragment stage, `b1 space3`. Per material rather than per frame, because it

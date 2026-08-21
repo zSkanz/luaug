@@ -48,6 +48,9 @@ Interpolants VertexMain(VertexInput input)
     const float4 shadingPosition = mul(Model, float4(input.Position, 1.0f));
     output.ShadingPosition = shadingPosition.xyz;
     output.Position = mul(ViewProjection, shadingPosition);
+    // For `core::perspective` the clip w IS the view-space distance in front of
+    // the camera, which is the space the cascade splits are stated in.
+    output.ViewDepth = output.Position.w;
 
     // The cofactor matrix, so a non-uniform scale tilts the normal correctly
     // instead of shearing it. Renormalised in the fragment stage, after

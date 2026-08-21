@@ -432,6 +432,8 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
                 .material = materialSlot,
                 .alpha = alpha,
                 .transparent = transparent,
+                .boundsCenter = core::center(worldBounds),
+                .boundsRadius = 0.5f * core::length(core::size(worldBounds)),
                 .inCameraFrustum = visible,
                 .firstBone = firstBone,
                 .boneCount = boneCount,
@@ -527,6 +529,8 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             .material = materialSlot,
             .alpha = alpha,
             .transparent = transparent,
+            .boundsCenter = core::center(worldBounds),
+            .boundsRadius = 0.5f * core::length(core::size(worldBounds)),
             .inCameraFrustum = visible,
         });
     });

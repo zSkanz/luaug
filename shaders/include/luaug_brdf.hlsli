@@ -228,47 +228,91 @@ float3 evaluateEnvironment(Surface surface, Texture2D environmentMap, SamplerSta
     return (diffuse + specular) * (intensity * occlusion);
 }
 
-// How much of the sun reaches this fragment: 1 lit, 0 fully occluded.
+// --- Cascaded shadows --------------------------------------------------------
 //
-// The map is a single orthographic cascade fitted around the camera, sampled
-// with an ordinary (non-comparison) sampler so the renderer need not create one
-// with `compare_enable` set -- the manual test below is the same arithmetic the
-// hardware would do, and it keeps the sampler state one thing rather than two.
-float sampleSunShadow(
-    Texture2D<float> shadowMap, SamplerState shadowSampler, float4x4 sunViewProjection, float3 position, float nol)
-{
-    const float4 lightClip = mul(sunViewProjection, float4(position, 1.0f));
-    // The sun is orthographic so w is 1; the divide is insurance against a
-    // future projective cascade rather than a cost worth removing.
-    const float3 lightNdc = lightClip.xyz / lightClip.w;
+// Four cascades in one 2x2 atlas (shadow.h says why an atlas rather than an
+// array), a filter radius constant in WORLD space, a normal-offset bias, and a
+// blend band rather than a switch at a plane. The roadmap names the last two as
+// the tells of a first cascaded implementation, so they are requirements here
+// rather than polish.
+//
+// **`Gather` is the comparison sampler.** ADR 0038 asks for one "so a tap
+// degrades instead of switching", and the property that matters is the
+// degradation: `SampleCmp` returns 0.25 rather than flipping 0 to 1 because it
+// bilinearly weights four binary comparisons. `Gather` returns those same four
+// texels in one texture operation, and the four comparisons and two lerps below
+// are six ALU instructions. So the frozen `SamplerDesc` gains no compare state
+// and the result is the same arithmetic (ADR 0043).
 
-    // Outside the cascade there is no information and the honest answer is
-    // "lit". Returning 0 instead is how a scene gains a hard black edge exactly
-    // where the fitted box stops.
-    if (any(abs(lightNdc.xy) > 1.0f) || lightNdc.z < 0.0f || lightNdc.z > 1.0f)
+// One tap: hardware-PCF's own answer, computed rather than sampled.
+float shadowTapPcf(Texture2D<float> atlas, SamplerState pointSampler, float2 uv, float reference, float2 atlasSize)
+{
+    // Gather returns the 2x2 neighbourhood in counter-clockwise order starting
+    // at the lower left: (-,+), (+,+), (+,-), (-,-) relative to the sample.
+    const float4 depths = atlas.Gather(pointSampler, uv);
+    const float4 lit = step(reference, depths);
+
+    // The same bilinear weights the texture unit would have used, from where the
+    // sample falls inside its texel.
+    const float2 texel = uv * atlasSize - 0.5f;
+    const float2 fraction = frac(texel);
+
+    const float bottom = lerp(lit.w, lit.z, fraction.x);
+    const float top = lerp(lit.x, lit.y, fraction.x);
+    return lerp(bottom, top, 1.0f - fraction.y);
+}
+
+// One cascade, 3x3 taps of the above. Returns 1 where the sun reaches.
+float sampleCascade(Texture2D<float> atlas, SamplerState pointSampler, uint cascade, float3 position, float3 normal,
+                    float nol, float2 atlasSize)
+{
+    const float texelWorld = CascadeTexelWorld[cascade];
+    const float depthRange = max(CascadeDepthRange[cascade], 1e-3f);
+
+    // Normal-offset bias, replacing a depth-only one: displacing the sample
+    // along the surface normal is what survives a grazing receiver, and it
+    // scales with the SINE of the light angle so it grows exactly where it is
+    // needed and vanishes where it is not.
+    const float slope = sqrt(saturate(1.0f - nol * nol));
+    const float3 offset = normal * (texelWorld * ShadowParams.y * slope);
+
+    const float4 lightClip = mul(CascadeViewProjection[cascade], float4(position + offset, 1.0f));
+    const float3 ndc = lightClip.xyz / lightClip.w;
+    if (any(abs(ndc.xy) > 1.0f) || ndc.z < 0.0f || ndc.z > 1.0f)
     {
+        // Outside the cascade there is no information and the honest answer is
+        // "lit". Returning 0 is how a scene gains a hard black edge exactly
+        // where a fitted box stops.
         return 1.0f;
     }
 
     // NDC +Y is up and a texture's V runs down. This holds on every backend
     // because SDL_GPU flips the Vulkan viewport to match D3D
-    // (third_party/sdl3/src/gpu/vulkan/SDL_gpu_vulkan.c:7503-7505), and depth is
-    // [0, 1] (engine/core/include/luaug/core/math.h, conventions block).
-    const float2 uv = lightNdc.xy * float2(0.5f, -0.5f) + float2(0.5f, 0.5f);
+    // (SDL_gpu_vulkan.c:7503-7505), and depth is [0, 1].
+    const float2 local = ndc.xy * float2(0.5f, -0.5f) + float2(0.5f, 0.5f);
 
-    // Slope-scaled: a surface nearly edge-on to the sun crosses many depth units
-    // inside one texel, so a bias large enough to stop acne there would detach
-    // every contact shadow elsewhere.
-    const float bias = lerp(0.005f, 0.0005f, saturate(nol));
-    const float reference = lightNdc.z - bias;
+    // The residual depth bias is stated in METRES and converted here, because a
+    // constant in depth units means a different distance in every cascade.
+    const float reference = ndc.z - ShadowParams.w / depthRange;
 
-    // Texel size read from the texture rather than from a uniform: the frozen
-    // contract has no field for the map's resolution, and a hardcoded size is
-    // how filtering silently stops matching when the map is resized.
-    uint width = 0;
-    uint height = 0;
-    shadowMap.GetDimensions(width, height);
-    const float2 texel = float2(1.0f / float(max(width, 1u)), 1.0f / float(max(height, 1u)));
+    // The filter radius, constant in world metres and clamped to a texel range.
+    // The clamp is the honest part: a 3x3 kernel spread over twenty texels is
+    // four samples of a large region rather than a filter, and it bands.
+    const float radiusTexels = clamp(ShadowParams.x / max(texelWorld, 1e-6f), 0.8f, 3.0f);
+    // A cascade's tile spans half the atlas, and its own extent is
+    // `texelWorld * tile` metres across -- so a step of one texel is this much
+    // local uv, and half that much atlas uv.
+    const float2 step2 = (radiusTexels / (0.5f * atlasSize)) * 0.5f;
+
+    // The tile: cascade 0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right.
+    const float2 tile = float2(float(cascade & 1u), float(cascade >> 1u)) * 0.5f;
+
+    // The atlas's whole tax, and it is four lines: a tap that walks off a tile
+    // reads the NEIGHBOURING cascade's depth, which is a bright seam along the
+    // split. Clamping to the tile inset by the kernel is what stops it.
+    const float2 inset = step2 + 0.5f / atlasSize;
+    const float2 lowest = tile + inset;
+    const float2 highest = tile + float2(0.5f, 0.5f) - inset;
 
     float lit = 0.0f;
     [unroll]
@@ -277,13 +321,57 @@ float sampleSunShadow(
         [unroll]
         for (int x = -1; x <= 1; ++x)
         {
-            // SampleLevel, not Sample: a depth map has no mips, and an implicit
-            // derivative inside an unrolled loop is a cost with no result.
-            const float occluder = shadowMap.SampleLevel(shadowSampler, uv + float2(x, y) * texel, 0.0f);
-            lit += reference <= occluder ? 1.0f : 0.0f;
+            const float2 uv = clamp(tile + local * 0.5f + float2(x, y) * step2, lowest, highest);
+            lit += shadowTapPcf(atlas, pointSampler, uv, reference, atlasSize);
         }
     }
     return lit / 9.0f;
+}
+
+// How much of the sun reaches this fragment: 1 lit, 0 fully occluded.
+//
+// `viewDepth` is the fragment's distance along the camera's forward axis, which
+// is what the splits are stated in. It arrives as an interpolant rather than
+// being derived from `SV_Position`, because deriving it would need the
+// projection this stage is not given.
+float sampleSunShadow(Texture2D<float> atlas, SamplerState pointSampler, float3 position, float3 normal, float nol,
+                      float viewDepth)
+{
+    uint width = 0;
+    uint height = 0;
+    atlas.GetDimensions(width, height);
+    const float2 atlasSize = float2(float(max(width, 1u)), float(max(height, 1u)));
+
+    // The first cascade that reaches this fragment. A loop rather than a chain
+    // of selects so the count is a constant one place.
+    uint cascade = 3u;
+    [unroll]
+    for (uint i = 0u; i < 4u; ++i)
+    {
+        if (viewDepth <= CascadeFar[i])
+        {
+            cascade = i;
+            break;
+        }
+    }
+
+    const float lit = sampleCascade(atlas, pointSampler, cascade, position, normal, nol, atlasSize);
+
+    // Blend over a BAND rather than switching at a plane, which the roadmap
+    // names as the second tell of a first cascaded implementation. A hard
+    // handover is visible for the same reason a filter that changes width is:
+    // two adjacent patches of one surface shaded by two different maps.
+    const float near = cascade == 0u ? 0.0f : CascadeFar[cascade - 1u];
+    const float far = CascadeFar[cascade];
+    const float band = max((far - near) * ShadowParams.z, 1e-4f);
+    const float blend = saturate((viewDepth - (far - band)) / band);
+    if (blend <= 0.0f || cascade >= 3u)
+    {
+        return lit;
+    }
+
+    const float next = sampleCascade(atlas, pointSampler, cascade + 1u, position, normal, nol, atlasSize);
+    return lerp(lit, next, blend);
 }
 
 // Linear fog towards `fogColor`. `fogRange.z` is 1/(end - start) precomputed on

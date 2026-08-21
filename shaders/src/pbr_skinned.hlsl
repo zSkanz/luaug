@@ -53,6 +53,9 @@ Interpolants VertexMain(VertexInput input)
     const float4 shadingPosition = mul(Model, posed);
     output.ShadingPosition = shadingPosition.xyz;
     output.Position = mul(ViewProjection, shadingPosition);
+    // For `core::perspective` the clip w IS the view-space distance in front of
+    // the camera, which is the space the cascade splits are stated in.
+    output.ViewDepth = output.Position.w;
 
     // The skin's rotation-scale block first, then the object's cofactor matrix.
     // Not the skin's own cofactor: a joint matrix is rigid plus whatever scale

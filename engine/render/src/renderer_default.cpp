@@ -23,20 +23,6 @@ constexpr rhi::TextureFormat kHdrFormat = rhi::TextureFormat::Rgba16Float;
 constexpr rhi::TextureFormat kDepthFormat = rhi::TextureFormat::D32Float;
 constexpr rhi::TextureFormat kShadowFormat = rhi::TextureFormat::D32Float;
 
-// An orthographic projection with depth in [0, 1], matching `core::perspective`.
-// Written here rather than in `core` because it is a shadow-map fit rather than
-// a general camera projection, and a `core::orthographic` with no other caller
-// would be a type nobody has checked the conventions of.
-[[nodiscard]] Mat4 orthographic(f32 halfExtent, f32 nearZ, f32 farZ) noexcept
-{
-    Mat4 result;
-    result.m[0][0] = 1.0f / halfExtent;
-    result.m[1][1] = 1.0f / halfExtent;
-    result.m[2][2] = 1.0f / (nearZ - farZ);
-    result.m[3][2] = nearZ / (nearZ - farZ);
-    return result;
-}
-
 // The cofactor matrix of the model transform's rotation-scale block, so a
 // non-uniformly scaled mesh lights correctly. The same construction the glTF
 // importer uses for baking, and for the same reason: it is det(M) * M^-T, so
@@ -153,8 +139,19 @@ private:
     // caller sets the static one and this switches at most once per pass,
     // because `extract` sorts by pipeline -- so a world with no skinned draw
     // makes no extra call at all, which is what keeps M4's goldens byte-exact.
+    // A cascade's own bounds, so the shadow pass draws into cascade zero only
+    // what cascade zero covers. Without it every cascade draws every caster and
+    // four cascades cost four times the submission -- which is the exact cost
+    // this milestone is also spending instancing to remove.
+    struct CullSphere
+    {
+        Vec3 centre;
+        f32 radius = 0.0f;
+    };
+
     void drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world, const MeshCache& meshes, const Mat4& viewProjection,
-                      rhi::PipelineHandle staticPipeline, rhi::PipelineHandle skinnedPipeline, Selection selection);
+                      rhi::PipelineHandle staticPipeline, rhi::PipelineHandle skinnedPipeline, Selection selection,
+                      const CullSphere* cull = nullptr);
 
     // Bakes whatever the environment owes this frame and uploads it. Called
     // once per frame, inside the frame, because `uploadTexture` needs a command
@@ -216,38 +213,6 @@ private:
 };
 
 } // namespace
-
-Mat4 sunViewProjection(Vec3 sunDirection, core::DVec3 origin) noexcept
-{
-    const Vec3 direction = core::normalize(sunDirection);
-    // A sun exactly overhead makes the obvious up vector parallel to the view,
-    // which produces a NaN basis. `lookAt` already falls back to the identity
-    // there, and picking the alternate up here is cheaper than a scene that
-    // flickers when the clock passes noon.
-    const Vec3 up = std::fabs(direction.y) > 0.99f ? Vec3{0.0f, 0.0f, 1.0f} : Vec3{0.0f, 1.0f, 0.0f};
-    const Vec3 eye = direction * (kShadowDepth * 0.5f);
-    Mat4 view = core::lookAt(eye, Vec3{}, up);
-
-    // In f64, because `origin` is a world coordinate and an open world's are
-    // large (ADR 0014). What comes out is under half a texel and fits an f32
-    // with room to spare, which is the whole reason the rounding happens here
-    // rather than in a shader.
-    const core::f64 lightX = static_cast<core::f64>(view.m[0][0]) * origin.x +
-                             static_cast<core::f64>(view.m[1][0]) * origin.y +
-                             static_cast<core::f64>(view.m[2][0]) * origin.z;
-    const core::f64 lightY = static_cast<core::f64>(view.m[0][1]) * origin.x +
-                             static_cast<core::f64>(view.m[1][1]) * origin.y +
-                             static_cast<core::f64>(view.m[2][1]) * origin.z;
-
-    const auto texel = static_cast<core::f64>(kShadowTexel);
-    const core::f64 residualX = lightX - std::round(lightX / texel) * texel;
-    const core::f64 residualY = lightY - std::round(lightY / texel) * texel;
-
-    view.m[3][0] += static_cast<f32>(residualX);
-    view.m[3][1] += static_cast<f32>(residualY);
-
-    return orthographic(kShadowExtent, 0.1f, kShadowDepth) * view;
-}
 
 std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, const ShaderLibrary& shaders,
                                                          rhi::TextureFormat colorFormat)
@@ -444,7 +409,13 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
         .addressW = rhi::AddressMode::ClampToEdge,
         .debugName = "environment",
     });
+    // Point, not linear: `Gather` fetches the four texels itself and the shader
+    // does the bilinear comparison, which is what makes a hardware comparison
+    // sampler unnecessary (ADR 0043).
     shadowSampler_ = device.createSampler({
+        .minFilter = rhi::Filter::Nearest,
+        .magFilter = rhi::Filter::Nearest,
+        .mipmapMode = rhi::MipmapMode::Nearest,
         .addressU = rhi::AddressMode::ClampToEdge,
         .addressV = rhi::AddressMode::ClampToEdge,
         .addressW = rhi::AddressMode::ClampToEdge,
@@ -482,9 +453,9 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
     shadowMap_ = device.createTexture({
         .format = kShadowFormat,
         .usage = rhi::TextureUsage::DepthStencilTarget | rhi::TextureUsage::Sampled,
-        .width = kShadowResolution,
-        .height = kShadowResolution,
-        .debugName = "shadow-map",
+        .width = kShadowAtlasResolution,
+        .height = kShadowAtlasResolution,
+        .debugName = "shadow-atlas",
     });
     if (!shadowMap_.valid()) {
         destroy(device);
@@ -640,7 +611,7 @@ void DefaultRenderer::updateEnvironment(rhi::ICmdList& cmd, const SkyParams& par
 
 void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world, const MeshCache& meshes,
                                    const Mat4& viewProjection, rhi::PipelineHandle staticPipeline,
-                                   rhi::PipelineHandle skinnedPipeline, Selection selection)
+                                   rhi::PipelineHandle skinnedPipeline, Selection selection, const CullSphere* cull)
 {
     const bool shadowPass = selection == Selection::Shadow;
     bool onSkinnedPipeline = false;
@@ -674,6 +645,12 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
             continue;
         if (selection == Selection::Transparent && !draw.transparent)
             continue;
+        if (cull != nullptr) {
+            const Vec3 offset = draw.boundsCenter - cull->centre;
+            const f32 reach = cull->radius + draw.boundsRadius;
+            if (core::dot(offset, offset) > reach * reach)
+                continue;
+        }
 
         const MeshCache::Resolved* resolved = meshes.resolve(draw.mesh);
         if (resolved == nullptr || resolved->lods.empty())
@@ -780,24 +757,64 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     const SkyParams sky = skyParamsFor(world.environment.sunDirection, world.environment.fogColor);
     updateEnvironment(cmd, sky);
 
-    const Mat4 sunMatrix = sunViewProjection(world.environment.sunDirection, world.camera.origin);
+    // The cascade fit, from the camera basis. `inverse(view)` is the camera's own
+    // frame; the camera sits at the origin of this space, so only its axes are
+    // read out of it.
+    const Mat4 cameraFrame = core::inverse(world.camera.view);
+    ShadowFit fit;
+    fit.sunDirection = world.environment.sunDirection;
+    fit.right = Vec3{cameraFrame.m[0][0], cameraFrame.m[0][1], cameraFrame.m[0][2]};
+    fit.up = Vec3{cameraFrame.m[1][0], cameraFrame.m[1][1], cameraFrame.m[1][2]};
+    // The camera looks down -Z, so its forward is the negated third axis.
+    fit.forward = Vec3{-cameraFrame.m[2][0], -cameraFrame.m[2][1], -cameraFrame.m[2][2]};
+    fit.tanHalfFovX = world.camera.projection.m[0][0] != 0.0f ? 1.0f / world.camera.projection.m[0][0] : 0.5f;
+    fit.tanHalfFovY = world.camera.projection.m[1][1] != 0.0f ? 1.0f / world.camera.projection.m[1][1] : 0.3f;
+    fit.nearPlane = world.camera.nearPlane;
+    fit.origin = world.camera.origin;
+    const ShadowCascades cascades = fitShadowCascades(fit);
 
     // --- Shadow pass --------------------------------------------------------
     //
-    // Runs even with no draws, so the map is cleared rather than carrying last
-    // frame's depths into a frame that samples it.
+    // One pass, four viewports into one 2x2 atlas -- `shadow.h` says why an
+    // atlas rather than an array. Runs even with no draws, so the map is cleared
+    // rather than carrying last frame's depths into a frame that samples it.
+    //
+    // Each cascade also culls against its OWN sphere. Without that, four
+    // cascades cost four times the submission, which is the exact price the
+    // instanced path elsewhere in this milestone exists to remove.
     cmd.pushDebugGroup("shadow");
     cmd.beginRenderPass({
         .colorAttachments = {},
         .depthStencil = {.texture = shadowMap_, .loadOp = rhi::LoadOp::Clear, .storeOp = rhi::StoreOp::Store},
         .debugName = "shadow",
     });
-    cmd.setPipeline(shadowPipeline_);
-    cmd.setViewport({.width = static_cast<f32>(kShadowResolution), .height = static_cast<f32>(kShadowResolution)});
-    cmd.setScissor(
-        {.width = static_cast<core::i32>(kShadowResolution), .height = static_cast<core::i32>(kShadowResolution)});
-    if (world.camera.valid)
-        drawGeometry(cmd, world, meshes, sunMatrix, shadowPipeline_, shadowSkinnedPipeline_, Selection::Shadow);
+    if (world.camera.valid) {
+        f32 splits[kShadowCascadeCount + 1]{};
+        shadowSplits(world.camera.nearPlane, kShadowDistance, kShadowSplitLambda, splits);
+
+        for (u32 index = 0; index < kShadowCascadeCount; ++index) {
+            const auto tile = static_cast<f32>(kShadowTileResolution);
+            const f32 x = static_cast<f32>(index & 1u) * tile;
+            const f32 y = static_cast<f32>(index >> 1u) * tile;
+            cmd.setPipeline(shadowPipeline_);
+            cmd.setViewport({.x = x, .y = y, .width = tile, .height = tile});
+            cmd.setScissor({.x = static_cast<core::i32>(x),
+                            .y = static_cast<core::i32>(y),
+                            .width = static_cast<core::i32>(kShadowTileResolution),
+                            .height = static_cast<core::i32>(kShadowTileResolution)});
+
+            // The cascade's sphere, in the same camera-relative space the fit
+            // used and the draws are in. The radius is recovered from the texel
+            // size rather than returned separately: it is the same number the
+            // fit divided by the tile resolution.
+            const CullSphere cull{
+                fit.forward * ((splits[index] + splits[index + 1]) * 0.5f),
+                cascades.texelWorld[index] * 0.5f * tile,
+            };
+            drawGeometry(cmd, world, meshes, cascades.viewProjection[index], shadowPipeline_, shadowSkinnedPipeline_,
+                         Selection::Shadow, &cull);
+        }
+    }
     cmd.endRenderPass();
     cmd.popDebugGroup();
 
@@ -870,7 +887,16 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         frame.fogRange[2] = world.environment.fogEnd > world.environment.fogStart
                                 ? 1.0f / (world.environment.fogEnd - world.environment.fogStart)
                                 : 0.0f;
-        frame.sunViewProjection = sunMatrix;
+        for (u32 index = 0; index < kShadowCascadeCount; ++index) {
+            frame.cascadeViewProjection[index] = cascades.viewProjection[index];
+            frame.cascadeFar[index] = cascades.farDistance[index];
+            frame.cascadeTexelWorld[index] = cascades.texelWorld[index];
+            frame.cascadeDepthRange[index] = cascades.depthRange[index];
+        }
+        frame.shadowParams[0] = kShadowFilterWorldRadius;
+        frame.shadowParams[1] = kShadowNormalOffsetTexels;
+        frame.shadowParams[2] = kShadowCascadeBlend;
+        frame.shadowParams[3] = kShadowDepthBiasMetres;
 
         frame.environmentParams[0] = static_cast<f32>(kEnvironmentMipCount);
         frame.environmentParams[1] = 1.0f;

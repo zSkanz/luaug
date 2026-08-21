@@ -67,8 +67,8 @@ cbuffer GpuObjectUniforms : register(b0, space1)
 #endif
 
 #if defined(LUAUG_UNIFORMS_FRAME)
-// `render::GpuFrameUniforms`, 704 bytes: 112 of float4 rows, 64 of matrix, 144
-// of irradiance, then 8 * 48 of lights starting at offset 320.
+// `render::GpuFrameUniforms`, 960 bytes: 176 of float4 rows, 256 of cascade
+// matrices, 144 of irradiance, then 8 * 48 of lights starting at offset 576.
 cbuffer GpuFrameUniforms : register(b0, space3)
 {
     // xyz points from the world TOWARDS the sun, w is its brightness -- with
@@ -89,7 +89,15 @@ cbuffer GpuFrameUniforms : register(b0, space3)
     // x how many mip levels the prefiltered environment has, y how strongly it
     // contributes, z and w unused.
     float4 EnvironmentParams;
-    column_major float4x4 SunViewProjection;
+    // One lane per cascade: where it stops in view-space metres, one of its
+    // shadow texels in world metres, and its orthographic depth range in metres.
+    float4 CascadeFar;
+    float4 CascadeTexelWorld;
+    float4 CascadeDepthRange;
+    // x filter radius in world metres, y normal offset in shadow texels, z the
+    // fraction of a cascade that blends into the next, w depth bias in metres.
+    float4 ShadowParams;
+    column_major float4x4 CascadeViewProjection[4];
     // Irradiance as nine SH coefficients, cosine-convolved and divided by pi on
     // the CPU, so `evaluateIrradiance` multiplies straight by the albedo.
     float4 IrradianceSh[9];
