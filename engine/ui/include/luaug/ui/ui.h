@@ -99,6 +99,34 @@ struct DrawList
     }
 };
 
+// What the glyph store has been asked for and what it has done about it.
+//
+// A COUNTER surface, like `LayoutStats` beside it, and for the same reason: the
+// property worth asserting is "a second frame of the same label fills nothing
+// new", and that is a number rather than a duration.
+//
+// `missingGlyphs` is the one to watch in a real game. It counts codepoints the
+// face could not draw, so a label in Portuguese that comes out full of boxes is
+// a number somebody can see before a player reports it.
+struct GlyphCacheStats
+{
+    // Live entries, each one a (face, size, codepoint) triple.
+    u64 entries = 0;
+    // Entries created. Rises once per new triple and never for a repeat.
+    u64 fills = 0;
+    u64 hits = 0;
+    // How many times the store filled up and was emptied. Non-zero means
+    // something is asking for a new size every frame; see `text.cpp`.
+    u64 clears = 0;
+    u64 missingGlyphs = 0;
+};
+
+[[nodiscard]] const GlyphCacheStats& glyphCacheStats() noexcept;
+
+// Empties the store and zeroes the counters. For the tests, and for a future
+// caller that swaps a face at runtime -- which is the case the key exists for.
+void resetGlyphCache() noexcept;
+
 // Measures a run at a size, optionally wrapped to a width.
 //
 // `maxWidth` of 0 means no wrapping. Wrapping breaks at spaces, and mid-word
