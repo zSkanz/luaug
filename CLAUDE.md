@@ -9,13 +9,15 @@ digest for any agent touching this repo.**
 LuauG — an open-source (Apache-2.0) standalone game engine: C++ core embedding
 Luau 0.734 directly, Roblox-familiar Instance/Service API over a data-oriented
 ECS, deterministic fixed-tick simulation, SDL3 + custom RHI (SDL3 GPU default),
-Jolt physics, code-first DX with hot reload. **Pre-alpha, M0 through M5 signed
+Jolt physics, code-first DX with hot reload. **Pre-alpha, M0 through M6 signed
 off**: the host boots a sandboxed VM, runs a deterministic tick over an Instance
-tree, hot-reloads in under two milliseconds, renders glTF meshes with forward
-PBR under a shadowed sun and a day/night cycle, and simulates a world with mass
-— rigid bodies, contacts, collision groups, queries, welds, and a character that
-walks. **M6 is next** and is the roadmap's Input Actions, UI, Tween, Audio and
-minimal animation. The engine is built milestone by milestone per
+tree, hot-reloads in under two milliseconds, renders glTF meshes and primitive
+parts with forward PBR under a shadowed sun, simulates a world with mass — rigid
+bodies, contacts, collision groups, queries, welds and a character that walks and
+rides platforms — and plays: input actions, UI, tweens, audio and skeletal
+animation, with `examples/04-obby` playable from menu to finish flag. **M7 is
+next** and is the roadmap's asset pipeline, async IO, streaming and floating
+origin. The engine is built milestone by milestone per
 `docs/roadmap.md`; `PROGRESS.md` says where things stand, and it is the file to
 trust when this paragraph and it disagree.
 

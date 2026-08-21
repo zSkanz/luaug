@@ -4,25 +4,28 @@
 
 LuauG gives you the developer experience you already know — `Instance` trees, `game:GetService`, `task.spawn`, signals with `:Connect` — in an independent, professional engine: a modern C++ core embedding the Luau VM directly, a data-oriented ECS behind a familiar Instance facade, a swappable renderer and physics stack, deterministic fixed-tick simulation, and a code-first workflow (VS Code + CLI + sub-second hot reload). It targets complete 2D and 3D games, from small scenes to huge streamed open worlds, on desktop first, then mobile, with a console-ready architecture.
 
-> **STATUS: pre-alpha, drawing, and simulating.** Seven of eleven milestones are
-> complete and human-signed-off. The engine boots a sandboxed Luau VM, opens a
-> window, runs a deterministic fixed-tick simulation over an Instance tree on an
-> ECS, hot-reloads a saved script into a new world in under two milliseconds,
-> renders glTF meshes with forward PBR, a shadow-casting sun, point and spot
-> lights, fog, and transparency, and simulates a thousand active rigid bodies in
-> two milliseconds a tick — on Windows, Linux and macOS, with an Android
-> triangle proving the graphics seam on a real device.
+> **STATUS: pre-alpha, and playable.** Eight of eleven milestones are complete
+> and human-signed-off. The engine boots a sandboxed Luau VM, opens a window,
+> runs a deterministic fixed-tick simulation over an Instance tree on an ECS,
+> hot-reloads a saved script into a new world in under two milliseconds, renders
+> glTF meshes and primitive parts with forward PBR under a shadow-casting sun,
+> simulates a thousand active rigid bodies in two milliseconds a tick, and now
+> has the layer that makes those a game: rebindable input actions, a UI tree,
+> tweens, positional audio and skeletal animation — on Windows, Linux and macOS,
+> with an Android triangle proving the graphics seam on a real device.
 >
-> **M5 is signed off**, and it is the milestone that gave the world mass: an
-> unanchored part is a Jolt rigid body, a `CharacterBody` walks and climbs and is
-> blocked by another one, and the determinism gate replays a recorded keyboard
-> stream rather than a bot.
+> **M6 is signed off**, and its deliverable is the point: `examples/04-obby` is a
+> course you play from a tweened menu to a finish flag, with a HUD, checkpoints,
+> moving platforms, sounds and an animated character — and a gate that replays a
+> recorded input stream headless to that flag, because five systems that each
+> pass their own tests still have to work with one another.
 >
 > The review gate is not ceremony. M4 was written up complete and tagged on its
 > own green gate, and a human using the engine then noticed the shadow never
-> moved: the renderer had never once read the `Lighting` service. M5 was signed
-> only after a reported defect turned out not to reproduce and the investigation
-> found a different, real one underneath it.
+> moved: the renderer had never once read the `Lighting` service. M6 was signed
+> after a person played the obby for an evening and found five more — including
+> a platform fix that was correct and unreachable, which only surfaced because
+> they re-tested a defect already marked fixed.
 >
 > It is written autonomously, milestone by milestone, by an AI agent (Claude
 > Opus, multi-agent orchestration) following [`MASTER_PROMPT.md`](MASTER_PROMPT.md),
@@ -39,8 +42,8 @@ LuauG gives you the developer experience you already know — `Instance` trees, 
 | ✅ | **M4** — meshes, materials, camera, lighting; RHI interface freeze (ADR 0037) | signed off, `milestone/m4` |
 | ✅ | **M4.5** — correcting the environment the renderer never read, and what was found beside it | signed off, `milestone/m4.5` |
 | ✅ | **M5** — Jolt physics, queries, welds, and a character you can steer | signed off, `milestone/m5` |
-| 🔨 | **M6** — input actions, UI, tweens, audio, minimal animation | next |
-| ⬜ | **M7** — asset pipeline, async IO, streaming, floating origin | |
+| ✅ | **M6** — input actions, UI, tweens, audio, minimal animation; `examples/04-obby` | signed off, `milestone/m6` |
+| 🔨 | **M7** — asset pipeline, async IO, streaming, floating origin | next |
 | ⬜ | **M7.5** — cascaded shadows, clustered lights, image-based lighting, post | |
 | ⬜ | **M8** — the flagship open-world demo, hardening, docs, v1.0 | |
 
@@ -48,18 +51,23 @@ LuauG gives you the developer experience you already know — `Instance` trees, 
 world rebuild without the window closing. A glTF scene lit by forward PBR with a
 single-cascade shadow map and a day/night cycle driven from the simulation clock.
 A physical world: gravity, contacts and `Touched` as deferred signals, impulses,
-friction, collision groups, raycasts and shape queries, transform welds, and a
-capsule character that climbs a kerb, is stopped by a wall, and is stopped by
-another character. An in-game explorer and property inspector that writes through
-the same setters a script goes through. 969 conformance specs written against
+friction, collision groups, raycasts and shape queries, welds, and a capsule
+character that climbs a kerb, rides a moving platform, and is stopped by a wall
+or by another character. An Input Action System with rebindable bindings across
+keyboard and gamepad, plus the raw event surface a Roblox developer reaches for.
+UI instances over a `UDim2` layout with rounded corners, hit-testing and a glyph
+cache. Property tweens on the simulation clock, positional audio whose timeline
+the simulation owns, and glTF skeletal animation. An in-game explorer, property
+inspector, memory table and log pane that write through the same setters a script
+goes through. **1,081** conformance specs written against
 [`docs/api-design.md`](docs/api-design.md) — not against the implementation —
 pass on Windows and Linux, alongside a determinism harness that replays a
-recorded **input** stream and compares world hashes, and a capture-stream gate
-that compares draw commands rather than pixels.
+recorded input stream and compares world hashes, and a capture-stream gate that
+compares draw commands rather than pixels.
 
-**What does not, yet:** UI, audio, animation, streaming, image-based lighting,
-cascaded shadows, and instanced draws — the renderer still submits one draw call
-per visible object, which is the measured ceiling for a crowd
+**What does not, yet:** streaming, an offline asset pipeline, image-based
+lighting, cascaded shadows, and instanced draws — the renderer still submits one
+draw call per visible object, which is the measured ceiling for a crowd
 ([`docs/perf-baselines.md`](docs/perf-baselines.md)). Each arrives with the
 milestone that owns it, and [`docs/roadmap.md`](docs/roadmap.md) says which.
 
