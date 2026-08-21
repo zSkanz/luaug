@@ -552,6 +552,107 @@ time.
     weight, no kerning, and unmistakably a placeholder -- which is better than a
     label that says nothing.
 
+11. **The deliverable found what the tests did not, five times.** Every one of
+    D027, D029, D030, D031 and half of D028 was found by a person PLAYING
+    `examples/04-obby`, and every one had passing unit tests around it: the
+    character controller had eleven cases and did not ride a platform, the layout
+    had nineteen and did not centre a column, `UICorner` had a full set of
+    generated accessors and drew nothing. The general shape, and it is the one to
+    carry into M7: **a test asserts what somebody thought to assert, and a
+    deliverable asserts what a person notices.** The roadmap called the obby "the
+    living conformance test for all five systems" before any of this happened,
+    and that turned out to be the literal truth rather than a figure of speech.
+
+12. **`Inert` depended on somebody remembering, which is the one thing it exists
+    not to depend on.** It was built at M4.5 so that "declared, stored, read
+    back, and nothing acts on it" would be visible in the inspector and the
+    api-dump. Two milestones later `UICorner.CornerRadius` was born into exactly
+    that state and nobody marked it — and it was found by a human looking at a
+    square button, not by any check.
+
+    `tools/repo/inertcheck.luau` is the mechanical half: every component field
+    has a reader or its property carries the marker. **Run once against the whole
+    tree it found five more**, and the worst of them was
+    `MeshPart.CollisionFidelity`, whose own doc claimed the physics mirror read
+    it while `physics_sync.cpp` admitted in a comment that it did not — two
+    documents disagreeing about the same property, which is precisely the state
+    a marker is supposed to make impossible. It also found one field,
+    `TextInputComponent::caret`, that named a feature nobody had written.
+
+    The lesson generalises past `Inert`: **a marker that a person applies is a
+    marker that gets forgotten, and the fix is a lint rather than a reminder.**
+
+13. **A gate can be confidently wrong about the thing it gates.** M6's audio
+    soak, run on a machine with speakers for the first time, reported 1,348
+    underruns in sixty seconds — and every one of them was the mixer working
+    correctly. The counter incremented on a callback that arrived with no NEW
+    voice frame, which is most callbacks, because the device asks at about 82 Hz
+    and the simulation publishes at 60.
+
+    Nothing about it was detectable headless, where no device opens and the
+    number is trivially zero. **The half of a gate that only runs on real
+    hardware is the half that has never been checked**, and this milestone has
+    two more of that shape: the screenshot gate is excluded from CI because a
+    pixel golden is tied to a GPU, and macOS builds only at a tag.
+
+14. **A fix can be correct and unreachable, and the second defect looks exactly
+    like the first.** D027 made kinematic bodies move rather than teleport and
+    made a character inherit its ground's velocity — both right, both tested,
+    both break-verified. The character still did not ride the platform, because
+    an `Anchored` part was classified `Static` and never became kinematic at all
+    (D031). The seam tests passed because they created a kinematic body
+    directly; only the end-to-end path went through the classifier.
+
+    **A seam test that constructs the state under test cannot see a caller that
+    never produces it.** The conformance case that does go through the whole
+    path — a tween on an `Anchored` part with a capsule on top — is the one that
+    would have caught it, and it is the one that exists now.
+
+15. **Measuring found two costs that reasoning had not.** D031's motion switch
+    was expected to cost a body rebuild per transition; the two things that
+    actually cost were a writeback that went from 0.03 ms to 9.9 ms (Jolt reports
+    every kinematic body as active, always, so the mirror was copying six
+    thousand solver transforms a tick back into components the script owns) and
+    an apply that went from 1.60 to 6.96 ms (the pending-move list deduplicated
+    by scanning itself, which is quadratic in the writes per tick).
+
+    Neither was visible in the design. Both were obvious in the number, and both
+    were fixed before the baseline row was written — which is the only reason the
+    row is worth anything.
+
+16. **A CI budget stopped being able to hold a scene whose meaning changed.**
+    `churn10k` had 3x headroom against 16 ms and lost it, because D031 legitimately
+    turned two thirds of its anchored parts into kinematic bodies. The runner is
+    2.7x slower than the reference machine, so 7.32 ms locally is 19.6 there. The
+    budget doubled with the reason written where it is read.
+
+    Worth keeping as a rule: **when a fix changes what a benchmark MEASURES, the
+    budget is the wrong place to argue about it** — the baseline file is, and the
+    budget's only job is to catch a catastrophe.
+
+17. **A struct that grows by one field can produce a segfault in a file that
+    does not use it.** `DrawQuad` gained a `cornerRadius` and a test about UTF-8
+    decoding started crashing, because Ninja left one object file compiled
+    against the old layout. `--clean-first` on the module was the whole answer.
+
+    The generalisation is the same one M5 recorded from the other end — the build
+    agreeing is not evidence that the build read your file — and it now has a
+    second symptom worth recognising: **a mysterious crash immediately after a
+    struct changed size is a stale object until proven otherwise.**
+
+18. **The scope changed four times during the milestone, and every change came
+    from the human.** `@luaug/input` was specified, then written, then deleted
+    unwritten when ADR 0041 replaced it with the raw event surface; solid `Part`
+    rendering and the non-device seam were appended after the brief had imported
+    its scope; the font and Clay questions were answered mid-flight and one of
+    the answers bound M6 rather than M7.
+
+    Nothing about that was disorderly, and the reason is structural: every change
+    arrived as a roadmap edit and an ADR before it arrived as work. **The brief
+    marking an item "added after this brief imported its scope" is what kept the
+    checklist honest**, and it is worth doing again rather than silently
+    rewriting the list.
+
 ## Gate Record
 
 Filled 2026-08-21, before human review. Every command below was run on the
