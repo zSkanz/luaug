@@ -13,11 +13,25 @@
 --- more expensive than one without, and having every part listen would measure
 --- a scene nobody builds. One in ten is a plausible game.
 ---
---- The 16 ms budget is a whole 60 Hz frame, deliberately. This scene is not
---- meant to fit inside a frame alongside everything else -- it is a stress case
---- and the threshold is a catastrophe detector. The number that matters is the
---- one recorded in docs/perf-baselines.md; this only fails when something has
---- gone badly wrong.
+--- The budget is a catastrophe detector rather than an instrument. This scene is
+--- not meant to fit inside a frame alongside everything else; the number that
+--- matters is the one recorded in docs/perf-baselines.md, and this only fails
+--- when something has gone badly wrong.
+---
+--- **It was 16 ms until M6 and is 32 now, and the reason is a semantic change
+--- rather than a slower engine** (D031). An `Anchored` part whose `CFrame` is
+--- written is a KINEMATIC body from M6 on -- which it always should have been,
+--- because a static body that teleports is how a moving platform failed to carry
+--- anything -- so two thirds of this scene's ten thousand parts are now in the
+--- broadphase layer Jolt re-fits every tick. The local mean went from 4.96 ms to
+--- 7.32, and a CI runner is regularly two to three times slower than the
+--- reference machine: 19.6 ms on one of them, against a 16 ms threshold, is the
+--- runner rather than the engine.
+---
+--- Doubling it keeps the same shape of check with the same amount of headroom
+--- the number had before. What it costs is sensitivity, and the honest place to
+--- notice a 50% regression is `perf-baselines.md`, where the real numbers are --
+--- which is what that file is for.
 
 local RunService = game:GetService("RunService")
 

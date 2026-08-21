@@ -3,5 +3,5 @@
   "script": "init.luau",
   "seed": 10000,
   "ticks": 300,
-  "budgetMs": 16.0
+  "budgetMs": 32.0
 }

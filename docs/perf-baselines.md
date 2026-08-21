@@ -176,6 +176,7 @@ to a file and taxes every configuration to enable.
 | M6 | `tests/bench/platforms200` | `win-msvc-dev` | physics: apply / step / writeback | 0.14 / 0.29 / 0.08 ms | — |
 | M6 | `tests/bench/churn10k` **after D031** (the same scene: two thirds of its anchored parts are written every tick, so two thirds of them are now KINEMATIC) | `win-msvc-dev` | mean sim tick | **7.32 ms** | 16 ms |
 | M6 | `tests/bench/churn10k` | `win-msvc-dev` | physics: apply / step / writeback | 0.43 / 3.89 / 0.78 ms | — |
+| M6 | `tests/bench/churn10k` | GitHub `windows-latest` | mean sim tick | 19.6 ms | the runner is 2.7x this machine, which is why the budget is a detector and this file is the instrument |
 | M6 | `examples/04-obby` (the deliverable: the course, two tweened platforms, a skinned rig, a `ScreenGui` with a list layout, five sounds) | `win-msvc-dev` | median frame, 1080p | **0.53 ms** | 16.7 ms — a 60 fps frame |
 | M6 | `examples/04-obby` | `win-msvc-dev` | worst frame | 1.84 ms | — |
 | M6 | `examples/04-obby` | `win-msvc-dev` | draws / triangles | 15 / 172 — solid parts now, where M5's playground was 0 / 0 |
