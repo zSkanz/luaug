@@ -782,6 +782,38 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   Roboto (Apache-2.0) is the alternative if matching the repository's own licence
   family is worth more than the typeface. `TextLabel.Font` stops being `Inert`
   when it lands, and the marker goes with it.
+- **`CharacterBody:Jump()` stops refusing in mid-air** (human decision,
+  2026-08-21). It currently applies `JumpSpeed` only when `Grounded`, which makes
+  a double jump — and a wall jump, and a triple jump — impossible to write, since
+  `LinearVelocity` is read-only and Luau has no other way to push a character
+  upward. The human's argument is the right one and it is short: **`Grounded` is
+  already exposed**, so `if character.Grounded then character:Jump() end`
+  reproduces today's behaviour in one line, in the game, where a jump policy
+  belongs.
+
+  - **The recorded reasoning never weighed this.** The property doc argues
+    *ignored* against *queued* — "a jump that fires the moment you land is a jump
+    you did not ask for" — and that argument is about queuing, which nothing here
+    proposes. Letting the caller decide was not among the alternatives it ruled
+    out.
+  - **What stays engine-side is the tick**, and it must: the jump is applied at
+    the next simulation tick and never immediately, or a replay diverges (R10).
+  - **What it unlocks costs nothing more**: double and triple jump, wall jump,
+    coyote time and jump buffering all become counters in Luau.
+  - **Say in the doc that calling it every frame is flying.** That is the game's
+    bug and it is the same in every engine that offers a mechanism rather than a
+    policy — but somebody arriving from a platform where the engine held that
+    guard will expect it, and the sentence is cheaper than the surprise.
+  - **Migration is three call sites**: `examples/03-physics-playground`, the
+    conformance character spec and the determinism character scene each gain
+    `if character.Grounded then`. `examples/04-obby` already writes it, because
+    it needed to know whether the jump actually happened in order to play a
+    sound.
+  - **Not taken, and named so it is not re-derived**: making velocity writable
+    (`SetVelocity` or similar) would unlock dash, knockback and grapple as well.
+    It is the more powerful change and the larger surface, and writing velocity
+    on a `CharacterVirtual` has rules of its own since it is not a solver body.
+    Left until a caller asks for it.
 - **Deliverable:** `examples/05-streaming` — a procedurally generated large
   world (no giant binary assets in the repo), fly-cam, ImGui chunk-state
   overlay, memory graph.
