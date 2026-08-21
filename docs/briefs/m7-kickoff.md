@@ -410,7 +410,28 @@ Fans out, once the interface exists and compiles:
 
 ## Findings
 
-(append during the milestone)
+Things the documents assumed that reality corrected, in the order they cost
+time.
+
+1. **The fuzz gate found a hole in the format the first time it ran, and the
+   answer was to change the format.** Four thousand random bit flips over a
+   valid pack; 3,999 were refused and one was accepted. It was a bit in a TOC
+   entry's `kind` field — a mesh becomes a prefab, every structural check still
+   passes, and nothing else in the file says what that entry should have been.
+
+   The general shape is worth more than the fix: **a content-addressed store
+   protects its payload by construction and its metadata by nothing.** Blob
+   bytes are covered by their own names and header fields by having to agree
+   with each other; the table of contents had neither. Sixteen bytes of TOC hash
+   in the header closes it, and it is checked on EVERY open rather than only a
+   verifying one, because the TOC is where offsets come from.
+
+   The second half is a test-design lesson. Adding the hash made the
+   hand-written "entry points outside the pack" case stop testing what it was
+   written for: it now failed at the hash check and never reached the bounds
+   check, which is the one thing standing between a malicious pack and a read
+   past the end of a buffer. That case now REPAIRS the TOC hash after corrupting
+   the entry, so the bounds check is still covered by something.
 
 ## Gate Record
 

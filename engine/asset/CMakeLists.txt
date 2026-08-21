@@ -14,9 +14,11 @@ luaug_add_module(asset
     SOURCES
         src/image.cpp
         src/gltf.cpp
+        src/pack.cpp
         src/primitives.cpp
     DEPS
         core
+        platform
 )
 
 # stb_image and stb_image_write. Header-only and SYSTEM, so upstream's warnings
@@ -36,6 +38,7 @@ luaug_add_module_tests(asset
     SOURCES
         tests/image_tests.cpp
         tests/gltf_tests.cpp
+        tests/pack_tests.cpp
         tests/primitive_tests.cpp
 )
 
