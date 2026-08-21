@@ -349,6 +349,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // because it drew more.
     core::u32 frameDrawCalls = 0;
     core::u64 frameTriangles = 0;
+    core::u32 frameLodDraws = 0;
     std::vector<f64> frameTimesMs;
     // Sixty warm-up frames rather than `--frame-stats`'s ten. A soak is minutes
     // long, so a second of startup costs it nothing -- and the streamed world
@@ -638,6 +639,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             .luaMemoryKb = static_cast<f64>(lua_totalbytes(host->runtime().state(), 0)) / 1024.0,
             .audioUnderruns = static_cast<f64>(host->audio().stats().underruns),
             .audioVoices = static_cast<f64>(host->audio().stats().activeVoices),
+            .meshLodDraws = static_cast<f64>(frameLodDraws),
         });
 
         if (options.frameStats || !options.soakReportPath.empty()) {
@@ -965,6 +967,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
             frameDrawCalls = 0;
             frameTriangles = 0;
+            frameLodDraws = 0;
+            // The SAME level the renderer will choose, from the same function.
+            // Counting level zero here while the backend drew level two would
+            // be a triangle count that describes a frame nobody rendered, and a
+            // stat that lies is worse than one that is missing.
+            const f32 lodPixelsPerUnit = snapshot.camera.valid && uiViewport.y > 0.0f
+                                             ? 0.5f * uiViewport.y * snapshot.camera.projection.m[1][1]
+                                             : 0.0f;
             for (const render::DrawItem& draw : snapshot.draws) {
                 // Counted from the snapshot rather than from the backend: it is
                 // the same number, it costs nothing, and it is available on a
@@ -972,10 +982,17 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 if (!draw.inCameraFrustum)
                     continue;
                 const render::MeshCache::Resolved* resolved = meshCache.resolve(draw.mesh);
-                if (resolved == nullptr || draw.section >= resolved->sections.size())
+                if (resolved == nullptr || resolved->lods.empty())
+                    continue;
+                const core::u32 level = render::selectMeshLod(*resolved, draw.transform, lodPixelsPerUnit);
+                const render::MeshLodRange& range = resolved->lods[level];
+                if (draw.section >= range.sectionCount ||
+                    range.firstSection + draw.section >= resolved->sections.size())
                     continue;
                 ++frameDrawCalls;
-                frameTriangles += resolved->sections[draw.section].indexCount / 3u;
+                if (level > 0)
+                    ++frameLodDraws;
+                frameTriangles += resolved->sections[range.firstSection + draw.section].indexCount / 3u;
             }
 
             submitWorld(snapshot, debugDraw);

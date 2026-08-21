@@ -3,14 +3,20 @@
 #include "luaug/rhi/backends.h"
 
 #include <doctest/doctest.h>
+#include <initializer_list>
+#include <vector>
 
 using luaug::asset::Mesh;
 using luaug::asset::Submesh;
 using luaug::asset::Vertex;
+using luaug::core::f32;
 using luaug::core::u32;
 using luaug::render::MeshCache;
 using luaug::render::MeshHandle;
+using luaug::render::MeshLodRange;
+using luaug::render::MeshSection;
 using luaug::render::MeshUsage;
+using luaug::render::selectMeshLod;
 
 namespace {
 
@@ -235,4 +241,174 @@ TEST_CASE_FIXTURE(DeviceFixture, "MeshCache: an empty mesh is a handle that draw
     CHECK(resolved->sections.empty());
 
     cache.destroy(*device);
+}
+
+// ---------------------------------------------------------------------------
+// Runtime LOD selection (roadmap M7: "basic LOD switching").
+//
+// Tested against the FUNCTION rather than through a frame, because what is worth
+// pinning is the arithmetic: a screen-space error is four multiplications and a
+// divide, and every one of them is a place to get a unit wrong. A capture golden
+// would prove the wiring and say nothing about whether the number is right.
+
+namespace {
+
+// A resolved mesh with `count` levels whose errors double each step. Errors in
+// the mesh's own units, which is what `asset::MeshLod::error` stores.
+struct LodFixture
+{
+    std::vector<MeshLodRange> ranges;
+    std::vector<MeshSection> sections;
+    MeshCache::Resolved resolved;
+
+    explicit LodFixture(std::initializer_list<f32> errors)
+    {
+        for (const f32 error : errors) {
+            ranges.push_back(MeshLodRange{
+                .firstSection = static_cast<u32>(sections.size()),
+                .sectionCount = 1,
+                .error = error,
+            });
+            sections.push_back(MeshSection{.firstIndex = 0, .indexCount = 3, .material = 0, .bounds = {}});
+        }
+        resolved.lods = ranges;
+        resolved.sections = sections;
+    }
+};
+
+// A camera-relative transform: uniform scale, translated `distance` down -Z.
+[[nodiscard]] luaug::core::Mat4 instanceAt(f32 distance, f32 scale = 1.0f)
+{
+    luaug::core::Mat4 m;
+    m.m[0][0] = scale;
+    m.m[1][1] = scale;
+    m.m[2][2] = scale;
+    m.m[2][3] = -distance;
+    return m;
+}
+
+// 720 pixels tall at a 60-degree vertical field of view: 0.5 * 720 / tan(30deg).
+constexpr f32 PixelsPerUnit = 623.5f;
+
+} // namespace
+
+TEST_CASE("a mesh with one level always draws it")
+{
+    const LodFixture fixture{0.0f};
+    CHECK(selectMeshLod(fixture.resolved, instanceAt(1.0f), PixelsPerUnit) == 0);
+    CHECK(selectMeshLod(fixture.resolved, instanceAt(10000.0f), PixelsPerUnit) == 0);
+}
+
+TEST_CASE("distance is what moves the level, and it moves it monotonically")
+{
+    // THE DIFFERENTIAL. A selector that always answered zero would pass every
+    // other case in this file; what says it is doing anything is that the same
+    // mesh at two distances answers differently, and never goes backwards as it
+    // recedes.
+    const LodFixture fixture{0.0f, 0.01f, 0.04f, 0.16f};
+
+    const u32 near = selectMeshLod(fixture.resolved, instanceAt(1.0f), PixelsPerUnit);
+    const u32 far = selectMeshLod(fixture.resolved, instanceAt(5000.0f), PixelsPerUnit);
+    CHECK(near == 0);
+    CHECK(far == 3);
+    CHECK(near < far);
+
+    u32 previous = 0;
+    for (f32 distance = 1.0f; distance < 5000.0f; distance *= 1.5f) {
+        const u32 level = selectMeshLod(fixture.resolved, instanceAt(distance), PixelsPerUnit);
+        CHECK(level >= previous);
+        previous = level;
+    }
+}
+
+TEST_CASE("the level is the coarsest that stays inside the pixel budget")
+{
+    // Level 1's error is 0.01 units. At `PixelsPerUnit` it subtends one pixel at
+    // 6.235 m, so just inside that distance level 0 is required and just outside
+    // level 1 is allowed. The arithmetic is the assertion.
+    const LodFixture fixture{0.0f, 0.01f};
+    CHECK(selectMeshLod(fixture.resolved, instanceAt(6.0f), PixelsPerUnit) == 0);
+    CHECK(selectMeshLod(fixture.resolved, instanceAt(6.5f), PixelsPerUnit) == 1);
+}
+
+TEST_CASE("scale counts, because an error is a length")
+{
+    // The same mesh at the same distance, ten times larger, is ten times more
+    // wrong on screen. A selector that ignored scale would draw a scaled-up
+    // boulder with a boulder's LOD.
+    const LodFixture fixture{0.0f, 0.01f};
+    CHECK(selectMeshLod(fixture.resolved, instanceAt(20.0f, 1.0f), PixelsPerUnit) == 1);
+    CHECK(selectMeshLod(fixture.resolved, instanceAt(20.0f, 10.0f), PixelsPerUnit) == 0);
+}
+
+TEST_CASE("a tighter pixel budget picks a finer level")
+{
+    // The threshold is a parameter so this is assertable at all, and the
+    // relationship is the point: asking for less error can never yield a coarser
+    // level.
+    const LodFixture fixture{0.0f, 0.01f, 0.04f};
+    const u32 loose = selectMeshLod(fixture.resolved, instanceAt(50.0f), PixelsPerUnit, 4.0f);
+    const u32 tight = selectMeshLod(fixture.resolved, instanceAt(50.0f), PixelsPerUnit, 0.25f);
+    CHECK(tight <= loose);
+    CHECK(tight < loose);
+}
+
+TEST_CASE("a degenerate camera or a zero distance draws the best level")
+{
+    // Both are real: a headless run before the first frame has no projection,
+    // and an instance at the camera's exact position divides by zero.
+    const LodFixture fixture{0.0f, 0.01f, 0.04f};
+    CHECK(selectMeshLod(fixture.resolved, instanceAt(1000.0f), 0.0f) == 0);
+    CHECK(selectMeshLod(fixture.resolved, instanceAt(0.0f), PixelsPerUnit) == 0);
+    CHECK(selectMeshLod(fixture.resolved, instanceAt(1000.0f), PixelsPerUnit, 0.0f) == 0);
+}
+
+TEST_CASE("a mesh uploaded with a LOD chain draws fewer indices as it recedes")
+{
+    // The plumbing, end to end minus the GPU: the loader flattens a chain into
+    // ONE index buffer with one section list and a range per level, and this
+    // asserts that the range a distance selects really does name fewer indices.
+    //
+    // Worth its own case because every part of it can be right on its own and
+    // still be wrong together: a correct selector indexing into level zero's
+    // sections would pass every test above this one and draw full detail
+    // forever.
+    DeviceFixture fixture;
+    MeshCache cache;
+    REQUIRE_FALSE(cache.create(*fixture.device).has_value());
+
+    // Two levels flattened the way `mesh_loader` flattens them: level 1's
+    // submesh starts where level 0's indices end.
+    Mesh mesh;
+    mesh.vertices.resize(6);
+    mesh.indices = {0, 1, 2, 0, 2, 3, 0, 1, 2};
+    mesh.submeshes.push_back(Submesh{.firstIndex = 0, .indexCount = 6, .material = 0, .bounds = {}});
+    mesh.submeshes.push_back(Submesh{.firstIndex = 6, .indexCount = 3, .material = 0, .bounds = {}});
+
+    const MeshLodRange ranges[] = {
+        {.firstSection = 0, .sectionCount = 1, .error = 0.0f},
+        {.firstSection = 1, .sectionCount = 1, .error = 0.05f},
+    };
+
+    auto* cmd = fixture.device->beginFrame();
+    REQUIRE(cmd != nullptr);
+    const MeshHandle handle = cache.create(*fixture.device, *cmd, mesh, MeshUsage::Static, nullptr, ranges);
+    REQUIRE(handle.valid());
+
+    const MeshCache::Resolved* resolved = cache.resolve(handle);
+    REQUIRE(resolved != nullptr);
+    REQUIRE(resolved->lods.size() == 2);
+
+    const auto indicesAt = [&](f32 distance) {
+        const u32 level = selectMeshLod(*resolved, instanceAt(distance), PixelsPerUnit);
+        const MeshLodRange& range = resolved->lods[level];
+        return resolved->sections[range.firstSection].indexCount;
+    };
+
+    // Near enough that a 0.05-unit error is more than a pixel; far enough that
+    // it is not.
+    CHECK(indicesAt(1.0f) == 6);
+    CHECK(indicesAt(4000.0f) == 3);
+
+    cache.destroy(*fixture.device);
 }

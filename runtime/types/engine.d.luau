@@ -1301,10 +1301,10 @@ declare extern type DebugService extends Instance with
     --- frame. A silent no-op in a headless run, like every gizmo.
     function DrawSphere(self, position: vector, radius: number, color: Color3?): ()
     --- Reads a named instrumentation counter -- `FPS`, `FrameTimeMs`, `PhysicsBodies`, `InstanceCount`,
-    --- `DrawCalls`, `LuaMemoryKB` and the rest, plus whatever `SetCustomStat` has published. An
-    --- unregistered name raises `scene.err.unknown_stat` instead of returning zero: a misspelt stat is
-    --- a bug in the caller, and a debug surface that answers zero hides that bug in the one place
-    --- people are already confused.
+    --- `DrawCalls`, `MeshLodDraws`, `LuaMemoryKB` and the rest, plus whatever `SetCustomStat` has
+    --- published. An unregistered name raises `scene.err.unknown_stat` instead of returning zero: a
+    --- misspelt stat is a bug in the caller, and a debug surface that answers zero hides that bug in
+    --- the one place people are already confused.
     function GetStat(self, name: string): number
     --- Publishes a game-defined number under this name, readable afterwards through `GetStat` and shown
     --- on the stats panel. A value that is not a number raises like any other typed-argument mismatch.

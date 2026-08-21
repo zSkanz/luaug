@@ -323,6 +323,13 @@ int debugServiceGetStat(lua_State* L)
         lua_pushnumber(L, frame.audioVoices);
         return 1;
     }
+    if (name == "MeshLodDraws") {
+        // Zero on a scene whose meshes have one level, which is the truthful
+        // answer and not a missing one -- the same reasoning `PhysicsBodies`
+        // carries above.
+        lua_pushnumber(L, frame.meshLodDraws);
+        return 1;
+    }
 
     const core::NameAtom atom = world(L).atoms().lookup(name);
     for (const auto& [key, value] : services(L).stats.entries) {

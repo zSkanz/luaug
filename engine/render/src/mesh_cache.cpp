@@ -3,7 +3,9 @@
 #include "luaug/core/i18n.h"
 #include "luaug/core/text_key.h"
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <utility>
 
@@ -156,6 +158,7 @@ void MeshCache::beginFrame(rhi::IDevice& device)
         if (entry.live && entry.dynamic) {
             entry.live = false;
             entry.sections.clear();
+            entry.lods.clear();
             entry.resolved = Resolved{};
             freeSlots_.push_back(static_cast<u32>(index));
         }
@@ -209,7 +212,7 @@ MeshHandle MeshCache::createSkinned(rhi::IDevice& device, rhi::ICmdList& cmd, co
 }
 
 MeshHandle MeshCache::create(rhi::IDevice& device, rhi::ICmdList& cmd, const asset::Mesh& mesh, MeshUsage usage,
-                             core::EngineError* outError)
+                             core::EngineError* outError, std::span<const MeshLodRange> lods)
 {
     const auto vertexCount = static_cast<u32>(mesh.vertices.size());
     const auto indexCount = static_cast<u32>(mesh.indices.size());
@@ -301,8 +304,21 @@ MeshHandle MeshCache::create(rhi::IDevice& device, rhi::ICmdList& cmd, const ass
         });
     }
 
+    entry.lods.assign(lods.begin(), lods.end());
+    if (entry.lods.empty()) {
+        // One level covering everything. Never empty, so no caller downstream
+        // has to handle "a mesh with no levels" -- a case that would exist only
+        // to be forgotten.
+        entry.lods.push_back(MeshLodRange{
+            .firstSection = 0,
+            .sectionCount = static_cast<u32>(entry.sections.size()),
+            .error = 0.0f,
+        });
+    }
+
     entry.resolved = resolved;
     entry.resolved.sections = entry.sections;
+    entry.resolved.lods = entry.lods;
     return MeshHandle{slot, entry.generation};
 }
 
@@ -324,6 +340,7 @@ void MeshCache::release(rhi::IDevice& device, MeshHandle handle)
 
     entry.live = false;
     entry.sections.clear();
+    entry.lods.clear();
     entry.resolved = Resolved{};
     freeSlots_.push_back(handle.index);
 }
@@ -347,6 +364,51 @@ usize MeshCache::staticMeshCount() const noexcept
             ++count;
     }
     return count;
+}
+
+u32 selectMeshLod(const MeshCache::Resolved& resolved, const core::Mat4& transform, core::f32 pixelsPerUnit,
+                  core::f32 pixelError) noexcept
+{
+    if (resolved.lods.size() <= 1 || pixelsPerUnit <= 0.0f || pixelError <= 0.0f) {
+        return 0;
+    }
+
+    // Camera-relative space, so the camera is the origin and the translation is
+    // the offset to it (`render_world.h`).
+    const core::f32 x = transform.m[0][3];
+    const core::f32 y = transform.m[1][3];
+    const core::f32 z = transform.m[2][3];
+    const core::f32 distance = std::sqrt(x * x + y * y + z * z);
+
+    // At or inside the near plane the projected error is unbounded, and the
+    // answer there is obvious: draw the best level.
+    if (distance <= 0.001f) {
+        return 0;
+    }
+
+    // The instance's LARGEST axis scale, because an error is a length and a
+    // non-uniform scale stretches it differently along each axis. The largest is
+    // the conservative choice: it never picks a level that looks worse than the
+    // threshold, only sometimes one that looks better than it had to.
+    const auto axisLength = [&transform](int column) {
+        const core::f32 ax = transform.m[0][column];
+        const core::f32 ay = transform.m[1][column];
+        const core::f32 az = transform.m[2][column];
+        return std::sqrt(ax * ax + ay * ay + az * az);
+    };
+    const core::f32 scale = std::max({axisLength(0), axisLength(1), axisLength(2)});
+
+    // The COARSEST level whose error still fits, walked from the far end so the
+    // answer is the cheapest acceptable one rather than the first acceptable
+    // one. Level 0 always qualifies -- its error is zero by construction -- so
+    // this terminates.
+    for (u32 level = static_cast<u32>(resolved.lods.size()); level > 0; --level) {
+        const core::f32 projected = resolved.lods[level - 1].error * scale * pixelsPerUnit / distance;
+        if (projected <= pixelError) {
+            return level - 1;
+        }
+    }
+    return 0;
 }
 
 } // namespace luaug::render

@@ -181,10 +181,23 @@ TEST_CASE("the LOD chain shrinks and stops when it stops paying")
 
     for (usize level = 1; level < compiled.lods.size(); ++level) {
         CHECK(compiled.lods[level].indices.size() < compiled.lods[level - 1].indices.size());
-        // Error is reported in `simplifyScale` units, so it is comparable
-        // between a chair and a mountain -- and it must grow as detail is lost.
+        // Error is ABSOLUTE, in the mesh's own units, and it must grow as
+        // detail is lost. It became absolute at M7 when the runtime selector
+        // arrived: it was stored divided by `meshopt_simplifyScale` where it
+        // should have been multiplied, which is neither relative nor absolute
+        // -- a number with no consumer is a number with no test.
         CHECK(compiled.lods[level].error >= compiled.lods[level - 1].error);
     }
+
+    // A LEVEL ABOVE ZERO HAS A NON-ZERO ERROR, which is the property the whole
+    // selector rests on: an error that stayed zero would make every level look
+    // free and the coarsest one always win.
+    CHECK(compiled.lods[1].error > 0.0f);
+
+    // And it is a plausible LENGTH rather than a fraction. The grid spans one
+    // unit, so simplifying it can move the surface by a fraction of a unit and
+    // not by hundreds -- which is what the old division produced.
+    CHECK(compiled.lods.back().error < 1.0f);
 }
 
 TEST_CASE("simplification never welds across a material boundary")

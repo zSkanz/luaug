@@ -435,7 +435,17 @@ std::optional<core::EngineError> compileMesh(const Model& model, std::span<const
             break;
         }
 
-        next.error = scale > 0.0f ? worstError / scale : worstError;
+        // MULTIPLIED by the scale, not divided. `meshopt_simplify` reports an
+        // error relative to the mesh's extents and `meshopt_simplifyScale`
+        // returns the factor that turns that into absolute units, so this is
+        // the level's error in the mesh's own space.
+        //
+        // It was a division, which is neither relative nor absolute, and nothing
+        // had ever read the value -- a number with no consumer is a number with
+        // no test. The runtime LOD selector is the first consumer, and it needs
+        // absolute: it scales by the instance's transform and divides by the
+        // distance to get pixels.
+        next.error = worstError * scale;
         out.lods.push_back(std::move(next));
     }
 

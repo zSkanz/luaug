@@ -222,6 +222,20 @@ if(LUAUG_BUILD_TESTS)
     # One repeat here rather than the default three. The gate asks whether the
     # engine still works, and three runs of a 10,000-instance scene is thirty
     # seconds of CI for a number nobody reads.
+    # M7's gate: "asset build determinism check in CI". Two PROCESSES rather
+    # than the in-process double build `luaug_assetc_tests` already does -- see
+    # the driver for what the second process can see that the second call
+    # cannot. `examples/05-streaming` is the input because it is the largest
+    # content tree in the repository: 289 chunks, meshes and textures.
+    add_test(NAME asset_determinism
+        COMMAND ${CMAKE_COMMAND}
+            -DASSETC=$<TARGET_FILE:assetc>
+            -DCONTENT=${CMAKE_SOURCE_DIR}/examples/05-streaming/content
+            -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/asset-determinism
+            -DMIN_FILES=290
+            -P ${CMAKE_SOURCE_DIR}/tests/assetdeterminism/run_determinism_gate.cmake)
+    set_tests_properties(asset_determinism PROPERTIES TIMEOUT 600)
+
     # M7's gate: the scripted five-minute fly-through over `examples/05-streaming`,
     # asserting peak memory under a declared ceiling and a frame-time histogram
     # with no hitch over 33 ms.

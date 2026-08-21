@@ -63,6 +63,32 @@ struct MeshSection
     AABB bounds;
 };
 
+// One level of detail, as a slice of the entry's section list.
+//
+// Every level of a mesh has the SAME submeshes in the same order -- the
+// simplifier works per submesh precisely so a material boundary survives
+// (`asset/mesh_format.h`) -- so `sectionCount` is the same for every level and
+// a draw that named section 3 of level 0 means section 3 of level 2 as well.
+// That is what lets the selector change a level without the extractor knowing
+// anything happened.
+struct MeshLodRange
+{
+    u32 firstSection = 0;
+    u32 sectionCount = 0;
+    // The level's absolute geometric error, in the mesh's own units. Zero for
+    // level 0. See `asset::MeshLod::error`.
+    core::f32 error = 0.0f;
+};
+
+// How wrong a level is allowed to look, in PIXELS of on-screen deviation.
+//
+// One pixel, and one is the honest number rather than a cautious one: below a
+// pixel a difference cannot be displayed at all, and above it somebody can point
+// at the silhouette that changed. A tighter threshold is a promise the display
+// cannot keep; a looser one is a quality decision, and this milestone has no
+// quality dial to hang it on (M7.5 is where rendering gets one).
+inline constexpr core::f32 LodPixelError = 1.0f;
+
 // Owns every vertex and index buffer the renderer draws from.
 //
 // Not a general resource manager and deliberately not reference counted: a mesh
@@ -100,8 +126,13 @@ public:
     // generation. Holding a dynamic handle across frames yields nothing rather
     // than geometry from another frame -- which is the mistake this enum exists
     // to make nameable.
+    // `lods` names slices of `mesh.submeshes`, one per level, when the caller
+    // has flattened a LOD chain into this mesh. Empty -- the common case, and
+    // every dynamic mesh -- publishes ONE level covering every section with an
+    // error of zero, so a caller that never heard of LODs draws exactly what it
+    // used to and the selector has nothing to choose between.
     [[nodiscard]] MeshHandle create(rhi::IDevice& device, rhi::ICmdList& cmd, const asset::Mesh& mesh, MeshUsage usage,
-                                    core::EngineError* outError = nullptr);
+                                    core::EngineError* outError = nullptr, std::span<const MeshLodRange> lods = {});
 
     // The skinned form: the same mesh plus its parallel joint/weight stream,
     // uploaded to a SECOND buffer. A separate overload rather than a defaulted
@@ -144,6 +175,16 @@ public:
         u32 firstIndex = 0;
         core::i32 vertexOffset = 0;
         std::span<const MeshSection> sections;
+
+        // The LOD chain, or one entry for a mesh that has none. `sections` is
+        // every level's sections CONCATENATED, and a level names its own slice
+        // of them -- one index buffer, one upload, one bind, and the level is a
+        // choice of range rather than a choice of resource.
+        //
+        // Empty is impossible: `create` always publishes at least the level it
+        // uploaded, so a caller never has to handle "no levels".
+        std::span<const MeshLodRange> lods;
+
         AABB bounds;
     };
 
@@ -170,6 +211,7 @@ private:
     {
         Resolved resolved;
         std::vector<MeshSection> sections;
+        std::vector<MeshLodRange> lods;
         u32 generation = 0;
         bool dynamic = false;
         bool live = false;
@@ -201,5 +243,25 @@ private:
     u32 ringVertexHighWater_ = 0;
     u32 ringIndexHighWater_ = 0;
 };
+
+// Which level of `resolved` to draw, given where the instance is and how many
+// pixels a world unit covers at one metre from the camera.
+//
+// **Screen-space error, not distance bands.** A distance threshold has to be
+// re-tuned for every mesh and every field of view -- a boulder and a mountain at
+// the same distance are not the same problem -- and it is the number people end
+// up tuning forever. A level's error is stored in the mesh's own units
+// (`asset::MeshLod::error`), so scaling it by the instance and projecting it
+// yields an error in PIXELS: comparable across every mesh in a world, and
+// unchanged when the field of view is.
+//
+// `transform` is camera-relative, which is the space `RenderWorld` works in, so
+// its translation IS the offset to the camera.
+//
+// R10 is not in the way: nothing here reaches the simulation. Two machines may
+// legitimately draw one frame at different levels if their windows differ, which
+// is why the render-capture gate runs at a fixed size.
+[[nodiscard]] u32 selectMeshLod(const MeshCache::Resolved& resolved, const core::Mat4& transform,
+                                core::f32 pixelsPerUnit, core::f32 pixelError = LodPixelError) noexcept;
 
 } // namespace luaug::render

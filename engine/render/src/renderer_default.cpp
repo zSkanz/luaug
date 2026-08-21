@@ -481,6 +481,19 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
 {
     const bool shadowPass = selection == Selection::Shadow;
     bool onSkinnedPipeline = false;
+
+    // Pixels per world unit at one metre, from the projection itself rather
+    // than from a field-of-view nobody stored: `projection[1][1]` IS
+    // `1 / tan(fovY / 2)` for `core::perspective`, so half the target height
+    // times that is the number a metre subtends at a metre away.
+    //
+    // Taken from the CAMERA even in the shadow pass, deliberately. A level
+    // chosen by how big a thing looks to the LIGHT would change with the sun,
+    // so a shadow could be cast by different geometry than the object drawn --
+    // which is a shadow that does not match its caster. Choosing once, from the
+    // camera, keeps the two the same mesh.
+    const f32 pixelsPerUnit =
+        world.camera.valid && height_ > 0 ? 0.5f * static_cast<f32>(height_) * world.camera.projection.m[1][1] : 0.0f;
     // The draws arrive sorted (Decision 7), so this walks them in order and
     // never reorders. Grouping is `extract`'s job and re-deriving it here would
     // be the backend doing work bgfx would have to repeat.
@@ -500,9 +513,13 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
             continue;
 
         const MeshCache::Resolved* resolved = meshes.resolve(draw.mesh);
-        if (resolved == nullptr || draw.section >= resolved->sections.size())
+        if (resolved == nullptr || resolved->lods.empty())
             continue;
-        const MeshSection& section = resolved->sections[draw.section];
+
+        const MeshLodRange& level = resolved->lods[selectMeshLod(*resolved, draw.transform, pixelsPerUnit)];
+        if (draw.section >= level.sectionCount || level.firstSection + draw.section >= resolved->sections.size())
+            continue;
+        const MeshSection& section = resolved->sections[level.firstSection + draw.section];
         if (section.indexCount == 0)
             continue;
 

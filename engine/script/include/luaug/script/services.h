@@ -89,6 +89,15 @@ struct FrameStats
     // counter a script cannot read is a gate a human has to take on trust.
     f64 audioUnderruns = 0.0;
     f64 audioVoices = 0.0;
+
+    // How many of this frame's draws used a level of detail COARSER than zero
+    // (roadmap M7: "basic LOD switching").
+    //
+    // Here because a selector nobody can see is a selector nobody can tell is
+    // working. It costs nothing to compute -- the frame already walks its draws
+    // to count them -- and it is the difference between "LOD switching shipped"
+    // and "LOD switching shipped and is choosing something".
+    f64 meshLodDraws = 0.0;
 };
 
 // A coroutine parked on `WaitForChild`. Kept apart from the timer list because

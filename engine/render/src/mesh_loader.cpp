@@ -258,20 +258,62 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
                 return;
             }
 
-            // LOD 0 only, and the chain is in the file waiting for the selector
-            // that ships with streaming. Uploading the full-detail level is what
-            // keeps a packed mesh drawing exactly as the loose one did, which is
-            // the property that lets the two feeds be compared at all.
+            // THE WHOLE CHAIN, flattened into one index buffer with one section
+            // list, and a range per level. One upload and one bind: choosing a
+            // level is choosing a range of indices, never a different resource,
+            // which is what keeps the selector free to change its mind every
+            // frame without touching the GPU.
+            //
+            // A mesh with no chain -- one level -- lands here as one range and
+            // draws byte-identically to how it did before this existed.
             asset::Mesh geometry;
             geometry.vertices = std::move(compiled.vertices);
-            geometry.indices = compiled.lods[0].indices;
-            geometry.submeshes = compiled.lods[0].submeshes;
             geometry.bounds = compiled.bounds;
-            triangles = static_cast<core::u32>(geometry.indices.size() / 3);
+
+            std::vector<MeshLodRange> lods;
+            lods.reserve(compiled.lods.size());
+            for (const asset::MeshLod& lod : compiled.lods) {
+                const auto indexBase = static_cast<core::u32>(geometry.indices.size());
+                const auto sectionBase = static_cast<core::u32>(geometry.submeshes.size());
+                geometry.indices.insert(geometry.indices.end(), lod.indices.begin(), lod.indices.end());
+                for (asset::Submesh submesh : lod.submeshes) {
+                    // Rebased into the combined buffer. The submesh order is
+                    // identical at every level (`asset/mesh_format.h`), so a
+                    // draw that named section N of one level means section N of
+                    // any other -- which is what makes the swap invisible
+                    // upstream.
+                    submesh.firstIndex += indexBase;
+                    geometry.submeshes.push_back(submesh);
+                }
+                lods.push_back(MeshLodRange{
+                    .firstSection = sectionBase,
+                    .sectionCount = static_cast<core::u32>(lod.submeshes.size()),
+                    .error = lod.error,
+                });
+            }
+
+            // LEVEL ZERO's triangles, not the whole chain's: this number is
+            // what a stats panel calls "the mesh", and counting every level
+            // would report a mesh roughly twice the size of the one on screen.
+            triangles = static_cast<core::u32>(compiled.lods[0].indices.size() / 3);
 
             const bool skinned = !compiled.joints.empty() && !compiled.skin.empty();
-            const MeshHandle handle = skinned ? cache.createSkinned(device, cmd, geometry, compiled.skin, &uploadError)
-                                              : cache.create(device, cmd, geometry, MeshUsage::Static, &uploadError);
+            // A SKINNED mesh takes level zero only, and that is a decision
+            // rather than an omission: the joint and weight streams are indexed
+            // by vertex and the simplifier is free to drop vertices, so a level
+            // above zero would need its own skin stream re-derived. Characters
+            // are also the last thing a game wants simplified, being the thing
+            // the camera is usually nearest to.
+            asset::Mesh skinnedGeometry;
+            if (skinned) {
+                skinnedGeometry.vertices = geometry.vertices;
+                skinnedGeometry.bounds = geometry.bounds;
+                skinnedGeometry.indices = compiled.lods[0].indices;
+                skinnedGeometry.submeshes = compiled.lods[0].submeshes;
+            }
+            const MeshHandle handle =
+                skinned ? cache.createSkinned(device, cmd, skinnedGeometry, compiled.skin, &uploadError)
+                        : cache.create(device, cmd, geometry, MeshUsage::Static, &uploadError, lods);
             if (!handle.valid()) {
                 core::logText(core::LogLevel::Warn, uploadError.message);
                 markFailed();
@@ -297,7 +339,11 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
                 images.push_back(uploaded);
             }
 
-            fillEntry(entry, geometry.bounds, geometry.submeshes, compiled.materials, images);
+            // LEVEL ZERO's submeshes, not the flattened list. `sectionCount`
+            // is how many draws an instance emits, and every level has the same
+            // submeshes in the same order -- so the flattened list would emit a
+            // draw per section PER LEVEL and render the mesh several times over.
+            fillEntry(entry, geometry.bounds, compiled.lods[0].submeshes, compiled.materials, images);
             library.set(content, entry);
 
             if (skeletons != nullptr && !compiled.joints.empty())

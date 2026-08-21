@@ -44,7 +44,12 @@ using core::u8;
 using core::usize;
 
 inline constexpr char MeshMagic[4] = {'L', 'G', 'M', 'S'};
-inline constexpr u32 MeshFormatVersion = 1;
+// Bumped to 2 at M7 when `MeshLod::error` changed meaning: it was stored
+// divided by `meshopt_simplifyScale` and is now multiplied by it, which is the
+// absolute error the runtime selector reads. A `.lmesh` built before the change
+// carries a number in units nothing can interpret, and a stale one loading
+// silently would put a mesh at the wrong level rather than fail.
+inline constexpr u32 MeshFormatVersion = 2;
 
 // The ceiling on one mesh, and it exists for a reason the fuzz case found: the
 // vertex and skin streams are meshopt-COMPRESSED, so their element count cannot
@@ -74,9 +79,16 @@ struct MeshLod
 {
     std::vector<u32> indices;
     std::vector<Submesh> submeshes;
-    // meshoptimizer's reported error for this level, in the units
-    // `meshopt_simplifyScale` returns -- a fraction of the mesh's own extent,
-    // so it is comparable between a chair and a mountain. Zero for LOD 0.
+    // How far this level's surface can be from the full-detail one, in the
+    // mesh's OWN units -- absolute, not a fraction of anything.
+    //
+    // Absolute because that is what a screen-space selector needs: multiply by
+    // the instance's scale, divide by the distance to the camera, multiply by
+    // the projection's pixels-per-unit, and the answer is an error in PIXELS,
+    // which is the only unit a threshold can honestly be written in. A relative
+    // error would need the mesh's extent carried beside it to mean anything.
+    //
+    // Zero for LOD 0, which is exact by construction.
     core::f32 error = 0.0f;
 };
 

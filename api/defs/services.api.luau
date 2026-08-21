@@ -565,7 +565,7 @@ local Classes: { Schema.Class } = {
                 Returns = { "number" },
                 ThreadSafety = "ReadParallel",
                 Doc = "Reads a named instrumentation counter -- `FPS`, `FrameTimeMs`, `PhysicsBodies`, "
-                    .. "`InstanceCount`, `DrawCalls`, `LuaMemoryKB` and the rest, plus whatever `SetCustomStat` has "
+                    .. "`InstanceCount`, `DrawCalls`, `MeshLodDraws`, `LuaMemoryKB` and the rest, plus whatever `SetCustomStat` has "
                     .. "published. An unregistered name raises `scene.err.unknown_stat` instead of returning zero: "
                     .. "a misspelt stat is a bug in the caller, and a debug surface that answers zero hides that "
                     .. "bug in the one place people are already confused.",
