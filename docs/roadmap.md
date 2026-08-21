@@ -937,6 +937,37 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   a call ADR 0037 does not have, that is an ADR — which is the freeze working
   rather than failing. Record which way it went either way, because "we already
   have depth" is exactly the kind of half-truth that reads as done.
+- **Design constraint (not scope): motion vectors and a jitterable projection are
+  renderer OUTPUTS, not a detail inside the anti-aliasing** (human decision,
+  2026-08-21, asked as "will we support DLSS/FSR, and frame generation"). None of
+  those ship in v1. What ships here is the anti-aliasing this milestone's post
+  chain already owes, and if that anti-aliasing is temporal it needs **exactly
+  the same two things** a temporal upscaler does: a per-pixel motion vector, and
+  a projection that can be jittered sub-pixel. Declaring them as outputs of the
+  renderer rather than as private state of a TAA pass is what makes the later
+  work days instead of a milestone.
+
+  - **The velocity buffer is the expensive half and it is renderer-wide.** Every
+    draw has to say where its pixel was last frame, which means each object
+    carries its previous transform and the pass writes a second target. That is
+    not a bolt-on, which is precisely why it is decided while the pass list is
+    being rebuilt.
+  - **Licences differ and the difference is not cosmetic.** FSR is MIT and XeSS
+    has an open variant, so both fit R6. **DLSS is a proprietary SDK and does
+    not** — adopting it would be a human-approved ADR and an optional path
+    outside the default build, which is how other engines carry it anyway. The
+    door is worth leaving open rather than closing by omission.
+  - **Frame generation needs two things beyond that**, and one is already true
+    here. It needs optical flow — hardware-assisted on some vendors, software on
+    others — and it needs **the UI composited AFTER the generated frame**, or a
+    HUD smears across every synthesized one. M6 built the ui2d pass as a separate
+    pass over the world, so that ordering already exists: **do not collapse it
+    into the world pass while rebuilding the pipeline here.** That sentence is
+    the whole of what this milestone owes frame generation.
+  - **None of this threatens R10.** Upscaling and frame generation are
+    presentation; the simulation hash never sees them. What they do cost is
+    input-to-photon latency, which is a real trade a player feels and which the
+    milestone that ships them has to measure rather than assume.
 - **Deliverable:** `examples/02-meshes` and the M7 streaming example, both
   rendered through the new path, each shown beside its M4.5 render at the same
   camera and clock — so the difference is the only variable.
