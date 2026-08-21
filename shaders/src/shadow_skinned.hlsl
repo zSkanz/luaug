@@ -23,7 +23,9 @@
 struct VertexInput
 {
     float3 Position : TEXCOORD0;
-    uint4 Joints : TEXCOORD1;
+    // `float4` and not `uint4`: see `pbr_skinned.hlsl` and D042. The stream
+    // holds floats, and declaring an integer input reinterprets them.
+    float4 Joints : TEXCOORD1;
     float4 Weights : TEXCOORD2;
 };
 
@@ -35,7 +37,7 @@ struct Interpolants
 Interpolants VertexMain(VertexInput input)
 {
     Interpolants output;
-    const float4 posed = mul(skinMatrix(input.Joints, input.Weights), float4(input.Position, 1.0f));
+    const float4 posed = mul(skinMatrix(uint4(input.Joints), input.Weights), float4(input.Position, 1.0f));
     output.Position = mul(LightViewProjection, mul(ShadowModel, posed));
     return output;
 }

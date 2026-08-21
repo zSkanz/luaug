@@ -7,7 +7,7 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 - **M7.5 — Looking Like an Engine — done and awaiting review.**
   The brief is [`docs/briefs/m7.5-kickoff.md`](docs/briefs/m7.5-kickoff.md), with
-  fifteen decisions, twelve Findings and a filled Gate Record. **Every scope item
+  fifteen decisions, thirteen Findings and a filled Gate Record. **Every scope item
   and every gate item is done**: four cascades in one atlas with a
   world-constant filter and a blend band, clustered forward shading on a 16×9×24
   grid, image-based lighting by the split sum, the post chain — depth prepass,
@@ -26,9 +26,14 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   the useful direction — the technique changed instead of the interface.
   **ADR 0043 is PROPOSED and needs the human**, because ADR 0037 requires a
   human-approved ADR to touch the frozen surface and this touches it.
-  **One defect recorded (D041)** and seven more found and fixed inside the
-  milestone; five of the eight were found by looking at a picture or a number
-  rather than by a test.
+  **Two defects recorded (D041, D042)** and seven more found and fixed inside the
+  milestone; six of the nine were found by looking at a picture or a number
+  rather than by a test. **D042 is the one to read**: a human asked what a dark
+  square above the obby's character was, and the answer was that skinning had
+  been broken since M6 -- every joint but index 0 read past the end of its
+  palette, because the indices travel as floats and both skinned shaders
+  declared their input as integers. `capture_gate_skinned` ran green through it
+  all, because it watches the palette and the palette was right.
 - **M7 — Scaling the World — COMPLETE, signed off 2026-08-21**, tagged
   `milestone/m7`.
   The brief is [`docs/briefs/m7-kickoff.md`](docs/briefs/m7-kickoff.md), with a

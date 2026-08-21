@@ -32,11 +32,13 @@ struct VertexInput
     float3 Normal : TEXCOORD1;
     float4 Tangent : TEXCOORD2;
     float2 Uv : TEXCOORD3;
-    // Slot 1, the skin stream. `uint4` rather than `uint16_t4`: the vertex
-    // format widens the two 16-bit pairs on the way in, which every backend
-    // does for free, and 16-bit shader types need a capability not every one of
-    // them has.
-    uint4 Joints : TEXCOORD4;
+    // Slot 1, the skin stream. **`float4`, because that is what the stream
+    // holds** -- `rhi::VertexFormat` has no integer format and the enumeration is
+    // frozen (ADR 0037), so the importer widens the indices to floats. Declaring
+    // this `uint4` did not convert them, it reinterpreted the bits, and every
+    // joint but zero read past the end of the palette (D042). The cast at the
+    // call below is the conversion, and it is explicit for that reason.
+    float4 Joints : TEXCOORD4;
     float4 Weights : TEXCOORD5;
 };
 
@@ -48,7 +50,7 @@ Interpolants VertexMain(VertexInput input)
     // multiplies rather than one premultiplied palette: the palette is per
     // SKELETON and `Model` is per draw, so folding them would mean re-uploading
     // the whole palette for every draw that shares a rig.
-    const float4x4 skin = skinMatrix(input.Joints, input.Weights);
+    const float4x4 skin = skinMatrix(uint4(input.Joints), input.Weights);
     const float4 posed = mul(skin, float4(input.Position, 1.0f));
     const float4 shadingPosition = mul(Model, posed);
     output.ShadingPosition = shadingPosition.xyz;

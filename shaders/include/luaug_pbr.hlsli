@@ -166,6 +166,15 @@ cbuffer GpuSkinUniforms : register(b1, space1)
     column_major float4x4 JointMatrices[LUAUG_MAX_SKIN_JOINTS];
 };
 
+// `joints` arrives as a `uint4` and the CALLER converts it from the float4 the
+// vertex stream actually holds. That conversion is not a formality (D042): the
+// stream is `VertexFormat::Float4` because `rhi::VertexFormat` has no integer
+// format and the enumeration is frozen (ADR 0037), and a shader that declared
+// its input as `uint4` did not convert the bits, it REINTERPRETED them -- so
+// joint 1 arrived as 1065353216 and every vertex bound to it read past the end
+// of the palette. Joint 0 was the only index that survived, because zero has the
+// same bits either way.
+//
 // The linear blend, glTF's own: up to four joints per vertex, weighted, with the
 // weights already normalised by the importer. A vertex whose weights sum to zero
 // -- which a broken export can produce -- keeps its bind position rather than
