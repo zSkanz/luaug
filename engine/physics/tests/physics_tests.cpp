@@ -713,3 +713,149 @@ TEST_CASE("the rollback seam refuses rather than pretending")
     CHECK(blob.empty());
     CHECK_FALSE(fixture.physics->restoreState(fixture.world, blob));
 }
+
+// --- Kinematic motion, and what stands on it (D027) ---------------------------
+//
+// A script-moved kinematic body had a velocity of zero, because moving one used
+// `SetPositionAndRotation` -- which puts a body somewhere and derives no
+// velocity from having done so. Nothing downstream could tell a platform that
+// was sliding from one that had always been there: a closing door did not push,
+// a piston did not launch, a conveyor did not carry, and a character standing on
+// a moving platform stayed exactly where it was while the platform left.
+//
+// Both halves are asserted below, and the second is the one somebody reported
+// from playing the obby.
+
+TEST_CASE("a kinematic body moved by a script has a velocity")
+{
+    Fixture fixture;
+
+    BodyDesc desc;
+    desc.shape.type = ShapeType::Box;
+    desc.shape.size = core::Vec3{4.0f, 1.0f, 4.0f};
+    desc.transform.position = core::DVec3{0.0, 0.0, 0.0};
+    desc.motion = MotionType::Kinematic;
+    desc.userData = 21;
+    const BodyHandle platform = fixture.physics->createBody(fixture.world, desc);
+    REQUIRE(platform.valid());
+
+    // One tick's worth of travel: two metres in a sixtieth of a second is
+    // 120 m/s, which is what the velocity has to come out as.
+    core::CFrameD target;
+    target.position = core::DVec3{0.0, 0.0, 2.0};
+    fixture.physics->setBodyTransform(fixture.world, platform, target);
+    fixture.physics->step(fixture.world, kFixedDt);
+
+    const BodyState state = fixture.physics->bodyState(fixture.world, platform);
+    // It ARRIVED -- a moved body still ends up where it was told to.
+    CHECK(state.transform.position.z == doctest::Approx(2.0).epsilon(0.01));
+    // And it got there at a speed, which is the half that was missing.
+    CHECK(static_cast<double>(state.linearVelocity.z) ==
+          doctest::Approx(2.0 / static_cast<double>(kFixedDt)).epsilon(0.05));
+}
+
+TEST_CASE("a capsule standing on a moving platform arrives with it")
+{
+    // The case the defect was reported from: a platform going there and back
+    // with a character on top. Break the ground-velocity inheritance in
+    // `moveCharacter` and this goes red -- the platform arrives and the capsule
+    // does not.
+    Fixture fixture;
+
+    BodyDesc platformDesc;
+    platformDesc.shape.type = ShapeType::Box;
+    platformDesc.shape.size = core::Vec3{8.0f, 1.0f, 8.0f};
+    platformDesc.transform.position = core::DVec3{0.0, 0.0, 0.0};
+    platformDesc.motion = MotionType::Kinematic;
+    platformDesc.userData = 22;
+    const BodyHandle platform = fixture.physics->createBody(fixture.world, platformDesc);
+    REQUIRE(platform.valid());
+
+    CharacterDesc characterDesc;
+    // Standing on a platform whose top face is at 0.5, so a five-metre capsule
+    // has its centre at 3.
+    characterDesc.transform.position = core::DVec3{0.0, 3.0, 0.0};
+    characterDesc.stepHeight = 0.6f;
+    characterDesc.userData = 23;
+    const CharacterHandle rider = fixture.physics->createCharacter(fixture.world, characterDesc);
+    REQUIRE(rider.valid());
+
+    // Settle, so the capsule is genuinely grounded before anything moves.
+    for (int tick = 0; tick < 30; ++tick) {
+        fixture.physics->moveCharacter(fixture.world, rider, core::Vec3{0.0f, -1.0f, 0.0f}, kFixedDt);
+        fixture.physics->step(fixture.world, kFixedDt);
+    }
+    REQUIRE(fixture.physics->characterState(fixture.world, rider).ground == CharacterGround::Grounded);
+
+    // There: 6 m over 120 ticks. Then back. The character asks for NOTHING
+    // horizontal the whole time -- every metre it covers is the platform's.
+    const auto driveTo = [&](f64 from, f64 to, int ticks) {
+        for (int tick = 1; tick <= ticks; ++tick) {
+            core::CFrameD target;
+            target.position = core::DVec3{0.0, 0.0, from + (to - from) * (static_cast<f64>(tick) / ticks)};
+            fixture.physics->setBodyTransform(fixture.world, platform, target);
+            fixture.physics->moveCharacter(fixture.world, rider, core::Vec3{0.0f, -1.0f, 0.0f}, kFixedDt);
+            fixture.physics->step(fixture.world, kFixedDt);
+        }
+    };
+
+    driveTo(0.0, 6.0, 120);
+    const CharacterState there = fixture.physics->characterState(fixture.world, rider);
+    CHECK(there.transform.position.z == doctest::Approx(6.0).epsilon(0.15));
+    CHECK(there.ground == CharacterGround::Grounded);
+
+    driveTo(6.0, 0.0, 120);
+    const CharacterState back = fixture.physics->characterState(fixture.world, rider);
+    CHECK(back.transform.position.z == doctest::Approx(0.0).epsilon(0.15));
+    // And it is still on the platform rather than having been left behind and
+    // caught up with by accident.
+    CHECK(back.ground == CharacterGround::Grounded);
+    CHECK(back.transform.position.y == doctest::Approx(3.0).epsilon(0.2));
+}
+
+TEST_CASE("a character in mid-air does not inherit the platform it left")
+{
+    // The other half of "only while grounded": carrying the last platform's
+    // velocity through a jump would launch the player off it.
+    Fixture fixture;
+
+    BodyDesc platformDesc;
+    platformDesc.shape.type = ShapeType::Box;
+    platformDesc.shape.size = core::Vec3{8.0f, 1.0f, 8.0f};
+    platformDesc.motion = MotionType::Kinematic;
+    platformDesc.userData = 24;
+    const BodyHandle platform = fixture.physics->createBody(fixture.world, platformDesc);
+    REQUIRE(platform.valid());
+
+    CharacterDesc characterDesc;
+    characterDesc.transform.position = core::DVec3{0.0, 3.0, 0.0};
+    characterDesc.userData = 25;
+    const CharacterHandle rider = fixture.physics->createCharacter(fixture.world, characterDesc);
+    REQUIRE(rider.valid());
+
+    for (int tick = 0; tick < 30; ++tick) {
+        fixture.physics->moveCharacter(fixture.world, rider, core::Vec3{0.0f, -1.0f, 0.0f}, kFixedDt);
+        fixture.physics->step(fixture.world, kFixedDt);
+    }
+
+    // Straight up, and away from the platform. From here on the character is
+    // airborne and the platform is racing sideways underneath it.
+    f32 vertical = 12.0f;
+    f64 z = 0.0;
+    for (int tick = 0; tick < 40; ++tick) {
+        z += 0.2;
+        core::CFrameD target;
+        target.position = core::DVec3{0.0, 0.0, z};
+        fixture.physics->setBodyTransform(fixture.world, platform, target);
+        fixture.physics->moveCharacter(fixture.world, rider, core::Vec3{0.0f, vertical, 0.0f}, kFixedDt);
+        fixture.physics->step(fixture.world, kFixedDt);
+        vertical -= 9.81f * kFixedDt;
+    }
+
+    const CharacterState state = fixture.physics->characterState(fixture.world, rider);
+    CHECK(state.ground != CharacterGround::Grounded);
+    // It went up, and it did not go sideways. Eight metres of platform travel
+    // happened underneath it and none of it was inherited.
+    CHECK(state.transform.position.y > 5.0);
+    CHECK(std::abs(state.transform.position.z) < 0.5);
+}

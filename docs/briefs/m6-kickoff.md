@@ -86,7 +86,7 @@ constraint that decides most of the decisions below.
       second input path that was declined an hour earlier. And it must carry a
       **value**, not a press: design a virtual button and the thumbstick will not
       fit later.
-- [ ] `examples/04-obby` — main menu (tweened), HUD, checkpoints, moving
+- [x] `examples/04-obby` — main menu (tweened), HUD, checkpoints, moving
       platforms (tweens on physics-kinematic parts), sounds, an animated
       character, fully playable start→finish
 
@@ -163,7 +163,7 @@ decision rather than against a hope.
 
 - [x] UI capture goldens at two resolutions (proves layout scaling)
 - [x] tween output vs. easing fixture tables
-- [ ] input replay of a full obby run completes to the finish flag in CI
+- [x] input replay of a full obby run completes to the finish flag in CI
       headless (the E2E gate for the whole stack so far)
 - [ ] audio smoke test (device opens, buffer underrun counter zero in a 60 s
       soak)

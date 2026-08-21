@@ -107,6 +107,7 @@ std::optional<core::EngineError> loadScenario(const std::filesystem::path& direc
     out.ticks = static_cast<u64>(std::max<core::i64>(0, root["ticks"].asInteger(0)));
     out.checkpointEvery = static_cast<u64>(std::max<core::i64>(1, root["checkpointEvery"].asInteger(1)));
     out.sameBuildOnly = root["sameBuildOnly"].asBool(false);
+    out.requireAttribute = std::string(root["requireAttribute"].asString(""));
 
     const std::string_view script = root["script"].asString("init.luau");
     out.scriptPath = std::filesystem::absolute(directory / script);
@@ -257,7 +258,27 @@ std::optional<core::EngineError> runScenario(const ReplayScenario& scenario, Rep
             out.checkpoints.push_back({tick, host.world().worldHash()});
     }
 
+    // The attribute the scenario says the run has to end with, read BEFORE
+    // `close`: a `BindToClose` handler is a chance to finish, and a game that
+    // only set its flag on the way out would be claiming a finish it did not
+    // reach during play.
+    bool reached = scenario.requireAttribute.empty();
+    if (!reached) {
+        const scene::Value value =
+            host.world().getAttribute(host.dataModel(), host.world().atoms().lookup(scenario.requireAttribute));
+        if (const auto* flag = std::get_if<bool>(&value); flag != nullptr)
+            reached = *flag;
+        else if (const auto* number = std::get_if<f64>(&value); number != nullptr)
+            reached = *number != 0.0;
+    }
+
     host.close();
+
+    if (!reached) {
+        const std::array<I18nArg, 2> args{I18nArg{"name", scenario.name},
+                                          I18nArg{"attribute", scenario.requireAttribute}};
+        return core::makeError(LUAUG_TR("engine.replay.err.attribute_missing"), args);
+    }
 
     if (errors != 0) {
         const std::array<I18nArg, 2> args{I18nArg{"name", scenario.name},

@@ -189,6 +189,19 @@ if(LUAUG_BUILD_TESTS)
         COMMAND luaug_host --replay=${CMAKE_SOURCE_DIR}/tests/determinism)
     set_tests_properties(determinism PROPERTIES TIMEOUT 300)
 
+    # M6's end-to-end gate: `examples/04-obby` driven by a recorded input stream,
+    # headless, from the menu to the finish flag. The whole stack is in the
+    # loop -- input dispatch, UI hit-testing and layout, tweens driving kinematic
+    # platforms, physics, audio, animation -- which is what makes it worth more
+    # than the five system gates it does not replace.
+    #
+    # It uses the same replay harness as `determinism`, and its scenario names an
+    # ATTRIBUTE the run has to end with. A hash comparison alone could not gate
+    # this: three runs that all fall in the same hole agree perfectly.
+    add_test(NAME obby_replay
+        COMMAND luaug_host --replay=${CMAKE_SOURCE_DIR}/tests/replay)
+    set_tests_properties(obby_replay PROPERTIES TIMEOUT 300)
+
     # The perf threshold (roadmap M2: the 10k-parts / 1k-listeners churn
     # benchmark "with a CI threshold", and the 500-instance gate scene). Both
     # budgets are deliberately loose -- see `bench.h`: a CI runner's speed varies

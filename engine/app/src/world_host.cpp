@@ -494,9 +494,14 @@ core::u64 WorldHost::scriptLoadFailures() const
     return static_cast<core::u64>(script::scriptLoadFailures(m_runtime->state()));
 }
 
+core::InstanceId WorldHost::dataModel() const noexcept
+{
+    return m_runtime.has_value() ? m_runtime->dataModel() : core::InstanceId{};
+}
+
 ConformanceReport WorldHost::conformanceReport() const
 {
-    const core::InstanceId root = m_runtime->dataModel();
+    const core::InstanceId root = dataModel();
     const auto attribute = [&](const char* name) -> core::i64 {
         const scene::Value value = m_world->getAttribute(root, m_world->atoms().lookup(name));
         const auto* number = std::get_if<f64>(&value);

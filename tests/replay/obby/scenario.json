@@ -1,0 +1,9 @@
+{
+  "name": "obby",
+  "script": "../../../examples/04-obby",
+  "seed": 7,
+  "ticks": 1100,
+  "checkpointEvery": 220,
+  "sameBuildOnly": true,
+  "requireAttribute": "ObbyFinished"
+}

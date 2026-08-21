@@ -257,6 +257,15 @@ struct CharacterRecord
     JPH::ObjectLayer layer = 0;
 };
 
+// A kinematic body's target for this tick, waiting for the delta that turns it
+// into a velocity. See `setBodyTransform`.
+struct PendingMove
+{
+    JPH::BodyID id;
+    JPH::RVec3 position;
+    JPH::Quat rotation;
+};
+
 // A contacting pair, keyed by our own handles rather than by Jolt's body ids.
 // Packed so a pair is one comparison and one sort key -- and so the ordering is
 // ours, which is what makes it survive a job system that reports the same pair
@@ -665,6 +674,37 @@ public:
         if (record == nullptr) {
             return;
         }
+
+        // **A kinematic body MOVES; it does not teleport** (D027).
+        //
+        // `SetPositionAndRotation` puts a body somewhere and derives no velocity
+        // from having done so, so every script-moved kinematic body in this
+        // engine had a velocity of zero: a closing door did not push, a piston
+        // did not launch, a conveyor did not carry, and a character standing on
+        // a moving platform stayed where it was while the platform left.
+        //
+        // `MoveKinematic` is the call that takes a target and a delta and
+        // computes the velocity that gets there. It needs the delta, and the
+        // only honest delta is the tick the simulation is ABOUT to take -- so
+        // the target is recorded here and spent in `step`, where that number is.
+        // Reading a wall clock for it would put a wall clock inside the
+        // simulation, which is exactly what R10 forbids.
+        if (record->motion == MotionType::Kinematic) {
+            const JPH::RVec3 position = toJoltPosition(transform.position);
+            const JPH::Quat rotation = toJolt(transform.rotation);
+            for (PendingMove& pending : m_kinematicMoves) {
+                if (pending.id == record->id) {
+                    // Two writes in one tick collapse to the last, because that
+                    // is what two property writes in one tick mean.
+                    pending.position = position;
+                    pending.rotation = rotation;
+                    return;
+                }
+            }
+            m_kinematicMoves.push_back(PendingMove{record->id, position, rotation});
+            return;
+        }
+
         m_system.GetBodyInterface().SetPositionAndRotation(
             record->id, toJoltPosition(transform.position), toJolt(transform.rotation),
             record->motion == MotionType::Static ? JPH::EActivation::DontActivate : JPH::EActivation::Activate);
@@ -774,6 +814,17 @@ public:
     void step(f32 fixedDt)
     {
         m_contacts.clear();
+
+        // The kinematic targets a script set this tick, spent against the tick
+        // the simulation is about to take (D027). In the order they were
+        // written, which is `applyScene`'s pool order and therefore a pure
+        // function of the operation sequence (R10).
+        if (!m_kinematicMoves.empty()) {
+            JPH::BodyInterface& bodies = m_system.GetBodyInterface();
+            for (const PendingMove& pending : m_kinematicMoves)
+                bodies.MoveKinematic(pending.id, pending.position, pending.rotation, fixedDt);
+            m_kinematicMoves.clear();
+        }
 
         const auto begin = std::chrono::steady_clock::now();
         // One collision step per tick. Jolt allows several sub-steps per call;
@@ -968,7 +1019,20 @@ public:
             return;
         }
 
-        record->character->SetLinearVelocity(toJolt(velocity));
+        // **The character inherits its ground's motion** (D027). Without this a
+        // platform slides out from under a player who stays exactly where they
+        // were -- the first thing anybody notices about a moving platform, and
+        // the second half of the same defect: the velocity below reads zero
+        // unless kinematic bodies are MOVED rather than teleported.
+        //
+        // Only while grounded. A character in mid-air is not standing on
+        // anything, and carrying the last platform's velocity through a jump
+        // would launch it.
+        JPH::Vec3 inherited = JPH::Vec3::sZero();
+        if (record->character->GetGroundState() == JPH::CharacterBase::EGroundState::OnGround)
+            inherited = record->character->GetGroundVelocity();
+
+        record->character->SetLinearVelocity(toJolt(velocity) + inherited);
 
         JPH::CharacterVirtual::ExtendedUpdateSettings settings;
         settings.mWalkStairsStepUp = JPH::Vec3(0.0f, record->stepHeight, 0.0f);
@@ -1269,6 +1333,8 @@ private:
     std::vector<u32> m_freeCharacters;
 
     std::vector<ContactPair> m_previousPairs;
+    // Cleared every `step`; see `setBodyTransform`.
+    std::vector<PendingMove> m_kinematicMoves;
     // Scratch for the diff, kept as a member so a tick with ten thousand
     // contacts does not allocate one.
     std::vector<ContactPair> m_carried;

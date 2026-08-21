@@ -14,7 +14,13 @@
 local testing = require("@luaug/testing")
 
 local describe, it, expect = testing.describe, testing.it, testing.expect
-local afterEach = testing.afterEach
+local beforeEach, afterEach = testing.beforeEach, testing.afterEach
+
+local PhysicsService = game:GetService("PhysicsService")
+
+local function step(ticks: number)
+    task.wait(ticks * PhysicsService.FixedTimestep)
+end
 
 local spawned: { Instance } = {}
 local connections: { Connection } = {}
@@ -175,5 +181,99 @@ describe("TouchEnded", function()
         crate:Destroy()
         task.wait(0.5)
         expect(ended):ToBe(0)
+    end)
+end)
+
+describe("Touched and a CharacterBody", function()
+    local ground: Part = nil :: any
+    local pad: Part = nil :: any
+    local character: CharacterBody = nil :: any
+
+    beforeEach(function()
+        ground = Instance.new("Part")
+        ground.Name = "CharacterGround"
+        ground.Size = vector.create(20, 1, 20)
+        ground.Position = vector.create(0, 0, 0)
+        ground.Anchored = true
+        ground.Parent = workspace
+
+        pad = Instance.new("Part")
+        pad.Name = "CharacterPad"
+        pad.Size = vector.create(6, 0.4, 6)
+        pad.Position = vector.create(0, 0.7, -8)
+        pad.Anchored = true
+        pad.Parent = workspace
+
+        character = Instance.new("CharacterBody")
+        character.Name = "Walker"
+        character.Size = vector.create(2, 4, 2)
+        character.Position = vector.create(0, 3, 0)
+        -- Slow on purpose: at the default speed a character crosses a six-metre
+        -- pad in a quarter of a second, and a case that asserts "on the pad"
+        -- after a fixed number of ticks would be asserting about the tick count.
+        character.WalkSpeed = 4
+        character.Parent = workspace
+    end)
+
+    afterEach(function()
+        character:Destroy()
+        pad:Destroy()
+        ground:Destroy()
+    end)
+
+    it("fires for the surface under a character's feet", function()
+        -- A checkpoint pad you walk onto and a hazard you step on are the two
+        -- things every obby is made of, and both are ground contacts. Before
+        -- M6 a `CharacterBody` fired nothing at all: the contact listener only
+        -- sees rigid-body pairs and a character controller is not one.
+        local touchedBy: BasePart? = nil
+        local connection = pad.Touched:Connect(function(other: BasePart)
+            touchedBy = other
+        end)
+
+        for _ = 1, 90 do
+            character:Move(vector.create(0, 0, -1))
+            step(1)
+        end
+
+        expect(touchedBy):ToBe(character :: any)
+        connection:Disconnect()
+    end)
+
+    it("fires TouchEnded when the character walks off", function()
+        local ended = 0
+        local connection = pad.TouchEnded:Connect(function()
+            ended += 1
+        end)
+
+        for _ = 1, 90 do
+            character:Move(vector.create(0, 0, -1))
+            step(1)
+        end
+        expect(ended):ToBe(0)
+
+        for _ = 1, 120 do
+            character:Move(vector.create(0, 0, -1))
+            step(1)
+        end
+        expect(ended):ToBe(1)
+        connection:Disconnect()
+    end)
+
+    it("fires on the character too, because Touched is a fact about each part", function()
+        local touchedPad = false
+        local connection = character.Touched:Connect(function(other: BasePart)
+            if other == (pad :: BasePart) then
+                touchedPad = true
+            end
+        end)
+
+        for _ = 1, 90 do
+            character:Move(vector.create(0, 0, -1))
+            step(1)
+        end
+
+        expect(touchedPad):ToBe(true)
+        connection:Disconnect()
     end)
 end)

@@ -151,6 +151,10 @@ public:
     // whatever is parented under it is in the world and whatever is not, is not.
     [[nodiscard]] core::InstanceId workspace() const noexcept { return m_workspace; }
 
+    // `game`. Where an attribute a whole run has to agree about lives -- the
+    // conformance report's counters, and the flag a replay scenario names.
+    [[nodiscard]] core::InstanceId dataModel() const noexcept;
+
     // The `Lighting` service, which carries the environment `extract` reads.
     // Invalid in a build with no render module, which is not an error.
     [[nodiscard]] core::InstanceId lighting() const noexcept { return m_lighting; }

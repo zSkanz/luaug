@@ -60,6 +60,16 @@ struct ReplayScenario
     // the gate's 10,000 ticks at every 500 is 20 samples.
     u64 checkpointEvery = 1;
 
+    // An attribute the DataModel must carry, truthy, when the last tick has run.
+    // Empty for a scenario that only checks determinism.
+    //
+    // **This is what turns a replay into an END-TO-END gate.** M6's own gate is
+    // "an input replay of a full obby run completes to the finish flag", and a
+    // hash comparison cannot say whether the flag was reached -- three runs that
+    // all fall in the same hole agree perfectly. The scenario names the fact it
+    // is really asserting, and the game sets it.
+    std::string requireAttribute;
+
     // Read from `inputs.txt` beside the manifest, and empty when there is none.
     // Sorted by tick, and stable within a tick: the order two keys change in on
     // the same tick is part of the recording (R10).
