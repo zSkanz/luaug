@@ -931,26 +931,6 @@
       ]
     },
     {
-      "Name": "KeyboardService",
-      "Extends": "Instance",
-      "Tags": ["DevOnly", "NotCreatable", "Service"],
-      "Properties": [],
-      "Methods": [
-        {
-          "Name": "IsKeyDown",
-          "Parameters": [
-            {
-              "Name": "key",
-              "Type": "string"
-            }
-          ],
-          "Returns": ["boolean"],
-          "ThreadSafety": "Unsafe"
-        }
-      ],
-      "Events": []
-    },
-    {
       "Name": "Lighting",
       "Extends": "Instance",
       "Tags": ["NotCreatable", "Service"],

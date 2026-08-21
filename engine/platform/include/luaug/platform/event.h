@@ -126,8 +126,10 @@ enum class Key : u16
     Count,
 };
 
-// The US-layout legend, which is the name a script uses and the name this enum
-// is written in. Empty for `Unknown` and for `Count`.
+// The key's name -- its US-layout legend, except for the digits, which are
+// `Digit0` rather than `0` because these names share one spelling space with
+// the mouse and gamepad tables below and with `Enum.KeyCode`'s items. Empty for
+// `Unknown` and for `Count`.
 [[nodiscard]] std::string_view keyName(Key key) noexcept;
 
 // The reverse, case-sensitive. `Key::Unknown` for a name no key carries.

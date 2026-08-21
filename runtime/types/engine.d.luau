@@ -693,7 +693,6 @@ declare extern type DataModel extends Instance with
     function GetService(self, name: "TagService"): TagService
     function GetService(self, name: "DebugService"): DebugService
     function GetService(self, name: "HotReloadService"): HotReloadService
-    function GetService(self, name: "KeyboardService"): KeyboardService
     function GetService(self, name: "PhysicsService"): PhysicsService
     function GetService(self, name: "InputService"): InputService
     --- Returns the service of this name, creating it on the first request. Services are singletons:
@@ -887,14 +886,6 @@ declare extern type HotReloadService extends Instance with
     --- script knows to look for what it left behind instead of building it again -- the instances
     --- tagged `PreserveOnReload` are already in the tree by the time any entry script runs.
     function IsReload(self): boolean
-end
-
-declare extern type KeyboardService extends Instance with
-    --- Whether a key is held right now, named by its US-layout legend: "W", "Space", "LeftShift". A
-    --- name no key carries is false rather than an error, because a scaffold that raises on a typo
-    --- teaches nothing the IAS will not re-teach. Reads the snapshot the current simulation tick was
-    --- given, so two reads inside one tick agree and a replay reproduces both.
-    function IsKeyDown(self, key: string): boolean
 end
 
 declare extern type PhysicsService extends Instance with

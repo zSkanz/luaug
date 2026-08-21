@@ -522,10 +522,13 @@ TEST_CASE("the boot-time method cross-check reports both directions")
     // `HotReloadService` brought `SaveState`, `LoadState` and `IsReload`; 56
     // once M5 brought `ApplyImpulse`, `CharacterBody:Move`/`Jump`, the three
     // `PhysicsService` collision-group calls, the three `Workspace` queries and
-    // `KeyboardService:IsKeyDown`; 59 once M6 brought `InputAction:GetState`,
-    // `InputAction:GetPreferredBinding` and `InputService:GetPointerPosition`.
-    CHECK(coverage.declared == 59);
-    CHECK(coverage.bound == 59);
+    // `KeyboardService:IsKeyDown`; 58 at M6, which added
+    // `InputAction:GetState`, `InputAction:GetPreferredBinding` and
+    // `InputService:GetPointerPosition` and DELETED `KeyboardService` -- the
+    // scaffold M5 tagged `DevOnly` so that its removal would be structural
+    // rather than a promise. This number going down by one is that removal.
+    CHECK(coverage.declared == 58);
+    CHECK(coverage.bound == 58);
     CHECK(coverage.declaredWithoutBinding == 0);
 }
 

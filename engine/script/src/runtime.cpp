@@ -202,12 +202,6 @@ void ScriptRuntime::setPhysics(scene::PhysicsSync* physics)
     m_impl->services.physics = physics;
 }
 
-void ScriptRuntime::setKeyboard(std::span<const bool> down)
-{
-    const usize count = std::min(down.size(), m_impl->services.keyboard.size());
-    std::copy_n(down.begin(), count, m_impl->services.keyboard.begin());
-}
-
 void ScriptRuntime::setReloadState(ReloadState* state)
 {
     if (state != nullptr)

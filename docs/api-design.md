@@ -249,27 +249,20 @@ tree *is* the API.
 
 **`HotReloadService`** — dev builds only (§3).
 
-**`KeyboardService`** — dev builds only, and **for one milestone**. Direct
-keyboard polling: `IsKeyDown(key: string) → boolean`, named by the US-layout
-legend (`"W"`, `"Space"`, `"LeftShift"`). A name no key carries is `false`
-rather than an error.
+**`KeyboardService` existed for exactly one milestone and is gone.** M5 shipped
+it as a `DevOnly` scaffold — direct keyboard polling — because that milestone
+had a character somebody had to steer and the Input Action System did not land
+until M6. The `DevOnly` tag was the point: it meant a shipping build never
+contained it, so its removal would be structural rather than a promise. M6
+removed it, and the class is absent from the IDL, from the generated
+definitions, from the api-dump and from the binary. ADR 0029's "the only input
+model" is now a property of the code.
 
-It exists because M5 ships a character somebody has to be able to steer and the
-Input Action System does not land until M6, and ADR 0029 makes the IAS the only
-input model — so it is tagged `DevOnly`, which means a shipping build does not
-contain it and its removal is structural rather than a promise. Migrating
-`examples/03-physics-playground` off it is an M6 gate item.
-
-The key is a **string** rather than an `Enum.KeyCode` deliberately.
-`Enum.KeyCode`'s full list — keys, mouse, gamepad — belongs to the IAS, where
-it is designed once with the whole list in front of it; a third of it shipped
-here would fix item values for a surface nobody has designed yet. A
-stringly-typed scaffold also cannot be mistaken for the real API.
-
-What it reads is the keyboard **as of the current simulation tick**, not the
-device: two polls inside one tick agree, and a recorded input stream can hand
-the same answers back with no keyboard attached — which is what the M5
-determinism gate replays.
+The scaffold's one lasting consequence is a naming one, and it is worth knowing
+if you read a recorded input stream from M5: the key names it used are the same
+names `Enum.KeyCode`'s items carry, because `platform`, the recorded stream and
+the enum are deliberately one spelling space. The digits changed spelling
+(`"0"` became `Digit0`) when that space was unified.
 
 **Reserved meanings, not implemented in v1** (do not squat them): the service
 names `Players`, `NetworkService`, `ReplicationService` and

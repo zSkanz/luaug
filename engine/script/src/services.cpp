@@ -685,25 +685,6 @@ int workspaceGetBodiesInBox(lua_State* L)
     return 1;
 }
 
-// --- KeyboardService (M5 scaffold) -------------------------------------------
-
-int keyboardIsKeyDown(lua_State* L)
-{
-    (void)checkInstance(L, 1);
-    size_t length = 0;
-    const char* text = luaL_checklstring(L, 2, &length);
-
-    const platform::Key key = platform::keyFromName(std::string_view{text, length});
-    if (key == platform::Key::Unknown) {
-        // A name no key carries is false rather than an error: a scaffold that
-        // raises on a typo teaches a lesson the IAS will re-teach differently.
-        lua_pushboolean(L, 0);
-        return 1;
-    }
-    lua_pushboolean(L, services(L).keyboard[static_cast<usize>(key)] ? 1 : 0);
-    return 1;
-}
-
 // --- InputService and InputAction (M6) ---------------------------------------
 
 int inputActionGetState(lua_State* L)
@@ -811,8 +792,6 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"HotReloadService", "SaveState", hotReloadSaveState},
     {"HotReloadService", "LoadState", hotReloadLoadState},
     {"HotReloadService", "IsReload", hotReloadIsReload},
-
-    {"KeyboardService", "IsKeyDown", keyboardIsKeyDown},
 
     {"InputAction", "GetState", inputActionGetState},
     {"InputAction", "GetPreferredBinding", inputActionGetPreferredBinding},

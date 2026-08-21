@@ -406,12 +406,6 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
     render::RenderWorld snapshot;
 
-    // The keyboard the sim ticks read (M5's scaffold; api-design.md §2.1's
-    // `KeyboardService`). Held across frames because a key stays down between
-    // the event that pressed it and the one that released it, and handed to the
-    // host BEFORE the ticks so that every tick this frame reads one snapshot.
-    std::array<bool, static_cast<usize>(platform::Key::Count)> keyboard{};
-
     auto headlessStepNs = static_cast<u64>(std::ceil(scheduler.timing().fixedDt * kNanosPerSecond));
     bool quit = false;
 
@@ -614,21 +608,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             for (const platform::Event& event : events) {
                 if (event.type == platform::EventType::Quit || event.type == platform::EventType::WindowCloseRequested)
                     quit = true;
-
-                // Accumulated rather than replaced: a key stays down between
-                // the press and the release, and the snapshot the next frame's
-                // ticks read is the accumulated state rather than this frame's
-                // events.
-                if (event.key != platform::Key::Unknown &&
-                    (event.type == platform::EventType::KeyDown || event.type == platform::EventType::KeyUp)) {
-                    keyboard[static_cast<usize>(event.key)] = event.type == platform::EventType::KeyDown;
-                }
             }
-            host->setKeyboard(keyboard);
-            // The Input Action System reads the same events, from the same
-            // pump, on the same frame. The M5 scaffold above it is what M6's
-            // gate deletes; until it does, the two coexist and neither reads a
-            // device the other cannot see.
+
+            // The Input Action System folds this frame's events into the device
+            // snapshot the ticks below read. Accumulated rather than replaced,
+            // because a key stays down between the press and the release, and
+            // handed over BEFORE the ticks so that every tick this frame sees
+            // one snapshot.
             host->pumpInput(events);
 
             // After the pump and with the span it returned: the overlay reads

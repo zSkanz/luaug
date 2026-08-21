@@ -32,11 +32,20 @@ using core::u64;
 // could be steered. A bot that calls `Move` directly proves the simulation is
 // deterministic and proves nothing about the path a keystroke takes to reach
 // it; this replays the keystroke.
+// One recorded transition. `keyCode` is an `Enum.KeyCode` value, which spans
+// the keyboard, the mouse and the gamepad -- M5 recorded `platform::Key` alone,
+// because the keyboard scaffold was the only path input had.
+//
+// An analogue line sets `axis` instead of a press: `900 = LeftStickX -0.5`.
+// Both shapes are one struct because a recording is read in tick order and a
+// second vector would have to be merged back into that order anyway.
 struct ReplayInput
 {
     u64 tick = 0;
-    platform::Key key = platform::Key::Unknown;
+    core::i32 keyCode = 0;
     bool down = false;
+    bool analog = false;
+    float value = 0.0f;
 };
 
 struct ReplayScenario

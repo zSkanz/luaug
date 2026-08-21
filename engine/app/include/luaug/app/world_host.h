@@ -150,12 +150,6 @@ public:
     // owns it because a hot reload rebuilds the world, and a simulation that
     // outlived the tree it mirrors would be holding bodies for parts that no
     // longer exist.
-    // The keyboard the next tick reads (M5's scaffold). The host owns the
-    // snapshot because it owns the event pump; the replay harness hands in a
-    // recorded one instead, which is the whole reason this is a setter rather
-    // than a device read inside the binding.
-    void setKeyboard(std::span<const bool> down);
-
     // The Input Action System (M6). The host owns it for the reason it owns the
     // physics mirror: `scene` cannot hold it without L3 depending on
     // `platform`, and a process-global would make two worlds in one process

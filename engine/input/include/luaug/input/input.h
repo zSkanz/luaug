@@ -35,6 +35,7 @@
 
 #include <array>
 #include <span>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -95,6 +96,20 @@ inline constexpr usize kKeyCodeCount = 94;
 // which is a choice `Enum.KeyCode`'s own doc states, because refusing at bind
 // time would let a rebinding UI hand the player an unusable option.
 [[nodiscard]] bool isAnalog(i32 keyCode) noexcept;
+
+// A `KeyCode` by the name `Enum.KeyCode` gives its item, and back. This is the
+// spelling a recorded input stream is written in -- `120 + Space` -- so that a
+// recording stays readable, stays reviewable as a diff, and stays valid across
+// a renumbering of the enum.
+//
+// The keyboard, mouse-button, gamepad-button and gamepad-axis names come from
+// `platform`'s own tables, which is why those tables and the enum are one
+// spelling space. The four this module adds are the ones no device event names:
+// `MouseMovement`, `MouseWheel`, `LeftThumbstick` and `RightThumbstick`.
+//
+// 0 for a name no item carries, and an empty view for `Unknown`.
+[[nodiscard]] i32 keyCodeFromName(std::string_view name) noexcept;
+[[nodiscard]] std::string_view keyCodeName(i32 keyCode) noexcept;
 
 // What the resolver reads. One frame's worth of device state, owned by the
 // system below and rebuilt by `pumpFrame`.

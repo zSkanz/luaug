@@ -17,13 +17,18 @@
 ---     capsule walks into.
 ---
 --- **Controls.** W/A/S/D walk relative to where the camera is looking, Space
---- jumps, Left/Right turn the camera, Up/Down raise and lower it. Every one of
---- them goes through `KeyboardService`, which is M5's scaffold and is replaced
---- by the Input Action System at M6 — that migration is an M6 gate item, and
---- this file is what it migrates.
+--- jumps, and the arrow keys or the right stick move the camera. Every one of
+--- them goes through the **Input Action System** (ADR 0029), which is the
+--- engine's only input path. It went through `KeyboardService` until M6 deleted
+--- that scaffold, and this file is the migration the M6 gate asks for.
+---
+--- Worth reading as an example rather than as plumbing: the two camera actions
+--- sit in their own context at `Enum.InputRate.Render`, because a camera should
+--- turn at the frame rate rather than at the tick rate, while movement and jump
+--- stay on `Simulation`, where the replay can see them (ADR 0039). That split
+--- is a property on a context, and it is the whole of what it costs.
 
 local DebugService = game:GetService("DebugService")
-local KeyboardService = game:GetService("KeyboardService")
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
 
@@ -146,23 +151,74 @@ Lighting.FogEnd = 320
 local cameraYaw = 0
 local cameraHeight = 7
 
-local function down(key: string): boolean
-    return KeyboardService:IsKeyDown(key)
-end
+-- Gameplay: the sim clock, which is where R10 holds and where the recorded
+-- input replay can see what the player did.
+local Gameplay = Instance.new("InputContext")
+Gameplay.Name = "Gameplay"
+Gameplay.Parent = workspace
+
+local MoveAction = Instance.new("InputAction")
+MoveAction.Name = "Move"
+MoveAction.Type = Enum.InputActionType.Direction2D
+MoveAction.Parent = Gameplay
+
+local MoveKeys = Instance.new("InputBinding")
+MoveKeys.Up = Enum.KeyCode.W
+MoveKeys.Down = Enum.KeyCode.S
+MoveKeys.Left = Enum.KeyCode.A
+MoveKeys.Right = Enum.KeyCode.D
+MoveKeys.DisplayName = "WASD"
+MoveKeys.Parent = MoveAction
+
+-- A second binding on the same action, and that is the point of the indirection:
+-- a stick and four keys are two ways to do one thing, not two code paths.
+local MoveStick = Instance.new("InputBinding")
+MoveStick.KeyCode = Enum.KeyCode.LeftThumbstick
+MoveStick.Parent = MoveAction
+
+local JumpAction = Instance.new("InputAction")
+JumpAction.Name = "Jump"
+JumpAction.Type = Enum.InputActionType.Bool
+JumpAction.Parent = Gameplay
+
+local JumpKey = Instance.new("InputBinding")
+JumpKey.KeyCode = Enum.KeyCode.Space
+JumpKey.DisplayName = "Space"
+JumpKey.Parent = JumpAction
+
+local JumpButton = Instance.new("InputBinding")
+JumpButton.KeyCode = Enum.KeyCode.ButtonSouth
+JumpButton.Parent = JumpAction
+
+-- The camera: the RENDER clock, because a camera that turned at the tick rate
+-- would step rather than sweep on a machine running above 60 fps.
+local CameraControls = Instance.new("InputContext")
+CameraControls.Name = "CameraControls"
+CameraControls.Rate = Enum.InputRate.Render
+CameraControls.Parent = workspace
+
+local TurnAction = Instance.new("InputAction")
+TurnAction.Name = "Turn"
+TurnAction.Type = Enum.InputActionType.Direction2D
+TurnAction.Parent = CameraControls
+
+local TurnKeys = Instance.new("InputBinding")
+TurnKeys.Up = Enum.KeyCode.Up
+TurnKeys.Down = Enum.KeyCode.Down
+TurnKeys.Left = Enum.KeyCode.Left
+TurnKeys.Right = Enum.KeyCode.Right
+TurnKeys.Parent = TurnAction
+
+local TurnStick = Instance.new("InputBinding")
+TurnStick.KeyCode = Enum.KeyCode.RightThumbstick
+TurnStick.Parent = TurnAction
 
 RunService.Heartbeat:Connect(function(dt: number)
-    if down("Left") then
-        cameraYaw += CameraTurnSpeed * dt
-    end
-    if down("Right") then
-        cameraYaw -= CameraTurnSpeed * dt
-    end
-    if down("Up") then
-        cameraHeight = math.min(CameraMaxHeight, cameraHeight + 6 * dt)
-    end
-    if down("Down") then
-        cameraHeight = math.max(CameraMinHeight, cameraHeight - 6 * dt)
-    end
+    -- +X turns left, +Y raises. One Direction2D action instead of four booleans,
+    -- which is what an action system buys even before anything is rebound.
+    local turn = TurnAction:GetState() :: Vector2
+    cameraYaw += CameraTurnSpeed * turn.X * dt
+    cameraHeight = math.clamp(cameraHeight + 6 * turn.Y * dt, CameraMinHeight, CameraMaxHeight)
 
     -- Forward is where the camera looks, flattened onto the ground plane: a
     -- character that walked into the sky because the camera was tilted up is
@@ -170,26 +226,17 @@ RunService.Heartbeat:Connect(function(dt: number)
     local forward = vector.create(-math.sin(cameraYaw), 0, -math.cos(cameraYaw))
     local right = vector.create(math.cos(cameraYaw), 0, -math.sin(cameraYaw))
 
-    local move = vector.zero
-    if down("W") then
-        move += forward
-    end
-    if down("S") then
-        move -= forward
-    end
-    if down("D") then
-        move += right
-    end
-    if down("A") then
-        move -= right
-    end
+    -- The action answers in screen space -- +Y forward, +X right -- and this is
+    -- the one line that maps it onto the ground plane the camera defines.
+    local axis = MoveAction:GetState() :: Vector2
+    local move = forward * axis.Y + right * axis.X
 
     -- Normalised so that walking diagonally is not faster than walking
     -- straight, which is the oldest bug in this shape of code.
     if vector.magnitude(move) > 0.001 then
         character:Move(vector.normalize(move))
     end
-    if down("Space") then
+    if JumpAction:GetState() :: boolean then
         character:Jump()
     end
 

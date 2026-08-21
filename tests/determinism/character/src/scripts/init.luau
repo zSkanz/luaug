@@ -11,15 +11,16 @@
 --- **Every input comes from `inputs.txt` beside the manifest.** That is the
 --- difference between this and a bot that calls `Move` directly: a bot proves
 --- the simulation is deterministic and proves nothing about the path a keystroke
---- takes to reach it. The recording drives `KeyboardService`, which is what a
---- player's keyboard drives.
+--- takes to reach it. The recording drives the Input Action System -- the same
+--- resolver, the same contexts, the same snapshot a real keyboard produces.
+--- It drove `KeyboardService` until M6 deleted that scaffold, and the recording
+--- did not change: the names in `inputs.txt` are the same names.
 ---
 --- The assertions are `error` calls, and the replay harness fails a run that
 --- logged one. That is not a coincidence -- the harness counts errors precisely
 --- so a scenario cannot die on its first tick and have its emptiness recorded
 --- as a golden.
 
-local KeyboardService = game:GetService("KeyboardService")
 local RunService = game:GetService("RunService")
 
 local Ground = Color3.fromRGB(96, 104, 96)
@@ -135,30 +136,48 @@ local checks: { Check } = {
     },
 }
 
+-- The Input Action System, built exactly as a game builds it: one context, two
+-- actions, one binding each. Nothing here is test-only -- that is the point of
+-- migrating this scene rather than leaving it on a scaffold.
+local Controls = Instance.new("InputContext")
+Controls.Name = "Controls"
+Controls.Parent = workspace
+
+local MoveAction = Instance.new("InputAction")
+MoveAction.Name = "Move"
+MoveAction.Type = Enum.InputActionType.Direction2D
+MoveAction.Parent = Controls
+
+local MoveKeys = Instance.new("InputBinding")
+MoveKeys.Up = Enum.KeyCode.W
+MoveKeys.Down = Enum.KeyCode.S
+MoveKeys.Left = Enum.KeyCode.A
+MoveKeys.Right = Enum.KeyCode.D
+MoveKeys.Parent = MoveAction
+
+local JumpAction = Instance.new("InputAction")
+JumpAction.Name = "Jump"
+JumpAction.Type = Enum.InputActionType.Bool
+JumpAction.Parent = Controls
+
+local JumpKey = Instance.new("InputBinding")
+JumpKey.KeyCode = Enum.KeyCode.Space
+JumpKey.Parent = JumpAction
+
 local tick = 0
 
 RunService.Heartbeat:Connect(function()
     tick += 1
 
-    -- The recording drives these, and nothing else does.
-    local move = vector.zero
-    if KeyboardService:IsKeyDown("W") then
-        move += vector.create(0, 0, 1)
-    end
-    if KeyboardService:IsKeyDown("S") then
-        move += vector.create(0, 0, -1)
-    end
-    if KeyboardService:IsKeyDown("D") then
-        move += vector.create(1, 0, 0)
-    end
-    if KeyboardService:IsKeyDown("A") then
-        move += vector.create(-1, 0, 0)
-    end
-
+    -- The recording drives these, and nothing else does. The action's +Y is
+    -- forward, which is +Z in this world -- the one place a game has to map the
+    -- screen-space axis onto its own ground plane.
+    local axis = MoveAction:GetState() :: Vector2
+    local move = vector.create(axis.X, 0, axis.Y)
     if vector.magnitude(move) > 0.001 then
         character:Move(vector.normalize(move))
     end
-    if KeyboardService:IsKeyDown("Space") then
+    if JumpAction:GetState() :: boolean then
         character:Jump()
     end
 

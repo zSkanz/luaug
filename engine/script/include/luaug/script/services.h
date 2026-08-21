@@ -153,15 +153,6 @@ public:
     // which is the same answer an empty world gives -- so every reader checks
     // rather than assuming.
     scene::PhysicsSync* physics = nullptr;
-
-    // The keyboard as of the current simulation tick (M5's scaffold; see
-    // `KeyboardService` in api-design.md §2.1). A SNAPSHOT rather than a live
-    // device read: two polls inside one tick must agree, and a replay must be
-    // able to hand the same answer back without a keyboard attached.
-    //
-    // Indexed by `platform::Key`. Sized from the enum's own `Count`, so adding
-    // a key does not leave an array somebody has to remember to grow.
-    std::array<bool, static_cast<usize>(platform::Key::Count)> keyboard{};
 };
 
 // Creates `game` and the two services that exist from boot, installs the

@@ -20,10 +20,11 @@ luaug-host examples/03-physics-playground --headless --frames=180 --exit --scree
 | `Left` `Right` | turn the camera |
 | `Up` `Down` | raise and lower it |
 
-Every one of them goes through **`KeyboardService`**, which is M5's scaffold and
-exists for exactly one milestone. ADR 0029 makes the Input Action System the
-only input model; this service is tagged `DevOnly` so it cannot reach a shipped
-game, and migrating this file to the IAS is an M6 gate item.
+Every one of them goes through the **Input Action System** (ADR 0029), which
+is the engine's only input path: one `InputContext` on the simulation clock
+for movement and jump, and a second at `Enum.InputRate.Render` for the camera,
+so it sweeps at the frame rate rather than stepping at the tick rate. Both the
+keyboard and a gamepad are bound, on the same actions.
 
 ## What it is showing
 

@@ -538,11 +538,6 @@ void WorldHost::tick()
     m_runtime->drain(core::Phase::Heartbeat);
 }
 
-void WorldHost::setKeyboard(std::span<const bool> down)
-{
-    m_runtime->setKeyboard(down);
-}
-
 void WorldHost::pumpInput(std::span<const platform::Event> events)
 {
     m_input.pumpFrame(events);

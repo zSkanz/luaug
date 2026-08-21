@@ -151,10 +151,16 @@ Key translateScancode(SDL_Scancode scancode) noexcept
 }
 
 // One table, walked in both directions. Written out rather than derived from
-// the enumerator names, because the legend and the identifier differ for the
-// digits -- `Digit0` is legend "0" -- and because a table a compiler cannot
-// check is one a test has to: `platform_tests` walks every enumerator and
-// requires a round trip through both functions.
+// the enumerator names, because a table a compiler cannot check is one a test
+// has to: `platform_tests` walks every enumerator and requires a round trip
+// through both functions.
+//
+// The digits are `Digit0` rather than `0`, which is the enumerator's name and
+// not the key's legend. M6 changed them: these names, the mouse and gamepad
+// names beside them, and `Enum.KeyCode`'s items are ONE spelling space -- a
+// recorded input stream is written in it, and `input` resolves a name to a
+// KeyCode by walking these tables. A legend that differed from the item name
+// for ten of the ninety-four would have meant a second table to keep in step.
 struct KeyNaming
 {
     Key key;
@@ -201,16 +207,16 @@ constexpr KeyNaming KeyNames[] = {
     {Key::X, "X"},
     {Key::Y, "Y"},
     {Key::Z, "Z"},
-    {Key::Digit0, "0"},
-    {Key::Digit1, "1"},
-    {Key::Digit2, "2"},
-    {Key::Digit3, "3"},
-    {Key::Digit4, "4"},
-    {Key::Digit5, "5"},
-    {Key::Digit6, "6"},
-    {Key::Digit7, "7"},
-    {Key::Digit8, "8"},
-    {Key::Digit9, "9"},
+    {Key::Digit0, "Digit0"},
+    {Key::Digit1, "Digit1"},
+    {Key::Digit2, "Digit2"},
+    {Key::Digit3, "Digit3"},
+    {Key::Digit4, "Digit4"},
+    {Key::Digit5, "Digit5"},
+    {Key::Digit6, "Digit6"},
+    {Key::Digit7, "Digit7"},
+    {Key::Digit8, "Digit8"},
+    {Key::Digit9, "Digit9"},
     {Key::Space, "Space"},
     {Key::Return, "Return"},
     {Key::Tab, "Tab"},

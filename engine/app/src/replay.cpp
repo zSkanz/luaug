@@ -4,6 +4,7 @@
 #include "luaug/core/json.h"
 #include "luaug/core/log.h"
 #include "luaug/core/text_key.h"
+#include "luaug/input/input.h"
 
 #include <algorithm>
 #include <array>
@@ -147,8 +148,23 @@ std::optional<core::EngineError> loadScenario(const std::filesystem::path& direc
             ReplayInput input;
             input.tick = static_cast<u64>(std::strtoull(tickText.c_str(), nullptr, 10));
             input.down = edge == "+";
-            input.key = platform::keyFromName(keyName);
-            if (input.key == platform::Key::Unknown || (edge != "+" && edge != "-")) {
+            input.analog = edge == "=";
+            input.keyCode = input::keyCodeFromName(keyName);
+
+            // An analogue line carries a fourth field. `900 = LeftStickX -0.5`
+            // is a stick held half left for as long as the recording says --
+            // held, like a key, because an axis has a value rather than an
+            // edge.
+            bool wellFormed = input.keyCode != 0 && (edge == "+" || edge == "-" || input.analog);
+            if (input.analog) {
+                std::string valueText;
+                if (fields >> valueText)
+                    input.value = std::strtof(valueText.c_str(), nullptr);
+                else
+                    wellFormed = false;
+            }
+
+            if (!wellFormed) {
                 // Refused rather than skipped. A recording with a typo in it
                 // would otherwise replay as a different recording and still
                 // pass, which is the failure mode this whole harness exists to
@@ -211,19 +227,30 @@ std::optional<core::EngineError> runScenario(const ReplayScenario& scenario, Rep
     // "the scenario simulated it differently", and those have different causes.
     out.checkpoints.push_back({0, host.world().worldHash()});
 
-    // The recorded keyboard, applied before each tick and held between them --
-    // a key stays down until the recording says it came up.
-    std::array<bool, static_cast<usize>(platform::Key::Count)> keyboard{};
+    // The recorded device, applied before each tick and held between them -- a
+    // key stays down until the recording says it came up, and an axis keeps its
+    // value until the recording moves it.
+    //
+    // Handed to the Input Action System as a SNAPSHOT rather than pumped as
+    // events, which is the seam `InputSystem::setSnapshot` exists for: what the
+    // replay drives is the state a tick would have seen, so everything from the
+    // resolver down runs exactly as it does with a keyboard attached. That is
+    // what makes this a replay of INPUT rather than of the API underneath it.
+    input::DeviceState device;
     usize nextInput = 0;
 
     for (u64 tick = 1; tick <= scenario.ticks; ++tick) {
         while (nextInput < scenario.inputs.size() && scenario.inputs[nextInput].tick <= tick) {
-            const ReplayInput& input = scenario.inputs[nextInput];
-            keyboard[static_cast<usize>(input.key)] = input.down;
+            const ReplayInput& recorded = scenario.inputs[nextInput];
+            const auto slot = static_cast<usize>(recorded.keyCode);
+            if (recorded.analog)
+                device.axis[slot] = recorded.value;
+            else
+                device.held[slot] = recorded.down;
             ++nextInput;
         }
         if (!scenario.inputs.empty())
-            host.setKeyboard(keyboard);
+            host.input().setSnapshot(device);
 
         host.tick();
         if (tick % scenario.checkpointEvery == 0 || tick == scenario.ticks)

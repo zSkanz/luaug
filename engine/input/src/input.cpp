@@ -116,6 +116,58 @@ bool isAnalog(i32 keyCode) noexcept
            keyCode == LeftThumbstick || keyCode == RightThumbstick;
 }
 
+// The four names no device event carries, so no `platform` table has them.
+// Indexed by KeyCode minus the block's first value, which is why they are laid
+// out as two pairs rather than as a map.
+constexpr std::string_view AnalogNames[] = {"MouseMovement", "MouseWheel"};
+constexpr std::string_view StickNames[] = {"LeftThumbstick", "RightThumbstick"};
+
+i32 keyCodeFromName(std::string_view name) noexcept
+{
+    if (name.empty())
+        return 0;
+
+    if (const platform::Key key = platform::keyFromName(name); key != platform::Key::Unknown)
+        return keyCodeOf(key);
+    if (const platform::MouseButton button = platform::mouseButtonFromName(name);
+        button != platform::MouseButton::Unknown) {
+        return keyCodeOf(button);
+    }
+    if (const platform::GamepadButton button = platform::gamepadButtonFromName(name);
+        button != platform::GamepadButton::Unknown) {
+        return keyCodeOf(button);
+    }
+    if (const platform::GamepadAxis axis = platform::gamepadAxisFromName(name);
+        axis != platform::GamepadAxis::Unknown) {
+        return keyCodeOf(axis);
+    }
+
+    for (i32 index = 0; index < 2; ++index) {
+        if (name == AnalogNames[index])
+            return MouseMovement + index;
+        if (name == StickNames[index])
+            return LeftThumbstick + index;
+    }
+    return 0;
+}
+
+std::string_view keyCodeName(i32 keyCode) noexcept
+{
+    if (inRange(keyCode, KeyboardFirst, KeyboardCount))
+        return platform::keyName(static_cast<platform::Key>(keyCode - KeyboardFirst + 1));
+    if (inRange(keyCode, MouseButtonFirst, MouseButtonCount))
+        return platform::mouseButtonName(static_cast<platform::MouseButton>(keyCode - MouseButtonFirst + 1));
+    if (inRange(keyCode, PadButtonFirst, PadButtonCount))
+        return platform::gamepadButtonName(static_cast<platform::GamepadButton>(keyCode - PadButtonFirst + 1));
+    if (inRange(keyCode, PadAxisFirst, PadAxisCount))
+        return platform::gamepadAxisName(static_cast<platform::GamepadAxis>(keyCode - PadAxisFirst + 1));
+    if (keyCode == MouseMovement || keyCode == MouseWheel)
+        return AnalogNames[keyCode - MouseMovement];
+    if (keyCode == LeftThumbstick || keyCode == RightThumbstick)
+        return StickNames[keyCode - LeftThumbstick];
+    return {};
+}
+
 void InputSystem::pumpFrame(std::span<const platform::Event> events)
 {
     for (const platform::Event& event : events) {
