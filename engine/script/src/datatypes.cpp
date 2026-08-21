@@ -1,6 +1,7 @@
 #include "luaug/script/datatypes.h"
 
 #include "luaug/scene/world.h"
+#include "luaug/script/animation.h"
 #include "luaug/script/instance_binding.h"
 #include "luaug/script/tweens.h"
 
@@ -1727,6 +1728,7 @@ void registerDatatypes(lua_State* L)
     registerQueryTypes(L, ctx, atoms);
     registerEnumTypes(L, ctx, atoms);
     registerTweenTypes(L);
+    registerAnimationTypes(L);
     registerVector(L);
 }
 

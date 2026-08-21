@@ -1620,6 +1620,35 @@ local Classes: { Schema.Class } = {
             },
         } :: { Schema.Event },
     },
+    {
+        Name = "AnimationPlayer",
+        Extends = "Instance",
+        Module = "render",
+        Doc = "Plays a skinned mesh's animation clips (§2.2). **Parent it to the `MeshPart` whose skeleton the "
+            .. "clips belong to** -- that is where it looks for them, and an `AnimationPlayer` parented "
+            .. "anywhere else finds nothing rather than guessing.\n\nIt stores nothing: the tracks are the "
+            .. "state, and each one is a handle a script holds rather than a child in the tree. Sampling "
+            .. "happens at `PreAnimation` on the SimClock, so a clip's position at a given tick is the same "
+            .. "in a replay as it was live.\n\nv1 is clip playback and linear blending -- no state machines, "
+            .. "no IK, no root motion (roadmap M6).",
+        Methods = {
+            {
+                Name = "LoadAnimation",
+                Parameters = { { Name = "content", Type = "Content" } },
+                Returns = { "AnimationTrack" },
+                ThreadSafety = "Unsafe",
+                Doc = "A track for one clip. Everything after a `#` is the clip's NAME inside the file, and a "
+                    .. "string with no `#` is a clip name in this player's own mesh -- so the common case is "
+                    .. '`player:LoadAnimation("Walk")`.\n\nA path before the `#` must be the mesh this player '
+                    .. "is under. v1 has no asset pipeline (M7 is where a clip becomes addressable on its "
+                    .. "own), so a clip exists only inside the file its skeleton came from, and a URN naming "
+                    .. "a different file loads nothing rather than playing the wrong rig.\n\n**Load a track "
+                    .. "once and keep it.** It always returns a track, even for a clip that is not there -- a "
+                    .. "mesh that has not finished loading would otherwise make an ordinary frame a nil index "
+                    .. "-- and every call is a handle the VM holds until the world goes away.",
+            },
+        } :: { Schema.Method },
+    },
 }
 
 local Definition: Schema.Definition = {

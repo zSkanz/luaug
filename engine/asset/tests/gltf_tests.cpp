@@ -925,7 +925,7 @@ TEST_CASE_FIXTURE(CatalogFixture, "gltf: a skinned mesh loads its skeleton, its 
     bool sawRoot = false;
     for (std::size_t vertex = 0; vertex < model.mesh.vertices.size(); ++vertex) {
         if (model.mesh.vertices[vertex].position.y < 0.5f) {
-            CHECK(model.skin[vertex].joints[0] == 0);
+            CHECK(static_cast<double>(model.skin[vertex].joints[0]) == doctest::Approx(0.0));
             CHECK(static_cast<double>(model.skin[vertex].weights[0]) == doctest::Approx(1.0));
             sawRoot = true;
         }

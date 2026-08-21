@@ -90,14 +90,24 @@ private:
         Transparent,
     };
 
+    // `skinned` is the pipeline a draw with a joint palette switches to. The
+    // caller sets the static one and this switches at most once per pass,
+    // because `extract` sorts by pipeline -- so a world with no skinned draw
+    // makes no extra call at all, which is what keeps M4's goldens byte-exact.
     void drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world, const MeshCache& meshes, const Mat4& viewProjection,
-                      Selection selection);
+                      rhi::PipelineHandle staticPipeline, rhi::PipelineHandle skinnedPipeline, Selection selection);
 
     bool valid_ = false;
     rhi::TextureFormat colorFormat_ = rhi::TextureFormat::Undefined;
 
     rhi::PipelineHandle shadowPipeline_{};
     rhi::PipelineHandle pbrPipeline_{};
+    // The skinned variants. Same shading, same state; what differs is the vertex
+    // input layout and one more uniform block, both of which are pipeline
+    // description rather than code (M6 brief, Decision 11).
+    rhi::PipelineHandle shadowSkinnedPipeline_{};
+    rhi::PipelineHandle pbrSkinnedPipeline_{};
+    rhi::PipelineHandle pbrSkinnedBlendPipeline_{};
     // The same shader as `pbrPipeline_`, differing only in state: source-alpha
     // blending and no depth write. A fragment's colour does not depend on which
     // pass drew it; only the order and the state do.
@@ -105,7 +115,7 @@ private:
     rhi::PipelineHandle skyPipeline_{};
     rhi::PipelineHandle tonemapPipeline_{};
 
-    rhi::ShaderHandle shaders_[8]{};
+    rhi::ShaderHandle shaders_[12]{};
     core::usize shaderCount_ = 0;
 
     rhi::TextureHandle hdr_{};
@@ -180,11 +190,18 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
     const rhi::ShaderHandle shadowFragment = load("shadow_depth", rhi::ShaderStage::Fragment);
     const rhi::ShaderHandle pbrVertex = load("pbr", rhi::ShaderStage::Vertex);
     const rhi::ShaderHandle pbrFragment = load("pbr", rhi::ShaderStage::Fragment);
+    const rhi::ShaderHandle pbrSkinnedVertex = load("pbr_skinned", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle pbrSkinnedFragment = load("pbr_skinned", rhi::ShaderStage::Fragment);
+    const rhi::ShaderHandle shadowSkinnedVertex = load("shadow_skinned", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle shadowSkinnedFragment = load("shadow_skinned", rhi::ShaderStage::Fragment);
     const rhi::ShaderHandle skyVertex = load("sky", rhi::ShaderStage::Vertex);
     const rhi::ShaderHandle skyFragment = load("sky", rhi::ShaderStage::Fragment);
     const rhi::ShaderHandle tonemapVertex = load("tonemap", rhi::ShaderStage::Vertex);
     const rhi::ShaderHandle tonemapFragment = load("tonemap", rhi::ShaderStage::Fragment);
 
+    if (!shadowSkinnedVertex.valid() || !shadowSkinnedFragment.valid() || !pbrSkinnedVertex.valid() ||
+        !pbrSkinnedFragment.valid())
+        return core::makeError(LUAUG_TR("render.err.shader_format_unknown"));
     if (!shadowVertex.valid() || !pbrVertex.valid() || !pbrFragment.valid() || !skyVertex.valid() ||
         !skyFragment.valid() || !tonemapVertex.valid() || !tonemapFragment.valid()) {
         destroy(device);
@@ -202,6 +219,31 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
     };
     const std::array<rhi::VertexBufferLayout, 1> buffers{
         rhi::VertexBufferLayout{.slot = 0, .strideBytes = 48},
+    };
+
+    // The skinned layouts: the same stream at slot 0 plus `asset::SkinVertex` at
+    // slot 1. The joint indices are `Float4` and not an integer format because
+    // `rhi::VertexFormat` has none and that enumeration is frozen (ADR 0037);
+    // model.h records what it costs.
+    const std::array<rhi::VertexBufferLayout, 2> skinnedBuffers{
+        rhi::VertexBufferLayout{.slot = 0, .strideBytes = 48},
+        rhi::VertexBufferLayout{.slot = 1, .strideBytes = 32},
+    };
+    const std::array<rhi::VertexAttribute, 6> skinnedAttributes{
+        rhi::VertexAttribute{.location = 0, .bufferSlot = 0, .format = rhi::VertexFormat::Float3, .offsetBytes = 0},
+        rhi::VertexAttribute{.location = 1, .bufferSlot = 0, .format = rhi::VertexFormat::Float3, .offsetBytes = 12},
+        rhi::VertexAttribute{.location = 2, .bufferSlot = 0, .format = rhi::VertexFormat::Float4, .offsetBytes = 24},
+        rhi::VertexAttribute{.location = 3, .bufferSlot = 0, .format = rhi::VertexFormat::Float2, .offsetBytes = 40},
+        rhi::VertexAttribute{.location = 4, .bufferSlot = 1, .format = rhi::VertexFormat::Float4, .offsetBytes = 0},
+        rhi::VertexAttribute{.location = 5, .bufferSlot = 1, .format = rhi::VertexFormat::Float4, .offsetBytes = 16},
+    };
+    // The shadow pass reads position and the skin stream and nothing else, so
+    // its joint and weight attributes are at locations 1 and 2 rather than 4 and
+    // 5 -- the numbers are the shader's declaration order, not the vertex's.
+    const std::array<rhi::VertexAttribute, 3> shadowSkinnedAttributes{
+        rhi::VertexAttribute{.location = 0, .bufferSlot = 0, .format = rhi::VertexFormat::Float3, .offsetBytes = 0},
+        rhi::VertexAttribute{.location = 1, .bufferSlot = 1, .format = rhi::VertexFormat::Float4, .offsetBytes = 0},
+        rhi::VertexAttribute{.location = 2, .bufferSlot = 1, .format = rhi::VertexFormat::Float4, .offsetBytes = 16},
     };
 
     const std::array<rhi::ColorTargetDesc, 1> hdrTarget{rhi::ColorTargetDesc{.format = kHdrFormat}};
@@ -255,6 +297,42 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
         .debugName = "pbr_blend",
     });
 
+    shadowSkinnedPipeline_ = device.createGraphicsPipeline({
+        .vertexShader = shadowSkinnedVertex,
+        .fragmentShader = shadowSkinnedFragment,
+        .vertexBuffers = skinnedBuffers,
+        .vertexAttributes = shadowSkinnedAttributes,
+        .rasterizer = {.cullMode = rhi::CullMode::Front},
+        .depthStencil = {.depthTest = true, .depthWrite = true, .depthCompare = rhi::CompareOp::LessOrEqual},
+        .colorTargets = {},
+        .depthStencilFormat = kShadowFormat,
+        .debugName = "shadow_skinned",
+    });
+
+    pbrSkinnedPipeline_ = device.createGraphicsPipeline({
+        .vertexShader = pbrSkinnedVertex,
+        .fragmentShader = pbrSkinnedFragment,
+        .vertexBuffers = skinnedBuffers,
+        .vertexAttributes = skinnedAttributes,
+        .rasterizer = {.cullMode = rhi::CullMode::Back},
+        .depthStencil = {.depthTest = true, .depthWrite = true, .depthCompare = rhi::CompareOp::LessOrEqual},
+        .colorTargets = hdrTarget,
+        .depthStencilFormat = kDepthFormat,
+        .debugName = "pbr_skinned",
+    });
+
+    pbrSkinnedBlendPipeline_ = device.createGraphicsPipeline({
+        .vertexShader = pbrSkinnedVertex,
+        .fragmentShader = pbrSkinnedFragment,
+        .vertexBuffers = skinnedBuffers,
+        .vertexAttributes = skinnedAttributes,
+        .rasterizer = {.cullMode = rhi::CullMode::Back},
+        .depthStencil = {.depthTest = true, .depthWrite = false, .depthCompare = rhi::CompareOp::LessOrEqual},
+        .colorTargets = hdrBlendTarget,
+        .depthStencilFormat = kDepthFormat,
+        .debugName = "pbr_skinned_blend",
+    });
+
     // The sky writes no depth and tests none: it is drawn first and everything
     // else covers it. Testing would need a depth value for a triangle that has
     // no position in the world.
@@ -277,7 +355,8 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
     });
 
     if (!shadowPipeline_.valid() || !pbrPipeline_.valid() || !pbrBlendPipeline_.valid() || !skyPipeline_.valid() ||
-        !tonemapPipeline_.valid()) {
+        !tonemapPipeline_.valid() || !shadowSkinnedPipeline_.valid() || !pbrSkinnedPipeline_.valid() ||
+        !pbrSkinnedBlendPipeline_.valid()) {
         destroy(device);
         return core::makeError(LUAUG_TR("render.err.pipeline_create_failed"));
     }
@@ -373,7 +452,8 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
     shaderCount_ = 0;
 
     for (rhi::PipelineHandle* pipeline :
-         {&shadowPipeline_, &pbrPipeline_, &pbrBlendPipeline_, &skyPipeline_, &tonemapPipeline_}) {
+         {&shadowPipeline_, &pbrPipeline_, &pbrBlendPipeline_, &skyPipeline_, &tonemapPipeline_,
+          &shadowSkinnedPipeline_, &pbrSkinnedPipeline_, &pbrSkinnedBlendPipeline_}) {
         if (pipeline->valid())
             device.destroy(*pipeline);
         *pipeline = {};
@@ -396,9 +476,11 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
 }
 
 void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world, const MeshCache& meshes,
-                                   const Mat4& viewProjection, Selection selection)
+                                   const Mat4& viewProjection, rhi::PipelineHandle staticPipeline,
+                                   rhi::PipelineHandle skinnedPipeline, Selection selection)
 {
     const bool shadowPass = selection == Selection::Shadow;
+    bool onSkinnedPipeline = false;
     // The draws arrive sorted (Decision 7), so this walks them in order and
     // never reorders. Grouping is `extract`'s job and re-deriving it here would
     // be the backend doing work bgfx would have to repeat.
@@ -423,6 +505,17 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
         const MeshSection& section = resolved->sections[draw.section];
         if (section.indexCount == 0)
             continue;
+
+        // A draw is skinned only if it has a palette AND the mesh carries the
+        // second stream. The two can disagree for exactly one frame -- a mesh
+        // whose file failed to load has no skin buffer while a track already
+        // exists -- and drawing that through the skinned pipeline would read an
+        // unbound vertex buffer.
+        const bool skinnedDraw = draw.boneCount > 0 && resolved->skin.valid() && skinnedPipeline.valid();
+        if (skinnedDraw != onSkinnedPipeline) {
+            cmd.setPipeline(skinnedDraw ? skinnedPipeline : staticPipeline);
+            onSkinnedPipeline = skinnedDraw;
+        }
 
         if (shadowPass) {
             const GpuShadowUniforms uniforms{viewProjection, draw.transform};
@@ -455,8 +548,24 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
             }
         }
 
-        const std::array<rhi::BufferHandle, 1> vertexBuffers{resolved->vertices};
-        cmd.bindVertexBuffers(0, vertexBuffers);
+        if (skinnedDraw) {
+            // The palette, one upload per draw. Per draw rather than per
+            // skeleton because `bindUniforms` is the only route the frozen RHI
+            // gives (ADR 0037) and it is scoped to the next draw -- which is why
+            // `kMaxSkinJoints` is a budget worth keeping small.
+            GpuSkinUniforms skin;
+            const u32 count = draw.boneCount < kMaxSkinJoints ? draw.boneCount : kMaxSkinJoints;
+            for (u32 index = 0; index < count; ++index)
+                skin.jointMatrices[index] = world.bones[draw.firstBone + index];
+            cmd.bindUniforms(rhi::ShaderStage::Vertex, 1, asBytes(&skin, sizeof(skin)));
+
+            const std::array<rhi::BufferHandle, 2> vertexBuffers{resolved->vertices, resolved->skin};
+            cmd.bindVertexBuffers(0, vertexBuffers);
+        }
+        else {
+            const std::array<rhi::BufferHandle, 1> vertexBuffers{resolved->vertices};
+            cmd.bindVertexBuffers(0, vertexBuffers);
+        }
         cmd.bindIndexBuffer(resolved->indices, rhi::IndexType::U32);
         cmd.drawIndexed(section.indexCount, 1, resolved->firstIndex + section.firstIndex, resolved->vertexOffset, 0);
     }
@@ -500,7 +609,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     cmd.setScissor(
         {.width = static_cast<core::i32>(kShadowResolution), .height = static_cast<core::i32>(kShadowResolution)});
     if (world.camera.valid)
-        drawGeometry(cmd, world, meshes, sunMatrix, Selection::Shadow);
+        drawGeometry(cmd, world, meshes, sunMatrix, shadowPipeline_, shadowSkinnedPipeline_, Selection::Shadow);
     cmd.endRenderPass();
     cmd.popDebugGroup();
 
@@ -579,7 +688,8 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
 
         cmd.setPipeline(pbrPipeline_);
         cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&frame, sizeof(frame)));
-        drawGeometry(cmd, world, meshes, world.camera.viewProjection, Selection::Opaque);
+        drawGeometry(cmd, world, meshes, world.camera.viewProjection, pbrPipeline_, pbrSkinnedPipeline_,
+                     Selection::Opaque);
 
         // Blended, after the opaque pass has filled depth, back to front. The
         // frame uniforms are still bound -- same block, same slot, same values
@@ -590,7 +700,8 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         // intersect each other sort wrongly at the pixels where they cross.
         // Order-independent transparency is not on the v1 list.
         cmd.setPipeline(pbrBlendPipeline_);
-        drawGeometry(cmd, world, meshes, world.camera.viewProjection, Selection::Transparent);
+        drawGeometry(cmd, world, meshes, world.camera.viewProjection, pbrBlendPipeline_, pbrSkinnedBlendPipeline_,
+                     Selection::Transparent);
     }
 
     cmd.endRenderPass();

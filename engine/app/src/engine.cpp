@@ -773,7 +773,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // flicker they cannot reproduce.
             meshCache.beginFrame(*device);
             if (renderer != nullptr && renderer->valid())
-                (void)meshLoader.sync(*device, *cmd, host->world(), host->workspace(), meshCache, meshLibrary);
+                (void)meshLoader.sync(*device, *cmd, host->world(), host->workspace(), meshCache, meshLibrary,
+                                      &host->skeletons());
 
             // Extraction happens once, at a known moment, from a world that is
             // between ticks (ADR 0027). Rendering never walks the ECS.
@@ -785,7 +786,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 targetHeight == 0 ? 1.0f : static_cast<f32>(targetWidth) / static_cast<f32>(targetHeight);
             const f32 shadowRadius = renderer != nullptr && renderer->valid() ? renderer->shadowRadius() : 0.0f;
             render::extract(host->world(), host->workspace(), host->lighting(), meshLibrary, aspect, shadowRadius,
-                            snapshot);
+                            host->animation(), snapshot);
             // The UI is laid out against the TARGET's size rather than the
             // window's: an offscreen render at 640x360 has to produce the
             // layout that resolution would, which is the whole of what the

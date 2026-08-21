@@ -149,6 +149,25 @@ struct GpuShadowUniforms
 
 static_assert(sizeof(GpuShadowUniforms) == 128, "GpuShadowUniforms is a cbuffer layout");
 
+// The most joints one skinned draw can be posed by. A budget rather than a limit
+// of the design, like `kMaxForwardLights`: the palette is a constant buffer and
+// a constant buffer has a size, so a rig with more joints than this draws in
+// bind pose for the ones past it. Sixty-four is generous for a humanoid -- a
+// game character is typically thirty to fifty -- and 4 KB is a comfortable push
+// on every backend. Raising it is one number here and one in `luaug_pbr.hlsli`.
+inline constexpr u32 kMaxSkinJoints = 64;
+
+// Vertex stage, `b1 space1`, for both skinned passes. `joint * inverseBind`
+// already combined, because that product is what a vertex multiplies by and
+// sending the two halves separately would send twice the bytes to do the same
+// multiply on the GPU.
+struct GpuSkinUniforms
+{
+    core::Mat4 jointMatrices[kMaxSkinJoints];
+};
+
+static_assert(sizeof(GpuSkinUniforms) == 64 * 64, "GpuSkinUniforms is a cbuffer layout; see luaug_pbr.hlsli");
+
 // Fragment stage, `b0 space3`, for the tonemap pass.
 struct GpuTonemapUniforms
 {

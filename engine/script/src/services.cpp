@@ -864,6 +864,8 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"InputAction", "GetPreferredBinding", inputActionGetPreferredBinding},
     {"InputService", "GetPointerPosition", inputServiceGetPointerPosition},
 
+    {"AnimationPlayer", "LoadAnimation", animationPlayerLoadAnimation},
+
     {"TweenService", "Create", tweenServiceCreate},
     {"TweenService", "GetValue", tweenServiceGetValue},
 

@@ -1,0 +1,185 @@
+// Skeletal animation: clip playback and linear blending (roadmap M6,
+// api-design.md §2.2's `AnimationPlayer` and `AnimationTrack`).
+//
+// It lives in `render` because `render` is the module that already has both
+// halves: `asset`, which owns the clips a glTF file carries, and `scene`, which
+// owns the tree the players sit in. `script` reaches it through
+// `scene::AnimationHost`, which is the `IPhysics3D*` arrangement one layer up.
+//
+// **Sampling is deterministic and runs at `PreAnimation`.** Track time, `Speed`
+// and `Weight` all advance on the SimClock; nothing here reads a wall clock, and
+// blending walks tracks in **load order** rather than in whatever order a
+// container hands them over -- R10 forbids the second, and two tracks at weight
+// 0.5 have to blend the same way on every run.
+//
+// v1 is clip playback and linear blending. No state machines, no IK, no root
+// motion and no additive or masked blending: the roadmap's words are "enough for
+// idle/walk/jump".
+#pragma once
+
+#include "luaug/asset/model.h"
+#include "luaug/core/id.h"
+#include "luaug/core/math.h"
+#include "luaug/core/name_atom.h"
+#include "luaug/scene/animation_host.h"
+
+#include <span>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+namespace luaug::scene {
+class World;
+}
+
+namespace luaug::render {
+
+using core::f32;
+using core::f64;
+using core::u32;
+using core::usize;
+
+// One loaded skeleton and its clips, keyed by the content URN the `MeshPart`
+// names. Populated by `MeshLoader` beside the GPU geometry, because the file is
+// read once and both halves come out of it.
+class SkeletonLibrary
+{
+public:
+    struct Entry
+    {
+        std::vector<asset::Joint> joints;
+        std::vector<asset::AnimationClip> clips;
+    };
+
+    void set(core::NameAtom content, Entry entry);
+    void clear() noexcept;
+
+    // Null for a URN nothing has loaded, or one whose file had no skeleton --
+    // which is most of them.
+    [[nodiscard]] const Entry* find(core::NameAtom content) const noexcept;
+
+private:
+    // Sorted by atom, like `MeshLibrary`, and for the same reason: R10 forbids
+    // an unordered container's iteration reaching observable output.
+    struct Slot
+    {
+        core::NameAtom content;
+        Entry entry;
+    };
+    std::vector<Slot> entries_;
+};
+
+// The pose one skinned mesh is in, ready for a draw. Model space, one matrix per
+// joint, `joint * inverseBind` already combined -- which is what a vertex shader
+// multiplies by and is therefore the only form worth storing.
+//
+// **Keyed by the `MeshPart`, not by the `AnimationPlayer`.** A pose is a
+// property of a skeleton, and the skeleton belongs to the mesh; two players
+// parented to one mesh are two sources blending into one pose, which is what
+// they look like on screen. It is also what lets `extract` ask for a pose with
+// the id it already has.
+struct Pose
+{
+    std::vector<core::Mat4> palette;
+};
+
+class AnimationSystem final : public scene::AnimationHost
+{
+public:
+    // The world and the library are references the system keeps: it is created
+    // by `app` after both exist and destroyed before either does, which is the
+    // same lifetime `PhysicsSync` has.
+    AnimationSystem(const scene::World& world, const SkeletonLibrary& skeletons);
+
+    [[nodiscard]] scene::TrackId createTrack(core::InstanceId player, std::string_view clip) override;
+    void play(scene::TrackId track, f32 fadeTime, f32 weight, f32 speed) override;
+    void stop(scene::TrackId track, f32 fadeTime) override;
+    void adjustWeight(scene::TrackId track, f32 weight, f32 fadeTime) override;
+    void adjustSpeed(scene::TrackId track, f32 speed) override;
+    void setLooped(scene::TrackId track, bool looped) override;
+    [[nodiscard]] scene::TrackState state(scene::TrackId track) const override;
+    void sample(f64 fixedDt) override;
+    [[nodiscard]] std::span<const scene::TrackId> drainEnded() override;
+    void retire(const scene::World& world) override;
+
+    // The pose of one `MeshPart`, or null for a mesh with no skeleton or nothing
+    // driving it. Read by the renderer; null means "draw it in bind pose", which
+    // is what an unanimated skinned mesh should look like.
+    [[nodiscard]] const Pose* pose(core::InstanceId meshPart) const noexcept;
+
+private:
+    struct Track
+    {
+        core::InstanceId player;
+        // The `MeshPart` the player was parented to, and the content URN of its
+        // skeleton -- both resolved once at creation. A player that is reparented
+        // or whose mesh changes content keeps playing against the rig the track
+        // was made for, which is honest: a different skeleton is a different rig,
+        // and a joint index means nothing across the two.
+        //
+        // It is also what lets `retire` find the pose of a player that has
+        // already been destroyed, when asking the tree is no longer possible.
+        core::InstanceId meshPart;
+        core::NameAtom content;
+        // Index into the entry's `clips`, or `NoClip`.
+        u32 clip = NoClip;
+        f64 time = 0.0;
+        f32 length = 0.0f;
+        f32 speed = 1.0f;
+        f32 weight = 1.0f;
+        // Where the weight is going and how long is left to get there. A target
+        // and a REMAINING time rather than a start/end pair, because
+        // `AdjustWeight` may retarget one mid-fade and a pair would then have to
+        // invent a new start -- and rather than a rate, because a rate has to be
+        // compared against the target to know when it has arrived and floating
+        // point makes that comparison a coin toss.
+        f32 targetWeight = 1.0f;
+        f64 fadeRemaining = 0.0;
+        bool looped = false;
+        bool playing = false;
+        // A non-looping clip that reached its end HOLDS its last frame until it
+        // is stopped or replayed. `playing` is already false by then -- the two
+        // are different questions, and answering the second with the first would
+        // snap a character back to bind pose for the one tick between `Ended`
+        // and the handler that reacts to it.
+        bool holding = false;
+        bool alive = true;
+    };
+
+    static constexpr u32 NoClip = 0xFFFFFFFFu;
+
+    void rebuildPose(core::InstanceId meshPart, const SkeletonLibrary::Entry& skeleton);
+
+    const scene::World* world_ = nullptr;
+    const SkeletonLibrary* skeletons_ = nullptr;
+
+    // Index 0 is never handed out, so a `TrackId` of 0 can mean "none" the way
+    // an invalid `InstanceId` does.
+    std::vector<Track> tracks_{Track{}};
+    std::vector<scene::TrackId> ended_;
+    std::vector<scene::TrackId> endedDrained_;
+
+    // One pose per skinned mesh that has tracks. Keyed rather than pooled because
+    // a `MeshPart` is an Instance and this is not scene's storage -- and because
+    // the count is a handful even in a crowd.
+    std::unordered_map<core::u64, Pose> poses_;
+
+    // Scratch, reused so a steady-state tick allocates nothing.
+    //
+    // The pose accumulates per COMPONENT rather than per joint transform,
+    // because a joint no channel drives has to keep its rest transform: one
+    // weighted average over all three would collapse an undriven joint to the
+    // origin, which is what makes a clip that animates one arm eat the other.
+    // The meshes whose pose this tick has to rebuild, collected before the walk
+    // so it is one pass per mesh rather than one per track.
+    std::vector<core::InstanceId> meshes_;
+    std::vector<core::DVec3> translation_;
+    std::vector<f32> rotation_;
+    std::vector<core::Vec3> scale_;
+    std::vector<f32> weightT_;
+    std::vector<f32> weightR_;
+    std::vector<f32> weightS_;
+    std::vector<core::Mat4> model_;
+};
+
+} // namespace luaug::render

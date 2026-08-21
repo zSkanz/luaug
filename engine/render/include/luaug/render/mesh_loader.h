@@ -17,6 +17,7 @@
 #pragma once
 
 #include "luaug/core/id.h"
+#include "luaug/render/animation.h"
 #include "luaug/render/mesh_cache.h"
 #include "luaug/render/render_world.h"
 #include "luaug/rhi/device.h"
@@ -44,8 +45,13 @@ public:
     // Returns how many meshes it loaded this call, which is zero on the frames
     // that matter -- a non-zero count every frame means something is asking for
     // a file that keeps failing, and the log will say which.
+    // `skeletons` is where a skinned file's joints and clips go. A pointer
+    // because a caller that draws but does not simulate -- a screenshot tool, a
+    // capture harness -- has nowhere to put them, and because the library
+    // belongs to the HOST rather than to the renderer: animation advances on the
+    // SimClock and has to run in a headless replay.
     core::u32 sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world, core::InstanceId root,
-                   MeshCache& cache, MeshLibrary& library);
+                   MeshCache& cache, MeshLibrary& library, SkeletonLibrary* skeletons = nullptr);
 
     // Releases every GPU resource this loader created. The cache's meshes are
     // the cache's to free; the textures are this one's.

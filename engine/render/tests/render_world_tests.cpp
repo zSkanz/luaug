@@ -152,7 +152,7 @@ TEST_CASE("extraction copies what rendering needs and nothing that can go stale"
     component->shape = 2;
 
     render::RenderWorld snapshot;
-    render::extract(fixture.world, root, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, snapshot);
+    render::extract(fixture.world, root, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, snapshot);
 
     REQUIRE(snapshot.parts.size() == 1);
     CHECK(snapshot.parts[0].cframe.position.x == 1.0);
@@ -175,7 +175,7 @@ TEST_CASE("only what is under the root is in the world")
     (void)nested;
 
     render::RenderWorld snapshot;
-    render::extract(fixture.world, root, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, snapshot);
+    render::extract(fixture.world, root, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, snapshot);
 
     // Whatever is parented under the root is in the world and whatever is not,
     // is not -- at any depth.
@@ -189,7 +189,7 @@ TEST_CASE("an invalid root extracts nothing rather than everything")
     (void)fixture.part(root);
 
     render::RenderWorld snapshot;
-    render::extract(fixture.world, {}, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, snapshot);
+    render::extract(fixture.world, {}, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, snapshot);
 
     // The failure mode this guards is a boot that has not created `Workspace`
     // yet drawing the whole world, unparented instances included.
@@ -203,13 +203,13 @@ TEST_CASE("extraction clears first, so one buffer serves every frame")
     (void)fixture.part(root);
 
     render::RenderWorld snapshot;
-    render::extract(fixture.world, root, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, snapshot);
-    render::extract(fixture.world, root, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, snapshot);
+    render::extract(fixture.world, root, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, snapshot);
+    render::extract(fixture.world, root, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, snapshot);
     CHECK(snapshot.parts.size() == 1);
 
     fixture.world.destroy(root);
     fixture.world.retireDestroyed();
-    render::extract(fixture.world, root, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, snapshot);
+    render::extract(fixture.world, root, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, snapshot);
     // A retired root is not a root: nothing resolves through it, so nothing is
     // in the world.
     CHECK(snapshot.parts.empty());
@@ -246,7 +246,7 @@ TEST_CASE("extraction resolves the camera, and answers nothing without one")
 
     SUBCASE("no camera means no view, and therefore no draws")
     {
-        render::extract(fixture.world, workspace, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, snapshot);
+        render::extract(fixture.world, workspace, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, snapshot);
         CHECK_FALSE(snapshot.camera.valid);
         CHECK(snapshot.draws.empty());
     }
@@ -255,7 +255,7 @@ TEST_CASE("extraction resolves the camera, and answers nothing without one")
     {
         const core::InstanceId camera = fixture.cameraLookingDownNegativeZ(workspace);
         fixture.world.destroy(camera);
-        render::extract(fixture.world, workspace, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, snapshot);
+        render::extract(fixture.world, workspace, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, snapshot);
         // The failure this guards is a renderer drawing through a camera whose
         // instance was retired, which is a stale InstanceId reaching the GPU.
         CHECK_FALSE(snapshot.camera.valid);
@@ -264,7 +264,7 @@ TEST_CASE("extraction resolves the camera, and answers nothing without one")
     SUBCASE("the origin is the camera position, so the GPU never sees a world coordinate")
     {
         (void)fixture.cameraLookingDownNegativeZ(workspace, core::DVec3{1000000.0, 0.0, 0.0});
-        render::extract(fixture.world, workspace, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, snapshot);
+        render::extract(fixture.world, workspace, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, snapshot);
         REQUIRE(snapshot.camera.valid);
         // ADR 0014's whole point: a million metres out, the matrices are still
         // small numbers, because the camera sits at the origin of its own space.
@@ -295,7 +295,7 @@ TEST_CASE("extraction culls what the camera cannot see, and keeps what it can")
     SUBCASE("in front of the camera is drawn")
     {
         (void)fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -10.0}, content);
-        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, snapshot);
+        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, snapshot);
         CHECK(snapshot.draws.size() == 1);
         CHECK(snapshot.candidateDraws == 1);
         CHECK(snapshot.culledDraws == 0);
@@ -304,7 +304,7 @@ TEST_CASE("extraction culls what the camera cannot see, and keeps what it can")
     SUBCASE("behind the camera is culled, and counted as culled")
     {
         (void)fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, 10.0}, content);
-        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, snapshot);
+        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, snapshot);
         CHECK(snapshot.draws.empty());
         // The counter is what makes "the culler did something" assertable. A
         // frame where candidates and culls are both zero is a frame the culler
@@ -317,7 +317,7 @@ TEST_CASE("extraction culls what the camera cannot see, and keeps what it can")
     {
         const core::NameAtom absent = fixture.atoms.intern("asset://absent.glb");
         (void)fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -10.0}, absent);
-        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, snapshot);
+        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, snapshot);
         CHECK(snapshot.draws.empty());
         // Not counted as a candidate either: nothing was ever a draw.
         CHECK(snapshot.candidateDraws == 0);
@@ -347,7 +347,7 @@ TEST_CASE("extraction orders draws near to far, stably")
     (void)fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -30.0}, content);
 
     render::RenderWorld snapshot;
-    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, snapshot);
+    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, snapshot);
     REQUIRE(snapshot.draws.size() == 3);
     CHECK(snapshot.draws[0].sortKey < snapshot.draws[1].sortKey);
     CHECK(snapshot.draws[1].sortKey < snapshot.draws[2].sortKey);
@@ -356,7 +356,7 @@ TEST_CASE("extraction orders draws near to far, stably")
 
     // R10: the same world extracted twice gives the same order, every time.
     render::RenderWorld again;
-    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, again);
+    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, again);
     REQUIRE(again.draws.size() == snapshot.draws.size());
     for (std::size_t index = 0; index < again.draws.size(); ++index)
         CHECK(again.draws[index].sortKey == snapshot.draws[index].sortKey);
@@ -385,7 +385,7 @@ TEST_CASE("extraction reads the environment from Lighting, and defaults without 
     component->geographicLatitude = 0.0f;
 
     render::RenderWorld snapshot;
-    render::extract(fixture.world, workspace, host, kNoMeshes, 1.0f, 0.0f, snapshot);
+    render::extract(fixture.world, workspace, host, kNoMeshes, 1.0f, 0.0f, nullptr, snapshot);
     // Six in the morning at the equator: the sun is due east, which is +X.
     CHECK(nearly(snapshot.environment.sunDirection.x, 1.0f));
     CHECK(nearly(snapshot.environment.sunDirection.y, 0.0f));
@@ -393,7 +393,7 @@ TEST_CASE("extraction reads the environment from Lighting, and defaults without 
     // An engine with no render module registers no Lighting at all, and an
     // invalid host must read as "use the defaults" rather than as an error.
     render::RenderWorld without;
-    render::extract(fixture.world, workspace, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, without);
+    render::extract(fixture.world, workspace, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, without);
     CHECK(nearly(without.environment.sunDirection.y, 1.0f));
 }
 
@@ -417,7 +417,7 @@ TEST_CASE("Transparency reaches the draw, picks the pass, and reverses the sort"
     SUBCASE("an opaque part is in the opaque pass with alpha one")
     {
         (void)fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -10.0}, content);
-        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, snapshot);
+        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, snapshot);
         REQUIRE(snapshot.draws.size() == 1);
         CHECK_FALSE(snapshot.draws[0].transparent);
         CHECK(nearly(snapshot.draws[0].alpha, 1.0f));
@@ -428,7 +428,7 @@ TEST_CASE("Transparency reaches the draw, picks the pass, and reverses the sort"
     {
         const core::InstanceId id = fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -10.0}, content);
         fixture.world.parts().find(id)->transparency = 0.25f;
-        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, snapshot);
+        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, snapshot);
         REQUIRE(snapshot.draws.size() == 1);
         CHECK(snapshot.draws[0].transparent);
         CHECK(nearly(snapshot.draws[0].alpha, 0.75f));
@@ -447,7 +447,7 @@ TEST_CASE("Transparency reaches the draw, picks the pass, and reverses the sort"
 
         const core::InstanceId id = fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -10.0}, content);
         fixture.world.parts().find(id)->transparency = 0.5f;
-        render::extract(fixture.world, workspace, core::InstanceId{}, library, 1.0f, 0.0f, snapshot);
+        render::extract(fixture.world, workspace, core::InstanceId{}, library, 1.0f, 0.0f, nullptr, snapshot);
         REQUIRE(snapshot.draws.size() == 1);
         // A glTF material can be see-through on its own and a script can make an
         // opaque mesh see-through; honouring one and not the other leaves a case
@@ -460,7 +460,7 @@ TEST_CASE("Transparency reaches the draw, picks the pass, and reverses the sort"
     {
         const core::InstanceId id = fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -10.0}, content);
         fixture.world.parts().find(id)->transparency = 1.0f;
-        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, snapshot);
+        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, snapshot);
         // Neither pass, and the debug path's existing rule: `submitWorld` skips
         // a part at `transparency >= 1`. A shadow cast by something nobody can
         // see is a defect whoever sees it reports.
@@ -475,7 +475,7 @@ TEST_CASE("Transparency reaches the draw, picks the pass, and reverses the sort"
         fixture.world.parts().find(near)->transparency = 0.4f;
         fixture.world.parts().find(far)->transparency = 0.6f;
 
-        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, snapshot);
+        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, snapshot);
         REQUIRE(snapshot.draws.size() == 3);
 
         // Opaque first, because the blended pass tests against the depth the
@@ -506,7 +506,7 @@ TEST_CASE("a MeshPart's wire box appears only while its mesh has not loaded")
 
     SUBCASE("nothing loaded: the box is the only sign the part exists")
     {
-        render::extract(fixture.world, workspace, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, snapshot);
+        render::extract(fixture.world, workspace, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, snapshot);
         CHECK(snapshot.parts.size() == 1);
         CHECK(snapshot.draws.empty());
     }
@@ -520,7 +520,7 @@ TEST_CASE("a MeshPart's wire box appears only while its mesh has not loaded")
         entry.sectionCount = 1;
         meshes.set(content, entry);
 
-        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, snapshot);
+        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, snapshot);
         // `Size` does not scale a mesh -- the file's bounds do -- so a wire box
         // built from it would be a unit cube describing nothing on screen.
         CHECK(snapshot.parts.empty());
@@ -531,7 +531,7 @@ TEST_CASE("a MeshPart's wire box appears only while its mesh has not loaded")
     {
         const core::InstanceId plain = fixture.world.create(fixture.partClass);
         (void)fixture.world.setParent(plain, workspace);
-        render::extract(fixture.world, workspace, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, snapshot);
+        render::extract(fixture.world, workspace, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, snapshot);
         CHECK(snapshot.parts.size() == 2);
     }
 }

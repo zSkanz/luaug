@@ -1,11 +1,13 @@
 #include "luaug/render/render_world.h"
 
 #include "luaug/render/lighting.h"
+#include "luaug/render/shader_types.h"
 #include "luaug/scene/components.h"
 #include "luaug/scene/world.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 
 namespace luaug::render {
 namespace {
@@ -100,7 +102,7 @@ const MeshLibrary::Entry* MeshLibrary::find(core::NameAtom content) const noexce
 }
 
 void extract(const scene::World& world, core::InstanceId root, core::InstanceId lightingHost, const MeshLibrary& meshes,
-             f32 viewportAspect, f32 shadowRadius, RenderWorld& out)
+             f32 viewportAspect, f32 shadowRadius, const AnimationSystem* animation, RenderWorld& out)
 {
     out.clear();
     if (!root.valid())
@@ -253,6 +255,23 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         const Mat4 transform = core::toRenderMatrix(part->cframe, origin);
         const AABB worldBounds = core::transformed(transform, entry->bounds);
 
+        // The palette, appended once per MESH rather than once per section: a
+        // character with four submeshes is one skeleton, and uploading its pose
+        // four times would be four times the bytes for one answer. Truncated at
+        // `kMaxSkinJoints` rather than refused -- a rig past the budget draws
+        // its first sixty-four joints posed and the rest in bind, which is
+        // visibly wrong in a way that says what happened.
+        u32 firstBone = 0;
+        u32 boneCount = 0;
+        if (animation != nullptr) {
+            if (const Pose* pose = animation->pose(id); pose != nullptr && !pose->palette.empty()) {
+                firstBone = static_cast<u32>(out.bones.size());
+                boneCount = static_cast<u32>(std::min<usize>(pose->palette.size(), kMaxSkinJoints));
+                out.bones.insert(out.bones.end(), pose->palette.begin(),
+                                 pose->palette.begin() + static_cast<std::ptrdiff_t>(boneCount));
+            }
+        }
+
         for (u32 section = 0; section < entry->sectionCount; ++section) {
             // Resolved before the cull test so that `material` is meaningful
             // on every candidate, and deduplicated across the frame by
@@ -328,7 +347,8 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             // every future backend would repeat.
             const f32 sortDepth = transparent ? kMaxSortDepth - depth : depth;
             out.draws.push_back(DrawItem{
-                .sortKey = drawSortKey(transparent ? kTransparentPass : kOpaquePass, 0, materialSlot, sortDepth),
+                .sortKey = drawSortKey(transparent ? kTransparentPass : kOpaquePass,
+                                       boneCount > 0 ? kSkinnedPipeline : kStaticPipeline, materialSlot, sortDepth),
                 .transform = transform,
                 .mesh = entry->mesh,
                 .section = section,
@@ -336,6 +356,8 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
                 .alpha = alpha,
                 .transparent = transparent,
                 .inCameraFrustum = visible,
+                .firstBone = firstBone,
+                .boneCount = boneCount,
             });
         }
     });

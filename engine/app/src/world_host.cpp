@@ -266,6 +266,13 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
     // which is what makes `Ended` land on the same tick in both.
     (void)m_audio.start(options.headless);
 
+    // Animation is created unconditionally, unlike the physics mirror: there is
+    // no backend to be missing. A world whose meshes carry no skeleton simply
+    // has an empty library, and every track it hands out plays nothing -- which
+    // is the same answer a build with no render module gives.
+    m_animation.emplace(*m_world, m_skeletons);
+    m_runtime->setAnimation(&*m_animation);
+
 #if LUAUG_PHYSICS_JOLT
     // The one hand-written switch over what the build compiled in (ADR 0023),
     // the same shape the RHI backend is chosen with. A build with no physics
@@ -546,6 +553,16 @@ void WorldHost::tick()
     // tween started by a handler in this phase begins on the next tick rather
     // than half-advancing on the tick it was created in.
     m_runtime->stepTweens(state.fixedTimestep);
+
+    // Skeletal animation, in the same half of the tick and after the drain for
+    // the same reason a tween is: a track played by a `PreAnimation` handler
+    // starts on the next tick rather than half-advancing on the one that
+    // created it. `Ended` is enqueued here and drains with `PreSimulation`,
+    // which is the deferred-signal rule (ADR 0015) and not a delay -- it is the
+    // next resumption point either way.
+    m_animation->sample(state.fixedTimestep);
+    m_runtime->fireAnimationEnded(m_animation->drainEnded());
+    m_animation->retire(*m_world);
 
     m_runtime->firePhase(core::Phase::PreSimulation, state.fixedTimestep);
     m_runtime->drain(core::Phase::PreSimulation);

@@ -114,6 +114,8 @@ void MeshCache::destroy(rhi::IDevice& device)
         if (entry.live && !entry.dynamic) {
             device.destroy(entry.resolved.vertices);
             device.destroy(entry.resolved.indices);
+            if (entry.resolved.skin.valid())
+                device.destroy(entry.resolved.skin);
         }
         entry.live = false;
     }
@@ -171,6 +173,39 @@ void MeshCache::beginFrame(rhi::IDevice& device)
     }
     retired_.swap(retiring_);
     retiring_.clear();
+}
+
+MeshHandle MeshCache::createSkinned(rhi::IDevice& device, rhi::ICmdList& cmd, const asset::Mesh& mesh,
+                                    std::span<const asset::SkinVertex> skin, core::EngineError* outError)
+{
+    if (skin.size() != mesh.vertices.size()) {
+        if (outError != nullptr)
+            *outError = core::makeError(LUAUG_TR("render.err.mesh_buffer_failed"), {}, "skin stream length");
+        return {};
+    }
+
+    const MeshHandle handle = create(device, cmd, mesh, MeshUsage::Static, outError);
+    if (!handle.valid() || skin.empty())
+        return handle;
+
+    Entry& entry = entries_[handle.index];
+    const auto sizeBytes = static_cast<u32>(skin.size() * sizeof(asset::SkinVertex));
+    entry.resolved.skin = device.createBuffer({
+        .usage = rhi::BufferUsage::Vertex,
+        .sizeBytes = sizeBytes,
+        .debugName = "mesh-skin",
+    });
+    if (!entry.resolved.skin.valid()) {
+        // The geometry is already up and drawable; what is lost is the skinning.
+        // Releasing the whole mesh over it would turn a character that stands
+        // still into a character that is not there, which is the worse failure.
+        if (outError != nullptr)
+            *outError = core::makeError(LUAUG_TR("render.err.mesh_buffer_failed"), {}, "skin stream");
+        return handle;
+    }
+
+    cmd.upload(entry.resolved.skin, std::as_bytes(skin), 0);
+    return handle;
 }
 
 MeshHandle MeshCache::create(rhi::IDevice& device, rhi::ICmdList& cmd, const asset::Mesh& mesh, MeshUsage usage,
@@ -284,6 +319,8 @@ void MeshCache::release(rhi::IDevice& device, MeshHandle handle)
         device.destroy(entry.resolved.vertices);
     if (entry.resolved.indices.valid())
         device.destroy(entry.resolved.indices);
+    if (entry.resolved.skin.valid())
+        device.destroy(entry.resolved.skin);
 
     entry.live = false;
     entry.sections.clear();

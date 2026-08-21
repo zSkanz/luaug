@@ -203,6 +203,16 @@ void ScriptRuntime::setPhysics(scene::PhysicsSync* physics)
     m_impl->services.physics = physics;
 }
 
+void ScriptRuntime::setAnimation(scene::AnimationHost* animation)
+{
+    m_impl->services.animation = animation;
+}
+
+void ScriptRuntime::fireAnimationEnded(std::span<const scene::TrackId> ended)
+{
+    luaug::script::fireAnimationEnded(m_impl->state, ended);
+}
+
 void ScriptRuntime::setReloadState(ReloadState* state)
 {
     if (state != nullptr)

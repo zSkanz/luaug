@@ -262,6 +262,24 @@ if(LUAUG_BUILD_TESTS)
             set_tests_properties(capture_gate_ui_${resolution} PROPERTIES TIMEOUT 60)
         endforeach()
 
+        # The skinned gate (M6). Four frames of one animated mesh beside one that
+        # is not animated at all, which is what makes it able to tell "the
+        # skinned path ran" from "everything went through the skinned path".
+        #
+        # Unlike the UI pair, this golden CAN see the thing it is about: the
+        # joint palette goes up as a uniform block and `bindUniforms` records
+        # contents (the half of D026 that was fixed at M4.5), so a pose that
+        # stopped moving is four identical lines in a file the diff points at.
+        add_test(NAME capture_gate_skinned
+            COMMAND ${CMAKE_COMMAND}
+                -DHOST=$<TARGET_FILE:luaug_host>
+                -DGOLDEN=${CMAKE_SOURCE_DIR}/tests/rendercapture/skinned-4frames.jsonl
+                -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/capture-gate-skinned.jsonl
+                -DSCRIPT=${CMAKE_SOURCE_DIR}/tests/rendercapture/skinned
+                -DFRAMES=4
+                -P ${CMAKE_SOURCE_DIR}/tests/rendercapture/run_capture_gate.cmake)
+        set_tests_properties(capture_gate_skinned PROPERTIES TIMEOUT 60)
+
         # M4.5's gate addition, and the one check in this file that is not a
         # golden: one scene at two `ClockTime` values, and the two frames must
         # differ. See the driver for why a golden could not make that claim --

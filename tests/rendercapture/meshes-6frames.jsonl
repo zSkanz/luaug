@@ -12,15 +12,22 @@
 {"op":"createShader","shader":6,"stage":"Fragment","bytes":536,"samplers":0,"uniformBuffers":0,"name":"shadow_depth"}
 {"op":"createShader","shader":7,"stage":"Vertex","bytes":4592,"samplers":0,"uniformBuffers":1,"name":"pbr"}
 {"op":"createShader","shader":8,"stage":"Fragment","bytes":13304,"samplers":5,"uniformBuffers":2,"name":"pbr"}
-{"op":"createShader","shader":9,"stage":"Vertex","bytes":1272,"samplers":0,"uniformBuffers":0,"name":"sky"}
-{"op":"createShader","shader":10,"stage":"Fragment","bytes":2548,"samplers":0,"uniformBuffers":1,"name":"sky"}
-{"op":"createShader","shader":11,"stage":"Vertex","bytes":1264,"samplers":0,"uniformBuffers":0,"name":"tonemap"}
-{"op":"createShader","shader":12,"stage":"Fragment","bytes":2720,"samplers":1,"uniformBuffers":1,"name":"tonemap"}
+{"op":"createShader","shader":9,"stage":"Vertex","bytes":6788,"samplers":0,"uniformBuffers":2,"name":"pbr_skinned"}
+{"op":"createShader","shader":10,"stage":"Fragment","bytes":13580,"samplers":5,"uniformBuffers":2,"name":"pbr_skinned"}
+{"op":"createShader","shader":11,"stage":"Vertex","bytes":3028,"samplers":0,"uniformBuffers":2,"name":"shadow_skinned"}
+{"op":"createShader","shader":12,"stage":"Fragment","bytes":828,"samplers":0,"uniformBuffers":0,"name":"shadow_skinned"}
+{"op":"createShader","shader":13,"stage":"Vertex","bytes":1272,"samplers":0,"uniformBuffers":0,"name":"sky"}
+{"op":"createShader","shader":14,"stage":"Fragment","bytes":2548,"samplers":0,"uniformBuffers":1,"name":"sky"}
+{"op":"createShader","shader":15,"stage":"Vertex","bytes":1264,"samplers":0,"uniformBuffers":0,"name":"tonemap"}
+{"op":"createShader","shader":16,"stage":"Fragment","bytes":2720,"samplers":1,"uniformBuffers":1,"name":"tonemap"}
 {"op":"createGraphicsPipeline","pipeline":3,"vertexShader":5,"fragmentShader":6,"primitive":"TriangleList","fill":"Solid","cull":"Front","depthTest":true,"depthWrite":true,"colorTargets":0,"depthFormat":"D32Float","name":"shadow"}
 {"op":"createGraphicsPipeline","pipeline":4,"vertexShader":7,"fragmentShader":8,"primitive":"TriangleList","fill":"Solid","cull":"Back","depthTest":true,"depthWrite":true,"colorTargets":1,"depthFormat":"D32Float","name":"pbr"}
 {"op":"createGraphicsPipeline","pipeline":5,"vertexShader":7,"fragmentShader":8,"primitive":"TriangleList","fill":"Solid","cull":"Back","depthTest":true,"depthWrite":false,"colorTargets":1,"depthFormat":"D32Float","name":"pbr_blend"}
-{"op":"createGraphicsPipeline","pipeline":6,"vertexShader":9,"fragmentShader":10,"primitive":"TriangleList","fill":"Solid","cull":"None","depthTest":false,"depthWrite":false,"colorTargets":1,"depthFormat":"Undefined","name":"sky"}
-{"op":"createGraphicsPipeline","pipeline":7,"vertexShader":11,"fragmentShader":12,"primitive":"TriangleList","fill":"Solid","cull":"None","depthTest":false,"depthWrite":false,"colorTargets":1,"depthFormat":"Undefined","name":"tonemap"}
+{"op":"createGraphicsPipeline","pipeline":6,"vertexShader":11,"fragmentShader":12,"primitive":"TriangleList","fill":"Solid","cull":"Front","depthTest":true,"depthWrite":true,"colorTargets":0,"depthFormat":"D32Float","name":"shadow_skinned"}
+{"op":"createGraphicsPipeline","pipeline":7,"vertexShader":9,"fragmentShader":10,"primitive":"TriangleList","fill":"Solid","cull":"Back","depthTest":true,"depthWrite":true,"colorTargets":1,"depthFormat":"D32Float","name":"pbr_skinned"}
+{"op":"createGraphicsPipeline","pipeline":8,"vertexShader":9,"fragmentShader":10,"primitive":"TriangleList","fill":"Solid","cull":"Back","depthTest":true,"depthWrite":false,"colorTargets":1,"depthFormat":"D32Float","name":"pbr_skinned_blend"}
+{"op":"createGraphicsPipeline","pipeline":9,"vertexShader":13,"fragmentShader":14,"primitive":"TriangleList","fill":"Solid","cull":"None","depthTest":false,"depthWrite":false,"colorTargets":1,"depthFormat":"Undefined","name":"sky"}
+{"op":"createGraphicsPipeline","pipeline":10,"vertexShader":15,"fragmentShader":16,"primitive":"TriangleList","fill":"Solid","cull":"None","depthTest":false,"depthWrite":false,"colorTargets":1,"depthFormat":"Undefined","name":"tonemap"}
 {"op":"createSampler","sampler":1,"name":"material"}
 {"op":"createSampler","sampler":2,"name":"shadow"}
 {"op":"createTexture","texture":2,"format":"Rgba8Unorm","usage":1,"width":1,"height":1,"layers":1,"mips":1,"name":"default-white"}
@@ -146,7 +153,7 @@
 {"op":"depthAttachment","load":"Clear","store":"DontCare","clear":1.0000}
 {"op":"setViewport","x":0.0000,"y":0.0000,"w":1280.0000,"h":720.0000,"minDepth":0.0000,"maxDepth":1.0000}
 {"op":"setScissor","x":0,"y":0,"w":1280,"h":720}
-{"op":"setPipeline","pipeline":6}
+{"op":"setPipeline","pipeline":9}
 {"op":"bindUniforms","stage":"Fragment","slot":0,"bytes":128,"digest":"201b92673d3e6959"}
 {"op":"draw","vertices":3,"instances":1,"firstVertex":0,"firstInstance":0}
 {"op":"setPipeline","pipeline":4}
@@ -282,7 +289,7 @@
 {"op":"pushDebugGroup","name":"tonemap"}
 {"op":"beginRenderPass","colorCount":1,"depth":0,"name":"tonemap"}
 {"op":"colorAttachment","texture":1,"load":"Clear","store":"Store","r":0.0000,"g":0.0000,"b":0.0000,"a":1.0000}
-{"op":"setPipeline","pipeline":7}
+{"op":"setPipeline","pipeline":10}
 {"op":"setViewport","x":0.0000,"y":0.0000,"w":1280.0000,"h":720.0000,"minDepth":0.0000,"maxDepth":1.0000}
 {"op":"setScissor","x":0,"y":0,"w":1280,"h":720}
 {"op":"bindUniforms","stage":"Fragment","slot":0,"bytes":16,"digest":"78133a8748a24b5a"}
@@ -411,7 +418,7 @@
 {"op":"depthAttachment","load":"Clear","store":"DontCare","clear":1.0000}
 {"op":"setViewport","x":0.0000,"y":0.0000,"w":1280.0000,"h":720.0000,"minDepth":0.0000,"maxDepth":1.0000}
 {"op":"setScissor","x":0,"y":0,"w":1280,"h":720}
-{"op":"setPipeline","pipeline":6}
+{"op":"setPipeline","pipeline":9}
 {"op":"bindUniforms","stage":"Fragment","slot":0,"bytes":128,"digest":"4381551cdcb1ffb8"}
 {"op":"draw","vertices":3,"instances":1,"firstVertex":0,"firstInstance":0}
 {"op":"setPipeline","pipeline":4}
@@ -547,7 +554,7 @@
 {"op":"pushDebugGroup","name":"tonemap"}
 {"op":"beginRenderPass","colorCount":1,"depth":0,"name":"tonemap"}
 {"op":"colorAttachment","texture":1,"load":"Clear","store":"Store","r":0.0000,"g":0.0000,"b":0.0000,"a":1.0000}
-{"op":"setPipeline","pipeline":7}
+{"op":"setPipeline","pipeline":10}
 {"op":"setViewport","x":0.0000,"y":0.0000,"w":1280.0000,"h":720.0000,"minDepth":0.0000,"maxDepth":1.0000}
 {"op":"setScissor","x":0,"y":0,"w":1280,"h":720}
 {"op":"bindUniforms","stage":"Fragment","slot":0,"bytes":16,"digest":"78133a8748a24b5a"}
@@ -676,7 +683,7 @@
 {"op":"depthAttachment","load":"Clear","store":"DontCare","clear":1.0000}
 {"op":"setViewport","x":0.0000,"y":0.0000,"w":1280.0000,"h":720.0000,"minDepth":0.0000,"maxDepth":1.0000}
 {"op":"setScissor","x":0,"y":0,"w":1280,"h":720}
-{"op":"setPipeline","pipeline":6}
+{"op":"setPipeline","pipeline":9}
 {"op":"bindUniforms","stage":"Fragment","slot":0,"bytes":128,"digest":"75463e191e840a0e"}
 {"op":"draw","vertices":3,"instances":1,"firstVertex":0,"firstInstance":0}
 {"op":"setPipeline","pipeline":4}
@@ -772,7 +779,7 @@
 {"op":"pushDebugGroup","name":"tonemap"}
 {"op":"beginRenderPass","colorCount":1,"depth":0,"name":"tonemap"}
 {"op":"colorAttachment","texture":1,"load":"Clear","store":"Store","r":0.0000,"g":0.0000,"b":0.0000,"a":1.0000}
-{"op":"setPipeline","pipeline":7}
+{"op":"setPipeline","pipeline":10}
 {"op":"setViewport","x":0.0000,"y":0.0000,"w":1280.0000,"h":720.0000,"minDepth":0.0000,"maxDepth":1.0000}
 {"op":"setScissor","x":0,"y":0,"w":1280,"h":720}
 {"op":"bindUniforms","stage":"Fragment","slot":0,"bytes":16,"digest":"78133a8748a24b5a"}
@@ -901,7 +908,7 @@
 {"op":"depthAttachment","load":"Clear","store":"DontCare","clear":1.0000}
 {"op":"setViewport","x":0.0000,"y":0.0000,"w":1280.0000,"h":720.0000,"minDepth":0.0000,"maxDepth":1.0000}
 {"op":"setScissor","x":0,"y":0,"w":1280,"h":720}
-{"op":"setPipeline","pipeline":6}
+{"op":"setPipeline","pipeline":9}
 {"op":"bindUniforms","stage":"Fragment","slot":0,"bytes":128,"digest":"7e03eea990bc2b7f"}
 {"op":"draw","vertices":3,"instances":1,"firstVertex":0,"firstInstance":0}
 {"op":"setPipeline","pipeline":4}
@@ -997,7 +1004,7 @@
 {"op":"pushDebugGroup","name":"tonemap"}
 {"op":"beginRenderPass","colorCount":1,"depth":0,"name":"tonemap"}
 {"op":"colorAttachment","texture":1,"load":"Clear","store":"Store","r":0.0000,"g":0.0000,"b":0.0000,"a":1.0000}
-{"op":"setPipeline","pipeline":7}
+{"op":"setPipeline","pipeline":10}
 {"op":"setViewport","x":0.0000,"y":0.0000,"w":1280.0000,"h":720.0000,"minDepth":0.0000,"maxDepth":1.0000}
 {"op":"setScissor","x":0,"y":0,"w":1280,"h":720}
 {"op":"bindUniforms","stage":"Fragment","slot":0,"bytes":16,"digest":"78133a8748a24b5a"}
@@ -1126,7 +1133,7 @@
 {"op":"depthAttachment","load":"Clear","store":"DontCare","clear":1.0000}
 {"op":"setViewport","x":0.0000,"y":0.0000,"w":1280.0000,"h":720.0000,"minDepth":0.0000,"maxDepth":1.0000}
 {"op":"setScissor","x":0,"y":0,"w":1280,"h":720}
-{"op":"setPipeline","pipeline":6}
+{"op":"setPipeline","pipeline":9}
 {"op":"bindUniforms","stage":"Fragment","slot":0,"bytes":128,"digest":"3971d742fd93d246"}
 {"op":"draw","vertices":3,"instances":1,"firstVertex":0,"firstInstance":0}
 {"op":"setPipeline","pipeline":4}
@@ -1222,7 +1229,7 @@
 {"op":"pushDebugGroup","name":"tonemap"}
 {"op":"beginRenderPass","colorCount":1,"depth":0,"name":"tonemap"}
 {"op":"colorAttachment","texture":1,"load":"Clear","store":"Store","r":0.0000,"g":0.0000,"b":0.0000,"a":1.0000}
-{"op":"setPipeline","pipeline":7}
+{"op":"setPipeline","pipeline":10}
 {"op":"setViewport","x":0.0000,"y":0.0000,"w":1280.0000,"h":720.0000,"minDepth":0.0000,"maxDepth":1.0000}
 {"op":"setScissor","x":0,"y":0,"w":1280,"h":720}
 {"op":"bindUniforms","stage":"Fragment","slot":0,"bytes":16,"digest":"78133a8748a24b5a"}
@@ -1351,7 +1358,7 @@
 {"op":"depthAttachment","load":"Clear","store":"DontCare","clear":1.0000}
 {"op":"setViewport","x":0.0000,"y":0.0000,"w":1280.0000,"h":720.0000,"minDepth":0.0000,"maxDepth":1.0000}
 {"op":"setScissor","x":0,"y":0,"w":1280,"h":720}
-{"op":"setPipeline","pipeline":6}
+{"op":"setPipeline","pipeline":9}
 {"op":"bindUniforms","stage":"Fragment","slot":0,"bytes":128,"digest":"0a6285ee8cf54527"}
 {"op":"draw","vertices":3,"instances":1,"firstVertex":0,"firstInstance":0}
 {"op":"setPipeline","pipeline":4}
@@ -1447,7 +1454,7 @@
 {"op":"pushDebugGroup","name":"tonemap"}
 {"op":"beginRenderPass","colorCount":1,"depth":0,"name":"tonemap"}
 {"op":"colorAttachment","texture":1,"load":"Clear","store":"Store","r":0.0000,"g":0.0000,"b":0.0000,"a":1.0000}
-{"op":"setPipeline","pipeline":7}
+{"op":"setPipeline","pipeline":10}
 {"op":"setViewport","x":0.0000,"y":0.0000,"w":1280.0000,"h":720.0000,"minDepth":0.0000,"maxDepth":1.0000}
 {"op":"setScissor","x":0,"y":0,"w":1280,"h":720}
 {"op":"bindUniforms","stage":"Fragment","slot":0,"bytes":16,"digest":"78133a8748a24b5a"}

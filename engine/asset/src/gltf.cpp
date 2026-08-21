@@ -623,7 +623,7 @@ std::optional<core::EngineError> Importer::readAttributes(const fg::Primitive& p
                 // (`readSkin`), and a vertex still pointing at a glTF slot
                 // would be weighted by whichever joint happened to land there.
                 const auto remap = [&](core::u16 slot) {
-                    return slot < jointRemap_.size() ? static_cast<core::u16>(jointRemap_[slot]) : core::u16{0};
+                    return slot < jointRemap_.size() ? static_cast<f32>(jointRemap_[slot]) : 0.0f;
                 };
                 staging.skin[index].joints[0] = remap(value.x());
                 staging.skin[index].joints[1] = remap(value.y());

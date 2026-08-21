@@ -16,6 +16,7 @@
 #include "luaug/core/name_atom.h"
 #include "luaug/core/phase.h"
 #include "luaug/input/scene_types.h"
+#include "luaug/render/scene_types.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/enum_registry.h"
 #include "luaug/scene/world.h"
@@ -50,13 +51,15 @@ struct Fixture
         catalogLoaded = static_cast<bool>(core::engineCatalog().loadFromFile(LUAUG_TEST_CATALOG));
 
         scene::generated::registerClasses(classes, atoms);
-        // `input`'s classes as well, and only because `script` BINDS methods on
-        // them: `InputAction:GetState` is registered from services.cpp whether
-        // or not the class exists, and the boot cross-check counts a binding
-        // whose class nothing declared as a mismatch. `render`'s classes are
-        // still absent, and can be -- none of them has a method.
+        // The other modules' classes as well, and only because `script` BINDS
+        // methods on them: `InputAction:GetState` is registered from
+        // services.cpp whether or not the class exists, and the boot cross-check
+        // counts a binding whose class nothing declared as a mismatch. `render`
+        // joined the list at M6, when `AnimationPlayer:LoadAnimation` became its
+        // first class with a method; `ui` is still absent, and can be.
         input::registerSceneTypes(classes, atoms);
         audio::registerSceneTypes(classes, atoms);
+        render::registerSceneTypes(classes, atoms);
         scene::generated::registerEnums(enums, atoms);
         world.emplace(classes, enums, atoms, 1234u);
         runtime.emplace(*world);

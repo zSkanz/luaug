@@ -21,6 +21,7 @@
 #include "luaug/core/math.h"
 #include "luaug/core/name_atom.h"
 #include "luaug/core/types.h"
+#include "luaug/render/animation.h"
 #include "luaug/render/mesh_cache.h"
 #include "luaug/render/shader_types.h"
 #include "luaug/rhi/types.h"
@@ -171,6 +172,12 @@ struct DrawItem
     // correct-looking image with the wrong shadows in it. The shadow pass draws
     // every item; the forward pass draws only these.
     bool inCameraFrustum = true;
+    // Where this draw's joint palette starts in `RenderWorld::bones`, and how
+    // many matrices it has. Zero count is the common case and means "not
+    // skinned": the draw goes through the static pipeline and binds one vertex
+    // buffer, exactly as it did before skinning existed.
+    u32 firstBone = 0;
+    u32 boneCount = 0;
 };
 
 struct RenderWorld
@@ -181,6 +188,10 @@ struct RenderWorld
     std::vector<RenderLight> lights;
     std::vector<RenderMaterial> materials;
     std::vector<DrawItem> draws;
+    // Every skinned draw's palette, concatenated. One vector rather than one per
+    // draw because it is uploaded per draw anyway and a vector of vectors would
+    // be a heap allocation per character per frame.
+    std::vector<Mat4> bones;
 
     // Counters the perf table records beside frame time, because the roadmap
     // asks for the *why* next to the *what*. `culled` is the interesting one: a
@@ -199,6 +210,7 @@ struct RenderWorld
         lights.clear();
         materials.clear();
         draws.clear();
+        bones.clear();
         candidateDraws = 0;
         culledDraws = 0;
     }
@@ -218,6 +230,12 @@ struct RenderWorld
 // opaque pass must fill depth before anything blends against it.
 inline constexpr u32 kOpaquePass = 0;
 inline constexpr u32 kTransparentPass = 1;
+
+// The values `drawSortKey`'s `pipeline` argument takes. A skinned draw binds a
+// second vertex buffer and a 4 KB uniform block, so grouping them is worth a
+// field that was already there and unused.
+inline constexpr u32 kStaticPipeline = 0;
+inline constexpr u32 kSkinnedPipeline = 1;
 
 // The largest depth `drawSortKey` can distinguish, in metres. Exposed because
 // the transparent pass sorts back-to-front and does it by subtracting from this
@@ -289,6 +307,11 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
              // covers a bounded region around the camera. The renderer owns the number
              // and passes it, rather than `extract` guessing at a constant that lives in
              // the pass list.
-             f32 shadowRadius, RenderWorld& out);
+             f32 shadowRadius,
+             // The poses skinned draws are in, or null in a build that does not
+             // animate -- a capture harness, a screenshot tool. Null means every
+             // skinned mesh comes out in bind pose, which is what an unanimated
+             // one should look like.
+             const AnimationSystem* animation, RenderWorld& out);
 
 } // namespace luaug::render

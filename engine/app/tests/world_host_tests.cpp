@@ -88,7 +88,8 @@ TEST_CASE("the environment the renderer sees is the one the world holds")
     REQUIRE(held != nullptr);
 
     render::RenderWorld snapshot;
-    render::extract(host.world(), host.workspace(), host.lighting(), render::MeshLibrary{}, 1.0f, 0.0f, snapshot);
+    render::extract(host.world(), host.workspace(), host.lighting(), render::MeshLibrary{}, 1.0f, 0.0f, nullptr,
+                    snapshot);
 
     // Field by field rather than "it is not the default": a defaults comparison
     // passes the moment someone changes a default, and the point of this
@@ -130,7 +131,8 @@ TEST_CASE("two clock times give the renderer two different suns")
         host.tick();
 
         render::RenderWorld snapshot;
-        render::extract(host.world(), host.workspace(), host.lighting(), render::MeshLibrary{}, 1.0f, 0.0f, snapshot);
+        render::extract(host.world(), host.workspace(), host.lighting(), render::MeshLibrary{}, 1.0f, 0.0f, nullptr,
+                        snapshot);
         return snapshot.environment.sunDirection;
     };
 
@@ -572,7 +574,8 @@ TEST_CASE("the world ticks, and a Heartbeat handler sees the clock advance")
         host.tick();
 
     render::RenderWorld snapshot;
-    render::extract(host.world(), host.workspace(), host.lighting(), render::MeshLibrary{}, 1.0f, 0.0f, snapshot);
+    render::extract(host.world(), host.workspace(), host.lighting(), render::MeshLibrary{}, 1.0f, 0.0f, nullptr,
+                    snapshot);
     REQUIRE(snapshot.parts.size() == 1);
     // Ten: the script connected during the boot drain, so it saw every one of
     // the ten ticks.
@@ -749,7 +752,8 @@ TEST_CASE("dragging Size and CFrame through their extremes does not take the hos
 
         inspector.applyPending(host.world());
         host.tick();
-        render::extract(host.world(), host.workspace(), host.lighting(), render::MeshLibrary{}, 1.0f, 0.0f, snapshot);
+        render::extract(host.world(), host.workspace(), host.lighting(), render::MeshLibrary{}, 1.0f, 0.0f, nullptr,
+                        snapshot);
     }
 
     // Still alive, still answering, and the panel can still format what it

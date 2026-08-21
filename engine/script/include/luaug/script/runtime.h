@@ -98,6 +98,16 @@ public:
     // as an empty world rather than as an error.
     void setPhysics(scene::PhysicsSync* physics);
 
+    // The animation host the `AnimationTrack` bindings drive. Null in a build
+    // with no render module, which those bindings answer as a track that plays
+    // nothing rather than as an error.
+    void setAnimation(scene::AnimationHost* animation);
+
+    // Enqueues `Ended` for each track the host reported finished. Called right
+    // after `AnimationHost::sample`, so the signal lands in the same drain as
+    // everything else that happened on that tick.
+    void fireAnimationEnded(std::span<const scene::TrackId> ended);
+
     void setReloadState(ReloadState* state);
 
     // Enqueues `PreReload` on the way out or `PostReload` on the way in

@@ -103,6 +103,19 @@ public:
     [[nodiscard]] MeshHandle create(rhi::IDevice& device, rhi::ICmdList& cmd, const asset::Mesh& mesh, MeshUsage usage,
                                     core::EngineError* outError = nullptr);
 
+    // The skinned form: the same mesh plus its parallel joint/weight stream,
+    // uploaded to a SECOND buffer. A separate overload rather than a defaulted
+    // parameter, because the two produce different draws and a caller should
+    // have to say which it means.
+    //
+    // `skin` must have one entry per vertex; a mismatched length is refused
+    // rather than clamped, since a skin stream half as long as the mesh is a
+    // file the importer should have rejected. `Static` only: a skinned mesh is
+    // an imported asset, and the ring is for geometry rebuilt every frame.
+    [[nodiscard]] MeshHandle createSkinned(rhi::IDevice& device, rhi::ICmdList& cmd, const asset::Mesh& mesh,
+                                           std::span<const asset::SkinVertex> skin,
+                                           core::EngineError* outError = nullptr);
+
     // Releases a static mesh's buffers. A dynamic handle is not released here;
     // the ring reclaims it at the next `beginFrame`.
     void release(rhi::IDevice& device, MeshHandle handle);
@@ -121,6 +134,10 @@ public:
     {
         rhi::BufferHandle vertices{};
         rhi::BufferHandle indices{};
+        // The joint/weight stream, bound at vertex slot 1 by the skinned
+        // pipelines. Invalid for a static mesh, which is most of them -- and an
+        // unskinned draw is byte-identical to M4's because of it.
+        rhi::BufferHandle skin{};
         // Added to every section's `firstIndex`, and to the vertex offset of
         // every draw. Zero for a static mesh, which owns its buffers outright;
         // non-zero for a dynamic one, which is a slice of a shared ring.

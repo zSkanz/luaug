@@ -153,13 +153,23 @@ struct Mesh
 // One vertex's four bone influences. Four is glTF's own limit per JOINTS_n set
 // and is what every real-time skin uses: a fifth influence is below the noise
 // floor of an 8-bit weight.
+//
+// **The joint indices are floats, and that is eight bytes spent on a freeze.**
+// They are integers and want to be `u16`, but `rhi::VertexFormat` has no
+// unsigned-integer format and that enumeration is frozen by ADR 0037 -- widening
+// it is a human decision (R5), not an agent's. A `float` holds every integer up
+// to 2^24 exactly, so this is correct rather than approximate; what it costs is
+// eight bytes per skinned vertex, which is 160 KB on a 20k-vertex character and
+// nothing at all on a world of static meshes, since an unskinned mesh carries no
+// skin stream. Recorded here so the trade is revisited with the ADR rather than
+// rediscovered.
 struct SkinVertex
 {
-    core::u16 joints[4]{0, 0, 0, 0};
+    f32 joints[4]{0.0f, 0.0f, 0.0f, 0.0f};
     f32 weights[4]{0.0f, 0.0f, 0.0f, 0.0f};
 };
 
-static_assert(sizeof(SkinVertex) == 24, "the skin stream is a GPU buffer layout; changing it changes the shaders");
+static_assert(sizeof(SkinVertex) == 32, "the skin stream is a GPU buffer layout; changing it changes the shaders");
 
 // One joint of a skeleton.
 //

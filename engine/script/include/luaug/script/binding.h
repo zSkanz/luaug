@@ -124,6 +124,12 @@ enum class UserdataTag : int
     TweenInfo = 16,
     Tween = 17,
 
+    // The other handle in M6, and the one `Tween`'s own doc already pointed at:
+    // a track is not parented and is not found in the tree, so it is userdata
+    // rather than an Instance (api-design.md §2.2). Its payload is a track id
+    // and the VM-local index of the record that carries its `Ended` signal.
+    AnimationTrack = 18,
+
     // Not a tag. The count exists so a registration loop can assert it covered
     // everything, and so the budget remaining is a number someone can read.
     Count,
@@ -201,6 +207,15 @@ struct VmContext
     // reach only through the slow path (rule 2 above).
     MemberTable getters[static_cast<usize>(UserdataTag::Count)];
     MemberTable methods[static_cast<usize>(UserdataTag::Count)];
+
+    // Writable members, and empty for every VALUE type -- `cf.Position = v` is
+    // not a slow way of moving a part, it is a mistake, and the value it would
+    // write to is a copy the caller is about to drop. A HANDLE is a different
+    // thing: `track.Looped = true` names the one track everybody holding that
+    // handle can see, which is why api-design.md §2.2 lists it as a property
+    // rather than as a `SetLooped`. A tag with no entries here refuses every
+    // write exactly as before.
+    MemberTable setters[static_cast<usize>(UserdataTag::Count)];
 
     // An Instance method's implementation, keyed by the descriptor the IDL
     // generated for it. Keyed by the pointer rather than by name because a

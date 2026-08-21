@@ -72,7 +72,7 @@ void MeshLoader::destroy(rhi::IDevice& device)
 }
 
 u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world, core::InstanceId root,
-                     MeshCache& cache, MeshLibrary& library)
+                     MeshCache& cache, MeshLibrary& library, SkeletonLibrary* skeletons)
 {
     if (!root.valid())
         return 0;
@@ -115,7 +115,12 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
         }
 
         core::EngineError uploadError;
-        const MeshHandle handle = cache.create(device, cmd, model.mesh, MeshUsage::Static, &uploadError);
+        // A file with a skin gets the second stream and a file without gets
+        // exactly what M4 uploaded -- which is what keeps an unskinned draw
+        // byte-identical to the one the goldens recorded.
+        const MeshHandle handle = model.skinned()
+                                      ? cache.createSkinned(device, cmd, model.mesh, model.skin, &uploadError)
+                                      : cache.create(device, cmd, model.mesh, MeshUsage::Static, &uploadError);
         if (!handle.valid()) {
             core::logText(core::LogLevel::Warn, uploadError.message);
             markFailed();
@@ -183,6 +188,15 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
         }
 
         library.set(content, entry);
+
+        // The skeleton half of the same file, handed to whoever asked for it.
+        // Read here rather than in a second pass because the file was already
+        // parsed once and parsing it again to find the joints would be the
+        // clearest kind of waste.
+        if (skeletons != nullptr && !model.joints.empty()) {
+            skeletons->set(content, SkeletonLibrary::Entry{std::move(model.joints), std::move(model.clips)});
+        }
+
         ++loaded;
 
         const std::array<core::I18nArg, 2> args{

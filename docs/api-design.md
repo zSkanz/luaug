@@ -326,7 +326,7 @@ Instance (abstract)
 ├─ AnimationPlayer             -- under a Model/MeshPart with a skinned mesh (ships in M6):
 │  │                           -- LoadAnimation(content) → AnimationTrack
 │  └─ AnimationTrack (non-Instance handle) -- Play(fadeTime?), Stop(fadeTime?), Looped,
-│                              -- Speed, Weight, IsPlaying, Ended signal
+│                              -- Speed, Weight, Playing, Length, TimePosition, Ended signal
 │                              -- v1 scope: glTF clip playback + linear blending; no state
 │                              -- machines, no IK (roadmap M6)
 ├─ InputContext / InputAction / InputBinding   (§2.4)
@@ -705,6 +705,7 @@ save/load pair for bindings in v1.
 | 24 | RemoteEvent/RemoteFunction | v1: none; `@std/net` primitives; replication reserved | Honest scope; portable backends (ADR 0012) |
 | 25 | A destroyed instance stays readable forever | Handles stop resolving at the end of the drain in which `Destroying` fired; using one raises `script.err.instance_dead` | The ECS reclaims the slot (architecture §4). Use-after-destroy becomes a keyed error instead of a silent read of a corpse |
 | 26 | Dot-access to children (`workspace.Baseplate`, `folder.ChildName`) | `FindFirstChild("Baseplate")` — or `WaitForChild`, which is what the habit really wanted | An `__index` fallback to children is untypeable under a 100%-strict surface (ADR 0018): the analyzer cannot know what a child name resolves to, so every such access would be `any` and the typing story would leak out through the most-used syntax in the language. It is also the habit that made `WaitForChild` load-bearing in the first place — a name that resolves or errors depending on load order. Members and children now live in separate namespaces, and `scene.err.unknown_member` (§2.2) says which one you missed |
+| 27 | `AnimationTrack.IsPlaying` | `AnimationTrack.Playing` | §9's own rule: a boolean PROPERTY carries no `Is` prefix and a boolean METHOD does. `Sound.Playing` was already spelled this way, and one engine cannot have both |
 
 This rename list is **frozen**: no further renames without a new row here, and
 no runtime aliases, ever.

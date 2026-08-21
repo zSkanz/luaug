@@ -347,6 +347,47 @@ declare extern type Tween with
     function Cancel(self): ()
 end
 
+declare extern type AnimationTrack with
+    --- Whether the clock is advancing. False for a track that reached the end of a clip that is not
+    --- `Looped` -- which still HOLDS its last frame until it is stopped or replayed, because `Ended` is
+    --- deferred and a character that returned to its rest pose for the one tick before the handler ran
+    --- would be a visible pop.
+    read Playing: boolean
+    --- Whether reaching the end wraps to the start instead of stopping. A looped track never fires
+    --- `Ended`, because it never does. Wrapping keeps the fraction of a tick it overshot by, so a loop
+    --- does not drift against everything else in the scene.
+    Looped: boolean
+    --- How fast the clip's clock runs. 2 is twice the speed and half the duration; 0 holds the pose
+    --- where it is, which is the honest way to freeze a frame.
+    Speed: number
+    --- How much this track contributes when several drive one skeleton. Assigning it is immediate --
+    --- the faded form is `Play`'s and `Stop`'s argument, and a property that took a fade time would not
+    --- be a property. Blending is a weighted average PER JOINT and per component, so a joint no clip
+    --- drives keeps its rest transform rather than being dragged towards the origin by tracks that say
+    --- nothing about it.
+    Weight: number
+    --- The clip's duration in seconds, or zero for a track whose clip was not found.
+    read Length: number
+    --- Where the clip's clock is, in seconds. Read-only in v1: seeking a blended pose is a different
+    --- feature from playing one, and a writable seek that ignored the blend would be the wrong half of
+    --- it.
+    read TimePosition: number
+    --- Fires on the tick a track reaches the end of a clip that is not `Looped`. A PROPERTY here rather
+    --- than an event because a track is not a class and only classes declare events; the signal it
+    --- holds behaves like any other. A `Stop` does not fire it: it is a past-tense fact about reaching
+    --- the end, and code that chains the next animation on it must not be fooled by one that was
+    --- interrupted.
+    read Ended: Signal<>
+    --- Starts the clip from the BEGINNING, every time -- the opposite of `Tween:Play`, and
+    --- deliberately: a jump animation triggered twice should play twice. `fadeTime` fades the weight in
+    --- from zero over that many seconds, which is what makes a walk blend into an idle rather than
+    --- snapping. It fades in to this track's own `Weight`, which is why one argument is enough.
+    function Play(self, fadeTime: number?): ()
+    --- Ends the track. `fadeTime` fades its weight out over that many seconds and stops it when it
+    --- reaches zero; without one it stops on the spot. `Ended` does not fire either way.
+    function Stop(self, fadeTime: number?): ()
+end
+
 declare extern type Instance with
     --- This instance's name; siblings may share one, and renaming into an awaited name satisfies a
     --- WaitForChild waiter exactly as parenting a new child does.
@@ -978,6 +1019,18 @@ declare extern type Sound extends Instance with
     --- the end, and code that awards something when a jingle finishes must not be fooled by one that
     --- was cut off.
     function Stop(self): ()
+end
+
+declare extern type AnimationPlayer extends Instance with
+    --- A track for one clip. Everything after a `#` is the clip's NAME inside the file, and a string
+    --- with no `#` is a clip name in this player's own mesh -- so the common case is
+    --- `player:LoadAnimation("Walk")`. A path before the `#` must be the mesh this player is under. v1
+    --- has no asset pipeline (M7 is where a clip becomes addressable on its own), so a clip exists only
+    --- inside the file its skeleton came from, and a URN naming a different file loads nothing rather
+    --- than playing the wrong rig. **Load a track once and keep it.** It always returns a track, even
+    --- for a clip that is not there -- a mesh that has not finished loading would otherwise make an
+    --- ordinary frame a nil index -- and every call is a handle the VM holds until the world goes away.
+    function LoadAnimation(self, content: Content): AnimationTrack
 end
 
 declare extern type DataModel extends Instance with
@@ -1618,7 +1671,8 @@ declare Instance: {
         & (("UIPadding") -> UIPadding)
         & (("UICorner") -> UICorner)
         & (("AudioGroup") -> AudioGroup)
-        & (("Sound") -> Sound),
+        & (("Sound") -> Sound)
+        & (("AnimationPlayer") -> AnimationPlayer),
 }
 
 declare game: DataModel

@@ -267,6 +267,25 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     spotLightDesc.detachComponents = native::detachSpotLightComponents;
     classes.registerClass(spotLightDesc);
 
+    // --- AnimationPlayer ---
+    static std::array<scene::MethodDesc, 1> animationPlayerMethods;
+    animationPlayerMethods = {{
+        scene::MethodDesc{
+            .name = atoms.intern("LoadAnimation"),
+            .yields = false,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .docKey = {},
+        },
+    }};
+    scene::ClassDescriptor animationPlayerDesc;
+    animationPlayerDesc.name = atoms.intern("AnimationPlayer");
+    animationPlayerDesc.super = instanceClass;
+    animationPlayerDesc.flags = scene::ClassFlags::None;
+    animationPlayerDesc.defaultName = atoms.intern("AnimationPlayer");
+    animationPlayerDesc.docKey = {};
+    animationPlayerDesc.methods = animationPlayerMethods;
+    classes.registerClass(animationPlayerDesc);
+
     // --- Lighting ---
     static std::array<scene::PropertyDesc, 8> lightingProperties;
     lightingProperties = {{

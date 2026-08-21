@@ -79,6 +79,8 @@ const char* typeName(UserdataTag tag) noexcept
         return "TweenInfo";
     case UserdataTag::Tween:
         return "Tween";
+    case UserdataTag::AnimationTrack:
+        return "AnimationTrack";
     case UserdataTag::Enum:
         return "Enum";
     case UserdataTag::Enums:
@@ -156,14 +158,23 @@ int memberNamecall(lua_State* L)
     raiseUnknownMember(L, tag, method);
 }
 
-int refuseWrite(lua_State* L)
+int memberNewIndex(lua_State* L)
 {
-    // Every value type in the v1 surface is immutable: `cf.Position = v` is not
+    // Every VALUE type in the v1 surface is immutable: `cf.Position = v` is not
     // a slow way of moving a part, it is a mistake, and the value it would write
-    // to is a copy the caller is about to drop.
+    // to is a copy the caller is about to drop. Their setter tables are empty,
+    // so this is the same refusal it has always been.
+    const UserdataTag tag = closureTag(L);
+
     int atom = -1;
     const char* key = lua_tostringatom(L, 2, &atom);
-    raiseUnknownMember(L, closureTag(L), key);
+    if (key != nullptr) {
+        const VmContext& ctx = context(L);
+        if (const MemberEntry* entry = findMember(ctx.setters[static_cast<usize>(tag)], ctx.resolve(atom)))
+            return entry->fn(L);
+    }
+
+    raiseUnknownMember(L, tag, key);
 }
 
 void setDispatch(lua_State* L, const char* event, lua_CFunction fn, UserdataTag tag)
@@ -185,7 +196,7 @@ void beginTagMetatable(lua_State* L, UserdataTag tag)
     lua_setuserdatametatable(L, static_cast<int>(tag));
 
     setDispatch(L, "__index", memberIndex, tag);
-    setDispatch(L, "__newindex", refuseWrite, tag);
+    setDispatch(L, "__newindex", memberNewIndex, tag);
     // Named `__namecall` on purpose: `laux.cpp:42` special-cases exactly this
     // debug name so an argument error reports the *method* rather than the
     // metamethod. It is free, and it is the difference between a usable message

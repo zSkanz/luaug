@@ -116,6 +116,37 @@ cbuffer GpuShadowUniforms : register(b0, space1)
 };
 #endif
 
+#if defined(LUAUG_UNIFORMS_SKIN)
+// Mirrors `render::kMaxSkinJoints`. A macro rather than a `static const` because
+// it is an array bound.
+#define LUAUG_MAX_SKIN_JOINTS 64
+
+// `render::GpuSkinUniforms`, 4096 bytes: one model-space matrix per joint, with
+// the inverse bind already folded in. The palette is what a vertex multiplies
+// by, so it is the only form worth uploading -- sending joint transforms and
+// inverse binds separately would send twice the bytes to do the same multiply
+// on the GPU.
+cbuffer GpuSkinUniforms : register(b1, space1)
+{
+    column_major float4x4 JointMatrices[LUAUG_MAX_SKIN_JOINTS];
+};
+
+// The linear blend, glTF's own: up to four joints per vertex, weighted, with the
+// weights already normalised by the importer. A vertex whose weights sum to zero
+// -- which a broken export can produce -- keeps its bind position rather than
+// collapsing to the origin, and the `identity` fallback is what does that.
+float4x4 skinMatrix(uint4 joints, float4 weights)
+{
+    const float total = weights.x + weights.y + weights.z + weights.w;
+    if (total <= 0.0f) {
+        return float4x4(1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                        1.0f);
+    }
+    return JointMatrices[joints.x] * weights.x + JointMatrices[joints.y] * weights.y +
+           JointMatrices[joints.z] * weights.z + JointMatrices[joints.w] * weights.w;
+}
+#endif
+
 #if defined(LUAUG_UNIFORMS_TONEMAP)
 // `render::GpuTonemapUniforms`, 16 bytes -- a whole row for one float, because
 // that is the smallest a constant buffer row is.

@@ -21,6 +21,7 @@
 #include "luaug/platform/event.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/physics_sync.h"
+#include "luaug/script/animation.h"
 #include "luaug/script/binding.h"
 #include "luaug/script/reload_state.h"
 #include "luaug/script/tweens.h"
@@ -154,6 +155,16 @@ public:
     // which is the same answer an empty world gives -- so every reader checks
     // rather than assuming.
     scene::PhysicsSync* physics = nullptr;
+
+    // The animation host, or null in a build with no render module. Same
+    // arrangement and same rule as `physics` above: null is a real state, and a
+    // track that has no host plays nothing rather than raising.
+    scene::AnimationHost* animation = nullptr;
+
+    // Every `AnimationTrack` handle this VM has handed out. Append-only: a
+    // record is four bytes and a signal id, and `LoadAnimation` is a load-once
+    // call rather than a per-frame one -- which is what its own doc says.
+    std::vector<TrackRecord> animationTracks;
 
     // Every live tween in this VM (api-design.md §2.1). Per-VM rather than
     // process-global for the same reason everything else here is: two worlds in

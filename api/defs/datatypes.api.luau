@@ -1437,6 +1437,104 @@ local Datatypes: { Schema.Datatype } = {
             },
         } :: { Schema.Method },
     },
+    {
+        Name = "AnimationTrack",
+        Module = "script",
+        Doc = "One clip playing on one `AnimationPlayer`, returned by `LoadAnimation` (§2.2). A handle rather "
+            .. "than an Instance, like `Tween`: nothing parents a track and nothing finds one in the "
+            .. "tree.\n\nIt is also the one datatype here that is not immutable, and the reason is what a "
+            .. "handle IS: `track.Looped = true` names the one track every holder of that handle can see, "
+            .. "where `cf.Position = v` would write to a copy the caller is about to drop.\n\n**Its clock is "
+            .. "the SimClock's.** `Speed` scales it, sampling happens at `PreAnimation`, and nothing here "
+            .. "reads a wall clock -- so a clip is at the same position on the same tick in a replay as it "
+            .. "was live.",
+        Properties = {
+            {
+                Name = "Playing",
+                Type = "boolean",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "Whether the clock is advancing. False for a track that reached the end of a clip that "
+                    .. "is not `Looped` -- which still HOLDS its last frame until it is stopped or replayed, "
+                    .. "because `Ended` is deferred and a character that returned to its rest pose for the "
+                    .. "one tick before the handler ran would be a visible pop.",
+            },
+            {
+                Name = "Looped",
+                Type = "boolean",
+                ThreadSafety = "Safe",
+                Doc = "Whether reaching the end wraps to the start instead of stopping. A looped track never "
+                    .. "fires `Ended`, because it never does. Wrapping keeps the fraction of a tick it "
+                    .. "overshot by, so a loop does not drift against everything else in the scene.",
+            },
+            {
+                Name = "Speed",
+                Type = "number",
+                ThreadSafety = "Safe",
+                Doc = "How fast the clip's clock runs. 2 is twice the speed and half the duration; 0 holds the "
+                    .. "pose where it is, which is the honest way to freeze a frame.",
+            },
+            {
+                Name = "Weight",
+                Type = "number",
+                ThreadSafety = "Safe",
+                Doc = "How much this track contributes when several drive one skeleton. Assigning it is "
+                    .. "immediate -- the faded form is `Play`'s and `Stop`'s argument, and a property that "
+                    .. "took a fade time would not be a property.\n\nBlending is a weighted average PER JOINT "
+                    .. "and per component, so a joint no clip drives keeps its rest transform rather than "
+                    .. "being dragged towards the origin by tracks that say nothing about it.",
+            },
+            {
+                Name = "Length",
+                Type = "number",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "The clip's duration in seconds, or zero for a track whose clip was not found.",
+            },
+            {
+                Name = "TimePosition",
+                Type = "number",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "Where the clip's clock is, in seconds. Read-only in v1: seeking a blended pose is a "
+                    .. "different feature from playing one, and a writable seek that ignored the blend would "
+                    .. "be the wrong half of it.",
+            },
+            {
+                Name = "Ended",
+                Type = "Signal<>",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "Fires on the tick a track reaches the end of a clip that is not `Looped`. A PROPERTY "
+                    .. "here rather than an event because a track is not a class and only classes declare "
+                    .. "events; the signal it holds behaves like any other.\n\nA `Stop` does not fire it: it "
+                    .. "is a past-tense fact about reaching the end, and code that chains the next animation "
+                    .. "on it must not be fooled by one that was interrupted.",
+            },
+        } :: { Schema.Property },
+        Methods = {
+            {
+                Name = "Play",
+                Parameters = { { Name = "fadeTime", Type = "number?" } },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Starts the clip from the BEGINNING, every time -- the opposite of `Tween:Play`, and "
+                    .. "deliberately: a jump animation triggered twice should play twice.\n\n`fadeTime` fades "
+                    .. "the weight in from zero over that many seconds, which is what makes a walk blend into "
+                    .. "an idle rather than snapping. It fades in to this track's own `Weight`, which is why "
+                    .. "one argument is enough.",
+            },
+            {
+                Name = "Stop",
+                Parameters = { { Name = "fadeTime", Type = "number?" } },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Ends the track. `fadeTime` fades its weight out over that many seconds and stops it "
+                    .. "when it reaches zero; without one it stops on the spot. `Ended` does not fire either "
+                    .. "way.",
+            },
+        } :: { Schema.Method },
+    },
 }
 
 local Definition: Schema.Definition = {

@@ -528,9 +528,10 @@ TEST_CASE("the boot-time method cross-check reports both directions")
     // scaffold M5 tagged `DevOnly` so that its removal would be structural
     // rather than a promise. That number going DOWN by one is the removal; 60
     // once `TweenService:Create` and `:GetValue` landed beside it, and 64 once
-    // `Sound:Play`/`Pause`/`Stop` and `AudioService:PlayLocal` did.
-    CHECK(coverage.declared == 64);
-    CHECK(coverage.bound == 64);
+    // `Sound:Play`/`Pause`/`Stop` and `AudioService:PlayLocal` did; 65 once
+    // `AnimationPlayer:LoadAnimation` brought the animation runtime.
+    CHECK(coverage.declared == 65);
+    CHECK(coverage.bound == 65);
     CHECK(coverage.declaredWithoutBinding == 0);
 }
 

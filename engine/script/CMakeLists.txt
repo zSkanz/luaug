@@ -14,6 +14,7 @@
 luaug_add_module(script
     LAYER 5
     SOURCES
+        src/animation.cpp
         src/binding.cpp
         src/datatypes.cpp
         src/instance_binding.cpp
@@ -36,7 +37,16 @@ luaug_add_module(script
 
 target_link_libraries(luaug_script PRIVATE luaug::luau)
 
+# `render` is linked into the TEST executable and nowhere else, the same
+# arrangement `render`'s own tests use for `rhi_null` and for the same reason: a
+# test binary is not a module. `script` binds `AnimationPlayer:LoadAnimation`,
+# and the boot-time cross-check counts a binding whose class nothing declared as
+# a mismatch -- so the fixture has to be able to register render's classes. The
+# module itself still sees only `scene::AnimationHost`.
 luaug_add_module_tests(script
+    MODULES
+        script
+        render
     SOURCES
         tests/sandbox_tests.cpp
         tests/datatype_tests.cpp

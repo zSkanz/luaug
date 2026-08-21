@@ -25,6 +25,7 @@ luaug_add_module(render
         src/mesh_loader.cpp
         src/scene_types.cpp
         src/ui_renderer.cpp
+        src/animation.cpp
         generated/class_descriptors.gen.cpp
     DEPS
         asset
@@ -60,4 +61,5 @@ luaug_add_module_tests(render
         tests/mesh_cache_tests.cpp
         tests/lighting_tests.cpp
         tests/shadow_tests.cpp
+        tests/animation_tests.cpp
 )

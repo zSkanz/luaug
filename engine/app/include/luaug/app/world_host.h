@@ -17,6 +17,7 @@
 #include "luaug/core/name_atom.h"
 #include "luaug/input/input.h"
 #include "luaug/physics/backends.h"
+#include "luaug/render/animation.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/enum_registry.h"
 #include "luaug/scene/physics_sync.h"
@@ -189,6 +190,18 @@ public:
     void pumpInput(std::span<const platform::Event> events);
     [[nodiscard]] input::InputSystem& input() noexcept { return m_input; }
 
+    // Where `MeshLoader` puts the skeleton and clips it reads out of a glTF.
+    // The loader runs in the render loop and this is simulation state, which is
+    // exactly why it is handed over rather than owned there.
+    [[nodiscard]] render::SkeletonLibrary& skeletons() noexcept { return m_skeletons; }
+
+    // The poses `render::extract` reads. Null before `boot`, which is the same
+    // window in which there is no world to extract from.
+    [[nodiscard]] const render::AnimationSystem* animation() const noexcept
+    {
+        return m_animation ? &*m_animation : nullptr;
+    }
+
     [[nodiscard]] scene::PhysicsSync* physics() noexcept { return m_physics ? &*m_physics : nullptr; }
     [[nodiscard]] const scene::PhysicsSync* physics() const noexcept { return m_physics ? &*m_physics : nullptr; }
     [[nodiscard]] script::ScriptRuntime& runtime() noexcept { return *m_runtime; }
@@ -241,6 +254,18 @@ private:
     physics::PhysicsResult m_backend;
     std::optional<scene::PhysicsSync> m_physics;
     input::InputSystem m_input;
+
+    // The skeletons the mesh loader reads out of each glTF, and the system that
+    // plays their clips. Both live here rather than beside the renderer because
+    // animation is SIMULATION: it advances on the SimClock, it has to run in a
+    // headless replay, and a script reads `TimePosition` off it. What the
+    // renderer takes is the pose it produces.
+    //
+    // Declared after `m_world` because the system holds a reference to it, and
+    // before nothing: `m_animation` is destroyed first, which is the order its
+    // own references need.
+    render::SkeletonLibrary m_skeletons;
+    std::optional<render::AnimationSystem> m_animation;
 
     std::filesystem::path m_root;
     core::InstanceId m_workspace;

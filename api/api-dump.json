@@ -2,6 +2,26 @@
   "Version": "0.0.1",
   "Classes": [
     {
+      "Name": "AnimationPlayer",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [],
+      "Methods": [
+        {
+          "Name": "LoadAnimation",
+          "Parameters": [
+            {
+              "Name": "content",
+              "Type": "Content"
+            }
+          ],
+          "Returns": ["AnimationTrack"],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Events": []
+    },
+    {
       "Name": "AudioGroup",
       "Extends": "Instance",
       "Tags": [],
@@ -1994,6 +2014,77 @@
     }
   ],
   "Datatypes": [
+    {
+      "Name": "AnimationTrack",
+      "Constructors": [],
+      "Constants": [],
+      "Properties": [
+        {
+          "Name": "Ended",
+          "Type": "Signal<>",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Length",
+          "Type": "number",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Looped",
+          "Type": "boolean",
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Playing",
+          "Type": "boolean",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Speed",
+          "Type": "number",
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "TimePosition",
+          "Type": "number",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Weight",
+          "Type": "number",
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Methods": [
+        {
+          "Name": "Play",
+          "Parameters": [
+            {
+              "Name": "fadeTime",
+              "Type": "number?"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Stop",
+          "Parameters": [
+            {
+              "Name": "fadeTime",
+              "Type": "number?"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Operators": []
+    },
     {
       "Name": "CFrame",
       "Constructors": [
