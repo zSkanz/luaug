@@ -287,7 +287,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(animationPlayerDesc);
 
     // --- Lighting ---
-    static std::array<scene::PropertyDesc, 8> lightingProperties;
+    static std::array<scene::PropertyDesc, 9> lightingProperties;
     lightingProperties = {{
         scene::PropertyDesc{
             .name = atoms.intern("ClockTime"),
@@ -365,6 +365,17 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
             .get = native::getLightingFogEnd,
             .set = native::setLightingFogEnd,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("ExposureCompensation"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_exposure_stops"),
+            .get = native::getLightingExposureCompensation,
+            .set = native::setLightingExposureCompensation,
         },
         scene::PropertyDesc{
             .name = atoms.intern("SunDirection"),

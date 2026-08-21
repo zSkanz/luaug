@@ -217,6 +217,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         out.environment.fogColor = lighting->fogColor;
         out.environment.fogStart = lighting->fogStart;
         out.environment.fogEnd = lighting->fogEnd;
+        out.environment.exposureCompensation = lighting->exposureCompensation;
     }
 
     // --- Debug parts --------------------------------------------------------

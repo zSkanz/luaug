@@ -14,7 +14,7 @@
 // pipelines (M6 brief, Decision 11) -- one shader with a branch would make every
 // static mesh in every world carry joint and weight attributes it never reads.
 //
-// **Every one of the ten fragment texture slots must always have something
+// **Every one of the eleven fragment texture slots must always have something
 // bound.** The material's `TextureFlags` are multipliers rather than branches
 // (`shader_types.h` says why), so the sample happens whether the material has
 // that texture or not, and a slot the renderer leaves empty is an unbound
@@ -62,6 +62,11 @@ Texture2D<float> LightIndexTexture : register(t8, space2);
 SamplerState LightIndexSampler : register(s8, space2);
 Texture2D LightDataTexture : register(t9, space2);
 SamplerState LightDataSampler : register(s9, space2);
+// Screen-space ambient occlusion, from the depth prepass (`ssao.hlsl`). Read in
+// SCREEN space rather than interpolated, because it is a property of the pixel
+// and not of the surface.
+Texture2D<float> OcclusionTexture : register(t10, space2);
+SamplerState OcclusionSampler : register(s10, space2);
 
 // An exact texel fetch through a point sampler.
 float clusterFetch1(Texture2D<float> texture, SamplerState pointSampler, uint x, uint y, uint width, uint height)
@@ -229,8 +234,17 @@ float4 shadeForward(Interpolants input)
     // `Ambient` is ADDED to the irradiance rather than replaced by it, so the
     // property keeps meaning what it documents: light reaching every surface
     // from every direction, a stand-in for bounced light there is still none of.
+    // The occlusion term multiplies the environment and the ambient below, and
+    // NOTHING else. A surface's occlusion of the environment says nothing about
+    // whether the sun reaches it, and the sun has a shadow map that answers
+    // exactly that; applying it to direct light is the most common way an
+    // ambient-occlusion pass ends up looking like dirt.
+    const float2 screenUv = input.Position.xy * ViewportParams.zw;
+    const float rawOcclusion = OcclusionTexture.SampleLevel(OcclusionSampler, screenUv, 0.0f);
+    const float occlusion = lerp(1.0f, rawOcclusion, EnvironmentParams.z);
+
     color += evaluateEnvironment(surface, EnvironmentMap, EnvironmentSampler, BrdfLut, BrdfSampler, IrradianceSh,
-                                 EnvironmentParams.x, EnvironmentParams.y, 1.0f);
+                                 EnvironmentParams.x, EnvironmentParams.y, occlusion);
     // And `Ambient` on the DIFFUSE lobe only, which is a change of side rather
     // than a change of mind. M4's comment argued for putting it on both, and the
     // argument was right at the time: "a mirror in a uniformly lit white room is
@@ -239,7 +253,7 @@ float4 shadeForward(Interpolants input)
     // behind it now, and it answers that case properly -- adding a flat term on
     // top of a prefiltered one is counting the same light twice, and it shows up
     // as metal that cannot be made dark.
-    color += Ambient.rgb * surface.DiffuseColor;
+    color += Ambient.rgb * surface.DiffuseColor * occlusion;
 
     float3 emissive = EmissiveFactor.rgb;
     emissive *= lerp(float3(1.0f, 1.0f, 1.0f), EmissiveTexture.Sample(EmissiveSampler, input.Uv).rgb, TextureFlags.w);

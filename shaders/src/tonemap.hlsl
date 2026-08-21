@@ -33,6 +33,12 @@
 
 Texture2D HdrTexture : register(t0, space2);
 SamplerState HdrSampler : register(s0, space2);
+// The bloom chain's finest level, already the sum of every coarser one.
+Texture2D BloomTexture : register(t1, space2);
+SamplerState BloomSampler : register(s1, space2);
+// One texel: the frame's adapted average luminance (`luminance_adapt.hlsl`).
+Texture2D<float> ExposureTexture : register(t2, space2);
+SamplerState ExposureSampler : register(s2, space2);
 
 struct Interpolants
 {
@@ -87,10 +93,23 @@ float4 FragmentMain(Interpolants input) : SV_Target0
     // known to be zero.
     const float3 hdr = HdrTexture.SampleLevel(HdrSampler, input.Uv, 0.0f).rgb;
 
-    // Exposure scales the scene before the curve, which is what makes it an
-    // exposure rather than a brightness: it moves which luminance lands on the
-    // roll-off, instead of stretching an already-compressed image.
-    const float3 exposed = max(hdr * ExposureUnused.x, float3(0.0f, 0.0f, 0.0f));
+    // Bloom is added in scene-referred light, BEFORE the curve. Adding it after
+    // would put a glow on top of an already-compressed image, which is the look
+    // of a screen-space filter rather than of light.
+    const float3 bloom = BloomTexture.SampleLevel(BloomSampler, input.Uv, 0.0f).rgb;
+    const float3 scene = hdr + bloom * ExposureBloom.y;
+
+    // **Exposure is automatic, with the artist control on top.** The measured
+    // value is the frame's adapted geometric-mean luminance; dividing by it maps
+    // that mean onto middle grey, which is what an exposure meter does. The
+    // compensation is in EV stops, which is the unit a person who has used a
+    // camera already knows -- and it is `Lighting.ExposureCompensation`.
+    //
+    // Middle grey at 0.18 is the photographic convention and it is what makes
+    // "correctly exposed" mean the same thing here as it does anywhere else.
+    const float measured = max(ExposureTexture.SampleLevel(ExposureSampler, float2(0.5f, 0.5f), 0.0f), 1e-4f);
+    const float exposure = (0.18f / measured) * exp2(ExposureBloom.x);
+    const float3 exposed = max(scene * exposure, float3(0.0f, 0.0f, 0.0f));
 
     return float4(encodeSrgb(tonemapPbrNeutral(exposed)), 1.0f);
 }

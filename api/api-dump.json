@@ -1117,6 +1117,10 @@
           "Type": "number"
         },
         {
+          "Name": "ExposureCompensation",
+          "Type": "number"
+        },
+        {
           "Name": "FogColor",
           "Type": "Color3"
         },

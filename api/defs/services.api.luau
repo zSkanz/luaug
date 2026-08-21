@@ -239,6 +239,14 @@ local Classes: { Schema.Class } = {
                     .. "which is how fog is turned off without a separate flag.",
             },
             {
+                Name = "ExposureCompensation",
+                Type = "number",
+                ErrorKey = "scene.err.number_exposure_stops",
+                Doc = "Exposure in EV stops, on top of the automatic exposure the renderer measures from the frame "
+                    .. "itself. Zero means whatever it measured; +1 is twice the light and -1 is half, which is the "
+                    .. "unit a camera uses. It is a look rather than a limit, so it is not clamped.",
+            },
+            {
                 Name = "SunDirection",
                 Type = "vector",
                 ReadOnly = true,

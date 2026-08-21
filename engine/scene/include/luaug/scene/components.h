@@ -242,6 +242,11 @@ struct LightingComponent
     // Equal to or below `fogStart` means no fog at all, which is how fog is
     // turned off without a second flag to keep in sync.
     f32 fogEnd = 0.0f;
+    // EV stops on top of the automatic exposure (M7.5). Zero means "whatever
+    // the frame measured"; the unit is the photographer's, so +1 is twice the
+    // light. Unbounded on purpose -- an exposure a scene deliberately blows out
+    // is a look, not an error.
+    f32 exposureCompensation = 0.0f;
 };
 
 // `Workspace`'s own state. One field, and it is a reference rather than a

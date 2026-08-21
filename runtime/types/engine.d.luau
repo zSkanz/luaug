@@ -1191,6 +1191,10 @@ declare extern type Lighting extends Instance with
     --- Distance in metres at which fog is total. Equal to or below FogStart means no fog at all, which
     --- is how fog is turned off without a separate flag.
     FogEnd: number
+    --- Exposure in EV stops, on top of the automatic exposure the renderer measures from the frame
+    --- itself. Zero means whatever it measured; +1 is twice the light and -1 is half, which is the unit
+    --- a camera uses. It is a look rather than a limit, so it is not clamped.
+    ExposureCompensation: number
     --- The unit vector pointing from the world towards the sun, derived from ClockTime and
     --- GeographicLatitude and nothing else -- no wall clock and no accumulated state, so the same
     --- ClockTime always gives the same direction.

@@ -183,12 +183,67 @@ float4x4 skinMatrix(uint4 joints, float4 weights)
 #endif
 
 #if defined(LUAUG_UNIFORMS_TONEMAP)
-// `render::GpuTonemapUniforms`, 16 bytes -- a whole row for one float, because
-// that is the smallest a constant buffer row is.
+// `render::GpuTonemapUniforms`, 16 bytes.
 cbuffer GpuTonemapUniforms : register(b0, space3)
 {
-    // x exposure, rest unused.
-    float4 ExposureUnused;
+    // x exposure compensation in EV stops, y how much bloom is mixed in.
+    float4 ExposureBloom;
+};
+#endif
+
+#if defined(LUAUG_UNIFORMS_SSAO)
+// `render::GpuSsaoUniforms`, 48 bytes.
+cbuffer GpuSsaoUniforms : register(b0, space3)
+{
+    // x tanHalfFovX, y tanHalfFovY, z near plane, w far plane.
+    float4 SsaoProjection;
+    // x width, y height, z 1/width, w 1/height.
+    float4 SsaoViewport;
+    // x radius in world metres, y depth bias, z strength.
+    float4 SsaoParams;
+};
+#endif
+
+#if defined(LUAUG_UNIFORMS_BLUR)
+// `render::GpuBlurUniforms`, 16 bytes.
+cbuffer GpuBlurUniforms : register(b0, space3)
+{
+    // x and y one source texel, z and w the direction in texels -- so one
+    // pipeline serves both passes of a separable blur.
+    float4 BlurTexelDirection;
+};
+#endif
+
+#if defined(LUAUG_UNIFORMS_BLOOM)
+// `render::GpuBloomUniforms`, 32 bytes.
+cbuffer GpuBloomUniforms : register(b0, space3)
+{
+    // x and y one SOURCE texel, z the filter radius in source texels.
+    float4 BloomTexelRadius;
+    // x threshold, y soft-knee width. Zero on every pass but the first.
+    float4 BloomThreshold;
+};
+#endif
+
+#if defined(LUAUG_UNIFORMS_LUMINANCE)
+// `render::GpuLuminanceUniforms`, 32 bytes.
+cbuffer GpuLuminanceUniforms : register(b0, space3)
+{
+    // x and y one source texel, z how far towards the measurement one FRAME
+    // moves -- per frame rather than per second, so a screenshot at frame thirty
+    // is the same picture on every machine.
+    float4 LuminanceTexelRate;
+    // x lowest and y highest average luminance the automatic exposure accepts.
+    float4 LuminanceRange;
+};
+#endif
+
+#if defined(LUAUG_UNIFORMS_FXAA)
+// `render::GpuFxaaUniforms`, 16 bytes.
+cbuffer GpuFxaaUniforms : register(b0, space3)
+{
+    // x and y one source texel.
+    float4 FxaaTexel;
 };
 #endif
 

@@ -23,6 +23,40 @@ using core::Vec3;
 constexpr rhi::TextureFormat kHdrFormat = rhi::TextureFormat::Rgba16Float;
 constexpr rhi::TextureFormat kDepthFormat = rhi::TextureFormat::D32Float;
 constexpr rhi::TextureFormat kShadowFormat = rhi::TextureFormat::D32Float;
+// Tonemapped, sRGB-encoded bytes: the input the anti-aliasing resolve wants.
+// `Rgba8Unorm` rather than the sRGB variant because `tonemap.hlsl` has already
+// applied the transfer function, and a format that applied it again would be the
+// classic double-encode.
+constexpr rhi::TextureFormat kLdrFormat = rhi::TextureFormat::Rgba8Unorm;
+constexpr rhi::TextureFormat kOcclusionFormat = rhi::TextureFormat::R8Unorm;
+constexpr rhi::TextureFormat kLuminanceFormat = rhi::TextureFormat::R32Float;
+
+// Five levels, halving from half resolution: the coarsest is a thirty-second of
+// the frame, which is where a bloom's tail stops being distinguishable from a
+// flat lift.
+constexpr u32 kBloomLevels = 5;
+
+// How far towards the frame's measured brightness one FRAME moves. Per frame
+// rather than per second, deliberately: a rate driven by elapsed wall-clock time
+// would make a screenshot at frame thirty a different picture on a fast machine
+// and a slow one.
+constexpr f32 kExposureAdaptationRate = 0.05f;
+
+// The bloom threshold, in scene-referred luminance, with a soft knee around it.
+// Applied once, on the way into the chain.
+constexpr f32 kBloomThreshold = 1.1f;
+constexpr f32 kBloomKnee = 0.6f;
+
+// How much of the bloom chain is mixed back in. Small, and it should be: bloom
+// that reads as a glow rather than as a haze is mostly threshold and radius, and
+// the intensity is what stops it from becoming fog.
+constexpr f32 kBloomIntensity = 0.05f;
+
+// The occlusion pass's sampling radius in world metres, its self-occlusion bias,
+// and how strongly it darkens.
+constexpr f32 kOcclusionRadius = 0.6f;
+constexpr f32 kOcclusionBias = 0.025f;
+constexpr f32 kOcclusionStrength = 1.0f;
 
 // The cofactor matrix of the model transform's rotation-scale block, so a
 // non-uniformly scaled mesh lights correctly. The same construction the glTF
@@ -54,6 +88,40 @@ constexpr rhi::TextureFormat kShadowFormat = rhi::TextureFormat::D32Float;
 [[nodiscard]] std::span<const std::byte> asBytes(const void* data, std::size_t size) noexcept
 {
     return std::span<const std::byte>(static_cast<const std::byte*>(data), size);
+}
+
+// A bloom level's size. Level zero is HALF the frame, so the chain starts one
+// halving in -- a full-resolution first level would be the frame's cost again
+// for a term that is about to be blurred.
+[[nodiscard]] u32 bloomLevelSize(u32 base, u32 level) noexcept
+{
+    const u32 size = base >> (level + 1);
+    return size > 0 ? size : 1u;
+}
+
+// One fullscreen triangle into one target: the shape every pass in the post
+// chain has. Written once because eleven copies of it would be eleven places to
+// forget the scissor, and a missing scissor is a pass that draws nothing on a
+// backend that requires one.
+void fullscreenPass(rhi::ICmdList& cmd, rhi::PipelineHandle pipeline, rhi::TextureHandle target, u32 width, u32 height,
+                    std::string_view name, std::span<const rhi::TextureBinding> textures,
+                    std::span<const std::byte> uniforms, rhi::LoadOp loadOp = rhi::LoadOp::Clear)
+{
+    const std::array<rhi::ColorAttachment, 1> attachment{rhi::ColorAttachment{
+        .texture = target,
+        .loadOp = loadOp,
+        .storeOp = rhi::StoreOp::Store,
+    }};
+    cmd.beginRenderPass({.colorAttachments = attachment, .debugName = name});
+    cmd.setPipeline(pipeline);
+    cmd.setViewport({.width = static_cast<f32>(width), .height = static_cast<f32>(height)});
+    cmd.setScissor({.width = static_cast<core::i32>(width), .height = static_cast<core::i32>(height)});
+    if (!uniforms.empty())
+        cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, uniforms);
+    if (!textures.empty())
+        cmd.bindTextures(rhi::ShaderStage::Fragment, 0, textures);
+    cmd.draw(3, 1, 0, 0);
+    cmd.endRenderPass();
 }
 
 [[nodiscard]] u32 environmentLevelSize(u32 level) noexcept
@@ -132,6 +200,10 @@ private:
     enum class Selection
     {
         Shadow,
+        // Depth only, but filtered like the forward pass: a caster outside the
+        // view still casts into it, and a caster outside the view still must not
+        // fill the depth buffer the camera reads.
+        Prepass,
         Opaque,
         Transparent,
     };
@@ -174,14 +246,47 @@ private:
     // blending and no depth write. A fragment's colour does not depend on which
     // pass drew it; only the order and the state do.
     rhi::PipelineHandle pbrBlendPipeline_{};
+    // Depth only, like the shadow pass, but culling BACK faces so the depth it
+    // writes is the depth the forward pass will test against. The shadow pass
+    // culls front faces on purpose and that would put every surface half a
+    // thickness away here.
+    rhi::PipelineHandle depthPrepassPipeline_{};
+    rhi::PipelineHandle depthPrepassSkinnedPipeline_{};
     rhi::PipelineHandle skyPipeline_{};
+    rhi::PipelineHandle ssaoPipeline_{};
+    rhi::PipelineHandle ssaoBlurPipeline_{};
+    rhi::PipelineHandle bloomDownPipeline_{};
+    rhi::PipelineHandle bloomUpPipeline_{};
+    rhi::PipelineHandle luminanceDownPipeline_{};
+    rhi::PipelineHandle luminanceReducePipeline_{};
+    rhi::PipelineHandle luminanceAdaptPipeline_{};
     rhi::PipelineHandle tonemapPipeline_{};
+    rhi::PipelineHandle fxaaPipeline_{};
 
-    rhi::ShaderHandle shaders_[12]{};
+    rhi::ShaderHandle shaders_[32]{};
     core::usize shaderCount_ = 0;
 
     rhi::TextureHandle hdr_{};
     rhi::TextureHandle depth_{};
+    // Tonemapped and sRGB-encoded, so the anti-aliasing resolve has an image to
+    // find edges in. FXAA works on perceptual luminance, which is what makes it
+    // a post-tonemap pass rather than a pre-tonemap one.
+    rhi::TextureHandle ldr_{};
+    // Half resolution, and the blur's ping-pong partner. Half because sixteen
+    // taps at full resolution is four times the cost for a term the blur is
+    // about to spread anyway (R16).
+    rhi::TextureHandle occlusion_{};
+    rhi::TextureHandle occlusionBlur_{};
+    // The bloom chain, each level its own texture because a `ColorAttachment`
+    // names a texture and not a mip level.
+    rhi::TextureHandle bloom_[kBloomLevels]{};
+    // The automatic exposure's measurement chain, and the two 1x1 targets it
+    // ping-pongs between: one frame reads what the last one wrote.
+    rhi::TextureHandle luminance64_{};
+    rhi::TextureHandle luminance8_{};
+    rhi::TextureHandle exposure_[2]{};
+    u32 exposureIndex_ = 0;
+    bool exposureInitialised_ = false;
     rhi::TextureHandle shadowMap_{};
     // 1x1 stand-ins for a material that has no map. `textureFlags` are
     // multipliers rather than branches, so the shader samples every slot
@@ -252,6 +357,32 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
     const rhi::ShaderHandle skyFragment = load("sky", rhi::ShaderStage::Fragment);
     const rhi::ShaderHandle tonemapVertex = load("tonemap", rhi::ShaderStage::Vertex);
     const rhi::ShaderHandle tonemapFragment = load("tonemap", rhi::ShaderStage::Fragment);
+    const rhi::ShaderHandle ssaoVertex = load("ssao", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle ssaoFragment = load("ssao", rhi::ShaderStage::Fragment);
+    const rhi::ShaderHandle ssaoBlurVertex = load("ssao_blur", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle ssaoBlurFragment = load("ssao_blur", rhi::ShaderStage::Fragment);
+    const rhi::ShaderHandle bloomDownVertex = load("bloom_down", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle bloomDownFragment = load("bloom_down", rhi::ShaderStage::Fragment);
+    const rhi::ShaderHandle bloomUpVertex = load("bloom_up", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle bloomUpFragment = load("bloom_up", rhi::ShaderStage::Fragment);
+    const rhi::ShaderHandle luminanceDownVertex = load("luminance_down", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle luminanceDownFragment = load("luminance_down", rhi::ShaderStage::Fragment);
+    const rhi::ShaderHandle luminanceReduceVertex = load("luminance_reduce", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle luminanceReduceFragment = load("luminance_reduce", rhi::ShaderStage::Fragment);
+    const rhi::ShaderHandle luminanceAdaptVertex = load("luminance_adapt", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle luminanceAdaptFragment = load("luminance_adapt", rhi::ShaderStage::Fragment);
+    const rhi::ShaderHandle fxaaVertex = load("fxaa", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle fxaaFragment = load("fxaa", rhi::ShaderStage::Fragment);
+
+    for (const rhi::ShaderHandle handle :
+         {ssaoVertex, ssaoFragment, ssaoBlurVertex, ssaoBlurFragment, bloomDownVertex, bloomDownFragment, bloomUpVertex,
+          bloomUpFragment, luminanceDownVertex, luminanceDownFragment, luminanceReduceVertex, luminanceReduceFragment,
+          luminanceAdaptVertex, luminanceAdaptFragment, fxaaVertex, fxaaFragment}) {
+        if (!handle.valid()) {
+            destroy(device);
+            return error.key.hash != 0 ? error : core::makeError(LUAUG_TR("render.err.shader_format_unknown"));
+        }
+    }
 
     if (!shadowSkinnedVertex.valid() || !shadowSkinnedFragment.valid() || !pbrSkinnedVertex.valid() ||
         !pbrSkinnedFragment.valid())
@@ -387,30 +518,99 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
         .debugName = "pbr_skinned_blend",
     });
 
+    // The DEPTH PREPASS, and it is `shadow_depth` compiled into a different
+    // pipeline rather than a new shader: `GpuShadowUniforms` is already a
+    // view-projection and a model matrix, which is exactly what a depth-only
+    // pass of the camera needs. What differs is state -- back-face culling, so
+    // the depth it writes is the depth the forward pass will test against.
+    //
+    // What it does NOT do, said out loud: an alpha-masked material writes depth
+    // where its own fragments would have been discarded. The shadow pass has
+    // always had the same gap, and closing it means a second fragment shader
+    // that samples base colour in a pass whose whole point is not to.
+    depthPrepassPipeline_ = device.createGraphicsPipeline({
+        .vertexShader = shadowVertex,
+        .fragmentShader = shadowFragment,
+        .vertexBuffers = buffers,
+        .vertexAttributes = attributes,
+        .rasterizer = {.cullMode = rhi::CullMode::Back},
+        .depthStencil = {.depthTest = true, .depthWrite = true, .depthCompare = rhi::CompareOp::LessOrEqual},
+        .colorTargets = {},
+        .depthStencilFormat = kDepthFormat,
+        .debugName = "depth_prepass",
+    });
+    depthPrepassSkinnedPipeline_ = device.createGraphicsPipeline({
+        .vertexShader = shadowSkinnedVertex,
+        .fragmentShader = shadowSkinnedFragment,
+        .vertexBuffers = skinnedBuffers,
+        .vertexAttributes = shadowSkinnedAttributes,
+        .rasterizer = {.cullMode = rhi::CullMode::Back},
+        .depthStencil = {.depthTest = true, .depthWrite = true, .depthCompare = rhi::CompareOp::LessOrEqual},
+        .colorTargets = {},
+        .depthStencilFormat = kDepthFormat,
+        .debugName = "depth_prepass_skinned",
+    });
+
     // The sky writes no depth and tests none: it is drawn first and everything
-    // else covers it. Testing would need a depth value for a triangle that has
-    // no position in the world.
+    // else covers it. It declares the depth FORMAT anyway, because the forward
+    // pass has a depth attachment and every pipeline used inside it must agree
+    // about that format even when it neither reads nor writes one.
     skyPipeline_ = device.createGraphicsPipeline({
         .vertexShader = skyVertex,
         .fragmentShader = skyFragment,
         .primitive = rhi::PrimitiveType::TriangleList,
         .rasterizer = {.cullMode = rhi::CullMode::None},
+        .depthStencil = {.depthTest = false, .depthWrite = false},
         .colorTargets = hdrTarget,
+        .depthStencilFormat = kDepthFormat,
         .debugName = "sky",
     });
 
-    tonemapPipeline_ = device.createGraphicsPipeline({
-        .vertexShader = tonemapVertex,
-        .fragmentShader = tonemapFragment,
-        .primitive = rhi::PrimitiveType::TriangleList,
-        .rasterizer = {.cullMode = rhi::CullMode::None},
-        .colorTargets = swapTarget,
-        .debugName = "tonemap",
-    });
+    const std::array<rhi::ColorTargetDesc, 1> occlusionTarget{rhi::ColorTargetDesc{.format = kOcclusionFormat}};
+    const std::array<rhi::ColorTargetDesc, 1> luminanceTarget{rhi::ColorTargetDesc{.format = kLuminanceFormat}};
+    const std::array<rhi::ColorTargetDesc, 1> ldrTarget{rhi::ColorTargetDesc{.format = kLdrFormat}};
+    // Additive, which is what lets the upsample ADD into the level below rather
+    // than read a target it is also writing -- something every backend refuses
+    // and which the frozen `BlendState` already makes unnecessary.
+    const std::array<rhi::ColorTargetDesc, 1> bloomAddTarget{rhi::ColorTargetDesc{
+        .format = kHdrFormat,
+        .blend = {.enabled = true,
+                  .srcColor = rhi::BlendFactor::One,
+                  .dstColor = rhi::BlendFactor::One,
+                  .srcAlpha = rhi::BlendFactor::One,
+                  .dstAlpha = rhi::BlendFactor::One},
+    }};
+
+    const auto fullscreen = [&](rhi::ShaderHandle vertex, rhi::ShaderHandle fragment,
+                                std::span<const rhi::ColorTargetDesc> targets, const char* name) {
+        return device.createGraphicsPipeline({
+            .vertexShader = vertex,
+            .fragmentShader = fragment,
+            .primitive = rhi::PrimitiveType::TriangleList,
+            .rasterizer = {.cullMode = rhi::CullMode::None},
+            .colorTargets = targets,
+            .debugName = name,
+        });
+    };
+
+    ssaoPipeline_ = fullscreen(ssaoVertex, ssaoFragment, occlusionTarget, "ssao");
+    ssaoBlurPipeline_ = fullscreen(ssaoBlurVertex, ssaoBlurFragment, occlusionTarget, "ssao_blur");
+    bloomDownPipeline_ = fullscreen(bloomDownVertex, bloomDownFragment, hdrTarget, "bloom_down");
+    bloomUpPipeline_ = fullscreen(bloomUpVertex, bloomUpFragment, bloomAddTarget, "bloom_up");
+    luminanceDownPipeline_ = fullscreen(luminanceDownVertex, luminanceDownFragment, luminanceTarget, "luminance_down");
+    luminanceReducePipeline_ =
+        fullscreen(luminanceReduceVertex, luminanceReduceFragment, luminanceTarget, "luminance_reduce");
+    luminanceAdaptPipeline_ =
+        fullscreen(luminanceAdaptVertex, luminanceAdaptFragment, luminanceTarget, "luminance_adapt");
+    tonemapPipeline_ = fullscreen(tonemapVertex, tonemapFragment, ldrTarget, "tonemap");
+    fxaaPipeline_ = fullscreen(fxaaVertex, fxaaFragment, swapTarget, "fxaa");
 
     if (!shadowPipeline_.valid() || !pbrPipeline_.valid() || !pbrBlendPipeline_.valid() || !skyPipeline_.valid() ||
         !tonemapPipeline_.valid() || !shadowSkinnedPipeline_.valid() || !pbrSkinnedPipeline_.valid() ||
-        !pbrSkinnedBlendPipeline_.valid()) {
+        !pbrSkinnedBlendPipeline_.valid() || !depthPrepassPipeline_.valid() || !depthPrepassSkinnedPipeline_.valid() ||
+        !ssaoPipeline_.valid() || !ssaoBlurPipeline_.valid() || !bloomDownPipeline_.valid() ||
+        !bloomUpPipeline_.valid() || !luminanceDownPipeline_.valid() || !luminanceReducePipeline_.valid() ||
+        !luminanceAdaptPipeline_.valid() || !fxaaPipeline_.valid()) {
         destroy(device);
         return core::makeError(LUAUG_TR("render.err.pipeline_create_failed"));
     }
@@ -538,10 +738,19 @@ std::optional<core::EngineError> DefaultRenderer::ensureTargets(rhi::IDevice& de
     if (hdr_.valid() && width == width_ && height == height_)
         return std::nullopt;
 
-    if (hdr_.valid())
-        device.destroy(hdr_);
-    if (depth_.valid())
-        device.destroy(depth_);
+    for (rhi::TextureHandle* texture : {&hdr_, &depth_, &ldr_, &occlusion_, &occlusionBlur_, &luminance64_,
+                                        &luminance8_, &exposure_[0], &exposure_[1]}) {
+        if (texture->valid())
+            device.destroy(*texture);
+        *texture = {};
+    }
+    for (rhi::TextureHandle& level : bloom_) {
+        if (level.valid())
+            device.destroy(level);
+        level = {};
+    }
+
+    const auto half = [](u32 value) { return value > 1 ? value / 2 : 1u; };
 
     hdr_ = device.createTexture({
         .format = kHdrFormat,
@@ -550,15 +759,86 @@ std::optional<core::EngineError> DefaultRenderer::ensureTargets(rhi::IDevice& de
         .height = height,
         .debugName = "hdr",
     });
+    // **Sampled as well as an attachment**, which is the whole of the roadmap's
+    // "the scene depth must be samplable by a later pass". It is written by the
+    // prepass, read by ambient occlusion, and then attached again by the forward
+    // pass -- never both at once, which is a rule every backend enforces and
+    // none has to be asked about.
     depth_ = device.createTexture({
         .format = kDepthFormat,
-        .usage = rhi::TextureUsage::DepthStencilTarget,
+        .usage = rhi::TextureUsage::DepthStencilTarget | rhi::TextureUsage::Sampled,
         .width = width,
         .height = height,
         .debugName = "depth",
     });
-    if (!hdr_.valid() || !depth_.valid())
+    ldr_ = device.createTexture({
+        .format = kLdrFormat,
+        .usage = rhi::TextureUsage::ColorTarget | rhi::TextureUsage::Sampled,
+        .width = width,
+        .height = height,
+        .debugName = "ldr",
+    });
+    occlusion_ = device.createTexture({
+        .format = kOcclusionFormat,
+        .usage = rhi::TextureUsage::ColorTarget | rhi::TextureUsage::Sampled,
+        .width = half(width),
+        .height = half(height),
+        .debugName = "occlusion",
+    });
+    occlusionBlur_ = device.createTexture({
+        .format = kOcclusionFormat,
+        .usage = rhi::TextureUsage::ColorTarget | rhi::TextureUsage::Sampled,
+        .width = half(width),
+        .height = half(height),
+        .debugName = "occlusion-blur",
+    });
+
+    u32 levelWidth = half(width);
+    u32 levelHeight = half(height);
+    for (u32 level = 0; level < kBloomLevels; ++level) {
+        bloom_[level] = device.createTexture({
+            .format = kHdrFormat,
+            .usage = rhi::TextureUsage::ColorTarget | rhi::TextureUsage::Sampled,
+            .width = levelWidth,
+            .height = levelHeight,
+            .debugName = "bloom",
+        });
+        levelWidth = half(levelWidth);
+        levelHeight = half(levelHeight);
+    }
+
+    luminance64_ = device.createTexture({
+        .format = kLuminanceFormat,
+        .usage = rhi::TextureUsage::ColorTarget | rhi::TextureUsage::Sampled,
+        .width = 64,
+        .height = 64,
+        .debugName = "luminance-64",
+    });
+    luminance8_ = device.createTexture({
+        .format = kLuminanceFormat,
+        .usage = rhi::TextureUsage::ColorTarget | rhi::TextureUsage::Sampled,
+        .width = 8,
+        .height = 8,
+        .debugName = "luminance-8",
+    });
+    for (rhi::TextureHandle& target : exposure_) {
+        target = device.createTexture({
+            .format = kLuminanceFormat,
+            .usage = rhi::TextureUsage::ColorTarget | rhi::TextureUsage::Sampled,
+            .width = 1,
+            .height = 1,
+            .debugName = "exposure",
+        });
+    }
+    exposureInitialised_ = false;
+
+    if (!hdr_.valid() || !depth_.valid() || !ldr_.valid() || !occlusion_.valid() || !occlusionBlur_.valid() ||
+        !luminance64_.valid() || !luminance8_.valid() || !exposure_[0].valid() || !exposure_[1].valid())
         return core::makeError(LUAUG_TR("render.err.target_create_failed"));
+    for (const rhi::TextureHandle& level : bloom_) {
+        if (!level.valid())
+            return core::makeError(LUAUG_TR("render.err.target_create_failed"));
+    }
 
     width_ = width;
     height_ = height;
@@ -573,16 +853,25 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
 
     for (rhi::PipelineHandle* pipeline :
          {&shadowPipeline_, &pbrPipeline_, &pbrBlendPipeline_, &skyPipeline_, &tonemapPipeline_,
-          &shadowSkinnedPipeline_, &pbrSkinnedPipeline_, &pbrSkinnedBlendPipeline_}) {
+          &shadowSkinnedPipeline_, &pbrSkinnedPipeline_, &pbrSkinnedBlendPipeline_, &depthPrepassPipeline_,
+          &depthPrepassSkinnedPipeline_, &ssaoPipeline_, &ssaoBlurPipeline_, &bloomDownPipeline_, &bloomUpPipeline_,
+          &luminanceDownPipeline_, &luminanceReducePipeline_, &luminanceAdaptPipeline_, &fxaaPipeline_}) {
         if (pipeline->valid())
             device.destroy(*pipeline);
         *pipeline = {};
     }
     for (rhi::TextureHandle* texture :
-         {&hdr_, &depth_, &shadowMap_, &whitePixel_, &flatNormalPixel_, &blackPixel_, &environmentMap_, &brdfLut_}) {
+         {&hdr_, &depth_, &ldr_, &occlusion_, &occlusionBlur_, &luminance64_, &luminance8_, &exposure_[0],
+          &exposure_[1], &shadowMap_, &whitePixel_, &flatNormalPixel_, &blackPixel_, &environmentMap_, &brdfLut_,
+          &clusterGrid_, &lightIndices_, &lightData_}) {
         if (texture->valid())
             device.destroy(*texture);
         *texture = {};
+    }
+    for (rhi::TextureHandle& level : bloom_) {
+        if (level.valid())
+            device.destroy(level);
+        level = {};
     }
     for (rhi::SamplerHandle* sampler : {&linearSampler_, &shadowSampler_, &environmentSampler_, &pointSampler_}) {
         if (sampler->valid())
@@ -594,6 +883,8 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
     height_ = 0;
     defaultsUploaded_ = false;
     brdfUploaded_ = false;
+    exposureInitialised_ = false;
+    exposureIndex_ = 0;
     environment_ = EnvironmentCache{};
     valid_ = false;
 }
@@ -657,7 +948,7 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
                                    const Mat4& viewProjection, rhi::PipelineHandle staticPipeline,
                                    rhi::PipelineHandle skinnedPipeline, Selection selection, const CullSphere* cull)
 {
-    const bool shadowPass = selection == Selection::Shadow;
+    const bool depthOnly = selection == Selection::Shadow || selection == Selection::Prepass;
     bool onSkinnedPipeline = false;
 
     // Pixels per world unit at one metre, from the projection itself rather
@@ -683,9 +974,9 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
         // frame -- including a half-transparent one, which still occludes. The
         // roadmap leaves whether it *should* as a separate question, and this
         // milestone does not open it.
-        if (!shadowPass && !draw.inCameraFrustum)
+        if (selection != Selection::Shadow && !draw.inCameraFrustum)
             continue;
-        if (selection == Selection::Opaque && draw.transparent)
+        if ((selection == Selection::Opaque || selection == Selection::Prepass) && draw.transparent)
             continue;
         if (selection == Selection::Transparent && !draw.transparent)
             continue;
@@ -718,7 +1009,7 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
             onSkinnedPipeline = skinnedDraw;
         }
 
-        if (shadowPass) {
+        if (depthOnly) {
             const GpuShadowUniforms uniforms{viewProjection, draw.transform};
             cmd.bindUniforms(rhi::ShaderStage::Vertex, 0, asBytes(&uniforms, sizeof(uniforms)));
         }
@@ -737,7 +1028,7 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
                 const auto orDefault = [](rhi::TextureHandle handle, rhi::TextureHandle fallback) {
                     return handle.valid() ? handle : fallback;
                 };
-                const std::array<rhi::TextureBinding, 10> textures{
+                const std::array<rhi::TextureBinding, 11> textures{
                     rhi::TextureBinding{orDefault(material.baseColor, whitePixel_), linearSampler_},
                     rhi::TextureBinding{orDefault(material.normal, flatNormalPixel_), linearSampler_},
                     rhi::TextureBinding{orDefault(material.metallicRoughness, whitePixel_), linearSampler_},
@@ -748,6 +1039,7 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
                     rhi::TextureBinding{clusterGrid_, pointSampler_},
                     rhi::TextureBinding{lightIndices_, pointSampler_},
                     rhi::TextureBinding{lightData_, pointSampler_},
+                    rhi::TextureBinding{occlusion_, linearSampler_},
                 };
                 cmd.bindTextures(rhi::ShaderStage::Fragment, 0, textures);
                 boundMaterial = draw.material;
@@ -874,6 +1166,80 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     cmd.endRenderPass();
     cmd.popDebugGroup();
 
+    // --- Depth prepass -------------------------------------------------------
+    //
+    // **This is the roadmap's design constraint, answered.** The scene's depth
+    // has to be samplable by a later pass, and a prepass is what makes that
+    // possible without asking the frozen RHI for a read-only depth state: depth
+    // is written here, sampled by the occlusion pass, and attached again by the
+    // forward pass -- never a texture and an attachment at the same time.
+    //
+    // What it costs is a second geometry submission, which is CPU work in the
+    // exact place the instanced path exists to reduce. What it buys, besides the
+    // constraint, is early-Z rejection for the forward pass.
+    cmd.pushDebugGroup("depth-prepass");
+    cmd.beginRenderPass({
+        .colorAttachments = {},
+        .depthStencil = {.texture = depth_, .loadOp = rhi::LoadOp::Clear, .storeOp = rhi::StoreOp::Store},
+        .debugName = "depth-prepass",
+    });
+    cmd.setViewport({.width = static_cast<f32>(target.width), .height = static_cast<f32>(target.height)});
+    cmd.setScissor({.width = static_cast<core::i32>(target.width), .height = static_cast<core::i32>(target.height)});
+    if (world.camera.valid) {
+        cmd.setPipeline(depthPrepassPipeline_);
+        drawGeometry(cmd, world, meshes, world.camera.viewProjection, depthPrepassPipeline_,
+                     depthPrepassSkinnedPipeline_, Selection::Prepass);
+    }
+    cmd.endRenderPass();
+    cmd.popDebugGroup();
+
+    // --- Ambient occlusion ---------------------------------------------------
+    //
+    // Half resolution, sixteen taps, then a depth-aware blur in two separable
+    // passes. The result multiplies the environment and the ambient and nothing
+    // else -- the sun has a shadow map that answers whether IT reaches a surface
+    // (brief, Decision 13).
+    cmd.pushDebugGroup("occlusion");
+    {
+        const u32 occlusionWidth = target.width > 1 ? target.width / 2 : 1;
+        const u32 occlusionHeight = target.height > 1 ? target.height / 2 : 1;
+
+        GpuSsaoUniforms ssao;
+        ssao.projection[0] = world.camera.projection.m[0][0] != 0.0f ? 1.0f / world.camera.projection.m[0][0] : 1.0f;
+        ssao.projection[1] = world.camera.projection.m[1][1] != 0.0f ? 1.0f / world.camera.projection.m[1][1] : 1.0f;
+        ssao.projection[2] = world.camera.nearPlane;
+        ssao.projection[3] = world.camera.farPlane;
+        ssao.viewport[0] = static_cast<f32>(occlusionWidth);
+        ssao.viewport[1] = static_cast<f32>(occlusionHeight);
+        ssao.viewport[2] = 1.0f / static_cast<f32>(occlusionWidth);
+        ssao.viewport[3] = 1.0f / static_cast<f32>(occlusionHeight);
+        ssao.params[0] = kOcclusionRadius;
+        ssao.params[1] = kOcclusionBias;
+        ssao.params[2] = kOcclusionStrength;
+
+        const std::array<rhi::TextureBinding, 1> depthBinding{rhi::TextureBinding{depth_, pointSampler_}};
+        fullscreenPass(cmd, ssaoPipeline_, occlusion_, occlusionWidth, occlusionHeight, "ssao", depthBinding,
+                       asBytes(&ssao, sizeof(ssao)));
+
+        GpuBlurUniforms blur;
+        blur.texelDirection[0] = 1.0f / static_cast<f32>(occlusionWidth);
+        blur.texelDirection[1] = 1.0f / static_cast<f32>(occlusionHeight);
+        blur.texelDirection[2] = 1.0f;
+        blur.texelDirection[3] = 0.0f;
+        const std::array<rhi::TextureBinding, 2> horizontal{rhi::TextureBinding{occlusion_, linearSampler_},
+                                                            rhi::TextureBinding{depth_, pointSampler_}};
+        fullscreenPass(cmd, ssaoBlurPipeline_, occlusionBlur_, occlusionWidth, occlusionHeight, "ssao-blur-x",
+                       horizontal, asBytes(&blur, sizeof(blur)));
+
+        blur.texelDirection[2] = 0.0f;
+        blur.texelDirection[3] = 1.0f;
+        const std::array<rhi::TextureBinding, 2> vertical{rhi::TextureBinding{occlusionBlur_, linearSampler_},
+                                                          rhi::TextureBinding{depth_, pointSampler_}};
+        fullscreenPass(cmd, ssaoBlurPipeline_, occlusion_, occlusionWidth, occlusionHeight, "ssao-blur-y", vertical,
+                       asBytes(&blur, sizeof(blur)));
+    }
+    cmd.popDebugGroup();
+
     // --- Sky and forward PBR ------------------------------------------------
 
     const std::array<rhi::ColorAttachment, 1> hdrAttachment{rhi::ColorAttachment{
@@ -885,7 +1251,10 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     cmd.pushDebugGroup("forward");
     cmd.beginRenderPass({
         .colorAttachments = hdrAttachment,
-        .depthStencil = {.texture = depth_, .loadOp = rhi::LoadOp::Clear, .storeOp = rhi::StoreOp::DontCare},
+        // LOADED, not cleared: the prepass wrote this depth and the occlusion
+        // pass has already read it. Stored, because the blended pass tests
+        // against it.
+        .depthStencil = {.texture = depth_, .loadOp = rhi::LoadOp::Load, .storeOp = rhi::StoreOp::Store},
         .debugName = "forward",
     });
     cmd.setViewport({.width = static_cast<f32>(target.width), .height = static_cast<f32>(target.height)});
@@ -956,6 +1325,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
 
         frame.environmentParams[0] = static_cast<f32>(kEnvironmentMipCount);
         frame.environmentParams[1] = 1.0f;
+        frame.environmentParams[2] = 1.0f;
         for (u32 index = 0; index < 9; ++index) {
             frame.irradianceSh[index][0] = environment_.irradiance[index].x;
             frame.irradianceSh[index][1] = environment_.irradiance[index].y;
@@ -994,29 +1364,120 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     cmd.endRenderPass();
     cmd.popDebugGroup();
 
+    // --- Automatic exposure -------------------------------------------------
+    //
+    // Three passes down to one texel, and the last of them carries state: it
+    // reads the exposure the LAST frame wrote and writes this frame's into the
+    // other of two 1x1 targets. That ping-pong is how a value survives a frame
+    // in a renderer with no compute and no readback a frame could afford.
+    const u32 previousExposure = exposureIndex_;
+    const u32 nextExposure = 1u - exposureIndex_;
+    exposureIndex_ = nextExposure;
+
+    cmd.pushDebugGroup("exposure");
+    {
+        GpuLuminanceUniforms luminance;
+        luminance.texelRate[0] = 1.0f / static_cast<f32>(target.width);
+        luminance.texelRate[1] = 1.0f / static_cast<f32>(target.height);
+        const std::array<rhi::TextureBinding, 1> hdrBinding{rhi::TextureBinding{hdr_, linearSampler_}};
+        fullscreenPass(cmd, luminanceDownPipeline_, luminance64_, 64, 64, "luminance-down", hdrBinding,
+                       asBytes(&luminance, sizeof(luminance)));
+
+        luminance.texelRate[0] = 1.0f / 64.0f;
+        luminance.texelRate[1] = 1.0f / 64.0f;
+        const std::array<rhi::TextureBinding, 1> coarse{rhi::TextureBinding{luminance64_, linearSampler_}};
+        fullscreenPass(cmd, luminanceReducePipeline_, luminance8_, 8, 8, "luminance-reduce", coarse,
+                       asBytes(&luminance, sizeof(luminance)));
+
+        luminance.texelRate[0] = 1.0f / 8.0f;
+        luminance.texelRate[1] = 1.0f / 8.0f;
+        // The first frame after a resize adapts instantly rather than from
+        // whatever the freshly created target happens to hold: a run whose first
+        // frames faded in from black is a run whose golden at frame two and
+        // screenshot at frame thirty disagree.
+        luminance.texelRate[2] = exposureInitialised_ ? kExposureAdaptationRate : 1.0f;
+        const std::array<rhi::TextureBinding, 2> adapt{
+            rhi::TextureBinding{luminance8_, linearSampler_},
+            rhi::TextureBinding{exposure_[previousExposure], linearSampler_}};
+        fullscreenPass(cmd, luminanceAdaptPipeline_, exposure_[nextExposure], 1, 1, "luminance-adapt", adapt,
+                       asBytes(&luminance, sizeof(luminance)));
+        exposureInitialised_ = true;
+    }
+    cmd.popDebugGroup();
+
+    // --- Bloom ---------------------------------------------------------------
+    //
+    // Down with a thirteen-tap box, up with a tent, each level its own texture
+    // because a `ColorAttachment` names a texture and not a mip level. The
+    // threshold is applied once, on the way in.
+    cmd.pushDebugGroup("bloom");
+    {
+        u32 sourceWidth = target.width;
+        u32 sourceHeight = target.height;
+        for (u32 level = 0; level < kBloomLevels; ++level) {
+            GpuBloomUniforms bloom;
+            bloom.texelRadius[0] = 1.0f / static_cast<f32>(sourceWidth);
+            bloom.texelRadius[1] = 1.0f / static_cast<f32>(sourceHeight);
+            bloom.texelRadius[2] = 1.0f;
+            if (level == 0) {
+                bloom.threshold[0] = kBloomThreshold;
+                bloom.threshold[1] = kBloomKnee;
+            }
+            const std::array<rhi::TextureBinding, 1> source{
+                rhi::TextureBinding{level == 0 ? hdr_ : bloom_[level - 1], linearSampler_}};
+            sourceWidth = bloomLevelSize(target.width, level);
+            sourceHeight = bloomLevelSize(target.height, level);
+            fullscreenPass(cmd, bloomDownPipeline_, bloom_[level], sourceWidth, sourceHeight, "bloom-down", source,
+                           asBytes(&bloom, sizeof(bloom)));
+        }
+
+        for (u32 level = kBloomLevels - 1; level > 0; --level) {
+            GpuBloomUniforms bloom;
+            bloom.texelRadius[0] = 1.0f / static_cast<f32>(bloomLevelSize(target.width, level));
+            bloom.texelRadius[1] = 1.0f / static_cast<f32>(bloomLevelSize(target.height, level));
+            bloom.texelRadius[2] = 1.0f;
+            const std::array<rhi::TextureBinding, 1> source{rhi::TextureBinding{bloom_[level], linearSampler_}};
+            // `LoadOp::Load`, because the pipeline blends ADDITIVELY into what
+            // the downsample already put there -- reading and writing one target
+            // in one pass is what every backend refuses.
+            fullscreenPass(cmd, bloomUpPipeline_, bloom_[level - 1], bloomLevelSize(target.width, level - 1),
+                           bloomLevelSize(target.height, level - 1), "bloom-up", source, asBytes(&bloom, sizeof(bloom)),
+                           rhi::LoadOp::Load);
+        }
+    }
+    cmd.popDebugGroup();
+
     // --- Tonemap ------------------------------------------------------------
     //
     // A separate pass rather than writing the swapchain directly from the
     // forward one: the HDR target has to be complete before it can be sampled,
-    // and a backend is entitled to enforce that.
-    const std::array<rhi::ColorAttachment, 1> finalAttachment{rhi::ColorAttachment{
-        .texture = target.color,
-        .loadOp = rhi::LoadOp::Clear,
-        .storeOp = rhi::StoreOp::Store,
-    }};
-
+    // and a backend is entitled to enforce that. It writes an LDR TEXTURE rather
+    // than the swapchain now, because the anti-aliasing resolve needs a
+    // tonemapped image to find edges in.
+    GpuTonemapUniforms tonemap;
+    tonemap.exposureBloom[0] = world.environment.exposureCompensation;
+    tonemap.exposureBloom[1] = kBloomIntensity;
+    const std::array<rhi::TextureBinding, 3> tonemapBindings{
+        rhi::TextureBinding{hdr_, linearSampler_}, rhi::TextureBinding{bloom_[0], linearSampler_},
+        rhi::TextureBinding{exposure_[nextExposure], linearSampler_}};
     cmd.pushDebugGroup("tonemap");
-    cmd.beginRenderPass({.colorAttachments = finalAttachment, .debugName = "tonemap"});
-    cmd.setPipeline(tonemapPipeline_);
-    cmd.setViewport({.width = static_cast<f32>(target.width), .height = static_cast<f32>(target.height)});
-    cmd.setScissor({.width = static_cast<core::i32>(target.width), .height = static_cast<core::i32>(target.height)});
+    fullscreenPass(cmd, tonemapPipeline_, ldr_, target.width, target.height, "tonemap", tonemapBindings,
+                   asBytes(&tonemap, sizeof(tonemap)));
+    cmd.popDebugGroup();
 
-    const GpuTonemapUniforms tonemap;
-    cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&tonemap, sizeof(tonemap)));
-    const std::array<rhi::TextureBinding, 1> hdrBinding{rhi::TextureBinding{hdr_, linearSampler_}};
-    cmd.bindTextures(rhi::ShaderStage::Fragment, 0, hdrBinding);
-    cmd.draw(3, 1, 0, 0);
-    cmd.endRenderPass();
+    // --- Anti-aliasing -------------------------------------------------------
+    //
+    // FXAA, on the tonemapped image, resolving to the swapchain. Spatial rather
+    // than temporal on purpose (M7.5 brief, Decision 10), and nothing here
+    // forecloses a temporal pass -- which would replace this one rather than
+    // fight it.
+    GpuFxaaUniforms fxaa;
+    fxaa.texel[0] = 1.0f / static_cast<f32>(target.width);
+    fxaa.texel[1] = 1.0f / static_cast<f32>(target.height);
+    const std::array<rhi::TextureBinding, 1> ldrBinding{rhi::TextureBinding{ldr_, linearSampler_}};
+    cmd.pushDebugGroup("fxaa");
+    fullscreenPass(cmd, fxaaPipeline_, target.color, target.width, target.height, "fxaa", ldrBinding,
+                   asBytes(&fxaa, sizeof(fxaa)));
     cmd.popDebugGroup();
 }
 

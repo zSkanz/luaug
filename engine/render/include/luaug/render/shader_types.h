@@ -115,10 +115,10 @@ struct GpuFrameUniforms
     // the cluster lookup entirely.
     f32 lightCountUnused[4]{0.0f, 0.0f, 0.0f, 0.0f};
     // x how many mip levels the prefiltered environment has, y how strongly it
-    // contributes, z and w unused. `y` is a multiplier rather than a switch so
-    // that a scene can dial the environment down without the shader gaining a
-    // branch nothing else needs.
-    f32 environmentParams[4]{6.0f, 1.0f, 0.0f, 0.0f};
+    // contributes, z how strongly ambient occlusion darkens it, w unused. `y`
+    // and `z` are multipliers rather than switches so that a scene can dial
+    // either down without the shader gaining a branch nothing else needs.
+    f32 environmentParams[4]{6.0f, 1.0f, 1.0f, 0.0f};
     // x and y are the exponential depth slicing's scale and bias, so a fragment
     // turns its own view depth into a cluster slice with one multiply-add and a
     // logarithm (clusters.h). z and w unused.
@@ -206,12 +206,87 @@ static_assert(sizeof(GpuSkinUniforms) == 64 * 64, "GpuSkinUniforms is a cbuffer 
 // Fragment stage, `b0 space3`, for the tonemap pass.
 struct GpuTonemapUniforms
 {
-    // x exposure, rest unused. A whole 16-byte row for one float because that is
-    // the smallest a constant buffer row is.
-    f32 exposureUnused[4]{1.0f, 0.0f, 0.0f, 0.0f};
+    // x exposure compensation in EV stops -- the artist control, on top of the
+    // automatic exposure the 1x1 target carries. y how much bloom is mixed in.
+    // z and w unused.
+    f32 exposureBloom[4]{0.0f, 0.04f, 0.0f, 0.0f};
 };
 
 static_assert(sizeof(GpuTonemapUniforms) == 16, "GpuTonemapUniforms is a cbuffer layout");
+
+// Fragment stage, `b0 space3`, for the screen-space ambient occlusion pass.
+//
+// It reads the depth the PREPASS wrote and nothing else: a forward renderer that
+// grew a normal target would have grown half a deferred one, so the normal is
+// reconstructed from depth derivatives (M7.5 brief, Decision 13).
+struct GpuSsaoUniforms
+{
+    // x tan of half the horizontal field of view, y vertical, z near plane,
+    // w far plane -- everything needed to turn a depth sample back into a
+    // view-space position.
+    f32 projection[4]{1.0f, 0.5f, 0.1f, 400.0f};
+    // x width in pixels, y height, z 1/width, w 1/height, of the AO target.
+    f32 viewport[4]{};
+    // x the sampling radius in world metres, y the depth bias that keeps a
+    // surface from occluding itself, z the strength, w unused.
+    f32 params[4]{0.5f, 0.02f, 1.0f, 0.0f};
+};
+
+static_assert(sizeof(GpuSsaoUniforms) == 48, "GpuSsaoUniforms is a cbuffer layout");
+
+// Fragment stage, `b0 space3`, for the depth-aware blur that follows it.
+struct GpuBlurUniforms
+{
+    // x and y are one texel of the source, z and w the blur direction in texels
+    // -- so one pipeline serves both the horizontal and the vertical pass.
+    f32 texelDirection[4]{};
+};
+
+static_assert(sizeof(GpuBlurUniforms) == 16, "GpuBlurUniforms is a cbuffer layout");
+
+// Fragment stage, `b0 space3`, shared by the bloom chain's two pipelines.
+struct GpuBloomUniforms
+{
+    // x and y are one texel of the SOURCE, z the filter radius in source texels,
+    // w unused.
+    f32 texelRadius[4]{};
+    // x the threshold in scene-referred luminance, y the soft knee's width, and
+    // both are zero on every pass but the first: the threshold is applied once,
+    // on the way into the chain, or a surface pops as it crosses it at every
+    // level. z and w unused.
+    f32 threshold[4]{};
+};
+
+static_assert(sizeof(GpuBloomUniforms) == 32, "GpuBloomUniforms is a cbuffer layout");
+
+// Fragment stage, `b0 space3`, for the three passes that measure the frame's
+// brightness and adapt to it.
+struct GpuLuminanceUniforms
+{
+    // x and y are one texel of the source, z how far towards the measured value
+    // one frame moves, w unused.
+    //
+    // **`z` is per FRAME rather than per second**, and that is deliberate: a
+    // rate driven by elapsed wall-clock time would make a screenshot at frame
+    // thirty a different picture on a fast machine and a slow one, and the
+    // goldens are the reason that matters (R10 in spirit).
+    f32 texelRate[4]{};
+    // x the lowest and y the highest average luminance the automatic exposure
+    // will accept, so a frame that is nearly black does not open all the way up
+    // and one looking at the sun does not close to nothing.
+    f32 range[4]{0.02f, 8.0f, 0.0f, 0.0f};
+};
+
+static_assert(sizeof(GpuLuminanceUniforms) == 32, "GpuLuminanceUniforms is a cbuffer layout");
+
+// Fragment stage, `b0 space3`, for the anti-aliasing resolve.
+struct GpuFxaaUniforms
+{
+    // x and y are one texel of the source; z and w unused.
+    f32 texel[4]{};
+};
+
+static_assert(sizeof(GpuFxaaUniforms) == 16, "GpuFxaaUniforms is a cbuffer layout");
 
 // Fragment stage, `b0 space3`, for the sky pass. The sky is drawn as a
 // fullscreen triangle before any geometry, so it needs the inverse view

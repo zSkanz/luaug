@@ -563,6 +563,26 @@ bool setLightingFogEnd(scene::World& world, core::InstanceId id, const Value& va
     return true;
 }
 
+Value getLightingExposureCompensation(const scene::World& world, core::InstanceId id)
+{
+    const scene::LightingComponent* lighting = readLighting(world, id);
+    return lighting == nullptr ? Value{} : Value{static_cast<f64>(lighting->exposureCompensation)};
+}
+
+bool setLightingExposureCompensation(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::LightingComponent* lighting = writeLighting(world, id);
+    if (lighting == nullptr)
+        return false;
+    f32 stops = 0.0f;
+    // Finite, and otherwise unbounded: a scene that deliberately blows out or
+    // crushes its exposure is making a picture, not a mistake.
+    if (!takeFinite(value, stops))
+        return false;
+    lighting->exposureCompensation = stops;
+    return true;
+}
+
 Value getLightingSunDirection(const scene::World& world, core::InstanceId id)
 {
     const scene::LightingComponent* lighting = readLighting(world, id);

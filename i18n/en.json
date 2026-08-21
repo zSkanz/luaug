@@ -252,6 +252,7 @@
   "scene.err.number_zero_to_one": "Cannot set {className}.{property}: it takes a number from 0 to 1.",
   "scene.err.number_cone_degrees": "Cannot set {className}.{property}: it takes an angle in degrees, greater than 0 and less than 180.",
   "scene.err.number_slope_degrees": "Cannot set {className}.{property}: it takes an angle in degrees, from 0 up to but not including 90.",
+  "scene.err.number_exposure_stops": "Cannot set {className}.{property}: it takes a finite number of EV stops.",
   "scene.err.number_latitude_degrees": "Cannot set {className}.{property}: it takes a latitude in degrees, from -90 to 90.",
   "scene.err.number_fixed_timestep": "Cannot set {className}.{property}: it takes a tick length from 1/240 to 1/30 of a second.",
   "scene.err.attribute_type": "Attribute \"{attribute}\" cannot hold a value of type {valueType}. An attribute holds a string, number, boolean, vector, Vector2, CFrame, Color3, UDim, UDim2 or Rect.",

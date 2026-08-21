@@ -122,6 +122,10 @@ struct RenderEnvironment
     f32 fogStart = 200.0f;
     // At or below `fogStart` means no fog, which is how it is switched off.
     f32 fogEnd = 0.0f;
+    // EV stops on top of the automatic exposure (M7.5). Zero means "whatever the
+    // frame measured", positive is brighter, and the unit is the one a person
+    // who has used a camera already knows. `Lighting.ExposureCompensation`.
+    f32 exposureCompensation = 0.0f;
 };
 
 // A material, resolved into what the GPU binds.

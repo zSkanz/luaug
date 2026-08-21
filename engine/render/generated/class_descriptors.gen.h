@@ -137,6 +137,8 @@ scene::Value getLightingFogStart(const scene::World& world, core::InstanceId id)
 bool setLightingFogStart(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getLightingFogEnd(const scene::World& world, core::InstanceId id);
 bool setLightingFogEnd(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getLightingExposureCompensation(const scene::World& world, core::InstanceId id);
+bool setLightingExposureCompensation(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getLightingSunDirection(const scene::World& world, core::InstanceId id);
 void attachLightingComponents(scene::World& world, core::InstanceId id);
 void detachLightingComponents(scene::World& world, core::InstanceId id);
