@@ -897,3 +897,75 @@ TEST_CASE_FIXTURE(CatalogFixture, "gltf: a texture the file names but does not s
     CHECK(model.images.empty());
     CHECK(model.mesh.vertices.empty());
 }
+
+// --- Skinning and animation (M6) ---------------------------------------------
+
+TEST_CASE_FIXTURE(CatalogFixture, "gltf: a skinned mesh loads its skeleton, its weights and its clip")
+{
+    Model model;
+    REQUIRE_FALSE(importGltf(readFixture("skinned_bar.gltf"), dataDirectory(), GltfImportOptions{}, model).has_value());
+
+    REQUIRE(model.skinned());
+    REQUIRE(model.joints.size() == 2);
+    REQUIRE(model.skin.size() == model.mesh.vertices.size());
+
+    // **Parents first.** The fixture lists its joints child-first on purpose, so
+    // a loader that trusted glTF's order would put the tip at index 0 and its
+    // root at index 1 -- and every pose would resolve a child against a parent
+    // that had not been computed yet. `Joint::parent` is documented as always
+    // less than the joint's own index, and this is the case that holds it.
+    CHECK(model.joints[0].name == "Root");
+    CHECK(model.joints[0].parent == luaug::asset::Joint::NoParent);
+    CHECK(model.joints[1].name == "Tip");
+    CHECK(model.joints[1].parent == 0);
+
+    // And the vertex stream was rewritten into that order with them. The
+    // fixture weights its bottom ring to the ROOT, which is glTF slot 1 and our
+    // index 0 -- so a stream that had not been remapped would say 1 here.
+    bool sawRoot = false;
+    for (std::size_t vertex = 0; vertex < model.mesh.vertices.size(); ++vertex) {
+        if (model.mesh.vertices[vertex].position.y < 0.5f) {
+            CHECK(model.skin[vertex].joints[0] == 0);
+            CHECK(static_cast<double>(model.skin[vertex].weights[0]) == doctest::Approx(1.0));
+            sawRoot = true;
+        }
+    }
+    CHECK(sawRoot);
+
+    REQUIRE(model.clips.size() == 1);
+    CHECK(model.clips[0].name == "Bend");
+    CHECK(static_cast<double>(model.clips[0].duration) == doctest::Approx(1.0));
+    REQUIRE(model.clips[0].channels.size() == 1);
+    CHECK(model.clips[0].channels[0].joint == 1);
+    CHECK(model.clips[0].channels[0].stride == 4);
+    CHECK(model.clips[0].channels[0].times.size() == 3);
+    CHECK(model.clips[0].channels[0].values.size() == 12);
+}
+
+TEST_CASE_FIXTURE(CatalogFixture, "gltf: bone weights are normalized on load")
+{
+    // An exporter is allowed to emit weights that do not sum to one, and a
+    // vertex whose influences sum to 0.98 shrinks by 2% every frame it is
+    // skinned -- which reads as a mesh that slowly deflates rather than as a
+    // weight problem.
+    std::string text = fixtureText("skinned_bar.gltf");
+    Model model;
+    REQUIRE_FALSE(importGltf(toBytes(text), dataDirectory(), GltfImportOptions{}, model).has_value());
+
+    for (const luaug::asset::SkinVertex& vertex : model.skin) {
+        const f32 sum = vertex.weights[0] + vertex.weights[1] + vertex.weights[2] + vertex.weights[3];
+        CHECK(static_cast<double>(sum) == doctest::Approx(1.0).epsilon(1e-5));
+    }
+}
+
+TEST_CASE_FIXTURE(CatalogFixture, "gltf: an unskinned mesh carries no skin stream at all")
+{
+    // The other half of Decision 11: joints and weights cost a skinned mesh
+    // twenty-four bytes a vertex and cost a static one nothing.
+    Model model;
+    REQUIRE_FALSE(importGltf(readFixture("quad.gltf"), dataDirectory(), GltfImportOptions{}, model).has_value());
+    CHECK_FALSE(model.skinned());
+    CHECK(model.skin.empty());
+    CHECK(model.joints.empty());
+    CHECK(model.clips.empty());
+}

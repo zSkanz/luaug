@@ -141,11 +141,92 @@ struct Mesh
 // Images are decoded here rather than left as encoded bytes because the caller
 // that matters uploads them immediately, and because an image referenced by two
 // materials should be decoded once.
+// --- Skinning and animation (M6) ---------------------------------------------
+//
+// **A second vertex stream rather than four more fields on `Vertex`.** Joints
+// and weights are sixteen bytes each, and putting them in the interleaved
+// vertex would spend that on every static vertex in every world so that a
+// character can have elbows (M6 brief, Decision 11). A skinned mesh carries
+// both arrays and an unskinned one carries neither, so an unskinned draw is
+// byte-identical to M4's.
+
+// One vertex's four bone influences. Four is glTF's own limit per JOINTS_n set
+// and is what every real-time skin uses: a fifth influence is below the noise
+// floor of an 8-bit weight.
+struct SkinVertex
+{
+    core::u16 joints[4]{0, 0, 0, 0};
+    f32 weights[4]{0.0f, 0.0f, 0.0f, 0.0f};
+};
+
+static_assert(sizeof(SkinVertex) == 24, "the skin stream is a GPU buffer layout; changing it changes the shaders");
+
+// One joint of a skeleton.
+//
+// `parent` is an index into the same array and is always LESS than the joint's
+// own index -- the loader sorts them so, which is what lets the pose be
+// resolved in one forward pass instead of a graph walk per frame.
+struct Joint
+{
+    static constexpr u32 NoParent = 0xFFFFFFFFu;
+
+    // The joint's rest transform relative to its parent.
+    core::CFrameD localBind;
+    // Model space to joint space at bind time -- glTF's inverse bind matrix,
+    // kept as it comes because it is a matrix rather than a rigid transform:
+    // an exporter is free to bake scale into it and often does.
+    core::Mat4 inverseBind;
+    u32 parent = NoParent;
+    std::string name;
+};
+
+// One animated channel: what it drives and the keys it drives it with.
+//
+// Times and values are parallel arrays rather than a vector of pairs because
+// sampling binary-searches the times and touches the values once -- two arrays
+// keep the search inside one cache line for far longer.
+struct AnimationChannel
+{
+    enum class Target : core::u8
+    {
+        Translation,
+        Rotation,
+        Scale,
+    };
+
+    u32 joint = 0;
+    Target target = Target::Translation;
+    std::vector<f32> times;
+    // Three floats per key for translation and scale, four (x, y, z, w) for
+    // rotation. Flat rather than typed, because the sampler is one function
+    // over a stride and three would be three places to get the interpolation
+    // wrong.
+    std::vector<f32> values;
+    u32 stride = 3;
+};
+
+struct AnimationClip
+{
+    std::string name;
+    // Seconds. The last key's time, which is what a loop wraps at.
+    f32 duration = 0.0f;
+    std::vector<AnimationChannel> channels;
+};
+
 struct Model
 {
     Mesh mesh;
     std::vector<MaterialDef> materials;
     std::vector<Image> images;
+
+    // Empty for a static mesh, and empty is the common case. When it is not,
+    // `skin` has one entry per vertex of `mesh` -- the two are parallel by
+    // construction, and the loader refuses a file where they are not.
+    std::vector<SkinVertex> skin;
+    std::vector<Joint> joints;
+    std::vector<AnimationClip> clips;
+
+    [[nodiscard]] bool skinned() const noexcept { return !joints.empty() && !skin.empty(); }
 };
 
 } // namespace luaug::asset

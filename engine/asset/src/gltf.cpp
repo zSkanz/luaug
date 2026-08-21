@@ -59,9 +59,11 @@ struct Staging
     std::vector<std::array<f32, 4>> tangents;
     std::vector<std::array<f32, 2>> uvs;
     std::vector<u32> indices;
+    std::vector<SkinVertex> skin;
     bool hasNormals = false;
     bool hasTangents = false;
     bool hasUvs = false;
+    bool hasSkin = false;
 };
 
 [[nodiscard]] core::Mat4 toMat4(const fg::math::fmat4x4& source) noexcept
@@ -251,6 +253,11 @@ private:
     [[nodiscard]] std::optional<core::EngineError> appendPrimitive(const fg::Primitive& primitive,
                                                                    const core::Mat4& transform);
     [[nodiscard]] std::optional<core::EngineError> readAttributes(const fg::Primitive& primitive, Staging& staging);
+    // The skeleton and the clips. Both run BEFORE the primitives, because a
+    // primitive appends to `skin` only when a skeleton exists -- see the
+    // comment where it does.
+    [[nodiscard]] std::optional<core::EngineError> readSkin();
+    [[nodiscard]] std::optional<core::EngineError> readAnimations();
     [[nodiscard]] std::optional<core::EngineError> resolveMaterial(const fg::Optional<std::size_t>& materialIndex,
                                                                    u32& slot);
     [[nodiscard]] std::optional<core::EngineError> resolveTexture(const fg::TextureInfo& info, TextureRef& ref);
@@ -272,6 +279,8 @@ private:
     std::vector<u32> imageSlots_;
     // Appended once, the first time a primitive names no material.
     u32 defaultMaterialSlot_ = TextureRef::Missing;
+    // glTF joint slot -> our sorted joint index. See `readSkin`.
+    std::vector<u32> jointRemap_;
     // Whether the material a primitive uses samples a normal map, which is the
     // condition for generating tangents it does not carry.
     bool materialWantsTangents_ = false;
@@ -285,6 +294,14 @@ std::optional<core::EngineError> Importer::run()
     visitedNodes_.assign(asset_.nodes.size(), false);
 
     if (auto error = collectInstances())
+        return error;
+
+    // Before the primitives: `appendPrimitive` appends to the skin stream only
+    // when there is a skeleton to weight against, and it decides that by asking
+    // whether `joints` is empty.
+    if (auto error = readSkin())
+        return error;
+    if (auto error = readAnimations())
         return error;
 
     for (const MeshInstance& instance : instances_) {
@@ -584,6 +601,55 @@ std::optional<core::EngineError> Importer::readAttributes(const fg::Primitive& p
         staging.hasUvs = true;
     }
 
+    // JOINTS_0 and WEIGHTS_0, and only the first set. glTF allows JOINTS_1 for
+    // meshes with more than four influences per vertex; `SkinVertex` carries
+    // four (model.h says why), so a second set has nowhere to go and is
+    // ignored rather than half-read.
+    const auto* joints = primitive.findAttribute("JOINTS_0");
+    const auto* weights = primitive.findAttribute("WEIGHTS_0");
+    if (joints != primitive.attributes.cend() && weights != primitive.attributes.cend()) {
+        const fg::Accessor& jointAccessor = asset_.accessors[joints->accessorIndex];
+        const fg::Accessor& weightAccessor = asset_.accessors[weights->accessorIndex];
+        if (jointAccessor.count != vertexCount || weightAccessor.count != vertexCount)
+            return core::makeError(LUAUG_TR("asset.gltf.err.attribute_count_mismatch"), {}, "JOINTS_0");
+        if (!accessorFits(asset_, jointAccessor) || !accessorFits(asset_, weightAccessor))
+            return core::makeError(LUAUG_TR("asset.gltf.err.accessor_out_of_range"), {}, "JOINTS_0");
+
+        staging.skin.resize(vertexCount);
+        fg::iterateAccessorWithIndex<fg::math::u16vec4>(
+            asset_, jointAccessor, [&](fg::math::u16vec4 value, std::size_t index) {
+                // Rewritten into OUR joint order as they are read. glTF's
+                // slots are the exporter's; ours are sorted parents-first
+                // (`readSkin`), and a vertex still pointing at a glTF slot
+                // would be weighted by whichever joint happened to land there.
+                const auto remap = [&](core::u16 slot) {
+                    return slot < jointRemap_.size() ? static_cast<core::u16>(jointRemap_[slot]) : core::u16{0};
+                };
+                staging.skin[index].joints[0] = remap(value.x());
+                staging.skin[index].joints[1] = remap(value.y());
+                staging.skin[index].joints[2] = remap(value.z());
+                staging.skin[index].joints[3] = remap(value.w());
+            });
+        fg::iterateAccessorWithIndex<fg::math::fvec4>(
+            asset_, weightAccessor, [&](fg::math::fvec4 value, std::size_t index) {
+                // Normalized on load rather than in the shader. An exporter is
+                // allowed to emit weights that do not sum to one, and a vertex
+                // whose influences sum to 0.98 shrinks by 2% every frame it is
+                // skinned -- which reads as a mesh that slowly deflates.
+                const float sum = value.x() + value.y() + value.z() + value.w();
+                // Guarded with a floor rather than a comparison against zero:
+                // MSVC reads `sum > 0 ? 1/sum : 0` as a possible division by
+                // zero and /WX makes that an error, and a vertex with no
+                // influences at all is a real thing an exporter emits.
+                const float scale = sum > 0.0f ? 1.0f / std::fmax(sum, 1.0e-8f) : 0.0f;
+                staging.skin[index].weights[0] = value.x() * scale;
+                staging.skin[index].weights[1] = value.y() * scale;
+                staging.skin[index].weights[2] = value.z() * scale;
+                staging.skin[index].weights[3] = value.w() * scale;
+            });
+        staging.hasSkin = true;
+    }
+
     if (primitive.indicesAccessor.has_value()) {
         const fg::Accessor& accessor = asset_.accessors[primitive.indicesAccessor.value()];
         if (!accessorFits(asset_, accessor))
@@ -799,6 +865,12 @@ std::optional<core::EngineError> Importer::appendPrimitive(const fg::Primitive& 
 
         core::expand(submesh.bounds, vertex.position);
         out_.mesh.vertices.push_back(vertex);
+        // The skin stream is parallel to the vertex stream BY CONSTRUCTION, and
+        // this is the line that constructs it: a primitive with no skin still
+        // appends a rest entry, so a file whose second primitive is unskinned
+        // cannot silently shift every joint index after it.
+        if (!out_.joints.empty())
+            out_.skin.push_back(staging.hasSkin ? staging.skin[slot] : SkinVertex{});
     }
 
     out_.mesh.indices.reserve(out_.mesh.indices.size() + staging.indices.size());
@@ -806,6 +878,202 @@ std::optional<core::EngineError> Importer::appendPrimitive(const fg::Primitive& 
         out_.mesh.indices.push_back(static_cast<u32>(baseVertex) + index);
 
     out_.mesh.submeshes.push_back(submesh);
+    return std::nullopt;
+}
+
+std::optional<core::EngineError> Importer::readSkin()
+{
+    // The first skin only. A file with two skins is two characters, and
+    // model.h's "one glTF file is one mesh" already settles what to do with
+    // one: it is two files.
+    if (asset_.skins.empty())
+        return std::nullopt;
+
+    const fg::Skin& skin = asset_.skins[0];
+    if (skin.joints.empty())
+        return std::nullopt;
+
+    // glTF's joint list is node indices in an order the exporter chose, and a
+    // parent may come after its child. `Joint::parent` is documented as always
+    // LESS than the joint's own index, so the pose resolves in one forward pass
+    // instead of a graph walk per frame -- which means the list has to be
+    // sorted into that order here, once, rather than every frame.
+    std::vector<std::size_t> nodeOf(skin.joints.begin(), skin.joints.end());
+    std::vector<u32> slotOfNode(asset_.nodes.size(), Joint::NoParent);
+    for (std::size_t slot = 0; slot < nodeOf.size(); ++slot)
+        slotOfNode[nodeOf[slot]] = static_cast<u32>(slot);
+
+    // Parent of each joint, in glTF's own order, found by asking every node
+    // which children it claims. glTF stores children and not parents.
+    std::vector<u32> parentOf(nodeOf.size(), Joint::NoParent);
+    for (std::size_t node = 0; node < asset_.nodes.size(); ++node) {
+        for (const std::size_t child : asset_.nodes[node].children) {
+            if (child < slotOfNode.size() && slotOfNode[child] != Joint::NoParent && node < slotOfNode.size() &&
+                slotOfNode[node] != Joint::NoParent) {
+                parentOf[slotOfNode[child]] = slotOfNode[node];
+            }
+        }
+    }
+
+    // Topological order, parents first. A cycle is impossible in a valid glTF
+    // -- the nodes are a tree -- and `validate` has already said the document
+    // is valid, so a joint whose parent is never emitted would be a bug in this
+    // function rather than in the file.
+    std::vector<u32> order;
+    order.reserve(nodeOf.size());
+    std::vector<bool> emitted(nodeOf.size(), false);
+    bool progress = true;
+    while (order.size() < nodeOf.size() && progress) {
+        progress = false;
+        for (u32 slot = 0; slot < nodeOf.size(); ++slot) {
+            if (emitted[slot])
+                continue;
+            const u32 parent = parentOf[slot];
+            if (parent != Joint::NoParent && !emitted[parent])
+                continue;
+            emitted[slot] = true;
+            order.push_back(slot);
+            progress = true;
+        }
+    }
+    if (order.size() != nodeOf.size())
+        return core::makeError(LUAUG_TR("asset.gltf.err.node_cycle"));
+
+    std::vector<u32> sortedOf(nodeOf.size(), Joint::NoParent);
+    for (u32 position = 0; position < order.size(); ++position)
+        sortedOf[order[position]] = position;
+
+    std::vector<core::Mat4> inverseBinds(nodeOf.size());
+    if (skin.inverseBindMatrices.has_value()) {
+        const fg::Accessor& accessor = asset_.accessors[skin.inverseBindMatrices.value()];
+        if (!accessorFits(asset_, accessor))
+            return core::makeError(LUAUG_TR("asset.gltf.err.accessor_out_of_range"), {}, "inverseBindMatrices");
+        fg::iterateAccessorWithIndex<fg::math::fmat4x4>(asset_, accessor,
+                                                        [&](fg::math::fmat4x4 value, std::size_t index) {
+                                                            if (index < inverseBinds.size())
+                                                                inverseBinds[index] = toMat4(value);
+                                                        });
+    }
+
+    out_.joints.resize(nodeOf.size());
+    for (u32 slot = 0; slot < nodeOf.size(); ++slot) {
+        Joint& joint = out_.joints[sortedOf[slot]];
+        const fg::Node& node = asset_.nodes[nodeOf[slot]];
+        joint.parent = parentOf[slot] == Joint::NoParent ? Joint::NoParent : sortedOf[parentOf[slot]];
+        joint.inverseBind = inverseBinds[slot];
+        joint.name = std::string(node.name);
+
+        // The rest pose, from the node's own TRS. A node stored as a matrix
+        // rather than a TRS is decomposed by fastgltf, which is why both shapes
+        // arrive here as the same three fields.
+        if (const auto* trs = std::get_if<fg::TRS>(&node.transform); trs != nullptr) {
+            // The widening is written out: a glTF translation is f32 and
+            // `CFrameD` is the f64 source of truth (ADR 0014), and
+            // `-Wdouble-promotion` is an error on `engine/` so that the
+            // conversion is a decision rather than an accident.
+            joint.localBind.position =
+                core::DVec3{static_cast<core::f64>(trs->translation.x()), static_cast<core::f64>(trs->translation.y()),
+                            static_cast<core::f64>(trs->translation.z())};
+            joint.localBind.rotation =
+                core::fromQuaternion(trs->rotation.x(), trs->rotation.y(), trs->rotation.z(), trs->rotation.w());
+        }
+    }
+
+    // The joint indices in the vertex stream are glTF's slots, so they have to
+    // be rewritten into the sorted order. Done on the staging side rather than
+    // here, which is why the remap is kept.
+    jointRemap_ = std::move(sortedOf);
+    return std::nullopt;
+}
+
+std::optional<core::EngineError> Importer::readAnimations()
+{
+    if (out_.joints.empty() || asset_.animations.empty())
+        return std::nullopt;
+
+    // Which sorted joint a node drives, so a channel's node target becomes a
+    // joint index. A channel that targets a node outside the skeleton is
+    // skipped rather than refused: a file may animate a camera beside its
+    // character, and that is not an error in the character.
+    std::vector<u32> jointOfNode(asset_.nodes.size(), Joint::NoParent);
+    for (std::size_t slot = 0; slot < asset_.skins[0].joints.size(); ++slot)
+        jointOfNode[asset_.skins[0].joints[slot]] = jointRemap_[slot];
+
+    for (const fg::Animation& animation : asset_.animations) {
+        AnimationClip clip;
+        clip.name = std::string(animation.name);
+
+        for (const fg::AnimationChannel& channel : animation.channels) {
+            if (!channel.nodeIndex.has_value())
+                continue;
+            const u32 joint = jointOfNode[channel.nodeIndex.value()];
+            if (joint == Joint::NoParent)
+                continue;
+
+            AnimationChannel out;
+            out.joint = joint;
+            switch (channel.path) {
+            case fg::AnimationPath::Translation:
+                out.target = AnimationChannel::Target::Translation;
+                out.stride = 3;
+                break;
+            case fg::AnimationPath::Rotation:
+                out.target = AnimationChannel::Target::Rotation;
+                out.stride = 4;
+                break;
+            case fg::AnimationPath::Scale:
+                out.target = AnimationChannel::Target::Scale;
+                out.stride = 3;
+                break;
+            default:
+                // Morph-target weights. v1 has no morph targets, so a channel
+                // driving them is dropped rather than half-read.
+                continue;
+            }
+
+            const fg::AnimationSampler& sampler = animation.samplers[channel.samplerIndex];
+            const fg::Accessor& times = asset_.accessors[sampler.inputAccessor];
+            const fg::Accessor& values = asset_.accessors[sampler.outputAccessor];
+            if (!accessorFits(asset_, times) || !accessorFits(asset_, values))
+                return core::makeError(LUAUG_TR("asset.gltf.err.accessor_out_of_range"), {}, "animation");
+
+            out.times.resize(times.count);
+            fg::iterateAccessorWithIndex<float>(asset_, times, [&](float value, std::size_t index) {
+                out.times[index] = value;
+                clip.duration = std::max(clip.duration, value);
+            });
+
+            out.values.resize(values.count * out.stride);
+            if (out.stride == 4) {
+                fg::iterateAccessorWithIndex<fg::math::fvec4>(asset_, values,
+                                                              [&](fg::math::fvec4 value, std::size_t index) {
+                                                                  out.values[index * 4 + 0] = value.x();
+                                                                  out.values[index * 4 + 1] = value.y();
+                                                                  out.values[index * 4 + 2] = value.z();
+                                                                  out.values[index * 4 + 3] = value.w();
+                                                              });
+            }
+            else {
+                fg::iterateAccessorWithIndex<fg::math::fvec3>(asset_, values,
+                                                              [&](fg::math::fvec3 value, std::size_t index) {
+                                                                  out.values[index * 3 + 0] = value.x();
+                                                                  out.values[index * 3 + 1] = value.y();
+                                                                  out.values[index * 3 + 2] = value.z();
+                                                              });
+            }
+
+            // A channel with fewer values than times would sample out of its own
+            // array. Refused rather than clamped: a clip that silently played
+            // the last key forever is a character that freezes mid-stride.
+            if (out.values.size() < out.times.size() * out.stride)
+                return core::makeError(LUAUG_TR("asset.gltf.err.attribute_count_mismatch"), {}, "animation");
+
+            clip.channels.push_back(std::move(out));
+        }
+
+        if (!clip.channels.empty())
+            out_.clips.push_back(std::move(clip));
+    }
     return std::nullopt;
 }
 
@@ -834,10 +1102,31 @@ void Importer::optimize()
     // Vertex fetch reorders the vertex buffer itself and rewrites index values
     // in place, so it is one pass over everything and it leaves each submesh's
     // index *range* exactly where it was.
+    //
+    // A SKINNED mesh cannot use the in-place form, and the reason is the whole
+    // hazard of a second stream: the reorder would move the vertices and leave
+    // `skin` in the old order, so every vertex would be weighted by another
+    // vertex's bones. meshoptimizer's remap variant exists for exactly this --
+    // it returns the permutation rather than applying it, and both streams are
+    // then permuted by the same table.
+    if (out_.skin.empty()) {
+        const std::size_t unique =
+            meshopt_optimizeVertexFetch(out_.mesh.vertices.data(), out_.mesh.indices.data(), out_.mesh.indices.size(),
+                                        out_.mesh.vertices.data(), vertexCount, sizeof(Vertex));
+        out_.mesh.vertices.resize(unique);
+        return;
+    }
+
+    std::vector<unsigned int> remap(vertexCount);
     const std::size_t unique =
-        meshopt_optimizeVertexFetch(out_.mesh.vertices.data(), out_.mesh.indices.data(), out_.mesh.indices.size(),
-                                    out_.mesh.vertices.data(), vertexCount, sizeof(Vertex));
+        meshopt_optimizeVertexFetchRemap(remap.data(), out_.mesh.indices.data(), out_.mesh.indices.size(), vertexCount);
+    meshopt_remapIndexBuffer(out_.mesh.indices.data(), out_.mesh.indices.data(), out_.mesh.indices.size(),
+                             remap.data());
+    meshopt_remapVertexBuffer(out_.mesh.vertices.data(), out_.mesh.vertices.data(), vertexCount, sizeof(Vertex),
+                              remap.data());
+    meshopt_remapVertexBuffer(out_.skin.data(), out_.skin.data(), vertexCount, sizeof(SkinVertex), remap.data());
     out_.mesh.vertices.resize(unique);
+    out_.skin.resize(unique);
 }
 
 } // namespace
