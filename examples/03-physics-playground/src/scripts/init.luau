@@ -236,7 +236,10 @@ RunService.Heartbeat:Connect(function(dt: number)
     if vector.magnitude(move) > 0.001 then
         character:Move(vector.normalize(move))
     end
-    if JumpAction:GetState() :: boolean then
+    if JumpAction:GetState() :: boolean and character.Grounded then
+        -- The `Grounded` check is the GAME's since M7: `Jump` fires wherever the
+        -- character is, and this one line is the ground-only rule a playground
+        -- wants. A platformer would drop it and count jumps instead.
         character:Jump()
     end
 

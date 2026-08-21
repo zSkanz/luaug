@@ -834,8 +834,11 @@ int methodCharacterJump(lua_State* L)
 {
     const core::InstanceId id = liveInstance(L, 1);
 
-    // A request rather than an impulse: whether it becomes one is the
-    // controller's answer at the next tick, and it is no in mid-air.
+    // A request rather than an impulse: it becomes one at the NEXT TICK and
+    // never inside this call, because a velocity written mid-frame is a replay
+    // that diverges (R10). Whether the character was grounded is not asked --
+    // that is the game's policy since M7, and `Grounded` is exposed so a game
+    // that wants the old rule writes one line.
     if (scene::CharacterBodyComponent* character = world(L).characterBodies().find(id); character != nullptr)
         character->jumpRequested = true;
     return 0;

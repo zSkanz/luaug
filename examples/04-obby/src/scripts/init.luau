@@ -521,10 +521,11 @@ RunService.Heartbeat:Connect(function(dt: number)
         character:Move(vector.normalize(move))
     end
 
-    if JumpAction:GetState() :: boolean then
-        if character.Grounded then
-            jumpSound:Play()
-        end
+    if JumpAction:GetState() :: boolean and character.Grounded then
+        -- Already written this way, because it needed to know whether the jump
+        -- actually happened in order to play a sound -- which is the roadmap's
+        -- own observation about why the mechanism belongs to the game.
+        jumpSound:Play()
         character:Jump()
     end
 

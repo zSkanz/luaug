@@ -143,7 +143,7 @@ describe("CharacterBody", function()
         expect((fast.Position.z - fastStart) > (slow.Position.z - slowStart) * 2):ToBe(true)
     end)
 
-    it("jumps when grounded and ignores a jump in mid-air", function()
+    it("jumps when grounded", function()
         ground()
         local body = character(vector.create(0, 2.6, 0))
         task.wait(1)
@@ -153,13 +153,28 @@ describe("CharacterBody", function()
         task.wait(0.25)
         expect(body.Position.y > 3):ToBe(true)
         expect(body.Grounded):ToBe(false)
+    end)
 
-        -- A second jump in mid-air changes nothing: it is ignored rather than
-        -- queued, so the character does not launch again the moment it lands.
-        local heightBefore = body.Position.y
+    it("jumps again in mid-air, because the policy is the game's", function()
+        -- Changed at M7 by human decision. `LinearVelocity` is read-only, so a
+        -- mid-air refusal here made a double jump impossible to write at all --
+        -- and `Grounded` is exposed, so the old rule is one line in the game.
+        ground()
+        local body = character(vector.create(0, 2.6, 0))
+        task.wait(1)
+
         body:Jump()
-        task.wait(0.1)
-        expect(body.Position.y < heightBefore + 1):ToBe(true)
+        task.wait(0.35)
+        expect(body.Grounded):ToBe(false)
+
+        -- Rising again from a mid-air jump. Measured over a WINDOW rather than
+        -- at a moment: the first jump is already falling by now, so a check
+        -- taken one tick later would read the arc it was on rather than the one
+        -- the second jump put it on (M5's own finding about moving things).
+        local before = body.Position.y
+        body:Jump()
+        task.wait(0.15)
+        expect(body.Position.y > before):ToBe(true)
     end)
 
     it("walks up a step below AutoStepHeight and is stopped by one above it", function()

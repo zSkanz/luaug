@@ -177,7 +177,9 @@ RunService.Heartbeat:Connect(function()
     if vector.magnitude(move) > 0.001 then
         character:Move(vector.normalize(move))
     end
-    if JumpAction:GetState() :: boolean then
+    if JumpAction:GetState() :: boolean and character.Grounded then
+        -- Grounded-only, so the recorded scenario keeps meaning what it meant:
+        -- `Jump` stopped refusing in mid-air at M7 and this scene predates that.
         character:Jump()
     end
 

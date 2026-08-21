@@ -365,10 +365,23 @@ void PhysicsSync::applyCharacter(core::InstanceId id, PartComponent& part, Rigid
     character.verticalVelocity += gravity.y * fixedDt;
 
     if (character.jumpRequested) {
-        // Ignored in mid-air rather than queued: a jump that fires the moment
-        // you land is a jump you did not ask for (the method's Doc).
-        if (grounded)
-            character.verticalVelocity = character.jumpSpeed;
+        // Applied WHEREVER the character is, grounded or not (human decision,
+        // 2026-08-21). The recorded reasoning had argued *ignored* against
+        // *queued* -- "a jump that fires the moment you land is a jump you did
+        // not ask for" -- and that argument is about queuing, which nothing
+        // here proposes. Letting the caller decide was never among the
+        // alternatives it ruled out.
+        //
+        // `Grounded` is already exposed, so `if character.Grounded then
+        // character:Jump() end` reproduces the old behaviour in one line, in
+        // the game, where a jump policy belongs. What it unlocks costs nothing
+        // more: double jump, wall jump, coyote time and jump buffering all
+        // become counters in Luau.
+        //
+        // What stays engine-side is the TICK. The velocity is set here, at the
+        // next simulation step, and never inside the call -- or a replay
+        // diverges (R10).
+        character.verticalVelocity = character.jumpSpeed;
         character.jumpRequested = false;
     }
 
