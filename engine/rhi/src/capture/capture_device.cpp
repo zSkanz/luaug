@@ -538,10 +538,19 @@ public:
     [[nodiscard]] PipelineHandle createGraphicsPipeline(const GraphicsPipelineDesc& desc) override
     {
         const PipelineHandle handle{nextPipeline_++};
+        // The per-instance stream count, not the total: a pipeline that grew an
+        // instanced stream has to be visible to the render-regression gate, or
+        // the gate is blind to exactly the change ADR 0043 was written for.
+        u64 instancedStreams = 0;
+        for (const VertexBufferLayout& layout : desc.vertexBuffers) {
+            if (layout.perInstance)
+                ++instancedStreams;
+        }
         stream_ += Line("createGraphicsPipeline")
                        .num("pipeline", static_cast<u64>(handle.id))
                        .num("vertexShader", static_cast<u64>(desc.vertexShader.id))
                        .num("fragmentShader", static_cast<u64>(desc.fragmentShader.id))
+                       .num("instancedStreams", instancedStreams)
                        .str("primitive", name(desc.primitive))
                        .str("fill", name(desc.rasterizer.fillMode))
                        .str("cull", name(desc.rasterizer.cullMode))

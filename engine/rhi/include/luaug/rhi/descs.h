@@ -75,8 +75,11 @@ struct VertexBufferLayout
 {
     u32 slot = 0;
     u32 strideBytes = 0;
-    // Per-instance stepping arrives with instanced rendering (M4); leaving it
-    // out keeps the capture stream from carrying a field no backend reads.
+    // When true this stream advances once per INSTANCE rather than once per
+    // vertex, which is what lets one call draw a run of objects that share a
+    // mesh and a material. False is the default and is what every stream that
+    // existed before instanced rendering was (ADR 0043).
+    bool perInstance = false;
 };
 
 struct DepthStencilState

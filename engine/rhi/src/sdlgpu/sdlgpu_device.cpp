@@ -398,8 +398,11 @@ PipelineHandle SdlGpuDevice::createGraphicsPipeline(const GraphicsPipelineDesc& 
         vertexBuffers.push_back({
             .slot = layout.slot,
             .pitch = layout.strideBytes,
-            .input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX,
-            .instance_step_rate = 0,
+            .input_rate = layout.perInstance ? SDL_GPU_VERTEXINPUTRATE_INSTANCE : SDL_GPU_VERTEXINPUTRATE_VERTEX,
+            // SDL documents this as ignored for a per-vertex stream, and one is
+            // the only rate a per-instance one has a caller for: a step of two
+            // would read every other transform.
+            .instance_step_rate = layout.perInstance ? 1u : 0u,
         });
     }
 
