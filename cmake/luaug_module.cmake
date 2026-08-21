@@ -10,9 +10,9 @@
 #
 #   L0 core
 #   L1 jobs, platform
-#   L2 rhi_api, physics_api, net_api, audio, asset
+#   L2 rhi_api, physics_api, net_api, asset
 #   L3 scene
-#   L4 render, input, nav
+#   L4 render, audio, input, nav
 #   L5 ui, script
 #   L6 app
 

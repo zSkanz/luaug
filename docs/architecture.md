@@ -158,19 +158,40 @@ namespace luaug::core {
 **jobs** (deps: core) — work-stealing CPU pool; NO blocking IO here.
 ```cpp
 namespace luaug::jobs {
-  void init(u32 workerCount); void shutdown();
-  JobHandle schedule(const char* name, Fn fn, std::span<JobHandle> deps = {});
-  void wait(JobHandle);
-  void parallelFor(usize begin, usize end, usize grain, RangeFn);
-  IJobAdapter* joltAdapter();   // Jolt JobSystem bridged onto this pool
+  enum class Domain : u8 { SimVisible, Render, AssetIo, Tooling };
+  void init(u32 workerCount = 0); void shutdown(); bool initialized(); u32 workerCount();
+  template<class Callable>
+  JobHandle schedule(const char* name, Domain, Callable&&, std::span<const JobHandle> deps = {});
+  void wait(JobHandle); void waitAll(std::span<const JobHandle>);
+  void parallelFor(const char* name, Domain, usize begin, usize end, usize grain, RangeFn, void* user);
+  constexpr u32 rangeCount(usize begin, usize end, usize grain);   // what a StableCommit is sized by
+  template<class T> class StableCommit;                            // jobs/commit.h
 }
 ```
+**Shipped at M7, and three things about it are contracts rather than sketch.**
+`Domain` is a *parameter* rather than a comment, because the classification has
+to survive being read by somebody who did not write the job. **An uninitialized
+pool is a serial pool** -- `schedule` runs the callable immediately and
+`parallelFor` walks its ranges in order -- which is the mode every headless
+determinism run wants and means no caller needs an `if (poolExists)` branch.
+And **the Jolt bridge is NOT here**: `jobs` is L1 and Jolt is a backend at L2,
+so a `JPH::JobSystem` implemented on this pool lives in `physics_jolt` where the
+Jolt headers already are. The planning sketch put a `joltAdapter()` in this
+namespace; that would have been the one include that made L1 know what a solver
+is.
+
 **Deterministic commit rule (R10):** parallel work that is visible to the
 simulation writes into per-job result/command buffers, hits a barrier, and is
 merged in a stable, index-ordered pass before any world mutation. Job domains
 are classified — *sim-visible* (stable commit required), *render*, *asset/IO*,
 *tooling* (no ordering requirement). Never let "which worker finished first"
 become observable simulation state.
+
+`StableCommit<T>` is that rule as a type, and `parallelFor`'s range partition is
+what makes it work: a range index is a function of the DATA -- `begin`, `end`,
+`grain` -- and never of how many workers the machine has, so bucket 3 holds the
+same elements on every machine and the merged order is ascending by element
+rather than by whoever finished first.
 
 **platform** (deps: core) — SDL3 wrapper; the only module touching SDL
 directly (besides `rhi_sdlgpu` and `app` glue).
