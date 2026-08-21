@@ -500,6 +500,33 @@ if(LUAUG_PHYSICS_JOLT)
     add_subdirectory(jolt/Build ${CMAKE_BINARY_DIR}/third_party/jolt SYSTEM)
 endif()
 
+# ---------------------------------------------------------------------------
+# BLAKE3 (architecture.md §2: `ContentHash` is BLAKE3-128).
+#
+# Three C files and no upstream project: `blake3/c/CMakeLists.txt` builds a
+# shared library, an install rule and a test tool, and detects SIMD support per
+# compiler -- all of which this build then has to un-decide. A four-line target
+# is smaller than the configuration that would suppress it.
+#
+# The SIMD paths are OFF, and that is the interesting part. They need either
+# per-file `-mavx2`-style flags or the hand-written assembly, and both make the
+# hash depend on what the BUILD MACHINE could compile rather than only on the
+# bytes. BLAKE3 is defined to produce identical output either way -- but a
+# content ADDRESS is a name, and a name whose derivation varies by build host is
+# a cache key nobody can reason about. The portable path still runs at roughly a
+# gigabyte a second, which is faster than the disk that feeds it.
+# ---------------------------------------------------------------------------
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/blake3/c/blake3.c")
+    add_library(blake3 STATIC
+        blake3/c/blake3.c
+        blake3/c/blake3_dispatch.c
+        blake3/c/blake3_portable.c)
+    target_include_directories(blake3 SYSTEM PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/blake3/c")
+    target_compile_definitions(blake3 PRIVATE
+        BLAKE3_NO_SSE2 BLAKE3_NO_SSE41 BLAKE3_NO_AVX2 BLAKE3_NO_AVX512)
+    add_library(blake3::blake3 ALIAS blake3)
+endif()
+
 # Restored so nothing above this directory inherits the ceiling. Our own build
 # does not shell out to git during configure today, and this is what keeps that
 # from becoming a silent dependency if it ever does.

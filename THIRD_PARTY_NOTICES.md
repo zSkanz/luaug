@@ -34,7 +34,7 @@ vendored yet; the roadmap allows lazy vendoring so long as the row exists.
 | enet | latest-tag | _not vendored yet_ | MIT | https://github.com/lsalzman/enet | `third_party/enet/` |
 | assimp | 6.0.x | _not vendored yet_ | BSD-3-Clause | https://github.com/assimp/assimp | `third_party/assimp/` |
 | doctest | 2.5.3 | `2d0a9359a60c` | MIT | https://github.com/doctest/doctest | `third_party/doctest/` |
-| blake3 | latest-tag | _not vendored yet_ | CC0-1.0 OR Apache-2.0 | https://github.com/BLAKE3-team/BLAKE3 | `third_party/blake3/` |
+| blake3 | 1.8.7 | `f3149ec5bb54` | CC0-1.0 OR Apache-2.0 | https://github.com/BLAKE3-team/BLAKE3 | `third_party/blake3/` |
 | xxhash | 0.8.3 | `e626a72bc232` | BSD-2-Clause | https://github.com/Cyan4973/xxHash | `third_party/xxhash/` |
 
 ## Fetched binary artifacts

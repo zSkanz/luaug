@@ -5,6 +5,7 @@
 luaug_add_module(core
     LAYER 0
     SOURCES
+        src/content_hash.cpp
         src/i18n.cpp
         src/json.cpp
         src/json_writer.cpp
@@ -15,10 +16,13 @@ luaug_add_module(core
         src/phase.cpp
         src/name_atom.cpp
         src/random.cpp
+    PRIVATE_DEPS
+        blake3::blake3
 )
 
 luaug_add_module_tests(core
     SOURCES
+        tests/content_hash_tests.cpp
         tests/text_key_tests.cpp
         tests/i18n_tests.cpp
         tests/json_tests.cpp
