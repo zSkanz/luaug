@@ -5,18 +5,19 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- **M6 — Playing the World — BUILT, awaiting human sign-off.** The brief is
+- **M6 — Playing the World — COMPLETE, signed off 2026-08-21**, tagged
+  `milestone/m6`. The brief is
   [`docs/briefs/m6-kickoff.md`](docs/briefs/m6-kickoff.md), with its fifteen
   decisions, its Findings and a filled Gate Record. **Every scope item and every
   gate item is done**: the five systems, solid `Part` rendering, `InputService`'s
   raw event surface (ADR 0041), the non-device input seam, `examples/04-obby`,
-  D017, and the six gates. Nothing is tagged: `milestone/m6` waits for the human,
-  which is §6's rule and not a formality.
+  D017, and the six gates. The Gate Record is in the brief.
   **Three ADRs**: 0039 (a context declares its dispatch rate), 0040 (a `UDim2`
   placement is arithmetic, so v1 does not call Clay — and Clay is un-vendored),
   0041 (`InputService` gains raw events, fed from the IAS's own pipeline).
-  **Ten defects closed** — D017, D021, D022, D027, D029, D030, D031, D032, and
-  half of D028 — of which six were found by a person playing the deliverable.
+  **Eight defects closed and half of a ninth** — D017, D021, D022, D027, D029,
+  D030, D031, D032, and the ground half of D028 — of which five were found by a
+  person playing the deliverable rather than by a test.
 - **M5 — Feeling the World: Jolt Physics + Character — COMPLETE, signed off
   2026-08-20**, tagged `milestone/m5`. Signed after a review round that found
   something: two `CharacterBody` were reported as passing through each other,
@@ -29,9 +30,17 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   (`milestone/m4`), its five gate items green against re-recorded artifacts.
   **M3** (`milestone/m3`), **M2** (`milestone/m2`), **M1**, **M0** — all signed
   off.
-- **CI is green on `main`**, run 32429107275, all three tiers — including the
-  first macOS build of Jolt. Two red runs preceded the first green one and both
-  found something a local tier cannot see (D023, D024).
+- **CI stopped running on 2026-08-21 and it is not the code.** Every job since
+  `5a542b7a` completes in about two seconds having executed ZERO steps and
+  produced no log, which is a job that never checked the repository out — the
+  signature of an Actions quota or a billing block on this private repository,
+  and the human's to clear. The last run that really executed
+  (`5a542b7a`) was green except for `perf_budget`, which `8f80ccf1` answers.
+  **So macOS is unverified for M6**, and the `milestone/m6` tag's macOS job is
+  what will say otherwise when Actions runs again. The last all-green run across
+  all three tiers is 32429107275, at M5.
+- **The last local gate before the tag**: all five stages green, 34 ctest targets
+  on Windows and 33 in the Tier-2 container, 1,081 conformance cases.
 
 ### M6: what a game can do that it could not
 
@@ -128,17 +137,28 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 - **D016 is fixed**: a `BindToClose` handler that yields is waited for, up to a
   capped grace period.
 
-### M5: what does NOT exist yet
+### What does NOT exist yet
 
-The brief's fifteen NOT-in-scope items, narrowed by one when the weld came into
-scope. The ones most likely to be mistaken for bugs:
+M6's seventeen NOT-in-scope items and M5's fifteen, and the ones most likely to
+be mistaken for bugs. Six of them are `Inert` properties, which means the engine
+says so in the inspector and the api-dump rather than only here — and
+`tools/repo/inertcheck.luau` is the gate that keeps a seventh from joining them
+quietly.
 
-- **Every `Part` renders as a wireframe box** — D022, scheduled with M7.5. Only
-  a `MeshPart` reaches the solid renderer, and that has been true since M2. The
-  boxes are where the bodies are.
+- **Text is one built-in ASCII face.** `TextLabel.Font` is `Inert` until M7
+  vendors Inter; a codepoint the face cannot draw is a visible box, on purpose.
+  No `RichText`, no shaping, no kerning.
+- **`ImageLabel` draws a flat tint.** `Image`, `ScaleType` and `SliceCenter` are
+  all `Inert` until there is a texture pipeline to hand one over (M7).
+- **`ScrollFrame` scrolls and draws no bar**; `ScrollBarThickness` is `Inert`.
+- **A `Sound` plays a generated tone of its declared length.** `Content` is
+  `Inert`. The timeline, the events, the mixing, the spatialization and the
+  group volumes are real; the file is not.
+- **`Touched` does not fire for a character's SIDE contacts** — D028's remaining
+  half. The surface under its feet does.
 - **`BasePart.Material` is not shipped**, and neither is `RaycastResult.Material`.
 - **`Enum.CollisionFidelity` round-trips and every value collides as a box**;
-  a hull needs mesh geometry the mirror cannot see until M7.
+  a hull needs mesh geometry the mirror cannot see until M7. `Inert`.
 - No joints or solver constraints beyond the transform weld; no sleeping policy
   exposed; no `saveState`/`restoreState` (declared, refuses); Jolt runs
   single-threaded until M7 wires the job system.
@@ -313,7 +333,7 @@ Entries for the planning session and for M0 through M4 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
 
-- **2026-08-21 (session 11, Claude Opus): M6 built, awaiting sign-off.** Picked
+- **2026-08-21 (session 11, Claude Opus): M6 built and signed off.** Picked
   up mid-milestone with four systems in, and finished it: the animation runtime
   and the skinned pipeline, solid `Part` rendering, `InputService`'s raw event
   surface, the non-device input seam, the glyph cache, Clay's removal,
