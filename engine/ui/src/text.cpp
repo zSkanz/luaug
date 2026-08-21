@@ -31,7 +31,9 @@
 // The seam is `measureText` and `buildTextGeometry`. When a real face arrives,
 // the cache's key, its miss path and both signatures stay; what changes is what
 // fills an entry.
+#include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
+#include "luaug/core/text_key.h"
 #include "luaug/ui/ui.h"
 
 #include <algorithm>
@@ -287,7 +289,8 @@ void fillReplacementGlyph(GlyphEntry& entry, std::vector<GlyphQuad>& quads)
     if (cache.entries.size() >= MaxGlyphEntries) {
         // See `MaxGlyphEntries`: reaching this is a signal rather than a routine
         // eviction, so it says so once per clear instead of silently churning.
-        core::logText(core::LogLevel::Debug, "ui: the glyph cache filled and was cleared");
+        const core::I18nArg args[] = {{"entries", static_cast<core::i64>(cache.entries.size())}};
+        core::log(core::LogLevel::Warn, LUAUG_TR("ui.warn.glyph_cache_cleared"), args);
         cache.entries.clear();
         cache.quads.clear();
         ++cache.stats.clears;

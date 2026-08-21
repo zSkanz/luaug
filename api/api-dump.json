@@ -738,6 +738,21 @@
             }
           ],
           "Returns": ["boolean"]
+        },
+        {
+          "Name": "SetVirtualState",
+          "Parameters": [
+            {
+              "Name": "keyCode",
+              "Type": "Enum.KeyCode"
+            },
+            {
+              "Name": "value",
+              "Type": "number"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
         }
       ],
       "Events": [
@@ -4336,6 +4351,30 @@
         {
           "Name": "V",
           "Value": 35
+        },
+        {
+          "Name": "Virtual1",
+          "Value": 94
+        },
+        {
+          "Name": "Virtual2",
+          "Value": 95
+        },
+        {
+          "Name": "Virtual3",
+          "Value": 96
+        },
+        {
+          "Name": "Virtual4",
+          "Value": 97
+        },
+        {
+          "Name": "VirtualStick1",
+          "Value": 98
+        },
+        {
+          "Name": "VirtualStick2",
+          "Value": 99
         },
         {
           "Name": "W",

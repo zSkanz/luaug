@@ -111,3 +111,94 @@ describe("Enum.UserInputType", function()
         expect(#Enum.UserInputType:GetEnumItems()):ToBe(9)
     end)
 end)
+
+describe("InputService:SetVirtualState", function()
+    it("refuses a key code that is not virtual", function()
+        -- Writing to `Space` would be a script pretending to be a keyboard, and
+        -- nothing downstream could tell the two apart afterwards.
+        expect(function()
+            InputService:SetVirtualState(Enum.KeyCode.Space, 1)
+        end):ToThrow()
+        expect(function()
+            InputService:SetVirtualState(Enum.KeyCode.LeftThumbstick, 1)
+        end):ToThrow()
+        expect(function()
+            InputService:SetVirtualState(Enum.PartShape.Ball :: any, 1)
+        end):ToThrow()
+    end)
+
+    it("accepts the four channels and reads back through IsKeyDown", function()
+        InputService:SetVirtualState(Enum.KeyCode.Virtual1, 1)
+        expect(InputService:IsKeyDown(Enum.KeyCode.Virtual1)):ToBe(true)
+
+        -- A value, not a press: below half deflection is not down, which is the
+        -- rule every analogue source here follows.
+        InputService:SetVirtualState(Enum.KeyCode.Virtual1, 0.4)
+        expect(InputService:IsKeyDown(Enum.KeyCode.Virtual1)):ToBe(false)
+
+        InputService:SetVirtualState(Enum.KeyCode.Virtual1, 0)
+        expect(InputService:IsKeyDown(Enum.KeyCode.Virtual1)):ToBe(false)
+    end)
+
+    it("drives a real action through an ordinary binding", function()
+        -- The proving caller, in miniature: a context, an action and a binding a
+        -- HUD button writes into. Nothing here is special-cased.
+        local context = Instance.new("InputContext")
+        context.Parent = InputService
+        local action = Instance.new("InputAction")
+        action.Name = "VirtualJump"
+        action.Parent = context
+        local binding = Instance.new("InputBinding")
+        binding.KeyCode = Enum.KeyCode.Virtual2
+        binding.Parent = action
+
+        expect(action:GetState()):ToBe(false)
+        InputService:SetVirtualState(Enum.KeyCode.Virtual2, 1)
+        step(2)
+        expect(action:GetState()):ToBe(true)
+
+        InputService:SetVirtualState(Enum.KeyCode.Virtual2, 0)
+        step(2)
+        expect(action:GetState()):ToBe(false)
+        context:Destroy()
+    end)
+
+    it("drives a Direction2D action through a virtual stick", function()
+        -- Why the seam carries a value rather than a press: an on-screen
+        -- thumbstick is the other half of any touch scheme, and a virtual BUTTON
+        -- would not have fitted it.
+        local context = Instance.new("InputContext")
+        context.Parent = InputService
+        local action = Instance.new("InputAction")
+        action.Type = Enum.InputActionType.Direction2D
+        action.Parent = context
+        local binding = Instance.new("InputBinding")
+        binding.KeyCode = Enum.KeyCode.VirtualStick1
+        binding.Parent = action
+
+        InputService:SetVirtualState(Enum.KeyCode.Virtual1, 0.5)
+        InputService:SetVirtualState(Enum.KeyCode.Virtual2, -1)
+        step(2)
+        expect(action:GetState()):ToBe(Vector2.new(0.5, -1))
+
+        InputService:SetVirtualState(Enum.KeyCode.Virtual1, 0)
+        InputService:SetVirtualState(Enum.KeyCode.Virtual2, 0)
+        step(2)
+        context:Destroy()
+    end)
+
+    it("marks the binding as Touch, which is what a prompt reads", function()
+        local context = Instance.new("InputContext")
+        context.Parent = InputService
+        local action = Instance.new("InputAction")
+        action.Parent = context
+        local binding = Instance.new("InputBinding")
+        binding.KeyCode = Enum.KeyCode.Virtual3
+        binding.Parent = action
+
+        -- `DeviceType` is derived from the key and read-only (ADR 0039), so this
+        -- is the enum's `Touch` item finally having a producer.
+        expect(binding.DeviceType):ToBe(Enum.InputDeviceType.Touch)
+        context:Destroy()
+    end)
+end)

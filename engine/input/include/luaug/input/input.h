@@ -136,7 +136,13 @@ struct RawInputEvent
 // that no device event names. `input.cpp` static_asserts the arithmetic against
 // the generated enum descriptor at registration, which is the check that keeps
 // this number honest.
-inline constexpr usize kKeyCodeCount = 94;
+inline constexpr usize kKeyCodeCount = 100;
+
+// Whether a `KeyCode` is one of the four virtual axes or the two composites over
+// them -- the ones `InputService:SetVirtualState` may write and nothing else
+// may. A HUD button writing to `Space` would be a script pretending to be a
+// keyboard, and there would then be no way for anything to tell the difference.
+[[nodiscard]] bool isVirtual(i32 keyCode) noexcept;
 
 // Which device family a `KeyCode` belongs to. `InputBinding.DeviceType` is this
 // function and nothing else (ADR 0039): a settable device type could disagree
@@ -207,6 +213,15 @@ public:
     // consumed: a poll asks what the HARDWARE is doing, and an event asks what
     // happened to the game.
     [[nodiscard]] bool isKeyDown(i32 keyCode) const noexcept;
+
+    // Writes one of the virtual axes. Ignores a code that is not virtual, which
+    // is what keeps the seam one-way: a script drives the four channels the
+    // engine set aside for it and nothing else.
+    //
+    // The value STICKS until it is written again, because a HUD button that is
+    // held is a value nobody has cleared -- and `releaseAll` clears it with
+    // everything else, so a press cannot survive losing focus.
+    void setVirtualState(i32 keyCode, f32 value) noexcept;
 
     // Resolves every `Simulation`-rate context and writes the result into the
     // world. Enqueues a `Change` per action whose value moved.

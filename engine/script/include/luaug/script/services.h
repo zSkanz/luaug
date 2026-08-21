@@ -157,10 +157,13 @@ public:
     // rather than assuming.
     scene::PhysicsSync* physics = nullptr;
 
-    // The device snapshot `InputService:IsKeyDown` reads, or null before the
-    // host hands it over. Same arrangement as `physics` and `animation`: the
-    // system belongs to the host's lifetime and this is a view onto it.
-    const input::InputSystem* input = nullptr;
+    // The input system `InputService` reads and, in exactly one place, writes:
+    // `SetVirtualState` drives the four virtual channels, which is the seam that
+    // lets a HUD button feed an action without becoming a second input model.
+    // Null before the host hands it over. Same arrangement as `physics` and
+    // `animation`: the system belongs to the host's lifetime and this is a view
+    // onto it.
+    input::InputSystem* input = nullptr;
 
     // The animation host, or null in a build with no render module. Same
     // arrangement and same rule as `physics` above: null is a real state, and a

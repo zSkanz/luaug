@@ -36,13 +36,22 @@ constexpr i32 PadAxisCount = 6;
 constexpr i32 LeftThumbstick = PadAxisFirst + PadAxisCount; // 92
 constexpr i32 RightThumbstick = LeftThumbstick + 1;         // 93
 
+// The virtual block (M6): four axes a script writes and two composites over
+// them. Not hardware, and deliberately IN the same arrays as hardware -- a
+// virtual source that lived somewhere else would be a second input model, and
+// the recorded stream would not carry it.
+constexpr i32 VirtualFirst = RightThumbstick + 1; // 94
+constexpr i32 VirtualCount = 4;
+constexpr i32 VirtualStick1 = VirtualFirst + VirtualCount; // 98
+constexpr i32 VirtualStick2 = VirtualStick1 + 1;           // 99
+
 // The axes, by name, so the two stick composites can find their halves.
 constexpr i32 LeftStickX = PadAxisFirst;
 constexpr i32 LeftStickY = PadAxisFirst + 1;
 constexpr i32 RightStickX = PadAxisFirst + 2;
 constexpr i32 RightStickY = PadAxisFirst + 3;
 
-static_assert(RightThumbstick + 1 == static_cast<i32>(kKeyCodeCount),
+static_assert(VirtualStick2 + 1 == static_cast<i32>(kKeyCodeCount),
               "the KeyCode ranges above must cover the whole enum with no gap");
 
 [[nodiscard]] constexpr bool inRange(i32 value, i32 first, i32 count) noexcept
@@ -99,12 +108,22 @@ constexpr f32 AnalogPressThreshold = 0.5f;
 
 } // namespace
 
+bool isVirtual(i32 keyCode) noexcept
+{
+    return inRange(keyCode, VirtualFirst, VirtualCount) || keyCode == VirtualStick1 || keyCode == VirtualStick2;
+}
+
 DeviceType deviceOf(i32 keyCode) noexcept
 {
     if (inRange(keyCode, PadButtonFirst, PadButtonCount) || inRange(keyCode, PadAxisFirst, PadAxisCount) ||
         keyCode == LeftThumbstick || keyCode == RightThumbstick) {
         return DeviceType::Gamepad;
     }
+    // The roadmap's clause, honoured: an on-screen control is the same thing a
+    // touch control will be, so the virtual family reports `Touch` rather than
+    // growing a fourth item nobody asked for.
+    if (isVirtual(keyCode))
+        return DeviceType::Touch;
     // Everything else, `Unknown` included. There is no third answer to give:
     // a binding that names nothing is not a touch binding.
     return DeviceType::KeyboardMouse;
@@ -112,8 +131,11 @@ DeviceType deviceOf(i32 keyCode) noexcept
 
 bool isAnalog(i32 keyCode) noexcept
 {
+    // Virtual included: the seam carries a VALUE and not a press, so a HUD
+    // button writes 1 and a thumbstick writes a deflection, and both go through
+    // the same half-deflection rule when a `Bool` action asks.
     return keyCode == MouseMovement || keyCode == MouseWheel || inRange(keyCode, PadAxisFirst, PadAxisCount) ||
-           keyCode == LeftThumbstick || keyCode == RightThumbstick;
+           keyCode == LeftThumbstick || keyCode == RightThumbstick || isVirtual(keyCode);
 }
 
 // The four names no device event carries, so no `platform` table has them.
@@ -121,6 +143,8 @@ bool isAnalog(i32 keyCode) noexcept
 // out as two pairs rather than as a map.
 constexpr std::string_view AnalogNames[] = {"MouseMovement", "MouseWheel"};
 constexpr std::string_view StickNames[] = {"LeftThumbstick", "RightThumbstick"};
+constexpr std::string_view VirtualNames[] = {"Virtual1", "Virtual2", "Virtual3", "Virtual4"};
+constexpr std::string_view VirtualStickNames[] = {"VirtualStick1", "VirtualStick2"};
 
 i32 keyCodeFromName(std::string_view name) noexcept
 {
@@ -147,6 +171,12 @@ i32 keyCodeFromName(std::string_view name) noexcept
             return MouseMovement + index;
         if (name == StickNames[index])
             return LeftThumbstick + index;
+        if (name == VirtualStickNames[index])
+            return VirtualStick1 + index;
+    }
+    for (i32 index = 0; index < VirtualCount; ++index) {
+        if (name == VirtualNames[index])
+            return VirtualFirst + index;
     }
     return 0;
 }
@@ -163,6 +193,10 @@ std::string_view keyCodeName(i32 keyCode) noexcept
         return platform::gamepadAxisName(static_cast<platform::GamepadAxis>(keyCode - PadAxisFirst + 1));
     if (keyCode == MouseMovement || keyCode == MouseWheel)
         return AnalogNames[keyCode - MouseMovement];
+    if (inRange(keyCode, VirtualFirst, VirtualCount))
+        return VirtualNames[keyCode - VirtualFirst];
+    if (keyCode == VirtualStick1 || keyCode == VirtualStick2)
+        return VirtualStickNames[keyCode - VirtualStick1];
     if (keyCode == LeftThumbstick || keyCode == RightThumbstick)
         return StickNames[keyCode - LeftThumbstick];
     return {};
@@ -288,6 +322,11 @@ struct Contribution
         if (code == RightThumbstick)
             return std::abs(state.axis[RightStickX]) > AnalogPressThreshold ||
                    std::abs(state.axis[RightStickY]) > AnalogPressThreshold;
+        if (code == VirtualStick1 || code == VirtualStick2) {
+            const usize first = static_cast<usize>(VirtualFirst + (code - VirtualStick1) * 2);
+            return std::abs(state.axis[first]) > AnalogPressThreshold ||
+                   std::abs(state.axis[first + 1]) > AnalogPressThreshold;
+        }
         return std::abs(state.axis[static_cast<usize>(code)]) > AnalogPressThreshold;
     }
     return state.held[static_cast<usize>(code)];
@@ -312,6 +351,14 @@ struct Contribution
         // `Up` composite means +Y. One convention reaches the game, and this is
         // the line that establishes it.
         return core::Vec2{state.axis[LeftStickX], -state.axis[LeftStickY]};
+    }
+    if (code == VirtualStick1 || code == VirtualStick2) {
+        // NOT negated: a virtual axis is written by a script in the engine's own
+        // convention, so there is no hardware convention to undo. A script that
+        // wants an inverted stick writes a negative number, or sets the
+        // binding's `Scale` to -1 like a settings screen does.
+        const usize first = static_cast<usize>(VirtualFirst + (code - VirtualStick1) * 2);
+        return core::Vec2{state.axis[first], state.axis[first + 1]};
     }
     return core::Vec2{state.axis[RightStickX], -state.axis[RightStickY]};
 }
@@ -365,6 +412,17 @@ namespace {
 
 } // namespace
 
+void InputSystem::setVirtualState(i32 keyCode, f32 value) noexcept
+{
+    if (!inRange(keyCode, VirtualFirst, VirtualCount))
+        return;
+    m_state.axis[static_cast<usize>(keyCode)] = value;
+    // A virtual press marks the device family too, so a HUD that switches its
+    // prompts follows the on-screen control the way it follows a gamepad.
+    if (std::abs(value) > AnalogPressThreshold)
+        m_state.lastDevice = DeviceType::Touch;
+}
+
 bool InputSystem::isKeyDown(i32 keyCode) const noexcept
 {
     // The same `digital`, with nothing consumed: a poll is about the device.
@@ -389,6 +447,13 @@ void InputSystem::collectRawEvents(core::Vec2 pointerDelta, core::Vec2 wheel)
     // a handler may write to the world -- so it has to come from something that
     // promises one (R10), and an array index is the cheapest promise there is.
     for (i32 code = 1; code < static_cast<i32>(kKeyCodeCount); ++code) {
+        // The composites are a way of READING two axes together, not inputs of
+        // their own: a stick pushed left is one event about `LeftStickX`, and
+        // a second one saying `LeftThumbstick` began would be the same fact
+        // twice under a name no device produced.
+        if (code == LeftThumbstick || code == RightThumbstick || code == VirtualStick1 || code == VirtualStick2)
+            continue;
+
         const auto slot = static_cast<usize>(code);
         // `digital` rather than `held`, so a trigger crossing half deflection
         // begins and ends like a button -- which is what `Enum.KeyCode`'s own
@@ -581,7 +646,8 @@ void InputSystem::dispatch(scene::World& world, Rate rate)
                         if (valid(code) && !m_consumed[static_cast<usize>(code)]) {
                             if (code == MouseMovement)
                                 amount = amount + pointerDelta;
-                            else if (code == LeftThumbstick || code == RightThumbstick)
+                            else if (code == LeftThumbstick || code == RightThumbstick || code == VirtualStick1 ||
+                                     code == VirtualStick2)
                                 amount = amount + stick(m_state, code);
                             else if (code == MouseWheel)
                                 amount = amount + wheel;

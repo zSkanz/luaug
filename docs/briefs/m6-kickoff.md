@@ -75,7 +75,7 @@ constraint that decides most of the decisions below.
       text**: a key handled here will not appear in a remapping screen and an
       action will. **This replaces `@luaug/input`, which is dropped** — it
       existed to make the simple case cheap and `IsKeyDown` makes it cheap.
-- [ ] **An action must be drivable by a non-device source** — a design
+- [x] **An action must be drivable by a non-device source** — a design
       constraint added to the roadmap 2026-08-20 by human decision, **after this
       brief imported its scope**. `InputBinding` is keyed by `KeyCode`, so only
       hardware can feed an `InputAction`; a touch button and a virtual thumbstick

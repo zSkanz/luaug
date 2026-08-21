@@ -101,7 +101,7 @@ public:
     // The device snapshot `InputService:IsKeyDown` reads, and the source of the
     // raw events below. Null in a runtime the host has not wired, which those
     // bindings answer as "nothing is down".
-    void setInput(const input::InputSystem* input);
+    void setInput(input::InputSystem* input);
 
     // Enqueues `InputBegan` / `InputChanged` / `InputEnded` for one tick's raw
     // events (ADR 0041). Called right after the simulation dispatch, so they

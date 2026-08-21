@@ -764,6 +764,25 @@ int inputServiceGetPointerPosition(lua_State* L)
     return 1;
 }
 
+int inputServiceSetVirtualState(lua_State* L)
+{
+    const scene::EnumValue item = checkEnumItem(L, 2);
+    if (item.enumId != scene::generated::KeyCodeEnumId)
+        luaL_argerror(L, 2, "Enum.KeyCode");
+    if (!input::isVirtual(item.value)) {
+        // Writing to `Space` would be a script pretending to be a keyboard, and
+        // nothing downstream could then tell the two apart. The four channels
+        // the engine set aside are the seam, and this is the line that keeps it
+        // one-way.
+        luaL_argerror(L, 2, "Enum.KeyCode.Virtual1..Virtual4");
+    }
+
+    const auto value = static_cast<f32>(luaL_checknumber(L, 3));
+    if (input::InputSystem* devices = services(L).input; devices != nullptr)
+        devices->setVirtualState(item.value, value);
+    return 0;
+}
+
 int inputServiceIsKeyDown(lua_State* L)
 {
     const scene::EnumValue item = checkEnumItem(L, 2);
@@ -878,6 +897,7 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"InputAction", "GetPreferredBinding", inputActionGetPreferredBinding},
     {"InputService", "GetPointerPosition", inputServiceGetPointerPosition},
     {"InputService", "IsKeyDown", inputServiceIsKeyDown},
+    {"InputService", "SetVirtualState", inputServiceSetVirtualState},
 
     {"AnimationPlayer", "LoadAnimation", animationPlayerLoadAnimation},
 

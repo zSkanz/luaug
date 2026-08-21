@@ -322,7 +322,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .set = nullptr,
         },
     }};
-    static std::array<scene::MethodDesc, 2> inputServiceMethods;
+    static std::array<scene::MethodDesc, 3> inputServiceMethods;
     inputServiceMethods = {{
         scene::MethodDesc{
             .name = atoms.intern("GetPointerPosition"),
@@ -332,6 +332,12 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         },
         scene::MethodDesc{
             .name = atoms.intern("IsKeyDown"),
+            .yields = false,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .docKey = {},
+        },
+        scene::MethodDesc{
+            .name = atoms.intern("SetVirtualState"),
             .yields = false,
             .threadSafety = scene::ThreadSafety::Unsafe,
             .docKey = {},

@@ -3,6 +3,7 @@
 #include "luaug/scene/world.h"
 
 #include <doctest/doctest.h>
+#include <ostream>
 
 // scene's generated header, through the include directory `luaug_scene` exports.
 // input's own is reached by a relative path from its source; a test does not
@@ -651,4 +652,164 @@ TEST_CASE("IsKeyDown reads the device and ignores what the UI took")
 
     fixture.release("Space");
     CHECK_FALSE(fixture.system.isKeyDown(fixture.keyCode("Space")));
+}
+
+// --- The non-device seam (roadmap M6's design constraint) ---------------------
+//
+// "An action must be drivable by something that is not a physical device." The
+// four virtual channels are that seam, and every case here is about the sentence
+// that follows it in the roadmap: it goes through the SAME dispatch, or it is the
+// second input model that was declined an hour earlier.
+
+TEST_CASE("a virtual channel drives a Bool action through an ordinary binding")
+{
+    Fixture fixture;
+    const InstanceId context = fixture.context();
+    const InstanceId jump = fixture.action(context, input::ActionType::Bool);
+    const InstanceId binding = fixture.binding(jump);
+    fixture.world->inputBindings().find(binding)->keyCode = fixture.keyCode("Virtual1");
+
+    fixture.system.dispatchSimTick(*fixture.world, 1);
+    CHECK_FALSE(fixture.state(jump).pressed);
+
+    // A HUD button pressed. Nothing about the action, the binding or the context
+    // is different from a keyboard's -- which is the whole claim.
+    fixture.system.setVirtualState(fixture.keyCode("Virtual1"), 1.0f);
+    fixture.system.dispatchSimTick(*fixture.world, 2);
+    CHECK(fixture.state(jump).pressed);
+
+    fixture.system.setVirtualState(fixture.keyCode("Virtual1"), 0.0f);
+    fixture.system.dispatchSimTick(*fixture.world, 3);
+    CHECK_FALSE(fixture.state(jump).pressed);
+}
+
+TEST_CASE("a virtual stick drives a Direction2D action, which is why the seam carries a value")
+{
+    // The easy mistake the roadmap names: design an on-screen BUTTON and the
+    // thumbstick -- the other half of any touch scheme -- does not fit later.
+    Fixture fixture;
+    const InstanceId context = fixture.context();
+    const InstanceId move = fixture.action(context, input::ActionType::Direction2D);
+    const InstanceId binding = fixture.binding(move);
+    fixture.world->inputBindings().find(binding)->keyCode = fixture.keyCode("VirtualStick1");
+
+    fixture.system.setVirtualState(fixture.keyCode("Virtual1"), 0.5f);
+    fixture.system.setVirtualState(fixture.keyCode("Virtual2"), -0.25f);
+    fixture.system.dispatchSimTick(*fixture.world, 1);
+
+    CHECK(static_cast<double>(fixture.state(move).axis.x) == doctest::Approx(0.5));
+    // NOT negated: a virtual axis is written in the engine's own convention, so
+    // there is no hardware convention to undo.
+    CHECK(static_cast<double>(fixture.state(move).axis.y) == doctest::Approx(-0.25));
+}
+
+TEST_CASE("a virtual value is eaten by a sinking context, like every other input")
+{
+    // A menu that stops the character stops the HUD button too. If it did not,
+    // the button would be a second input model wearing a different hat.
+    Fixture fixture;
+    const InstanceId menu = fixture.context(10.0f, true);
+    const InstanceId confirm = fixture.action(menu, input::ActionType::Bool);
+    fixture.world->inputBindings().find(fixture.binding(confirm))->keyCode = fixture.keyCode("Virtual1");
+
+    const InstanceId game = fixture.context(0.0f, false);
+    const InstanceId jump = fixture.action(game, input::ActionType::Bool);
+    fixture.world->inputBindings().find(fixture.binding(jump))->keyCode = fixture.keyCode("Virtual1");
+
+    fixture.system.setVirtualState(fixture.keyCode("Virtual1"), 1.0f);
+    fixture.system.dispatchSimTick(*fixture.world, 1);
+    CHECK(fixture.state(confirm).pressed);
+    CHECK_FALSE(fixture.state(jump).pressed);
+
+    // Menu closed: the same value falls through to the game on the next tick.
+    fixture.world->inputContexts().find(menu)->enabled = false;
+    fixture.system.dispatchSimTick(*fixture.world, 2);
+    CHECK(fixture.state(jump).pressed);
+}
+
+TEST_CASE("a virtual value counts as pressed past half deflection")
+{
+    // The rule every analogue source here follows, applied to this one so that a
+    // slider bound to a `Bool` action behaves like a trigger does.
+    Fixture fixture;
+    const InstanceId context = fixture.context();
+    const InstanceId action = fixture.action(context, input::ActionType::Bool);
+    fixture.world->inputBindings().find(fixture.binding(action))->keyCode = fixture.keyCode("Virtual2");
+
+    fixture.system.setVirtualState(fixture.keyCode("Virtual2"), 0.4f);
+    fixture.system.dispatchSimTick(*fixture.world, 1);
+    CHECK_FALSE(fixture.state(action).pressed);
+
+    fixture.system.setVirtualState(fixture.keyCode("Virtual2"), 0.6f);
+    fixture.system.dispatchSimTick(*fixture.world, 2);
+    CHECK(fixture.state(action).pressed);
+}
+
+TEST_CASE("the seam is one-way: nothing else may be written")
+{
+    // A script writing to `Space` would be pretending to be a keyboard, and
+    // nothing downstream could tell the two apart afterwards.
+    Fixture fixture;
+    CHECK(input::isVirtual(fixture.keyCode("Virtual1")));
+    CHECK(input::isVirtual(fixture.keyCode("VirtualStick2")));
+    CHECK_FALSE(input::isVirtual(fixture.keyCode("Space")));
+    CHECK_FALSE(input::isVirtual(fixture.keyCode("LeftThumbstick")));
+
+    fixture.system.setVirtualState(fixture.keyCode("Space"), 1.0f);
+    CHECK_FALSE(fixture.system.isKeyDown(fixture.keyCode("Space")));
+}
+
+TEST_CASE("a virtual binding reports the Touch device family")
+{
+    // The roadmap's clause: when something eventually produces `Touch` it should
+    // produce it through this seam rather than growing a new one.
+    Fixture fixture;
+    CHECK(input::deviceOf(fixture.keyCode("Virtual1")) == input::DeviceType::Touch);
+    CHECK(input::deviceOf(fixture.keyCode("VirtualStick1")) == input::DeviceType::Touch);
+
+    fixture.system.setVirtualState(fixture.keyCode("Virtual1"), 1.0f);
+    // And a HUD follows the on-screen control the way it follows a gamepad.
+    CHECK(fixture.system.snapshot().lastDevice == input::DeviceType::Touch);
+}
+
+TEST_CASE("a virtual press produces a raw event, so the replay gate can see it")
+{
+    // M6's own gate is an obby run replayed headless to the finish flag. A HUD
+    // button that reached an action without touching the device snapshot would
+    // be an input that gate could not see.
+    Fixture fixture;
+    fixture.system.dispatchSimTick(*fixture.world, 1);
+    (void)fixture.system.drainRawEvents();
+
+    fixture.system.setVirtualState(fixture.keyCode("Virtual1"), 1.0f);
+    fixture.system.dispatchSimTick(*fixture.world, 2);
+    const std::span<const input::RawInputEvent> raw = fixture.system.drainRawEvents();
+    REQUIRE(raw.size() == 1);
+    CHECK(raw[0].phase == input::RawInputEvent::Phase::Began);
+    CHECK(raw[0].keyCode == fixture.keyCode("Virtual1"));
+}
+
+TEST_CASE("losing focus clears a virtual press")
+{
+    // A HUD button held when the window went away is a button nobody is holding.
+    Fixture fixture;
+    fixture.system.setVirtualState(fixture.keyCode("Virtual1"), 1.0f);
+    CHECK(fixture.system.isKeyDown(fixture.keyCode("Virtual1")));
+
+    fixture.system.releaseAll(*fixture.world);
+    CHECK_FALSE(fixture.system.isKeyDown(fixture.keyCode("Virtual1")));
+}
+
+TEST_CASE("the virtual codes round-trip through their names")
+{
+    // The recorded stream is written in names, so a code with no name is a code
+    // a replay cannot carry -- which would be exactly the gap this seam exists
+    // to close.
+    Fixture fixture;
+    for (const char* name : {"Virtual1", "Virtual2", "Virtual3", "Virtual4", "VirtualStick1", "VirtualStick2"}) {
+        CAPTURE(name);
+        const core::i32 code = fixture.keyCode(name);
+        CHECK(input::keyCodeFromName(name) == code);
+        CHECK(input::keyCodeName(code) == name);
+    }
 }

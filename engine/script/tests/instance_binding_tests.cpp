@@ -530,9 +530,10 @@ TEST_CASE("the boot-time method cross-check reports both directions")
     // once `TweenService:Create` and `:GetValue` landed beside it, and 64 once
     // `Sound:Play`/`Pause`/`Stop` and `AudioService:PlayLocal` did; 65 once
     // `AnimationPlayer:LoadAnimation` brought the animation runtime; 66 once
-    // `InputService:IsKeyDown` arrived with ADR 0041's raw event surface.
-    CHECK(coverage.declared == 66);
-    CHECK(coverage.bound == 66);
+    // `InputService:IsKeyDown` arrived with ADR 0041's raw event surface, and 67
+    // once `InputService:SetVirtualState` opened the non-device seam.
+    CHECK(coverage.declared == 67);
+    CHECK(coverage.bound == 67);
     CHECK(coverage.declaredWithoutBinding == 0);
 }
 

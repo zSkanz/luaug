@@ -1486,7 +1486,7 @@ void registerEnums(EnumRegistry& enums, core::AtomTable& atoms)
     enums.registerEnum(runContextDesc);
 
     // --- KeyCode ---
-    static std::array<EnumItemDesc, 94> keyCodeItems;
+    static std::array<EnumItemDesc, 100> keyCodeItems;
     keyCodeItems = {{
         EnumItemDesc{
             .name = atoms.intern("Unknown"),
@@ -1956,6 +1956,36 @@ void registerEnums(EnumRegistry& enums, core::AtomTable& atoms)
         EnumItemDesc{
             .name = atoms.intern("RightThumbstick"),
             .value = 93,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Virtual1"),
+            .value = 94,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Virtual2"),
+            .value = 95,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Virtual3"),
+            .value = 96,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Virtual4"),
+            .value = 97,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("VirtualStick1"),
+            .value = 98,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("VirtualStick2"),
+            .value = 99,
             .docKey = {},
         },
     }};

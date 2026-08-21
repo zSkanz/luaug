@@ -204,7 +204,7 @@ void ScriptRuntime::setPhysics(scene::PhysicsSync* physics)
     m_impl->services.physics = physics;
 }
 
-void ScriptRuntime::setInput(const input::InputSystem* input)
+void ScriptRuntime::setInput(input::InputSystem* input)
 {
     m_impl->services.input = input;
 }

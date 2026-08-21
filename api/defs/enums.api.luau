@@ -323,6 +323,35 @@ local Definition: Schema.Definition = {
                     Value = 93,
                     Doc = "The right stick as a Vector2.",
                 },
+                {
+                    Name = "Virtual1",
+                    Value = 94,
+                    Doc = "A source that is not hardware, written by `InputService:SetVirtualState` (§2.4). It is "
+                        .. "a KeyCode like any other, so it binds, sinks, resolves and REPLAYS like any other -- "
+                        .. "which is the whole point: a HUD button that fed an action through a side door would "
+                        .. "be a second input model, and the recorded stream would not contain it.\n\n**It "
+                        .. "carries a VALUE and not a press.** A button writes 1 and 0; a slider writes anything "
+                        .. "between. Bound to a `Bool` action it counts as pressed past half deflection, which "
+                        .. "is the rule every analogue source here follows.\n\nFour of them, because a touch "
+                        .. "scheme is a thumbstick and two or three buttons and four is one more than that. They "
+                        .. "are numbered rather than named for a purpose, because the purpose is the game''s.",
+                },
+                { Name = "Virtual2", Value = 95 },
+                { Name = "Virtual3", Value = 96 },
+                { Name = "Virtual4", Value = 97 },
+                {
+                    Name = "VirtualStick1",
+                    Value = 98,
+                    Doc = "`Virtual1` and `Virtual2` as one Vector2 -- the source a `Direction2D` action binds "
+                        .. "for an on-screen thumbstick. The same relationship `LeftThumbstick` has to "
+                        .. "`LeftStickX` and `LeftStickY`, and the reason the virtual seam carries a value: "
+                        .. "design an on-screen BUTTON and the thumbstick does not fit later.",
+                },
+                {
+                    Name = "VirtualStick2",
+                    Value = 99,
+                    Doc = "`Virtual3` and `Virtual4` as one Vector2.",
+                },
             } :: { Schema.EnumItem },
         },
         {
@@ -379,8 +408,12 @@ local Definition: Schema.Definition = {
                 {
                     Name = "Touch",
                     Value = 2,
-                    Doc = "Declared because the enum is designed once (ADR 0029). Nothing produces it in v1: "
-                        .. "there is no touch input and no mobile port (R15).",
+                    Doc = "What a VIRTUAL binding reports -- one keyed to `Enum.KeyCode.Virtual1` and its "
+                        .. "siblings, which is how a HUD button or an on-screen thumbstick drives an action "
+                        .. "(§2.4). There is still no touch HARDWARE and no mobile port (R15); the item is "
+                        .. "here because an on-screen control is the same thing a touch control will be, and "
+                        .. "the roadmap asked that when something eventually produces this family it produce "
+                        .. "it through this seam rather than growing a new one.",
                 },
             } :: { Schema.EnumItem },
         },
