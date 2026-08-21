@@ -694,6 +694,17 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   - **`Enum.InputDeviceType.Touch` already exists**, declared with "nothing
     produces it in v1" written into the enum. When something eventually does, it
     should produce it through this seam rather than growing a new one.
+- **Design constraint (not scope): the glyph store is a cache, not a bake**
+  (human decision, 2026-08-20). `TextLabel.Font` is typed `Content`, so a game
+  will supply its own TrueType face by URI the way a `MeshPart` supplies a mesh,
+  and M7's asset pipeline is what hands it over. A glyph atlas baked once at boot
+  works only while there is one face at one size — which stops being true the
+  moment that lands, and a bake then becomes a rewrite rather than a widening.
+  So whatever M6 builds must be keyed by **face, size and codepoint** and filled
+  on demand, even while there is exactly one face to fill it with. Unicode is the
+  same decision from the other side: `stb_easy_font` is ASCII, and a game in
+  Portuguese already needs á ç ã õ, so the cache is sized and the
+  missing-glyph behaviour is chosen here rather than discovered by a player.
 - **Deliverable:** `examples/04-obby` — main menu (tweened), HUD, checkpoints,
   moving platforms (tweens on physics-kinematic parts — a deliberate
   integration stressor), sounds, an animated character, fully playable
@@ -725,6 +736,13 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   *time*, not in a count of chunks: chunk cost varies with content, and the gate
   is stated as "zero hitches >33 ms attributable to streaming" — budget and gate
   should measure the same thing.
+- **The default typeface ships here** (human decision, 2026-08-20): **Inter,
+  OFL 1.1**, vendored with its licence recorded in `THIRD_PARTY_NOTICES.md` (R6).
+  One face, not several — a good default plus "bring your own" covers the ground,
+  and three vendored faces are three things to licence, update and explain.
+  Roboto (Apache-2.0) is the alternative if matching the repository's own licence
+  family is worth more than the typeface. `TextLabel.Font` stops being `Inert`
+  when it lands, and the marker goes with it.
 - **Deliverable:** `examples/05-streaming` — a procedurally generated large
   world (no giant binary assets in the repo), fly-cam, ImGui chunk-state
   overlay, memory graph.

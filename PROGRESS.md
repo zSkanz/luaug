@@ -222,20 +222,39 @@ scope. The ones most likely to be mistaken for bugs:
 
 ## Blocked — needs human
 
-- **Which font does the engine ship?** M6 draws every label in `stb_easy_font`,
-  the vector face already vendored inside `third_party/stb`: ASCII, one weight,
-  no kerning. ADR 0011 names stb_truetype, and stb_truetype needs a TrueType
-  FILE — an asset with a licence, which is an R6 decision rather than an agent's.
-  `TextLabel.Font` is marked `Inert` with M7 named, so the gap is declared rather
-  than discovered. The question is which permissively-licensed face to vendor
-  (DejaVu, Inter, Noto Sans and Liberation are all candidates), and it can wait
-  until M7's asset pipeline — the UI works without it.
-- **Clay is vendored and v1 does not call it.** ADR 0040 explains why: a `UDim2`
-  placement is arithmetic rather than a constraint, and Clay cannot express an
-  unclamped scale or a fractional anchor point. The row and the pin are
-  untouched, because removing a dependency is a human decision (R5, §10). Two
-  answers are reasonable — drop the row, or keep it for a UI feature that is
-  genuinely flow-shaped, which `UIGridLayout` would be.
+- **ANSWERED 2026-08-20 — the font is an asset, and the engine ships exactly
+  one.** `TextLabel.Font` is already typed `Content`, so a game supplies its own
+  face by URI the way a `MeshPart` supplies a mesh; that half of the design is
+  done. What the human decided is the default: **Inter (OFL 1.1)**, chosen for
+  legibility at UI sizes. Roboto (Apache-2.0) is the alternative if matching the
+  repository's own licence family is worth more than the typeface, and it is a
+  one-word change. Not several faces: one good default plus "bring your own"
+  covers the ground, and three vendored faces are three things to licence,
+  update and explain.
+
+  **Three consequences the human named, and one of them binds M6 rather than
+  M7.** They are recorded in the roadmap so they are not rediscovered:
+  - **The glyph store must be a CACHE, not a boot-time bake** — keyed by face,
+    size and codepoint, filled on demand. Baking works only while there is one
+    face at one size, which stops being true the moment a game supplies a font.
+    **This is M6's to get right**, because M7 hands it user faces and a bake
+    becomes a rewrite.
+  - **Unicode stops being optional.** `stb_easy_font` is ASCII; a game in
+    Portuguese needs á ç ã õ and a game in Japanese needs far more. That decides
+    whether the cache holds 128 entries or thousands, and whether a missing glyph
+    falls back or draws nothing.
+  - **`TextLabel.Font` stops being `Inert`** when the face lands, and the marker
+    goes with it.
+
+- **ANSWERED 2026-08-20 — the Clay row is removed.** ADR 0040 established that a
+  `UDim2` placement is arithmetic and that Clay cannot express an unclamped scale
+  or a fractional anchor point, so this is not "not used yet", it is "does not
+  fit the model". A vendored dependency nobody calls still enters every build,
+  every notices file and every future reader's half hour. The ADR stays in the
+  tree if a genuinely flow-shaped feature (`UIGridLayout` was the example) ever
+  wants it back. **Executing it is the M6 session's**, since it touches the
+  manifest, the CMake and `THIRD_PARTY_NOTICES.md` while that session owns the
+  build.
 
 - **The Android run of `examples/02-meshes` is due.** Deferred by the human
   until M4.5 closed, and M4.5 and M5 have both closed since. It is a device
