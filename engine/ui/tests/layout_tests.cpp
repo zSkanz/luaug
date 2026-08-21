@@ -680,3 +680,104 @@ TEST_CASE("a tiled image repeats at its own size and is cut at the far edge")
     CHECK(list.quads[2].uvMax.x == doctest::Approx(22.0 / 64.0));
     CHECK(list.quads[5].uvMax.y == doctest::Approx(8.0 / 32.0));
 }
+
+// ---------------------------------------------------------------------------
+// Scroll bars (roadmap M7: `ScrollBarThickness` stops being `Inert`).
+
+TEST_CASE("a scrollable region draws a track and a thumb")
+{
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId frame = fixture.child("ScrollFrame", screen);
+    fixture.object(frame).size = core::UDim2{core::UDim{0.0f, 100.0f}, core::UDim{0.0f, 100.0f}};
+    fixture.object(frame).backgroundTransparency = 1.0f;
+
+    scene::ScrollFrameComponent* scroll = fixture.world->scrollFrames().find(frame);
+    REQUIRE(scroll != nullptr);
+    // Four times as tall as the view, so a quarter of the track is thumb.
+    scroll->canvasSize = core::UDim2{core::UDim{0.0f, 100.0f}, core::UDim{0.0f, 400.0f}};
+    scroll->scrollBarThickness = 10.0f;
+    fixture.run();
+
+    ui::DrawList list;
+    ui::buildDrawList(*fixture.world, fixture.service, list);
+    // Two: the vertical track and its thumb. There is no horizontal bar because
+    // the canvas is exactly as wide as the view -- a bar for an axis that
+    // cannot move is a bar that lies.
+    REQUIRE(list.quads.size() == 2);
+
+    // Along the far edge, ten pixels wide.
+    CHECK(list.quads[0].min.x == doctest::Approx(90.0));
+    CHECK(list.quads[0].max.x == doctest::Approx(100.0));
+    CHECK(list.quads[0].max.y == doctest::Approx(100.0));
+
+    // The thumb is as long a fraction of the track as the view is of the
+    // canvas: a quarter of a hundred pixels.
+    CHECK(list.quads[1].max.y - list.quads[1].min.y == doctest::Approx(25.0));
+    CHECK(list.quads[1].min.y == doctest::Approx(0.0));
+}
+
+TEST_CASE("the thumb travels with the scroll and reaches the end at the end")
+{
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId frame = fixture.child("ScrollFrame", screen);
+    fixture.object(frame).size = core::UDim2{core::UDim{0.0f, 100.0f}, core::UDim{0.0f, 100.0f}};
+    fixture.object(frame).backgroundTransparency = 1.0f;
+
+    scene::ScrollFrameComponent* scroll = fixture.world->scrollFrames().find(frame);
+    REQUIRE(scroll != nullptr);
+    scroll->canvasSize = core::UDim2{core::UDim{0.0f, 100.0f}, core::UDim{0.0f, 400.0f}};
+    scroll->scrollBarThickness = 10.0f;
+    // Scrolled to the very bottom: 400 of canvas less 100 of view.
+    scroll->canvasPosition = core::Vec2{0.0f, 300.0f};
+    fixture.run();
+
+    ui::DrawList list;
+    ui::buildDrawList(*fixture.world, fixture.service, list);
+    REQUIRE(list.quads.size() == 2);
+    // Flush with the bottom of the track, and no further. A thumb that ran past
+    // the end is the classic off-by-one of this arithmetic.
+    CHECK(list.quads[1].max.y == doctest::Approx(100.0));
+    CHECK(list.quads[1].min.y == doctest::Approx(75.0));
+}
+
+TEST_CASE("a thickness of zero scrolls and draws no bar")
+{
+    // What a touch surface wants, and what the property's own doc promises.
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId frame = fixture.child("ScrollFrame", screen);
+    fixture.object(frame).size = core::UDim2{core::UDim{0.0f, 100.0f}, core::UDim{0.0f, 100.0f}};
+    fixture.object(frame).backgroundTransparency = 1.0f;
+
+    scene::ScrollFrameComponent* scroll = fixture.world->scrollFrames().find(frame);
+    REQUIRE(scroll != nullptr);
+    scroll->canvasSize = core::UDim2{core::UDim{0.0f, 100.0f}, core::UDim{0.0f, 400.0f}};
+    scroll->scrollBarThickness = 0.0f;
+    fixture.run();
+
+    ui::DrawList list;
+    ui::buildDrawList(*fixture.world, fixture.service, list);
+    CHECK(list.quads.empty());
+    // The scrolling itself is untouched: the canvas still clamps.
+    CHECK(scroll->canvasPosition.y == doctest::Approx(0.0));
+}
+
+TEST_CASE("a canvas that fits gets no bar at all")
+{
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId frame = fixture.child("ScrollFrame", screen);
+    fixture.object(frame).size = core::UDim2{core::UDim{0.0f, 100.0f}, core::UDim{0.0f, 100.0f}};
+    fixture.object(frame).backgroundTransparency = 1.0f;
+
+    scene::ScrollFrameComponent* scroll = fixture.world->scrollFrames().find(frame);
+    REQUIRE(scroll != nullptr);
+    scroll->canvasSize = core::UDim2{core::UDim{0.0f, 50.0f}, core::UDim{0.0f, 50.0f}};
+    fixture.run();
+
+    ui::DrawList list;
+    ui::buildDrawList(*fixture.world, fixture.service, list);
+    CHECK(list.quads.empty());
+}

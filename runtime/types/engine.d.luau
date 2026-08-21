@@ -980,9 +980,14 @@ declare extern type ScrollFrame extends UIObject with
     --- How far the canvas is scrolled, in pixels. Clamped to what the canvas allows on the next layout,
     --- so a write past the end settles at the end rather than showing emptiness.
     CanvasPosition: Vector2
-    --- In pixels; zero draws no bar and still scrolls, which is what a touch surface wants. **Stored
-    --- and not yet read** (M7): v1 scrolls by `CanvasPosition` and draws no bar at all, so every
-    --- thickness behaves as zero. The scrolling is real; the bar is the part that is missing.
+    --- In pixels; zero draws no bar and still scrolls, which is what a touch surface wants. A bar
+    --- appears only on an axis that can actually move: a canvas that fits its region gets none, because
+    --- a bar for an axis with nowhere to go is a bar that lies. The thumb is as long a fraction of the
+    --- track as the view is of the canvas, and never shorter than the bar is wide -- a thumb of two
+    --- pixels in a very long canvas is a thumb nobody can grab. Both parts take their colour from the
+    --- frame's own `BackgroundColor`, at a quarter and three quarters alpha. v1 has no theme, and a
+    --- hard-coded grey would be wrong on half of them. The bar is drawn OUTSIDE the region's own clip,
+    --- or it would scroll away with the content it reports on.
     ScrollBarThickness: number
 end
 

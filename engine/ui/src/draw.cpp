@@ -175,6 +175,71 @@ void appendImageQuads(core::Rect box, const ResolvedImage& image, bool ready, i3
     }
 }
 
+// --- Scroll bars -------------------------------------------------------------
+
+// How far along an axis the canvas can move, and how much of it is showing.
+struct ScrollAxis
+{
+    f32 canvas = 0.0f;
+    f32 view = 0.0f;
+    f32 offset = 0.0f;
+
+    [[nodiscard]] bool scrollable() const noexcept { return canvas > view && view > 0.0f; }
+};
+
+// The bar for one axis, appended to `out`.
+//
+// **Drawn with the PARENT's scissor rather than the region's own**, which is the
+// one thing about a scroll bar that is easy to get wrong: a `ScrollFrame` clips
+// its descendants, and a bar clipped by that clip would be scrolled away by the
+// content it is reporting on.
+void appendScrollBar(core::Rect box, ScrollAxis axis, f32 thickness, bool vertical, core::Color3 color, u32 scissor,
+                     std::vector<DrawQuad>& out)
+{
+    if (!axis.scrollable() || thickness <= 0.0f) {
+        return;
+    }
+
+    // The track. Along the far edge, inset by nothing: a bar that floated inside
+    // its region would overlap the content it is next to.
+    const core::Rect track = vertical ? core::Rect{{box.max.x - thickness, box.min.y}, {box.max.x, box.max.y}}
+                                      : core::Rect{{box.min.x, box.max.y - thickness}, {box.max.x, box.max.y}};
+
+    DrawQuad trackQuad;
+    trackQuad.min = track.min;
+    trackQuad.max = track.max;
+    trackQuad.color = color;
+    // A quarter, so the track reads as a groove rather than as a second panel.
+    // Both parts take their colour from the frame's own `BackgroundColor` --
+    // v1 has no theme, and a hard-coded grey would be wrong on half of them.
+    trackQuad.alpha = 0.25f;
+    trackQuad.scissor = scissor;
+    out.push_back(trackQuad);
+
+    // The thumb: as long a fraction of the track as the view is of the canvas,
+    // and never shorter than the bar is wide -- a thumb of two pixels in a very
+    // long canvas is a thumb nobody can grab.
+    const f32 trackLength = vertical ? (track.max.y - track.min.y) : (track.max.x - track.min.x);
+    const f32 minimum = std::fmin(thickness * 2.0f, trackLength);
+    const f32 length = std::fmax(minimum, trackLength * (axis.view / axis.canvas));
+    const f32 room = std::fmax(0.0f, axis.canvas - axis.view);
+    const f32 travel = trackLength - length;
+    const f32 start = room > 0.0f ? travel * (axis.offset / room) : 0.0f;
+
+    DrawQuad thumb;
+    thumb.min = vertical ? core::Vec2{track.min.x, track.min.y + start} : core::Vec2{track.min.x + start, track.min.y};
+    thumb.max = vertical ? core::Vec2{track.max.x, track.min.y + start + length}
+                         : core::Vec2{track.min.x + start + length, track.max.y};
+    thumb.color = color;
+    thumb.alpha = 0.75f;
+    thumb.scissor = scissor;
+    // Rounded to half its thickness, which is a capsule. The one piece of
+    // styling here, and it costs nothing: `UICorner`'s distance field is on
+    // every quad already (D030).
+    thumb.cornerRadius = thickness * 0.5f;
+    out.push_back(thumb);
+}
+
 void collect(const scene::World& world, core::InstanceId id, u32 scissor, std::vector<Entry>& entries,
              std::vector<Rect>& scissors)
 {
@@ -244,6 +309,21 @@ void emit(const scene::World& world, const Entry& entry, DrawList& out)
         quad.scissor = entry.scissor;
         quad.cornerRadius = cornerRadius;
         out.quads.push_back(quad);
+    }
+
+    if (const scene::ScrollFrameComponent* scroll = world.scrollFrames().find(entry.id); scroll != nullptr) {
+        // The bars, on the entry's OWN scissor -- which is the parent's clip,
+        // not the region's. A `ScrollFrame` clips its descendants, and a bar
+        // clipped by that clip would scroll away with the content it reports on.
+        const core::Vec2 size{box.max.x - box.min.x, box.max.y - box.min.y};
+        const ScrollAxis horizontal{scroll->canvasSize.x.scale * size.x + scroll->canvasSize.x.offset, size.x,
+                                    scroll->canvasPosition.x};
+        const ScrollAxis vertical{scroll->canvasSize.y.scale * size.y + scroll->canvasSize.y.offset, size.y,
+                                  scroll->canvasPosition.y};
+        appendScrollBar(box, vertical, scroll->scrollBarThickness, true, self->backgroundColor, entry.scissor,
+                        out.quads);
+        appendScrollBar(box, horizontal, scroll->scrollBarThickness, false, self->backgroundColor, entry.scissor,
+                        out.quads);
     }
 
     if (const scene::ImageLabelComponent* image = world.imageLabels().find(entry.id); image != nullptr) {

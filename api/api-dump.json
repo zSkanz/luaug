@@ -1443,8 +1443,7 @@
         {
           "Name": "ScrollBarThickness",
           "Type": "number",
-          "Default": "12",
-          "Inert": true
+          "Default": "12"
         }
       ],
       "Methods": [],
