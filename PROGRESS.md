@@ -7,7 +7,7 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 - **M7.5 — Looking Like an Engine — done and awaiting review.**
   The brief is [`docs/briefs/m7.5-kickoff.md`](docs/briefs/m7.5-kickoff.md), with
-  fifteen decisions, eleven Findings and a filled Gate Record. **Every scope item
+  fifteen decisions, twelve Findings and a filled Gate Record. **Every scope item
   and every gate item is done**: four cascades in one atlas with a
   world-constant filter and a blend band, clustered forward shading on a 16×9×24
   grid, image-based lighting by the split sum, the post chain — depth prepass,
