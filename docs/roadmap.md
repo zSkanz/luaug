@@ -1019,7 +1019,7 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
     would make the phase-2 editor pay a refactor, and this check is how that is
     found while it is still cheap.
   - **Networking is the second caller, which is why this matters more than it
-    did when it was only the editor's.** The post-v1 multiplayer design (phase 4)
+    did when it was only the editor's.** The post-v1 multiplayer design (post-v1 phase 3)
     puts an authoritative world and a replica in one process over a loopback
     transport — the fastest multiplayer development environment there is, and
     impossible if anything here assumes one world. A seam with two callers is
@@ -1058,14 +1058,19 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
 
 ## Post-v1 phases (ordered intent, not scheduled)
 
-1. **2D layer** — sprites, tilemaps, Box2D 3.1, dedicated 2D workflow (first
-   item, per user decision #7), together with **navmesh integration**
-   (NavigationService over the existing Recast/Detour seam, ADR 0022).
-2. **Mobile** — Android first (bgfx RHI backend for the GLES2 long tail;
-   NCG on Android), then iOS (interpreter-only; no JIT).
-3. **Visual editor** — built on the engine (Studio-like, phase 2 of the
+**Reordered 2026-08-21 by human decision**, from 1-2-3-4-5 to the sequence
+below: the visual editor first because it multiplies everything after it, then
+the 2D layer, then multiplayer, then mobile. This supersedes "first item, per
+user decision #7", which had put the 2D layer first — that item is unchanged and
+only its position moved.
+
+1. **Visual editor** — built on the engine (Studio-like, phase 2 of the
    original vision).
-4. **Multiplayer/replication** — official server authority + prediction over the
+2. **2D layer** — sprites, tilemaps, Box2D 3.1, dedicated 2D workflow (user
+   decision #7 made this the first item; the human moved it to second on
+   2026-08-21), together with **navmesh integration**
+   (NavigationService over the existing Recast/Detour seam, ADR 0022).
+3. **Multiplayer/replication** — official server authority + prediction over the
    deterministic fixed-tick foundations; `ITransport` becomes the replication
    channel. **Designed and approved by the human on 2026-08-21**, and ready to
    start as soon as v1 ships. The shape below is a commitment, not a sketch: what
@@ -1124,6 +1129,9 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
    declared class nothing implements is exactly what `instances.api.luau`
    forbids. The names are already reserved — `Enum.RunContext`, `src/client` and
    `src/server` — and reserving is all v1 owes.
+4. **Mobile** — Android first (bgfx RHI backend for the GLES2 long tail;
+   NCG on Android), then iOS (interpreter-only; no JIT).
 5. **Ecosystem** — FMOD/Wwise audio module alternatives, per-module hot
    reload (only if the world-restart budget proves insufficient), Box3D as a
    second 3D physics backend when it reaches 1.0.
+
