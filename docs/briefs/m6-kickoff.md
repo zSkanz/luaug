@@ -43,6 +43,25 @@ constraint that decides most of the decisions below.
 - [ ] **Minimal skeletal animation**: glTF clip playback + linear blending
       (`AnimationPlayer`/`AnimationTrack` per api-design.md) — no state machines,
       no IK; enough for idle/walk/jump
+- [ ] **Solid `Part` rendering** — added to the roadmap 2026-08-20 by human
+      decision, **after this brief imported its scope**, so it is appended rather
+      than assumed to have been read. A `Part` has no solid path: it reaches the
+      frame only as a debug wire box, so `Instance.new("Part")` is invisible and
+      M5's physics playground is looked at in wireframe. One unit mesh per
+      `Enum.PartShape` member, built once at boot and registered with
+      `MeshCache` like any other, scaled by `Size` — five meshes, not one per
+      part. `extract` then emits ordinary `DrawItem`s and colour, `Material`,
+      `Transparency` and the blended pass come free. **This is M4's
+      "engine-generated geometry must reach the renderer" constraint being spent
+      for the first time: if the seam was left open correctly the renderer
+      changes not at all, and if it has to change, that is the finding.** Two
+      things to settle rather than to slide past: `Part.Shape` is extracted and
+      ignored today (`submitWorld` calls `wireBox` whatever it says, so a `Ball`
+      is a box) and must end this milestone either honoured or marked `Inert`;
+      and the segment count for ball, cylinder and capsule is a permanent
+      decision, because it is baked into every golden recorded after it. The
+      debug wire path stays — `render_world.cpp` says why, and it is still how
+      anything is seen when the real path breaks.
 - [ ] `examples/04-obby` — main menu (tweened), HUD, checkpoints, moving
       platforms (tweens on physics-kinematic parts), sounds, an animated
       character, fully playable start→finish

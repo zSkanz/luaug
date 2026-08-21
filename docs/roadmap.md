@@ -595,6 +595,44 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   that measurement (M2 Decision 6). UI cost is relayout rather than draw, so
   measure the two separately and keep a static-UI case whose relayout cost is
   expected to be ~zero.
+- **Solid `Part` rendering, added to M6 by human decision on 2026-08-20.** A
+  `Part` has no solid path at all today: `renderer_default` walks `draws`, which
+  only `MeshPart` fills, and a `Part` reaches the frame solely as a debug wire
+  box. So `Instance.new("Part")` — the primary building block of the API this
+  engine is familiar to — produces something invisible, and M5's own
+  `examples/03-physics-playground` builds its stacks, ramps and seesaw out of
+  `Part`, which means the physics milestone is looked at in wireframe.
+
+  - **`Part.Shape` is extracted and ignored, which is the same shape of defect
+    `Transparency` was.** It is declared in the IDL, stored, and copied into
+    `RenderPart.shape` — and `submitWorld` calls `wireBox` whatever it says, so
+    a `Ball` draws as a box. Either this item fixes it or it is marked `Inert`;
+    it may not stay as it is, because that is precisely the state the M4.5
+    marker exists to make impossible.
+  - **This is the M4 design constraint being spent for the first time.** The
+    roadmap required that "engine-generated geometry must be able to reach the
+    renderer" and that "the mesh path cannot assume a mesh is a handle to an
+    imported asset". A unit mesh per shape, built once at boot and registered
+    with `MeshCache` like any other, is exactly that caller — and if the seam
+    was left open correctly, **the renderer changes not at all**. If it turns
+    out the renderer has to change, that is the finding, and it is worth more
+    than the feature.
+  - **One mesh per shape, scaled by `Size`.** Not a mesh per part: the transform
+    already carries non-uniform scale and the cofactor normal matrix that
+    survives it exists since M4. Five meshes total, for the five members of
+    `Enum.PartShape`.
+  - **Name the tessellation rather than picking it silently.** A ball, a cylinder
+    and a capsule need a segment count, and it is a permanent decision — the
+    number is baked into every golden recorded after it, and changing it later
+    re-records all of them.
+  - **Colour, `Material`, `Transparency` and the blended pass come free**, since
+    a `Part` draw becomes an ordinary `DrawItem` with an ordinary material. That
+    is the point of routing this through `draws` rather than growing the debug
+    path a second time.
+  - **The debug wire path stays.** `render_world.cpp` says why in its own
+    comment: it is how anything is seen when the real path is not working, so a
+    bug in the culler must not be able to hide it. What changes is that it stops
+    being the only way a `Part` is visible.
 - **Deliverable:** `examples/04-obby` — main menu (tweened), HUD, checkpoints,
   moving platforms (tweens on physics-kinematic parts — a deliberate
   integration stressor), sounds, an animated character, fully playable
