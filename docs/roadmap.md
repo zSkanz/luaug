@@ -1018,6 +1018,12 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
     host. A static, a singleton or a global index anywhere between here and v1.0
     would make the phase-2 editor pay a refactor, and this check is how that is
     found while it is still cheap.
+  - **Networking is the second caller, which is why this matters more than it
+    did when it was only the editor's.** The post-v1 multiplayer design (phase 4)
+    puts an authoritative world and a replica in one process over a loopback
+    transport — the fastest multiplayer development environment there is, and
+    impossible if anything here assumes one world. A seam with two callers is
+    much harder to quietly drop than a seam with one.
   - It is owed here because hardening is where architectural promises are
     proven, not because this is the first milestone that could run it — the test
     is small enough for any milestone to take early, and its value decays with
@@ -1059,9 +1065,65 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
    NCG on Android), then iOS (interpreter-only; no JIT).
 3. **Visual editor** — built on the engine (Studio-like, phase 2 of the
    original vision).
-4. **Multiplayer/replication** — official server authority + prediction over
-   the deterministic fixed-tick foundations; `ITransport` becomes the
-   replication channel.
+4. **Multiplayer/replication** — official server authority + prediction over the
+   deterministic fixed-tick foundations; `ITransport` becomes the replication
+   channel. **Designed and approved by the human on 2026-08-21**, and ready to
+   start as soon as v1 ships. The shape below is a commitment, not a sketch: what
+   it costs v1 is nothing, because every seam it needs is already open.
+
+   - **Authority is world state, not build flavour.** A `World` is authoritative
+     or a replica, and that single fact produces every topology. **One binary,
+     four postures, decided at runtime**: run it and you are solo; run it and
+     host and you are client and server at once; run it `--headless` with a
+     server script and you are a dedicated server; join one and you are a
+     replica. There is no "server build" — `--headless` has existed since M1 and
+     is how every gate already runs the engine.
+   - **Three pieces, each owning one thing.** The **client** shows and sends
+     intent and decides nothing. The **simulation server** — the engine, headless
+     — owns the match or the region: positions, collisions, whether the ray hit.
+     The **backend** is the game author's, in any language, and owns the account:
+     inventory, progression, persistence. It is reached with `@std/net.request`,
+     which already works.
+   - **Two rules.** The client says what it did, never what happened — a client
+     that could assert a result is a client that always hits. And the backend is
+     called at the start and the end, never inside the tick: a tick is 60 Hz and a
+     database is not.
+   - **Absent by default, and that is stronger than disabled.** A solo game
+     compiles without `engine/net` and pays nothing — no transport, no
+     serialisation, no code path. That is the pattern this engine already has for
+     a whole module being gone: "null is a real state and not an error", as the
+     animation host and the physics mirror both say. With the module present but
+     playing alone, the service exists and tells the truth — authority true,
+     topology solo, one player — so **one script runs solo and networked without
+     a configuration branch**. A game does not ask "am I networked", it asks "do
+     I decide this".
+   - **`NetworkService` is the optional, familiar surface**, and it earns its
+     place by owning what `@std/net` cannot: players, authority, topology and
+     replication. A socket has no notion of a player. **`@std/net` is parallel,
+     not underneath** — one talks to the outside world (the author's backend, an
+     API), the other talks to the players in the match. They do not overlap. The
+     service goes through `ITransport` like everything else and **may never open a
+     socket of its own**, which is the same rule that made `InputService`'s raw
+     events feed from the IAS dispatch rather than from the OS (ADR 0041).
+   - **State replication is the model.** Deltas of world state, with interest
+     management reusing what streaming already built — foci are plural in
+     `StreamingManager` today, and a match of six has six. Rollback stays
+     *possible* rather than planned: it needs cross-platform determinism as a
+     guarantee, and ADR 0025 leaves that recorded rather than enforced.
+   - **The protocol is declared, not derived.** If replication is "the engine
+     serialises its own structs" then only the engine can ever speak it, and the
+     option of an independently written server closes by accident. Declaring the
+     wire format keeps that open. **Committing to it as a public contract is NOT
+     part of this** — that is a versioned promise, and it is a separate decision
+     taken when somebody actually wants it.
+
+   **Deliberately not committed here**, so the milestone that builds this is not
+   boxed in by a paragraph: replication semantics (what replicates, how often,
+   delta encoding) which is the genuinely hard part and needs a milestone;
+   rollback; a public protocol; and the `NetworkService` class in the IDL, since a
+   declared class nothing implements is exactly what `instances.api.luau`
+   forbids. The names are already reserved — `Enum.RunContext`, `src/client` and
+   `src/server` — and reserving is all v1 owes.
 5. **Ecosystem** — FMOD/Wwise audio module alternatives, per-module hot
    reload (only if the world-restart budget proves insufficient), Box3D as a
    second 3D physics backend when it reaches 1.0.
