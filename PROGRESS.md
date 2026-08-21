@@ -5,6 +5,16 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
+- **M7 — Scaling the World — IN PROGRESS, started 2026-08-21.** The brief is
+  [`docs/briefs/m7-kickoff.md`](docs/briefs/m7-kickoff.md), with its eleven
+  decisions, its build order in seven phases and the gate copied verbatim. The
+  milestone builds the open-world substrate: an offline asset pipeline with
+  deterministic content-addressed output, a job system and async IO, a
+  per-World floating origin, and chunked streaming — plus the five `Inert`
+  markers that were waiting for a way to hand the engine a file, Inter, and
+  `CharacterBody:Jump()` in mid-air. The previous milestone's gate was re-run
+  green before any work started: 34 ctest targets on Windows, 33 in the Tier-2
+  container, 1,081 conformance cases, docs and format clean.
 - **M6 — Playing the World — COMPLETE, signed off 2026-08-21**, tagged
   `milestone/m6`. The brief is
   [`docs/briefs/m6-kickoff.md`](docs/briefs/m6-kickoff.md), with its fifteen
