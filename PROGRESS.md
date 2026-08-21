@@ -5,6 +5,12 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
+- **M6 — Playing the World — IN PROGRESS.** The brief is
+  [`docs/briefs/m6-kickoff.md`](docs/briefs/m6-kickoff.md), with its fifteen
+  decisions and its Findings. Three of the five systems are in: the **Input
+  Action System** (ADR 0039), **TweenService**, and the **UI layout** (ADR 0040).
+  Audio and skeletal animation are not started; `examples/04-obby` is not
+  started; no gate item is recorded yet.
 - **M5 — Feeling the World: Jolt Physics + Character — COMPLETE, signed off
   2026-08-20**, tagged `milestone/m5`. Signed after a review round that found
   something: two `CharacterBody` were reported as passing through each other,
@@ -20,6 +26,30 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 - **CI is green on `main`**, run 32429107275, all three tiers — including the
   first macOS build of Jolt. Two red runs preceded the first green one and both
   found something a local tier cannot see (D023, D024).
+
+### M6 so far: what a game can do that it could not
+
+- **Input is one model, and the scaffold is gone.** `InputContext` →
+  `InputAction` → `InputBinding`, resolved in priority order with per-input
+  sinking, on a clock the context declares (ADR 0039). `KeyboardService` is
+  deleted from the IDL, the defs, the api-dump and the binary -- which is what
+  M5's `DevOnly` tag was for. The determinism scene migrated and `inputs.txt`
+  did not change a line.
+- **`Enum.KeyCode` is ninety-four items** spanning keyboard, mouse and the
+  standard gamepad, and its item names ARE `platform`'s device-layer names --
+  asserted against `platform::Key::Count` at compile time, so a key added to one
+  list and not the other is a build failure rather than every gamepad code
+  shifting by one.
+- **Tweens write through the setter scripts write through**, and step on the
+  SimClock. `TweenService:GetValue` is checked against 297 numbers computed from
+  the published easing formulas by an implementation written separately from the
+  engine's.
+- **The UI lays out**, at any resolution, with a dirty flag that makes an idle
+  frame run no solver at all. It does not draw yet: there is no ui2d pass.
+- **D021 is fixed**: a range refusal names its range.
+- **Four value types** -- `Vector2`, `UDim`, `UDim2`, `Rect` -- with the
+  attribute domain §2.2 widened by them, and a world-hash case that requires
+  every `Value` alternative to hash its payload rather than its tag.
 
 ### M5: what the world can do that it could not
 
@@ -100,14 +130,18 @@ scope. The ones most likely to be mistaken for bugs:
   raises "it takes a number" about a number. Every M5 property with a range is
   affected; the fix is a per-property error-key override in the IDL.
 - **D022 — a `Part` never reaches the solid renderer.** Scheduled with M7.5.
-- **M6 opens in a NEW session** (§6: never start a second milestone in the one
-  that closed one, and this one closed M5). Its first action, written out so the
-  next session does not re-derive it: **read
-  `docs/briefs/m5-kickoff.md`'s Findings**, then write
-  `docs/briefs/m6-kickoff.md` from `docs/roadmap.md`'s M6 section — whose first
-  scope item is the Input Action System, and whose gate includes migrating
-  `examples/03-physics-playground` off `KeyboardService`, which is what deletes
-  that service.
+- **M6's next step, written out so it is not re-derived**: the ui2d render pass.
+  `engine/ui` produces a `DrawList` of quads and scissors and nothing consumes
+  it — `render` needs a 2D pipeline, a shader pair, and a call from
+  `renderer_default` after the world and before ImGui. The UI goldens at two
+  resolutions are blocked on it and so is the obby. After that, in the brief's
+  order: `engine/audio`, skeletal animation, D017, `examples/04-obby`, gates.
+- **Two of M6's decisions went against a document, and both are ADRs.**
+  ADR 0039 (an `InputContext` declares its dispatch rate; the IAS's enums are
+  total) and ADR 0040 (a UDim2 placement is arithmetic, so v1 does not call
+  Clay). The second is the one a reviewer should read: it is the milestone
+  declining to use a dependency the same milestone vendored, and it does not
+  remove it, because that is not the agent's call.
 - **The renderer submits one draw call per visible object, and that is the
   engine's real ceiling for a crowd.** Measured 2026-08-20 against a
   survivors-like horde: two thousand enemies run at 11.1 ms a frame, of which
@@ -161,6 +195,21 @@ scope. The ones most likely to be mistaken for bugs:
     fix.
 
 ## Blocked — needs human
+
+- **Which font does the engine ship?** M6 draws every label in `stb_easy_font`,
+  the vector face already vendored inside `third_party/stb`: ASCII, one weight,
+  no kerning. ADR 0011 names stb_truetype, and stb_truetype needs a TrueType
+  FILE — an asset with a licence, which is an R6 decision rather than an agent's.
+  `TextLabel.Font` is marked `Inert` with M7 named, so the gap is declared rather
+  than discovered. The question is which permissively-licensed face to vendor
+  (DejaVu, Inter, Noto Sans and Liberation are all candidates), and it can wait
+  until M7's asset pipeline — the UI works without it.
+- **Clay is vendored and v1 does not call it.** ADR 0040 explains why: a `UDim2`
+  placement is arithmetic rather than a constraint, and Clay cannot express an
+  unclamped scale or a fractional anchor point. The row and the pin are
+  untouched, because removing a dependency is a human decision (R5, §10). Two
+  answers are reasonable — drop the row, or keep it for a UI feature that is
+  genuinely flow-shaped, which `UIGridLayout` would be.
 
 - **The Android run of `examples/02-meshes` is due.** Deferred by the human
   until M4.5 closed, and M4.5 and M5 have both closed since. It is a device

@@ -1,5 +1,5 @@
-# L5 -- Roblox-style GUI instances over Clay (architecture.md §2 `ui`,
-# ADR 0011).
+# L5 -- the retained tree of screen-space GUI instances (architecture.md §2
+# `ui`, ADR 0011 as amended by ADR 0040).
 #
 # Deps are core, scene, input and render, which is what architecture.md names.
 # `asset` joins them when an `ImageLabel` can name a texture the pipeline loads;
