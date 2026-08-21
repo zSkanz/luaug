@@ -123,6 +123,8 @@
   "asset.manifest.err.missing_blob": "The content manifest names {content}, but the pack beside it does not hold it.",
   "app.info.pack_mounted": "Mounted content pack {path}.",
   "app.info.streaming_world": "Streaming a world of {count} chunk(s).",
+  "app.warn.image_missing": "The picture {content} is not in any mounted content directory, so the label it names draws as a flat colour.",
+  "app.warn.image_undecodable": "The picture {content} could not be decoded; the label it names draws as a flat colour.",
   "app.warn.chunk_missing": "The chunk index names {content}, but nothing mounted resolves it.",
   "app.warn.io_unavailable": "Asynchronous file reads are unavailable; the world will load synchronously.",
   "asset.chunk.err.magic": "That file is not a LuauG world chunk.",

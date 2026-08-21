@@ -1319,11 +1319,12 @@ local Classes: { Schema.Class } = {
                 Name = "Image",
                 Type = "Content",
                 Default = '""',
-                Inert = true,
-                Doc = "The picture, as an `asset://` URI. **Stored and not yet read** (M7): the asset "
-                    .. "pipeline cannot hand a texture to the 2D pass until it can stream one, so a named "
-                    .. "image draws as a flat `ImageColor` rectangle. Empty draws nothing but still fills the "
-                    .. "background.",
+                Doc = "The picture, as an `asset://` URI. A compiled texture out of a pack or an ordinary "
+                    .. "PNG out of a source tree; both work, because dev mode is the mode people spend their "
+                    .. "time in.\n\nEmpty draws nothing but still fills the background. A URI that names "
+                    .. "nothing, and a picture that has been asked for but has not finished loading, both draw "
+                    .. "as a flat `ImageColor` rectangle -- the same thing, because from a frame's point of "
+                    .. "view they are.",
             },
             {
                 Name = "ImageColor",
@@ -1336,19 +1337,19 @@ local Classes: { Schema.Class } = {
                 Name = "ScaleType",
                 Type = "Enum.ScaleType",
                 Default = "Enum.ScaleType.Stretch",
-                Inert = true,
-                Doc = "How the picture fits the box. **Stored and not yet read** (M7): there is no picture to "
-                    .. "fit until the asset pipeline can hand one over, and `Image` carries the same marker for "
-                    .. "the same reason.",
+                Doc = "How the picture fits the box.\n\n`Tile` is BOUNDED: past about four thousand "
+                    .. "tiles the picture stretches instead, because a one-pixel image tiled over a full-screen "
+                    .. "frame is nearly a million quads and the frame that built them would be the hitch. A "
+                    .. "visibly wrong picture is one somebody can find; a frame that stops responding is not.",
             },
             {
                 Name = "SliceCenter",
                 Type = "Rect",
                 Default = "Rect.new(Vector2.zero, Vector2.zero)",
-                Inert = true,
-                Doc = "For `ScaleType.Slice`, where the nine-slice cuts are, in SOURCE pixels. **Stored and not "
-                    .. "yet read** (M7), with `Image` and `ScaleType`: a cut is a cut in a texture, and there is "
-                    .. "no texture yet.\n\nAn inverted or empty rectangle is kept as given rather than "
+                Doc = "For `ScaleType.Slice`, where the nine-slice cuts are, in SOURCE pixels. The four "
+                    .. "corners are drawn at their own size whatever the box is, which is how a panel keeps "
+                    .. "its rounded corners.\n\nA box narrower than its own two corners collapses the "
+                    .. "middle rather than drawing the corners on top of each other.\n\nAn inverted or empty rectangle is kept as given rather than "
                     .. "corrected: a slice quietly fixed up is a panel that draws wrong with no way to find out "
                     .. "why.",
             },

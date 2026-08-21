@@ -24,6 +24,157 @@ struct Entry
     u32 scissor = 0;
 };
 
+// --- Images ------------------------------------------------------------------
+
+// Set by the app, which is the only thing that can see both a content mount and
+// a GPU. Null is the ordinary state of a test and of a headless run with no
+// content: every image then draws as its flat tint.
+ImageProvider g_imageProvider = nullptr;
+void* g_imageProviderUser = nullptr;
+
+[[nodiscard]] bool resolveImage(std::string_view urn, ResolvedImage& out)
+{
+    if (g_imageProvider == nullptr) {
+        return false;
+    }
+    return g_imageProvider(g_imageProviderUser, urn, out) && out.texture != 0 && out.width > 0 && out.height > 0;
+}
+
+// One textured quad, in box pixels and source pixels.
+//
+// Source pixels rather than normalised UVs at every call site, because every
+// rule below -- a nine-slice cut, a tile step, a letterbox -- is stated in the
+// picture's own pixels, and converting once here is what keeps them readable.
+void pushImageQuad(core::Rect box, core::Rect source, const ResolvedImage& image, core::Color3 tint, u32 scissor,
+                   f32 cornerRadius, std::vector<DrawQuad>& out)
+{
+    if (box.max.x <= box.min.x || box.max.y <= box.min.y) {
+        return;
+    }
+    DrawQuad quad;
+    quad.min = box.min;
+    quad.max = box.max;
+    quad.uvMin = Vec2{source.min.x / static_cast<f32>(image.width), source.min.y / static_cast<f32>(image.height)};
+    quad.uvMax = Vec2{source.max.x / static_cast<f32>(image.width), source.max.y / static_cast<f32>(image.height)};
+    quad.color = tint;
+    quad.alpha = 1.0f;
+    quad.texture = image.texture;
+    quad.scissor = scissor;
+    quad.cornerRadius = cornerRadius;
+    out.push_back(quad);
+}
+
+// Nine-slice. The four corners keep their own size, the four edges stretch along
+// one axis, and the middle stretches along both -- which is how a panel keeps
+// its rounded corners at any size.
+void appendSlice(core::Rect box, const ResolvedImage& image, core::Rect centre, core::Color3 tint, u32 scissor,
+                 std::vector<DrawQuad>& out)
+{
+    const auto width = static_cast<f32>(image.width);
+    const auto height = static_cast<f32>(image.height);
+
+    // The cuts, in source pixels, clamped into the picture. An inverted or
+    // out-of-range `SliceCenter` is the caller's to see: its own doc says it is
+    // kept as given rather than corrected, so this clamps only enough to keep
+    // the arithmetic from producing negative rectangles.
+    const f32 left = std::fmin(std::fmax(centre.min.x, 0.0f), width);
+    const f32 top = std::fmin(std::fmax(centre.min.y, 0.0f), height);
+    const f32 right = std::fmin(std::fmax(centre.max.x, left), width);
+    const f32 bottom = std::fmin(std::fmax(centre.max.y, top), height);
+
+    // Source columns and rows.
+    const f32 sx[4] = {0.0f, left, right, width};
+    const f32 sy[4] = {0.0f, top, bottom, height};
+
+    // Destination columns and rows. The corners take their source size; the
+    // middle takes whatever is left, and never less than nothing -- a box
+    // narrower than its own two corners collapses the middle rather than
+    // drawing the corners on top of each other.
+    const f32 boxWidth = box.max.x - box.min.x;
+    const f32 boxHeight = box.max.y - box.min.y;
+    const f32 leftEdge = std::fmin(left, boxWidth);
+    const f32 rightEdge = std::fmin(width - right, std::fmax(boxWidth - leftEdge, 0.0f));
+    const f32 topEdge = std::fmin(top, boxHeight);
+    const f32 bottomEdge = std::fmin(height - bottom, std::fmax(boxHeight - topEdge, 0.0f));
+
+    const f32 dx[4] = {box.min.x, box.min.x + leftEdge, box.max.x - rightEdge, box.max.x};
+    const f32 dy[4] = {box.min.y, box.min.y + topEdge, box.max.y - bottomEdge, box.max.y};
+
+    for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+            pushImageQuad(core::Rect{{dx[column], dy[row]}, {dx[column + 1], dy[row + 1]}},
+                          core::Rect{{sx[column], sy[row]}, {sx[column + 1], sy[row + 1]}}, image, tint, scissor,
+                          // No rounding on a slice: the picture is what supplies
+                          // the corner, which is the entire point of using one.
+                          0.0f, out);
+        }
+    }
+}
+
+// Repeated at its own size until the box is full, clipped at the far edges.
+void appendTile(core::Rect box, const ResolvedImage& image, core::Color3 tint, u32 scissor, std::vector<DrawQuad>& out)
+{
+    const auto width = static_cast<f32>(image.width);
+    const auto height = static_cast<f32>(image.height);
+
+    // Bounded, and the bound is a real decision: a one-pixel picture tiled over
+    // a full-screen frame is nearly a million quads, and the frame that built
+    // them would be the hitch. Past the cap the picture stretches instead, which
+    // is visibly wrong in a way somebody can find -- unlike a frame that simply
+    // stops responding.
+    constexpr int MaxTiles = 4096;
+    const f32 columns = std::ceil((box.max.x - box.min.x) / std::fmax(width, 1.0f));
+    const f32 rows = std::ceil((box.max.y - box.min.y) / std::fmax(height, 1.0f));
+    if (columns * rows > static_cast<f32>(MaxTiles)) {
+        pushImageQuad(box, core::Rect{{0.0f, 0.0f}, {width, height}}, image, tint, scissor, 0.0f, out);
+        return;
+    }
+
+    for (f32 y = box.min.y; y < box.max.y; y += height) {
+        for (f32 x = box.min.x; x < box.max.x; x += width) {
+            // The last tile in a row or column is CUT rather than overhanging:
+            // the source rectangle shrinks with the destination, so the picture
+            // is clipped at its own resolution instead of being squashed.
+            const f32 visibleWidth = std::fmin(width, box.max.x - x);
+            const f32 visibleHeight = std::fmin(height, box.max.y - y);
+            pushImageQuad(core::Rect{{x, y}, {x + visibleWidth, y + visibleHeight}},
+                          core::Rect{{0.0f, 0.0f}, {visibleWidth, visibleHeight}}, image, tint, scissor, 0.0f, out);
+        }
+    }
+}
+
+void appendImageQuads(core::Rect box, const ResolvedImage& image, bool ready, i32 scaleType, core::Rect sliceCenter,
+                      core::Color3 tint, u32 scissor, f32 cornerRadius, std::vector<DrawQuad>& out)
+{
+    if (!ready) {
+        // The flat tint, which is what M6 drew for every image and is now what a
+        // picture looks like while it is still arriving.
+        DrawQuad quad;
+        quad.min = box.min;
+        quad.max = box.max;
+        quad.color = tint;
+        quad.alpha = 1.0f;
+        quad.scissor = scissor;
+        quad.cornerRadius = cornerRadius;
+        out.push_back(quad);
+        return;
+    }
+
+    switch (scaleType) {
+    case 1:
+        appendSlice(box, image, sliceCenter, tint, scissor, out);
+        return;
+    case 2:
+        appendTile(box, image, tint, scissor, out);
+        return;
+    default:
+        // Stretch: the whole picture into the whole box, aspect ratio and all.
+        pushImageQuad(box, core::Rect{{0.0f, 0.0f}, {static_cast<f32>(image.width), static_cast<f32>(image.height)}},
+                      image, tint, scissor, cornerRadius, out);
+        return;
+    }
+}
+
 void collect(const scene::World& world, core::InstanceId id, u32 scissor, std::vector<Entry>& entries,
              std::vector<Rect>& scissors)
 {
@@ -96,23 +247,17 @@ void emit(const scene::World& world, const Entry& entry, DrawList& out)
     }
 
     if (const scene::ImageLabelComponent* image = world.imageLabels().find(entry.id); image != nullptr) {
-        // `Image` names an asset the pipeline cannot hand over until M7, so the
-        // tint is drawn as a flat quad rather than as a textured one. The
-        // property is marked `Inert` in the IDL with that milestone named --
-        // which is the difference between a documented gap and a silent one.
         if (!image->image.empty()) {
-            DrawQuad quad;
-            quad.min = box.min;
-            quad.max = box.max;
-            quad.color = image->imageColor;
-            quad.alpha = backgroundAlpha > 0.0f ? 1.0f : 1.0f;
-            quad.scissor = entry.scissor;
-            quad.cornerRadius = cornerRadius;
-            out.quads.push_back(quad);
+            // A picture the provider cannot resolve -- not loaded, or a URI that
+            // names nothing -- draws as the flat tint. That is what an image
+            // still arriving looks like, and it is better than a hole.
+            ResolvedImage resolved;
+            const bool ready = resolveImage(image->image, resolved);
+            appendImageQuads(box, resolved, ready, image->scaleType, image->sliceCenter, image->imageColor,
+                             entry.scissor, cornerRadius, out.quads);
         }
         return;
     }
-
     if (const scene::TextLabelComponent* label = world.textLabels().find(entry.id); label != nullptr) {
         std::string_view text = label->text;
         core::Color3 color = label->textColor;
@@ -183,6 +328,12 @@ void buildDrawList(const scene::World& world, core::InstanceId uiService, DrawLi
         for (const Entry& entry : entries)
             emit(world, entry, out);
     }
+}
+
+void setImageProvider(ImageProvider provider, void* user) noexcept
+{
+    g_imageProvider = provider;
+    g_imageProviderUser = user;
 }
 
 } // namespace luaug::ui

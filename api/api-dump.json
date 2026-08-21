@@ -548,8 +548,7 @@
         {
           "Name": "Image",
           "Type": "Content",
-          "Default": "\"\"",
-          "Inert": true
+          "Default": "\"\""
         },
         {
           "Name": "ImageColor",
@@ -559,14 +558,12 @@
         {
           "Name": "ScaleType",
           "Type": "Enum.ScaleType",
-          "Default": "Enum.ScaleType.Stretch",
-          "Inert": true
+          "Default": "Enum.ScaleType.Stretch"
         },
         {
           "Name": "SliceCenter",
           "Type": "Rect",
-          "Default": "Rect.new(Vector2.zero, Vector2.zero)",
-          "Inert": true
+          "Default": "Rect.new(Vector2.zero, Vector2.zero)"
         }
       ],
       "Methods": [],

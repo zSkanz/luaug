@@ -9,8 +9,12 @@
 
 #include "luaug/asset/content.h"
 #include "luaug/rhi/device.h"
+#include "luaug/ui/ui.h"
 
 #include <optional>
+#include <span>
+#include <string>
+#include <vector>
 
 namespace luaug::app {
 
@@ -42,6 +46,11 @@ public:
     // rectangles and samples nothing.
     [[nodiscard]] rhi::TextureHandle atlasTexture() const noexcept { return atlas_; }
 
+    // Every image the UI has asked for, in the order it asked. The frame loop
+    // appends these after the atlas, so index 2 is the first picture -- which
+    // is the numbering `ui::ResolvedImage::texture` hands back.
+    [[nodiscard]] std::span<const rhi::TextureHandle> images() const noexcept { return images_; }
+
 private:
     const asset::ContentMounts* mounts_ = nullptr;
     rhi::TextureHandle atlas_{};
@@ -51,6 +60,36 @@ private:
     // The atlas expanded from coverage to RGBA. Kept between frames so a
     // re-upload does not allocate four megabytes every time a new glyph appears.
     std::vector<std::byte> staging_;
+
+    // One entry per distinct `Image` URN, in first-asked order. Never removed
+    // while the world lives: a picture a HUD shows on one screen is a picture it
+    // will show again, and the index handed to `ui` has to stay meaning the same
+    // texture for as long as a draw list can hold it.
+    struct Image
+    {
+        std::string urn;
+        rhi::TextureHandle texture{};
+        core::u32 width = 0;
+        core::u32 height = 0;
+        // Asked for and not there. Remembered so a label naming a missing
+        // picture costs one lookup rather than one decode attempt per frame.
+        bool failed = false;
+        // Asked for and not yet loaded. Cleared by the first `sync` that sees
+        // it, which is the frame after the label first named it.
+        bool pending = true;
+    };
+    std::vector<Image> imageEntries_;
+    std::vector<rhi::TextureHandle> images_;
+
+    // **A request, not a load.** The draw list is built before `sync` runs, and
+    // an upload needs a command list -- so a URN nobody has seen is RECORDED
+    // here and returns false, `sync` loads it with the device it has, and the
+    // frame after that draws the picture. One frame of flat tint, which is
+    // exactly what "still arriving" looks like and is the same answer a picture
+    // genuinely still streaming would give.
+    [[nodiscard]] bool requestImage(std::string_view urn, ui::ResolvedImage& out);
+    static bool requestImageThunk(void* user, std::string_view urn, ui::ResolvedImage& out);
+    void loadPendingImages(rhi::IDevice& device, rhi::ICmdList& cmd);
 };
 
 } // namespace luaug::app

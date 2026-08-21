@@ -992,6 +992,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             uiTextures.clear();
             uiTextures.push_back(rhi::TextureHandle{});
             uiTextures.push_back(uiText.atlasTexture());
+            for (const rhi::TextureHandle image : uiText.images())
+                uiTextures.push_back(image);
             buildUiGeometry(uiDrawList, uiViewport, uiVertices, uiRuns, uiTextures);
 
             frameDrawCalls = 0;

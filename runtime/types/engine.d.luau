@@ -948,20 +948,25 @@ declare extern type TextInput extends TextLabel with
 end
 
 declare extern type ImageLabel extends UIObject with
-    --- The picture, as an `asset://` URI. **Stored and not yet read** (M7): the asset pipeline cannot
-    --- hand a texture to the 2D pass until it can stream one, so a named image draws as a flat
-    --- `ImageColor` rectangle. Empty draws nothing but still fills the background.
+    --- The picture, as an `asset://` URI. A compiled texture out of a pack or an ordinary PNG out of a
+    --- source tree; both work, because dev mode is the mode people spend their time in. Empty draws
+    --- nothing but still fills the background. A URI that names nothing, and a picture that has been
+    --- asked for but has not finished loading, both draw as a flat `ImageColor` rectangle -- the same
+    --- thing, because from a frame's point of view they are.
     Image: Content
     --- Multiplied into the image, so one white glyph sheet can be drawn in any colour. White leaves it
     --- alone.
     ImageColor: Color3
-    --- How the picture fits the box. **Stored and not yet read** (M7): there is no picture to fit until
-    --- the asset pipeline can hand one over, and `Image` carries the same marker for the same reason.
+    --- How the picture fits the box. `Tile` is BOUNDED: past about four thousand tiles the picture
+    --- stretches instead, because a one-pixel image tiled over a full-screen frame is nearly a million
+    --- quads and the frame that built them would be the hitch. A visibly wrong picture is one somebody
+    --- can find; a frame that stops responding is not.
     ScaleType: EnumScaleType
-    --- For `ScaleType.Slice`, where the nine-slice cuts are, in SOURCE pixels. **Stored and not yet
-    --- read** (M7), with `Image` and `ScaleType`: a cut is a cut in a texture, and there is no texture
-    --- yet. An inverted or empty rectangle is kept as given rather than corrected: a slice quietly
-    --- fixed up is a panel that draws wrong with no way to find out why.
+    --- For `ScaleType.Slice`, where the nine-slice cuts are, in SOURCE pixels. The four corners are
+    --- drawn at their own size whatever the box is, which is how a panel keeps its rounded corners. A
+    --- box narrower than its own two corners collapses the middle rather than drawing the corners on
+    --- top of each other. An inverted or empty rectangle is kept as given rather than corrected: a
+    --- slice quietly fixed up is a panel that draws wrong with no way to find out why.
     SliceCenter: Rect
 end
 

@@ -475,3 +475,208 @@ TEST_CASE("no UICorner means a radius of zero, which costs the shader one compar
     REQUIRE_FALSE(list.quads.empty());
     CHECK(list.quads[0].cornerRadius == doctest::Approx(0.0));
 }
+
+// ---------------------------------------------------------------------------
+// Images (roadmap M7: `Image`, `ScaleType` and `SliceCenter` stop being `Inert`).
+//
+// Against the GEOMETRY rather than through a frame, for the same reason the LOD
+// tests are: a nine-slice is nine rectangles and a tile is a division, and every
+// one of those is a place to get an edge wrong by a pixel. A screenshot would
+// prove the wiring and say nothing about whether the cuts are where the caller
+// asked for them.
+
+namespace {
+
+// A 64x32 picture, always available. The provider is the seam the app fills; a
+// test fills it with a constant, which is enough to make every rule below
+// checkable without a GPU.
+constexpr luaug::core::u32 ImageWidth = 64;
+constexpr luaug::core::u32 ImageHeight = 32;
+
+bool provideTestImage(void* user, std::string_view urn, luaug::ui::ResolvedImage& out)
+{
+    (void)user;
+    if (urn != "asset://ui/panel.png") {
+        return false;
+    }
+    out.texture = 2;
+    out.width = ImageWidth;
+    out.height = ImageHeight;
+    return true;
+}
+
+struct ImageGuard
+{
+    ImageGuard() { luaug::ui::setImageProvider(&provideTestImage, nullptr); }
+    ~ImageGuard() { luaug::ui::setImageProvider(nullptr, nullptr); }
+};
+
+} // namespace
+
+TEST_CASE("a stretched image is one quad covering the whole source")
+{
+    ImageGuard guard;
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId label = fixture.child("ImageLabel", screen);
+    fixture.object(label).size = core::UDim2{core::UDim{0.0f, 200.0f}, core::UDim{0.0f, 100.0f}};
+    // No background, so the list is the IMAGE's quads and nothing else. An
+    // `ImageLabel` draws its background first like every other `UIObject`, and
+    // counting that here would be counting a different feature.
+    fixture.object(label).backgroundTransparency = 1.0f;
+    scene::ImageLabelComponent* image = fixture.world->imageLabels().find(label);
+    REQUIRE(image != nullptr);
+    image->image = "asset://ui/panel.png";
+    fixture.run();
+
+    ui::DrawList list;
+    ui::buildDrawList(*fixture.world, fixture.service, list);
+    REQUIRE(list.quads.size() == 1);
+    CHECK(list.quads[0].texture == 2);
+    CHECK(list.quads[0].uvMin.x == doctest::Approx(0.0));
+    CHECK(list.quads[0].uvMin.y == doctest::Approx(0.0));
+    CHECK(list.quads[0].uvMax.x == doctest::Approx(1.0));
+    CHECK(list.quads[0].uvMax.y == doctest::Approx(1.0));
+    CHECK(list.quads[0].max.x == doctest::Approx(200.0));
+}
+
+TEST_CASE("an image nothing can resolve draws as its tint rather than as a hole")
+{
+    // No provider installed, so nothing resolves. This is also what a picture
+    // still being loaded looks like -- the app records the request on the first
+    // frame and the texture exists on the next.
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId label = fixture.child("ImageLabel", screen);
+    fixture.object(label).size = core::UDim2{core::UDim{0.0f, 40.0f}, core::UDim{0.0f, 40.0f}};
+    // No background, so the list is the IMAGE's quads and nothing else. An
+    // `ImageLabel` draws its background first like every other `UIObject`, and
+    // counting that here would be counting a different feature.
+    fixture.object(label).backgroundTransparency = 1.0f;
+    scene::ImageLabelComponent* image = fixture.world->imageLabels().find(label);
+    REQUIRE(image != nullptr);
+    image->image = "asset://ui/nothing.png";
+    fixture.run();
+
+    ui::DrawList list;
+    ui::buildDrawList(*fixture.world, fixture.service, list);
+    REQUIRE(list.quads.size() == 1);
+    CHECK(list.quads[0].texture == 0);
+}
+
+TEST_CASE("a nine-slice keeps its corners at their own size")
+{
+    ImageGuard guard;
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId label = fixture.child("ImageLabel", screen);
+    fixture.object(label).size = core::UDim2{core::UDim{0.0f, 200.0f}, core::UDim{0.0f, 100.0f}};
+
+    // No background, so the list is the IMAGE's quads and nothing else. An
+    // `ImageLabel` draws its background first like every other `UIObject`, and
+    // counting that here would be counting a different feature.
+    fixture.object(label).backgroundTransparency = 1.0f;
+    scene::ImageLabelComponent* image = fixture.world->imageLabels().find(label);
+    REQUIRE(image != nullptr);
+    image->image = "asset://ui/panel.png";
+    image->scaleType = 1;
+    // Eight pixels in from every edge of a 64x32 picture.
+    image->sliceCenter = core::Rect{{8.0f, 8.0f}, {56.0f, 24.0f}};
+    fixture.run();
+
+    ui::DrawList list;
+    ui::buildDrawList(*fixture.world, fixture.service, list);
+    // Nine: four corners, four edges and a middle, all of them with something
+    // in them at this size.
+    REQUIRE(list.quads.size() == 9);
+
+    // The top-left corner is EIGHT pixels on screen, whatever the box is. That
+    // is the whole promise of a nine-slice: a panel keeps its rounded corners at
+    // any size.
+    CHECK(list.quads[0].min.x == doctest::Approx(0.0));
+    CHECK(list.quads[0].min.y == doctest::Approx(0.0));
+    CHECK(list.quads[0].max.x == doctest::Approx(8.0));
+    CHECK(list.quads[0].max.y == doctest::Approx(8.0));
+    CHECK(list.quads[0].uvMax.x == doctest::Approx(8.0 / 64.0));
+
+    // The bottom-right corner is eight pixels in from the far edge.
+    CHECK(list.quads[8].min.x == doctest::Approx(200.0 - 8.0));
+    CHECK(list.quads[8].max.x == doctest::Approx(200.0));
+    CHECK(list.quads[8].uvMin.x == doctest::Approx(56.0 / 64.0));
+
+    // The middle takes everything the corners did not.
+    CHECK(list.quads[4].min.x == doctest::Approx(8.0));
+    CHECK(list.quads[4].max.x == doctest::Approx(192.0));
+}
+
+TEST_CASE("a nine-slice in a box narrower than its own corners collapses the middle")
+{
+    // The case that produces overlapping corners in every implementation that
+    // does not think about it: 12 pixels of box and 16 pixels of corner.
+    ImageGuard guard;
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId label = fixture.child("ImageLabel", screen);
+    fixture.object(label).size = core::UDim2{core::UDim{0.0f, 12.0f}, core::UDim{0.0f, 12.0f}};
+
+    // No background, so the list is the IMAGE's quads and nothing else. An
+    // `ImageLabel` draws its background first like every other `UIObject`, and
+    // counting that here would be counting a different feature.
+    fixture.object(label).backgroundTransparency = 1.0f;
+    scene::ImageLabelComponent* image = fixture.world->imageLabels().find(label);
+    REQUIRE(image != nullptr);
+    image->image = "asset://ui/panel.png";
+    image->scaleType = 1;
+    image->sliceCenter = core::Rect{{8.0f, 8.0f}, {56.0f, 24.0f}};
+    fixture.run();
+
+    ui::DrawList list;
+    ui::buildDrawList(*fixture.world, fixture.service, list);
+    // FEWER than nine: a cell that collapsed to nothing is not emitted at all,
+    // which is one draw saved rather than one draw of zero pixels.
+    REQUIRE_FALSE(list.quads.empty());
+    CHECK(list.quads.size() < 9);
+    // No quad reaches past the box, and none is inside out -- overlapping
+    // corners are what a box narrower than its own corners produces in an
+    // implementation that does not think about it.
+    for (const ui::DrawQuad& quad : list.quads) {
+        CHECK(quad.min.x <= quad.max.x);
+        CHECK(quad.min.y <= quad.max.y);
+        CHECK(quad.max.x <= doctest::Approx(12.0));
+    }
+}
+
+TEST_CASE("a tiled image repeats at its own size and is cut at the far edge")
+{
+    ImageGuard guard;
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId label = fixture.child("ImageLabel", screen);
+    // 150 x 40 of a 64 x 32 picture: three columns, the last one 22 wide, and
+    // two rows, the last one 8 tall.
+    fixture.object(label).size = core::UDim2{core::UDim{0.0f, 150.0f}, core::UDim{0.0f, 40.0f}};
+
+    // No background, so the list is the IMAGE's quads and nothing else. An
+    // `ImageLabel` draws its background first like every other `UIObject`, and
+    // counting that here would be counting a different feature.
+    fixture.object(label).backgroundTransparency = 1.0f;
+    scene::ImageLabelComponent* image = fixture.world->imageLabels().find(label);
+    REQUIRE(image != nullptr);
+    image->image = "asset://ui/panel.png";
+    image->scaleType = 2;
+    fixture.run();
+
+    ui::DrawList list;
+    ui::buildDrawList(*fixture.world, fixture.service, list);
+    REQUIRE(list.quads.size() == 6);
+
+    // The first tile is whole.
+    CHECK(list.quads[0].max.x == doctest::Approx(64.0));
+    CHECK(list.quads[0].uvMax.x == doctest::Approx(1.0));
+
+    // The last tile in the row is CUT rather than squashed: its source shrinks
+    // with its destination, so the picture keeps its own resolution.
+    CHECK(list.quads[2].max.x == doctest::Approx(150.0));
+    CHECK(list.quads[2].uvMax.x == doctest::Approx(22.0 / 64.0));
+    CHECK(list.quads[5].uvMax.y == doctest::Approx(8.0 / 32.0));
+}

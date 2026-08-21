@@ -165,6 +165,30 @@ struct GlyphAtlas
 using FaceProvider = bool (*)(void* user, std::string_view name, std::vector<core::u8>& out);
 void setFaceProvider(FaceProvider provider, void* user) noexcept;
 
+// What an `ImageLabel.Image` resolves to: which texture index to sample and how
+// big the picture is in its own pixels.
+//
+// The SIZE is not decoration. `ScaleType.Slice` cuts a nine-patch at pixel
+// offsets, and `ScaleType.Tile` repeats at the picture's own size -- neither can
+// be computed from the box alone, and a layout module has no other way to learn
+// them.
+struct ResolvedImage
+{
+    u32 texture = 0;
+    u32 width = 0;
+    u32 height = 0;
+};
+
+// Resolves an `asset://` URI to a texture the UI can name. Same shape and same
+// reason as `FaceProvider`: `ui` has no content mounts and no GPU, and the app
+// is the only thing that has both.
+//
+// False means "not loaded", and the caller draws the tint as a flat rectangle --
+// which is what an image still streaming in looks like, and is better than a
+// hole.
+using ImageProvider = bool (*)(void* user, std::string_view urn, ResolvedImage& out);
+void setImageProvider(ImageProvider provider, void* user) noexcept;
+
 [[nodiscard]] const GlyphCacheStats& glyphCacheStats() noexcept;
 
 // Empties the store and zeroes the counters. For the tests, and for a future
