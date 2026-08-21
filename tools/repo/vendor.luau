@@ -424,6 +424,110 @@ local function commandSync(names: { string })
     info("stage with: git add -f third_party")
 end
 
+--- Every `CMakeLists.txt` and `*.cmake` this repository OWNS, which is every
+--- one of them except the vendored trees' own. Upstream's build files reference
+--- upstream's files freely and are not our build; scanning them would report a
+--- violation for every file we deliberately do not carry.
+local function ownBuildFiles(): { string }
+    local found: { string } = {}
+    local pending: { string } = { "." }
+
+    while #pending > 0 do
+        local dir = table.remove(pending) :: string
+        for _, entry in fs.listDirectory(dir) do
+            local child = if dir == "." then entry.name else `{dir}/{entry.name}`
+            if entry.type == "dir" then
+                -- `third_party/` itself is ours; the trees inside it are not.
+                if child == ".git" or child == ".lute" or string.find(child, "^third_party/.") ~= nil then
+                    continue
+                end
+                table.insert(pending, child)
+            elseif entry.name == "CMakeLists.txt" or string.match(entry.name, "%.cmake$") ~= nil then
+                table.insert(found, child)
+            end
+        end
+    end
+
+    table.sort(found)
+    return found
+end
+
+--- Every path this repository's own build files name inside `<name>/`, as
+--- written. Deliberately textual: the alternative is running CMake, and a guard
+--- that needs a configured build tree is a guard nobody runs.
+local function buildReferences(name: string): { { file: string, path: string } }
+    local references: { { file: string, path: string } } = {}
+    local seen: { [string]: boolean } = {}
+
+    for _, file in ownBuildFiles() do
+        local text = fs.readFileToString(file)
+        for reference in string.gmatch(text, `{name}/([%w%._%-/]+)`) do
+            local key = `{file}|{reference}`
+            if not seen[key] then
+                seen[key] = true
+                table.insert(references, { file = file, path = reference })
+            end
+        end
+    end
+
+    return references
+end
+
+--- The guard ADR 0042 was approved on the condition of (human, 2026-08-21).
+---
+--- A hand-curated `include` list ROTS: at the next pin bump upstream moves a
+--- file out of the listed paths, and the build either breaks obscurely or --
+--- worse -- quietly stops compiling something. Narrowing without verification is
+--- debt with interest, so this is the interest being paid.
+---
+--- Two checks, both offline and both cheap:
+---
+---   1. every listed pathspec still selects something on disk, which is what a
+---      rename upstream destroys;
+---   2. every path OUR OWN build files name inside the tree is covered by the
+---      list and present, which is the condition in its own words -- a source
+---      added outside the curated set fails here rather than at a compiler.
+local function verifyNarrowing(dependency: Dependency): number
+    local include = dependency.include
+    if include == nil or #include == 0 then
+        return 0
+    end
+
+    local problems = 0
+
+    for _, pathspec in include do
+        local target = `{dependency.path}/{pathspec}`
+        if not fs.exists(target) then
+            print(`  {dependency.name}: include path "{pathspec}" selects nothing — upstream moved or renamed it`)
+            problems += 1
+        end
+    end
+
+    local shortName = string.match(dependency.path, "([^/]+)$") or dependency.name
+    for _, reference in buildReferences(shortName) do
+        local covered = false
+        for _, pathspec in include do
+            if reference.path == pathspec or string.sub(reference.path, 1, #pathspec + 1) == `{pathspec}/` then
+                covered = true
+                break
+            end
+        end
+
+        if not covered then
+            print(
+                `  {dependency.name}: {reference.file} names "{shortName}/{reference.path}", `
+                    .. `which the row's include list does not cover (ADR 0042)`
+            )
+            problems += 1
+        elseif not fs.exists(`{dependency.path}/{reference.path}`) then
+            print(`  {dependency.name}: {reference.file} names "{shortName}/{reference.path}", which is not there`)
+            problems += 1
+        end
+    end
+
+    return problems
+end
+
 local function commandStatus()
     local dependencies = readManifest()
     local missing = 0
@@ -447,8 +551,18 @@ local function commandStatus()
         print(string.format("  %-24s %-12s %s", dependency.name, dependency.version, state))
     end
 
-    print(`vendor: {#dependencies} rows, {missing} pinned-but-missing, {unpinned} unpinned`)
-    if missing > 0 then
+    local narrowingProblems = 0
+    for _, dependency in dependencies do
+        if isPinned(dependency) then
+            narrowingProblems += verifyNarrowing(dependency)
+        end
+    end
+
+    print(
+        `vendor: {#dependencies} rows, {missing} pinned-but-missing, {unpinned} unpinned, `
+            .. `{narrowingProblems} narrowing problem(s)`
+    )
+    if missing > 0 or narrowingProblems > 0 then
         process.exit(1)
     end
 end

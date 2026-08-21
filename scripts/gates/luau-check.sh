@@ -137,6 +137,17 @@ lute tools/repo/i18nlint.luau
 echo "== module layering =="
 lute tools/repo/checklayers.luau
 
+# The vendored trees agree with the manifest, and -- the part that needs a gate
+# rather than a habit -- a NARROWED row's include list still covers everything
+# this repository's build files name inside it (ADR 0042, approved 2026-08-21 on
+# exactly this condition).
+#
+# A hand-curated include list rots: at the next pin bump upstream moves a file
+# out of the listed paths, and the build either breaks obscurely or quietly stops
+# compiling something. Narrowing without verification is debt with interest.
+echo "== vendored trees and narrowed include lists (ADR 0042) =="
+lute tools/repo/vendor.luau status
+
 # Every component field has a reader, or its property is marked `Inert`. The
 # mechanical half of D030: `Inert` was built at M4.5 so that "stored and nothing
 # acts on it" would be visible, and two milestones later a property was born into

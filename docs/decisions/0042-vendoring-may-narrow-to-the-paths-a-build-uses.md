@@ -1,6 +1,6 @@
 # 0042 — A vendored row may narrow to the upstream paths the build uses
 
-- Status: accepted
+- Status: accepted (human, 2026-08-21, **conditional on the guard below**)
 - Date: 2026-08-21
 - Amends: ADR 0021 (the "exact upstream content" clause, narrowed rather than
   replaced). Extends ADR 0032's reasoning about binaries in history.
@@ -60,6 +60,34 @@ and it does not permit dropping a licence or notice file — the four licence an
 notice files are in `basis_universal`'s include list for that reason, and a row
 that omitted them would be a licence violation rather than a tidy-up.
 
+## The condition this was approved on
+
+The human's approval came with one, and it is about the future rather than about
+today: **a hand-curated `include` list rots.** At the next pin bump upstream
+moves a file out of the listed paths, and the build either breaks obscurely or —
+worse — quietly stops compiling something. Narrowing without verification is
+debt with interest.
+
+So `tools/repo/vendor.luau status` verifies a narrowed row, and the Luau gate
+runs it. Two checks, both offline, both costing a handful of small file reads:
+
+1. **Every listed pathspec still selects something on disk.** A rename upstream
+   turns a path into nothing, and the next `sync` would otherwise report success
+   while producing an incomplete tree — the tool that guarantees "this is
+   upstream at the pin" being the one that lies about it.
+2. **Every path this repository's own build files name inside the tree is
+   covered by the list and present.** This is the condition in its own words: a
+   source added outside the curated set fails here, by name, rather than at a
+   compiler or not at all. Only files this repository owns are scanned — a
+   vendored tree's own CMake references its own files freely and is not our
+   build.
+
+Both are break-verified: dropping `zstd` from the list reports the two build
+references it no longer covers, and adding `basis_universal/OpenCL/…` to a
+source list reports that path by name. The check is textual on purpose. The
+alternative is asking CMake, and a guard that needs a configured build tree is a
+guard nobody runs.
+
 ## Consequences
 
 `third_party/basis_universal` is 13 MB instead of 302 MB. The mechanism is four
@@ -70,8 +98,6 @@ by "check out upstream and diff the directory", because the directory listings
 differ by construction. Verifying one means diffing the paths the row names,
 which is what the `include` list is for.
 
-There is one judgement here a human may want to remake, and it is recorded in
-`PROGRESS.md`: whether narrowing should exist at all, or whether a dependency
-this large should instead be an ADR 0032 fetched artifact — which it cannot be
-today, because ADR 0032 rule 4 says anything the engine LINKS is vendored as
-source, and the transcoder is linked into the runtime.
+The alternative considered and not taken was an ADR 0032 fetched artifact, which
+does not fit: rule 4 there says anything the engine LINKS is vendored as source,
+and the basis transcoder is linked into the runtime.

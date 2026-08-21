@@ -304,14 +304,17 @@ have different answers.
 - **`ITransport`** — the future replication seam — is a header, and it gets one
   implementation so the seam is proven rather than asserted. **ENet** is that
   implementation: MIT, tiny, no transitive dependencies.
-- **GameNetworkingSockets** is not vendored this milestone, and this is the one
-  decision here that needs a human. Its dependency set is *OpenSSL or libsodium,
+- **GameNetworkingSockets** is not vendored this milestone. **Answered by the
+  human on 2026-08-21: agreed, without reservation** — what v1 needs is the
+  seam, not the implementation behind it, and the row keeps `TBD` with the
+  reasoning written into it the way the Jolt row did until M5. Its dependency set is *OpenSSL or libsodium,
   plus protobuf* (`docs/research/ecosystem-2026.md:210`) — none of which has a
   manifest row, all of which would be new vendored dependencies (R5, R6, §10)
   bought for a seam with no v1 caller. ADR 0040 settled this shape one milestone
   ago: a dependency nobody calls still enters every build, every notices file
-  and every future reader half hour. **The row stays, unpinned, with the ADR
-  recording why** — and the human answers, exactly as they did for Clay.
+  and every future reader half hour. **The row stays, unpinned, carrying the
+  reason** — a decision deferred with a reason on it is a different thing from a
+  decision forgotten.
 
 ### 10. Inter ships as a vendored font file, and the glyph cache widens
 

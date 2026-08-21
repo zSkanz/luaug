@@ -229,27 +229,51 @@ quietly.
   its notices row are gone, and ADR 0040 carries the answer so that re-vendoring
   is an ADR and a manifest row rather than a rediscovery.
 
-- **A vendored tree was narrowed rather than carried whole, and that is a
-  policy question rather than an implementation one (ADR 0042).**
-  `basis_universal` at `v2_50` is **302 MB**, of which about 275 MB is test
-  images, WebGL demos, Python wheels and **49 MB of prebuilt binaries** — none
-  of it compiled here, and the last of it is exactly what ADR 0032 exists to
-  keep out of git history. ADR 0021 says a vendored tree is "exact upstream
-  content at the pinned commit"; applying that rule literally would have
-  violated the reasoning of the other ADR, and 302 MB per pin bump is paid by
-  every future clone forever.
+- **ANSWERED 2026-08-21 — narrowing is allowed, on the condition that a machine
+  checks it (ADR 0042).** `basis_universal` at `v2_50` is **302 MB**, of which
+  275 MB is test images, WebGL demos, Python wheels and **49 MB of prebuilt
+  binaries** — the last of which is exactly what ADR 0032 exists to keep out of
+  git history, while ADR 0021 says a vendored tree is "exact upstream content".
+  One of the two had to give, and giving on 0021 costs less: what landed is
+  still byte-exact at the pinned commit, and 302 MB per pin bump is paid by
+  every future clone forever. 13 MB instead of 302.
 
-  **What was done**: the manifest row gained an `include` list of eight upstream
-  paths, and the vendor tool passes them to git as pathspecs **on the checkout
-  itself** — so what landed is still byte-exact upstream at the pinned commit,
-  and what was given up is only "the whole tree". 13 MB instead of 302 MB.
+  **The condition is about the future, not about now**: a hand-curated `include`
+  list rots — at the next pin bump upstream moves a file out of the listed paths
+  and the build either breaks obscurely or quietly stops compiling something.
+  **Done**: `vendor.luau status` verifies a narrowed row and the Luau gate runs
+  it, checking that every listed pathspec still selects something AND that every
+  path this repository's own build files name inside the tree is covered by the
+  list. Break-verified both ways. The check is textual on purpose: asking CMake
+  would need a configured build tree, and a guard nobody runs is not a guard.
 
-  **What a human may want to remake**: whether narrowing should exist at all.
-  The alternative is an ADR 0032 fetched artifact, which does not fit today
-  because rule 4 there says anything the engine LINKS is vendored as source and
-  the basis transcoder is linked into the runtime. Widening the row back to the
-  whole tree is deleting one line. Written up rather than assumed, because
-  changing what "vendored" means is not the agent's call to make quietly.
+- **ANSWERED 2026-08-21 — ENet only; GameNetworkingSockets waits, with the
+  reason written down.** v1 ships primitives and M7's scope is a loopback echo,
+  so what v1 needs is the SEAM rather than the implementation behind it.
+  `ITransport` is frozen with ENet as its one implementation. GNS depends on
+  OpenSSL-or-libsodium plus protobuf — a code generator that invades the build
+  and a compilation problem on four tiers — bought for a seam with no v1 caller.
+  Its manifest row keeps `TBD` and now carries the reasoning, the way the Jolt
+  row did until M5: **a decision deferred with a reason on it is a different
+  thing from a decision forgotten**, and whoever builds replication post-v1
+  finds the argument instead of re-deriving it.
+
+- **Two agent sessions work in this repository, and the tree is divided
+  (human protocol, 2026-08-21).** The other window is a REVIEW agent: it plays
+  the engine, finds defects, and records decisions. Five of M6's defects came
+  from there (D027, D029, D030, D031 and the waver confirmation), as did the
+  roadmap items marked "human decision".
+
+  - **`PROGRESS.md`, `engine/`, `api/`, `tests/`, `shaders/` and `tools/` are
+    the builder's.** The reviewer does not write them.
+  - **`docs/roadmap.md`, `docs/defects.md`, `docs/decisions/`, `README.md`,
+    `CLAUDE.md` and the briefs are where the reviewer writes.**
+  - **Scope can arrive after a kickoff imported it**, and it has four times
+    (pivot, weld, solid `Part`, `@luaug/input`). The reviewer annotates the
+    brief saying it came out of order; the builder **re-reads the roadmap and
+    the brief before each big step**. This is why: the M4 close rewrote
+    `PROGRESS.md` and dropped three open defects, which is what
+    `docs/defects.md` was born from.
 
 - **The Android run of `examples/02-meshes` is due.** Deferred by the human
   until M4.5 closed, and M4.5 and M5 have both closed since. It is a device
