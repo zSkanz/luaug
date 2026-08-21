@@ -348,6 +348,113 @@ local Classes: { Schema.Class } = {
             .. "the API.",
     },
     {
+        Name = "StreamingService",
+        Extends = "Instance",
+        Module = "scene",
+        Tags = { "Service", "NotCreatable" } :: { Schema.ClassTag },
+        Properties = {
+            {
+                Name = "Enabled",
+                Type = "boolean",
+                Default = "true",
+                ThreadSafety = "ReadParallel",
+                Doc = "Whether the world streams at all. Turning it off FREEZES the current set rather than "
+                    .. "draining it: nothing new is scheduled and nothing resident is evicted, which is what "
+                    .. "makes it usable as `hold the world still while I do something`. Evicting while refusing "
+                    .. "to load would empty the world one ring at a time and leave nothing to come back to.",
+            },
+            {
+                Name = "LoadRadius",
+                Type = "number",
+                Default = "1024",
+                ThreadSafety = "ReadParallel",
+                ErrorKey = "scene.err.number_positive",
+                Doc = "How far from a focus the engine tries to keep chunks resident, in studs. Best effort: a "
+                    .. "chunk inside it is wanted, and one outside stays resident until it passes a WIDER ring, "
+                    .. "because a single radius makes a focus standing on a boundary load and evict the same "
+                    .. "chunk every frame -- and the symptom of that is not a wrong world, it is a stutter "
+                    .. "nobody can find.",
+            },
+            {
+                Name = "MinRadius",
+                Type = "number",
+                Default = "512",
+                ThreadSafety = "ReadParallel",
+                ErrorKey = "scene.err.number_positive",
+                Doc = "The must-have ring, in studs. Everything inside it is guaranteed resident before a focus "
+                    .. "may advance into it, so the character walks into a world that exists rather than "
+                    .. "through one that has not arrived. Read `PauseOutsideLoadedArea` for what happens when it "
+                    .. "has not.",
+            },
+            {
+                Name = "PauseOutsideLoadedArea",
+                Type = "boolean",
+                Default = "false",
+                ThreadSafety = "ReadParallel",
+                Doc = "Whether the simulation waits when the minimum ring is not yet resident. A familiar "
+                    .. "streaming pause, and the alternative is a character falling through ground that has not "
+                    .. "loaded. It is a pause and not a rollback: the tick simply does not advance.",
+            },
+        } :: { Schema.Property },
+        Methods = {
+            {
+                Name = "AddFocus",
+                Parameters = { { Name = "instance", Type = "Instance" } },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Streams the world around this instance as well. A focus is normally the character or the "
+                    .. "camera; several are legal and the engine keeps a chunk that any of them wants. An "
+                    .. "instance with no position in the world is refused, because a focus that cannot be "
+                    .. "located would silently anchor the world at the origin.",
+            },
+            {
+                Name = "RemoveFocus",
+                Parameters = { { Name = "instance", Type = "Instance" } },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Stops streaming around it. Removing the last focus does not unload the world: it stops "
+                    .. "anything being wanted, and what is resident stays until something wants it gone.",
+            },
+            {
+                Name = "LoadAreaAsync",
+                Parameters = {
+                    { Name = "position", Type = "vector" },
+                    { Name = "radius", Type = "number" },
+                },
+                Returns = {},
+                Yields = true,
+                ThreadSafety = "Unsafe",
+                Doc = "Yields until every chunk within `radius` of `position` is resident. What a teleport calls "
+                    .. "before it moves the character, so the destination exists when they arrive. Returns "
+                    .. "immediately when the area is already loaded, and raises rather than hanging when the "
+                    .. "world has no chunks there at all.",
+            },
+        } :: { Schema.Method },
+        Events = {
+            {
+                Name = "AreaLoaded",
+                Parameters = {
+                    { Name = "position", Type = "vector" },
+                    { Name = "radius", Type = "number" },
+                },
+                Doc = "Fires when an area a script asked for has finished loading. Deferred like every signal.",
+            },
+            {
+                Name = "InstanceStreamedOut",
+                Parameters = { { Name = "instance", Type = "Instance" } },
+                Doc = "Fires for each instance that left the world while a script still held a reference to it. "
+                    .. "Streamed out means REPARENTED TO NIL rather than destroyed, so the handle a script holds "
+                    .. "still resolves -- it is a husk, and reading it is legal. An instance nothing referenced "
+                    .. "is simply destroyed and does not fire this.",
+            },
+        } :: { Schema.Event },
+        Doc = "The streamed world's controls (api-design.md §2.1). A world too large to hold is divided into a "
+            .. "uniform grid of chunks; this service decides which of them are resident, by distance to the foci "
+            .. "a game names. Streaming is a system rather than scene-root state, which is why it is a service "
+            .. "and not a property of `Workspace`. The per-frame cost is budgeted in TIME rather than in a count "
+            .. "of chunks, because a chunk's cost varies with what is in it.",
+    },
+    {
         Name = "TagService",
         Extends = "Instance",
         Module = "scene",

@@ -1,8 +1,10 @@
 #include "luaug/assetc/compiler.h"
 
+#include "luaug/asset/chunk.h"
 #include "luaug/asset/gltf.h"
 #include "luaug/asset/image.h"
 #include "luaug/asset/mesh_format.h"
+#include "luaug/core/json.h"
 #include "luaug/core/json_writer.h"
 #include "luaug/platform/file.h"
 
@@ -38,6 +40,13 @@ using asset::AssetKind;
     const std::string name = lowercase(path.filename().string());
     const std::string extension = lowercase(path.extension().string());
 
+    // Matched on the compound suffix rather than on `.json`, so an ordinary
+    // JSON file a project keeps in its content directory rides through as raw
+    // rather than being refused for not being a chunk.
+    if (name.size() > 11 && name.compare(name.size() - 11, 11, ".chunk.json") == 0) {
+        return SourceKind::Chunk;
+    }
+
     if (extension == ".gltf" || extension == ".glb") {
         return SourceKind::Mesh;
     }
@@ -57,6 +66,100 @@ using asset::AssetKind;
     return platform::readFile(path, out);
 }
 
+// `[1.0, 2.0, 3.0]` and friends. Absent or malformed yields the fallback rather
+// than a zero, because a zero here is a part at the world origin and looks like
+// a bug in the generator rather than a bug in its file.
+[[nodiscard]] core::DVec3 readDVec3(const core::JsonValue& value, core::DVec3 fallback)
+{
+    if (value.size() != 3) {
+        return fallback;
+    }
+    return core::DVec3{value.at(0).asNumber(fallback.x), value.at(1).asNumber(fallback.y),
+                       value.at(2).asNumber(fallback.z)};
+}
+
+[[nodiscard]] core::Vec3 readVec3(const core::JsonValue& value, core::Vec3 fallback)
+{
+    const core::DVec3 wide = readDVec3(value, core::toDVec3(fallback));
+    return core::toVec3(wide);
+}
+
+// Interned as it goes, so a chunk with four hundred rocks carries one copy of
+// the mesh URN rather than four hundred.
+[[nodiscard]] u32 internString(asset::Chunk& chunk, std::string_view text)
+{
+    if (text.empty()) {
+        return asset::ChunkInstance::NoString;
+    }
+    for (usize i = 0; i < chunk.strings.size(); ++i) {
+        if (chunk.strings[i] == text) {
+            return static_cast<u32>(i);
+        }
+    }
+    chunk.strings.emplace_back(text);
+    return static_cast<u32>(chunk.strings.size() - 1);
+}
+
+[[nodiscard]] std::optional<core::EngineError> readChunkSource(std::string_view json, asset::Chunk& out, f32& chunkSize)
+{
+    core::JsonDocument document;
+    const core::JsonDocument::ParseResult parsed = document.parse(json, "chunk source");
+    if (!parsed.ok) {
+        const core::I18nArg args[] = {{"detail", parsed.diagnostic}};
+        return core::makeError(LUAUG_TR("assetc.err.chunk_source"), args);
+    }
+
+    const core::JsonValue root = document.root();
+    if (root["format"].asString() != "luaug-chunk-source") {
+        const core::I18nArg args[] = {{"detail", "not a LuauG chunk source"}};
+        return core::makeError(LUAUG_TR("assetc.err.chunk_source"), args);
+    }
+
+    chunkSize = static_cast<f32>(root["chunkSize"].asNumber(static_cast<core::f64>(asset::DefaultChunkSize)));
+    out.id.x = static_cast<core::i32>(root["x"].asInteger());
+    out.id.z = static_cast<core::i32>(root["z"].asInteger());
+    out.id.layer = static_cast<core::i32>(root["layer"].asInteger());
+    out.bounds = asset::chunkBounds(out.id, chunkSize);
+    out.bounds.min.y = root["minY"].asNumber(-1.0);
+    out.bounds.max.y = root["maxY"].asNumber(1.0);
+
+    const core::JsonValue instances = root["instances"];
+    if (instances.size() > asset::MaxChunkInstances) {
+        const core::I18nArg args[] = {{"detail", "more instances than the engine will materialise"}};
+        return core::makeError(LUAUG_TR("assetc.err.chunk_source"), args);
+    }
+
+    out.instances.reserve(instances.size());
+    for (usize i = 0; i < instances.size(); ++i) {
+        const core::JsonValue row = instances.at(i);
+        asset::ChunkInstance instance;
+
+        const std::string_view kind = row["kind"].asString("part");
+        instance.kind = kind == "meshpart" ? asset::ChunkInstance::Kind::MeshPart : asset::ChunkInstance::Kind::Part;
+        instance.shape = static_cast<core::u8>(row["shape"].asInteger());
+        instance.anchored = row["anchored"].asBool(true);
+        instance.transparency = static_cast<f32>(row["transparency"].asNumber(0.0));
+        instance.cframe.position = readDVec3(row["position"], core::DVec3{});
+        instance.size = readVec3(row["size"], core::Vec3{1.0f, 1.0f, 1.0f});
+        instance.color = core::Color3{1.0f, 1.0f, 1.0f};
+        const core::Vec3 colour = readVec3(row["color"], core::Vec3{1.0f, 1.0f, 1.0f});
+        instance.color = core::Color3{colour.x, colour.y, colour.z};
+        instance.name = internString(out, row["name"].asString());
+        instance.meshContent = internString(out, row["mesh"].asString());
+
+        if (instance.kind == asset::ChunkInstance::Kind::MeshPart &&
+            instance.meshContent == asset::ChunkInstance::NoString) {
+            // A `MeshPart` with no mesh is an invisible part, which is the
+            // shape of a defect that surfaces as "the world is missing things"
+            // rather than as an error.
+            const core::I18nArg args[] = {{"detail", "a meshpart with no mesh"}};
+            return core::makeError(LUAUG_TR("assetc.err.chunk_source"), args);
+        }
+        out.instances.push_back(instance);
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 const char* sourceKindName(SourceKind kind) noexcept
@@ -66,6 +169,8 @@ const char* sourceKindName(SourceKind kind) noexcept
         return "mesh";
     case SourceKind::Texture:
         return "texture";
+    case SourceKind::Chunk:
+        return "chunk";
     case SourceKind::Raw:
         return "raw";
     }
@@ -82,7 +187,20 @@ std::vector<SourceFile> collectSources(const std::filesystem::path& root, std::s
         return sources;
     }
 
-    for (std::filesystem::recursive_directory_iterator it(root, ec), end; it != end; it.increment(ec)) {
+    // The CONSTRUCTOR's error is checked as well as the increment's, and it has
+    // to be: a failed construction leaves the iterator equal to `end`, so the
+    // loop body never runs and a build that could not read its own content
+    // directory would report success with nothing in it. Added while chasing an
+    // empty pack whose cause turned out to be elsewhere -- which is exactly
+    // when a silent path is worth closing, because it was indistinguishable
+    // from the real bug for twenty minutes.
+    std::filesystem::recursive_directory_iterator it(root, ec);
+    if (ec) {
+        diagnostic = "could not walk " + root.string() + ": " + ec.message();
+        return {};
+    }
+
+    for (const std::filesystem::recursive_directory_iterator end; it != end; it.increment(ec)) {
         if (ec) {
             diagnostic = "could not walk " + root.string() + ": " + ec.message();
             return {};
@@ -121,6 +239,7 @@ CompileResult compile(const CompileOptions& options)
 
     asset::PackWriter pack;
     std::vector<ManifestEntry> manifest;
+    asset::ChunkIndex chunkIndex;
 
     for (const SourceFile& source : sources) {
         std::vector<std::byte> bytes;
@@ -205,6 +324,46 @@ CompileResult compile(const CompileOptions& options)
             break;
         }
 
+        case SourceKind::Chunk: {
+            asset::Chunk chunk;
+            f32 chunkSize = asset::DefaultChunkSize;
+            const std::string text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+            if (const auto error = readChunkSource(text, chunk, chunkSize)) {
+                result.diagnostic = source.relative.generic_string() + ": " + error->message;
+                return result;
+            }
+            // Every cell in one world agrees about the grid, or two chunks
+            // describe overlapping regions and the manager scores both.
+            if (result.chunkCount > 0 && chunkIndex.chunkSize != chunkSize) {
+                result.diagnostic = source.relative.generic_string() + ": disagrees about the chunk size";
+                return result;
+            }
+            chunkIndex.chunkSize = chunkSize;
+
+            std::filesystem::path relative = source.relative;
+            // `world/cell_0_0.chunk.json` becomes `world/cell_0_0.lchunk`: the
+            // output keeps the author's own directory layout, so a person
+            // looking for a chunk finds it where they put it.
+            relative.replace_extension();
+            relative.replace_extension(".lchunk");
+
+            ChunkOutput output;
+            output.relativePath = relative.generic_string();
+            output.bytes = asset::encodeChunk(chunk);
+
+            asset::ChunkIndexEntry entry;
+            entry.id = chunk.id;
+            entry.bounds = chunk.bounds;
+            entry.urn = urnFor(relative);
+            entry.instanceCount = static_cast<u32>(chunk.instances.size());
+            entry.bytes = static_cast<u32>(output.bytes.size());
+            chunkIndex.chunks.push_back(std::move(entry));
+
+            result.chunks.push_back(std::move(output));
+            result.chunkCount += 1;
+            break;
+        }
+
         case SourceKind::Raw: {
             ManifestEntry entry;
             entry.urn = urnFor(source.relative);
@@ -224,8 +383,17 @@ CompileResult compile(const CompileOptions& options)
     std::sort(manifest.begin(), manifest.end(),
               [](const ManifestEntry& a, const ManifestEntry& b) { return a.urn < b.urn; });
 
+    // Sorted by id, which is what makes a lookup a binary search and the
+    // materialisation order a property of the world rather than of the
+    // filesystem.
+    std::sort(chunkIndex.chunks.begin(), chunkIndex.chunks.end(),
+              [](const asset::ChunkIndexEntry& a, const asset::ChunkIndexEntry& b) { return a.id < b.id; });
+    std::sort(result.chunks.begin(), result.chunks.end(),
+              [](const ChunkOutput& a, const ChunkOutput& b) { return a.relativePath < b.relativePath; });
+
     result.pack = pack.build();
     result.manifest = writeManifest(manifest);
+    result.chunkIndex = result.chunkCount > 0 ? asset::writeChunkIndex(chunkIndex) : std::string{};
     result.entries = std::move(manifest);
     result.ok = true;
     return result;

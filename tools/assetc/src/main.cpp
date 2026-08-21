@@ -6,7 +6,9 @@
 #include "luaug/platform/platform.h"
 
 #include <cstring>
+#include <filesystem>
 #include <iostream>
+#include <span>
 #include <string>
 
 namespace {
@@ -93,7 +95,30 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // The chunks go beside the pack rather than in it, and the directory is
+    // derived rather than asked for: `asset/chunk.h` explains why a chunk is
+    // its own file, and a second flag naming where they land would be a second
+    // way for the index and the files to disagree.
+    if (result.chunkCount > 0) {
+        const std::filesystem::path chunkRoot = std::filesystem::path(output).parent_path() / "content";
+        for (const luaug::assetc::ChunkOutput& chunk : result.chunks) {
+            if (!luaug::assetc::writeFile(chunkRoot / chunk.relativePath, chunk.bytes, diagnostic)) {
+                std::cout << "assetc: " << diagnostic << "\n";
+                return 1;
+            }
+        }
+
+        const std::filesystem::path indexPath = std::filesystem::path(output).parent_path() / "content.chunks.json";
+        const std::span<const std::byte> indexBytes(reinterpret_cast<const std::byte*>(result.chunkIndex.data()),
+                                                    result.chunkIndex.size());
+        if (!luaug::assetc::writeFile(indexPath, indexBytes, diagnostic)) {
+            std::cout << "assetc: " << diagnostic << "\n";
+            return 1;
+        }
+    }
+
     std::cout << "assetc: " << result.meshCount << " mesh(es), " << result.textureCount << " texture(s), "
-              << result.rawCount << " raw file(s) -> " << result.pack.size() << " bytes\n";
+              << result.chunkCount << " chunk(s), " << result.rawCount << " raw file(s) -> " << result.pack.size()
+              << " bytes\n";
     return 0;
 }

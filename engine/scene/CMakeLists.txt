@@ -22,10 +22,18 @@ luaug_add_module(scene
         src/world_hash.cpp
         src/native_accessors.cpp
         src/physics_sync.cpp
+        src/streaming_glue.cpp
         generated/class_descriptors.gen.cpp
     DEPS
         core
         physics_api
+        # M7: the streaming glue turns an `asset::Chunk` into instances, which
+        # architecture.md §2 assigns to this module ("streaming glue") and §10
+        # spells out ("materialization through the same reflection path as
+        # scripts"). L3 over L2 is a legal edge; what it buys is that the chunk
+        # TYPE stays in the module that reads chunks off disk, rather than being
+        # duplicated here so the two can drift.
+        asset
 )
 
 # The generated reflection tables (architecture.md §4). Checked in and
@@ -52,4 +60,5 @@ luaug_add_module_tests(scene
         tests/enum_registry_tests.cpp
         tests/world_tests.cpp
         tests/physics_sync_tests.cpp
+        tests/streaming_glue_tests.cpp
 )

@@ -24,6 +24,7 @@
 // and the pack.
 #pragma once
 
+#include "luaug/asset/chunk.h"
 #include "luaug/asset/mesh_format.h"
 #include "luaug/asset/pack.h"
 #include "luaug/core/content_hash.h"
@@ -40,6 +41,7 @@
 namespace luaug::assetc {
 
 using core::ContentHash;
+using core::f32;
 using core::u32;
 using core::u64;
 using core::usize;
@@ -48,6 +50,11 @@ enum class SourceKind
 {
     Mesh,
     Texture,
+    // A `*.chunk.json` cell of the streamed world. Compiled into a `.lchunk`
+    // beside the pack rather than into it: a pack is read whole at mount, and a
+    // world bigger than memory cannot have its instance lists resident
+    // (`asset/chunk.h`).
+    Chunk,
     // Copied through untouched: a font, a catalog, a shader blob. Copying
     // rather than refusing is what lets a project put anything it likes in its
     // content directory.
@@ -85,6 +92,16 @@ struct CompileOptions
     asset::MeshCompileOptions mesh;
 };
 
+// One compiled cell, written as its own file so the streaming manager can read
+// it one at a time.
+struct ChunkOutput
+{
+    // Relative to the chunk output directory, and the tail of the URN the index
+    // names -- so the two cannot disagree about where a chunk is.
+    std::string relativePath;
+    std::vector<std::byte> bytes;
+};
+
 struct CompileResult
 {
     bool ok = false;
@@ -94,9 +111,15 @@ struct CompileResult
     std::string manifest;
     std::vector<ManifestEntry> entries;
 
+    // Empty for a project with no streamed world, which is every project before
+    // this milestone.
+    std::vector<ChunkOutput> chunks;
+    std::string chunkIndex;
+
     u32 meshCount = 0;
     u32 textureCount = 0;
     u32 rawCount = 0;
+    u32 chunkCount = 0;
 };
 
 // Every regular file under `root`, sorted by relative path. Empty with a

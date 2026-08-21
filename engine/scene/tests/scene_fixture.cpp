@@ -96,6 +96,16 @@ void detachPart(World& world, core::InstanceId id)
     world.parts().remove(id);
 }
 
+void attachMeshPart(World& world, core::InstanceId id)
+{
+    world.meshParts().add(id, MeshPartComponent{});
+}
+
+void detachMeshPart(World& world, core::InstanceId id)
+{
+    world.meshParts().remove(id);
+}
+
 void attachModel(World& world, core::InstanceId id)
 {
     world.models().add(id, ModelComponent{});
@@ -168,6 +178,17 @@ Hierarchy::Hierarchy()
     partDesc.defaultName = atoms.intern("Part");
     partDesc.properties = m_partProperties;
     partClass = classes.registerClass(partDesc);
+
+    // Registered so the streaming glue's `MeshPart` path is exercised rather
+    // than skipped. It carries no properties of its own here: what the glue
+    // writes is the mesh URN, and the component is what holds that.
+    ClassDescriptor meshPartDesc;
+    meshPartDesc.name = atoms.intern("MeshPart");
+    meshPartDesc.super = basePartClass;
+    meshPartDesc.defaultName = atoms.intern("MeshPart");
+    meshPartDesc.attachComponents = attachMeshPart;
+    meshPartDesc.detachComponents = detachMeshPart;
+    meshPartClass = classes.registerClass(meshPartDesc);
 
     ClassDescriptor modelDesc;
     modelDesc.name = atoms.intern("Model");

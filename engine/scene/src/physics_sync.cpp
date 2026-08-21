@@ -664,6 +664,33 @@ void PhysicsSync::publishContacts()
     }
 }
 
+bool PhysicsSync::shouldRebase(core::DVec3 focus, f64 threshold) const noexcept
+{
+    const core::DVec3 offset = focus - m_origin;
+    // Squared, so the common answer -- "no" -- costs no square root, and
+    // compared per axis so the tolerance is a BOX rather than a sphere: a focus
+    // travelling along one axis should rebase at the same distance whichever
+    // axis it is.
+    return std::abs(offset.x) > threshold || std::abs(offset.y) > threshold || std::abs(offset.z) > threshold;
+}
+
+void PhysicsSync::setOrigin(core::DVec3 origin)
+{
+    if (origin == m_origin) {
+        return;
+    }
+    m_origin = origin;
+    m_rebaseCount += 1;
+    m_backend.setWorldOrigin(m_world, origin);
+
+    // The mirror's own record of what it last pushed is in ABSOLUTE
+    // coordinates, so it survives a rebase untouched -- which is the reason the
+    // record was stored that way rather than as whatever the solver held. If it
+    // had been local, every part in the world would look like a script write on
+    // the next tick and the mirror would push six thousand transforms back down
+    // for nothing.
+}
+
 void PhysicsSync::step(f64 fixedDt)
 {
     if (!m_world.valid())

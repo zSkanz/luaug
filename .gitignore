@@ -65,3 +65,11 @@ luaug-test-report.json
 luaug.log
 luaug-crash-*.dmp
 luaug-crash-*.txt
+
+# `examples/05-streaming`'s world is GENERATED (M7 brief, Decision 8): its
+# chunk sources come from `tools/generate_world.luau` and its compiled payloads
+# from `luaug build-assets`. What is committed is the forty-line generator, not
+# the megabyte and a half it writes -- the roadmap's own deliverable line asks
+# for "no giant binary assets in the repo", and generated JSON is the same thing
+# wearing a text extension. `run.bat` regenerates it when it is missing.
+examples/05-streaming/content/world/

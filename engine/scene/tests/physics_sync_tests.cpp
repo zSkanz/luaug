@@ -41,6 +41,17 @@ public:
     void destroyWorld(physics::WorldHandle) override { worldDestroyed = true; }
     void setGravity(physics::WorldHandle, core::Vec3 value) override { gravity = value; }
 
+    // Recorded rather than acted on: what these cases assert is that the mirror
+    // pushes the origin down exactly once per change, which a real solver would
+    // hide behind a thousand body moves.
+    void setWorldOrigin(physics::WorldHandle, core::DVec3 value) override
+    {
+        origin = value;
+        originPushes += 1;
+    }
+
+    [[nodiscard]] core::DVec3 worldOrigin(physics::WorldHandle) const override { return origin; }
+
     [[nodiscard]] physics::BodyHandle createBody(physics::WorldHandle, const physics::BodyDesc& desc) override
     {
         const physics::BodyHandle handle{nextBody++, 1};
@@ -176,6 +187,8 @@ public:
     bool worldDestroyed = false;
     int charactersDestroyed = 0;
     core::Vec3 gravity{0.0f, 0.0f, 0.0f};
+    core::DVec3 origin{};
+    int originPushes = 0;
 
     std::vector<Created> created;
     std::vector<Created> rebuilt;
@@ -476,4 +489,64 @@ TEST_CASE("the mirror does nothing at all without a Workspace")
     CHECK(mirror.backend.created.empty());
     CHECK(mirror.backend.steps == 0);
     CHECK(id.valid());
+}
+
+TEST_CASE("the mirror pushes an origin change down exactly once")
+{
+    Mirror mirror;
+    (void)mirror.part("Crate", core::DVec3{0.0, 5.0, 0.0});
+    mirror.sync.step(1.0 / 60.0);
+
+    CHECK(mirror.sync.origin() == core::DVec3{});
+    CHECK(mirror.backend.originPushes == 0);
+    CHECK(mirror.sync.rebaseCount() == 0);
+
+    mirror.sync.setOrigin(core::DVec3{4096.0, 0.0, -4096.0});
+    CHECK(mirror.backend.origin == core::DVec3{4096.0, 0.0, -4096.0});
+    CHECK(mirror.backend.originPushes == 1);
+    CHECK(mirror.sync.rebaseCount() == 1);
+
+    // Setting the same origin again is not a rebase. Without this, a host that
+    // pushed the current origin every frame would move every body in the world
+    // every frame -- and the counter is what would say so.
+    mirror.sync.setOrigin(core::DVec3{4096.0, 0.0, -4096.0});
+    CHECK(mirror.backend.originPushes == 1);
+    CHECK(mirror.sync.rebaseCount() == 1);
+}
+
+TEST_CASE("a rebase does not make the mirror re-push every transform")
+{
+    Mirror mirror;
+    (void)mirror.part("Crate", core::DVec3{0.0, 5.0, 0.0});
+    mirror.sync.step(1.0 / 60.0);
+
+    const std::size_t before = mirror.backend.transforms.size();
+    mirror.sync.setOrigin(core::DVec3{4096.0, 0.0, 0.0});
+    mirror.sync.step(1.0 / 60.0);
+
+    // The mirror's record of what it last pushed is in ABSOLUTE coordinates, so
+    // a rebase leaves it valid. If it had been stored in the solver's space,
+    // every part in the world would look like a script write on the next tick
+    // and six thousand transforms would go back down for nothing.
+    CHECK(mirror.backend.transforms.size() == before);
+}
+
+TEST_CASE("the rebase policy is a box around the origin, not a sphere")
+{
+    Mirror mirror;
+
+    CHECK_FALSE(mirror.sync.shouldRebase(core::DVec3{}));
+    CHECK_FALSE(mirror.sync.shouldRebase(core::DVec3{3999.0, 0.0, 0.0}));
+    CHECK(mirror.sync.shouldRebase(core::DVec3{4001.0, 0.0, 0.0}));
+    CHECK(mirror.sync.shouldRebase(core::DVec3{0.0, 0.0, -4001.0}));
+
+    // A box rather than a sphere, so a focus travelling along one axis rebases
+    // at the same distance whichever axis it is. On a sphere the diagonal would
+    // reach 6.9 km before triggering.
+    CHECK_FALSE(mirror.sync.shouldRebase(core::DVec3{3999.0, 0.0, 3999.0}));
+
+    // And the tolerance follows the origin rather than the world's zero.
+    mirror.sync.setOrigin(core::DVec3{100000.0, 0.0, 0.0});
+    CHECK_FALSE(mirror.sync.shouldRebase(core::DVec3{100000.0, 0.0, 0.0}));
+    CHECK(mirror.sync.shouldRebase(core::DVec3{}));
 }

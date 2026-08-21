@@ -43,6 +43,7 @@ struct Hierarchy
     ClassId folderClass = InvalidClass;
     ClassId basePartClass = InvalidClass;
     ClassId partClass = InvalidClass;
+    ClassId meshPartClass = InvalidClass;
     ClassId modelClass = InvalidClass;
 
     core::NameAtom nameProperty;

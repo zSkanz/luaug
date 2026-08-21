@@ -37,6 +37,26 @@ public:
     virtual void destroyWorld(WorldHandle world) = 0;
     virtual void setGravity(WorldHandle world, core::Vec3 gravity) = 0;
 
+    // --- The floating origin (ADR 0014, architecture.md §10) ------------------
+    //
+    // Every position on this interface is ABSOLUTE, in the f64 world
+    // coordinates `scene` stores and a script reads. The origin is what the
+    // backend subtracts to get the f32 space it simulates in, and moving it is
+    // how a world stays precise ten thousand kilometres out.
+    //
+    // **Per world and never a global**, which ADR 0014 says twice: a future
+    // server running several simulation regions gives each its own origin, and
+    // nothing about this interface would change.
+    //
+    // A rebase moves every resident body and character by the negative of the
+    // delta, preserving velocity, so **nothing moves in absolute terms**. The
+    // caller decides WHEN -- the trigger is a focus leaving the tolerance, which
+    // is streaming's business rather than the solver's -- and the caller must do
+    // it at a safe point, because a rebase mid-tick would move the world under a
+    // solver that is halfway through it.
+    virtual void setWorldOrigin(WorldHandle world, core::DVec3 origin) = 0;
+    [[nodiscard]] virtual core::DVec3 worldOrigin(WorldHandle world) const = 0;
+
     // --- Bodies --------------------------------------------------------------
 
     // An invalid handle when the world is full or the shape is degenerate. The

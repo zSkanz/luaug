@@ -1046,6 +1046,99 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     scriptServiceDesc.docKey = {};
     classes.registerClass(scriptServiceDesc);
 
+    // --- StreamingService ---
+    static std::array<PropertyDesc, 4> streamingServiceProperties;
+    streamingServiceProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("Enabled"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::ReadParallel,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getStreamingServiceEnabled,
+            .set = native::setStreamingServiceEnabled,
+        },
+        PropertyDesc{
+            .name = atoms.intern("LoadRadius"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::ReadParallel,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_positive"),
+            .get = native::getStreamingServiceLoadRadius,
+            .set = native::setStreamingServiceLoadRadius,
+        },
+        PropertyDesc{
+            .name = atoms.intern("MinRadius"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::ReadParallel,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_positive"),
+            .get = native::getStreamingServiceMinRadius,
+            .set = native::setStreamingServiceMinRadius,
+        },
+        PropertyDesc{
+            .name = atoms.intern("PauseOutsideLoadedArea"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::ReadParallel,
+            .readOnly = false,
+            .inert = false,
+            .docKey = {},
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getStreamingServicePauseOutsideLoadedArea,
+            .set = native::setStreamingServicePauseOutsideLoadedArea,
+        },
+    }};
+    static std::array<MethodDesc, 3> streamingServiceMethods;
+    streamingServiceMethods = {{
+        MethodDesc{
+            .name = atoms.intern("AddFocus"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .docKey = {},
+        },
+        MethodDesc{
+            .name = atoms.intern("RemoveFocus"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .docKey = {},
+        },
+        MethodDesc{
+            .name = atoms.intern("LoadAreaAsync"),
+            .yields = true,
+            .threadSafety = ThreadSafety::Unsafe,
+            .docKey = {},
+        },
+    }};
+    static std::array<EventDesc, 2> streamingServiceEvents;
+    streamingServiceEvents = {{
+        EventDesc{
+            .name = atoms.intern("AreaLoaded"),
+            .slot = 7,
+            .docKey = {},
+        },
+        EventDesc{
+            .name = atoms.intern("InstanceStreamedOut"),
+            .slot = 8,
+            .docKey = {},
+        },
+    }};
+    ClassDescriptor streamingServiceDesc;
+    streamingServiceDesc.name = atoms.intern("StreamingService");
+    streamingServiceDesc.super = instanceClass;
+    streamingServiceDesc.flags = ClassFlags::Service | ClassFlags::NotCreatable;
+    streamingServiceDesc.defaultName = atoms.intern("StreamingService");
+    streamingServiceDesc.docKey = {};
+    streamingServiceDesc.properties = streamingServiceProperties;
+    streamingServiceDesc.methods = streamingServiceMethods;
+    streamingServiceDesc.events = streamingServiceEvents;
+    classes.registerClass(streamingServiceDesc);
+
     // --- TagService ---
     static std::array<MethodDesc, 4> tagServiceMethods;
     tagServiceMethods = {{
@@ -1285,6 +1378,31 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
 // forbids a container from being the thing that decides it.
 void registerEnums(EnumRegistry& enums, core::AtomTable& atoms)
 {
+    // --- StreamingMode ---
+    static std::array<EnumItemDesc, 3> streamingModeItems;
+    streamingModeItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Default"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Atomic"),
+            .value = 1,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Persistent"),
+            .value = 2,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor streamingModeDesc;
+    streamingModeDesc.name = atoms.intern("StreamingMode");
+    streamingModeDesc.docKey = {};
+    streamingModeDesc.items = streamingModeItems;
+    enums.registerEnum(streamingModeDesc);
+
     // --- PartShape ---
     static std::array<EnumItemDesc, 5> partShapeItems;
     partShapeItems = {{

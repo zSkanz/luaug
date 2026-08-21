@@ -126,6 +126,12 @@ public:
     // frames, so a stat never changes halfway through a tick that reads it.
     void publishStats(const script::FrameStats& stats);
 
+    // What the streaming host produced this frame, turned into deferred
+    // signals. Here rather than in `engine.cpp` because firing one needs the
+    // VM, and the VM is this class's.
+    void publishStreamingResults(const std::vector<core::InstanceId>& streamedOut,
+                                 const std::function<bool(core::DVec3, f64)>& areaResident);
+
     // The render-rate phase. Never fires headless -- headless is the same
     // scheduler minus the render steps, and this is one of them.
     void preRender(f64 renderDt);

@@ -25,7 +25,7 @@ TEST_CASE("the fixture hierarchy registers")
     CHECK(schema.modelClass != InvalidClass);
 
     // Slot 0 is the reserved "no class", so five classes means six entries.
-    CHECK(schema.classes.classCount() == 6);
+    CHECK(schema.classes.classCount() == 7);
     CHECK(schema.classes.findId(schema.atoms.intern("Part")) == schema.partClass);
     CHECK(schema.classes.findId(schema.atoms.intern("Nothing")) == InvalidClass);
 }

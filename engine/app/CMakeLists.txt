@@ -15,6 +15,7 @@ luaug_add_module(app
         src/replay.cpp
         src/bench.cpp
         src/screenshot.cpp
+        src/streaming_host.cpp
         src/debug_overlay.cpp
         src/inspector.cpp
         src/dev_control.cpp

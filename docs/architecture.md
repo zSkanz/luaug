@@ -362,7 +362,7 @@ payloads); the runtime materializes them through the same reflection path as
 scripts, and `AssetService:LoadModelAsync` + `Instance:Clone()` give the
 Unity-prefab-style instantiate-many workflow.
 
-**scene** (deps: core, jobs, physics_api) — ECS storage, Instance facade,
+**scene** (deps: core, jobs, physics_api, asset) — ECS storage, Instance facade,
 reflection, attributes/tags, signals, serialization, streaming glue, built-in
 systems (transform hierarchy, physics sync via an injected `IPhysics3D*`).
 Details in §4.

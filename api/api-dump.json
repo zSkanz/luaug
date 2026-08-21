@@ -1568,6 +1568,101 @@
       "Events": []
     },
     {
+      "Name": "StreamingService",
+      "Extends": "Instance",
+      "Tags": ["NotCreatable", "Service"],
+      "Properties": [
+        {
+          "Name": "Enabled",
+          "Type": "boolean",
+          "Default": "true",
+          "ThreadSafety": "ReadParallel"
+        },
+        {
+          "Name": "LoadRadius",
+          "Type": "number",
+          "Default": "1024",
+          "ThreadSafety": "ReadParallel"
+        },
+        {
+          "Name": "MinRadius",
+          "Type": "number",
+          "Default": "512",
+          "ThreadSafety": "ReadParallel"
+        },
+        {
+          "Name": "PauseOutsideLoadedArea",
+          "Type": "boolean",
+          "Default": "false",
+          "ThreadSafety": "ReadParallel"
+        }
+      ],
+      "Methods": [
+        {
+          "Name": "AddFocus",
+          "Parameters": [
+            {
+              "Name": "instance",
+              "Type": "Instance"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "LoadAreaAsync",
+          "Parameters": [
+            {
+              "Name": "position",
+              "Type": "vector"
+            },
+            {
+              "Name": "radius",
+              "Type": "number"
+            }
+          ],
+          "Returns": [],
+          "Yields": true,
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "RemoveFocus",
+          "Parameters": [
+            {
+              "Name": "instance",
+              "Type": "Instance"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Events": [
+        {
+          "Name": "AreaLoaded",
+          "Parameters": [
+            {
+              "Name": "position",
+              "Type": "vector"
+            },
+            {
+              "Name": "radius",
+              "Type": "number"
+            }
+          ]
+        },
+        {
+          "Name": "InstanceStreamedOut",
+          "Parameters": [
+            {
+              "Name": "instance",
+              "Type": "Instance"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "Name": "TagService",
       "Extends": "Instance",
       "Tags": ["NotCreatable", "Service"],
@@ -4559,6 +4654,23 @@
         {
           "Name": "Name",
           "Value": 0
+        }
+      ]
+    },
+    {
+      "Name": "StreamingMode",
+      "Items": [
+        {
+          "Name": "Atomic",
+          "Value": 1
+        },
+        {
+          "Name": "Default",
+          "Value": 0
+        },
+        {
+          "Name": "Persistent",
+          "Value": 2
         }
       ]
     },

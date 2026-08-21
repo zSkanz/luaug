@@ -924,6 +924,70 @@ bool setPhysicsServiceFixedTimestep(World& world, core::InstanceId, const Value&
     return true;
 }
 
+Value getStreamingServiceEnabled(const World& world, core::InstanceId)
+{
+    return world.engineState().streamingEnabled;
+}
+
+bool setStreamingServiceEnabled(World& world, core::InstanceId, const Value& value)
+{
+    const auto* flag = std::get_if<bool>(&value);
+    if (flag == nullptr)
+        return false;
+    world.engineState().streamingEnabled = *flag;
+    return true;
+}
+
+Value getStreamingServiceLoadRadius(const World& world, core::InstanceId)
+{
+    return world.engineState().streamingLoadRadius;
+}
+
+bool setStreamingServiceLoadRadius(World& world, core::InstanceId, const Value& value)
+{
+    const auto* number = std::get_if<f64>(&value);
+    // Strictly positive: a radius of zero is a world that never loads anything,
+    // which reads as "streaming is broken" rather than as "you asked for
+    // nothing".
+    if (number == nullptr || !finite(*number) || *number <= 0.0)
+        return false;
+    world.engineState().streamingLoadRadius = *number;
+    return true;
+}
+
+Value getStreamingServiceMinRadius(const World& world, core::InstanceId)
+{
+    return world.engineState().streamingMinRadius;
+}
+
+bool setStreamingServiceMinRadius(World& world, core::InstanceId, const Value& value)
+{
+    const auto* number = std::get_if<f64>(&value);
+    if (number == nullptr || !finite(*number) || *number <= 0.0)
+        return false;
+    // Deliberately NOT clamped against `LoadRadius`. The two are written in
+    // whichever order a script happens to write them, and refusing the first
+    // write because the second has not happened yet is a property that depends
+    // on statement order. The manager takes the smaller of the two as the
+    // must-have ring, which is the same answer without the trap.
+    world.engineState().streamingMinRadius = *number;
+    return true;
+}
+
+Value getStreamingServicePauseOutsideLoadedArea(const World& world, core::InstanceId)
+{
+    return world.engineState().streamingPauseOutsideLoadedArea;
+}
+
+bool setStreamingServicePauseOutsideLoadedArea(World& world, core::InstanceId, const Value& value)
+{
+    const auto* flag = std::get_if<bool>(&value);
+    if (flag == nullptr)
+        return false;
+    world.engineState().streamingPauseOutsideLoadedArea = *flag;
+    return true;
+}
+
 Value getDebugServiceOverlayVisible(const World& world, core::InstanceId)
 {
     return world.engineState().overlayVisible;

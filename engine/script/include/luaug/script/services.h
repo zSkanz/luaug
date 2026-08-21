@@ -28,6 +28,7 @@
 #include "luaug/script/tweens.h"
 
 #include <array>
+#include <functional>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -135,6 +136,19 @@ public:
 
     std::vector<ChildWaiter> childWaiters;
 
+    // `StreamingService.LoadAreaAsync` (M7), the same shape as a child waiter
+    // and for the same reason: the caller is parked on a condition the world
+    // will satisfy later, and the host is what notices. What a teleport calls
+    // before it moves the character, so the destination exists on arrival.
+    struct AreaWaiter
+    {
+        core::DVec3 position;
+        core::f64 radius = 0.0;
+        int threadRef = -1;
+        u64 scheduledTick = 0;
+    };
+    std::vector<AreaWaiter> areaWaiters;
+
     // Resolved once at boot. `fireRunServiceEvent` runs four times a tick and
     // `publishMessage` runs per `print`; hashing a string literal on either path
     // is a cost with no reason to exist.
@@ -142,10 +156,13 @@ public:
     core::NameAtom loaded;
     core::NameAtom preReload;
     core::NameAtom postReload;
+    core::NameAtom instanceStreamedOut;
+    core::NameAtom areaLoaded;
     scene::ClassId runServiceClass = 0;
     scene::ClassId tagServiceClass = 0;
     scene::ClassId debugServiceClass = 0;
     scene::ClassId hotReloadServiceClass = 0;
+    scene::ClassId streamingServiceClass = 0;
 
     // The hot-reload bag (ADR 0024). Never null: `ScriptRuntime` owns one so
     // that `SaveState` is never a silent no-op, and the host substitutes its
@@ -200,6 +217,17 @@ void publishFrameStats(lua_State* L, const FrameStats& stats);
 // sink is a process-wide slot the host owns, and a signal system that competed
 // for it would silently lose to whoever installed one last.
 void publishMessage(lua_State* L, core::LogLevel level, std::string_view text);
+
+// `StreamingService.InstanceStreamedOut`, one fire per instance that became a
+// husk. A husk is REPARENTED TO NIL rather than destroyed, so the handle a
+// script holds still resolves when the handler reads it (§4).
+void fireStreamedOut(lua_State* L, core::InstanceId instance);
+
+// Wakes every `LoadAreaAsync` whose area is now resident and fires
+// `AreaLoaded` for it. `resident` is the host's answer, because whether a
+// region is loaded is a question only the streaming host can answer and this
+// module must not learn what a chunk is.
+void resumeAreaWaiters(lua_State* L, const std::function<bool(core::DVec3, core::f64)>& resident);
 
 // Enqueues one of `RunService`'s phase signals with its delta in seconds. The
 // scheduler calls this at each resumption point; the fire drains like any other.

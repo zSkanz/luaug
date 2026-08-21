@@ -654,6 +654,15 @@ void WorldHost::publishStats(const script::FrameStats& stats)
     script::publishFrameStats(m_runtime->state(), stats);
 }
 
+void WorldHost::publishStreamingResults(const std::vector<core::InstanceId>& streamedOut,
+                                        const std::function<bool(core::DVec3, f64)>& areaResident)
+{
+    for (const core::InstanceId instance : streamedOut) {
+        script::fireStreamedOut(m_runtime->state(), instance);
+    }
+    script::resumeAreaWaiters(m_runtime->state(), areaResident);
+}
+
 void WorldHost::preRender(f64 renderDt)
 {
     // Step 3 of the frame: the render-rate half of the dispatch split

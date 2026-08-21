@@ -27,6 +27,9 @@ declare extern type EnumItem with
     read EnumType: any
 end
 
+declare extern type EnumStreamingMode extends EnumItem with
+end
+
 declare extern type EnumPartShape extends EnumItem with
 end
 
@@ -1092,6 +1095,7 @@ declare extern type DataModel extends Instance with
     function GetService(self, name: "Lighting"): Lighting
     function GetService(self, name: "RunService"): RunService
     function GetService(self, name: "ScriptService"): ScriptService
+    function GetService(self, name: "StreamingService"): StreamingService
     function GetService(self, name: "TagService"): TagService
     function GetService(self, name: "DebugService"): DebugService
     function GetService(self, name: "HotReloadService"): HotReloadService
@@ -1206,6 +1210,47 @@ declare extern type RunService extends Instance with
 end
 
 declare extern type ScriptService extends Instance with
+end
+
+declare extern type StreamingService extends Instance with
+    --- Whether the world streams at all. Turning it off FREEZES the current set rather than draining
+    --- it: nothing new is scheduled and nothing resident is evicted, which is what makes it usable as
+    --- `hold the world still while I do something`. Evicting while refusing to load would empty the
+    --- world one ring at a time and leave nothing to come back to.
+    Enabled: boolean
+    --- How far from a focus the engine tries to keep chunks resident, in studs. Best effort: a chunk
+    --- inside it is wanted, and one outside stays resident until it passes a WIDER ring, because a
+    --- single radius makes a focus standing on a boundary load and evict the same chunk every frame --
+    --- and the symptom of that is not a wrong world, it is a stutter nobody can find.
+    LoadRadius: number
+    --- The must-have ring, in studs. Everything inside it is guaranteed resident before a focus may
+    --- advance into it, so the character walks into a world that exists rather than through one that
+    --- has not arrived. Read `PauseOutsideLoadedArea` for what happens when it has not.
+    MinRadius: number
+    --- Whether the simulation waits when the minimum ring is not yet resident. A familiar streaming
+    --- pause, and the alternative is a character falling through ground that has not loaded. It is a
+    --- pause and not a rollback: the tick simply does not advance.
+    PauseOutsideLoadedArea: boolean
+    --- Fires when an area a script asked for has finished loading. Deferred like every signal.
+    read AreaLoaded: Signal<vector, number>
+    --- Fires for each instance that left the world while a script still held a reference to it.
+    --- Streamed out means REPARENTED TO NIL rather than destroyed, so the handle a script holds still
+    --- resolves -- it is a husk, and reading it is legal. An instance nothing referenced is simply
+    --- destroyed and does not fire this.
+    read InstanceStreamedOut: Signal<Instance>
+    --- Streams the world around this instance as well. A focus is normally the character or the camera;
+    --- several are legal and the engine keeps a chunk that any of them wants. An instance with no
+    --- position in the world is refused, because a focus that cannot be located would silently anchor
+    --- the world at the origin.
+    function AddFocus(self, instance: Instance): ()
+    --- Stops streaming around it. Removing the last focus does not unload the world: it stops anything
+    --- being wanted, and what is resident stays until something wants it gone.
+    function RemoveFocus(self, instance: Instance): ()
+    --- Yields until every chunk within `radius` of `position` is resident. What a teleport calls before
+    --- it moves the character, so the destination exists when they arrive. Returns immediately when the
+    --- area is already loaded, and raises rather than hanging when the world has no chunks there at
+    --- all.
+    function LoadAreaAsync(self, position: vector, radius: number): ()
 end
 
 declare extern type TagService extends Instance with
@@ -1423,6 +1468,12 @@ declare extern type AudioService extends Instance with
 end
 
 declare Enum: {
+    StreamingMode: {
+        Default: EnumStreamingMode,
+        Atomic: EnumStreamingMode,
+        Persistent: EnumStreamingMode,
+        GetEnumItems: (self: any) -> { EnumStreamingMode },
+    },
     PartShape: {
         Block: EnumPartShape,
         Ball: EnumPartShape,

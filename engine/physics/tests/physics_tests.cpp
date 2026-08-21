@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <doctest/doctest.h>
 #include <memory>
 #include <vector>
@@ -858,4 +859,178 @@ TEST_CASE("a character in mid-air does not inherit the platform it left")
     // happened underneath it and none of it was inherited.
     CHECK(state.transform.position.y > 5.0);
     CHECK(std::abs(state.transform.position.z) < 0.5);
+}
+
+// --- The floating origin (ADR 0014, architecture.md §10) ---------------------
+
+namespace {
+
+// One scenario, run wherever the caller puts it: a floor, a cube dropped onto
+// it from ten metres, and a hundred and twenty ticks of the result. What comes
+// back is the cube's motion RELATIVE to where it started, because that is the
+// thing that must not depend on where in the world the scenario is.
+[[nodiscard]] std::vector<core::DVec3> dropTrajectory(core::DVec3 at, core::DVec3 origin)
+{
+    Fixture fixture;
+    fixture.physics->setWorldOrigin(fixture.world, origin);
+
+    BodyDesc floor = floorDesc();
+    floor.transform.position = floor.transform.position + at;
+    fixture.spawn(floor);
+
+    const core::DVec3 start = at + core::DVec3{0.0, 10.0, 0.0};
+    const BodyHandle cube = fixture.physics->createBody(fixture.world, cubeDesc(start, 2));
+    REQUIRE(cube.valid());
+
+    std::vector<core::DVec3> trajectory;
+    trajectory.reserve(120);
+    for (int tick = 0; tick < 120; ++tick) {
+        fixture.physics->step(fixture.world, kFixedDt);
+        const BodyState state = fixture.physics->bodyState(fixture.world, cube);
+        trajectory.push_back(state.transform.position - start);
+    }
+    return trajectory;
+}
+
+// A micrometre. The grid the hash below quantizes onto, and the number is
+// chosen rather than picked:
+//
+//   * f64's own resolution at 1e7 is about 1.9 NANOMETRES, so the round trip
+//     through absolute world coordinates -- which is what a script reads and
+//     therefore what has to be compared -- carries a few nanometres of noise
+//     that no solver produced and no rebase can remove;
+//   * a real behavioural divergence is millimetres at the very least, because
+//     it comes from a contact resolving differently.
+//
+// So the grid sits five hundred times above the noise and a thousand times
+// below the signal. It is the same technique the render capture gate uses, and
+// for the same reason: hashing raw floats compares the representation instead
+// of the thing.
+constexpr core::f64 kTrajectoryGrid = 1.0e-6;
+
+[[nodiscard]] core::u64 hashTrajectory(const std::vector<core::DVec3>& trajectory)
+{
+    core::u64 hash = 1469598103934665603ull;
+    const auto mix = [&hash](core::f64 value) {
+        const auto quantized = static_cast<core::i64>(std::llround(value / kTrajectoryGrid));
+        core::u64 bits = 0;
+        std::memcpy(&bits, &quantized, sizeof(bits));
+        hash ^= bits;
+        hash *= 1099511628211ull;
+    };
+    for (const core::DVec3& sample : trajectory) {
+        mix(sample.x);
+        mix(sample.y);
+        mix(sample.z);
+    }
+    return hash;
+}
+
+} // namespace
+
+TEST_CASE("a body ten thousand kilometres out behaves exactly as one at the origin")
+{
+    // The roadmap's own gate item: "object behavior at coordinate 1e7 identical
+    // to origin (hash comparison)".
+    constexpr core::DVec3 far{1.0e7, 0.0, 1.0e7};
+
+    const std::vector<core::DVec3> atOrigin = dropTrajectory(core::DVec3{}, core::DVec3{});
+    const std::vector<core::DVec3> rebased = dropTrajectory(far, far);
+
+    REQUIRE(atOrigin.size() == rebased.size());
+    CHECK(hashTrajectory(atOrigin) == hashTrajectory(rebased));
+
+    // The SOLVER is bit-identical -- the origin is exactly the translation and
+    // `1e7 + 10` is exact in f64, so it is handed the same f32 inputs both
+    // times. What is not bit-identical is the value a script reads back, and
+    // the reason is worth stating: an absolute f64 coordinate at 1e7 has a
+    // resolution of about 1.9 nanometres, so the round trip out of local space
+    // and back quantizes. That is a property of f64 rather than of this
+    // engine, and the tolerance below is that number with room to spare.
+    constexpr core::f64 tolerance = 1.0e-7;
+    for (core::usize i = 0; i < atOrigin.size(); ++i) {
+        CHECK(std::abs(atOrigin[i].x - rebased[i].x) < tolerance);
+        CHECK(std::abs(atOrigin[i].y - rebased[i].y) < tolerance);
+        CHECK(std::abs(atOrigin[i].z - rebased[i].z) < tolerance);
+    }
+
+    // And it actually simulated: a cube dropped from ten metres onto a floor
+    // ends up about ten metres lower. A trajectory of zeroes would satisfy every
+    // comparison above.
+    CHECK(atOrigin.back().y == doctest::Approx(-9.5).epsilon(0.05));
+}
+
+TEST_CASE("without the origin, the same scenario ten thousand kilometres out is wrong")
+{
+    // The differential, and the reason the case above is not a gate that passes
+    // while doing nothing: leave the origin at zero and the solver receives f32
+    // coordinates whose quantum out there is most of a metre.
+    constexpr core::DVec3 far{1.0e7, 0.0, 1.0e7};
+
+    const std::vector<core::DVec3> atOrigin = dropTrajectory(core::DVec3{}, core::DVec3{});
+    const std::vector<core::DVec3> unrebased = dropTrajectory(far, core::DVec3{});
+
+    REQUIRE(atOrigin.size() == unrebased.size());
+    CHECK(hashTrajectory(atOrigin) != hashTrajectory(unrebased));
+}
+
+TEST_CASE("a rebase moves nothing in absolute terms and keeps the fall going")
+{
+    Fixture fixture;
+    fixture.spawn(floorDesc());
+
+    const BodyHandle cube = fixture.physics->createBody(fixture.world, cubeDesc(core::DVec3{0.0, 40.0, 0.0}, 2));
+    REQUIRE(cube.valid());
+
+    for (int tick = 0; tick < 30; ++tick) {
+        fixture.physics->step(fixture.world, kFixedDt);
+    }
+
+    const BodyState before = fixture.physics->bodyState(fixture.world, cube);
+    fixture.physics->setWorldOrigin(fixture.world, core::DVec3{5000.0, 0.0, -8000.0});
+    const BodyState after = fixture.physics->bodyState(fixture.world, cube);
+
+    // The world moved under the simulation and the simulation did not notice:
+    // the absolute position is what a script reads, and it is unchanged.
+    CHECK(after.transform.position.x == doctest::Approx(before.transform.position.x));
+    CHECK(after.transform.position.y == doctest::Approx(before.transform.position.y));
+    CHECK(after.transform.position.z == doctest::Approx(before.transform.position.z));
+
+    // Velocity survives, which is what "velocity-preserving teleport" means and
+    // is the difference between a rebase and a body stopping dead every time
+    // the camera walks far enough.
+    CHECK(after.linearVelocity.y == doctest::Approx(static_cast<double>(before.linearVelocity.y)));
+    CHECK(after.linearVelocity.y < -1.0f);
+
+    CHECK(fixture.physics->worldOrigin(fixture.world) == core::DVec3{5000.0, 0.0, -8000.0});
+
+    // And it keeps falling to the same place it would have.
+    for (int tick = 0; tick < 200; ++tick) {
+        fixture.physics->step(fixture.world, kFixedDt);
+    }
+    CHECK(fixture.physics->bodyState(fixture.world, cube).transform.position.y == doctest::Approx(0.5).epsilon(0.1));
+}
+
+TEST_CASE("two worlds in one process keep their own origins")
+{
+    // ADR 0014 says this twice: origin is World-scoped state and never a global.
+    // A future server running several simulation regions gives each its own.
+    Fixture first;
+    Fixture second;
+
+    first.physics->setWorldOrigin(first.world, core::DVec3{1000.0, 0.0, 0.0});
+    second.physics->setWorldOrigin(second.world, core::DVec3{-2.5e6, 0.0, 7.0e6});
+
+    CHECK(first.physics->worldOrigin(first.world) == core::DVec3{1000.0, 0.0, 0.0});
+    CHECK(second.physics->worldOrigin(second.world) == core::DVec3{-2.5e6, 0.0, 7.0e6});
+
+    const BodyHandle a = first.physics->createBody(first.world, cubeDesc(core::DVec3{3.0, 5.0, 0.0}, 7));
+    const BodyHandle b = second.physics->createBody(second.world, cubeDesc(core::DVec3{3.0, 5.0, 0.0}, 7));
+    REQUIRE(a.valid());
+    REQUIRE(b.valid());
+
+    // Same absolute coordinates in and out, whatever each world subtracts in
+    // between.
+    CHECK(first.physics->bodyState(first.world, a).transform.position.x == doctest::Approx(3.0));
+    CHECK(second.physics->bodyState(second.world, b).transform.position.x == doctest::Approx(3.0));
 }

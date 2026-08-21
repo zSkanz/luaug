@@ -14,6 +14,7 @@
 #include "luaug/app/inspector.h"
 #include "luaug/app/reload.h"
 #include "luaug/app/screenshot.h"
+#include "luaug/app/streaming_host.h"
 #include "luaug/app/world_host.h"
 #include "luaug/asset/content.h"
 #include "luaug/core/build_info.h"
@@ -363,6 +364,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // path is not a fallback here, it is the dev-mode path ADR 0010 keeps
     // forever.
     asset::ContentMounts contentMounts;
+
+    // The streamed world, if the project has one. Inactive and free for every
+    // project that does not, which is every example before this milestone.
+    StreamingHost streaming;
     std::unique_ptr<render::IRenderer> renderer;
     render::ShaderLibrary shaders;
     render::DebugRenderer debugRenderer;
@@ -451,6 +456,20 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             }
         }
         meshLoader.setContentMounts(&contentMounts);
+
+        if (isProject) {
+            // Mounted after the pack so a loose chunk overrides a built one,
+            // which is the same dev-mode override rule the content directory
+            // gets, and the index sits beside them both.
+            const std::filesystem::path built = options.scriptPath / ".luaug" / "content";
+            if (std::filesystem::is_directory(built, pathError)) {
+                contentMounts.mountDirectory(built);
+            }
+            if (!platform::initIo()) {
+                core::log(LogLevel::Warn, LUAUG_TR("app.warn.io_unavailable"), {});
+            }
+            (void)streaming.load(contentMounts, options.scriptPath / ".luaug" / "content.chunks.json");
+        }
         renderer = render::createDefaultRenderer();
         if (auto error = renderer->create(*device, shaders, colorFormat); error.has_value()) {
             core::logText(LogLevel::Warn, error->message);
@@ -632,6 +651,27 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // world is dropped by `onWorldChanged` rather than replayed against a
         // world that never issued the ids it names.
         inspector.applyPending(host->world());
+
+        // The streamed world advances at the SAME safe point, and for the same
+        // reason: materialising instances mid-tick is the mutation the reload
+        // below is forbidden for. Two milliseconds is architecture.md §10's
+        // budget, and it is denominated in time rather than in chunks because
+        // a chunk's cost varies with what is in it.
+        if (streaming.active()) {
+            streaming.setWorld(&host->world(), host->workspace());
+            streaming.setPhysics(host->physics());
+            streaming.pump(2.0);
+        }
+
+        // Published UNCONDITIONALLY, and the conformance suite is what settled
+        // it: a `LoadAreaAsync` in a project with no streamed world parked a
+        // coroutine nothing would ever resume. With no chunks there is nothing
+        // to wait for, so the honest answer is "loaded" on the next pump -- and
+        // it has to be given, because a call that hangs forever is worse than
+        // one that refuses.
+        host->publishStreamingResults(streaming.drainStreamedOut(), [&streaming](core::DVec3 position, f64 radius) {
+            return streaming.areaResident(position, radius);
+        });
 
         // The only place a reload happens, and for the same reason: a world
         // swapped mid-tick would break within-run determinism, which is the

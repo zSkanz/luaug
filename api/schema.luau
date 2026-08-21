@@ -284,7 +284,18 @@ local ServiceNameExceptions = { Workspace = true, Lighting = true }
 --- already read as past-tense facts and need no exception; renaming only the
 --- first of the three to `InputStarted` would break the set to satisfy a rule
 --- the other two already satisfy.
-local EventNameExceptions = { Heartbeat = true, MessageOut = true, FocusLost = true, InputBegan = true }
+--- `InstanceStreamedOut` is M7's, and it is the same shape as `FocusLost`: it
+--- IS a past-tense fact in English, and the pattern cannot see the particle
+--- that makes it one. §2.1 names it, and it is the name a person arriving from
+--- a familiar platform reaches for -- `InstanceStreamedOutEnded` is not a
+--- sentence anybody would write.
+local EventNameExceptions = {
+    Heartbeat = true,
+    MessageOut = true,
+    FocusLost = true,
+    InputBegan = true,
+    InstanceStreamedOut = true,
+}
 
 local function isPascalCase(name: string): boolean
     return string.match(name, PascalCase) ~= nil

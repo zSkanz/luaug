@@ -38,27 +38,28 @@ void registerEnums(EnumRegistry& enums, core::AtomTable& atoms);
 // validating an enum property names the same number a stored `EnumValue`
 // carries. A registry lookup by name would answer the same question and
 // would do it with a hash probe on a property write.
-inline constexpr EnumId PartShapeEnumId = 1;
-inline constexpr EnumId CollisionFidelityEnumId = 2;
-inline constexpr EnumId RaycastFilterTypeEnumId = 3;
-inline constexpr EnumId CharacterStateEnumId = 4;
-inline constexpr EnumId RotationOrderEnumId = 5;
-inline constexpr EnumId LogLevelEnumId = 6;
-inline constexpr EnumId RunContextEnumId = 7;
-inline constexpr EnumId KeyCodeEnumId = 8;
-inline constexpr EnumId InputActionTypeEnumId = 9;
-inline constexpr EnumId InputDeviceTypeEnumId = 10;
-inline constexpr EnumId UserInputTypeEnumId = 11;
-inline constexpr EnumId InputRateEnumId = 12;
-inline constexpr EnumId EasingStyleEnumId = 13;
-inline constexpr EnumId EasingDirectionEnumId = 14;
-inline constexpr EnumId PlaybackStateEnumId = 15;
-inline constexpr EnumId FillDirectionEnumId = 16;
-inline constexpr EnumId HorizontalAlignmentEnumId = 17;
-inline constexpr EnumId VerticalAlignmentEnumId = 18;
-inline constexpr EnumId SortOrderEnumId = 19;
-inline constexpr EnumId AutomaticSizeEnumId = 20;
-inline constexpr EnumId ScaleTypeEnumId = 21;
+inline constexpr EnumId StreamingModeEnumId = 1;
+inline constexpr EnumId PartShapeEnumId = 2;
+inline constexpr EnumId CollisionFidelityEnumId = 3;
+inline constexpr EnumId RaycastFilterTypeEnumId = 4;
+inline constexpr EnumId CharacterStateEnumId = 5;
+inline constexpr EnumId RotationOrderEnumId = 6;
+inline constexpr EnumId LogLevelEnumId = 7;
+inline constexpr EnumId RunContextEnumId = 8;
+inline constexpr EnumId KeyCodeEnumId = 9;
+inline constexpr EnumId InputActionTypeEnumId = 10;
+inline constexpr EnumId InputDeviceTypeEnumId = 11;
+inline constexpr EnumId UserInputTypeEnumId = 12;
+inline constexpr EnumId InputRateEnumId = 13;
+inline constexpr EnumId EasingStyleEnumId = 14;
+inline constexpr EnumId EasingDirectionEnumId = 15;
+inline constexpr EnumId PlaybackStateEnumId = 16;
+inline constexpr EnumId FillDirectionEnumId = 17;
+inline constexpr EnumId HorizontalAlignmentEnumId = 18;
+inline constexpr EnumId VerticalAlignmentEnumId = 19;
+inline constexpr EnumId SortOrderEnumId = 20;
+inline constexpr EnumId AutomaticSizeEnumId = 21;
+inline constexpr EnumId ScaleTypeEnumId = 22;
 
 } // namespace generated
 
@@ -187,6 +188,16 @@ void detachWorkspaceComponents(World& world, core::InstanceId id);
 
 // RunService
 Value getRunServiceSimTime(const World& world, core::InstanceId id);
+
+// StreamingService
+Value getStreamingServiceEnabled(const World& world, core::InstanceId id);
+bool setStreamingServiceEnabled(World& world, core::InstanceId id, const Value& value);
+Value getStreamingServiceLoadRadius(const World& world, core::InstanceId id);
+bool setStreamingServiceLoadRadius(World& world, core::InstanceId id, const Value& value);
+Value getStreamingServiceMinRadius(const World& world, core::InstanceId id);
+bool setStreamingServiceMinRadius(World& world, core::InstanceId id, const Value& value);
+Value getStreamingServicePauseOutsideLoadedArea(const World& world, core::InstanceId id);
+bool setStreamingServicePauseOutsideLoadedArea(World& world, core::InstanceId id, const Value& value);
 
 // DebugService
 Value getDebugServiceOverlayVisible(const World& world, core::InstanceId id);

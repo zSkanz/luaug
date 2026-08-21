@@ -451,6 +451,73 @@ int instanceWaitForChild(lua_State* L)
     return lua_yield(L, 0);
 }
 
+// --- StreamingService (M7) ---------------------------------------------------
+//
+// A focus is an INSTANCE rather than a position, so the world streams around
+// something that moves without a script pushing coordinates every frame. The
+// host reads the set once per frame and asks each entry where it is.
+
+int streamingAddFocus(lua_State* L)
+{
+    (void)checkInstance(L, 1);
+    const core::InstanceId focus = checkInstance(L, 2);
+
+    World& w = world(L);
+    // An instance with no position cannot anchor a world, and accepting one
+    // would silently stream around the origin -- which looks like "streaming is
+    // broken" rather than like "that was the wrong instance".
+    if (w.parts().find(focus) == nullptr && w.cameras().find(focus) == nullptr)
+        raise(L, LUAUG_TR("scene.err.streaming_focus_unlocatable"));
+
+    std::vector<core::InstanceId>& foci = w.streamingFoci();
+    const auto at = std::lower_bound(foci.begin(), foci.end(), focus,
+                                     [](core::InstanceId a, core::InstanceId b) { return a.index < b.index; });
+    // Sorted and deduplicated: adding the same focus twice would double its
+    // weight in nothing at all, but it would also make removal ambiguous.
+    if (at == foci.end() || at->index != focus.index)
+        foci.insert(at, focus);
+    return 0;
+}
+
+int streamingRemoveFocus(lua_State* L)
+{
+    (void)checkInstance(L, 1);
+    const core::InstanceId focus = checkInstance(L, 2);
+
+    std::vector<core::InstanceId>& foci = world(L).streamingFoci();
+    const auto at = std::lower_bound(foci.begin(), foci.end(), focus,
+                                     [](core::InstanceId a, core::InstanceId b) { return a.index < b.index; });
+    if (at != foci.end() && at->index == focus.index)
+        foci.erase(at);
+    return 0;
+}
+
+int streamingLoadAreaAsync(lua_State* L)
+{
+    (void)checkInstance(L, 1);
+    const core::Vec3 position = checkVector3(L, 2);
+    const f64 radius = luaL_checknumber(L, 3);
+    if (!(radius > 0.0))
+        raise(L, LUAUG_TR("scene.err.number_positive"));
+
+    ServiceState& state = services(L);
+    ServiceState::AreaWaiter waiter;
+    waiter.position = core::toDVec3(position);
+    waiter.radius = radius;
+    waiter.scheduledTick = world(L).engineState().tick;
+
+    lua_pushthread(L);
+    waiter.threadRef = lua_ref(L, -1);
+    lua_pop(L, 1);
+
+    // Always parks, even when the area is already resident: whether it is is a
+    // question only the host can answer, and answering it here would need this
+    // module to know what a chunk is. The host resumes it on the very next
+    // pump, so an already-loaded area costs one frame rather than a wait.
+    state.areaWaiters.push_back(waiter);
+    return lua_yield(L, 0);
+}
+
 // --- Registration ------------------------------------------------------------
 
 // --- HotReloadService --------------------------------------------------------
@@ -888,6 +955,10 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"RunService", "Resume", runServiceResume},
     {"RunService", "IsPaused", runServiceIsPaused},
 
+    {"StreamingService", "AddFocus", streamingAddFocus},
+    {"StreamingService", "RemoveFocus", streamingRemoveFocus},
+    {"StreamingService", "LoadAreaAsync", streamingLoadAreaAsync},
+
     {"TagService", "GetTagged", tagServiceGetTagged},
     {"TagService", "GetAllTags", tagServiceGetAllTags},
     {"TagService", "GetInstanceAddedSignal", tagServiceGetInstanceAddedSignal},
@@ -939,10 +1010,13 @@ void registerServices(lua_State* L)
     core::AtomTable& atoms = w.atoms();
 
     state.messageOut = atoms.intern("MessageOut");
+    state.instanceStreamedOut = atoms.intern("InstanceStreamedOut");
+    state.areaLoaded = atoms.intern("AreaLoaded");
     state.loaded = atoms.intern("Loaded");
     state.runServiceClass = w.classes().findId(atoms.intern("RunService"));
     state.tagServiceClass = w.classes().findId(atoms.intern("TagService"));
     state.debugServiceClass = w.classes().findId(atoms.intern("DebugService"));
+    state.streamingServiceClass = w.classes().findId(atoms.intern("StreamingService"));
     state.hotReloadServiceClass = w.classes().findId(atoms.intern("HotReloadService"));
     state.preReload = atoms.intern("PreReload");
     state.postReload = atoms.intern("PostReload");
@@ -1023,6 +1097,80 @@ void publishMessage(lua_State* L, core::LogLevel level, std::string_view text)
     pushEnumItem(L, scene::EnumValue{scene::generated::LogLevelEnumId, logLevel});
     fireEngineMessage(L, debug, descriptor->slot, lua_gettop(L) - 1, 2);
     lua_pop(L, 2);
+}
+
+void fireStreamedOut(lua_State* L, core::InstanceId instance)
+{
+    const core::InstanceId service = findServiceOfClass(L, services(L).streamingServiceClass);
+    if (!service.valid())
+        return;
+
+    const scene::EventDesc* descriptor =
+        world(L).classes().findEvent(world(L).classOf(service), services(L).instanceStreamedOut);
+    if (descriptor == nullptr)
+        return;
+
+    pushInstance(L, instance);
+    fireInstanceEvent(L, service, descriptor->slot, lua_gettop(L), 1);
+    lua_pop(L, 1);
+}
+
+void fireAreaLoaded(lua_State* L, core::Vec3 position, f64 radius)
+{
+    const core::InstanceId service = findServiceOfClass(L, services(L).streamingServiceClass);
+    if (!service.valid())
+        return;
+
+    const scene::EventDesc* descriptor =
+        world(L).classes().findEvent(world(L).classOf(service), services(L).areaLoaded);
+    if (descriptor == nullptr)
+        return;
+
+    pushVector3(L, position);
+    lua_pushnumber(L, radius);
+    fireInstanceEvent(L, service, descriptor->slot, lua_gettop(L) - 1, 2);
+    lua_pop(L, 2);
+}
+
+void resumeAreaWaiters(lua_State* L, const std::function<bool(core::DVec3, f64)>& resident)
+{
+    ServiceState& state = services(L);
+    if (state.areaWaiters.empty())
+        return;
+
+    // Collected first, for the reason `resumeChildWaiters` gives: a resumed
+    // coroutine may park another waiter, and the vector it would push onto is
+    // the one being walked.
+    std::vector<ServiceState::AreaWaiter> ready;
+    for (usize index = 0; index < state.areaWaiters.size();) {
+        const ServiceState::AreaWaiter& waiter = state.areaWaiters[index];
+        if (!resident(waiter.position, waiter.radius)) {
+            ++index;
+            continue;
+        }
+        ready.push_back(waiter);
+        state.areaWaiters.erase(state.areaWaiters.begin() + static_cast<std::ptrdiff_t>(index));
+    }
+
+    for (const ServiceState::AreaWaiter& waiter : ready) {
+        // The signal fires whether or not the coroutine survives the resume:
+        // `AreaLoaded` is a fact about the world rather than a reply to the
+        // caller, and a script that connected to it did not necessarily call
+        // `LoadAreaAsync`.
+        fireAreaLoaded(L, core::toVec3(waiter.position), waiter.radius);
+
+        lua_getref(L, waiter.threadRef);
+        lua_State* co = lua_tothread(L, -1);
+        if (co == nullptr) {
+            lua_pop(L, 1);
+            (void)lua_unref(L, waiter.threadRef);
+            continue;
+        }
+        const bool finished = resumeScheduled(L, co, 0);
+        lua_pop(L, 1);
+        if (finished)
+            (void)lua_unref(L, waiter.threadRef);
+    }
 }
 
 void fireRunServiceEvent(lua_State* L, core::NameAtom event, f64 delta)

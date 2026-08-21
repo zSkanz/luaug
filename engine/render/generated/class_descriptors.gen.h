@@ -40,27 +40,28 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms);
 // validating an enum property names the same number a stored `EnumValue`
 // carries. A registry lookup by name would answer the same question and
 // would do it with a hash probe on a property write.
-inline constexpr scene::EnumId PartShapeEnumId = 1;
-inline constexpr scene::EnumId CollisionFidelityEnumId = 2;
-inline constexpr scene::EnumId RaycastFilterTypeEnumId = 3;
-inline constexpr scene::EnumId CharacterStateEnumId = 4;
-inline constexpr scene::EnumId RotationOrderEnumId = 5;
-inline constexpr scene::EnumId LogLevelEnumId = 6;
-inline constexpr scene::EnumId RunContextEnumId = 7;
-inline constexpr scene::EnumId KeyCodeEnumId = 8;
-inline constexpr scene::EnumId InputActionTypeEnumId = 9;
-inline constexpr scene::EnumId InputDeviceTypeEnumId = 10;
-inline constexpr scene::EnumId UserInputTypeEnumId = 11;
-inline constexpr scene::EnumId InputRateEnumId = 12;
-inline constexpr scene::EnumId EasingStyleEnumId = 13;
-inline constexpr scene::EnumId EasingDirectionEnumId = 14;
-inline constexpr scene::EnumId PlaybackStateEnumId = 15;
-inline constexpr scene::EnumId FillDirectionEnumId = 16;
-inline constexpr scene::EnumId HorizontalAlignmentEnumId = 17;
-inline constexpr scene::EnumId VerticalAlignmentEnumId = 18;
-inline constexpr scene::EnumId SortOrderEnumId = 19;
-inline constexpr scene::EnumId AutomaticSizeEnumId = 20;
-inline constexpr scene::EnumId ScaleTypeEnumId = 21;
+inline constexpr scene::EnumId StreamingModeEnumId = 1;
+inline constexpr scene::EnumId PartShapeEnumId = 2;
+inline constexpr scene::EnumId CollisionFidelityEnumId = 3;
+inline constexpr scene::EnumId RaycastFilterTypeEnumId = 4;
+inline constexpr scene::EnumId CharacterStateEnumId = 5;
+inline constexpr scene::EnumId RotationOrderEnumId = 6;
+inline constexpr scene::EnumId LogLevelEnumId = 7;
+inline constexpr scene::EnumId RunContextEnumId = 8;
+inline constexpr scene::EnumId KeyCodeEnumId = 9;
+inline constexpr scene::EnumId InputActionTypeEnumId = 10;
+inline constexpr scene::EnumId InputDeviceTypeEnumId = 11;
+inline constexpr scene::EnumId UserInputTypeEnumId = 12;
+inline constexpr scene::EnumId InputRateEnumId = 13;
+inline constexpr scene::EnumId EasingStyleEnumId = 14;
+inline constexpr scene::EnumId EasingDirectionEnumId = 15;
+inline constexpr scene::EnumId PlaybackStateEnumId = 16;
+inline constexpr scene::EnumId FillDirectionEnumId = 17;
+inline constexpr scene::EnumId HorizontalAlignmentEnumId = 18;
+inline constexpr scene::EnumId VerticalAlignmentEnumId = 19;
+inline constexpr scene::EnumId SortOrderEnumId = 20;
+inline constexpr scene::EnumId AutomaticSizeEnumId = 21;
+inline constexpr scene::EnumId ScaleTypeEnumId = 22;
 
 } // namespace generated
 

@@ -296,9 +296,16 @@ struct ContactPair
 //
 // f64 in, f32 out. This is architecture.md §10's split and not a shortcut:
 // world precision is f64 in `scene` plus a floating origin, and physics runs in
-// the rebased f32 space. Until M7 rebases anything the origin is zero, so the
-// narrowing is the whole conversion -- and the day it is not, it is one
-// function.
+// the rebased f32 space.
+//
+// **M7 made the origin real, and the two functions below are now the WRONG ones
+// to call from inside a world.** They narrow against an origin of zero, which is
+// only correct for a world that has never rebased; `JoltWorld::toLocal` and
+// `::toWorld` are the pair that subtracts and adds the world's own origin, and
+// every call site inside the world uses those. These stay because the debug
+// bridge -- which is handed a sink and not a world -- needs a raw pair, and
+// because a raycast's DIRECTION is a displacement rather than a position and
+// must never be shifted.
 
 [[nodiscard]] JPH::Vec3 toJolt(core::Vec3 v) noexcept
 {
@@ -495,30 +502,37 @@ private:
 class DebugBridge final : public JPH::DebugRendererSimple
 {
 public:
-    explicit DebugBridge(IDebugDrawSink& sink) : m_sink(sink) {}
+    // The origin is passed in rather than read from a world, because the bridge
+    // is handed a sink and never a world -- and a wireframe drawn in local space
+    // while everything else is drawn in world space is D011 again, one rebase
+    // later.
+    DebugBridge(IDebugDrawSink& sink, core::DVec3 origin) : m_sink(sink), m_origin(origin) {}
 
     void DrawLine(JPH::RVec3Arg from, JPH::RVec3Arg to, JPH::ColorArg color) override
     {
-        m_sink.line(fromJoltPosition(from), fromJoltPosition(to), toRgb(color));
+        m_sink.line(toWorld(from), toWorld(to), toRgb(color));
     }
 
     void DrawTriangle(JPH::RVec3Arg v1, JPH::RVec3Arg v2, JPH::RVec3Arg v3, JPH::ColorArg color, ECastShadow) override
     {
         const u32 rgb = toRgb(color);
-        m_sink.line(fromJoltPosition(v1), fromJoltPosition(v2), rgb);
-        m_sink.line(fromJoltPosition(v2), fromJoltPosition(v3), rgb);
-        m_sink.line(fromJoltPosition(v3), fromJoltPosition(v1), rgb);
+        m_sink.line(toWorld(v1), toWorld(v2), rgb);
+        m_sink.line(toWorld(v2), toWorld(v3), rgb);
+        m_sink.line(toWorld(v3), toWorld(v1), rgb);
     }
 
     void DrawText3D(JPH::RVec3Arg, const JPH::string_view&, JPH::ColorArg, float) override {}
 
 private:
+    [[nodiscard]] core::DVec3 toWorld(JPH::RVec3Arg v) const noexcept { return fromJoltPosition(v) + m_origin; }
+
     [[nodiscard]] static u32 toRgb(JPH::ColorArg color) noexcept
     {
         return (static_cast<u32>(color.r) << 16) | (static_cast<u32>(color.g) << 8) | static_cast<u32>(color.b);
     }
 
     IDebugDrawSink& m_sink;
+    core::DVec3 m_origin;
 };
 #endif
 
@@ -571,6 +585,68 @@ public:
 
     JoltWorld(const JoltWorld&) = delete;
     JoltWorld& operator=(const JoltWorld&) = delete;
+
+    // --- The floating origin (ADR 0014, architecture.md §10) ------------------
+    //
+    // Every position crossing this seam is ABSOLUTE f64 -- that is what `scene`
+    // stores and what a script reads. Everything inside Jolt is f32 relative to
+    // `m_origin`. These two are the whole translation, and they are members
+    // rather than free functions precisely so that a call site cannot forget
+    // which space it is in: there is no way to reach a body's position without
+    // going through one of them.
+    //
+    // A DIRECTION never passes through here. A ray's direction is a
+    // displacement, and shifting it would turn a hundred-metre ray into a
+    // hundred-metre ray pointing at the old origin.
+    [[nodiscard]] JPH::RVec3 toLocal(core::DVec3 v) const noexcept { return toJoltPosition(v - m_origin); }
+
+    [[nodiscard]] core::DVec3 toWorld(JPH::RVec3Arg v) const noexcept { return fromJoltPosition(v) + m_origin; }
+
+    [[nodiscard]] core::DVec3 origin() const noexcept { return m_origin; }
+
+    // Moves the world under the simulation. Every resident body and character
+    // shifts by the negative of the delta, so **nothing moves in absolute
+    // terms** -- which is the entire point, and is why the test for this is a
+    // hash rather than a picture.
+    //
+    // Velocities are untouched, and that is not an omission: a teleport that
+    // reset them would stop a falling body dead every time the origin moved,
+    // which is architecture.md's "velocity-preserving teleport" spelled out.
+    // Bodies are NOT activated, because a sleeping body that wakes on a rebase
+    // is a world that behaves differently depending on where the camera is.
+    void setOrigin(core::DVec3 origin)
+    {
+        if (origin == m_origin) {
+            return;
+        }
+
+        const JPH::Vec3 delta = toJolt(core::toVec3(origin - m_origin));
+        m_origin = origin;
+
+        JPH::BodyInterface& bodies = m_system.GetBodyInterface();
+        for (const BodyRecord& record : m_bodies) {
+            if (!record.alive) {
+                continue;
+            }
+            JPH::RVec3 position;
+            JPH::Quat rotation;
+            bodies.GetPositionAndRotation(record.id, position, rotation);
+            bodies.SetPositionAndRotation(record.id, position - delta, rotation, JPH::EActivation::DontActivate);
+        }
+
+        // A kinematic body's pending target is a POSITION and shifts with
+        // everything else. Missing this would send every moving platform back
+        // to where it was before the rebase, once, on the frame it happened.
+        for (PendingMove& move : m_kinematicMoves) {
+            move.position = move.position - delta;
+        }
+
+        for (const CharacterRecord& record : m_characters) {
+            if (record.character != nullptr) {
+                record.character->SetPosition(record.character->GetPosition() - delta);
+            }
+        }
+    }
 
     void setGravity(core::Vec3 gravity)
     {
@@ -699,12 +775,12 @@ public:
             // and each write walked every pending move before it, which cost
             // four milliseconds a tick that the benchmark found immediately.
             m_kinematicMoves.push_back(
-                PendingMove{record->id, toJoltPosition(transform.position), toJolt(transform.rotation)});
+                PendingMove{record->id, toLocal(transform.position), toJolt(transform.rotation)});
             return;
         }
 
         m_system.GetBodyInterface().SetPositionAndRotation(
-            record->id, toJoltPosition(transform.position), toJolt(transform.rotation),
+            record->id, toLocal(transform.position), toJolt(transform.rotation),
             record->motion == MotionType::Static ? JPH::EActivation::DontActivate : JPH::EActivation::Activate);
     }
 
@@ -772,7 +848,7 @@ public:
         JPH::RVec3 position;
         JPH::Quat rotation;
         bodies.GetPositionAndRotation(record->id, position, rotation);
-        state.transform.position = fromJoltPosition(position);
+        state.transform.position = toWorld(position);
         state.transform.rotation = fromJolt(rotation);
         JPH::Vec3 linear;
         JPH::Vec3 angular;
@@ -842,7 +918,7 @@ public:
 
     [[nodiscard]] bool raycast(const RayD& ray, const QueryFilter& filter, RayHit& outHit) const
     {
-        const JPH::RRayCast cast{toJoltPosition(ray.origin), toJolt(ray.direction)};
+        const JPH::RRayCast cast{toLocal(ray.origin), toJolt(ray.direction)};
         const BodyFilterAdapter bodyFilter(*this, filter);
         const LayerFilterAdapter layerFilter(filter);
 
@@ -862,7 +938,7 @@ public:
         const JPH::RVec3 point = cast.GetPointOnRay(collector.hit.mFraction);
         outHit.body = handle;
         outHit.userData = record->userData;
-        outHit.position = fromJoltPosition(point);
+        outHit.position = toWorld(point);
         // The fraction is along the ray as given, and the ray's length is the
         // direction's magnitude -- `Workspace:Raycast(origin, direction)` takes
         // an unnormalised direction whose length IS the range.
@@ -874,7 +950,7 @@ public:
     [[nodiscard]] bool spherecast(const RayD& ray, f32 radius, const QueryFilter& filter, RayHit& outHit) const
     {
         const JPH::SphereShape sphere(std::max(radius, 0.005f));
-        const JPH::RShapeCast cast(&sphere, JPH::Vec3::sOne(), JPH::RMat44::sTranslation(toJoltPosition(ray.origin)),
+        const JPH::RShapeCast cast(&sphere, JPH::Vec3::sOne(), JPH::RMat44::sTranslation(toLocal(ray.origin)),
                                    toJolt(ray.direction));
         const BodyFilterAdapter bodyFilter(*this, filter);
         const LayerFilterAdapter layerFilter(filter);
@@ -894,7 +970,7 @@ public:
 
         outHit.body = handle;
         outHit.userData = record->userData;
-        outHit.position = fromJoltPosition(JPH::RVec3(collector.hit.mContactPointOn2));
+        outHit.position = toWorld(JPH::RVec3(collector.hit.mContactPointOn2));
         outHit.distance = collector.hit.mFraction * core::length(ray.direction);
         const JPH::Vec3 axis = collector.hit.mPenetrationAxis;
         outHit.normal = axis.IsNearZero() ? core::Vec3{0.0f, 1.0f, 0.0f} : fromJolt(-axis.Normalized());
@@ -908,7 +984,7 @@ public:
                                           std::max(size.z * 0.5f, 0.005f)),
                                 0.0f);
         const JPH::RMat44 centerOfMass =
-            JPH::RMat44::sRotationTranslation(toJolt(transform.rotation), toJoltPosition(transform.position));
+            JPH::RMat44::sRotationTranslation(toJolt(transform.rotation), toLocal(transform.position));
         const BodyFilterAdapter bodyFilter(*this, filter);
         const LayerFilterAdapter layerFilter(filter);
 
@@ -993,7 +1069,7 @@ public:
         record.stepHeight = desc.stepHeight;
         record.userData = desc.userData;
         record.layer = settings.mInnerBodyLayer;
-        record.character = new JPH::CharacterVirtual(&settings, toJoltPosition(desc.transform.position),
+        record.character = new JPH::CharacterVirtual(&settings, toLocal(desc.transform.position),
                                                      toJolt(desc.transform.rotation), desc.userData, &m_system);
 
         return CharacterHandle{slot, record.generation};
@@ -1054,7 +1130,7 @@ public:
         if (record == nullptr) {
             return;
         }
-        record->character->SetPosition(toJoltPosition(transform.position));
+        record->character->SetPosition(toLocal(transform.position));
         record->character->SetRotation(toJolt(transform.rotation));
     }
 
@@ -1066,7 +1142,7 @@ public:
             return state;
         }
 
-        state.transform.position = fromJoltPosition(record->character->GetPosition());
+        state.transform.position = toWorld(record->character->GetPosition());
         state.transform.rotation = fromJolt(record->character->GetRotation());
         state.linearVelocity = fromJolt(record->character->GetLinearVelocity());
 
@@ -1100,7 +1176,7 @@ public:
     void debugDraw([[maybe_unused]] IDebugDrawSink& sink)
     {
 #ifdef JPH_DEBUG_RENDERER
-        DebugBridge bridge(sink);
+        DebugBridge bridge(sink, m_origin);
         JPH::BodyManager::DrawSettings settings;
         settings.mDrawShape = true;
         settings.mDrawShapeWireframe = true;
@@ -1151,8 +1227,8 @@ private:
         record.group = desc.group;
         record.userData = desc.userData;
 
-        JPH::BodyCreationSettings settings(shape, toJoltPosition(desc.transform.position),
-                                           toJolt(desc.transform.rotation), toJoltMotion(desc.motion),
+        JPH::BodyCreationSettings settings(shape, toLocal(desc.transform.position), toJolt(desc.transform.rotation),
+                                           toJoltMotion(desc.motion),
                                            encodeLayer(desc.group, desc.motion != MotionType::Static));
         settings.mFriction = desc.friction;
         settings.mRestitution = desc.restitution;
@@ -1322,6 +1398,7 @@ private:
     ObjectPairFilter m_pairFilter;
     JPH::TempAllocatorImpl m_temp;
     JPH::JobSystemSingleThreaded m_jobs;
+    core::DVec3 m_origin;
     JPH::PhysicsSystem m_system;
     ContactRecorder m_contacts;
 
@@ -1462,6 +1539,19 @@ public:
         if (JoltWorld* world = resolve(handle); world != nullptr) {
             world->setGravity(gravity);
         }
+    }
+
+    void setWorldOrigin(WorldHandle handle, core::DVec3 origin) override
+    {
+        if (JoltWorld* world = resolve(handle); world != nullptr) {
+            world->setOrigin(origin);
+        }
+    }
+
+    [[nodiscard]] core::DVec3 worldOrigin(WorldHandle handle) const override
+    {
+        const JoltWorld* world = resolve(handle);
+        return world != nullptr ? world->origin() : core::DVec3{};
     }
 
     [[nodiscard]] BodyHandle createBody(WorldHandle handle, const BodyDesc& desc) override

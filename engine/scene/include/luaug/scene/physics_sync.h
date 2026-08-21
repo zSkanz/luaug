@@ -56,6 +56,35 @@ public:
     // signals. Called from the sim tick and from nowhere else.
     void step(f64 fixedDt);
 
+    // --- The floating origin (ADR 0014, architecture.md §10) ------------------
+    //
+    // The tree stores absolute f64 and always has; what the origin changes is
+    // the f32 space the solver works in. Scripts never see it, which is ADR
+    // 0014's "rebasing is invisible to Luau" one layer down: a `CFrame` read
+    // after a rebase is the same `CFrame` read before it.
+    //
+    // **Call at a safe point.** A rebase between two ticks is a translation of
+    // everything at once; a rebase inside one would move the world under a
+    // solver halfway through it.
+    void setOrigin(core::DVec3 origin);
+    [[nodiscard]] core::DVec3 origin() const noexcept { return m_origin; }
+
+    // How far a focus may drift before the origin should follow it. Four
+    // kilometres is architecture.md §10's number: f32 has about 24 bits of
+    // mantissa, so at 4 km the quantum is a quarter of a millimetre and a
+    // contact still resolves cleanly.
+    static constexpr f64 RebaseThreshold = 4000.0;
+
+    // The policy, separated from the mechanism so a test can drive either. True
+    // when `focus` has left the tolerance around the current origin; the caller
+    // then decides whether this is a safe point.
+    [[nodiscard]] bool shouldRebase(core::DVec3 focus, f64 threshold = RebaseThreshold) const noexcept;
+
+    // How many times the origin has moved. A counter rather than a log line:
+    // a world that rebases every frame is a world whose threshold has hysteresis
+    // it does not have, and that shows up as a number climbing.
+    [[nodiscard]] u64 rebaseCount() const noexcept { return m_rebaseCount; }
+
     // The physics world's own handle, for the query methods the bindings
     // expose. `Workspace:Raycast` is a read of the same world the tick steps.
     [[nodiscard]] physics::WorldHandle worldHandle() const noexcept { return m_world; }
@@ -198,6 +227,8 @@ private:
     u32 m_groupRevision = 0xffffffffu;
     core::InstanceId m_workspace;
     Timings m_timings;
+    core::DVec3 m_origin;
+    u64 m_rebaseCount = 0;
 };
 
 } // namespace luaug::scene

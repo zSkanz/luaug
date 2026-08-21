@@ -24,6 +24,12 @@ namespace luaug::core {
 static_assert(std::numeric_limits<f32>::has_infinity, "the empty AABB is built from an f32 infinity");
 inline constexpr f32 kInfinity = std::numeric_limits<f32>::infinity();
 
+// The f64 one, and it exists because the Linux tier refused the alternative:
+// initialising a `DVec3` with `kInfinity` is an implicit float-to-double
+// promotion, which MSVC accepts silently and Clang rejects under
+// `-Wdouble-promotion`. Two names rather than one conversion nobody meant.
+inline constexpr f64 kInfinityD = std::numeric_limits<f64>::infinity();
+
 // Bit-identical to the Luau `vector` primitive, which IS Vector3 (ADR 0013):
 // three contiguous f32, no padding, no fourth lane. `lua_tovector` hands back a
 // `const float*` into exactly this shape, so a binding can reinterpret rather
@@ -329,6 +335,47 @@ struct AABB
 
     [[nodiscard]] constexpr bool operator==(const AABB&) const noexcept = default;
 };
+
+// The f64 counterpart, named in architecture.md §2's `core` list since planning
+// and needed by the first thing that measures a distance in WORLD terms: a
+// streaming manager scoring a chunk ten kilometres away cannot do it in f32,
+// because at that range f32 loses the metre that decides whether the chunk is
+// inside the radius.
+//
+// Deliberately not a template over `AABB`. The two are used in different places
+// for different reasons -- one bounds geometry for a renderer, the other bounds
+// a region of the world -- and a shared template would invite passing one where
+// the other belongs.
+struct DAABB
+{
+    DVec3 min{kInfinityD, kInfinityD, kInfinityD};
+    DVec3 max{-kInfinityD, -kInfinityD, -kInfinityD};
+
+    [[nodiscard]] static constexpr DAABB fromMinMax(DVec3 min, DVec3 max) noexcept { return DAABB{min, max}; }
+
+    [[nodiscard]] constexpr bool operator==(const DAABB&) const noexcept = default;
+};
+
+[[nodiscard]] constexpr bool isEmpty(const DAABB& box) noexcept
+{
+    return box.max.x < box.min.x || box.max.y < box.min.y || box.max.z < box.min.z;
+}
+
+[[nodiscard]] constexpr DVec3 center(const DAABB& box) noexcept
+{
+    return DVec3{(box.min.x + box.max.x) * 0.5, (box.min.y + box.max.y) * 0.5, (box.min.z + box.max.z) * 0.5};
+}
+
+// Zero for a point inside the box, which is what makes it usable directly as a
+// streaming score: a focus standing in a chunk scores it at zero and nothing
+// outranks it.
+[[nodiscard]] constexpr f64 distanceSquared(const DAABB& box, DVec3 point) noexcept
+{
+    const f64 dx = point.x < box.min.x ? box.min.x - point.x : (point.x > box.max.x ? point.x - box.max.x : 0.0);
+    const f64 dy = point.y < box.min.y ? box.min.y - point.y : (point.y > box.max.y ? point.y - box.max.y : 0.0);
+    const f64 dz = point.z < box.min.z ? box.min.z - point.z : (point.z > box.max.z ? point.z - box.max.z : 0.0);
+    return dx * dx + dy * dy + dz * dz;
+}
 
 // True when the box holds nothing at all, which is what a default-constructed
 // one is. Any inverted axis counts: a box cannot be half-empty.

@@ -107,6 +107,19 @@ struct EngineState
     bool paused = false;
     bool overlayVisible = false;
 
+    // `StreamingService`'s knobs (M7). Here rather than in a component for the
+    // same reason `FixedTimestep` is: a service with one instance and no
+    // hierarchy of its own has nothing a component would buy, and the host
+    // reads these once per frame to build the manager's focus list.
+    //
+    // The radii are in studs and the pair is a RANGE rather than a value: the
+    // engine keeps chunks inside `streamingLoadRadius` and guarantees the ones
+    // inside `streamingMinRadius` before a focus may advance into them.
+    bool streamingEnabled = true;
+    f64 streamingLoadRadius = 1024.0;
+    f64 streamingMinRadius = 512.0;
+    bool streamingPauseOutsideLoadedArea = false;
+
     // `InputService`'s own state (M6). The pointer position is a SNAPSHOT taken
     // once per frame, like M5's keyboard: two reads inside one tick agree, and a
     // recorded input stream can hand the same answer back with no mouse.
@@ -286,10 +299,22 @@ public:
     [[nodiscard]] CollisionGroups& collisionGroups() noexcept { return m_collisionGroups; }
     [[nodiscard]] const CollisionGroups& collisionGroups() const noexcept { return m_collisionGroups; }
 
+    // `StreamingService`'s focus set (M7). A sorted vector rather than a set:
+    // it holds two or three entries, the host walks it every frame, and R10
+    // forbids an unordered container's order reaching observable output -- the
+    // order foci are scored in decides which chunk wins a tie.
+    [[nodiscard]] std::vector<core::InstanceId>& streamingFoci() noexcept { return m_streamingFoci; }
+    [[nodiscard]] const std::vector<core::InstanceId>& streamingFoci() const noexcept { return m_streamingFoci; }
+
     [[nodiscard]] core::AtomTable& atoms() noexcept { return m_atoms; }
     // A property getter takes a `const World&`, and resolving an atom to text
     // is the one thing it routinely needs the table for.
     [[nodiscard]] const core::AtomTable& atoms() const noexcept { return m_atoms; }
+
+private:
+    std::vector<core::InstanceId> m_streamingFoci;
+
+public:
     [[nodiscard]] const ClassRegistry& classes() const noexcept { return m_classes; }
     // Held here rather than reached separately because every consumer that has
     // one reflection table wants the other: a property write validates an enum

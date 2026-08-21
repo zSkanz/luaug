@@ -12,12 +12,14 @@
 luaug_add_module(asset
     LAYER 2
     SOURCES
+        src/chunk.cpp
         src/content.cpp
         src/image.cpp
         src/gltf.cpp
         src/mesh_format.cpp
         src/pack.cpp
         src/primitives.cpp
+        src/streaming.cpp
         src/texture.cpp
     DEPS
         core
@@ -45,12 +47,14 @@ luaug_add_module_tests(asset
     MODULES
         asset
     SOURCES
+        tests/chunk_tests.cpp
         tests/content_tests.cpp
         tests/image_tests.cpp
         tests/gltf_tests.cpp
         tests/mesh_format_tests.cpp
         tests/pack_tests.cpp
         tests/primitive_tests.cpp
+        tests/streaming_tests.cpp
         tests/texture_tests.cpp
 )
 

@@ -25,6 +25,31 @@ local Schema = require("../schema")
 local Definition: Schema.Definition = {
     Enums = {
         {
+            Name = "StreamingMode",
+            Doc = "How a `Model` behaves when the streaming system reaches it (api-design.md §2.1).",
+            Items = {
+                {
+                    Name = "Default",
+                    Value = 0,
+                    Doc = "Its descendants stream in and out independently, which is what a world of scenery "
+                        .. "wants: a distant building's parts can leave one at a time.",
+                },
+                {
+                    Name = "Atomic",
+                    Value = 1,
+                    Doc = "The model streams as ONE unit: either every descendant is resident or none is. What a "
+                        .. "machine assembled from moving parts needs, because half a mechanism is worse than "
+                        .. "none of it.",
+                },
+                {
+                    Name = "Persistent",
+                    Value = 2,
+                    Doc = "Never streamed out, whatever the focus does. The character, the checkpoint it "
+                        .. "respawns at, and anything a script holds a long-lived reference to.",
+                },
+            } :: { Schema.EnumItem },
+        },
+        {
             Name = "PartShape",
             Doc = "The solid a `Part` renders and collides as; `MeshPart` carries geometry instead (§2.2).",
             Items = {
