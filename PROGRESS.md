@@ -5,16 +5,27 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- **M7 — Scaling the World — IN PROGRESS, started 2026-08-21.** The brief is
-  [`docs/briefs/m7-kickoff.md`](docs/briefs/m7-kickoff.md), with its eleven
-  decisions, its build order in seven phases and the gate copied verbatim. The
-  milestone builds the open-world substrate: an offline asset pipeline with
-  deterministic content-addressed output, a job system and async IO, a
-  per-World floating origin, and chunked streaming — plus the five `Inert`
-  markers that were waiting for a way to hand the engine a file, Inter, and
-  `CharacterBody:Jump()` in mid-air. The previous milestone's gate was re-run
-  green before any work started: 34 ctest targets on Windows, 33 in the Tier-2
-  container, 1,081 conformance cases, docs and format clean.
+- **M7 — Scaling the World — SCOPE AND GATE COMPLETE, awaiting human review.**
+  The brief is [`docs/briefs/m7-kickoff.md`](docs/briefs/m7-kickoff.md), with a
+  filled Gate Record and eleven Findings. **Every scope item and every gate item
+  is done**: the offline pipeline, the job system and async IO, the per-World
+  floating origin, chunked streaming with `StreamingService`, runtime LOD
+  selection by projected screen error, `ITransport` with ENet behind it,
+  `@std/net`, the Recast seam with no integration, the assimp importer, Inter,
+  mid-air `Jump()`, `examples/05-streaming`, and all five `Inert` markers that
+  named this milestone. Two `Inert` markers remain and both are M7.5's.
+  **The six gate items, with numbers**: 25 MiB peak against a declared 192 MiB
+  ceiling over 17,939 frames; zero hitches over 33 ms inside streaming, worst
+  pump 1.9 ms; identical hashes at 1e7 with a differential; 292 files
+  byte-identical across two processes; a loopback echo in both directions; 4,000
+  bit flips all refused.
+  **Nine defects found and fixed (D032–D040)**, eight of them by instruments this
+  milestone built — including D040, which turned out to be what M6 Finding 17
+  had been all along: header changes were rebuilding NOTHING, so every
+  incremental Windows build in the project's history had been silently reusing
+  stale objects.
+  **The last local gate**: all five stages green, 39 ctest targets on Windows and
+  38 in the Tier-2 container, 1,108 conformance cases.
 - **M6 — Playing the World — COMPLETE, signed off 2026-08-21**, tagged
   `milestone/m6`. The brief is
   [`docs/briefs/m6-kickoff.md`](docs/briefs/m6-kickoff.md), with its fifteen
@@ -105,17 +116,13 @@ quietly.
   half, and the crash handler is in place for the next occurrence — the next
   report should carry `luaug-crash-<pid>.dmp` and `luaug.log` from beside
   whatever was being run.
-- **D018 — `luaug_net_tests` hung once** on Windows and passed on a re-run. §12
-  quarantines on the second occurrence; this is the entry that makes a second
-  one countable.
-- **The build agreeing is not evidence that the build read your file.** A
-  break-verification restored with `Copy-Item` kept the source's old timestamp,
-  Ninja rebuilt nothing, and a passing fix was reported as failing against code
-  that was no longer on disk. Restore with `cp` and `touch`. **M6 found the same
-  shape from the other end**: a `DrawQuad` that grew by one field left a stale
-  object behind and produced a segfault in a test that had nothing to do with the
-  change. `--clean-first` on the module was the answer, and "a mysterious crash
-  right after a struct changed size" is now a known first thing to check.
+- **The build agreeing is not evidence that the build read your file, and on
+  Windows it was not evidence that it read your HEADER either.** D040: ninja
+  recorded no header dependencies at all, so `--clean-first` was load-bearing
+  for two milestones and nobody knew why. Fixed by `chcp 65001`, which the gate
+  now sets. The older half still applies: a break-verification restored with
+  `Copy-Item` keeps the source's old timestamp and rebuilds nothing — restore
+  with `cp` and `touch`.
 - **D028's remaining half — `Touched` for a character's SIDE contacts.** The
   ground half is fixed; a wall walked into still fires nothing, because the
   character's non-ground contacts are not on the `IPhysics3D` seam. That is a
@@ -123,75 +130,13 @@ quietly.
 - **D026 — the capture gate records an upload's SIZE and not its contents**, so
   the quads a frame draws are invisible to the blocking render gate. What holds
   the line meanwhile is in the row.
-- **M7's first step, written out so it is not re-derived**: the asset pipeline is
-  what four `Inert` markers now name. `TextLabel.Font`, `ImageLabel.Image`,
-  `ImageLabel.ScaleType`, `ImageLabel.SliceCenter`, `ScrollFrame.ScrollBarThickness`
-  and `MeshPart.CollisionFidelity` are each stored, read back, and acted on by
-  nothing — and `tools/repo/inertcheck.luau` is the gate that will not let a
-  seventh join them quietly.
-- **Three of M6's decisions went against a document, and all three are ADRs.**
-  0039 (an `InputContext` declares its dispatch rate; the IAS's enums are total),
-  0040 (a `UDim2` placement is arithmetic, so v1 does not call Clay), and 0041
-  (`InputService` gains the raw event surface ADR 0029 had ruled out). 0040 is
-  the one a reviewer should read for the process: the milestone declined to use a
-  dependency it had vendored, did NOT remove it because that is not the agent's
-  call, and the human answered on 2026-08-21 — so Clay is un-vendored now. 0041
-  is the one to read for the judgement: the technical objection to raw events was
-  never to events, it was to events read from the OS, and every part of it
-  dissolved once they came out of the IAS's own pipeline. What changed the answer
-  was a PRODUCT argument the agent had not weighed.
-- **The renderer submits one draw call per visible object, and that is the
-  engine's real ceiling for a crowd.** Measured 2026-08-20 against a
-  survivors-like horde: two thousand enemies run at 11.1 ms a frame, of which
-  1.8 ms is the whole simulation and 6.9 ms is submitting 2,092 forward draws —
-  and the same scene costs the same 10.2 ms at 320×180 as at 4K, for twelve
-  thousand triangles. Instanced draws are now named M7.5 scope with that number
-  attached; the table is in `docs/perf-baselines.md`.
-- **The physics mirror costs ~160 ns per body per tick to decide nothing
-  changed.** Recorded in `docs/perf-baselines.md`. The remaining fix is a
-  dirty-flag design, and it belongs with M7's streaming rather than with M6.
-- **A check on a moving thing names a window, not a moment.** Three M5 test
-  cases in a row failed by measuring after the thing they were testing: a
-  character crosses a six-metre ledge in a second and a half, so a check taken at
-  the end reads "never climbed" and means "climbed and kept going".
-- **A picture of two things at once catches what neither test can.** The Jolt
-  debug-draw bridge found, on the frame it first drew, that `CharacterBody` was
-  the one `BasePart` whose `Position` meant its feet. Every test passed.
-- **Physics arriving changed what every scene already in the repository meant.**
-  An unanchored part is a rigid body, and every example, fixture and benchmark
-  predates that. The proof the change is inert where it should be is that
-  `capture_gate_meshes` passes against the unchanged M4.5 golden.
-- **A gate can be stronger than the guarantee it rests on, and get away with it
-  until the day it cannot.** Committing a determinism trace and checking it on CI
-  is a cross-BUILD check; ADR 0025 promises same-build. Four milestones of
-  integer and tree state paid nothing for the gap, and the first floating-point
-  scenario spent it — on CI, at tick 600 of 3,600, with nothing about the gate
-  having changed.
-- **A gate that can pass while doing nothing keeps being built by accident.**
-  Twelve instances in six milestones. M5's was a conformance run reporting "938
-  passed, 0 failed" over a suite that had silently lost seventeen cases to a
-  syntax error.
-- **A golden cannot detect a defect that was present when it was recorded.** It
-  asserts stability, not correctness, and it *feels* like the other one. The
-  shape that catches this is a differential.
-- **Test the step that resolves, not the step that computes.** M5 acted on this:
-  the host test asserts that a part falls in a world no script touched, because a
-  mirror that was never handed a `Workspace` produces a world where nothing does
-  and every API-level test still passes.
-- **The Linux tier is the only thing between this repository and a whole family
-  of defects** MSVC does not mention — M5 added an ABI one to the family: Jolt
-  compiled `-fno-rtti` emits no typeinfo, so a class deriving from one of its
-  types fails to link on Clang and links fine on MSVC.
-- Carried forward, none blocking:
-  - **Two of the five generated artifacts api-design.md §5 lists do not exist**:
-    the typed `@std`/`@luaug` stubs and `docs/reference/**`.
-  - **The shipping profile does not configure**, and needs a bytecode-loading
-    path that does not exist. Scheduled with `luaug build` at M8.
-  - **DXIL produced on Linux is never verified as signed.** M8.
-  - **The message catalog does not load inside the APK.** `Catalog::loadFromFile`
-    uses `std::filesystem`; `loadFromJson` plus `platform::readTextFile` is the
-    fix.
-
+- **M7 is done and unreviewed.** The scope and the gate are complete and the
+  Gate Record is filled; what is left is a human reading it. Nothing here should
+  write "COMPLETE" or tag `milestone/m7` before that.
+- **What M7 deliberately does not have** is listed at the end of its Gate
+  Record, and the two worth carrying forward are: no shipped example has a mesh
+  dense enough to exercise LOD selection, so `MeshLodDraws` reads zero until one
+  does; and `@std/net` is client-side only, with `net.serve` reserved.
 ## Blocked — needs human
 
 - **ANSWERED 2026-08-20 — the font is an asset, and the engine ships exactly
@@ -306,6 +251,35 @@ quietly.
 Entries for the planning session and for M0 through M4 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
+
+- **2026-08-21 (session 12 continued, Claude Opus): M7 finished — scope, gate,
+  and nine defects.** Streaming, `StreamingService` and `examples/05-streaming`;
+  the soak gate; `@std/net` and `ITransport` over ENet; the nav seam; runtime
+  LOD; the asset determinism gate; Inter and the UI texture path; images with
+  three scale types; scroll bars; decoded audio; convex-hull collision; the
+  assimp importer.
+
+  **A human reported the deliverable losing frame rate — 100 fps to 35 over five
+  minutes — and that one report opened seven of the nine defects.** Reproduced
+  by counting instances rather than by trusting the frame rate: the world grew
+  by a thousand instances every fifteen seconds because `setWorld` rebuilt the
+  streaming glue every frame and threw away the record of what was resident.
+  Building the gate that would have caught it found the next two; making that
+  gate measure what it CLAIMS -- time inside streaming rather than whole frames
+  -- found two more.
+
+  **And the last one was the build itself.** M6 Finding 17 had been recorded four
+  times as "a stale object after a struct changed size, use `--clean-first`".
+  The fifth time somebody touched a header and read the output: `ninja: no work
+  to do`. A localised MSVC emits the `/showIncludes` prefix in the console
+  codepage while CMake writes it as UTF-8, so **no header dependency had ever
+  been recorded** and every incremental Windows build in the project had been
+  unreliable. `chcp 65001`, verified by touching a header and watching the
+  object rebuild; the Windows stage went 45 s to 109 s on the first run after,
+  which is the sound of two milestones of staleness clearing.
+
+  The lesson is in the brief: a workaround that always works is
+  indistinguishable from an explanation, and it stops the search.
 
 - **2026-08-21 (session 12, Claude Opus): M7 started; the substrate and the
   offline pipeline are in.** The brief with its eleven decisions, then

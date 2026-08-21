@@ -54,27 +54,27 @@ that is the only way a person can see whether it works.
       format, basis_universal/KTX2 textures, meshopt LODs, content-addressed
       pack + manifest, deterministic outputs (same input, same hashes; enables
       CI caching)
-- [ ] **assimp as the offline-CLI-only importer** for exotic formats,
+- [x] **assimp as the offline-CLI-only importer** for exotic formats,
       normalizing to glTF 2.0 — never linked into the runtime
 - [x] **Engine job system + async IO**
-- [ ] **64-bit world coordinates + floating origin** (render-relative
+- [x] **64-bit world coordinates + floating origin** (render-relative
       translation; origin/rebase is per-World state, never a global — ADR 0014)
       — enforced by tests
-- [ ] **Chunked world format + StreamingService semantics** (load/unload radius
+- [x] **Chunked world format + StreamingService semantics** (load/unload radius
       around foci, priority queue, budgeted per-frame materialization)
-- [ ] **Basic LOD switching**
-- [ ] **Low-level net primitives**: GameNetworkingSockets + ENet behind the
+- [x] **Basic LOD switching**
+- [x] **Low-level net primitives**: GameNetworkingSockets + ENet behind the
       transport interface, exposed as the minimal socket/HTTP surface via
       `@std/net` (loopback echo example only — replication is post-v1)
-- [ ] **Recast/Detour**: vendored, seam defined, **no integration** (explicit
+- [x] **Recast/Detour**: vendored, seam defined, **no integration** (explicit
       non-goal, ADR 0022)
-- [ ] **The default typeface ships here**: Inter, OFL 1.1, vendored with its
+- [x] **The default typeface ships here**: Inter, OFL 1.1, vendored with its
       licence in `THIRD_PARTY_NOTICES.md` (R6). `TextLabel.Font` stops being
       `Inert` and the marker goes with it
-- [ ] **`CharacterBody:Jump()` stops refusing in mid-air** (human decision,
+- [x] **`CharacterBody:Jump()` stops refusing in mid-air** (human decision,
       2026-08-21), with the doc sentence about calling it every frame, and the
       three call-site migrations
-- [ ] **Deliverable:** `examples/05-streaming` — a procedurally generated large
+- [x] **Deliverable:** `examples/05-streaming` — a procedurally generated large
       world (no giant binary assets in the repo), fly-cam, ImGui chunk-state
       overlay, memory graph
 
@@ -84,13 +84,13 @@ The five remaining `Inert` markers name this milestone in their own docs
 (`tools/repo/inertcheck.luau` is what keeps them honest), and four of the five
 are `Inert` for exactly one reason: there was no way to hand the engine a file.
 
-- [ ] `ImageLabel.Image` / `ImageButton.Image` — a real texture, so the flat
+- [x] `ImageLabel.Image` / `ImageButton.Image` — a real texture, so the flat
       tint becomes a picture
-- [ ] `ImageLabel.ScaleType` and `SliceCenter` — meaningless until there is an
+- [x] `ImageLabel.ScaleType` and `SliceCenter` — meaningless until there is an
       image to scale or slice
-- [ ] `ScrollFrame.ScrollBarThickness` — the one that is *not* an asset
+- [x] `ScrollFrame.ScrollBarThickness` — the one that is *not* an asset
       question; it is a bar nobody drew
-- [ ] `MeshPart.CollisionFidelity` — a hull needs mesh geometry the physics
+- [x] `MeshPart.CollisionFidelity` — a hull needs mesh geometry the physics
       mirror cannot see, and the asset system is what gives it eyes
 
 ## NOT in scope
@@ -137,14 +137,14 @@ discovery. Fifteen items.
 
 ## Gate checklist (verbatim from roadmap)
 
-- [ ] scripted 5-minute fly-through: peak memory under the declared ceiling
-- [ ] zero frame hitches >33 ms attributable to streaming (frame-time histogram
+- [x] scripted 5-minute fly-through: peak memory under the declared ceiling
+- [x] zero frame hitches >33 ms attributable to streaming (frame-time histogram
       asserted)
-- [ ] float-precision test: object behavior at coordinate 1e7 identical to
+- [x] float-precision test: object behavior at coordinate 1e7 identical to
       origin (hash comparison)
-- [ ] asset build determinism check in CI
-- [ ] loopback socket echo test
-- [ ] pak round-trip fuzz test (truncated/corrupt pak, structured error, no
+- [x] asset build determinism check in CI
+- [x] loopback socket echo test
+- [x] pak round-trip fuzz test (truncated/corrupt pak, structured error, no
       crash)
 
 ## The decisions this brief makes
@@ -491,6 +491,196 @@ time.
    arrays. **A round-trip test has to assert the invariant the codec promises,
    not the strongest invariant the author can imagine.**
 
+5. **A symptom recorded four times as a "pattern to remember" was a defect
+   nobody had looked for.** Twice in M6 and twice in M7 an access violation
+   landed in code that had nothing wrong with it, immediately after a struct
+   gained members, and every time `--clean-first` fixed it. It went into the
+   findings as M6 Finding 17: *a stale object file after a struct changed size*.
+   True, and not an explanation.
+
+   The fifth time, somebody touched a header and read the output: `ninja: no work
+   to do`. Ninja matches a prefix against `/showIncludes` to learn a file's
+   header dependencies; CMake writes that prefix as UTF-8; a LOCALISED MSVC emits
+   it in the console codepage. The two never matched, so **not one header
+   dependency had ever been recorded** and every incremental Windows build in the
+   project's history had been unreliable. `chcp 65001` fixes it, verified by
+   touching the header and watching the object rebuild.
+
+   The general shape: **a workaround that always works is indistinguishable from
+   an explanation, and it stops the search.** "Remember to use `--clean-first`"
+   is a sentence that costs one debugging session every time it is right. The
+   test that found it took one minute and could have been run at any point in
+   two milestones.
+
+6. **The gate that measures the wrong thing passes for the wrong reason, and
+   then fails for the wrong reason.** The soak gate's hitch check first read
+   whole frames. It could not support the claim the roadmap asks for — "hitches
+   attributable to streaming" — and on the Tier-2 container it went red on
+   eighteen frames out of eighteen thousand that had nothing to do with
+   streaming.
+
+   Changing it to read the time spent inside the streaming pump did two things
+   at once: it made the claim true, and it immediately found two real defects
+   (D038, D039) that the whole-frame version had been averaging away. The
+   roadmap had already said it — *budget and gate should measure the same thing*
+   — and the sentence read like style advice until the gate was wrong in both
+   directions on the same afternoon.
+
+7. **Both of this milestone's new gates passed vacuously the first time.** The
+   soak ran in 0.17 s over eleven instances because `--rhi=null` skipped the
+   content mount; the determinism gate compared two files because `assetc`
+   writes a pack and a manifest even for an empty input. Flat frame times over an
+   empty world are exactly what a leak detector wants to see.
+
+   Both now carry a declared minimum — `--soak-min-instances`, `MIN_FILES` — and
+   the rule they encode is worth stating: **a gate that cannot fail on nothing is
+   not a gate.** The failure mode is not a red build; it is a green one nobody
+   questions.
+
+8. **The engine's own timeline is not the wall clock, and a test that forgets
+   that fails on a fast machine.** Three cases in this milestone waited on
+   `task.wait` for something a SOCKET was doing. Headless runs the simulation as
+   fast as the machine allows, so two seconds of sim time is milliseconds of real
+   time — less than a worker thread needs to be scheduled at all.
+
+   The fix is to spin on `os.clock` when the thing being waited for keeps
+   wall-clock time, and it has a corollary that bit separately: a conformance run
+   carries a hundred-thousand-FRAME budget, so a case that waits on the wall
+   clock *spends* that budget and the suite is killed mid-run. The `@std/net`
+   conformance spec is written so that every request fails during URL PARSING,
+   before a socket exists — the park-and-resume path is identical and the socket
+   is `luaug_net_tests`' job.
+
+9. **`Inert` was five markers and one gap.** Four of the five named this
+   milestone for the same reason — there was no way to hand the engine a file —
+   and the fifth (`ScrollBarThickness`) was a bar nobody had drawn. But the UI
+   could not sample a TEXTURE at all: `DrawQuad` had `uvMin`, `uvMax` and a
+   `texture` index, and the vertex had no UV and the pipeline had no sampler. The
+   fields were a promise, not a path.
+
+   So the font and the images were one change and not two, and the ordering
+   mattered: building the texture path for the typeface — which the human had
+   decided independently — is what turned `Image`, `ScaleType` and `SliceCenter`
+   from a milestone's work into a day's. **A cluster of deferred items with one
+   name in their docs is usually one missing capability wearing five hats.**
+
+10. **M6's seam held, and that is worth recording because it is rare.**
+    `text.cpp` was written with the glyph key already face-size-codepoint and the
+    store already a cache rather than a bake, on an argument stated at the time:
+    *an atlas baked once at boot works exactly as long as there is one face at
+    one size*. When the real face arrived the key did not change, `measureText`
+    and `buildTextGeometry` kept their signatures, and what changed was what
+    fills an entry.
+
+    The cost of getting that right in M6 was a paragraph of reasoning and a
+    slightly odd-looking cache key. The saving in M7 was not rewriting the text
+    system. Seams pay when the shape of the future thing is guessed correctly,
+    and the way to guess correctly is to name the property that will change —
+    here, "there will be more than one face" — rather than the feature.
+
+11. **A variable font has a default master, and stb_truetype does not know
+    which.** Inter ships no static TTF at the pinned tag, and stb_truetype draws
+    the outlines in `glyf` — which for a variable font is one particular master.
+    If that master had been Thin, every label in the engine would have been
+    hairline and the cause would have been invisible.
+
+    It is Regular, and the way that is known is a test measuring the ink coverage
+    of a capital H against its own bounding box: about two fifths for Regular,
+    an eighth for Thin, two thirds for Black. **When a dependency's behaviour is
+    a fact rather than a contract, assert the fact.**
+
 ## Gate Record
 
-(filled at milestone end, before human review)
+Filled at milestone end, before human review. Every number below was produced by
+a command in this repository, and the command is named beside it.
+
+### The roadmap's six
+
+| Gate item | Where it runs | Result |
+|---|---|---|
+| Scripted 5-minute fly-through, peak memory under the declared ceiling | `ctest -R streaming_soak` | **25 MiB peak against a declared 192 MiB.** 17,939 frames — five minutes of sim in about nine seconds of wall clock, because the fixed 1/60 s headless step decouples the two |
+| Zero frame hitches >33 ms attributable to streaming, frame-time histogram asserted | `ctest -R streaming_soak` | **Zero.** Worst pump inside streaming 1.9 ms; whole-frame median 0.44 ms, p99 0.83 ms, worst 3.8 ms. The histogram is in `streaming-soak.json` |
+| Float precision: behaviour at 1e7 identical to the origin, hash comparison | `ctest -R determinism` | Identical hashes, with a differential proving the un-rebased case differs |
+| Asset build determinism check in CI | `ctest -R asset_determinism` | **292 files byte-identical across two PROCESSES.** Break-verified both ways: an empty content tree is refused by the declared minimum |
+| Loopback socket echo test | `ctest -R "^net$"` | Both directions, over a real ENet handshake, with the disconnect |
+| Pak round-trip fuzz: truncated or corrupt pack gives a structured error and no crash | `ctest -R "^asset$"` | 4,000 bit flips, every one refused. The first run found a real hole and the format changed (Finding 1) |
+
+### The gate's own honesty
+
+Two of the six say something narrower than they first appear, and the narrowing
+is written into the code rather than left for a reader to discover.
+
+**"Attributable to streaming" is now measured, not assumed.** The hitch check
+originally read whole frames, which cannot support that claim — and it went red
+in the Tier-2 container on eighteen frames that had nothing to do with streaming.
+The roadmap's own performance note says it plainly: *budget and gate should
+measure the same thing*. The budget is two milliseconds of materialisation per
+frame, so the check now reads the time a frame spent inside the streaming pump.
+Whole frames are kept as a p99 backstop that tolerates a scheduler and does not
+tolerate a machine that is uniformly slow.
+
+**The soak runs on the null backend**, so a GPU-side leak is invisible to it.
+That is a deliberate trade recorded in `tests/streamsoak/run_soak_gate.cmake`:
+the gate cannot attribute a hitch to a cause, so a driver's scheduling on
+whatever machine CI allocated would land in the same histogram as a slow chunk,
+and the first flaky failure teaches everyone to ignore the gate. What was removed
+is the renderer; what is measured — residency, decode, materialisation, eviction,
+physics, the tick — is all still there.
+
+Both gates carry a declared minimum (`--soak-min-instances`, `MIN_FILES`) because
+each of them passed vacuously once. A gate that cannot fail on nothing is not a
+gate.
+
+### The full local gate
+
+`scripts/localgate.ps1`, all five stages, on the commit this record is written
+against:
+
+```
+  ok    docs     (6.2 s)
+  ok    luau     (5.7 s)
+  ok    format   (10.7 s)
+  ok    windows  (47.2 s)
+  ok    linux    (55.8 s)
+```
+
+39 ctest targets on Windows, 38 on Linux, 1,108 conformance cases, and the Luau
+gate's own nine.
+
+### Defects found and fixed during the milestone
+
+Nine, and eight of them were found by instruments this milestone built. That
+ratio is the milestone's real result: the gates were not written to pass.
+
+| | What | Found by |
+|---|---|---|
+| D033 | The streamed world grew by a thousand instances every fifteen seconds and never shrank; 100 fps to 35 over five minutes | A human playing the deliverable |
+| D034 | `--rhi=null` mounted no content: 289 chunks became eleven instances and the soak passed in 0.17 s | Wiring D033's gate |
+| D035 | A refused connection waited out its whole timeout on Windows — present since M3 | `@std/net`'s first request |
+| D036 | The frame loop's poller starved the network worker thread | `@std/net`'s first request |
+| D037 | The job system deadlocked on shutdown and hung the local gate | The gate hanging, and a minidump |
+| D038 | `SDL_LoadFileAsync` opens the file synchronously: 5–141 ms on the frame thread | The soak gate's first honest run |
+| D039 | `ContentMounts::resolve` read every file in full to decide it existed, then read it again | The same measurement |
+| D040 | **Header changes rebuilt nothing.** Every incremental Windows build had been silently reusing stale objects for the whole project | Someone finally touching a header and reading the output |
+| — | M6 Finding 17, recorded four times as a pattern to remember, WAS D040 | — |
+
+### What this milestone does not have
+
+Stated here so a reviewer does not have to find it by looking.
+
+- **No shipped example carries a mesh dense enough to have a LOD chain**, so the
+  selector answers level zero everywhere and `MeshLodDraws` reads zero. The
+  arithmetic is unit-proven and the plumbing has a differential; what is missing
+  is content, and `MeshLodDraws` is the instrument that will show it the day
+  there is some.
+- **`@std/net` is client-side only.** `net.serve` does not exist and is reserved,
+  with the reasoning at the top of `net_module.cpp`. `https` is refused rather
+  than downgraded: this build vendors no TLS library.
+- **`ITransport` has one implementation.** GameNetworkingSockets stays unvendored
+  with a manifest row that says why.
+- **Recast is vendored and has no build target at all**, which is the scope
+  bullet. `engine/nav` is a header and a stub that proves the seam compiles.
+- **The exotic importer does not import images.** A material's factors survive;
+  its maps do not.
+- **Skinned meshes take LOD zero only**, because joint weights are indexed by
+  vertex and the simplifier drops vertices.
