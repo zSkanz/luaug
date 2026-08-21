@@ -109,6 +109,14 @@ public:
 
     void setCallbacks(StreamingCallbacks callbacks) { m_callbacks = std::move(callbacks); }
 
+    // Forgets that anything is resident WITHOUT asking for an eviction.
+    // Narrow on purpose: the one legitimate caller is a host whose scene went
+    // away underneath it, where the instances are already gone and an evict
+    // callback would be asking a glue that never materialised them to destroy
+    // ids that no longer exist. Every other path must evict properly -- this
+    // one drops the record because the record's subject is gone.
+    void forgetResidency() noexcept;
+
     // Replaces the focus set wholesale. A vector rather than an add/remove pair
     // because the caller has the authoritative list every frame anyway, and two
     // ways to change one set is one way too many.

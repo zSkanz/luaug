@@ -48,6 +48,14 @@ public:
     // for its absence would warn on every example in the tree.
     [[nodiscard]] bool load(const asset::ContentMounts& mounts, const std::filesystem::path& indexPath);
 
+    // Idempotent, and that is the contract rather than an optimisation. The
+    // frame loop calls this every frame so that a hot reload's new world is
+    // picked up at the safe point -- and the glue is where the record of WHICH
+    // instances belong to which resident chunk lives, so rebuilding it on an
+    // unchanged world throws that record away. The manager goes on believing
+    // those chunks are resident and asks to evict them; the fresh glue has
+    // never heard of them and does nothing. That was D032: a world that grew by
+    // a thousand instances every fifteen seconds and never shrank.
     void setWorld(scene::World* world, core::InstanceId streamRoot);
     void setPhysics(scene::PhysicsSync* physics) noexcept { m_physics = physics; }
 
@@ -82,6 +90,11 @@ private:
     std::unique_ptr<scene::StreamingGlue> m_glue;
     const asset::ContentMounts* m_mounts = nullptr;
     scene::World* m_world = nullptr;
+    // Half of `setWorld`'s identity check. The root matters as much as the
+    // world: the same `World` re-rooted elsewhere is a different mount, and a
+    // glue still holding the old root would parent chunks into a folder that is
+    // no longer the stream root.
+    core::InstanceId m_streamRoot;
     scene::PhysicsSync* m_physics = nullptr;
     bool m_active = false;
     u64 m_rebases = 0;

@@ -7,7 +7,7 @@
   "engine.boot.info.crash_artifact": "On a crash, a dump will be written to {path}.",
   "engine.boot.shutdown": "Shutting down (reason: {reason}).",
 
-  "engine.cli.usage": "Usage: luaug-host [script.luau] [--headless --frames=N --exit] [--rhi=NAME] | --run-tests=DIR | --replay=DIR [--record-replay] | --version | --help",
+  "engine.cli.usage": "Usage: luaug-host [script.luau] [--headless --frames=N --exit] [--frame-stats] [--soak-report=FILE [--soak-ceiling-mb=N]] [--rhi=NAME] | --run-tests=DIR | --replay=DIR [--record-replay] | --version | --help",
   "engine.cli.err.no_script": "No script given. Usage: luaug-host <script.luau>",
   "engine.cli.err.unknown_option": "Unknown option: {option}.",
   "engine.cli.err.bad_value": "Not a valid value: {option}.",
@@ -66,6 +66,14 @@
   "engine.frame.warn.catch_up_clamped": "Frame took {ms} ms; dropped simulated time after {ticks} catch-up ticks.",
   "engine.frame.info.stats": "{frames} measured frames: median {median} ms, worst {worst} ms, {draws} draws, {triangles} triangles.",
   "engine.close.warn.grace_expired": "A BindToClose handler was still running after {seconds} s; the shutdown is going ahead without it.",
+  "engine.soak.info.report": "Soak: {frames} frames, median {median} ms, p99 {p99} ms, worst {worst} ms, peak {peak} MiB, instances {early} -> {late}. Report written to {path}.",
+  "engine.soak.err.no_frames": "The soak recorded no frames after warm-up; it was shorter than the warm-up window and proves nothing.",
+  "engine.soak.err.empty_world": "The soak saw at most {peak} instances, below the {minimum} the caller declared; it measured an empty world.",
+  "engine.soak.err.hitches": "{hitches} frame(s) took longer than {threshold} ms; the worst was {worst} ms.",
+  "engine.soak.err.over_ceiling": "Peak resident memory was {peak} MiB, over the declared ceiling of {ceiling} MiB.",
+  "engine.soak.err.growing": "The world grew from {early} to {late} instances between the second and the fourth quarter of the run; a streamed world flattens.",
+  "engine.soak.err.report_write_failed": "Could not write the soak report to {path}.",
+  "engine.soak.err.failed": "The soak gate failed: {failures} check(s) did not pass. See the report at {path}.",
   "engine.frame.info.summary": "Ran {frames} frames, {ticks} simulation ticks.",
 
   "scene.err.collision_groups_full": "There is no room for another collision group; a world holds at most 1024.",

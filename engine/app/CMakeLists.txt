@@ -15,6 +15,7 @@ luaug_add_module(app
         src/replay.cpp
         src/bench.cpp
         src/screenshot.cpp
+        src/soak.cpp
         src/streaming_host.cpp
         src/debug_overlay.cpp
         src/inspector.cpp
@@ -109,6 +110,7 @@ luaug_add_module_tests(app
         tests/world_host_tests.cpp
         tests/debug_overlay_tests.cpp
         tests/inspector_tests.cpp
+        tests/soak_tests.cpp
 )
 
 if(LUAUG_BUILD_TESTS)
@@ -220,6 +222,35 @@ if(LUAUG_BUILD_TESTS)
     # One repeat here rather than the default three. The gate asks whether the
     # engine still works, and three runs of a 10,000-instance scene is thirty
     # seconds of CI for a number nobody reads.
+    # M7's gate: the scripted five-minute fly-through over `examples/05-streaming`,
+    # asserting peak memory under a declared ceiling and a frame-time histogram
+    # with no hitch over 33 ms.
+    #
+    # Eighteen thousand frames is five minutes of SIM time and about ten seconds
+    # of wall clock, because the fixed 1/60 s headless step decouples the two.
+    # That is the whole reason a five-minute gate is affordable at all.
+    #
+    # THE THIRD ASSERTION IS THE ONE THAT EARNED ITS PLACE. D032 degraded from
+    # 100 fps to 35 over five minutes with no hitch anywhere and no ceiling
+    # breach -- a thousand instances leaked every fifteen seconds. `soak.h`
+    # explains why the instance count flattening is the property that separates
+    # a streamed world from a growing one.
+    #
+    # The ceiling is 192 MiB against 25 MiB measured. Loose rather than tight on
+    # purpose: it is a backstop for a leak the growth check somehow misses, and a
+    # ceiling with no headroom is a gate that goes red when an allocator changes.
+    add_test(NAME streaming_soak
+        COMMAND ${CMAKE_COMMAND}
+            -DHOST=$<TARGET_FILE:luaug_host>
+            -DASSETC=$<TARGET_FILE:assetc>
+            -DPROJECT=${CMAKE_SOURCE_DIR}/examples/05-streaming
+            -DREPORT=${CMAKE_CURRENT_BINARY_DIR}/streaming-soak.json
+            -DFRAMES=18000
+            -DCEILING_MB=192
+            -DMIN_INSTANCES=1000
+            -P ${CMAKE_SOURCE_DIR}/tests/streamsoak/run_soak_gate.cmake)
+    set_tests_properties(streaming_soak PROPERTIES TIMEOUT 600)
+
     add_test(NAME perf_budget
         COMMAND luaug_host --bench=${CMAKE_SOURCE_DIR}/tests/bench --bench-repeats=1)
     set_tests_properties(perf_budget PROPERTIES TIMEOUT 600 LABELS perf)

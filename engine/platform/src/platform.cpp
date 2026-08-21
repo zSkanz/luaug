@@ -9,6 +9,19 @@
 #include <SDL3/SDL_platform_defines.h>
 #include <chrono>
 
+#if defined(_WIN32)
+// windows.h before psapi.h: psapi's declarations use the Win32 typedefs.
+#include <windows.h>
+
+#include <psapi.h>
+#elif defined(__linux__)
+#include <cstdio>
+
+#include <unistd.h>
+#elif defined(__APPLE__)
+#include <mach/mach.h>
+#endif
+
 namespace luaug::platform {
 namespace {
 
@@ -105,6 +118,44 @@ u64 nowNs() noexcept
     // every platform we target.
     const auto since = std::chrono::steady_clock::now().time_since_epoch();
     return static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(since).count());
+}
+
+u64 residentBytes() noexcept
+{
+#if defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS counters{};
+    counters.cb = sizeof(counters);
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters)) == 0) {
+        return 0;
+    }
+    return static_cast<u64>(counters.WorkingSetSize);
+#elif defined(__linux__)
+    // `statm` rather than `status`: two integers on one line, in pages, with
+    // no parsing beyond the second field. `status`'s VmRSS is the same number
+    // behind a line search and a unit suffix.
+    std::FILE* const statm = std::fopen("/proc/self/statm", "rb");
+    if (statm == nullptr) {
+        return 0;
+    }
+    unsigned long long total = 0;
+    unsigned long long resident = 0;
+    const int read = std::fscanf(statm, "%llu %llu", &total, &resident);
+    (void)std::fclose(statm);
+    if (read != 2) {
+        return 0;
+    }
+    return static_cast<u64>(resident) * static_cast<u64>(::sysconf(_SC_PAGESIZE));
+#elif defined(__APPLE__)
+    mach_task_basic_info info{};
+    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, reinterpret_cast<task_info_t>(&info), &count) !=
+        KERN_SUCCESS) {
+        return 0;
+    }
+    return static_cast<u64>(info.resident_size);
+#else
+    return 0;
+#endif
 }
 
 const Paths& paths()

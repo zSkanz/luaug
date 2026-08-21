@@ -118,6 +118,36 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
             options.frameStats = true;
             continue;
         }
+
+        // M7's gate. The report path turns the recorder on; the ceiling is
+        // separate because a soak that only wants the histogram should not have
+        // to invent a memory number to get one.
+        if (arg.starts_with("--soak-report=")) {
+            options.soakReportPath = std::filesystem::path(arg.substr(arg.find('=') + 1));
+            continue;
+        }
+        if (arg.starts_with("--soak-ceiling-mb=")) {
+            const std::string_view value = arg.substr(arg.find('=') + 1);
+            luaug::core::u64 parsed = 0;
+            if (!numericValue(value, parsed) || parsed == 0) {
+                const std::array<I18nArg, 2> badValue{I18nArg{"option", arg}, I18nArg{"value", value}};
+                luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.bad_value"), badValue);
+                return kExitUsage;
+            }
+            options.soakCeilingBytes = parsed * 1024 * 1024;
+            continue;
+        }
+        if (arg.starts_with("--soak-min-instances=")) {
+            const std::string_view value = arg.substr(arg.find('=') + 1);
+            luaug::core::u64 parsed = 0;
+            if (!numericValue(value, parsed) || parsed == 0) {
+                const std::array<I18nArg, 2> badValue{I18nArg{"option", arg}, I18nArg{"value", value}};
+                luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.bad_value"), badValue);
+                return kExitUsage;
+            }
+            options.soakMinimumInstances = parsed;
+            continue;
+        }
         // The render target's size. Windowed it is the window; headless it is the
         // offscreen texture. The M4 gate records a frame-time baseline at 1080p
         // and the host had no way to be asked for one.

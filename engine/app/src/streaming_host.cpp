@@ -1,4 +1,4 @@
-#include "luaug/app/streaming_host.h"
+﻿#include "luaug/app/streaming_host.h"
 
 #include "luaug/asset/content.h"
 #include "luaug/core/i18n.h"
@@ -84,8 +84,20 @@ bool StreamingHost::load(const asset::ContentMounts& mounts, const std::filesyst
 
 void StreamingHost::setWorld(scene::World* world, core::InstanceId streamRoot)
 {
+    // The early return IS the fix (D032). See the header for what rebuilding
+    // the glue on an unchanged world costs.
+    if (m_world == world && m_streamRoot == streamRoot) {
+        return;
+    }
+
+    // A real world change means the previous world's residency record went
+    // with the world, so the manager has to stop believing in it too. Without
+    // this the first frame after a reload asks the NEW glue to evict chunks it
+    // never materialised -- the same silent no-op, one frame wide.
     m_world = world;
+    m_streamRoot = streamRoot;
     m_glue = world != nullptr ? std::make_unique<scene::StreamingGlue>(*world, streamRoot) : nullptr;
+    m_manager.forgetResidency();
 }
 
 void StreamingHost::beginRead(asset::ChunkId id, const asset::ChunkIndexEntry& entry)

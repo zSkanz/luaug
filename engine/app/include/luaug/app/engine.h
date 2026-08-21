@@ -90,6 +90,24 @@ struct EngineOptions
     // keeping them (R10 forbids simulation reading them at all).
     bool frameStats = false;
 
+    // M7's gate, as a flag. Empty writes no report and asserts nothing.
+    //
+    // The HOST enforces it rather than a script or a separate checker, the
+    // same way `--replay` compares against its own golden: the numbers exist
+    // only inside the frame loop, and a gate that has to be re-derived from a
+    // log line is a gate that rots the first time the line is reworded.
+    // A failed soak is a non-zero exit; `soak.h` holds the arithmetic.
+    std::filesystem::path soakReportPath;
+
+    // The DECLARED ceiling. Zero asserts no ceiling -- a number only whoever
+    // is running a particular fly-through can supply, and one this code has
+    // no business inventing a default for.
+    u64 soakCeilingBytes = 0;
+
+    // What "the world loaded" means for this particular scene. Zero asserts
+    // nothing; see `soak.h` for why a soak needs to be told.
+    u64 soakMinimumInstances = 0;
+
     i32 width = 1280;
     i32 height = 720;
 };

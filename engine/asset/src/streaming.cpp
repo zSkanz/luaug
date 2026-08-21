@@ -55,6 +55,27 @@ void StreamingManager::setIndex(ChunkIndex index)
     m_inFlight = 0;
 }
 
+void StreamingManager::forgetResidency() noexcept
+{
+    for (Entry& entry : m_entries) {
+        entry.state = ChunkState::Unloaded;
+        entry.decoded = Chunk{};
+        entry.bytes = 0;
+        entry.wanted = false;
+    }
+    // The in-flight COUNTER has to go with them, and it is the subtle half.
+    // `onChunkLoaded` only decrements for an entry still marked `Loading`, so
+    // reads outstanding across this call would never be credited back and the
+    // counter would climb to `maxInFlight` and stay there -- streaming that
+    // stops after a hot reload, which is a worse bug than the one this fixes.
+    // The completions themselves are harmless: they decode into slots nothing
+    // has decided about yet, and a chunk's bytes on disk do not change.
+    m_inFlight = 0;
+    m_stats.bytesResident = 0;
+    m_stats.resident = 0;
+    m_stats.decoded = 0;
+}
+
 void StreamingManager::setFoci(std::span<const StreamingFocus> foci)
 {
     m_foci.assign(foci.begin(), foci.end());

@@ -51,6 +51,19 @@ void shutdown();
 // a fixed dt down precisely so nothing below it needs the real time.
 [[nodiscard]] u64 nowNs() noexcept;
 
+// Resident set size in bytes, or zero where the platform will not say.
+//
+// Here for one caller and it is worth naming: M7's gate is "peak memory under
+// the declared ceiling" over a five-minute fly-through, and a streaming system
+// that leaks is indistinguishable from one that works until you measure it.
+// Zero rather than an error on an unsupported platform, because a soak report
+// that cannot read memory should still report frame times.
+//
+// The number is the OS's, so it counts the whole process -- the GPU driver and
+// the allocator's free lists included. It is a TREND instrument: what a soak
+// asserts is that the curve flattens, not what the absolute figure is.
+[[nodiscard]] u64 residentBytes() noexcept;
+
 // `setThreadName` from architecture.md §2 is absent on purpose: SDL3 has no
 // setter for it, only SDL_GetThreadName, so it would mean per-platform code
 // with no way to test it. This note used to say it would land with `jobs`, and

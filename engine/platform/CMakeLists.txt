@@ -26,7 +26,9 @@ luaug_add_module(platform
 # than in `app` because the call site is here: the layer that knows which OS
 # this is, is the layer that names the OS's libraries.
 if(WIN32)
-    target_link_libraries(luaug_platform PRIVATE dbghelp)
+    # dbghelp: the crash handler's symbol resolution. psapi: `residentBytes`,
+    # which M7's soak gate needs and which lives in neither kernel32 nor SDL.
+    target_link_libraries(luaug_platform PRIVATE dbghelp psapi)
 endif()
 
 # The tests link SDL3 for the same reason the GPU backend will: they include

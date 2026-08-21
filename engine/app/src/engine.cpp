@@ -14,6 +14,7 @@
 #include "luaug/app/inspector.h"
 #include "luaug/app/reload.h"
 #include "luaug/app/screenshot.h"
+#include "luaug/app/soak.h"
 #include "luaug/app/streaming_host.h"
 #include "luaug/app/world_host.h"
 #include "luaug/asset/content.h"
@@ -349,6 +350,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     core::u32 frameDrawCalls = 0;
     core::u64 frameTriangles = 0;
     std::vector<f64> frameTimesMs;
+    // Sixty warm-up frames rather than `--frame-stats`'s ten. A soak is minutes
+    // long, so a second of startup costs it nothing -- and the streamed world
+    // has not finished its first ring of chunks inside ten frames, which would
+    // put the whole materialisation burst in the measured window.
+    SoakRecorder soak(60);
     core::u64 lastFrameNs = 0;
 
     render::MeshLibrary meshLibrary;
@@ -390,6 +396,67 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     std::vector<render::UiScissorRun> uiRuns;
     bool debugPassAttempted = false;
 
+    // Mounts and the streamed world are set up HERE, outside `ensureDebugPass`,
+    // and that placement is a defect this milestone had to find twice. They
+    // lived inside it, so a device that could not take shaders -- `--rhi=null`,
+    // or any machine whose shader load failed -- booted with NO content mounted
+    // and NO chunk index, silently. The soak gate ran in 0.17 s over a world of
+    // eleven instances and reported a pass.
+    //
+    // Nothing below reads a shader, a format or a device. Content addressing and
+    // streaming residency are decisions about files and distances; the renderer
+    // is downstream of them, and coupling the two made a gate vacuous rather
+    // than red -- the worse of the two failures.
+    // The PROJECT's content directory, not the engine's. `asset://` is a
+    // URN in the game's namespace -- `asset://models/tree.glb` means the
+    // file the developer put in their own `content/models/`, and resolving
+    // it beside `luaug-host` would mean every project shipped its meshes
+    // into the engine's install. The engine's own content directory is for
+    // shaders and the message catalog, which are the engine's.
+    //
+    // `scriptPath` is a directory when it is a project root and a file when
+    // it is a bare script (engine.h), so a lone script gets the engine's
+    // content directory -- which is right: it has no project to have one.
+    std::error_code pathError;
+    const bool isProject =
+        !options.scriptPath.empty() && std::filesystem::is_directory(options.scriptPath, pathError);
+    const std::filesystem::path contentRoot =
+        isProject ? options.scriptPath / "content" : platform::paths().contentDir;
+    meshLoader.setContentRoot(contentRoot);
+
+    contentMounts.clear();
+    contentMounts.mountDirectory(contentRoot);
+    if (isProject) {
+        const std::filesystem::path pack = options.scriptPath / ".luaug" / "content.lpack";
+        if (std::filesystem::exists(pack, pathError)) {
+            if (auto mountError = contentMounts.mountPack(pack); mountError.has_value()) {
+                // Named and survivable: a pack that will not open leaves the
+                // loose mount standing, so a broken build is a message and a
+                // slower load rather than a world with no meshes in it.
+                core::logText(LogLevel::Warn, mountError->message);
+            }
+            else {
+                const std::array<core::I18nArg, 1> mountArgs{core::I18nArg{"path", pack.string()}};
+                core::log(LogLevel::Info, LUAUG_TR("app.info.pack_mounted"), mountArgs);
+            }
+        }
+    }
+    meshLoader.setContentMounts(&contentMounts);
+
+    if (isProject) {
+        // Mounted after the pack so a loose chunk overrides a built one,
+        // which is the same dev-mode override rule the content directory
+        // gets, and the index sits beside them both.
+        const std::filesystem::path built = options.scriptPath / ".luaug" / "content";
+        if (std::filesystem::is_directory(built, pathError)) {
+            contentMounts.mountDirectory(built);
+        }
+        if (!platform::initIo()) {
+            core::log(LogLevel::Warn, LUAUG_TR("app.warn.io_unavailable"), {});
+        }
+        (void)streaming.load(contentMounts, options.scriptPath / ".luaug" / "content.chunks.json");
+    }
+
     const auto ensureDebugPass = [&](rhi::TextureFormat colorFormat) {
         // Gated on "can this device take shaders", not on "will pixels come
         // out". They are different questions, and conflating them made the
@@ -420,55 +487,6 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         if (auto error = meshCache.create(*device); error.has_value()) {
             core::logText(LogLevel::Warn, error->message);
             return;
-        }
-        // The PROJECT's content directory, not the engine's. `asset://` is a
-        // URN in the game's namespace -- `asset://models/tree.glb` means the
-        // file the developer put in their own `content/models/`, and resolving
-        // it beside `luaug-host` would mean every project shipped its meshes
-        // into the engine's install. The engine's own content directory is for
-        // shaders and the message catalog, which are the engine's.
-        //
-        // `scriptPath` is a directory when it is a project root and a file when
-        // it is a bare script (engine.h), so a lone script gets the engine's
-        // content directory -- which is right: it has no project to have one.
-        std::error_code pathError;
-        const bool isProject =
-            !options.scriptPath.empty() && std::filesystem::is_directory(options.scriptPath, pathError);
-        const std::filesystem::path contentRoot =
-            isProject ? options.scriptPath / "content" : platform::paths().contentDir;
-        meshLoader.setContentRoot(contentRoot);
-
-        contentMounts.clear();
-        contentMounts.mountDirectory(contentRoot);
-        if (isProject) {
-            const std::filesystem::path pack = options.scriptPath / ".luaug" / "content.lpack";
-            if (std::filesystem::exists(pack, pathError)) {
-                if (auto error = contentMounts.mountPack(pack); error.has_value()) {
-                    // Named and survivable: a pack that will not open leaves the
-                    // loose mount standing, so a broken build is a message and a
-                    // slower load rather than a world with no meshes in it.
-                    core::logText(LogLevel::Warn, error->message);
-                }
-                else {
-                    const std::array<core::I18nArg, 1> mountArgs{core::I18nArg{"path", pack.string()}};
-                    core::log(LogLevel::Info, LUAUG_TR("app.info.pack_mounted"), mountArgs);
-                }
-            }
-        }
-        meshLoader.setContentMounts(&contentMounts);
-
-        if (isProject) {
-            // Mounted after the pack so a loose chunk overrides a built one,
-            // which is the same dev-mode override rule the content directory
-            // gets, and the index sits beside them both.
-            const std::filesystem::path built = options.scriptPath / ".luaug" / "content";
-            if (std::filesystem::is_directory(built, pathError)) {
-                contentMounts.mountDirectory(built);
-            }
-            if (!platform::initIo()) {
-                core::log(LogLevel::Warn, LUAUG_TR("app.warn.io_unavailable"), {});
-            }
-            (void)streaming.load(contentMounts, options.scriptPath / ".luaug" / "content.chunks.json");
         }
         renderer = render::createDefaultRenderer();
         if (auto error = renderer->create(*device, shaders, colorFormat); error.has_value()) {
@@ -624,7 +642,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             .audioVoices = static_cast<f64>(host->audio().stats().activeVoices),
         });
 
-        if (options.frameStats) {
+        if (options.frameStats || !options.soakReportPath.empty()) {
             // The WALL clock, not `frame.renderDt`. Headless drives the frame
             // loop from a synthetic 1/60 s step so a golden capture cannot
             // depend on how busy the machine was (M1 Finding 8) -- which makes
@@ -634,8 +652,16 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // R10 is not in the way: it forbids SIMULATION reading a wall clock.
             // A profiler is the one thing that has to.
             const core::u64 sampleNs = platform::nowNs();
-            if (lastFrameNs != 0)
-                frameTimesMs.push_back(static_cast<f64>(sampleNs - lastFrameNs) / 1'000'000.0);
+            if (lastFrameNs != 0) {
+                const f64 frameMs = static_cast<f64>(sampleNs - lastFrameNs) / 1'000'000.0;
+                frameTimesMs.push_back(frameMs);
+                // Resident size is read per frame rather than sampled, because
+                // the number the gate wants is a PEAK and a peak between two
+                // samples is a peak nobody saw.
+                soak.sample({.frameMs = frameMs,
+                             .residentBytes = platform::residentBytes(),
+                             .instanceCount = static_cast<core::u64>(host->world().instanceCount())});
+            }
             lastFrameNs = sampleNs;
         }
 
@@ -1154,6 +1180,50 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         core::log(LogLevel::Info, LUAUG_TR("engine.frame.info.stats"), stats);
     }
 
+    // The soak verdict is computed BEFORE teardown, because teardown frees the
+    // very memory the peak was measured against -- and after the frame loop,
+    // because a gate that could stop a run early would report on a run that did
+    // not happen.
+    std::optional<core::EngineError> soakFailure;
+    if (!options.soakReportPath.empty()) {
+        const SoakThresholds thresholds{.memoryCeilingBytes = options.soakCeilingBytes,
+                                        .minimumInstances = options.soakMinimumInstances};
+        const SoakVerdict verdict = soak.evaluate(thresholds);
+
+        std::ofstream report(options.soakReportPath, std::ios::binary);
+        report << soak.report(thresholds);
+        if (!report.good()) {
+            const std::array<I18nArg, 1> writeArgs{I18nArg{"path", options.soakReportPath.string()}};
+            soakFailure = core::makeError(LUAUG_TR("engine.soak.err.report_write_failed"), writeArgs);
+        }
+        report.close();
+
+        const std::array<I18nArg, 8> reportArgs{
+            I18nArg{"frames", static_cast<core::i64>(verdict.frames)},
+            I18nArg{"median", verdict.medianMs},
+            I18nArg{"p99", verdict.p99Ms},
+            I18nArg{"worst", verdict.worstMs},
+            I18nArg{"peak", static_cast<core::i64>(verdict.peakResidentBytes / (1024 * 1024))},
+            I18nArg{"early", static_cast<core::i64>(verdict.earlyInstances)},
+            I18nArg{"late", static_cast<core::i64>(verdict.lateInstances)},
+            I18nArg{"path", options.soakReportPath.string()},
+        };
+        core::log(LogLevel::Info, LUAUG_TR("engine.soak.info.report"), reportArgs);
+
+        // Every failure is logged and then ONE error is returned. A gate that
+        // reports only its first complaint makes the second one cost another
+        // five minutes.
+        for (const core::EngineError& failure : verdict.failures) {
+            core::logText(LogLevel::Error, failure.message);
+        }
+        if (!verdict.ok && !soakFailure.has_value()) {
+            const std::array<I18nArg, 2> failArgs{
+                I18nArg{"failures", static_cast<core::i64>(verdict.failures.size())},
+                I18nArg{"path", options.soakReportPath.string()}};
+            soakFailure = core::makeError(LUAUG_TR("engine.soak.err.failed"), failArgs);
+        }
+    }
+
     uiRenderer.destroy(*device);
     debugRenderer.destroy(*device);
     if (offscreen.valid())
@@ -1161,7 +1231,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     if (window != nullptr)
         device->releaseWindow(*window);
 
-    return std::nullopt;
+    return soakFailure;
 }
 
 } // namespace luaug::app
