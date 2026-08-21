@@ -501,14 +501,18 @@ local Classes: { Schema.Class } = {
             {
                 Name = "CollisionFidelity",
                 Type = "Enum.CollisionFidelity",
-                Inert = true,
-                Doc = "How closely the collision shape follows the rendered geometry. **Stored and not yet read** "
-                    .. "(M7): every fidelity collides as the mesh's bounding BOX, because a hull needs the "
-                    .. "mesh's points and those live in the render module, which sits above the physics mirror. "
-                    .. "M7's asset pipeline is what hands a hull across.\n\nThe property reads back what was "
-                    .. "written rather than what it resolved to, because a value that silently became another "
-                    .. "value is worse than one that says what it did. This carried the same claim as prose in "
-                    .. "`physics_sync.cpp` for a milestone and was NOT marked -- `inertcheck` is what found it.",
+                Doc = "How closely the collision shape follows the rendered geometry.\n\n`Box` names a "
+                    .. "shape rather than an accuracy and is honoured exactly: a caller who asked for the "
+                    .. "bounding box gets it even when the mesh's geometry is loaded. Every other value asks "
+                    .. "for the geometry, and what it gets is a CONVEX HULL -- a hull is what a rigid-body "
+                    .. "solver can use directly, and a concave triangle mesh is a different shape class with "
+                    .. "different rules (it cannot be dynamic) that nothing in v1 asks for.\n\nA mesh "
+                    .. "whose points have not arrived yet collides as its bounding box, which is the state of "
+                    .. "every `MeshPart` in the frame before its file finishes loading: a body with no shape "
+                    .. "for one frame is a body that falls through the floor. So does a mesh too degenerate "
+                    .. "to make a solid from -- three points are a triangle, not a hull.\n\nThe "
+                    .. "property reads back what was written rather than what it resolved to, because a "
+                    .. "value that silently became another value is worse than one that says what it did.",
             },
         },
     },

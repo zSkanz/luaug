@@ -186,7 +186,17 @@ Invoke-Stage 'windows' {
 
     # One cmd invocation, because the environment vcvars64.bat establishes does
     # not survive back into PowerShell.
+    #
+    # **`chcp 65001` is load-bearing and not cosmetic** (D040). CMake writes
+    # ninja`s `msvc_deps_prefix` -- the string ninja looks for in `/showIncludes`
+    # output to learn which headers an object depends on -- as UTF-8. A LOCALISED
+    # MSVC emits that string with non-ASCII characters in the console codepage,
+    # so under any other codepage the two never match, ninja records NO header
+    # dependencies at all, and every incremental build silently reuses objects
+    # compiled against an older header. It cost this project four debugging
+    # sessions before anybody looked at why.
     $script = @"
+chcp 65001 >nul
 call "$vcvars" >nul || exit /b 1
 cmake --preset win-msvc-dev || exit /b 1
 cmake --build --preset win-msvc-dev || exit /b 1

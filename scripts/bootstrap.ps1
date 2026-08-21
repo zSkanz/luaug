@@ -55,7 +55,11 @@ if (-not ($haveCMake -and $haveNinja)) {
         Write-Host "Visual Studio found at: $vsPath"
         Write-Host "It bundles CMake and Ninja, but the presets need the MSVC environment."
         Write-Host "Build from a Developer Shell, or prefix commands with:"
-        Write-Host "  `"$vsPath\VC\Auxiliary\Build\vcvars64.bat`" && cmake --preset win-msvc-dev"
+        Write-Host "  chcp 65001 && `"$vsPath\VC\Auxiliary\Build\vcvars64.bat`" && cmake --preset win-msvc-dev"
+        Write-Host ""
+        Write-Host "The chcp is not cosmetic (D040): on a LOCALISED MSVC, ninja cannot match the"
+        Write-Host "/showIncludes prefix under any other codepage, records no header dependencies,"
+        Write-Host "and every incremental build silently reuses objects built against an old header."
     } else {
         Write-Host "No Visual Studio C++ toolchain found. Install VS with 'Desktop development with C++'."
     }

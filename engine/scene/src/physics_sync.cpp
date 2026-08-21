@@ -112,13 +112,30 @@ physics::ShapeDesc PhysicsSync::shapeOf(core::InstanceId id, const PartComponent
     physics::ShapeDesc shape;
     shape.size = part.size;
 
-    // A `MeshPart` collides as the box or hull its CollisionFidelity asks for.
-    // There is no hull yet -- the mesh's points live in the render module,
-    // which sits above this one -- so every fidelity collides as the bounding
-    // box and the property reads back what was written. That is a defect with a
-    // milestone (M7's asset pipeline), not a silent substitution.
+    // A `MeshPart` collides as the box or hull its `CollisionFidelity` asks for.
+    //
+    // `Box` is the fidelity that says "the bounding box" and it is honoured
+    // exactly. Every other value asks for the geometry, and the geometry that
+    // exists is a CONVEX HULL: a hull is what a rigid-body solver can use
+    // directly, and a concave triangle mesh is a different shape class with
+    // different rules (it cannot be dynamic) that nobody has asked for.
+    //
+    // A mesh whose points have not arrived falls back to the box rather than to
+    // nothing. That is the state of a `MeshPart` in the frame before its file
+    // finishes loading, and a body with no shape for one frame is a body that
+    // falls through the floor.
     if (const MeshPartComponent* mesh = m_scene.meshParts().find(id); mesh != nullptr) {
         shape.type = physics::ShapeType::Box;
+        if (mesh->collisionFidelity == 0) {
+            return shape;
+        }
+        const core::NameAtom content = mesh->meshContent;
+        const auto at = std::lower_bound(m_collisionPoints.begin(), m_collisionPoints.end(), content,
+                                         [](const auto& entry, core::NameAtom key) { return entry.first.id < key.id; });
+        if (at != m_collisionPoints.end() && at->first == content && at->second.size() >= 4) {
+            shape.type = physics::ShapeType::ConvexHull;
+            shape.points = at->second;
+        }
         return shape;
     }
     shape.type = shapeForPartShape(part.shape);
@@ -737,6 +754,17 @@ void PhysicsSync::step(f64 fixedDt)
     m_timings.apply = std::chrono::duration<f64>(applied - begin).count();
     m_timings.step = std::chrono::duration<f64>(stepped - applied).count();
     m_timings.writeback = std::chrono::duration<f64>(end - stepped).count();
+}
+
+void PhysicsSync::setCollisionPoints(core::NameAtom content, std::vector<core::Vec3> points)
+{
+    const auto at = std::lower_bound(m_collisionPoints.begin(), m_collisionPoints.end(), content,
+                                     [](const auto& entry, core::NameAtom key) { return entry.first.id < key.id; });
+    if (at != m_collisionPoints.end() && at->first == content) {
+        at->second = std::move(points);
+        return;
+    }
+    m_collisionPoints.insert(at, {content, std::move(points)});
 }
 
 } // namespace luaug::scene

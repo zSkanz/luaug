@@ -550,3 +550,88 @@ TEST_CASE("the rebase policy is a box around the origin, not a sphere")
     CHECK_FALSE(mirror.sync.shouldRebase(core::DVec3{100000.0, 0.0, 0.0}));
     CHECK(mirror.sync.shouldRebase(core::DVec3{}));
 }
+
+// ---------------------------------------------------------------------------
+// `MeshPart.CollisionFidelity` (roadmap M7: it stops being `Inert`).
+
+TEST_CASE("a MeshPart collides as its bounding box until its points arrive")
+{
+    // The state of every `MeshPart` in the frame before its file finishes
+    // loading. A body with no shape for one frame is a body that falls through
+    // the floor, so the box is the fallback rather than nothing.
+    Mirror mirror;
+    const core::InstanceId id = mirror.part("Rock");
+    MeshPartComponent mesh;
+    mesh.meshContent = mirror.fixture.world.atoms().intern("asset://models/rock.glb");
+    // `Hull`, not `Box`: the caller asked for the geometry.
+    mesh.collisionFidelity = 1;
+    mirror.fixture.world.meshParts().add(id, mesh);
+    mirror.step();
+
+    REQUIRE(mirror.backend.created.size() == 1);
+    CHECK(mirror.backend.created[0].desc.shape.type == physics::ShapeType::Box);
+}
+
+TEST_CASE("a MeshPart collides as a hull once its points have been handed over")
+{
+    Mirror mirror;
+    const core::NameAtom content = mirror.fixture.world.atoms().intern("asset://models/rock.glb");
+
+    // A tetrahedron: the fewest points a hull can be made of, which is also the
+    // threshold the mirror checks before it believes it has geometry.
+    mirror.sync.setCollisionPoints(content, {core::Vec3{0.0f, 0.0f, 0.0f}, core::Vec3{1.0f, 0.0f, 0.0f},
+                                             core::Vec3{0.0f, 1.0f, 0.0f}, core::Vec3{0.0f, 0.0f, 1.0f}});
+    CHECK(mirror.sync.collisionMeshCount() == 1);
+
+    const core::InstanceId id = mirror.part("Rock");
+    MeshPartComponent mesh;
+    mesh.meshContent = content;
+    mesh.collisionFidelity = 1;
+    mirror.fixture.world.meshParts().add(id, mesh);
+    mirror.step();
+
+    REQUIRE(mirror.backend.created.size() == 1);
+    CHECK(mirror.backend.created[0].desc.shape.type == physics::ShapeType::ConvexHull);
+    CHECK(mirror.backend.created[0].desc.shape.points.size() == 4);
+}
+
+TEST_CASE("CollisionFidelity Box is honoured exactly, points or no points")
+{
+    // The one fidelity that names a shape rather than an accuracy, and it means
+    // what it says: a caller who asked for the bounding box gets it even when
+    // the mesh's geometry is sitting right there.
+    Mirror mirror;
+    const core::NameAtom content = mirror.fixture.world.atoms().intern("asset://models/rock.glb");
+    mirror.sync.setCollisionPoints(content, {core::Vec3{0.0f, 0.0f, 0.0f}, core::Vec3{1.0f, 0.0f, 0.0f},
+                                             core::Vec3{0.0f, 1.0f, 0.0f}, core::Vec3{0.0f, 0.0f, 1.0f}});
+
+    const core::InstanceId id = mirror.part("Rock");
+    MeshPartComponent mesh;
+    mesh.meshContent = content;
+    mesh.collisionFidelity = 0;
+    mirror.fixture.world.meshParts().add(id, mesh);
+    mirror.step();
+
+    REQUIRE(mirror.backend.created.size() == 1);
+    CHECK(mirror.backend.created[0].desc.shape.type == physics::ShapeType::Box);
+}
+
+TEST_CASE("a hull too degenerate to be one falls back to the box")
+{
+    // Three points is a triangle, not a solid. Jolt would refuse it and the body
+    // would have no shape at all -- which is the part falling through the world.
+    Mirror mirror;
+    const core::NameAtom content = mirror.fixture.world.atoms().intern("asset://models/flat.glb");
+    mirror.sync.setCollisionPoints(
+        content, {core::Vec3{0.0f, 0.0f, 0.0f}, core::Vec3{1.0f, 0.0f, 0.0f}, core::Vec3{0.0f, 1.0f, 0.0f}});
+
+    const core::InstanceId id = mirror.part("Flat");
+    MeshPartComponent mesh;
+    mesh.meshContent = content;
+    mesh.collisionFidelity = 1;
+    mirror.fixture.world.meshParts().add(id, mesh);
+    mirror.step();
+
+    REQUIRE(mirror.backend.created.size() == 1);
+    CHECK(mirror.backend.created[0].desc.shape.type == physics::ShapeType::Box);
+}

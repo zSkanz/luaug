@@ -271,6 +271,17 @@ public:
         // material should upload one material.
         std::vector<u32> sectionMaterial;
         std::vector<RenderMaterial> materials;
+
+        // The mesh's vertex POSITIONS, for whoever needs a collision hull
+        // (`MeshPart.CollisionFidelity`). Empty for a primitive and for a mesh
+        // whose file failed.
+        //
+        // Kept here rather than decoded a second time by the physics mirror: the
+        // decode already happened, the positions are twelve bytes a vertex, and
+        // a second decode of a fifty-thousand-vertex mesh to answer a question
+        // the first one already answered is the kind of cost nobody notices
+        // until a world has a hundred of them.
+        std::vector<Vec3> positions;
     };
 
     void set(core::NameAtom content, const Entry& entry);
@@ -283,6 +294,16 @@ public:
     // missing mesh nobody notices.
     [[nodiscard]] const Entry* find(core::NameAtom content) const noexcept;
     [[nodiscard]] usize size() const noexcept { return entries_.size(); }
+
+    // Every entry, in atom order. For a caller that has to mirror this into
+    // something else -- the physics mirror's collision points -- and that
+    // therefore needs the whole set rather than one lookup.
+    template <typename Fn>
+    void forEach(Fn&& fn) const
+    {
+        for (const auto& entry : entries_)
+            fn(entry.content, entry.entry);
+    }
 
 private:
     // A flat vector, kept sorted by atom, rather than a hash map: it holds one

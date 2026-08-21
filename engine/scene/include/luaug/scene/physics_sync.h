@@ -29,6 +29,7 @@
 #include "luaug/scene/components.h"
 
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace luaug::scene {
@@ -49,6 +50,24 @@ public:
     // invalid id means nothing in this world has a body, which is the shape of
     // the defect that cost M4 a milestone, so the host tests that it resolved.
     void setWorkspace(core::InstanceId workspace) noexcept { m_workspace = workspace; }
+
+    // The points a `MeshPart` with a hull fidelity collides as, keyed by the
+    // content id its `MeshContent` names.
+    //
+    // PUSHED by whoever loaded the mesh rather than pulled from here, because
+    // this module is L3 and a mesh file is the asset system's (L2) to read
+    // through mounts the app (L6) owns. The app is the only place that can see
+    // both, which is the same arrangement the UI's font and image providers use.
+    //
+    // Positions only, and every one of them: a convex hull builder discards the
+    // interior points itself, and a sampled subset would produce a hull SMALLER
+    // than the mesh -- which is a character sinking into a rock rather than a
+    // slightly wrong shape.
+    void setCollisionPoints(core::NameAtom content, std::vector<core::Vec3> points);
+
+    // How many meshes have handed over their points. For a test, and for a
+    // person asking why a hull is not a hull.
+    [[nodiscard]] usize collisionMeshCount() const noexcept { return m_collisionPoints.size(); }
     [[nodiscard]] core::InstanceId workspace() const noexcept { return m_workspace; }
 
     // One simulation tick: apply the scene's writes, advance the characters,
@@ -112,6 +131,12 @@ public:
     [[nodiscard]] usize bodyCount() const noexcept { return m_bodyCount; }
 
 private:
+    // Sorted by content atom id. A flat vector rather than a hash map for the
+    // reason every other cache in this repository is one: a world has a handful
+    // of distinct collision meshes, and a flat array has an order that an
+    // unordered container does not (R10).
+    std::vector<std::pair<core::NameAtom, std::vector<core::Vec3>>> m_collisionPoints;
+
     // What the mirror last pushed down for one instance, so that a tick can
     // tell a script's write from its own writeback without either side
     // carrying a dirty flag. `scene` cannot ask the body what it looks like

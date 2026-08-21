@@ -1149,8 +1149,7 @@
       "Properties": [
         {
           "Name": "CollisionFidelity",
-          "Type": "Enum.CollisionFidelity",
-          "Inert": true
+          "Type": "Enum.CollisionFidelity"
         },
         {
           "Name": "MeshContent",

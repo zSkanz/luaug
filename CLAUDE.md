@@ -86,6 +86,14 @@ lint) · `luaug new <template>` · `luaug fmt`.
   PATH. Visual Studio bundles CMake and Ninja — the fix is almost never "install
   CMake", it is to run `VC\Auxiliary\Build\vcvars64.bat` first. `bootstrap.ps1`
   detects this and prints the exact command.
+- **Build with `chcp 65001` on Windows, always.** CMake writes ninja's
+  `msvc_deps_prefix` as UTF-8; a LOCALISED MSVC emits that string in the console
+  codepage, the two never match, and ninja then records **no header dependencies
+  at all** — every incremental build silently reuses objects compiled against an
+  older header, and the symptom is an access violation in code that has nothing
+  wrong with it. `scripts/localgate.ps1` sets it; a hand-run `cmake --build`
+  must too. Four debugging sessions were spent on the symptom before anybody
+  looked at the cause (D040).
 - **`pwsh` (PowerShell 7) may not be installed**; Windows PowerShell 5.1 runs
   the bootstrap fine. Invoke the script directly rather than assuming a shell.
 - **rokit needs `--no-trust-check`** in any non-interactive session, or

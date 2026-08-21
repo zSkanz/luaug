@@ -344,6 +344,9 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
             // submeshes in the same order -- so the flattened list would emit a
             // draw per section PER LEVEL and render the mesh several times over.
             fillEntry(entry, geometry.bounds, compiled.lods[0].submeshes, compiled.materials, images);
+            entry.positions.reserve(geometry.vertices.size());
+            for (const asset::Vertex& vertex : geometry.vertices)
+                entry.positions.push_back(vertex.position);
             library.set(content, entry);
 
             if (skeletons != nullptr && !compiled.joints.empty())
@@ -394,6 +397,9 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
             }
 
             fillEntry(entry, model.mesh.bounds, model.mesh.submeshes, model.materials, images);
+            entry.positions.reserve(model.mesh.vertices.size());
+            for (const asset::Vertex& vertex : model.mesh.vertices)
+                entry.positions.push_back(vertex.position);
             library.set(content, entry);
 
             // The skeleton half of the same file, handed to whoever asked for

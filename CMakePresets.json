@@ -17,7 +17,10 @@
       "inherits": "base",
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
       "architecture": { "value": "x64", "strategy": "external" },
-      "toolset": { "value": "host=x64", "strategy": "external" }
+      "toolset": { "value": "host=x64", "strategy": "external" },
+      "environment": {
+        "VSLANG": "1033"
+      }
     },
     {
       "name": "linux-clang",
@@ -43,8 +46,8 @@
   ],
   "buildPresets": [
     { "name": "win-msvc-debug",    "configurePreset": "win-msvc-debug" },
-    { "name": "win-msvc-dev",      "configurePreset": "win-msvc-dev" },
-    { "name": "win-msvc-shipping", "configurePreset": "win-msvc-shipping" },
+    { "name": "win-msvc-dev",      "configurePreset": "win-msvc-dev",      "environment": { "VSLANG": "1033" } },
+    { "name": "win-msvc-shipping", "configurePreset": "win-msvc-shipping", "environment": { "VSLANG": "1033" } },
     { "name": "linux-clang-debug", "configurePreset": "linux-clang-debug" },
     { "name": "linux-clang-dev",   "configurePreset": "linux-clang-dev" },
     { "name": "linux-clang-asan",  "configurePreset": "linux-clang-asan" },

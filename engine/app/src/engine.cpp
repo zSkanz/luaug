@@ -939,7 +939,18 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             if (renderer != nullptr && renderer->valid())
                 meshLoader.syncPrimitives(*device, *cmd, host->world(), meshCache, meshLibrary);
             if (renderer != nullptr && renderer->valid())
-                (void)meshLoader.sync(*device, *cmd, host->world(), host->workspace(), meshCache, meshLibrary);
+                if (meshLoader.sync(*device, *cmd, host->world(), host->workspace(), meshCache, meshLibrary) > 0 &&
+                    host->physics() != nullptr) {
+                    // A mesh finished loading, so the physics mirror can be told
+                    // what it collides as. Pushed from here because this is the
+                    // one place that can see both the render library and the
+                    // mirror -- `render` is L4 and `scene` is L3, and neither is
+                    // allowed to reach the other.
+                    meshLibrary.forEach([&](core::NameAtom content, const render::MeshLibrary::Entry& entry) {
+                        if (!entry.positions.empty())
+                            host->physics()->setCollisionPoints(content, entry.positions);
+                    });
+                }
 
             // Extraction happens once, at a known moment, from a world that is
             // between ticks (ADR 0027). Rendering never walks the ECS.
