@@ -5,6 +5,25 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
+- **E2 — Moving Things — IN PROGRESS, opened 2026-08-22.** Post-v1 phase 1,
+  milestone 2 of 4. The manipulators and the direct manipulation around them:
+  translate, rotate and scale in the viewport; multi-select; creating an
+  instance; reparenting by drag. Specified in
+  [`docs/roadmap.md`](docs/roadmap.md#e2--moving-things-l) and
+  [`docs/briefs/e2-kickoff.md`](docs/briefs/e2-kickoff.md), both written at
+  kickoff from four read-only reconnaissance passes — the method ADR 0046 used
+  to size E1.
+
+  **Three things the passes found broken, and only building on them would
+  have.** The undo coalescing key is computed in `engine.cpp` from *how many*
+  writes are pending this frame, so a gizmo writing `CFrame` and `Size` together
+  records a full world snapshot every frame — and nothing tests the calculation.
+  The selection outline shakes four kilometres out, because it submits in world
+  coordinates and `DebugDraw::rebaseTo` subtracts in f32. And `isEngineOwned`
+  does not know about `generated`, so a drag could drop an authored part inside a
+  streamed chunk, where the save skips it and the next eviction destroys it
+  without a word. All three are in the roadmap section's six decisions.
+
 - **E1 — The Editor — COMPLETE, signed off 2026-08-22**, tagged `milestone/e1`. Post-v1 phase 1,
   opened by human decision the same day v1.0.0 shipped. `luaug edit` is an
   application: a menu bar, dockable panels, a viewport you click and fly through,
@@ -19,18 +38,12 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   one was right — but a milestone this size is not a template, and the roadmap
   now says so where the next one is planned.
 
-  **The shape was decided by measurement** (ADR 0046): five read-only passes over
-  the repository before a line was written found that ADR 0011 had already named
-  the editor on the ImGui side four milestones earlier; that a Luau editor is
-  *blocked* rather than expensive, because the game VM has no filesystem and R4
-  does not bend for tooling; and that `world_hash.cpp`'s deterministic walk is a
-  whole-world serializer with a `Hasher` where a writer should be.
-
-  **And the world became data** (ADR 0047, human decision): a scene is an asset
-  under `content/`, a project declares which one a RUN starts with, and the
-  editor remembers which one a PERSON had open. `examples/06-scene` is the first
-  project here whose world is not in its script. Code-first is not deprecated by
-  it — `Instance.new` at runtime stays first-class the way it is in Unity.
+  **Two decisions carry it and both are their own documents**: ADR 0046, the
+  editor is a mode of the engine binary drawn in ImGui, decided by five
+  reconnaissance passes rather than by taste; and ADR 0047, the authored world is
+  data and scripts are behaviour, which is what `examples/06-scene` exists to
+  demonstrate. Code-first is not deprecated by either — `Instance.new` at runtime
+  stays first-class the way it is in Unity.
 
   **Seven defects, six of them found by a person opening the thing**, and **five
   of those are one architectural mistake appearing five times**: the editor
@@ -39,14 +52,15 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   camera and the keyboard — *while the editor is editing, the tool owns the
   machine, and pressing play hands it back.*
 
-  **What it does not have**, in full at the end of the brief and in short here:
-  no manipulators, no creating an instance, no multi-select; a stop that restores
-  the world and not the Luau VM; and ADR 0047's boot order still inverted. And
-  one thing that is not a gap but a limit worth knowing: **the ImGui shell cannot
-  render headlessly and SDL does not accept injected input**, so there is no
-  automated path to a picture of this editor or to a click inside it. Every image
-  in `docs/images/e1/` was captured from a real window, and every visual claim in
-  the Gate Record rests on a person having looked.
+  **What it does not have** is in full at the end of the brief; E2 owns the
+  manipulators, creating an instance and multi-select, and what remains after
+  that is a stop that restores the world and not the Luau VM. **ADR 0047's boot
+  order is no longer on that list** — it was fixed as D067, and the bill for
+  shipping it inverted is written there. One limit is not a gap and is worth
+  knowing: **the ImGui shell cannot render headlessly and SDL does not accept
+  injected input**, so there is no automated path to a picture of this editor or
+  to a click inside it. Every image in `docs/images/e1/` was captured from a real
+  window.
 
 - **M8 — Flagship, Hardening, Docs, v1.0 — COMPLETE and RELEASED 2026-08-22**,
   tagged `milestone/m8` and `v1.0.0`, both on `origin`, with the GitHub release
@@ -109,10 +123,20 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
   citations. That file exists because three human-reported defects were removed
   from this one while it was being rewritten to close M4. **A close rewrites this
   file wholesale; it can no longer take the open list with it.**
-- **E2 owes the manipulators and nothing else**, because E1 absorbed the rest.
-  Translate, rotate and scale in the viewport; creating an instance; reparenting
-  by drag; multi-select. The brief's "what E1 deliberately does not have" is the
-  full list and nothing on it was discovered late.
+- **E2 is open and specified; the next action is the interfaces.** In order,
+  because everything else reads them: `Inspector`'s selection set and
+  `pruneDead`; the gesture and the extracted coalescing key; `picking.h`'s
+  `worldToViewport`, gizmo frame, axis hit test and drag solve; then `Editor`'s
+  `createInstance`, `reparent`, the batch forms and `authorable`. Nothing fans
+  out until those headers compile (§7).
+- **D067 and D068 are fixed and they are why the editor was unusable on the
+  flagship.** A boot scene was applied AFTER the entry scripts had built the
+  world, so it destroyed every instance they made while the Luau VM kept the
+  references and the connections — `instance_dead` once a frame, forever, and a
+  world that never arrived. The order ADR 0047 specifies is load-then-start and
+  `WorldHost::boot` does it now. It also fixes a hot reload that used to drop the
+  scene entirely. D068 is how that project got a scene at all: Save Scene As
+  wrote into `content/content/` and said nothing.
 - **`openworld_soak` flaked once and is D066.** It failed E1's first closing gate
   and passed twice immediately after, on the same binary. Not quarantined -- §12
   sets that at twice -- and written down so the second time is recognised. If the
@@ -257,65 +281,35 @@ Entries for the planning session and for M0 through M4 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
 
-- **2026-08-22 (session 17, Claude Opus): E1 built — the editor.** Post-v1
-  phase 1 opened by human decision, specified, and built through eight rounds of
-  review with the person using it after every one.
+- **2026-08-22 (session 18, Claude Opus): D067 fixed, and E2 opened.**
 
-  **Did:** five parallel read-only passes over the repository before writing
-  anything; ADR 0046 and ADR 0047; the phase's milestones in the roadmap;
-  `luaug edit`; the shell, dockspace, viewport, picking and fly camera; the loop
-  — play, pause, step, stop, save — on three run states and `World::snapshot`;
-  the scene format and `examples/06-scene`; the content browser; the application
-  menu; context menus; undo and redo; and D056's `shipping` profile fixed with a
-  gate stage that builds and links it every run.
+  **Did:** the §2 boot sequence; reproduced the human's report byte for byte
+  before touching anything — 120 headless frames of the flagship with its scene
+  named produce 89 copies of `init.luau:566: [script.err.instance_dead]`, and
+  zero after the fix; moved the boot scene inside `WorldHost::boot`, ahead of
+  `startScripts`; normalised and validated the Save Scene As path (D068); four
+  regression cases in `world_host_tests` and two in `editor_tests`; the full
+  local gate green on all six stages; then the E2 roadmap section and kickoff
+  brief, from four reconnaissance passes.
 
-  **Learned, and it is one lesson said five ways.** D058 the world already
-  running, D059 the cursor vanishing, D060 the audio playing, D061 the camera
-  flickering, D062 the input going two places — five reports, one architectural
-  mistake: the editor was inheriting the game's decisions instead of taking them.
-  No amount of arbitrating who wins settles that, because the disagreement IS the
-  design. The camera was the clearest: it wrote `Workspace.CurrentCamera`, which
-  made the tool and the game two authors of one transform, and the fix was for
-  the editor to own a camera the world does not contain.
+  **Learned, and it is the same shape three times.** Every one of the three
+  defects the passes found is a piece of arithmetic that is right for one and
+  wrong for many: an undo key that only computes when exactly one write is
+  pending, a rebase that subtracts in f32 because one debug line never needed
+  more, an ownership test that knows about services and not about what streaming
+  made. None of them is a bug in what E1 shipped — each is a correct answer to
+  the question that was being asked at the time, and a manipulator asks a bigger
+  one.
 
-  **Also learned, and it cost a round of somebody's time**: a patch that asserts
-  half way and writes at the end writes NOTHING, and the build passed anyway
-  because the signature it would have changed had not changed either. I reported
-  the context menus as done on the strength of having run the patch rather than
-  having read the result (D064). Every script that edits this repository now
-  re-reads the file after writing and fails if what it added is not there — **an
-  edit that cannot be verified is an edit that did not happen.**
+  **Also learned:** a milestone can ship a documented gap and be right, and the
+  bill still comes. E1 wrote down that ADR 0047's boot order was inverted and
+  said in the code comment that letting the file win was "the honest behaviour to
+  ship until the lifecycle moves". It was — right up until a project whose script
+  builds its world met a scene, which is the one case where the two orders
+  disagree, and the failure is not a subtly wrong world but an unusable editor.
 
-  **And a third time the same shape**: `setPointerLocked`'s result was discarded
-  with a `(void)`, so a refused pointer lock and a granted one looked identical
-  from outside. The log that replaced it is what turned D063 from three guesses
-  into a fact in one run.
-
-  **Next:** E2 owes the manipulators, creating an instance, reparenting by drag
-  and multi-select — and nothing else, because E1 absorbed the rest.
-
-- **2026-08-22 (session 16, Claude Opus): v1.0.0 RELEASED.** Ran the §2 boot
-  sequence on a repository whose milestones were all closed, and it earned its
-  keep at step 2: the ledger said `milestone/m8` and `v1.0.0` were local and both
-  were already on `origin`, while `milestone/m4`, `m7` and `m7.5` — which it did
-  not mention — were not. The repo wins; the ledger was corrected and the three
-  pushed.
-
-  **Did:** the five-stage local gate green (docs 12.3 s, luau 9.7 s, format 14 s,
-  windows 62.1 s, linux 77.2 s, 1,109 conformance cases) as the evidence for
-  publishing; `luaug build examples/10-open-world` for the artifact; and the
-  GitHub release at <https://github.com/zSkanz/luaug/releases/tag/v1.0.0>, with
-  the flagship's Windows folder attached at 6.7 MiB and notes that state the
-  build-from-source chain, the soak numbers, the known limits and the missing
-  macOS tier rather than leaving a reader to find them.
-
-  **Learned:** a tag and a release are different objects, and `gh release list`
-  answering nothing while `git ls-remote --tags` answers plenty is what tells
-  them apart — the ledger had recorded "tagged" and read it back as "released".
-
-  **Open, and it is a person's:** the repository is private, so the release
-  reaches the account and nobody else, and that same setting is what keeps
-  Actions dark.
+  **Next:** freeze `Inspector`'s selection set and `Inspector::pruneDead`, then
+  the gesture and the extracted coalescing key, per the E2 brief's subagent plan.
 
 - **2026-08-21 (session 11, Claude Opus): M6 built and signed off.** Moved to
   the archive with the rest of M6.

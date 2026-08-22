@@ -1221,10 +1221,13 @@ only prose in `docs/api-design.md` — no selection highlight, no manipulator, n
 undo, no dockspace, no scene file format, and no way for the engine to write a
 file (`engine/platform/include/luaug/platform/file.h` reads and never writes).
 
-**The sequence, and only E1 is specified.** E2 through E5 are ordered intent in
+**The sequence, and E1 and E2 are specified.** E3 and E4 are ordered intent in
 the same sense as the phase list above: each gets its detail and its gate at its
-own kickoff, from what the milestone before it learned. Writing five gates today
-would be writing four of them from a position that has not seen an editor run.
+own kickoff, from what the milestone before it learned. Writing five gates on the
+day the phase opened would have been writing four of them from a position that
+had not seen an editor run — and E2's, written after E1 shipped, is a different
+document for it: it names three defects that only somebody who had built the
+first one could have found.
 
 **Re-cut 2026-08-22, at E1's review, by human decision.** The first sequence
 below put manipulators in one milestone, saving in another and play in a third —
@@ -1257,7 +1260,7 @@ size were normal.
 | ID | Name | Size | Runnable artifact |
 |----|------|------|-------------------|
 | E1 | The Editor | XXL | `luaug edit`: an application with a menu bar and dockable panels; a viewport you click, fly and select in; **play, pause, step, stop and save**; a **content browser** with folders and context menus, from which **opening a scene loads it**; **undo and redo**; and a scene format that makes a project's world data. **Built, awaiting review** |
-| E2 | Moving Things | L | Translate, rotate and scale manipulators; creating instances; reparenting by drag; multi-select — the direct manipulation the loop and the undo stack make safe |
+| E2 | Moving Things | L | Translate, rotate and scale manipulators; creating instances; reparenting by drag; multi-select — the direct manipulation the loop and the undo stack make safe. **Specified below, in progress** |
 | E3 | Assets and Prefabs | M | Prefabs as scenes, an asset importer path from the browser, and a scene that references what it uses |
 | E4 | The Editor Ships | M | The distribution question ADR 0046 deliberately declined, and the editor's own performance gate |
 
@@ -1385,3 +1388,179 @@ engine has picked its own and keeps it.
   - **A human opens the editor on the flagship and says whether it is an editor**
     — the gate item that is deliberately not automatable, and the one every
     milestone since M4 has proven is where the real defects come from.
+
+### E2 — Moving Things (L)
+
+Specified 2026-08-22, at kickoff, from four read-only reconnaissance passes over
+the repository — the same method ADR 0046 used to size E1, and for the same
+reason the phase list gives: E2 through E5 get their detail at their own kickoff,
+written from what the milestone before them learned rather than from a position
+that has not yet seen an editor run.
+
+**The starting position, measured rather than assumed.** Every foundation a
+manipulator stands on exists and is tested. `picking.h` is arithmetic rather than
+a UI callback, and its own opening paragraph says why: an aspect-ratio error is
+exactly right at the centre of the screen and wrong at every edge, so a picking
+bug that reproduces by clicking is one nobody fixes twice. `DebugDraw` submits in
+world space, is rebased once a frame, and draws in a pass with no depth
+attachment — which is to say it already draws over everything, which is what a
+gizmo wants and what E1's selection outline already uses. Undo is snapshots with
+a coalescing key, and `World::setParent` already returns a typed error and
+already refuses a cycle. The vendored ImGui is 1.92.9b on the docking branch and
+carries `BeginDragDropSource`/`AcceptDragDropPayload` and `BeginMultiSelect`
+already compiled.
+
+**What is absent is smaller and sharper than the milestone's name suggests.**
+There is no world-to-screen projection anywhere in the tree — a repo-wide search
+for `worldToScreen`, `worldToViewport` or `projectPoint` finds nothing. The
+selection is a single `InstanceId` and nothing anywhere holds two. `setParent`
+has exactly one caller in the editor layer and no drag-and-drop exists in the
+repository at all. There is no `Editor::createInstance`. And the undo coalescing
+key is computed inline in `engine.cpp` out of *how many writes are pending this
+frame*, which no test covers and which a manipulator breaks on its first dragged
+frame.
+
+#### The six decisions this milestone is built on
+
+**1. The selection becomes a set, and it stays where the single one lived.** The
+`Inspector` owns it — `editor.h` already says in its own words that a second copy
+would be two answers to one question. `selection()` keeps meaning *the primary*,
+so every existing reader stays correct, and a new `selectionSet()` serves the
+ones that need all of them. A single `Inspector::pruneDead(world)` replaces the
+four hand-written `if (!alive(selection())) select({})` sites — and closes a
+latent defect nobody has reported: select a child, delete its parent, and the
+selection today points at a dead id, because the check compares against the
+deleted id and not against its subtree.
+
+**2. An edit is a GESTURE, and that is what coalesces.** Today the key is
+`(target << 32) | property`, and it is computed only when the frame has *exactly
+one* pending write; two or more make it zero, and zero never coalesces. A gizmo
+dragging three parts, or writing `CFrame` and `Size` together, therefore records
+a full world snapshot every frame — a hundred and twenty undo steps and a hundred
+and twenty world copies in two seconds, which is precisely the failure
+`editor_tests.cpp`'s coalescing case exists to prevent and precisely the failure
+that case cannot see, because it calls `record` directly and the calculation in
+`engine.cpp` has no test at all. E2 replaces it with a gesture opened by whoever
+starts the drag and closed when it ends. One drag is one step however many writes
+it made, and two consecutive drags on the same property are two steps — which the
+current scheme wrongly merges into one.
+
+**3. A transform over N instances is a DELTA applied to each, never one value
+broadcast.** Dragging three parts with an absolute write stacks them on top of
+each other. The editor computes the delta and enqueues N absolute writes, which
+means `PendingWrite` does not change and the safe-point drain does not change:
+the arithmetic moves into the editor, where a test can drive it, rather than into
+the inspector, where it would be a second meaning for a queue that has one.
+
+**4. The gizmo is DRAWN in the world and HIT-TESTED by arithmetic.** Drawn
+through `DebugDraw`, because that path already draws over everything, already
+goes through the same view-projection that drew the frame — so it cannot disagree
+with the image the way a separately-computed screen-space overlay eventually
+would — already clips to the viewport panel, and is a buffer of vertices a
+headless test can read. Hit-tested in `picking.h`, as free functions over a ray
+and a gizmo frame, because E1's rule is unchanged: a bug that reproduces only by
+dragging is a bug nobody fixes twice. `picking.h` gains `worldToViewport` as the
+exact inverse of `rayThroughPixel` — reading the two tangents back off the same
+projection matrix, for the same reason — which is what keeps a handle a constant
+size in pixels.
+
+**5. The gizmo is submitted CAMERA-RELATIVE, and so is the selection outline.**
+`DebugDraw::rebaseTo` subtracts in f32 and its own header says so, so a
+submission in world coordinates quantises the absolute metre value *before* the
+camera is subtracted from it. That is about half a millimetre at four kilometres
+and worse further out, on a handle somebody is trying to drag precisely.
+`submitSelection` has this defect today and it has never been reported; E2 fixes
+both, by subtracting in f64 at the submission, which is what `toRenderMatrix`
+exists for.
+
+**6. Authorable is not the same question as engine-owned, and reparenting is
+where the difference bites.** `isEngineOwned` covers the DataModel root and
+classes flagged `Service`; it says nothing about `generated`, which is the flag
+streaming puts on a chunk's folder and which the scene format reads three times.
+So nothing today stops a drag from dropping an authored part inside
+`Chunk_12_-4`: the save would skip it, because the serializer skips a generated
+subtree whole, and the next eviction would destroy it without a word. E2 answers
+that with one predicate — authorable — that tests engine-owned, `generated`, and
+the ancestors of both, and every new verb goes through it.
+
+#### Scope
+
+- **Three manipulators in the viewport** — translate, rotate, scale — driven from
+  the primary selection with the rest following by delta. Axis handles and plane
+  handles for translate; per-axis rings for rotate; per-axis and uniform for
+  scale. World space and local space, because a rotated part is unusable in one
+  of them and which one depends on the part.
+- **Snapping**, with a modifier to suspend it. It costs almost nothing on top of
+  the delta arithmetic, and its absence is what makes a manipulator feel like a
+  toy.
+- **Multi-select**: ctrl-click to add and remove, shift-click for a range in the
+  Explorer, ctrl-click in the viewport. The Properties panel shows the properties
+  the selection holds in COMMON and marks a differing value as mixed rather than
+  showing the first one's, which is a lie somebody edits by accident.
+- **Creating an instance** from the Explorer's context menu and the menu bar,
+  over the 27 classes that are neither `Abstract`, `Service` nor `NotCreatable` —
+  the same filter `Instance.new` applies, read from the same flags rather than
+  from a list this milestone would have to maintain. Parented where the menu was
+  opened, selected on creation, undoable, and placed in front of the editor
+  camera rather than at the origin: an instance created four kilometres from the
+  view is one nobody finds.
+- **Reparenting by drag** in the Explorer, refusing a cycle, refusing a target
+  that is not authorable, and with a drop-between-rows target so ordering is
+  expressible.
+- **Batch delete and duplicate** over the whole selection, as ONE undo step each,
+  because somebody who deleted four things did one thing.
+- **The gesture-based undo key**, extracted out of `engine.cpp` into something a
+  test can reach.
+
+#### NOT in scope, stated so it is not drifted into
+
+Prefabs and any notion of a nested scene (E3). An asset importer (E3). Any
+distribution of the editor (E4). Shape-exact picking — every part is still picked
+as its box, which `picking.h` already writes down as an approximation. Solid
+gizmo geometry: `DebugDraw` is a line list and stays one, so the handles are made
+of lines. A second viewport, an orthographic view, or view bookmarks. Aligning or
+distributing a selection. Copy and paste. A transform panel with numeric entry
+beyond the Properties grid that already exists. And the VM that a stop does not
+put back, which is still E1's honest limit and still waits on what ADR 0047
+changes over time.
+
+#### Gate (definition of done)
+
+- `luaug edit examples/06-scene` opens, a part is selected, and each of the three
+  manipulators moves it in the viewport. A screenshot per mode is attached to the
+  gate record.
+- **The manipulator arithmetic has unit tests over a camera and a viewport
+  rectangle**, covering: an axis handle hit at the centre of the screen and at a
+  corner; an axis nearly parallel to the view direction; a drag that begins off
+  the axis; a non-square viewport; and a round trip — `worldToViewport` of a
+  point, back through `rayThroughPixel`, aiming at that point — checked at the
+  four corners, because that is the aspect-ratio error the file already exists to
+  catch.
+- **One drag is one undo step**, proven headlessly: sixty frames of writes inside
+  one gesture produce one history entry, and two gestures over the same property
+  produce two. The extracted key has its own test; the inline calculation it
+  replaces had none.
+- **A transform over a multi-selection moves each instance by the same delta**,
+  proven on a selection whose members start at different transforms: three parts
+  a metre apart are still a metre apart after the drag.
+- **The gizmo does not shake four kilometres from the origin.** The vertices
+  `DebugDraw` holds for a gizmo submitted at 4 km agree with the exact
+  camera-relative value to within a tenth of a millimetre. The same check covers
+  the selection outline, which is the defect it finds.
+- Multi-select in the Explorer and in the viewport; the Properties panel shows
+  the common properties of a mixed-class selection and marks a differing value as
+  mixed. Proven by tests over the free functions that compute both, since the
+  panel itself cannot be driven headlessly.
+- Creating an instance from the UI lands under the parent the menu was opened on,
+  is selected, and is taken back by one undo. Reparenting by drag moves a
+  subtree, refuses a cycle, and refuses a target inside a streamed chunk — all of
+  it driven through `Editor` directly by a test rather than by a mouse.
+- Deleting a selection of four is one undo step, and undoing it brings all four
+  back with the same instance ids, which is the property E1's delete test already
+  asserts for one.
+- `scripts/localgate.ps1` green on every stage; `luaug check` clean; docs-lint
+  clean.
+- **A human opens the editor on the flagship, moves something, and says whether
+  it moves the way a manipulator should** — deliberately not automatable, and the
+  gate item every milestone since M4 has proven is where the real defects come
+  from.
