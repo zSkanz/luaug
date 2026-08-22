@@ -1,42 +1,23 @@
-# The M6 end-to-end gate: a full run of `examples/04-obby`, start to finish
-# flag, replayed headless.
-#
-# One line per key transition: <tick> <+ down | - up> <Key>, named by its
-# US-layout legend. Held between transitions, exactly as a real key is.
-#
-# Authored rather than captured, for the reason `tests/determinism/character`
-# gives at length: a capture of somebody playing is a minute of noise nobody can
-# review, while this is a script of intent whose every line says what it is for.
-# The engine cannot tell the difference, which is the point -- what is replayed
-# is a keystroke's whole path to the game rather than a bot calling the API
-# underneath it.
-#
-# **The timings are not arbitrary and they are not tuned to a frame.** The
-# character walks 5 m/s, which is one metre every twelve ticks, so its position
-# is `z = -(tick - 20) / 12` from the moment W goes down. Each jump is taken one
-# metre before a platform's edge, which at a jump speed of 5.5 lands it three
-# metres onto the next one -- a metre of slack at both ends.
-
-# Dismiss the menu. A key rather than the mouse, because a menu only a pointer
-# could open would make the rest of this file unreachable.
 5 + Return
 8 - Return
-
-# Walk, and never stop. Everything below is a jump taken while walking.
 20 + W
-
-# Start pad -> Hop1. The pad ends at z = -6; this leaves at -5.
 80 + Space
 84 - Space
-
-# Hop1 -> Hop2, over a three-metre gap and a metre of rise.
-176 + Space
-180 - Space
-
-# Hop2 -> Hop3, the last jump. From here the course is platforms that meet.
-284 + Space
-288 - Space
-
-# No more input. The lift and the ferry are walked onto and ridden: their ends
-# meet the ledges they serve, so boarding is a step rather than a jump, and the
-# character reaches the finish pad at about tick 980.
+164 + Space
+168 - Space
+248 + Space
+252 - Space
+332 + Space
+336 - Space
+1030 - W
+1160 + W
+1215 - W
+1350 + W
+1536 + Space
+1540 - Space
+1610 + Space
+1614 - Space
+1700 + Space
+1704 - Space
+1788 + Space
+1792 - Space

@@ -64,25 +64,80 @@ local function block(name: string, position: vector, size: vector, color: Color3
     return part
 end
 
--- The start pad, wide enough to stand on while the menu is up.
-block("Start", vector.create(0, 0, 0), vector.create(12, 1, 12), Ground)
+--- The course, in the order you meet it.
+---
+--- **Every number here is derived from what the character can do rather than
+--- chosen.** Gravity is 9.81 m/s^2 and this engine's units are METRES: at
+--- `JumpSpeed` 5.5 a jump rises 1.54 m, stays up 1.12 s and carries 5.6 m at a
+--- level landing, which was measured off a traced run rather than worked out on
+--- paper. So the rule the whole course obeys is **a gap of at most 3 m and a
+--- rise of at most 0.8 m**, which spends about half a jump. This is the engine's
+--- example, not a test of anybody's timing.
+---
+--- `position` is the part's CENTRE and every plank is a metre thick, so the
+--- surface you stand on is `y + 0.5` and a four-metre character standing on it
+--- reads `Position.y = y + 2.5`.
+---
+--- **A gap of half a metre is a walk and not a jump.** The character is a
+--- two-metre capsule, so its underside bridges anything narrower than its own
+--- radius; that is what joins the moving platforms below to the ledges they
+--- serve without either overlapping the other, which two solid bodies must not
+--- do.
+local Course = {
+    -- Wide enough to stand on while the menu is up.
+    { name = "Start", position = vector.create(0, 0.0, 0), size = vector.create(12, 1, 12), color = Ground },
 
--- Three hops, each a little higher and a little further. The gaps are two and
--- three metres against a fourteen-metre-a-second walk, which is generous on
--- purpose: this is the engine's example, not a test of the player's timing.
-local StaticHops = {
-    { position = vector.create(0, 0, -11), size = vector.create(6, 1, 6) },
-    { position = vector.create(0, 1, -20), size = vector.create(6, 1, 6) },
-    { position = vector.create(0, 2, -29), size = vector.create(6, 1, 6) },
+    -- Four hops, each three metres out and eighty centimetres up. Four rather
+    -- than M6's three, and the size is 4x4 rather than 6x6: a landing pad wider
+    -- than the jump is not a jump.
+    { name = "Hop1", position = vector.create(0, 0.0, -11), size = vector.create(4, 1, 4), color = Platform },
+    { name = "Hop2", position = vector.create(0, 0.8, -18), size = vector.create(4, 1, 4), color = Platform },
+    { name = "Hop3", position = vector.create(0, 1.6, -25), size = vector.create(4, 1, 4), color = Platform },
+    { name = "Hop4", position = vector.create(0, 2.4, -32), size = vector.create(4, 1, 4), color = Platform },
+
+    -- The first landing: wide, flat, and a metre from Hop4 so it is stepped onto
+    -- rather than jumped to. A checkpoint belongs where you can stand still.
+    { name = "Ledge1", position = vector.create(0, 2.4, -40), size = vector.create(10, 1, 10), color = Ground },
+
+    -- The second landing, at the top of the lift.
+    { name = "Ledge2", position = vector.create(0, 5.9, -57), size = vector.create(10, 1, 10), color = Ground },
+
+    -- **The gorge floor, and it is why the ferry is not a trap.** M6's ferry
+    -- crossed open air: a player who walked off the ledge while it was away fell
+    -- to the death height and started the section again, with nothing to say
+    -- that waiting was the answer. Five and a half metres down there is a floor
+    -- now, and beside it a staircase back up -- so missing the ferry costs a
+    -- climb rather than the run. The drop is deliberately more than the
+    -- character is tall, or the ferry would sweep through anybody standing on
+    -- the floor beneath it.
+    { name = "Gorge", position = vector.create(0, 0.4, -70), size = vector.create(16, 1, 26), color = Ground },
+    { name = "Climb1", position = vector.create(7, 1.6, -64), size = vector.create(3, 1, 3), color = Platform },
+    { name = "Climb2", position = vector.create(7, 2.8, -61), size = vector.create(3, 1, 3), color = Platform },
+    { name = "Climb3", position = vector.create(7, 4.0, -58), size = vector.create(3, 1, 3), color = Platform },
+    { name = "Climb4", position = vector.create(7, 5.2, -55), size = vector.create(3, 1, 3), color = Platform },
+
+    -- The far side of the ferry, and the last place to stand still.
+    { name = "Summit", position = vector.create(0, 5.9, -85), size = vector.create(12, 1, 12), color = Ground },
+
+    -- The run home: three more hops to the flag, so the course ends on the thing
+    -- it opened with instead of on a walk.
+    { name = "Stone1", position = vector.create(0, 6.7, -95), size = vector.create(4, 1, 4), color = Platform },
+    { name = "Stone2", position = vector.create(0, 7.5, -102), size = vector.create(4, 1, 4), color = Platform },
+    { name = "Stone3", position = vector.create(0, 8.3, -109), size = vector.create(4, 1, 4), color = Platform },
+    { name = "FinishLedge", position = vector.create(0, 8.3, -117), size = vector.create(8, 1, 8), color = Ground },
 }
-for index, hop in StaticHops do
-    block(`Hop{index}`, hop.position, hop.size, Platform)
+
+for _, piece in Course do
+    block(piece.name, piece.position, piece.size, piece.color)
 end
 
 -- A hazard, beside the path rather than across it. Touching it costs a
--- checkpoint's worth of progress, and walking straight down the middle misses
--- it -- which is what makes it a thing to notice rather than a thing to time.
-local spike = block("Spike", vector.create(2.6, 2.8, -29), vector.create(2, 0.6, 4), Hazard)
+-- checkpoint's worth of progress, and walking down the middle misses it by
+-- nearly two metres -- which is what makes it a thing to notice rather than a
+-- thing to time. It sits further out than M6's did, because `Touched` fires for
+-- a SIDE contact now (D028) and a hazard you can brush is a hazard that fires
+-- when you did nothing wrong.
+local spike = block("Spike", vector.create(3.8, 3.2, -40), vector.create(2, 0.6, 8), Hazard)
 
 -- --- Moving platforms --------------------------------------------------------
 --
@@ -95,24 +150,38 @@ local spike = block("Spike", vector.create(2.6, 2.8, -29), vector.create(2, 0.6,
 -- neither of these needs a handler to turn it around. `Sine`/`InOut` is what
 -- makes them ridable: a platform that changed direction at full speed would
 -- shear a character off it, and this one comes to rest at each end.
+--
+-- **`DelayTime` is what makes them boardable, and it is new.** The delay runs
+-- after a whole there-and-back, which puts it at the START of the travel -- so
+-- each of these waits at the end you get on at. M6 had neither, and boarding was
+-- a timing puzzle nothing in the level told you you were playing: arrive at the
+-- wrong moment and the platform is five metres over your head.
+
+--- How long a platform waits at the end you board it from, in seconds. Long
+--- enough to walk on without hurrying and short enough not to feel broken.
+local BoardingRest = 1.6
 
 local function shuttle(name: string, from: vector, to: vector, size: vector, seconds: number): Part
     local part = block(name, from, size, Moving)
-    local info = TweenInfo.new(seconds, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
+    local info = TweenInfo.new(seconds, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true, BoardingRest)
     TweenService:Create(part, info, { CFrame = CFrame.new(to) }):Play()
     return part
 end
 
--- The lift: up and down, so it is boarded at the bottom and left at the top.
-shuttle("Lift", vector.create(0, 2, -36), vector.create(0, 7, -36), vector.create(8, 1, 8), 2)
+-- The lift: up and down, boarded at the bottom and left at the top.
+--
+-- **Its travel is three and a half metres on purpose, and that is the guard
+-- rail.** The character is four metres tall, so whenever the lift is anywhere
+-- but down, its underside is at chest height and the way in is blocked -- you
+-- cannot walk into the shaft, ever, and there is nothing to fall into. A taller
+-- lift would need a wall; this one is its own.
+shuttle("Lift", vector.create(0, 2.4, -48.5), vector.create(0, 5.9, -48.5), vector.create(6, 1, 6), 2.2)
 
-block("Ledge", vector.create(0, 7, -44), vector.create(8, 1, 8), Platform)
-
--- The ferry: along the course rather than across it, which is the shape a
--- player can board without timing a crossing.
-shuttle("Ferry", vector.create(0, 7, -51), vector.create(0, 7, -59), vector.create(6, 1, 6), 2)
-
-block("Summit", vector.create(0, 7, -68), vector.create(10, 1, 12), Platform)
+-- The ferry: along the course rather than across it, which is the shape a player
+-- can board without timing a crossing. It rests against `Ledge2` for
+-- `BoardingRest`, carries you ten metres, and sets you down half a metre from
+-- the summit.
+shuttle("Ferry", vector.create(0, 5.9, -65.5), vector.create(0, 5.9, -75.5), vector.create(6, 1, 6), 2.4)
 
 -- --- Checkpoints -------------------------------------------------------------
 
@@ -121,9 +190,14 @@ block("Summit", vector.create(0, 7, -68), vector.create(10, 1, 12), Platform)
 local respawn = vector.create(0, 3, 0)
 local checkpointsReached = 0
 
+--- One per section, each on a surface you can stand still on. Three rather than
+--- M6's two: the run home is three jumps over open air, and a course that sent
+--- you back across the ferry for missing the last one would be punishing the
+--- wrong mistake.
 local CheckpointSpots = {
-    vector.create(0, 2.7, -29),
-    vector.create(0, 7.7, -44),
+    vector.create(0, 3.1, -40),
+    vector.create(0, 6.6, -57),
+    vector.create(0, 6.6, -85),
 }
 
 -- --- Sounds ------------------------------------------------------------------
@@ -145,6 +219,7 @@ end
 local jumpSound = sound("Jump", 0.25, 1.6)
 local checkpointSound = sound("Checkpoint", 0.4, 1.2)
 local fallSound = sound("Fall", 0.35, 0.6)
+local landSound = sound("Land", 0.2, 0.5)
 local finishSound = sound("Finish", 0.5, 0.9)
 
 -- --- The character -----------------------------------------------------------
@@ -313,7 +388,7 @@ title.Parent = menu
 local hint = Instance.new("TextLabel")
 hint.Name = "Hint"
 hint.Size = UDim2.new(1, -32, 0, 40)
-hint.Text = "WASD to walk, Space to jump.\nReach the flag."
+hint.Text = "WASD to walk, Space to jump, arrows to look.\nSeven jumps, a lift and a ferry."
 hint.TextSize = 14
 hint.TextColor = Color3.fromRGB(180, 188, 204)
 hint.BackgroundTransparency = 1
@@ -350,12 +425,30 @@ local status = Instance.new("TextLabel")
 status.Name = "Status"
 status.Size = UDim2.new(0, 320, 1, 0)
 status.Position = UDim2.new(0, 16, 0, 0)
-status.Text = "Checkpoint 0 / 2"
+status.Text = "Checkpoint 0 / 3"
 status.TextSize = 16
 status.TextColor = Color3.fromRGB(232, 236, 244)
 status.HorizontalAlignment = Enum.HorizontalAlignment.Left
 status.BackgroundTransparency = 1
 status.Parent = hud
+
+--- What to do next, in words.
+---
+--- M6 had a status line that counted checkpoints and nothing that said what the
+--- course wanted. That is fine while every obstacle is a jump; it is not fine at
+--- a lift, where the correct move is to STAND STILL for a second and nothing on
+--- screen says so. A player who does not know that reads a platform overhead as
+--- a wall and concludes the course is broken.
+local objective = Instance.new("TextLabel")
+objective.Name = "Objective"
+objective.Size = UDim2.new(0, 420, 1, 0)
+objective.Position = UDim2.new(0, 344, 0, 0)
+objective.Text = "Jump the gaps"
+objective.TextSize = 16
+objective.TextColor = Color3.fromRGB(196, 206, 224)
+objective.HorizontalAlignment = Enum.HorizontalAlignment.Left
+objective.BackgroundTransparency = 1
+objective.Parent = hud
 
 --- The touch jump button. This is the roadmap's proving caller: a `TextButton`
 --- driving a real `InputAction`, useful on a desktop on its own, and going
@@ -445,6 +538,14 @@ end)
 
 -- --- Checkpoints, falling and the flag ---------------------------------------
 
+--- What the section AFTER each checkpoint asks for. Indexed the same way, so
+--- reaching checkpoint 1 puts up the instruction for the lift that follows it.
+local Objectives = {
+    "Wait for the lift, then ride it up",
+    "Wait for the ferry, then ride it across",
+    "Three jumps to the flag",
+}
+
 for index, spot in CheckpointSpots do
     local pad = block(`Checkpoint{index}`, spot, vector.create(4, 0.4, 4), Checkpoint)
     pad.Touched:Connect(function(other: BasePart)
@@ -454,6 +555,7 @@ for index, spot in CheckpointSpots do
         checkpointsReached = index
         respawn = spot + vector.create(0, 3, 0)
         status.Text = `Checkpoint {checkpointsReached} / {#CheckpointSpots}`
+        objective.Text = Objectives[index] or "Reach the flag"
         checkpointSound:Play()
     end)
 end
@@ -462,8 +564,8 @@ end
 -- fires for the surface under a character's feet and not for a wall it presses
 -- against (D028), so a finish line has to be something you step on. The pole
 -- behind it is the thing you aim at.
-local flag = block("Finish", vector.create(0, 7.7, -70), vector.create(6, 0.4, 6), Finish)
-block("Flagpole", vector.create(0, 9.2, -73), vector.create(3, 3, 0.5), Finish)
+local flag = block("Finish", vector.create(0, 9.0, -117), vector.create(6, 0.4, 6), Finish)
+block("Flagpole", vector.create(0, 10.5, -120), vector.create(3, 3, 0.5), Finish)
 
 flag.Touched:Connect(function(other: BasePart)
     if other ~= (character :: BasePart) or finished then
@@ -534,10 +636,15 @@ RunService.Heartbeat:Connect(function(dt: number)
     -- dispatch and gone by the next.
     InputService:SetVirtualState(Enum.KeyCode.Virtual1, 0)
 
+    -- Landing is a transition and `wasGrounded` is what makes it one. It was
+    -- computed and never read through M6, which is the same shape as `UICorner`
+    -- being stored and never drawn (D030) -- a variable nothing consumes is a
+    -- feature nobody finished.
     if not character.Grounded then
         wasGrounded = false
     elseif not wasGrounded then
         wasGrounded = true
+        landSound:Play()
     end
 
     if character.Position.y < DeathHeight then
