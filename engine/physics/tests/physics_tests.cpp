@@ -424,6 +424,135 @@ TEST_CASE("two characters cannot walk through each other")
     CHECK(gap > 1.8);
 }
 
+TEST_CASE("a character touches the wall it walks into, and the floor it stands on")
+{
+    // D028: a `CharacterBody` is a `BasePart` and a script expects `Touched`
+    // from one. The rigid-body contact listener cannot give it -- a
+    // `CharacterVirtual` is not a body in the broad phase -- so M6 answered the
+    // ground half by diffing the surface under the feet, and a wall walked into
+    // fired nothing at all. The obby's finish had to become a pad you stand on.
+    Fixture fixture;
+    fixture.spawn(floorDesc());
+
+    BodyDesc wall;
+    wall.shape.size = core::Vec3{6.0f, 6.0f, 1.0f};
+    wall.transform.position = core::DVec3{0.0, 3.0, 6.0};
+    wall.motion = MotionType::Static;
+    wall.userData = 21;
+    fixture.spawn(wall);
+
+    CharacterDesc desc;
+    desc.transform.position = core::DVec3{0.0, 2.5, 0.0};
+    desc.userData = 9;
+    const CharacterHandle character = fixture.physics->createCharacter(fixture.world, desc);
+    REQUIRE(character.valid());
+
+    std::vector<u64> began;
+    for (int i = 0; i < 120; ++i) {
+        const CharacterState state = fixture.physics->characterState(fixture.world, character);
+        const f32 vertical =
+            state.ground == CharacterGround::Grounded ? 0.0f : state.linearVelocity.y - 9.81f * kFixedDt;
+        fixture.physics->moveCharacter(fixture.world, character, core::Vec3{0.0f, vertical, 4.0f}, kFixedDt);
+        fixture.physics->step(fixture.world, kFixedDt);
+
+        for (const ContactEvent& event : fixture.physics->drainContacts(fixture.world)) {
+            if (event.phase == ContactPhase::Began && event.firstUserData == 9)
+                began.push_back(event.secondUserData);
+        }
+    }
+
+    // The floor it stands on and the wall it walks into, each named once. The
+    // wall is the half D028 carried; the floor is the half that used to be
+    // diffed a layer up and is one mechanism now.
+    CHECK(std::count(began.begin(), began.end(), 1u) == 1);
+    CHECK(std::count(began.begin(), began.end(), 21u) == 1);
+
+    const CharacterState state = fixture.physics->characterState(fixture.world, character);
+    CHECK(state.transform.position.z < 5.6);
+}
+
+TEST_CASE("a character stops touching a wall it walks away from")
+{
+    Fixture fixture;
+    fixture.spawn(floorDesc());
+
+    BodyDesc wall;
+    wall.shape.size = core::Vec3{6.0f, 6.0f, 1.0f};
+    wall.transform.position = core::DVec3{0.0, 3.0, 6.0};
+    wall.motion = MotionType::Static;
+    wall.userData = 21;
+    fixture.spawn(wall);
+
+    CharacterDesc desc;
+    desc.transform.position = core::DVec3{0.0, 2.5, 0.0};
+    desc.userData = 9;
+    const CharacterHandle character = fixture.physics->createCharacter(fixture.world, desc);
+
+    const auto walk = [&](f32 forward, int ticks, std::vector<ContactEvent>& out) {
+        for (int i = 0; i < ticks; ++i) {
+            const CharacterState state = fixture.physics->characterState(fixture.world, character);
+            const f32 vertical =
+                state.ground == CharacterGround::Grounded ? 0.0f : state.linearVelocity.y - 9.81f * kFixedDt;
+            fixture.physics->moveCharacter(fixture.world, character, core::Vec3{0.0f, vertical, forward}, kFixedDt);
+            fixture.physics->step(fixture.world, kFixedDt);
+            const std::span<const ContactEvent> events = fixture.physics->drainContacts(fixture.world);
+            out.insert(out.end(), events.begin(), events.end());
+        }
+    };
+
+    std::vector<ContactEvent> approach;
+    walk(4.0f, 120, approach);
+    const bool touchedWall = std::any_of(approach.begin(), approach.end(), [](const ContactEvent& event) {
+        return event.phase == ContactPhase::Began && event.firstUserData == 9 && event.secondUserData == 21;
+    });
+    REQUIRE(touchedWall);
+
+    std::vector<ContactEvent> retreat;
+    walk(-4.0f, 60, retreat);
+    // A contact that stops being reported has really ended: a character is never
+    // put to sleep by the solver, which is why this diff makes no sleep
+    // exception where the rigid one has to.
+    const bool leftWall = std::any_of(retreat.begin(), retreat.end(), [](const ContactEvent& event) {
+        return event.phase == ContactPhase::Ended && event.firstUserData == 9 && event.secondUserData == 21;
+    });
+    CHECK(leftWall);
+}
+
+TEST_CASE("a character standing still reports its floor once, not once a tick")
+{
+    // The whole point of a diff. Reading the contact list every tick and firing
+    // on it would make `Touched` a per-frame event, which is the most common way
+    // a contact signal becomes useless.
+    Fixture fixture;
+    fixture.spawn(floorDesc());
+
+    CharacterDesc desc;
+    desc.transform.position = core::DVec3{0.0, 2.5, 0.0};
+    desc.userData = 9;
+    const CharacterHandle character = fixture.physics->createCharacter(fixture.world, desc);
+
+    int began = 0;
+    int ended = 0;
+    for (int i = 0; i < 240; ++i) {
+        const CharacterState state = fixture.physics->characterState(fixture.world, character);
+        const f32 vertical =
+            state.ground == CharacterGround::Grounded ? 0.0f : state.linearVelocity.y - 9.81f * kFixedDt;
+        fixture.physics->moveCharacter(fixture.world, character, core::Vec3{0.0f, vertical, 0.0f}, kFixedDt);
+        fixture.physics->step(fixture.world, kFixedDt);
+        for (const ContactEvent& event : fixture.physics->drainContacts(fixture.world)) {
+            if (event.firstUserData != 9)
+                continue;
+            if (event.phase == ContactPhase::Began)
+                ++began;
+            else
+                ++ended;
+        }
+    }
+
+    CHECK(began == 1);
+    CHECK(ended == 0);
+}
+
 TEST_CASE("a character is not pushed by another walking into it")
 {
     Fixture fixture;

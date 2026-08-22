@@ -137,8 +137,8 @@ quietly.
 - **A `Sound` plays a generated tone of its declared length.** `Content` is
   `Inert`. The timeline, the events, the mixing, the spatialization and the
   group volumes are real; the file is not.
-- **`Touched` does not fire for a character's SIDE contacts** — D028's remaining
-  half. The surface under its feet does.
+- **`Touched` fires for every contact a character has**, the wall it walks into
+  as well as the surface under its feet (D028, closed 2026-08-21).
 - **`BasePart.Material` is not shipped**, and neither is `RaycastResult.Material`.
 - **`Enum.CollisionFidelity` round-trips and every value collides as a box**;
   a hull needs mesh geometry the mirror cannot see until M7. `Inert`.
@@ -167,10 +167,11 @@ quietly.
   now sets. The older half still applies: a break-verification restored with
   `Copy-Item` keeps the source's old timestamp and rebuilds nothing — restore
   with `cp` and `touch`.
-- **D028's remaining half — `Touched` for a character's SIDE contacts.** The
-  ground half is fixed; a wall walked into still fires nothing, because the
-  character's non-ground contacts are not on the `IPhysics3D` seam. That is a
-  seam widening rather than a fix.
+- **D028 is closed, and the seam did not move.** The row predicted a widening of
+  `IPhysics3D`; what it took was reading the character's own active contacts
+  after the step and putting them through the diff the rigid pairs already go
+  through. The ground half moved there too — two mechanisms for one signal is
+  how the two come to disagree.
 - **D026 is fixed**: an upload records what it carried, not how many bytes it
   was. The obvious fix -- the same content hash `bindUniforms` has used since
   M4.5 -- does not work, and the Tier-2 run is what said so: **a hash has no

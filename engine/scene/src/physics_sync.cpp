@@ -619,41 +619,18 @@ void PhysicsSync::writeCharacters()
             m_scene.changes().push(change);
         }
 
-        // **`Touched` for the surface under a character's feet.**
+        // **`Touched` is the backend's, all of it** (D028).
         //
-        // A `CharacterBody` is a `BasePart`, so a script reasonably expects
-        // `Touched` from one -- and it got nothing, because the contact listener
-        // only sees rigid-body pairs and a character controller is not a body in
-        // the broad phase. A checkpoint pad you walk onto and a hazard you step
-        // on are the two cases every obby is made of, and both are ground
-        // contacts.
+        // M6 diffed the surface under the character's feet here, because the
+        // rigid-body contact listener could not see a `CharacterVirtual` at all
+        // and a checkpoint pad you walk onto is what an obby is made of. That
+        // covered the ground and nothing else -- a wall walked into fired
+        // nothing -- and it was a second diff for a signal that already had one.
         //
-        // Diffed against last tick, exactly as `buildContactEvents` diffs the
-        // rigid pairs: a ground that appears fires `Touched` on both parts, one
-        // that goes away fires `TouchEnded`, one that stays fires nothing.
-        //
-        // **What this still does not cover is a SIDE contact** -- a wall walked
-        // into fires nothing -- because the character's non-ground contacts are
-        // not on the `IPhysics3D` seam. D028 carries the remainder.
-        if (ground != character->groundPart) {
-            const auto fire = [&](core::InstanceId subject, core::InstanceId other, const char* event) {
-                if (!subject.valid())
-                    return;
-                Change change;
-                change.kind = ChangeKind::InstanceEvent;
-                change.subject = subject;
-                change.other = other;
-                change.name = m_scene.atoms().intern(event);
-                m_scene.changes().push(change);
-            };
-            // Both directions, because `Touched` is a fact about each part and a
-            // script may have connected to either -- the same rule
-            // `publishContacts` applies to a rigid pair.
-            fire(character->groundPart, id, "TouchEnded");
-            fire(id, character->groundPart, "TouchEnded");
-            fire(id, ground, "Touched");
-            fire(ground, id, "Touched");
-        }
+        // Both halves come through `publishContacts` now, from the character's
+        // own active contacts. `groundPart` stays because `Landed` above is
+        // about ground STATE rather than about contact, and because riding a
+        // platform needs to know which one.
 
         character->grounded = grounded;
         character->state = grounded ? 0 : 1;

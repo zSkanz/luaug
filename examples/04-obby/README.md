@@ -74,9 +74,13 @@ per frame. The rig is two joints and a one-second clip, which is small enough
 that you can read the pose in the capture golden.
 
 **Checkpoints are `Touched` handlers on pads you stand on**, and the finish is a
-pad rather than a pole. `Touched` fires for the surface under a character's feet
-and not for a wall it presses against — D028 carries the remainder — so a finish
-line has to be something you step on. The pole behind it is what you aim at.
+pad rather than a pole. That was a constraint when this example was built —
+`Touched` fired for the surface under a character's feet and for nothing else,
+so a finish line had to be something you step on — and D028 has since removed
+it: a character touches the wall it walks into as well. The pads stay, because a
+pad you step on reads better than a pole you press against, and because the
+example is the replay gate's input stream and moving the finish would rerecord
+it for nothing.
 
 ## The gate
 

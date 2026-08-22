@@ -282,9 +282,50 @@ struct ContactPair
     }
 };
 
+// One contact between a CHARACTER and something else, for the tick.
+//
+// Held apart from `ContactPair` rather than folded into it, and the reason is
+// not tidiness: a `CharacterVirtual` is not a body, so the two sides are handles
+// from different spaces, and the sleep exception the rigid diff makes must not
+// apply here -- a character is never put to sleep by the solver and its inner
+// body is created with `mAllowSleeping = false` (`CharacterVirtual.cpp:146`), so
+// a contact that stops being reported really has ended.
+//
+// The character is always the FIRST side, which is what makes the pair
+// canonical without a swap.
+struct CharacterPair
+{
+    u64 character = 0;
+    u64 other = 0;
+    // The other side is another character's inner body rather than an ordinary
+    // one, so its handle is a `CharacterHandle` and resolves through a different
+    // table. Part of the key, because the two spaces can collide numerically.
+    bool otherIsCharacter = false;
+
+    [[nodiscard]] constexpr bool operator==(const CharacterPair&) const noexcept = default;
+    [[nodiscard]] constexpr bool operator<(const CharacterPair& rhs) const noexcept
+    {
+        if (character != rhs.character)
+            return character < rhs.character;
+        if (other != rhs.other)
+            return other < rhs.other;
+        return static_cast<int>(otherIsCharacter) < static_cast<int>(rhs.otherIsCharacter);
+    }
+};
+
 [[nodiscard]] constexpr u64 packHandle(BodyHandle handle) noexcept
 {
     return (static_cast<u64>(handle.generation) << 32) | handle.index;
+}
+
+[[nodiscard]] constexpr u64 packHandle(CharacterHandle handle) noexcept
+{
+    return (static_cast<u64>(handle.generation) << 32) | handle.index;
+}
+
+[[nodiscard]] constexpr CharacterHandle unpackCharacter(u64 packed) noexcept
+{
+    return CharacterHandle{static_cast<u32>(packed & 0xffffffffu), static_cast<u32>(packed >> 32)};
 }
 
 [[nodiscard]] constexpr BodyHandle unpackHandle(u64 packed) noexcept
@@ -909,6 +950,8 @@ public:
         m_timings.step = std::chrono::duration<f64>(end - begin).count();
 
         buildContactEvents();
+        collectCharacterContacts();
+        buildCharacterContactEvents();
     }
 
     [[nodiscard]] std::span<const ContactEvent> contacts() const noexcept { return m_events; }
@@ -1081,6 +1124,7 @@ public:
         if (record == nullptr) {
             return;
         }
+        forgetCharacterPairs(packHandle(handle));
         record->character = nullptr;
         record->alive = false;
         m_freeCharacters.push_back(handle.index);
@@ -1276,6 +1320,27 @@ private:
         const auto drop = [packed](const ContactPair& pair) { return pair.first == packed || pair.second == packed; };
         m_previousPairs.erase(std::remove_if(m_previousPairs.begin(), m_previousPairs.end(), drop),
                               m_previousPairs.end());
+
+        // A character standing on the body being destroyed would otherwise carry
+        // the contact forever: the pair can never appear again, so the diff can
+        // never fire its `TouchEnded`, and `emitCharacter` would refuse it
+        // anyway once the record is gone.
+        const auto dropCharacter = [packed](const CharacterPair& pair) {
+            return !pair.otherIsCharacter && pair.other == packed;
+        };
+        m_previousCharacterPairs.erase(
+            std::remove_if(m_previousCharacterPairs.begin(), m_previousCharacterPairs.end(), dropCharacter),
+            m_previousCharacterPairs.end());
+    }
+
+    void forgetCharacterPairs(u64 packed)
+    {
+        const auto drop = [packed](const CharacterPair& pair) {
+            return pair.character == packed || (pair.otherIsCharacter && pair.other == packed);
+        };
+        m_previousCharacterPairs.erase(
+            std::remove_if(m_previousCharacterPairs.begin(), m_previousCharacterPairs.end(), drop),
+            m_previousCharacterPairs.end());
     }
 
     // The whole of `Touched`/`TouchEnded`: this tick's contacting pairs against
@@ -1339,6 +1404,140 @@ private:
         }
         const JPH::BodyInterface& bodies = m_system.GetBodyInterface();
         return !bodies.IsActive(first->id) && !bodies.IsActive(second->id);
+    }
+
+    // **`Touched` for a character's contacts, all of them** (D028).
+    //
+    // A `CharacterBody` is a `BasePart`, so a script reasonably expects
+    // `Touched` from one -- and the rigid-body contact listener cannot give it,
+    // because a `CharacterVirtual` is not a body in the broad phase. M6 answered
+    // the half an obby needs by diffing the surface under the character's feet
+    // in the scene glue, and left a wall walked into firing nothing.
+    //
+    // This is the whole of it instead, and the ground half moved here with it:
+    // two mechanisms for one signal is how the two disagree. `GetActiveContacts`
+    // is what the character's own update already collected
+    // (`CharacterVirtual.h:511`), so the cost is a walk over a handful of
+    // contacts and no extra collision work.
+    //
+    // The order is `m_characters`' own slot order and then the sort in
+    // `buildCharacterContactEvents`, so nothing about how Jolt's job system
+    // happened to schedule the sweep reaches the event stream (R10).
+    void collectCharacterContacts()
+    {
+        m_characterPairs.clear();
+        const JPH::BodyInterface& bodies = m_system.GetBodyInterface();
+
+        for (usize slot = 0; slot < m_characters.size(); ++slot) {
+            const CharacterRecord& record = m_characters[slot];
+            if (!record.alive || record.character == nullptr)
+                continue;
+
+            const u64 self = packHandle(CharacterHandle{static_cast<u32>(slot), record.generation});
+            for (const JPH::CharacterContact& contact : record.character->GetActiveContacts()) {
+                // A PREDICTIVE contact is one the sweep found ahead of the
+                // character and never reached: `mHadCollision` is what separates
+                // "touching" from "about to". A discarded one was refused by the
+                // validate callback and never happened at all.
+                if (!contact.mHadCollision || contact.mWasDiscarded)
+                    continue;
+                // Another `CharacterVirtual` directly, which this engine never
+                // produces: `mCharacterVsCharacterCollision` is deliberately
+                // unset (see `createCharacter`), so character-against-character
+                // arrives as the inner BODY below.
+                if (contact.mBodyB.IsInvalid())
+                    continue;
+
+                CharacterPair pair;
+                pair.character = self;
+                if (const CharacterHandle peer = characterOfInnerBody(contact.mBodyB); peer.valid()) {
+                    // Skip the pair a character makes with its own inner body,
+                    // which is a contact with itself and not an event.
+                    if (packHandle(peer) == self)
+                        continue;
+                    pair.other = packHandle(peer);
+                    pair.otherIsCharacter = true;
+                }
+                else {
+                    pair.other = bodies.GetUserData(contact.mBodyB);
+                }
+                m_characterPairs.push_back(pair);
+            }
+        }
+    }
+
+    // Which character owns this body, when the body is a character's inner one.
+    //
+    // Linear over the character table, which is a handful of entries and is
+    // walked only for contacts a character actually has. A map keyed by `BodyID`
+    // would be the answer if that stopped being true.
+    [[nodiscard]] CharacterHandle characterOfInnerBody(JPH::BodyID id) const noexcept
+    {
+        for (usize slot = 0; slot < m_characters.size(); ++slot) {
+            const CharacterRecord& record = m_characters[slot];
+            if (record.alive && record.character != nullptr && record.character->GetInnerBodyID() == id)
+                return CharacterHandle{static_cast<u32>(slot), record.generation};
+        }
+        return CharacterHandle{};
+    }
+
+    // The same diff `buildContactEvents` makes, without the sleep exception --
+    // see `CharacterPair` for why there is nothing to except.
+    void buildCharacterContactEvents()
+    {
+        std::sort(m_characterPairs.begin(), m_characterPairs.end());
+        m_characterPairs.erase(std::unique(m_characterPairs.begin(), m_characterPairs.end()), m_characterPairs.end());
+
+        usize i = 0;
+        usize j = 0;
+        while (i < m_characterPairs.size() || j < m_previousCharacterPairs.size()) {
+            if (j == m_previousCharacterPairs.size() ||
+                (i < m_characterPairs.size() && m_characterPairs[i] < m_previousCharacterPairs[j])) {
+                emitCharacter(ContactPhase::Began, m_characterPairs[i]);
+                ++i;
+            }
+            else if (i == m_characterPairs.size() || m_previousCharacterPairs[j] < m_characterPairs[i]) {
+                emitCharacter(ContactPhase::Ended, m_previousCharacterPairs[j]);
+                ++j;
+            }
+            else {
+                ++i;
+                ++j;
+            }
+        }
+
+        m_previousCharacterPairs = m_characterPairs;
+    }
+
+    void emitCharacter(ContactPhase phase, const CharacterPair& pair)
+    {
+        const CharacterHandle character = unpackCharacter(pair.character);
+        const CharacterRecord* record = resolve(character);
+        if (record == nullptr)
+            return;
+
+        // The BODY side of the event is left invalid for a character, because a
+        // character does not have one. `firstUserData` and `secondUserData` are
+        // filled either way, and they are what the scene glue reads.
+        ContactEvent event;
+        event.phase = phase;
+        event.firstUserData = record->userData;
+
+        if (pair.otherIsCharacter) {
+            const CharacterRecord* peer = resolve(unpackCharacter(pair.other));
+            if (peer == nullptr)
+                return;
+            event.secondUserData = peer->userData;
+        }
+        else {
+            const BodyHandle other = unpackHandle(pair.other);
+            const BodyRecord* otherRecord = resolve(other);
+            if (otherRecord == nullptr)
+                return;
+            event.second = other;
+            event.secondUserData = otherRecord->userData;
+        }
+        m_events.push_back(event);
     }
 
     void emit(ContactPhase phase, const ContactPair& pair)
@@ -1408,6 +1607,9 @@ private:
     std::vector<u32> m_freeCharacters;
 
     std::vector<ContactPair> m_previousPairs;
+    // The character half of the same diff (D028).
+    std::vector<CharacterPair> m_characterPairs;
+    std::vector<CharacterPair> m_previousCharacterPairs;
     // Cleared every `step`; see `setBodyTransform`.
     std::vector<PendingMove> m_kinematicMoves;
     // Scratch for the diff, kept as a member so a tick with ten thousand

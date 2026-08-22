@@ -260,6 +260,33 @@ describe("Touched and a CharacterBody", function()
         connection:Disconnect()
     end)
 
+    it("fires for a wall the character walks into, not only the floor", function()
+        -- D028, and the reason `examples/04-obby` finishes on a PAD rather than
+        -- on the pole it was designed around: a character pressed against a
+        -- flagpole fired nothing, because M6 covered the ground half by diffing
+        -- the surface under the feet and a wall is not under anybody's feet.
+        local wall = Instance.new("Part")
+        wall.Name = "CharacterWall"
+        wall.Size = vector.create(8, 6, 1)
+        wall.Position = vector.create(0, 3, -14)
+        wall.Anchored = true
+        wall.Parent = workspace
+
+        local touchedBy: BasePart? = nil
+        local connection = wall.Touched:Connect(function(other: BasePart)
+            touchedBy = other
+        end)
+
+        for _ = 1, 200 do
+            character:Move(vector.create(0, 0, -1))
+            step(1)
+        end
+
+        expect(touchedBy):ToBe(character :: any)
+        connection:Disconnect()
+        wall:Destroy()
+    end)
+
     it("fires on the character too, because Touched is a fact about each part", function()
         local touchedPad = false
         local connection = character.Touched:Connect(function(other: BasePart)
