@@ -157,11 +157,15 @@ quietly.
   and is NOT the cascade fit**, which is what the fit commit says about itself.
   Eleven things are ruled out in the row, each with a build and a measurement,
   and the one that removes the artifact removes the shadow with it. The next
-  step is named there: read the stored depth against the receiver's for one
-  dashed texel. **Shader-side visualisation is unavailable for that** -- writing
-  a constant into the forward pass's colour makes the entire frame come out one
-  flat colour, because the automatic exposure collapses on it, and getting that
-  instrument back is worth doing before the next attempt.
+  measurement has since been made: the streaks are regions where the receiver is
+  more than a METRE behind the stored depth, with a one-pixel boundary. **Acne
+  oscillates around zero; this does not** -- they are real shadows whose EDGE is
+  quantised onto the texel grid with no penumbra to hide it, which is why every
+  bias failed. What is left is a wider kernel rather than another constant.
+  **The instrument works now, and the reason it did not was misdiagnosed twice:**
+  replacing the forward pass's colour leaves its uniforms unused, dead-code
+  elimination drops them, and the pipeline stops being creatable -- the flat
+  frame was a frame with no pipeline, not a bad exposure.
 - **D004 — the inspector crash while dragging `Size`/`CFrame` — is still open and
   still not reproduced.** Two halves are ruled out: the write path driven through
   zero, negative, 1e30 and infinity with a render extraction every frame, and 25
