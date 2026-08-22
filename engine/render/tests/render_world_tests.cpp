@@ -673,3 +673,49 @@ TEST_CASE("a slot reused by a different instance has no history")
     CHECK(history.previous(stale) == nullptr);
     CHECK(history.previous(first) != nullptr);
 }
+
+// --- D070: a history whose world has been replaced under it -----------------
+//
+// A snapshot restore preserves generations, precisely so that an `InstanceId`
+// means the same thing after one as before it -- which is also what let a
+// `TransformHistory` entry go on answering for a part the restore had moved
+// metres. `world.h` states the obligation the frame loop owes here in so many
+// words: these caches are "rebuilt from the tree rather than restored ... safe
+// order: restore, then rebuild".
+//
+// The symptom was the flagship's character capsule flickering after a stop,
+// interpolated every frame between where it had walked to and where it was put
+// back -- with an alpha that goes on sweeping [0, 1) because the frame
+// scheduler drains its accumulator whether or not the editor let a tick
+// through.
+TEST_CASE("clearing the history is what makes a restored world stop interpolating")
+{
+    Fixture fixture;
+    const core::InstanceId root = fixture.world.create(fixture.folderClass);
+    const core::InstanceId part = fixture.part(root);
+
+    scene::PartComponent* component = fixture.world.parts().find(part);
+    REQUIRE(component != nullptr);
+    component->cframe.position = core::DVec3{40.0, 0.0, 0.0};
+
+    render::TransformHistory history;
+    history.capture(fixture.world);
+
+    // The restore. Same id, same generation -- that is the whole difficulty --
+    // and a position nowhere near what the history holds.
+    component->cframe.position = core::DVec3{0.0, 0.0, 0.0};
+
+    render::RenderWorld stale;
+    render::extract(fixture.world, root, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, 0.5f, &history, stale);
+    REQUIRE(stale.parts.size() == 1);
+    // Twenty metres from anywhere the world says it is, and a different number
+    // every frame as alpha sweeps.
+    CHECK(nearly(static_cast<core::f32>(stale.parts[0].cframe.position.x), 20.0f));
+
+    history.clear();
+
+    render::RenderWorld settled;
+    render::extract(fixture.world, root, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, 0.5f, &history, settled);
+    REQUIRE(settled.parts.size() == 1);
+    CHECK(settled.parts[0].cframe.position.x == 0.0);
+}

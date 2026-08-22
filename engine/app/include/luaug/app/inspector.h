@@ -181,13 +181,96 @@ void collectTree(const scene::World& world, core::InstanceId root, std::vector<T
 class Inspector
 {
 public:
-    [[nodiscard]] core::InstanceId selection() const noexcept { return selection_; }
-    void select(core::InstanceId id) noexcept { selection_ = id; }
+    // --- The selection ------------------------------------------------------
+    //
+    // **A set, and the primary is the last thing clicked.** One instance was
+    // the whole of it until E2, and the shape it grew into is the one every
+    // reader already assumed: `selection()` still answers *the* selected
+    // instance, which is what a properties grid pointed at one thing and a
+    // manipulator anchored to one transform both mean, and `selectionSet()`
+    // answers all of them for the callers that act on the whole thing.
+    //
+    // **Order is click order, not document order.** The primary has to be the
+    // one somebody last touched -- a manipulator that anchored to whichever
+    // member happened to sort first would jump between objects as the selection
+    // grew. A caller that needs determinism over the set (a batch delete, a
+    // reparent) sorts by `collectTree` at the moment it acts, where document
+    // order is what it means; storing it that way would only make the primary
+    // arbitrary.
+    //
+    // The set lives here rather than in the `Editor` for the reason `editor.h`
+    // already gives about the single one: a second copy would be two answers to
+    // one question.
+
+    // The primary -- the last instance added -- or an invalid id when nothing
+    // is selected.
+    [[nodiscard]] core::InstanceId selection() const noexcept
+    {
+        return selection_.empty() ? core::InstanceId{} : selection_.back();
+    }
+    [[nodiscard]] std::span<const core::InstanceId> selectionSet() const noexcept { return selection_; }
+    [[nodiscard]] usize selectionCount() const noexcept { return selection_.size(); }
+    [[nodiscard]] bool isSelected(core::InstanceId id) const noexcept;
+
+    // Replaces the whole selection with one instance. An invalid id clears it,
+    // which is what a click on empty space means and what every caller that
+    // wrote `select({})` already meant.
+    void select(core::InstanceId id) noexcept;
+    // Replaces the whole selection with a set, in the order given. Duplicates
+    // are dropped and invalid ids are skipped, so a caller assembling a range
+    // does not have to.
+    void select(std::span<const core::InstanceId> ids);
+    // Adds to the selection and makes it primary, or removes it if it was
+    // already there -- which is one gesture (ctrl-click) and therefore one
+    // function. Removing the primary promotes whatever was added before it.
+    void toggle(core::InstanceId id);
+    // Adds without removing. Already-selected ids are promoted to primary
+    // rather than duplicated.
+    void add(core::InstanceId id);
+    void clearSelection() noexcept { selection_.clear(); }
+
+    // Drops whatever the world no longer has.
+    //
+    // **This replaces four hand-written `if (!alive(selection())) select({})`
+    // sites, and it is not the same check.** Those compared against ONE id: a
+    // stop, an undo, or a delete that removed the selection's PARENT left the
+    // set pointing at instances the world had retired, because nothing asked
+    // about the subtree. A sweep cannot get that wrong.
+    void pruneDead(const scene::World& world);
 
     // Queues an edit. Never writes: see Decision 15 and `applyPending`.
     void enqueue(core::InstanceId target, core::NameAtom property, scene::Value value);
 
     [[nodiscard]] usize pendingCount() const noexcept { return pending_.size(); }
+    [[nodiscard]] std::span<const PendingWrite> pending() const noexcept { return pending_; }
+
+    // --- Gestures -------------------------------------------------------------
+    //
+    // **A drag is one edit, and this is what says so.** Undo coalesces on a
+    // key, and the key used to be derived from what was in the queue: the
+    // target and the property, and only when the frame held exactly ONE write.
+    // That is right for a person dragging one slider and wrong for everything
+    // E2 adds. A manipulator writes `CFrame` and `Size` together, or writes to
+    // three selected parts, so the frame holds two or six writes, so the key is
+    // zero, so every frame of the drag records a full world snapshot -- a
+    // hundred and twenty undo steps and a hundred and twenty world copies in
+    // two seconds.
+    //
+    // The queue cannot answer this because the answer is not in it. Whoever
+    // starts a drag knows a drag started, and that is the only thing that does:
+    // ImGui says `IsItemActivated` and `IsItemDeactivatedAfterEdit`, and the
+    // gizmo has its own mouse-down and mouse-up. So they say.
+    //
+    // It also fixes something the old scheme got wrong in the other direction:
+    // two separate drags of the same slider shared a key and merged into one
+    // undo step, so taking back the second took back the first as well.
+
+    // Opens a gesture and returns its id. Nested calls return the id already
+    // open rather than starting a second one -- a widget inside a drag is still
+    // the same drag.
+    core::u64 beginGesture() noexcept;
+    void endGesture() noexcept { gesture_ = 0; }
+    [[nodiscard]] core::u64 gesture() const noexcept { return gesture_; }
 
     // What is waiting, for a caller that has to know BEFORE the drain -- which
     // the undo stack does: it records the world as it was, and "as it was"
@@ -226,10 +309,44 @@ public:
 private:
     void recordOutcome(const WriteOutcome& outcome);
 
-    core::InstanceId selection_;
+    std::vector<core::InstanceId> selection_;
+    core::u64 gesture_ = 0;
+    core::u64 nextGesture_ = 0;
     core::u64 worldGeneration_ = 0;
     std::vector<PendingWrite> pending_;
     std::vector<WriteOutcome> outcomes_;
 };
+
+// The rows between two ids, inclusive, in the order `rows` holds them.
+//
+// This is shift-click, and it is a free function for the reason every other
+// piece of arithmetic in this editor is one: the panel it serves cannot be
+// drawn without a window, so anything decided inside the draw callback is
+// decided where no test can reach it.
+//
+// Either id being absent from `rows` -- which a collapsed branch makes
+// ordinary -- leaves the selection alone rather than guessing at a range. The
+// anchor stays primary, because it is the one somebody is extending FROM.
+void selectVisibleRange(Inspector& inspector, std::span<const TreeRow> rows, core::InstanceId anchor,
+                        core::InstanceId to);
+
+// The undo key for what is about to be applied.
+//
+// Zero never coalesces, which is what makes it the safe answer: an unrecognised
+// situation becomes its own undo step rather than silently joining the one
+// before it.
+//
+// **An open gesture wins outright**, however many writes it produced and to
+// however many instances -- that is the whole point of it. Gesture ids carry
+// the top bit so they can never be mistaken for the fallback key below, which
+// is built out of an instance index that would need two billion instances to
+// reach it.
+//
+// **The fallback is for every path that has not opted in**, and it is the old
+// rule generalised from "exactly one write" to "every write addresses the same
+// property of the same instance". A caller that never learned about gestures
+// therefore behaves exactly as it did before, which is what keeps this change
+// from being a regression in feel somewhere nobody looked.
+[[nodiscard]] core::u64 coalesceKeyFor(core::u64 gesture, std::span<const PendingWrite> pending) noexcept;
 
 } // namespace luaug::app

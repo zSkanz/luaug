@@ -202,7 +202,7 @@ void buildUiGeometry(const ui::DrawList& list, core::Vec2 viewport, std::vector<
     }
 }
 
-// The selected instance, outlined in the viewport.
+// The selected instances, outlined in the viewport.
 //
 // A selection that exists only in a tree view is not a selection in a 3D
 // editor: the whole reason to click a thing in the world is to see which thing
@@ -212,25 +212,41 @@ void buildUiGeometry(const ui::DrawList& list, core::Vec2 viewport, std::vector<
 // that vanished when you turned around would be worse than none.
 //
 // Orange because nothing in a PBR scene is, and because it stays legible
-// against both the lit and the shadowed halves of a frame.
-void submitSelection(const scene::World& world, core::InstanceId selection, render::DebugDraw& draw)
+// against both the lit and the shadowed halves of a frame. The primary is
+// brighter than the rest, because a manipulator anchors to it and which one
+// that is has to be visible.
+//
+// **Submitted CAMERA-RELATIVE, which is why it takes an origin and why it is
+// called after `rebaseTo` rather than with the rest of the debug submissions.**
+// `DebugDraw::rebaseTo` subtracts in f32 and its own header says so: a box
+// recorded at an absolute world position is quantised to a float BEFORE the
+// camera comes off it, which is about half a millimetre four kilometres out and
+// worse beyond. `toRenderMatrix` does the subtraction in f64, and an outline
+// somebody is trying to drag a handle on cannot afford the other one.
+void submitSelection(const scene::World& world, std::span<const core::InstanceId> selection, core::DVec3 cameraOrigin,
+                     render::DebugDraw& draw)
 {
-    if (!selection.valid() || !world.alive(selection))
-        return;
+    for (usize index = 0; index < selection.size(); ++index) {
+        const core::InstanceId id = selection[index];
+        if (!id.valid() || !world.alive(id))
+            continue;
 
-    const scene::PartComponent* part = world.parts().find(selection);
-    if (part == nullptr)
-        return;
+        const scene::PartComponent* part = world.parts().find(id);
+        if (part == nullptr)
+            continue;
 
-    // A hair larger than the part, so the outline sits outside the surface
-    // rather than fighting it for the same depth -- a box drawn exactly on a
-    // face z-fights along every edge, which reads as a flicker rather than as a
-    // selection.
-    constexpr f32 kOutlineMargin = 1.01f;
-    draw.wireBox(core::toRenderMatrix(part->cframe, {}),
-                 core::Vec3{part->size.x * 0.5f * kOutlineMargin, part->size.y * 0.5f * kOutlineMargin,
-                            part->size.z * 0.5f * kOutlineMargin},
-                 render::DebugColor::fromLinear(1.0f, 0.45f, 0.05f));
+        const bool primary = index + 1 == selection.size();
+        // A hair larger than the part, so the outline sits outside the surface
+        // rather than fighting it for the same depth -- a box drawn exactly on
+        // a face z-fights along every edge, which reads as a flicker rather
+        // than as a selection.
+        constexpr f32 kOutlineMargin = 1.01f;
+        draw.wireBox(core::toRenderMatrix(part->cframe, cameraOrigin),
+                     core::Vec3{part->size.x * 0.5f * kOutlineMargin, part->size.y * 0.5f * kOutlineMargin,
+                                part->size.z * 0.5f * kOutlineMargin},
+                     primary ? render::DebugColor::fromLinear(1.0f, 0.45f, 0.05f)
+                             : render::DebugColor::fromLinear(0.75f, 0.30f, 0.03f));
+    }
 }
 
 void submitWorld(const render::RenderWorld& snapshot, render::DebugDraw& draw)
@@ -488,6 +504,18 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     bool overlayVisible = false;
 
     render::TransformHistory transformHistory;
+    // What `transformHistory` was captured against. A restore, an undo, a scene
+    // load or a reload all replace the world under it, and `world.h` says in so
+    // many words what that costs: the history is "rebuilt from the tree rather
+    // than restored ... safe order: restore, then rebuild". Nothing rebuilt it,
+    // and a snapshot preserves generations precisely so an id means the same
+    // thing afterwards -- which is what let a stale entry go on answering.
+    //
+    // The inspector's counter is the signal because it already IS one: every
+    // path that replaces the world calls `onWorldChanged`, and inventing a
+    // second notion of "the world is not the one it was" would be inventing
+    // somewhere for the two to disagree.
+    core::u64 transformHistoryWorld = 0;
 
     render::MeshLibrary meshLibrary;
     render::MeshCache meshCache;
@@ -872,17 +900,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // A whole frame's queued edits are one step: they were typed in one
         // frame and a person undoing thinks of them as one thing.
         //
-        // The coalesce key is the instance and the property, so a drag on one
-        // value is a single step however many frames it lasts. Two different
-        // properties in a row are two steps, which is what somebody who set a
-        // size and then a colour expects to walk back through.
-        if (options.editor && inspector.pendingCount() > 0) {
-            const PendingWrite& first = inspector.pendingAt(0);
-            const bool oneProperty = inspector.pendingCount() == 1;
-            const core::u64 key =
-                oneProperty ? (static_cast<core::u64>(first.target.index) << 32) | first.property.id : 0;
-            editor.history().record(host->world(), "Edit", key);
-        }
+        // The key says what counts as ONE edit, and `coalesceKeyFor` owns that
+        // question -- it used to be four lines here, which is four lines no
+        // test could reach. An open gesture is one drag however many writes it
+        // made; without one the old rule still applies, so a caller that never
+        // learned about gestures behaves exactly as it did.
+        if (options.editor && inspector.pendingCount() > 0)
+            editor.history().record(host->world(), "Edit", coalesceKeyFor(inspector.gesture(), inspector.pending()));
 
         inspector.applyPending(host->world());
 
@@ -1150,6 +1174,22 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         if (options.editor)
             simTicks = editor.allowedTicks(simTicks);
 
+        // **The history is dropped when the world it describes has been
+        // replaced**, and here because here is downstream of every way that
+        // happens -- a stop, an undo, a redo, a scene load, a new scene and a
+        // hot reload are all behind us and the first `capture` of this frame is
+        // ahead. `world.h` states the obligation in so many words: these
+        // caches are "rebuilt from the tree rather than restored ... safe
+        // order: restore, then rebuild". Nothing rebuilt this one (D070).
+        //
+        // A snapshot preserves generations precisely so that an id means the
+        // same thing afterwards, which is what let a stale entry go on
+        // answering `previous()` for an instance that had moved metres.
+        if (transformHistoryWorld != inspector.worldGeneration()) {
+            transformHistoryWorld = inspector.worldGeneration();
+            transformHistory.clear();
+        }
+
         // The simulation, before anything is drawn: rendering shows the state a
         // tick settled on, never one being written.
         for (u32 step = 0; step < simTicks; ++step) {
@@ -1197,6 +1237,18 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             const bool editorLooking = editorOwnsPointer && editor.lookInput().active;
             const bool wantLocked = editorOwnsPointer ? editorLooking : engineState.pointerLocked;
             const bool wantVisible = editorOwnsPointer ? !editorLooking : engineState.pointerVisible;
+
+            // **Handed back means handed back** (D069). The pointer belongs to
+            // whoever holds it, and while that is the GAME the panels must not
+            // see the mouse at all -- relative mode keeps posting motion with a
+            // logical position SDL accumulates, and the invisible cursor walks
+            // across the explorer hovering and clicking things a player turning
+            // their head cannot see. Told here rather than inferred there,
+            // because this is where the question is already answered, and told
+            // BEFORE `handleEvents` runs later in this same frame, so there is
+            // no frame of lag on either edge.
+            if (overlay.has_value())
+                overlay->setGameHoldsPointer(wantLocked && !editorOwnsPointer);
 
             if (wantLocked != pointerLocked) {
                 pointerLocked = wantLocked;
@@ -1273,7 +1325,18 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // way. Interpolating a headless frame by the accumulator's rounding
         // residue would move every recorded uniform in its last bits for no
         // gain at all.
-        const f32 renderAlpha = syntheticClock ? 0.0f : frame.alpha;
+        //
+        // **And zero whenever the world is not advancing** (D070). Interpolation
+        // blends where a part was at the START of the last tick with where it
+        // is now, and a frame that runs no tick is not between those two things
+        // -- there is one state and the frame is on it. The accumulator does not
+        // stop for a paused editor: `FrameScheduler` drains it every frame
+        // whether or not the editor let a tick through, so `alpha` goes on
+        // sweeping the whole of [0, 1) at render rate. Against a history that
+        // stopped moving, that is a part drawn somewhere different every frame,
+        // which is what "the capsule flickers after stop" is.
+        const bool worldAdvancing = !options.editor || advancing(editor.runState());
+        const f32 renderAlpha = syntheticClock || !worldAdvancing ? 0.0f : frame.alpha;
 
         // What the speakers do is a consequence of the simulation and never an
         // input to it (M6 brief, Decision 9), which is why this is after the
@@ -1625,9 +1688,6 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
             submitWorld(snapshot, debugDraw);
 
-            if (options.editor)
-                submitSelection(host->world(), inspector.selection(), debugDraw);
-
             // Read AFTER submission, because that is when the renderer knows.
             // Counted by the renderer rather than derived from the snapshot: a
             // draw call is a thing a backend issues, and inferring it from the
@@ -1647,6 +1707,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // belonged. `origin` is zero when no camera resolved, which is
             // exactly the M1 path this must not disturb.
             debugDraw.rebaseTo(snapshot.camera.origin);
+
+            // After the rebase and not before it, because these are already in
+            // the space it converts to -- see `submitSelection`. Everything the
+            // editor draws over the world goes here for the same reason.
+            if (options.editor)
+                submitSelection(host->world(), inspector.selectionSet(), snapshot.camera.origin, debugDraw);
 
             // Uploaded before the render pass opens, because a copy cannot run
             // inside one -- the seam says so and the backend enforces it. The

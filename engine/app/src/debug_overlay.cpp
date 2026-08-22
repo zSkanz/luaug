@@ -266,14 +266,32 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             (void)std::snprintf(label, sizeof(label), "%.*s  (%.*s)", static_cast<int>(instanceName.size()),
                                 instanceName.data(), static_cast<int>(className.size()), className.data());
 
-            if (ImGui::Selectable(label, row.id == inspector.selection()))
-                inspector.select(row.id);
+            if (ImGui::Selectable(label, inspector.isSelected(row.id))) {
+                // Ctrl adds and removes, shift takes the run from the primary
+                // to here, a plain click replaces. The range is taken over
+                // `g_visible` rather than over the whole tree, because a range
+                // somebody drew with the mouse across a collapsed branch would
+                // pick up rows they cannot see.
+                const ImGuiIO& io = ImGui::GetIO();
+                if (io.KeyCtrl) {
+                    inspector.toggle(row.id);
+                }
+                else if (io.KeyShift && inspector.selection().valid()) {
+                    selectVisibleRange(inspector, g_visible, inspector.selection(), row.id);
+                }
+                else {
+                    inspector.select(row.id);
+                }
+            }
 
-            // **Right-clicking selects first.** A menu that acted on whatever
-            // was selected before would delete the wrong thing the first time
-            // somebody right-clicked without looking.
+            // **Right-clicking selects first, unless this row is already part
+            // of the selection.** A menu that acted on whatever was selected
+            // before would delete the wrong thing the first time somebody
+            // right-clicked without looking -- and one that replaced the
+            // selection would throw away the four things they had just picked
+            // in order to act on one of them.
             if (commands != nullptr && dialogs != nullptr && ImGui::BeginPopupContextItem("row-menu")) {
-                if (row.id != inspector.selection())
+                if (!inspector.isSelected(row.id))
                     inspector.select(row.id);
 
                 const bool engineOwned = Editor::isEngineOwned(world, row.id, root);
@@ -522,6 +540,11 @@ void drawEditor(scene::World& world, Inspector& inspector, core::InstanceId id, 
     ImGui::PopID();
 }
 
+// The gesture this panel currently owns, or zero. File-static for the same
+// reason the row buffers above are: the panel is one function called once a
+// frame, and its state between frames has nowhere else to live.
+core::u64 g_propertyGesture = 0;
+
 void drawProperties(scene::World& world, Inspector& inspector)
 {
     const core::InstanceId selected = inspector.selection();
@@ -573,6 +596,26 @@ void drawProperties(scene::World& world, Inspector& inspector)
             drawEditor(world, inspector, selected, *descriptor);
         }
         ImGui::EndTable();
+    }
+
+    // **A drag in this panel is ONE edit**, and this is what tells the undo
+    // stack so. ImGui keeps exactly one item active at a time, so "something in
+    // this window is being held" is the whole of the question -- which is why
+    // this is four lines here rather than a pair of calls repeated through
+    // twelve widget branches, three of which draw more than one widget and
+    // would each have got it subtly wrong.
+    //
+    // The panel closes only the gesture it opened. The manipulators open their
+    // own, and a properties panel that ended somebody else's drag because
+    // nothing in it was focused would be worse than not tracking one at all.
+    const bool holding = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && ImGui::IsAnyItemActive();
+    if (holding && g_propertyGesture == 0) {
+        g_propertyGesture = inspector.beginGesture();
+    }
+    else if (!holding && g_propertyGesture != 0) {
+        if (inspector.gesture() == g_propertyGesture)
+            inspector.endGesture();
+        g_propertyGesture = 0;
     }
 }
 
@@ -1423,8 +1466,21 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // the key from either would make the shell's own dialogs unclosable. So it
     // is asked for last, after everything that could have wanted it.
     const bool popupOpen = ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
-    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !ImGui::IsAnyItemActive() && !popupOpen)
-        commands.clearSelection = true;
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !ImGui::IsAnyItemActive() && !popupOpen) {
+        // **In play mode Escape stops**, which is what Unreal does and what
+        // this editor now needs rather than merely wants. A running game holds
+        // the pointer, and while it does the panels do not see the mouse at all
+        // (D069) -- so a project that never hands the cursor back would have no
+        // way to reach the stop button. The keyboard still arrives, and a
+        // transport somebody cannot reach is not a transport.
+        //
+        // The game sees the key too. That is the same arrangement Unreal ships
+        // and the honest one: while you are testing, the tool keeps one key.
+        if (editor != nullptr && editor->inPlayMode())
+            commands.play = false;
+        else
+            commands.clearSelection = true;
+    }
 
     // Ctrl+Z and Ctrl+Y, under the same rule Escape is: not while a field has
     // the keyboard, because Ctrl+Z inside a text box is the box's own undo and
@@ -1593,20 +1649,43 @@ void DebugOverlay::handleEvents(std::span<const platform::Event> events)
     // ImGui models far more input than the engine does -- text, mouse capture,
     // window focus -- so it reads the untranslated stream. That stream existing
     // at all is what sdl_interop.h is for.
-    // **While the camera is being turned, the UI does not see the mouse move**
-    // (D063). SDL keeps posting motion in relative mode -- with a logical
-    // position it accumulates from the deltas -- so without this the hidden
-    // cursor walks across the panels, highlighting rows in the explorer and
-    // hovering buttons nobody is pointing at.
+    // **While the pointer is held, the UI does not see the mouse.** Relative
+    // mode hides the cursor and stops moving it, and SDL goes on posting motion
+    // with a logical position it accumulates from the deltas -- so without this
+    // the invisible cursor walks across the panels, highlighting rows in the
+    // explorer and hovering buttons nobody is pointing at.
     //
-    // Motion only. The button going up still has to arrive, or ImGui would
-    // believe it is held forever and the turn would never end.
+    // **Two holders, and they need different things.** The EDITOR holds it
+    // while a right-drag turns the fly camera (D063), and there only motion is
+    // withheld: the button going UP still has to arrive, or ImGui believes it
+    // is held forever and the turn never ends. The GAME holds it for as long as
+    // somebody is playing (D069), and there the mouse is not the UI's at all --
+    // motion, wheel and button PRESSES are all withheld, because a player
+    // turning their head must not be clicking the explorer at the same time.
+    //
+    // A release is delivered in both cases and for the same reason: ImGui can
+    // never be left believing a button it was never told about is down.
     const bool looking = editor_ != nullptr && editor_->lookInput().active;
     for (const SDL_Event& raw : platform::rawEvents()) {
-        if (looking && raw.type == SDL_EVENT_MOUSE_MOTION)
+        const bool motion = raw.type == SDL_EVENT_MOUSE_MOTION;
+        if (looking && motion)
             continue;
+        if (gameHoldsPointer_ &&
+            (motion || raw.type == SDL_EVENT_MOUSE_WHEEL || raw.type == SDL_EVENT_MOUSE_BUTTON_DOWN)) {
+            continue;
+        }
         ImGui_ImplSDL3_ProcessEvent(&raw);
     }
+
+    // **And the cursor is nowhere**, which withholding motion alone does not
+    // say: ImGui would keep the last position it was told about, so whichever
+    // row the cursor happened to be over when play was pressed would stay lit
+    // for the whole session. `-FLT_MAX` is ImGui's own spelling of "there is no
+    // mouse". The SDL3 backend will not overwrite it while relative mode is on
+    // -- `ImGui_ImplSDL3_UpdateMouseData` guards its global-state fallback with
+    // exactly that -- so this holds for the frame.
+    if (gameHoldsPointer_)
+        ImGui::GetIO().AddMousePosEvent(-FLT_MAX, -FLT_MAX);
 
     for (const platform::Event& event : events) {
         // Repeats excluded: holding F3 down should not strobe the panel.

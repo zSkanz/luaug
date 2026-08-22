@@ -112,6 +112,26 @@ public:
         viewportTexture_ = viewport;
     }
 
+    // **Whether the GAME is holding the pointer this frame.**
+    //
+    // A locked pointer is SDL's relative mode: the cursor is hidden, it does
+    // not move, and SDL goes on posting motion with a logical position it
+    // accumulates from the deltas. That position walks -- across the explorer,
+    // across the properties grid -- and ImGui hovers and clicks whatever it
+    // walks over, which is a player turning their head and re-parenting
+    // something they cannot see.
+    //
+    // D063 fixed the half of this the EDITOR causes, where a right-drag turns
+    // the fly camera; `handleEvents` has read `lookInput` since. This is the
+    // other half and it is the worse one, because the editor's lasts as long as
+    // a button is held and the game's lasts as long as somebody is playing.
+    //
+    // The rule is the one the whole of E1 settled, running the other way: while
+    // the editor is editing the tool owns the machine, and pressing play hands
+    // it back. Handed back means handed back -- the panels do not get to keep
+    // the mouse.
+    void setGameHoldsPointer(bool held) noexcept { gameHoldsPointer_ = held; }
+
     // What the shell asked for while it drew, taken by the frame loop and reset.
     // Draining rather than reading, so a command cannot be acted on twice
     // because a frame did not draw.
@@ -202,6 +222,7 @@ private:
     [[maybe_unused]] EditorPanels panels_;
     [[maybe_unused]] EditorDialogs dialogs_;
     [[maybe_unused]] Editor* editor_ = nullptr;
+    [[maybe_unused]] bool gameHoldsPointer_ = false;
     [[maybe_unused]] rhi::TextureHandle viewportTexture_;
 };
 

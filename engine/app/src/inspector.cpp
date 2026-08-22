@@ -292,6 +292,109 @@ const char* setResultLabel(scene::World::SetResult result) noexcept
     return "?";
 }
 
+void selectVisibleRange(Inspector& inspector, std::span<const TreeRow> rows, core::InstanceId anchor,
+                        core::InstanceId to)
+{
+    const auto find = [rows](core::InstanceId id) -> usize {
+        for (usize i = 0; i < rows.size(); ++i) {
+            if (rows[i].id == id)
+                return i;
+        }
+        return rows.size();
+    };
+
+    const usize from = find(anchor);
+    const usize until = find(to);
+    if (from == rows.size() || until == rows.size())
+        return;
+
+    const usize first = from < until ? from : until;
+    const usize last = from < until ? until : from;
+
+    std::vector<core::InstanceId> range;
+    range.reserve(last - first + 1);
+    for (usize i = first; i <= last; ++i) {
+        if (rows[i].id != anchor)
+            range.push_back(rows[i].id);
+    }
+    // Last, so it is the primary: the anchor is what the next shift-click
+    // extends from, and a range that promoted its far end would walk the anchor
+    // along with every click.
+    range.push_back(anchor);
+    inspector.select(range);
+}
+
+bool Inspector::isSelected(core::InstanceId id) const noexcept
+{
+    return std::find(selection_.begin(), selection_.end(), id) != selection_.end();
+}
+
+void Inspector::select(core::InstanceId id) noexcept
+{
+    selection_.clear();
+    if (id.valid())
+        selection_.push_back(id);
+}
+
+void Inspector::select(std::span<const core::InstanceId> ids)
+{
+    selection_.clear();
+    for (const core::InstanceId id : ids)
+        add(id);
+}
+
+void Inspector::add(core::InstanceId id)
+{
+    if (!id.valid())
+        return;
+    // Promoted rather than duplicated. Clicking something already selected has
+    // to make it the primary -- that is how somebody chooses which member a
+    // manipulator anchors to without losing the rest of the selection.
+    std::erase(selection_, id);
+    selection_.push_back(id);
+}
+
+void Inspector::toggle(core::InstanceId id)
+{
+    if (!id.valid())
+        return;
+    if (const auto it = std::find(selection_.begin(), selection_.end(), id); it != selection_.end()) {
+        selection_.erase(it);
+        return;
+    }
+    selection_.push_back(id);
+}
+
+void Inspector::pruneDead(const scene::World& world)
+{
+    std::erase_if(selection_, [&world](const core::InstanceId id) { return !world.alive(id); });
+}
+
+core::u64 Inspector::beginGesture() noexcept
+{
+    if (gesture_ != 0)
+        return gesture_;
+    // The top bit, so a gesture id and the property-derived fallback key can
+    // never be the same number -- see `coalesceKeyFor`.
+    gesture_ = (core::u64{1} << 63) | ++nextGesture_;
+    return gesture_;
+}
+
+core::u64 coalesceKeyFor(core::u64 gesture, std::span<const PendingWrite> pending) noexcept
+{
+    if (gesture != 0)
+        return gesture;
+    if (pending.empty())
+        return 0;
+
+    const PendingWrite& first = pending.front();
+    for (const PendingWrite& write : pending) {
+        if (!(write.target == first.target) || !(write.property == first.property))
+            return 0;
+    }
+    return (static_cast<core::u64>(first.target.index) << 32) | first.property.id;
+}
+
 void Inspector::enqueue(core::InstanceId target, core::NameAtom property, scene::Value value)
 {
     pending_.push_back(PendingWrite{target, property, std::move(value)});
@@ -312,7 +415,11 @@ void Inspector::applyPending(scene::World& world)
 void Inspector::onWorldChanged() noexcept
 {
     ++worldGeneration_;
-    selection_ = core::InstanceId{};
+    selection_.clear();
+    // A gesture is a drag over instances this world no longer has. Leaving it
+    // open would coalesce the next unrelated edit into whatever came before the
+    // reload.
+    gesture_ = 0;
     pending_.clear();
     outcomes_.clear();
 }

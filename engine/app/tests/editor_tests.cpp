@@ -610,3 +610,44 @@ TEST_CASE("a scene path that leaves content/ is refused rather than created")
     CHECK_FALSE(Editor::sceneNameIsUsable("C:/main.scene.json"));
     CHECK_FALSE(Editor::sceneNameIsUsable("scenes//main.scene.json"));
 }
+
+// --- D070: every path that replaces the world says so -----------------------
+//
+// The frame loop drops its `render::TransformHistory` when
+// `Inspector::worldGeneration` moves, because that counter is the one signal
+// every world-replacing path already raises and a second notion of "this is not
+// the world it was" would only be somewhere for the two to disagree.
+//
+// So the counter moving is a contract rather than an implementation detail, and
+// this is what holds it: a path added later that restores without announcing it
+// would bring the flicker back, and nothing else in the tree would notice.
+TEST_CASE("a stop, an undo, a redo and a new scene each announce that the world was replaced")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId subject = fixture.widget(world, "Subject");
+    REQUIRE_FALSE(world.setParent(subject, root).has_value());
+
+    const core::u64 booted = inspector.worldGeneration();
+
+    editor.play(world);
+    editor.stop(world, inspector);
+    const core::u64 afterStop = inspector.worldGeneration();
+    CHECK(afterStop != booted);
+
+    editor.history().record(world, "Edit", 0);
+    REQUIRE(editor.undo(world, inspector));
+    const core::u64 afterUndo = inspector.worldGeneration();
+    CHECK(afterUndo != afterStop);
+
+    REQUIRE(editor.redo(world, inspector));
+    const core::u64 afterRedo = inspector.worldGeneration();
+    CHECK(afterRedo != afterUndo);
+
+    editor.newScene(world, inspector);
+    CHECK(inspector.worldGeneration() != afterRedo);
+}

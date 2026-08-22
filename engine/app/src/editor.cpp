@@ -136,8 +136,7 @@ void Editor::stop(scene::World& world, Inspector& inspector)
     // id would resolve to whatever the slot holds now, which is either nothing
     // or somebody else -- and a properties grid pointed at somebody else is how
     // an edit lands on the wrong object.
-    if (!world.alive(inspector.selection()))
-        inspector.select(core::InstanceId{});
+    inspector.pruneDead(world);
     inspector.onWorldChanged();
 
     m_status = EditorStatus{"stopped -- the world is back where you pressed play", false};
@@ -284,8 +283,7 @@ bool Editor::undo(scene::World& world, Inspector& inspector)
     if (!m_history.undo(world))
         return false;
 
-    if (!world.alive(inspector.selection()))
-        inspector.select(core::InstanceId{});
+    inspector.pruneDead(world);
     inspector.onWorldChanged();
 
     m_status = EditorStatus{"undid " + label, false};
@@ -298,8 +296,7 @@ bool Editor::redo(scene::World& world, Inspector& inspector)
     if (!m_history.redo(world))
         return false;
 
-    if (!world.alive(inspector.selection()))
-        inspector.select(core::InstanceId{});
+    inspector.pruneDead(world);
     inspector.onWorldChanged();
 
     m_status = EditorStatus{"redid " + label, false};
@@ -348,8 +345,10 @@ bool Editor::deleteInstance(scene::World& world, core::InstanceId id, core::Inst
     // The selection cannot outlive what it names. `destroy` leaves the handle
     // resolving until the end of the drain that carries `Destroying`, so this
     // is asked as a question about the tree rather than about the id.
-    if (inspector.selection() == id)
-        inspector.select(core::InstanceId{});
+    // A sweep rather than a comparison. `destroy` took the whole subtree, so
+    // testing the selection against `id` alone would leave a selected CHILD of
+    // what was deleted pointing at an instance the world has retired.
+    inspector.pruneDead(world);
 
     m_status = EditorStatus{"deleted " + name + " -- there is no undo yet; reopening the scene brings it back", false};
     return true;

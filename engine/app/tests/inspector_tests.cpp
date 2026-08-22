@@ -28,6 +28,7 @@
 
 #include "inspector_fixture.h"
 
+using luaug::app::coalesceKeyFor;
 using luaug::app::collectProperties;
 using luaug::app::collectTree;
 using luaug::app::editable;
@@ -37,6 +38,7 @@ using luaug::app::enumDomainOf;
 using luaug::app::formatValue;
 using luaug::app::Inspector;
 using luaug::app::propertyTag;
+using luaug::app::selectVisibleRange;
 using luaug::app::setResultLabel;
 using luaug::app::TreeRow;
 
@@ -452,4 +454,207 @@ TEST_CASE("a property's documentation reaches the runtime, through the inherited
     // A descriptor that carries none reads as empty, not as a null pointer.
     CHECK(docs.at("Nothing").empty());
     CHECK(std::string_view(scene::PropertyDesc{}.doc).empty());
+}
+
+// --- E2: the selection is a set, and the primary is the last thing clicked ---
+
+TEST_CASE("a selection holds several instances, newest last")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId a = fixture.widget(world, "A");
+    const core::InstanceId b = fixture.widget(world, "B");
+    const core::InstanceId c = fixture.widget(world, "C");
+
+    Inspector inspector;
+    inspector.select(a);
+    CHECK(inspector.selectionCount() == 1);
+    CHECK(inspector.selection() == a);
+
+    inspector.add(b);
+    inspector.add(c);
+    CHECK(inspector.selectionCount() == 3);
+    // The primary is what a manipulator anchors to and what the properties grid
+    // shows, so it has to be the one somebody last touched.
+    CHECK(inspector.selection() == c);
+    CHECK(inspector.isSelected(a));
+    CHECK(inspector.isSelected(b));
+
+    // Adding something already selected promotes it rather than duplicating it,
+    // which is how you choose the anchor without losing the rest.
+    inspector.add(a);
+    CHECK(inspector.selectionCount() == 3);
+    CHECK(inspector.selection() == a);
+
+    // A plain click replaces.
+    inspector.select(b);
+    CHECK(inspector.selectionCount() == 1);
+    CHECK(inspector.selection() == b);
+
+    // And an invalid id is the deselect every caller already spelled as
+    // `select({})`.
+    inspector.select(core::InstanceId{});
+    CHECK(inspector.selectionCount() == 0);
+    CHECK_FALSE(inspector.selection().valid());
+}
+
+TEST_CASE("ctrl-click adds and removes, and removing the primary promotes the one before it")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId a = fixture.widget(world, "A");
+    const core::InstanceId b = fixture.widget(world, "B");
+
+    Inspector inspector;
+    inspector.toggle(a);
+    inspector.toggle(b);
+    CHECK(inspector.selectionCount() == 2);
+    CHECK(inspector.selection() == b);
+
+    inspector.toggle(b);
+    CHECK(inspector.selectionCount() == 1);
+    CHECK(inspector.selection() == a);
+
+    inspector.toggle(a);
+    CHECK(inspector.selectionCount() == 0);
+}
+
+TEST_CASE("pruning drops what the world no longer has, including a selected child of a deleted parent")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId parent = fixture.widget(world, "Parent");
+    const core::InstanceId child = fixture.widget(world, "Child");
+    const core::InstanceId other = fixture.widget(world, "Other");
+    REQUIRE_FALSE(world.setParent(child, parent).has_value());
+
+    Inspector inspector;
+    inspector.select(other);
+    inspector.add(child);
+
+    // **This is the case the old check could not see.** It compared the
+    // selection against the id being deleted; the child was never that id, so
+    // it stayed selected and pointing at an instance the world had retired.
+    REQUIRE(world.destroy(parent));
+    world.retireDestroyed();
+
+    inspector.pruneDead(world);
+    CHECK(inspector.selectionCount() == 1);
+    CHECK(inspector.selection() == other);
+}
+
+TEST_CASE("shift-click takes the run between two visible rows and keeps the anchor primary")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId root = fixture.widget(world, "Root");
+    std::vector<core::InstanceId> made;
+    for (int index = 0; index < 5; ++index) {
+        const core::InstanceId id = fixture.widget(world, "Row");
+        REQUIRE_FALSE(world.setParent(id, root).has_value());
+        made.push_back(id);
+    }
+
+    std::vector<TreeRow> rows;
+    collectTree(world, root, rows);
+    REQUIRE(rows.size() == 6);
+
+    Inspector inspector;
+    selectVisibleRange(inspector, rows, made[1], made[3]);
+    CHECK(inspector.selectionCount() == 3);
+    CHECK(inspector.isSelected(made[1]));
+    CHECK(inspector.isSelected(made[2]));
+    CHECK(inspector.isSelected(made[3]));
+    // The anchor stays primary: it is what the NEXT shift-click extends from,
+    // and a range that promoted its far end would walk the anchor along with
+    // every click.
+    CHECK(inspector.selection() == made[1]);
+
+    // Backwards is the same range.
+    selectVisibleRange(inspector, rows, made[3], made[1]);
+    CHECK(inspector.selectionCount() == 3);
+    CHECK(inspector.selection() == made[3]);
+
+    // A row that is not visible -- a collapsed branch makes this ordinary --
+    // leaves the selection alone rather than guessing.
+    inspector.select(made[0]);
+    const core::InstanceId hidden = fixture.widget(world, "Hidden");
+    selectVisibleRange(inspector, rows, made[0], hidden);
+    CHECK(inspector.selectionCount() == 1);
+    CHECK(inspector.selection() == made[0]);
+}
+
+// --- E2: a drag is one edit --------------------------------------------------
+
+TEST_CASE("an open gesture is the undo key, however many writes it made")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId a = fixture.widget(world, "A");
+    const core::InstanceId b = fixture.widget(world, "B");
+
+    Inspector inspector;
+    const core::u64 gesture = inspector.beginGesture();
+    CHECK(gesture != 0);
+    // Nested is the same gesture: a widget inside a drag is still that drag.
+    CHECK(inspector.beginGesture() == gesture);
+
+    inspector.enqueue(a, fixture.atom("Count"), scene::Value{core::f64{1.0}});
+    inspector.enqueue(b, fixture.atom("Count"), scene::Value{core::f64{2.0}});
+    inspector.enqueue(b, fixture.atom("Flag"), scene::Value{true});
+
+    // Three writes, two instances, two properties -- and one key, which is the
+    // whole reason this exists. The old rule returned zero here, and zero never
+    // coalesces, so this frame would have been its own undo step.
+    CHECK(coalesceKeyFor(inspector.gesture(), inspector.pending()) == gesture);
+
+    inspector.endGesture();
+    CHECK(inspector.gesture() == 0);
+
+    // And a second drag is a second key, so undoing it does not also undo the
+    // first -- which the property-derived key got wrong.
+    const core::u64 again = inspector.beginGesture();
+    CHECK(again != gesture);
+}
+
+TEST_CASE("without a gesture the key is the old rule, so nothing that never opted in changed")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId a = fixture.widget(world, "A");
+    const core::InstanceId b = fixture.widget(world, "B");
+    const core::NameAtom count = fixture.atom("Count");
+    const core::NameAtom flag = fixture.atom("Flag");
+
+    Inspector inspector;
+    CHECK(coalesceKeyFor(0, inspector.pending()) == 0);
+
+    inspector.enqueue(a, count, scene::Value{core::f64{1.0}});
+    const core::u64 one = coalesceKeyFor(0, inspector.pending());
+    CHECK(one != 0);
+
+    // Same instance, same property, twice in a frame: still one edit.
+    inspector.enqueue(a, count, scene::Value{core::f64{2.0}});
+    CHECK(coalesceKeyFor(0, inspector.pending()) == one);
+
+    // A second property in the same frame is not one edit, and zero says so.
+    inspector.enqueue(a, flag, scene::Value{true});
+    CHECK(coalesceKeyFor(0, inspector.pending()) == 0);
+
+    // A different instance is a different key, so a drag on one part does not
+    // swallow the edit to another.
+    Inspector second;
+    second.enqueue(b, count, scene::Value{core::f64{1.0}});
+    CHECK(coalesceKeyFor(0, second.pending()) != one);
+}
+
+TEST_CASE("a reload closes an open gesture")
+{
+    Fixture fixture;
+    Inspector inspector;
+    (void)inspector.beginGesture();
+    inspector.onWorldChanged();
+    // Left open, the next unrelated edit would coalesce into whatever was being
+    // dragged in a world that no longer exists.
+    CHECK(inspector.gesture() == 0);
 }
