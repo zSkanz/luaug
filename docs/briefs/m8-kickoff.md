@@ -456,9 +456,9 @@ _(appended during the milestone)_
 
 ## Gate Record
 
-Filled 2026-08-22, before human review. Every command below was run on the
-reference machine (`docs/perf-baselines.md`); the milestone is **not** complete
-until a human plays the demo and says so (`MASTER_PROMPT.md` §6, §13).
+Filled 2026-08-22, and closed the same day: **the human played it and signed
+off.** Every command below was run on the reference machine
+(`docs/perf-baselines.md`).
 
 ### The roadmap's eight
 
@@ -471,7 +471,7 @@ until a human plays the demo and says so (`MASTER_PROMPT.md` §6, §13).
 | determinism replay green | **Pass.** `determinism` and `replay_gates` green on both tiers; 1,109 conformance cases. Render interpolation was built so it cannot touch this: `TransformHistory` lives in `render`, `scene`'s components are untouched, and every recorded trace still matches. |
 | `luaug check` clean repo-wide | **Pass.** `luau-analyze` strict, StyLua, the i18n lint, the layering check, `inertcheck`, the vendor/narrowing check, and now `licensecheck` — 19 vendored dependencies, every licence present and permissive. |
 | docs-lint clean | **Pass.** Relative links, version consistency, the R7 sweep, the ledger's shape, every example's launcher, and the defect register's numbering, states and citations. |
-| **a human plays the demo and signs off** | **Outstanding, and it is the gate.** |
+| **a human plays the demo and signs off** | **Pass, 2026-08-22.** Played, and the five defects it produced -- D047 and D048 through the milestone, then D050 to D054 in the review rounds -- are the reason this row is the gate. |
 
 ### The full local gate
 

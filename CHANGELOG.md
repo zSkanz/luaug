@@ -11,7 +11,7 @@ does not is engine work and belongs in the git history rather than in this file.
 
 Nothing yet.
 
-## [1.0.0] — awaiting release
+## [1.0.0] — 2026-08-22
 
 The first release. Eleven milestones, M0 through M8, each signed off by a human
 after playing what it built.

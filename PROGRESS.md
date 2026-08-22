@@ -5,13 +5,19 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- **M8 — Flagship, Hardening, Docs, v1.0 — BUILT, awaiting human review.**
-  Not complete: a milestone is complete when the human says so
-  (`MASTER_PROMPT.md` §6), and M4 is why that is written down. No `milestone/m8`
-  tag and no `v1.0.0` tag until then.
+- **M8 — Flagship, Hardening, Docs, v1.0 — COMPLETE, signed off 2026-08-22**,
+  tagged `milestone/m8` and `v1.0.0`. **The tags are local: pushing them and
+  creating the GitHub release need an account, and that is the one part of M8's
+  scope still waiting on a person** (below).
   The brief is [`docs/briefs/m8-kickoff.md`](docs/briefs/m8-kickoff.md), with
-  five decisions, twelve Findings and a filled Gate Record. **Every scope item is
-  done** except the release itself, which needs a human and an account (below).
+  five decisions, twelve Findings and a filled Gate Record.
+
+  **What the review rounds cost and were worth.** The sign-off came after five
+  more defects the human found by playing it — D050 through D054 — every one of
+  them invisible to every gate in this repository, and the last of them
+  (D055) came from reading the gate record's own list of what the milestone had
+  measured and not fixed. That is eleven defects in one milestone, eight of
+  them from a person running the thing while the whole suite was green.
 
   **The deliverable is [`examples/10-open-world`](examples/10-open-world/)** — a
   third-person character walking 4.35 km of streamed terrain under a sun that
@@ -101,40 +107,20 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   instanced path shipped drawing nothing and three independent green instruments
   agreed with the empty frame.
 - **M7 — Scaling the World — COMPLETE, signed off 2026-08-21**, tagged
-  `milestone/m7`.
-  The brief is [`docs/briefs/m7-kickoff.md`](docs/briefs/m7-kickoff.md), with a
-  filled Gate Record and eleven Findings. **Every scope item and every gate item
-  is done**: the offline pipeline, the job system and async IO, the per-World
-  floating origin, chunked streaming with `StreamingService`, runtime LOD
-  selection by projected screen error, `ITransport` with ENet behind it,
-  `@std/net`, the Recast seam with no integration, the assimp importer, Inter,
-  mid-air `Jump()`, `examples/05-streaming`, and all five `Inert` markers that
-  named this milestone. Two `Inert` markers remain and both are M7.5's.
-  **The six gate items, with numbers**: 25 MiB peak against a declared 192 MiB
-  ceiling over 17,939 frames; zero hitches over 33 ms inside streaming, worst
-  pump 1.9 ms; identical hashes at 1e7 with a differential; 292 files
-  byte-identical across two processes; a loopback echo in both directions; 4,000
-  bit flips all refused.
-  **Nine defects found and fixed (D032–D040)**, eight of them by instruments this
-  milestone built — including D040, which turned out to be what M6 Finding 17
-  had been all along: header changes were rebuilding NOTHING, so every
-  incremental Windows build in the project's history had been silently reusing
-  stale objects.
-  **The last local gate**: all five stages green, 39 ctest targets on Windows and
-  38 in the Tier-2 container, 1,108 conformance cases.
+  `milestone/m7`. The offline asset pipeline, the job system and async IO, the
+  per-World floating origin, chunked streaming, runtime LOD, the transport seam
+  and the assimp importer. Eleven Findings and a filled Gate Record with its six
+  measured items are in [`docs/briefs/m7-kickoff.md`](docs/briefs/m7-kickoff.md).
+  **The one to carry forward is D040**: header changes had been rebuilding
+  NOTHING on Windows since the project started, so every incremental build was
+  silently reusing stale objects — which is why `chcp 65001` is in the gate.
 - **M6 — Playing the World — COMPLETE, signed off 2026-08-21**, tagged
-  `milestone/m6`. The brief is
-  [`docs/briefs/m6-kickoff.md`](docs/briefs/m6-kickoff.md), with its fifteen
-  decisions, its Findings and a filled Gate Record. **Every scope item and every
-  gate item is done**: the five systems, solid `Part` rendering, `InputService`'s
-  raw event surface (ADR 0041), the non-device input seam, `examples/04-obby`,
-  D017, and the six gates. The Gate Record is in the brief.
-  **Three ADRs**: 0039 (a context declares its dispatch rate), 0040 (a `UDim2`
-  placement is arithmetic, so v1 does not call Clay — and Clay is un-vendored),
-  0041 (`InputService` gains raw events, fed from the IAS's own pipeline).
-  **Eight defects closed and half of a ninth** — D017, D021, D022, D027, D029,
-  D030, D031, D032, and the ground half of D028 — of which five were found by a
-  person playing the deliverable rather than by a test.
+  `milestone/m6`. Input, UI, tweens, audio and skeletal animation, with
+  `examples/04-obby` playable end to end; three ADRs (0039, 0040, 0041), fifteen
+  decisions and a filled Gate Record in
+  [`docs/briefs/m6-kickoff.md`](docs/briefs/m6-kickoff.md). **Five of its nine
+  defects were found by a person playing the deliverable**, which is the pattern
+  every milestone since has repeated.
 - **M5 — Feeling the World: Jolt Physics + Character — COMPLETE, signed off
   2026-08-20**, tagged `milestone/m5`. Its Gate Record, its seventeen Findings
   and the review round that found D025 are in
@@ -156,44 +142,20 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 - **The last local gate before the tag**: all five stages green, 34 ctest targets
   on Windows and 33 in the Tier-2 container, 1,081 conformance cases.
 
-### M6: what a game can do that it could not
+### The state before this one, and what does not exist yet
 
-Moved to [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md)
-with M5's, for the same reason and on the same day. The filled Gate Record and
-the milestone's eighteen Findings are in
-[`docs/briefs/m6-kickoff.md`](docs/briefs/m6-kickoff.md).
+M5's and M6's entries, and the NOT-in-scope list they carried, are in
+[`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md) — moved
+there at the M8 close, when this file passed its ~300-line cap again (§11).
+Nothing was dropped: each milestone's brief carries its own Gate Record and
+Findings, `CHANGELOG.md` §1.0.0 lists what v1 ships, and the roadmap's R15 list
+says what v1 deliberately does not.
 
-### M5: what the world can do that it could not
-
-Moved to [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md)
-when this file passed its ~300-line cap (§11). Nothing was dropped: the M5 brief
-carries the same milestone's seventeen Findings and its Gate Record.
-
-### What does NOT exist yet
-
-M6's seventeen NOT-in-scope items and M5's fifteen, and the ones most likely to
-be mistaken for bugs. Six of them are `Inert` properties, which means the engine
-says so in the inspector and the api-dump rather than only here — and
-`tools/repo/inertcheck.luau` is the gate that keeps a seventh from joining them
-quietly.
-
-- **Text is one built-in ASCII face.** `TextLabel.Font` is `Inert` until M7
-  vendors Inter; a codepoint the face cannot draw is a visible box, on purpose.
-  No `RichText`, no shaping, no kerning.
-- **`ImageLabel` draws a flat tint.** `Image`, `ScaleType` and `SliceCenter` are
-  all `Inert` until there is a texture pipeline to hand one over (M7).
-- **`ScrollFrame` scrolls and draws no bar**; `ScrollBarThickness` is `Inert`.
-- **A `Sound` plays a generated tone of its declared length.** `Content` is
-  `Inert`. The timeline, the events, the mixing, the spatialization and the
-  group volumes are real; the file is not.
-- **`Touched` fires for every contact a character has**, the wall it walks into
-  as well as the surface under its feet (D028, closed 2026-08-21).
-- **`BasePart.Material` is not shipped**, and neither is `RaycastResult.Material`.
-- **`Enum.CollisionFidelity` round-trips and every value collides as a box**;
-  a hull needs mesh geometry the mirror cannot see until M7. `Inert`.
-- No joints or solver constraints beyond the transform weld; no sleeping policy
-  exposed; no `saveState`/`restoreState` (declared, refuses); Jolt runs
-  single-threaded until M7 wires the job system.
+**The one part of that list a reader is most likely to mistake for a bug**:
+`BasePart.Material` is not shipped, and neither is `RaycastResult.Material`.
+Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
+`tools/repo/inertcheck.luau` — which sweeps both component pools and
+`EngineState` since D055 — is what keeps a new one from joining them quietly.
 
 ## Now / Next
 
@@ -249,14 +211,15 @@ quietly.
 - **THE RELEASE ITSELF, and it is the last item in the roadmap.** M8's scope ends
   with "tag `v1.0.0`, GitHub release with Windows binaries + source
   instructions", and every part of that needs a person:
-  - **The sign-off.** `MASTER_PROMPT.md` §13 says v1 ships when the M8 gate
-    record is green **and the human has played `examples/10-open-world` and said
-    ship**. The gate record is filled and the demo runs. Nothing is tagged.
-  - **The tag and the release need an account.** §10 puts "anything requiring
-    accounts, credentials, secrets, or spending money" on this list without
-    qualification, so `v1.0.0` and the GitHub release are asked for rather than
-    created. `CHANGELOG.md` is written and its `[1.0.0]` link points at the tag
-    that does not exist yet.
+  - **The sign-off is DONE** (2026-08-22). `MASTER_PROMPT.md` §13 asks for a
+    green M8 gate record and a human who has played `examples/10-open-world` and
+    said ship; both happened, and `milestone/m8` and `v1.0.0` are tagged in this
+    clone.
+  - **Pushing them and creating the release need an account.** §10 puts
+    "anything requiring accounts, credentials, secrets, or spending money" on
+    this list without qualification, so the two `git push --tags` and the GitHub
+    release are asked for rather than done. `CHANGELOG.md` dates `[1.0.0]` at
+    2026-08-22 and its link points at the tag, which now exists locally.
   - **The artifact is buildable today**: `luaug build examples/10-open-world`
     produces the folder a release would attach, and `tests/packaging` runs that
     whole chain on every Windows gate.
@@ -312,10 +275,11 @@ Entries for the planning session and for M0 through M4 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
 
-- **2026-08-22 (session 15, Claude Opus): M8 built — assemble, polish, prove.**
-  The flagship, the graphics settings family, `luaug build` and application
-  identity, the editor-seam proof, the performance pass, the docs, the licence
-  audit and the CHANGELOG. Five decisions, seven Findings, a filled Gate Record.
+- **2026-08-22 (session 15, Claude Opus): M8 built AND SIGNED OFF — assemble,
+  polish, prove, ship.** The flagship, the graphics settings family,
+  `luaug build` and application identity, the editor-seam proof, the performance
+  pass, the docs, the licence audit and the CHANGELOG. Five decisions, twelve
+  Findings, a filled Gate Record, and eleven defects.
 
   **Did:** `examples/10-open-world`; render interpolation; ADR 0044 (graphics
   settings), 0045 (a packaged game is a folder), and ADR 0017's condition checked
@@ -324,8 +288,8 @@ there when this file passed its ~300-line cap.
   and `docs/api/`; `docs/coming-from-roblox.md` written for real; `@luaug/camera`;
   mouse look with a pointer lock that now actually locks.
 
-  **Learned, and it is the same lesson seven times:** every one of the defects a
-  human found — D047 through D053 and the inverted camera — was
+  **Learned, and it is the same lesson eight times:** every one of the defects a
+  human found — D047 through D054 and the inverted camera — was
   invisible to every gate in the repository, and two of them were invisible in
   any single screenshot because what moved was the CLOCK and a position readout
   showing `-0, 2, -0` for a character creeping in the ninth decimal. The
@@ -347,10 +311,23 @@ there when this file passed its ~300-line cap.
   the same baseline measured 6.25 ms first in a sweep and 4.83 ms last, and an
   hour went into a regression that was the measurement order.
 
-  **Next:** the human plays `examples/10-open-world` and either signs M8 off — at
-  which point `milestone/m8` and `v1.0.0` are tagged and the release is theirs to
-  create — or reports what is wrong, which is what the last two review rounds
-  were worth more than the milestones that preceded them.
+  **Then five review rounds, and they were worth more than the build.** The
+  human played it and reported, in order: shadows flickering under a moving sun
+  (D050 — the texel snap rounded an absolute position in a light space that
+  turns); objects hovering over their own shadows (D051 — two biases paying for
+  an acne the front-face cull already prevents); shadows coarse at a moderate
+  distance (D052 — this project asked for 180 m of shadow on a 1024 tile, which
+  is half a metre per texel); the world pulsing after eleven in the morning
+  (D053 — the diffuse ambient rode the specular chain's rebuild threshold and
+  therefore arrived in steps); and the flicker scaling with camera distance
+  (D054 — the filter returns a COUNT of taps, so one texel of the map flipping
+  moved an edge by a twenty-fifth of the penumbra). Then the human read the gate
+  record's own list of what the milestone had measured and not fixed, and asked
+  for that too (D055 — the stored-and-unread lint swept component pools only,
+  and widening it found three more properties doing nothing).
+
+  **Signed off 2026-08-22**, `milestone/m8` and `v1.0.0` tagged locally. The
+  push and the GitHub release need an account and are asked for.
 
 - **2026-08-21 (session 11, Claude Opus): M6 built and signed off.** Moved to
   the archive with the rest of M6.
