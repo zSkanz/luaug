@@ -10,7 +10,7 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   (`MASTER_PROMPT.md` §6), and M4 is why that is written down. No `milestone/m8`
   tag and no `v1.0.0` tag until then.
   The brief is [`docs/briefs/m8-kickoff.md`](docs/briefs/m8-kickoff.md), with
-  five decisions, seven Findings and a filled Gate Record. **Every scope item is
+  five decisions, ten Findings and a filled Gate Record. **Every scope item is
   done** except the release itself, which needs a human and an account (below).
 
   **The deliverable is [`examples/10-open-world`](examples/10-open-world/)** — a

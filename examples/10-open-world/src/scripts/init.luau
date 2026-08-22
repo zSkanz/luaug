@@ -142,8 +142,13 @@ body.Parent = workspace
 -- so a light at the body's own centre is a light every one of that body's
 -- surfaces faces away from: at midnight the character was a black silhouette
 -- standing in a pool of its own light, which is the one thing a carried lantern
--- must not look like. The post is a hand's width out and shoulder-high,
--- invisible because what a player should see is the light and not the fixture.
+-- must not look like. The post is invisible because what a player should see is
+-- the light and not the fixture.
+--
+-- **Above the head rather than beside the hip**, which is the second try: at hip
+-- height the lit side of the character is whichever way the lantern hangs, and
+-- the camera is behind, so the half a player actually sees stayed dark. A light
+-- overhead catches the top of every surface from every angle.
 local lanternPost = Instance.new("Part")
 lanternPost.Name = "LanternPost"
 lanternPost.Size = Vector3.new(0.2, 0.2, 0.2)
@@ -155,7 +160,7 @@ lanternPost.Parent = workspace
 local lanternWeld = Instance.new("Weld")
 lanternWeld.Part0 = character
 lanternWeld.Part1 = lanternPost
-lanternWeld.C0 = CFrame.new(0.85, 0.5, 0)
+lanternWeld.C0 = CFrame.new(0.6, 1.9, 0)
 lanternWeld.Parent = workspace
 
 local lantern = Instance.new("PointLight")
