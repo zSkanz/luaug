@@ -54,6 +54,26 @@ bool setSize(World& world, core::InstanceId id, const Value& value)
     return true;
 }
 
+// Added when the scene format needed it. A fixture that could not express a
+// `CFrame` could not test the one property type an authored world is mostly
+// made of -- and `CFrame` is also the only f64 one, so it is where a
+// serializer that narrows on the way through would show it.
+Value getCFrame(const World& world, core::InstanceId id)
+{
+    const PartComponent* part = world.parts().find(id);
+    return part == nullptr ? Value{} : Value{part->cframe};
+}
+
+bool setCFrame(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* frame = std::get_if<core::CFrameD>(&value);
+    PartComponent* part = world.parts().find(id);
+    if (frame == nullptr || part == nullptr)
+        return false;
+    part->cframe = *frame;
+    return true;
+}
+
 Value getShape(const World& world, core::InstanceId id)
 {
     const PartComponent* part = world.parts().find(id);
@@ -123,6 +143,7 @@ Hierarchy::Hierarchy()
     nameProperty = atoms.intern("Name");
     transparencyProperty = atoms.intern("Transparency");
     sizeProperty = atoms.intern("Size");
+    cframeProperty = atoms.intern("CFrame");
     shapeProperty = atoms.intern("Shape");
     primaryPartProperty = atoms.intern("PrimaryPart");
 
@@ -140,6 +161,7 @@ Hierarchy::Hierarchy()
         PropertyDesc{
             .name = transparencyProperty, .type = ValueType::Number, .get = getTransparency, .set = setTransparency},
         PropertyDesc{.name = sizeProperty, .type = ValueType::Vector3, .get = getSize, .set = setSize},
+        PropertyDesc{.name = cframeProperty, .type = ValueType::CFrame, .get = getCFrame, .set = setCFrame},
     };
     m_partProperties = {
         PropertyDesc{.name = shapeProperty, .type = ValueType::Number, .get = getShape, .set = setShape},

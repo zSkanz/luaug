@@ -95,11 +95,27 @@ public:
 
     // Pushes this frame's voice state to the mixer. Called once per frame, after
     // the ticks -- what the speakers do is a consequence of the simulation.
+    //
+    // While suspended it pushes silence and reads the world anyway, which is the
+    // difference between pausing and stopping: a `Sound`'s `TimePosition` and
+    // `Playing` are untouched, so resuming continues rather than restarts.
     void update(scene::World& world, core::InstanceId listener);
+
+    // Silences the mixer without changing a single `Sound` (D060).
+    //
+    // The editor is what needs this: a world that is not ticking should not be
+    // audible, and the alternative -- pausing a game and still hearing its
+    // ambience -- is the same wrong-owner mistake as an editor whose cursor
+    // belongs to the game. It is a HOST decision, and no script can reach it:
+    // `SoundService.Volume` is the game's control and this is the tool's.
+    void setSuspended(bool suspended) noexcept { m_suspended = suspended; }
+    [[nodiscard]] bool suspended() const noexcept { return m_suspended; }
 
     [[nodiscard]] AudioStats stats() const noexcept;
 
 private:
+    bool m_suspended = false;
+
     struct Impl;
     // A pointer rather than a member so that `miniaudio.h` -- 95,000 lines of
     // it -- stays out of every translation unit that includes this header. R17

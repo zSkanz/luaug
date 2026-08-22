@@ -5,8 +5,12 @@
 #include <luaug/core/id.h>
 #include <luaug/core/math.h>
 #include <luaug/rhi/types.h>
+#include <luaug/scene/world.h>
 
+#include <filesystem>
+#include <memory>
 #include <optional>
+#include <string>
 
 // The editor's model: what it has selected, where its 3D view is, and what the
 // mouse has asked it to find. No ImGui in this header, for the same reason
@@ -84,22 +88,72 @@ struct PickRequest
     core::Vec2 pixel;
 };
 
-// Whether the world this editor is looking at is being simulated.
+// What the editor is doing with the world.
 //
-// **An editor opens paused, and that is the whole point of having this**
-// (D058). A world that is ticking is a world whose properties are being
-// written by scripts sixty times a second, so somebody typing into the
-// properties grid is arguing with the game and losing.
+// **Three states, not two, and the third is the one a two-state model gets
+// wrong.** `Editing` is not "playing, paused" -- it is not play mode at all,
+// and while it holds, the TOOL owns the machine: no ticks, no render-rate
+// script phases, no audio, the editor's own camera, and the cursor. `Playing`
+// hands all of that back. `Paused` is inside play mode: the game's camera and
+// the game's cursor, held still.
 //
-// There is deliberately no `Stopped`. In an editor, stop returns the world to
-// what it was before play began -- to the EDITED state -- and nothing in this
-// engine can remember an edited state yet, because nothing can serialize a
-// world. That is E3, and a button that silently discarded a person's work would
-// be worse than no button.
+// Collapsing `Editing` and `Paused` into one state was the first design, and
+// it made the play button a toggle between two things that are not opposites --
+// which is what a person notices first, because pressing play and pressing
+// stop are different questions and a single toggle can only answer one of them.
 enum class RunState
 {
-    Paused,
+    Editing,
     Playing,
+    Paused,
+};
+
+// Whether the world advances, which is a different question from whether the
+// editor is in play mode.
+[[nodiscard]] constexpr bool advancing(RunState state) noexcept
+{
+    return state == RunState::Playing;
+}
+
+// Whether the TOOL owns the machine -- the cursor, the camera, the silence.
+// True only outside play mode: pausing a running game does not hand the game's
+// camera to the editor, and a person who paused to look at something would be
+// surprised if it did.
+[[nodiscard]] constexpr bool editing(RunState state) noexcept
+{
+    return state == RunState::Editing;
+}
+
+// What the shell asked for this frame, drained by the frame loop at the safe
+// point.
+//
+// The shell records intent and never acts, for the same reason a property edit
+// queues instead of writing: play, stop and save each replace or walk the whole
+// world, and doing that inside an ImGui callback would mutate a world that the
+// panel behind this one is still drawing from.
+struct EditorCommands
+{
+    // Set to the state asked for rather than a toggle, so two panels asking in
+    // one frame cannot cancel each other out.
+    // Whether to be in play mode. Set to the state asked for rather than a
+    // toggle, so two panels asking in one frame cannot cancel each other out.
+    std::optional<bool> play;
+    // Whether to be paused, which is only meaningful inside play mode.
+    std::optional<bool> pause;
+    bool save = false;
+
+    void clear() noexcept { *this = EditorCommands{}; }
+    [[nodiscard]] bool any() const noexcept { return play.has_value() || pause.has_value() || save; }
+};
+
+// What the last save or load did, kept so the shell can say it. A save that
+// silently dropped four references is a save somebody should be told about.
+struct EditorStatus
+{
+    // Shown until something else happens. Not a catalog key: R3 does not govern
+    // what an editor draws (ADR 0046), and this text names paths and counts.
+    std::string message;
+    bool failed = false;
 };
 
 class Editor
@@ -122,7 +176,45 @@ public:
     [[nodiscard]] bool pickPending() const noexcept { return m_pending.has_value(); }
 
     [[nodiscard]] RunState runState() const noexcept { return m_run; }
-    void setRunState(RunState state) noexcept { m_run = state; }
+
+    // --- The loop: play, stop, save ------------------------------------------
+    //
+    // **Play remembers the world so Stop can put it back**, which is the Unity
+    // and Unreal semantic and the one a person means by the word. Without it,
+    // testing a change destroys the change -- and a tool where testing your work
+    // costs you your work is not one anybody uses twice.
+    //
+    // The mechanism is `World::snapshot`, which is what every component in
+    // `engine/scene` was made trivially copyable FOR: five comments across that
+    // module say so, and this is the first caller they ever had.
+    //
+    // **What a restore does not put back is the Luau VM** -- variables,
+    // connections, coroutines -- and that is stated rather than hidden. A
+    // connection a script made during play is still connected after stop. The
+    // honest fix is a VM rebuild, and it is not free: this engine's projects
+    // still BUILD their worlds in script, so rebuilding the VM would rebuild the
+    // world and undo the restore. ADR 0047 is what changes that, and until a
+    // project's world is data the restore is the world's and not the VM's.
+    // Enters play mode, remembering the world so `stop` can put it back. A
+    // no-op while already in play mode, so a second press cannot move the point
+    // stop returns to.
+    void play(scene::World& world);
+    // Leaves play mode and restores. The opposite of `play`, which is why they
+    // share a button.
+    void stop(scene::World& world, Inspector& inspector);
+    // Holds a running world still without leaving play mode. Not the opposite
+    // of anything, which is why it has its own.
+    void setPaused(bool paused) noexcept;
+
+    [[nodiscard]] bool inPlayMode() const noexcept { return m_run != RunState::Editing; }
+
+    // Writes the world to `path`. Returns false and sets the status on failure;
+    // the caller does not need to know which of the two steps failed, but a
+    // person does, so the status says.
+    bool save(const scene::World& world, const std::filesystem::path& path);
+    bool load(scene::World& world, const std::filesystem::path& path, Inspector& inspector);
+
+    [[nodiscard]] const EditorStatus& status() const noexcept { return m_status; }
 
     // Ask for exactly one tick while paused. A step is how somebody watches a
     // thing happen instead of inferring it from before and after, and it is the
@@ -132,13 +224,13 @@ public:
     // How many of the frame's owed ticks the world may actually take.
     //
     // Playing: all of them, unchanged -- the editor is not a second scheduler
-    // and must not become one. Paused: none, unless a step was asked for, and
-    // then exactly one however many the frame owed. Consuming the request here
+    // and must not become one. Editing or paused: none, unless a step was asked
+    // for, and then exactly one however many the frame owed. Consuming the request here
     // rather than at the button is what makes a step one tick rather than one
     // tick per frame the button stays held.
     [[nodiscard]] core::u32 allowedTicks(core::u32 owed) noexcept
     {
-        if (m_run == RunState::Playing)
+        if (advancing(m_run))
             return owed;
         // The request survives a frame that owed nothing. A step is a promise
         // that one tick will happen, not that one will happen if the frame
@@ -165,13 +257,13 @@ public:
     // An editor needs to look around a world that is holding still, which is
     // most of what looking around is for.
     //
-    // It writes `Workspace.CurrentCamera` rather than owning a second camera,
-    // and that is the cheap correct answer rather than a shortcut: nothing else
-    // is writing it while the world is paused, the renderer already looks
-    // through it, and a second camera would need the renderer to learn which
-    // one to use. When the world plays, the game takes its camera back on the
-    // first tick and this stops fighting for it -- which is why the drive below
-    // does nothing while playing.
+    // **It is the editor's own camera and the world never learns about it**,
+    // which is what Unity's scene view and Unreal's editor viewport both are.
+    // The first design wrote `Workspace.CurrentCamera` instead, and that made
+    // the tool and the game two authors of one transform -- a disagreement no
+    // arbitration settles, because the disagreement IS the design (D061). The
+    // renderer is told which view to draw through `render::ViewOverride`, and
+    // while the world plays it is told nothing and draws the game's.
 
     // Seeds the editor camera from wherever the world's camera currently is, so
     // pressing pause does not teleport the view. Called once, when the editor
@@ -208,8 +300,12 @@ private:
     core::DVec3 m_cameraOrigin;
     bool m_hasCamera = false;
     std::optional<PickRequest> m_pending;
-    RunState m_run = RunState::Paused;
+    RunState m_run = RunState::Editing;
     bool m_stepRequested = false;
+    // Held by pointer because a `WorldSnapshot` is thirty component pools and
+    // an editor that is not playing should not be carrying an empty one.
+    std::unique_ptr<scene::WorldSnapshot> m_playSnapshot;
+    EditorStatus m_status;
 
     core::CFrameD m_cameraCFrame;
     bool m_cameraAdopted = false;

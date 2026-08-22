@@ -27,6 +27,7 @@
 #include "luaug/core/text_key.h"
 #include "luaug/jobs/jobs.h"
 #include "luaug/platform/event.h"
+#include "luaug/platform/file.h"
 #include "luaug/platform/platform.h"
 #include "luaug/platform/window.h"
 #include "luaug/render/debug_draw.h"
@@ -38,6 +39,7 @@
 #include "luaug/render/transform_history.h"
 #include "luaug/render/ui_renderer.h"
 #include "luaug/rhi/device.h"
+#include "luaug/scene/scene_file.h"
 #include "luaug/ui/ui.h"
 
 #include <algorithm>
@@ -417,6 +419,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // a panel has said how big it is.
     Editor editor;
     ViewportTarget viewportTarget;
+    // Whether the game was taking input last frame, so the release happens once
+    // on the way out rather than every frame the editor is editing.
+    bool gameHadInput = true;
+    // One scene per project for now, at the project's root, named so it is
+    // obvious in a directory listing and obvious in a diff. More than one is a
+    // milestone that has a reason for more than one.
+    const std::filesystem::path scenePath = options.scriptPath / "main.scene.json";
 
     // The explorer's selection and the queue its edits wait in. Held by the
     // frame loop rather than by the overlay because it outlives a hot reload
@@ -653,6 +662,37 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     if (std::optional<core::EngineError> bootError = host->boot(worldOptions); bootError.has_value())
         return bootError;
 
+    // **The scene, if the project has one** (ADR 0047). Loaded after the boot
+    // drain rather than before it, which is not where the ADR eventually puts
+    // it: the lifecycle it describes is load-then-start, and this engine's
+    // `WorldHost::boot` starts the scripts as part of booting. For a project
+    // whose scripts do not build a world -- which is what the ADR asks projects
+    // to become -- the two orders produce the same world, and `examples/06-scene`
+    // is the one that proves it. For a project that still builds its world in
+    // code, this order lets the file win, and that is the honest behaviour to
+    // ship until the lifecycle moves.
+    //
+    // A project with no scene file is not an error and never logs one. Every
+    // example before `06-scene` is exactly that.
+    if (!options.scriptPath.empty() && platform::fileExists(scenePath)) {
+        std::string sceneText;
+        if (!platform::readTextFile(scenePath, sceneText)) {
+            core::log(core::LogLevel::Warn, LUAUG_TR("scene.err.scene_unreadable"));
+        }
+        else {
+            scene::SceneIoReport sceneReport;
+            if (const std::optional<core::EngineError> sceneError =
+                    scene::readScene(host->world(), sceneText, &sceneReport);
+                sceneError.has_value()) {
+                core::logText(core::LogLevel::Error, sceneError->message);
+            }
+            else {
+                const core::I18nArg args[] = {{"count", static_cast<core::i64>(sceneReport.instances)}};
+                core::log(core::LogLevel::Info, LUAUG_TR("scene.info.scene_loaded"), args);
+            }
+        }
+    }
+
     // `game`, which is where the tree the explorer walks starts. Re-pointed
     // after every reload, because a reload destroys this world and builds
     // another (ADR 0024).
@@ -827,6 +867,24 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // selection is one frame behind the mouse. That is the same frame of
         // latency a typed value already has and it is not felt at sixty hertz.
         if (options.editor) {
+            // The shell's buttons, acted on HERE and not where they were
+            // pressed: play snapshots the world, stop replaces it and save walks
+            // all of it, and none of those may happen while a panel is drawing
+            // from the same world.
+            if (overlay.has_value()) {
+                const EditorCommands editorCommands = overlay->takeCommands();
+                if (editorCommands.play.has_value()) {
+                    if (*editorCommands.play)
+                        editor.play(host->world());
+                    else
+                        editor.stop(host->world(), inspector);
+                }
+                if (editorCommands.pause.has_value())
+                    editor.setPaused(*editorCommands.pause);
+                if (editorCommands.save)
+                    (void)editor.save(host->world(), scenePath);
+            }
+
             const core::InstanceId wasSelected = inspector.selection();
             editor.resolvePick(host->world(), inspector);
 
@@ -860,26 +918,20 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             //
             // Seeded from wherever the world's camera already is, so pressing
             // pause does not teleport the view somewhere nobody asked for.
-            if (const core::InstanceId cameraId = host->currentCamera(); cameraId.valid()) {
-                // Interned here rather than cached outside the loop, and that is
-                // the correct trade rather than the lazy one: a hot reload
-                // rebuilds the atom table with the world, so an atom held across
-                // one would name nothing. Hashing five characters on the frames
-                // somebody is flying costs less than the bug that caching it
-                // invites.
-                const core::NameAtom editorCameraProperty = host->world().atoms().intern("CFrame");
-                if (!editor.cameraAdopted()) {
-                    if (const std::optional<scene::Value> current =
-                            host->world().getProperty(cameraId, editorCameraProperty);
-                        current.has_value() && std::holds_alternative<core::CFrameD>(*current))
-                        editor.adoptCamera(std::get<core::CFrameD>(*current));
-                }
-                else if (editor.runState() == RunState::Paused) {
-                    // Through `setProperty` and not into the component, which is
-                    // ADR 0046's rule and not a formality: the property path is
-                    // what fires the changed signal, what a script watching the
-                    // camera sees, and what the world hash reads.
-                    host->world().setProperty(cameraId, editorCameraProperty, scene::Value{editor.cameraCFrame()});
+            // **The editor's camera is the editor's**, and the world never
+            // learns about it (ADR 0046's rule taken the rest of the way). It is
+            // seeded once from whatever the world is looking through so that
+            // opening the editor does not teleport the view, and after that the
+            // renderer is TOLD which view to draw -- see `render::ViewOverride`.
+            //
+            // Writing `Workspace.CurrentCamera` was the first design and it was
+            // wrong: it made the tool and the game two authors of one transform,
+            // which is a disagreement no arbitration settles (D061).
+            if (!editor.cameraAdopted()) {
+                if (const core::InstanceId cameraId = host->currentCamera(); cameraId.valid()) {
+                    if (const scene::CameraComponent* camera = host->world().cameras().find(cameraId);
+                        camera != nullptr)
+                        editor.adoptCamera(camera->cframe);
                 }
             }
         }
@@ -1026,12 +1078,30 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // a game that locks its pointer legal.
         if (window != nullptr) {
             scene::EngineState& engineState = host->world().engineState();
-            if (engineState.pointerLocked != pointerLocked) {
-                pointerLocked = engineState.pointerLocked;
+
+            // **In the editor the cursor belongs to the person, not to the
+            // game** (D059). `examples/10-open-world` locks the pointer at file
+            // scope for its mouse look, and the boot drain runs that before the
+            // first frame -- so an editor opened on it started with no cursor
+            // and no way to click a panel. The rule is the one Unity and Unreal
+            // use and it is the same rule the transport applies to time: while
+            // the world is paused the editor owns the device, and pressing play
+            // hands it back.
+            //
+            // The game's property is not overwritten, only overridden. A script
+            // that reads `InputService.PointerLocked` sees what it wrote, which
+            // keeps the property honest and keeps a replay of a game that locks
+            // its pointer legal.
+            const bool editorOwnsPointer = options.editor && editing(editor.runState());
+            const bool wantLocked = !editorOwnsPointer && engineState.pointerLocked;
+            const bool wantVisible = editorOwnsPointer || engineState.pointerVisible;
+
+            if (wantLocked != pointerLocked) {
+                pointerLocked = wantLocked;
                 (void)platform::setPointerLocked(*window, pointerLocked);
             }
-            if (engineState.pointerVisible != pointerVisible) {
-                pointerVisible = engineState.pointerVisible;
+            if (wantVisible != pointerVisible) {
+                pointerVisible = wantVisible;
                 platform::setPointerVisible(pointerVisible);
             }
 
@@ -1090,6 +1160,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // -- can be replaced by a reload; the call is an identity check when
         // nothing changed.
         host->audio().setContentMounts(&contentMounts);
+        // Silent while the editor is paused (D060). A world that is not ticking
+        // should not be audible, and hearing a game's ambience while editing it
+        // is the same wrong-owner mistake as an editor whose cursor belongs to
+        // the game.
+        // Silent whenever the world is not advancing -- editing OR paused in
+        // play mode. A paused game that kept humming would be the same
+        // half-stopped state the three-state model exists to remove.
+        host->audio().setSuspended(options.editor && !advancing(editor.runState()));
         host->audio().update(host->world(), host->currentCamera());
 
         // The physics wireframe (roadmap M5, "Jolt debug-draw bridge"): what the
@@ -1145,7 +1223,25 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // because a key stays down between the press and the release, and
             // handed over BEFORE the ticks so that every tick this frame sees
             // one snapshot.
-            host->pumpInput(events);
+            // **The game does not receive input while the editor is editing**
+            // (D062). Same rule as the tick, the cursor, the audio and the
+            // camera, and the same reason: while the tool owns the machine, WASD
+            // is a fly camera and not a character. The events still reach ImGui
+            // -- it takes the untranslated SDL stream of its own -- so the shell
+            // is fully live while the game is not.
+            //
+            // `releaseAll` on the way in rather than on the way out, so a key
+            // held when play stopped is not still held when play starts again.
+            // That is the alt-tab case the function was written for, arriving
+            // through a different door.
+            const bool gameTakesInput = !options.editor || editor.inPlayMode();
+            if (gameTakesInput) {
+                host->pumpInput(events);
+            }
+            else if (gameHadInput) {
+                host->input().releaseAll(host->world());
+            }
+            gameHadInput = gameTakesInput;
 
             // The UI's own reading of the same events. Gathered here rather
             // than from the device snapshot because two of the three are
@@ -1227,7 +1323,18 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         if (target.valid()) {
             ensureDebugPass(targetFormat);
 
-            if (!options.headless)
+            // **A paused world runs no script phases, not even the render-rate
+            // one** (D061). `PreRender` fires on the render clock rather than
+            // the tick, so it kept firing while the editor was paused -- and
+            // `examples/10-open-world` drives its follow camera from there, so
+            // the script and the editor wrote `CurrentCamera` on alternate
+            // frames and the view flickered between two answers.
+            //
+            // Pause means the game is not running. A phase that still fires is
+            // the game still running, and no amount of arbitrating who wins the
+            // camera would make that untrue.
+            const bool worldIsRunning = !options.editor || advancing(editor.runState());
+            if (!options.headless && worldIsRunning)
                 host->preRender(frame.renderDt);
 
             // Loading comes BEFORE extraction, and the order is load-bearing:
@@ -1262,8 +1369,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             const f32 aspect =
                 targetHeight == 0 ? 1.0f : static_cast<f32>(targetWidth) / static_cast<f32>(targetHeight);
             const f32 shadowRadius = renderer != nullptr && renderer->valid() ? renderer->shadowRadius() : 0.0f;
+            // Paused: the editor's own view. Playing: the game's, unchanged --
+            // which is what makes the viewport show the GAME when you press play
+            // rather than a tool's idea of it.
+            const render::ViewOverride editorView{editor.cameraCFrame(), 70.0f, 0.1f, 5000.0f};
+            const bool useEditorView = options.editor && editing(editor.runState()) && editor.cameraAdopted();
             render::extract(host->world(), host->workspace(), host->lighting(), meshLibrary, aspect, shadowRadius,
-                            host->animation(), renderAlpha, &transformHistory, snapshot);
+                            host->animation(), renderAlpha, &transformHistory, snapshot,
+                            useEditorView ? &editorView : nullptr);
             // The UI is laid out against the TARGET's size rather than the
             // window's: an offscreen render at 640x360 has to produce the
             // layout that resolution would, which is the whole of what the

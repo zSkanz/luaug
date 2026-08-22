@@ -112,6 +112,16 @@ public:
         viewportTexture_ = viewport;
     }
 
+    // What the shell asked for while it drew, taken by the frame loop and reset.
+    // Draining rather than reading, so a command cannot be acted on twice
+    // because a frame did not draw.
+    [[nodiscard]] EditorCommands takeCommands() noexcept
+    {
+        const EditorCommands taken = commands_;
+        commands_.clear();
+        return taken;
+    }
+
     // Applies the F3 toggle from this frame's translated events, and forwards
     // the untranslated stream behind them -- platform::rawEvents() -- to
     // ImGui, which models far more input than the engine does.
@@ -188,6 +198,7 @@ private:
     // member rather than a static so it belongs to an overlay rather than to
     // the process.
     [[maybe_unused]] bool layoutBuilt_ = false;
+    EditorCommands commands_;
     [[maybe_unused]] Editor* editor_ = nullptr;
     [[maybe_unused]] rhi::TextureHandle viewportTexture_;
 };

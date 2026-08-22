@@ -366,6 +366,29 @@ private:
     std::vector<Slot> entries_;
 };
 
+// A view the CALLER supplies, instead of the one the world names.
+//
+// **An editor's viewport is not the game's view**, in this engine for the same
+// reason it is not in Unity or Unreal: a scene view that borrowed the game's
+// camera would have to take it away from the game to be usable, and handing it
+// back is a negotiation nobody wins. Sharing one camera between a tool and the
+// thing it edits produces exactly one symptom -- two authors writing one
+// transform on alternate frames -- and no arbitration fixes it, because the
+// disagreement is the design.
+//
+// So the editor owns a camera the world does not contain, and the renderer is
+// TOLD which view to draw rather than asked to find one. Null -- the default,
+// and what every game, every golden and every headless run passes -- means
+// `Workspace.CurrentCamera`, unchanged.
+struct ViewOverride
+{
+    core::CFrameD cframe;
+    // Degrees, vertical, matching `Camera.FieldOfView`.
+    f32 fieldOfView = 70.0f;
+    f32 nearPlane = 0.1f;
+    f32 farPlane = 5000.0f;
+};
+
 // Fills `out` from the world.
 //
 // `root` is `Workspace`: whatever is parented under it is in the world and
@@ -402,6 +425,9 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
              // evaluated at `t + alpha` seen from a camera at `t` slides forward
              // and snaps back once a tick, which is the artifact this exists to
              // remove rather than a smaller version of it.
-             f32 alpha, const TransformHistory* history, RenderWorld& out);
+             f32 alpha, const TransformHistory* history, RenderWorld& out,
+             // The view to draw from, or null for the world's own camera. See
+             // `ViewOverride`.
+             const ViewOverride* view = nullptr);
 
 } // namespace luaug::render

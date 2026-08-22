@@ -20,6 +20,8 @@ luaug_add_module(scene
         src/enum_registry.cpp
         src/world.cpp
         src/world_hash.cpp
+        src/world_snapshot.cpp
+        src/scene_file.cpp
         src/native_accessors.cpp
         src/physics_sync.cpp
         src/streaming_glue.cpp
@@ -59,6 +61,8 @@ luaug_add_module_tests(scene
         tests/class_registry_tests.cpp
         tests/enum_registry_tests.cpp
         tests/world_tests.cpp
+        tests/world_snapshot_tests.cpp
+        tests/scene_file_tests.cpp
         tests/physics_sync_tests.cpp
         tests/streaming_glue_tests.cpp
 )

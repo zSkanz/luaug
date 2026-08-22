@@ -622,29 +622,64 @@ void drawConsole(script::ScriptRuntime* runtime)
 // remember an edited world yet -- nothing can serialize one. A Stop that
 // silently rebuilt from the scripts would throw away whatever somebody had
 // changed, which is worse than a button that is not there.
-void drawTransport(Editor& editor)
+// The transport, in the order and the shape Unity and Unreal both use.
+//
+// **Play and stop are one button because they are opposites**; pause is a
+// different question and gets its own. A single toggle cannot answer both --
+// pressing play asks "run my game", pressing stop asks "give me my world back",
+// and a button that means one of them while showing the other is the first
+// thing a person notices.
+void drawTransport(Editor& editor, EditorCommands& commands)
 {
-    const bool playing = editor.runState() == RunState::Playing;
+    const RunState run = editor.runState();
+    const bool inPlay = editor.inPlayMode();
 
-    // One button that reads as the thing it will DO, not the state it is in.
-    // A button labelled with the current state is the oldest way to make
-    // somebody press the wrong one.
-    if (ImGui::Button(playing ? "pause" : "play"))
-        editor.setRunState(playing ? RunState::Paused : RunState::Playing);
+    if (ImGui::Button(inPlay ? "stop" : "play"))
+        commands.play = !inPlay;
+    ImGui::SetItemTooltip(inPlay ? "leave play mode and put the world back where you pressed play"
+                                 : "run the game, remembering the world first");
 
+    // Only inside play mode, because pausing is a thing that happens to a
+    // running game. Disabled rather than hidden: a control that appears and
+    // disappears moves the ones beside it.
     ImGui::SameLine();
-    ImGui::BeginDisabled(playing);
-    if (ImGui::Button("step"))
-        editor.requestStep();
+    ImGui::BeginDisabled(!inPlay);
+    if (ImGui::Button(run == RunState::Paused ? "resume" : "pause"))
+        commands.pause = run != RunState::Paused;
     ImGui::EndDisabled();
 
     ImGui::SameLine();
-    if (playing) {
-        ImGui::TextDisabled("running");
-    }
-    else {
-        ImGui::TextDisabled("paused | right-drag to look, WASD/QE to fly, wheel for speed (%.0f m/s)",
+    ImGui::BeginDisabled(run == RunState::Playing);
+    if (ImGui::Button("step"))
+        editor.requestStep();
+    ImGui::EndDisabled();
+    ImGui::SetItemTooltip("advance exactly one simulation tick");
+
+    ImGui::SameLine();
+    if (ImGui::Button("save"))
+        commands.save = true;
+
+    ImGui::SameLine();
+    switch (run) {
+    case RunState::Playing:
+        ImGui::TextDisabled("playing");
+        break;
+    case RunState::Paused:
+        ImGui::TextDisabled("paused in play mode -- stop to get your world back");
+        break;
+    case RunState::Editing:
+        ImGui::TextDisabled("editing | right-drag to look, WASD/QE to fly, wheel for speed (%.0f m/s)",
                             static_cast<double>(editor.cameraSpeed()));
+        break;
+    }
+
+    // Whatever the last save or stop had to say, on the line under the buttons
+    // rather than in a modal: somebody pressing save twice a minute should not
+    // have to dismiss anything.
+    if (!editor.status().message.empty()) {
+        const ImVec4 colour =
+            editor.status().failed ? ImVec4(1.0f, 0.45f, 0.35f, 1.0f) : ImVec4(0.55f, 0.75f, 0.55f, 1.0f);
+        ImGui::TextColored(colour, "%s", editor.status().message.c_str());
     }
 }
 
@@ -706,14 +741,14 @@ void driveEditorCamera(Editor& editor, bool overViewport)
 // around a rendered world reads as a bug rather than as a frame. Its rectangle
 // is handed to the editor every frame because that rectangle is the only thing
 // that maps a mouse position onto a ray.
-void drawViewport(Editor& editor, rhi::TextureHandle texture)
+void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& commands)
 {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     const bool open = ImGui::Begin("viewport");
     ImGui::PopStyleVar();
 
     if (open) {
-        drawTransport(editor);
+        drawTransport(editor, commands);
 
         const ImVec2 size = ImGui::GetContentRegionAvail();
         const ImVec2 origin = ImGui::GetCursorScreenPos();
@@ -775,7 +810,8 @@ void buildDefaultLayout(ImGuiID dockspace)
 // the whole argument of ADR 0046: what an editor mostly is, this engine already
 // had.
 void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,
-                     script::ScriptRuntime* runtime, Editor* editor, rhi::TextureHandle viewport, bool& laidOut)
+                     script::ScriptRuntime* runtime, Editor* editor, rhi::TextureHandle viewport, bool& laidOut,
+                     EditorCommands& commands)
 {
     // A transparent central node, so a layout that has not been built yet shows
     // the frame underneath instead of a slab of grey.
@@ -794,7 +830,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     }
 
     if (editor != nullptr)
-        drawViewport(*editor, viewport);
+        drawViewport(*editor, viewport, commands);
 
     if (ImGui::Begin("explorer")) {
         if (world != nullptr && inspector != nullptr)
@@ -992,7 +1028,7 @@ void DebugOverlay::render(rhi::ICmdList& cmd, rhi::TextureHandle target, const F
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
     if (shell_ == Shell::Editor)
-        drawEditorShell(frame, world_, root_, inspector_, runtime_, editor_, viewportTexture_, layoutBuilt_);
+        drawEditorShell(frame, world_, root_, inspector_, runtime_, editor_, viewportTexture_, layoutBuilt_, commands_);
     else
         drawShell(frame, world_, root_, inspector_, runtime_);
     ImGui::Render();

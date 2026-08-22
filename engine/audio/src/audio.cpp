@@ -339,6 +339,12 @@ void AudioSystem::update(scene::World& world, core::InstanceId listener)
     next.reserve(kMaxVoices);
 
     world.sounds().forEach([&](core::InstanceId id, const scene::SoundComponent& sound) {
+        // Suspended: the world is read and nothing is heard. Returning before
+        // the walk instead would be the same silence, and this way the walk's
+        // side effects -- none today, and that is not a promise the future owes
+        // -- cannot start depending on being skipped.
+        if (m_suspended)
+            return;
         if (!sound.playing)
             return;
 

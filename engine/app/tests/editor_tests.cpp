@@ -168,17 +168,49 @@ TEST_CASE("a click nearer the top of the viewport picks the higher of two parts"
     CHECK(lower->instance == low);
 }
 
-TEST_CASE("an editor opens paused, because a ticking world overwrites what you type into it")
+TEST_CASE("an editor opens in EDIT mode, because a ticking world overwrites what you type into it")
 {
     Editor editor;
-    CHECK(editor.runState() == luaug::app::RunState::Paused);
+    CHECK(editor.runState() == luaug::app::RunState::Editing);
+    CHECK_FALSE(editor.inPlayMode());
     CHECK(editor.allowedTicks(4) == 0);
+}
+
+TEST_CASE("pause is a thing that happens inside play mode and nowhere else")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    // Asking to pause while editing is asking for a state that does not exist.
+    // Entering play mode to provide it would be worse than doing nothing.
+    editor.setPaused(true);
+    CHECK(editor.runState() == luaug::app::RunState::Editing);
+
+    editor.play(world);
+    CHECK(editor.runState() == luaug::app::RunState::Playing);
+
+    editor.setPaused(true);
+    CHECK(editor.runState() == luaug::app::RunState::Paused);
+    CHECK(editor.inPlayMode());
+    CHECK(editor.allowedTicks(4) == 0);
+
+    editor.setPaused(false);
+    CHECK(editor.runState() == luaug::app::RunState::Playing);
+
+    // Stop leaves play mode from either half of it.
+    editor.setPaused(true);
+    editor.stop(world, inspector);
+    CHECK(editor.runState() == luaug::app::RunState::Editing);
 }
 
 TEST_CASE("playing does not become a second scheduler")
 {
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
     Editor editor;
-    editor.setRunState(luaug::app::RunState::Playing);
+    editor.play(world);
 
     // Whatever the frame owed, unchanged -- including the catch-up clamp's
     // maximum and a frame that owed nothing.
@@ -210,11 +242,13 @@ TEST_CASE("a step asked for on a frame that owes nothing is not swallowed")
 
 TEST_CASE("pausing mid-play stops the world at the next frame")
 {
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
     Editor editor;
-    editor.setRunState(luaug::app::RunState::Playing);
+    editor.play(world);
     REQUIRE(editor.allowedTicks(2) == 2);
 
-    editor.setRunState(luaug::app::RunState::Paused);
+    editor.setPaused(true);
     CHECK(editor.allowedTicks(2) == 0);
 }
 
@@ -244,10 +278,12 @@ TEST_CASE("driving does nothing until a camera has been adopted")
 TEST_CASE("the game takes its camera back when the world plays")
 {
     Editor editor;
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
     core::CFrameD start;
     start.position = {0.0, 0.0, 0.0};
     editor.adoptCamera(start);
-    editor.setRunState(luaug::app::RunState::Playing);
+    editor.play(world);
 
     editor.driveCamera({100.0f, 100.0f}, {1.0f, 1.0f, 1.0f}, 1.0f);
 
@@ -306,4 +342,87 @@ TEST_CASE("camera speed refuses a value that makes the camera unusable")
 
     editor.setCameraSpeed(-5.0f);
     CHECK(editor.cameraSpeed() > 0.0f);
+}
+
+TEST_CASE("play remembers the world, and stop puts it back")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId kept = fixture.widget(world, "Kept");
+
+    Editor editor;
+    Inspector inspector;
+
+    CHECK_FALSE(editor.inPlayMode());
+    editor.play(world);
+    CHECK(editor.inPlayMode());
+    CHECK(editor.runState() == luaug::app::RunState::Playing);
+
+    // What "playing" did: a new instance, and the old one gone.
+    const core::InstanceId spawned = fixture.widget(world, "Spawned");
+    (void)world.destroy(kept);
+    const core::u64 during = world.worldHash();
+
+    editor.stop(world, inspector);
+
+    CHECK(editor.runState() == luaug::app::RunState::Editing);
+    CHECK_FALSE(editor.inPlayMode());
+    CHECK(world.worldHash() != during);
+    CHECK(world.alive(kept));
+    CHECK_FALSE(world.alive(spawned));
+}
+
+TEST_CASE("stopping drops a selection the restore took away")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+
+    Editor editor;
+    Inspector inspector;
+    editor.play(world);
+
+    const core::InstanceId spawned = fixture.widget(world, "Spawned");
+    inspector.select(spawned);
+    REQUIRE(inspector.selection() == spawned);
+
+    editor.stop(world, inspector);
+
+    // Left selected, the properties grid would be pointed at a slot that now
+    // holds nothing or somebody else -- which is how an edit lands on the wrong
+    // object.
+    CHECK_FALSE(inspector.selection().valid());
+}
+
+TEST_CASE("stop with nothing to restore is not a crash and not a lie")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId kept = fixture.widget(world, "Kept");
+
+    Editor editor;
+    Inspector inspector;
+    editor.stop(world, inspector);
+
+    CHECK(editor.runState() == luaug::app::RunState::Editing);
+    CHECK(world.alive(kept));
+}
+
+TEST_CASE("pressing play twice does not move the point stop returns to")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId original = fixture.widget(world, "Original");
+
+    Editor editor;
+    Inspector inspector;
+    editor.play(world);
+
+    const core::InstanceId spawned = fixture.widget(world, "Spawned");
+    // Already playing, so this is a no-op rather than a second snapshot -- the
+    // alternative is a stop that returns to the middle of a play session.
+    editor.play(world);
+    editor.stop(world, inspector);
+
+    CHECK(world.alive(original));
+    CHECK_FALSE(world.alive(spawned));
 }

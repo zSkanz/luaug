@@ -367,3 +367,82 @@ TEST_CASE("many inserts and erases keep the map consistent")
     map.forEach([&walked](InstanceId, int&) { ++walked; });
     CHECK(walked == map.size());
 }
+
+// --- restoreFrom ------------------------------------------------------------
+//
+// The container half of `scene::World::snapshot` (ADR 0016). The properties
+// below are the whole contract, and the third one is the reason the function
+// exists at all rather than being a plain assignment.
+
+TEST_CASE("a restore brings back what was live and drops what came after")
+{
+    SlotMap<int> map;
+    const InstanceId first = map.insert(1);
+    const InstanceId second = map.insert(2);
+    CHECK(map.erase(second));
+
+    const SlotMap<int> snapshot = map;
+
+    const InstanceId later = map.insert(20);
+    CHECK(map.erase(first));
+    CHECK(map.size() == 1);
+
+    map.restoreFrom(snapshot);
+
+    CHECK(map.size() == 1);
+    // The handle held across the round trip resolves to the same value, which
+    // is what an editor's selection depends on.
+    REQUIRE(map.find(first) != nullptr);
+    CHECK(*map.find(first) == 1);
+    CHECK(map.find(later) == nullptr);
+    CHECK(map.find(second) == nullptr);
+}
+
+TEST_CASE("a restore reaches back past an erase, and the map keeps working")
+{
+    SlotMap<int> map;
+    const InstanceId only = map.insert(7);
+
+    const SlotMap<int> snapshot = map;
+
+    CHECK(map.erase(only));
+    CHECK(map.find(only) == nullptr);
+
+    map.restoreFrom(snapshot);
+
+    REQUIRE(map.find(only) != nullptr);
+    CHECK(*map.find(only) == 7);
+
+    const InstanceId next = map.insert(8);
+    CHECK(next != only);
+    CHECK(*map.find(only) == 7);
+    CHECK(*map.find(next) == 8);
+}
+
+TEST_CASE("a generation the session used is never handed out again")
+{
+    // Two recycles of one slot on purpose. With one, the generation the restore
+    // rolls back to and the next one handed out miss each other by one, and a
+    // map with no high-water mark would pass anyway.
+    SlotMap<int> map;
+    const InstanceId anchor = map.insert(0);
+    CHECK(map.erase(anchor));
+
+    const SlotMap<int> snapshot = map;
+
+    std::vector<InstanceId> session;
+    for (int cycle = 0; cycle < 2; ++cycle) {
+        const InstanceId id = map.insert(cycle);
+        session.push_back(id);
+        CHECK(map.erase(id));
+    }
+
+    map.restoreFrom(snapshot);
+
+    for (int i = 0; i < 8; ++i) {
+        const InstanceId fresh = map.insert(i);
+        CHECK(fresh != anchor);
+        for (const InstanceId used : session)
+            CHECK(fresh != used);
+    }
+}

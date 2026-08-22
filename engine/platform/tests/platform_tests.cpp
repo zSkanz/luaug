@@ -12,8 +12,10 @@
 #include <doctest/doctest.h>
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 using luaug::core::engineCatalog;
@@ -399,6 +401,179 @@ TEST_CASE("readFile fails without touching the caller's buffer")
     std::string text{"kept"};
     CHECK_FALSE(luaug::platform::readTextFile(std::filesystem::temp_directory_path(), text));
     CHECK(text == "kept");
+}
+
+// --- platform::writeFile -----------------------------------------------------
+//
+// The write seam the host saves through. It is deliberately unreachable from
+// the game VM (see file.h), so the only caller these cases stand in for is a
+// tool. What they pin is the contract a save depends on: exact bytes back,
+// an overwrite that replaces rather than appends, and a clean false -- no
+// crash, no truncated target, no litter -- for every path that cannot take a
+// write.
+
+namespace {
+
+// Every write test works inside its own directory under the system temporary
+// one, so a failure leaves evidence in a named place and two cases can never
+// collide over a filename.
+struct ScratchDir
+{
+    explicit ScratchDir(std::string_view name)
+        : path(std::filesystem::temp_directory_path() / std::filesystem::path(std::string("luaug-write-").append(name)))
+    {
+        std::error_code ec;
+        std::filesystem::remove_all(path, ec);
+        std::filesystem::create_directories(path, ec);
+    }
+
+    ~ScratchDir()
+    {
+        std::error_code ec;
+        std::filesystem::remove_all(path, ec);
+    }
+
+    ScratchDir(const ScratchDir&) = delete;
+    ScratchDir& operator=(const ScratchDir&) = delete;
+
+    std::filesystem::path path;
+};
+
+[[nodiscard]] std::span<const std::byte> asBytes(std::string_view text)
+{
+    return {reinterpret_cast<const std::byte*>(text.data()), text.size()};
+}
+
+// How many entries the directory holds. The atomic write leaves a temporary
+// beside its target while it runs, and a caller must never find one afterwards
+// -- neither on the path that succeeded nor on the one that failed.
+[[nodiscard]] std::size_t entryCount(const std::filesystem::path& directory)
+{
+    std::error_code ec;
+    std::size_t count = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(directory, ec)) {
+        (void)entry;
+        ++count;
+    }
+    return count;
+}
+
+} // namespace
+
+TEST_CASE("writeFile round-trips its bytes through readFile")
+{
+    const ScratchDir scratch("roundtrip");
+    const std::filesystem::path path = scratch.path / "scene.bin";
+
+    // The same NUL-and-bare-CR payload the read cases use: a writer that went
+    // through a text-mode FILE* or a C string would lose one or the other.
+    const std::string payload("ab\0cd\r\n", 7);
+    REQUIRE(luaug::platform::writeFile(path, asBytes(payload)));
+
+    std::vector<std::byte> bytes;
+    REQUIRE(luaug::platform::readFile(path, bytes));
+    REQUIRE(bytes.size() == payload.size());
+    CHECK(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
+
+    // And the text spelling of the same call, read back the same way.
+    const std::filesystem::path textPath = scratch.path / "scene.json";
+    REQUIRE(luaug::platform::writeTextFile(textPath, payload));
+
+    std::string text;
+    REQUIRE(luaug::platform::readTextFile(textPath, text));
+    CHECK(text == payload);
+
+    // Nothing but the two files: the temporaries the atomic write used are gone.
+    CHECK(entryCount(scratch.path) == 2);
+}
+
+TEST_CASE("writeFile replaces an existing file rather than appending to it")
+{
+    const ScratchDir scratch("overwrite");
+    const std::filesystem::path path = scratch.path / "scene.json";
+
+    REQUIRE(luaug::platform::writeTextFile(path, "a longer first version"));
+
+    // Shorter on purpose. A rename replaces the whole file; a write that seeked
+    // to zero without truncating would leave the tail of the first version
+    // behind, and the length is what catches that.
+    REQUIRE(luaug::platform::writeTextFile(path, "second"));
+
+    std::string text;
+    REQUIRE(luaug::platform::readTextFile(path, text));
+    CHECK(text == "second");
+    CHECK(entryCount(scratch.path) == 1);
+}
+
+TEST_CASE("an empty payload writes an empty file")
+{
+    const ScratchDir scratch("empty");
+    const std::filesystem::path path = scratch.path / "empty.bin";
+
+    const std::span<const std::byte> nothing;
+    REQUIRE(luaug::platform::writeFile(path, nothing));
+    CHECK(luaug::platform::fileExists(path));
+
+    std::vector<std::byte> bytes{std::byte{0x7f}};
+    REQUIRE(luaug::platform::readFile(path, bytes));
+    CHECK(bytes.empty());
+}
+
+TEST_CASE("a write into a directory that does not exist fails until it is made")
+{
+    const ScratchDir scratch("mkdir");
+    const std::filesystem::path nested = scratch.path / "saves" / "level-01";
+    const std::filesystem::path path = nested / "scene.json";
+
+    // `writeFile` does not create parents on its own -- a typo'd path has to
+    // fail rather than scatter directories.
+    CHECK_FALSE(luaug::platform::writeTextFile(path, "scene"));
+    CHECK_FALSE(luaug::platform::fileExists(path));
+    // And it left no temporary behind in the directory that DOES exist.
+    CHECK(entryCount(scratch.path) == 0);
+
+    // Which is what `createDirectories` is for, missing parents included.
+    REQUIRE(luaug::platform::createDirectories(nested));
+    REQUIRE(luaug::platform::writeTextFile(path, "scene"));
+
+    std::string text;
+    REQUIRE(luaug::platform::readTextFile(path, text));
+    CHECK(text == "scene");
+
+    // Already there is success, not a failure: a save over an existing project
+    // hits this every time.
+    CHECK(luaug::platform::createDirectories(nested));
+}
+
+TEST_CASE("a path that cannot be written fails instead of crashing")
+{
+    const ScratchDir scratch("unwritable");
+
+    // A directory is not a file. The temporary write may well succeed -- it is
+    // a sibling name -- and the rename onto a directory is what must not.
+    CHECK_FALSE(luaug::platform::writeTextFile(scratch.path, "nope"));
+    CHECK(entryCount(scratch.path) == 0);
+
+    // A regular file used as a directory. Portable on purpose: an illegal
+    // character is a Windows notion and `*` is a perfectly good POSIX
+    // filename, but no platform lets a path descend through a file.
+    const std::filesystem::path file = scratch.path / "not-a-directory";
+    REQUIRE(luaug::platform::writeTextFile(file, "leaf"));
+
+    CHECK_FALSE(luaug::platform::writeTextFile(file / "child.json", "nope"));
+    CHECK_FALSE(luaug::platform::createDirectories(file));
+
+    // The file it tried to descend through is untouched.
+    std::string text;
+    REQUIRE(luaug::platform::readTextFile(file, text));
+    CHECK(text == "leaf");
+    CHECK(entryCount(scratch.path) == 1);
+
+    // An empty path is a caller's bug, and must not become a file named after
+    // the temporary suffix in the working directory.
+    const std::filesystem::path nowhere;
+    CHECK_FALSE(luaug::platform::writeFile(nowhere, asBytes("nope")));
+    CHECK_FALSE(luaug::platform::createDirectories(nowhere));
 }
 
 // --- Application identity (roadmap M8) ---------------------------------------

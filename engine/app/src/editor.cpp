@@ -1,6 +1,10 @@
 #include <luaug/app/editor.h>
+#include <luaug/platform/file.h>
 #include <luaug/rhi/device.h>
+#include <luaug/scene/scene_file.h>
 #include <luaug/scene/world.h>
+
+#include <string>
 
 namespace luaug::app {
 namespace {
@@ -88,6 +92,97 @@ PickRay Editor::rayThrough(core::Vec2 pixelInViewport) const noexcept
     return rayThroughPixel(m_projection, m_view, m_cameraOrigin, local, pixelInViewport);
 }
 
+void Editor::play(scene::World& world)
+{
+    // Already in play mode -- running or paused. Taking a second snapshot here
+    // would move the point stop returns to into the middle of a play session.
+    if (m_run != RunState::Editing)
+        return;
+
+    // Taken every time play is pressed rather than kept from the first, because
+    // stop means "back to where I pressed play", not "back to where I opened
+    // the editor".
+    m_playSnapshot = std::make_unique<scene::WorldSnapshot>(world.snapshot());
+    m_run = RunState::Playing;
+    m_status = EditorStatus{"playing", false};
+}
+
+void Editor::setPaused(bool paused) noexcept
+{
+    // Pause is a thing that happens INSIDE play mode. Asking for it while
+    // editing is asking for a state that does not exist, and silently entering
+    // play mode to provide it would be worse than doing nothing.
+    if (m_run == RunState::Editing)
+        return;
+    m_run = paused ? RunState::Paused : RunState::Playing;
+}
+
+void Editor::stop(scene::World& world, Inspector& inspector)
+{
+    m_run = RunState::Editing;
+    if (m_playSnapshot == nullptr)
+        return;
+
+    world.restore(*m_playSnapshot);
+    m_playSnapshot.reset();
+
+    // A selection made DURING play can name something the restore removed. The
+    // id would resolve to whatever the slot holds now, which is either nothing
+    // or somebody else -- and a properties grid pointed at somebody else is how
+    // an edit lands on the wrong object.
+    if (!world.alive(inspector.selection()))
+        inspector.select(core::InstanceId{});
+    inspector.onWorldChanged();
+
+    m_status = EditorStatus{"stopped -- the world is back where you pressed play", false};
+}
+
+bool Editor::save(const scene::World& world, const std::filesystem::path& path)
+{
+    scene::SceneIoReport report;
+    const std::string text = scene::writeScene(world, &report);
+
+    if (!platform::createDirectories(path.parent_path()) || !platform::writeTextFile(path, text)) {
+        m_status = EditorStatus{"could not write " + path.string(), true};
+        return false;
+    }
+
+    std::string message = "saved " + std::to_string(report.instances) + " instance(s) to " + path.string();
+    // Counted rather than swallowed. A reference that pointed outside the scene
+    // is a thing the person authored and the file cannot hold, and finding that
+    // out when you reopen is finding it out too late.
+    if (report.droppedReferences > 0)
+        message += " (" + std::to_string(report.droppedReferences) + " reference(s) outside the scene were dropped)";
+    m_status = EditorStatus{message, false};
+    return true;
+}
+
+bool Editor::load(scene::World& world, const std::filesystem::path& path, Inspector& inspector)
+{
+    std::string text;
+    if (!platform::readTextFile(path, text)) {
+        m_status = EditorStatus{"could not read " + path.string(), true};
+        return false;
+    }
+
+    scene::SceneIoReport report;
+    if (const std::optional<core::EngineError> error = scene::readScene(world, text, &report); error.has_value()) {
+        m_status = EditorStatus{error->message, true};
+        return false;
+    }
+
+    // Everything the file named was created just now, so nothing selected
+    // before it still means what it meant.
+    inspector.select(core::InstanceId{});
+    inspector.onWorldChanged();
+
+    std::string message = "loaded " + std::to_string(report.instances) + " instance(s) from " + path.string();
+    if (report.unknownClasses > 0)
+        message += " (" + std::to_string(report.unknownClasses) + " unknown class(es) skipped)";
+    m_status = EditorStatus{message, false};
+    return true;
+}
+
 void Editor::adoptCamera(const core::CFrameD& cframe) noexcept
 {
     m_cameraCFrame = cframe;
@@ -115,7 +210,10 @@ core::CFrameD Editor::driveCamera(core::Vec2 lookDelta, core::Vec3 move, f32 dt)
     // Playing means the game owns its camera again. Writing here would be two
     // authors for one transform, and the visible result is a camera that
     // stutters between where the script wants it and where the editor left it.
-    if (m_run == RunState::Playing || !m_cameraAdopted)
+    // Only while editing. Inside play mode the game owns its camera, paused or
+    // not: a person who paused to look at something did not ask for the tool's
+    // view.
+    if (!editing(m_run) || !m_cameraAdopted)
         return m_cameraCFrame;
 
     constexpr f32 kRadiansPerPixel = 0.0032f;

@@ -1,0 +1,74 @@
+{
+  "format": "luaug-scene",
+  "version": 1,
+  "root": {
+    "class": "Workspace",
+    "name": "Workspace",
+    "properties": {
+      "CurrentCamera": "Workspace.MainCamera"
+    },
+    "children": [
+      {
+        "class": "Camera",
+        "name": "MainCamera",
+        "properties": {
+          "CFrame": [0.0, 6.0, 18.0, 1.0, -0.0, 0.0, 0.0, 0.9701, -0.2425, -0.0, 0.2425, 0.9701],
+          "FieldOfView": 70.0
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Ground",
+        "properties": {
+          "CFrame": [0.0, -0.5, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+          "Size": [40.0, 1.0, 40.0],
+          "Color": [0.35, 0.42, 0.32],
+          "Anchored": true
+        }
+      },
+      {
+        "class": "Part",
+        "name": "LeftBlock",
+        "properties": {
+          "CFrame": [-5.0, 1.5, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+          "Size": [2.0, 2.0, 2.0],
+          "Color": [0.82, 0.35, 0.25],
+          "Anchored": true
+        },
+        "tags": ["Spin"]
+      },
+      {
+        "class": "Part",
+        "name": "MiddleBlock",
+        "properties": {
+          "CFrame": [0.0, 1.5, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+          "Size": [2.0, 3.0, 2.0],
+          "Color": [0.85, 0.72, 0.30],
+          "Anchored": true
+        },
+        "tags": ["Spin"]
+      },
+      {
+        "class": "Part",
+        "name": "RightBlock",
+        "properties": {
+          "CFrame": [5.0, 1.5, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+          "Size": [2.0, 2.0, 2.0],
+          "Color": [0.30, 0.55, 0.78],
+          "Anchored": true
+        },
+        "tags": ["Spin"]
+      },
+      {
+        "class": "Part",
+        "name": "Marker",
+        "properties": {
+          "CFrame": [0.0, 0.1, 8.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+          "Size": [1.0, 0.2, 1.0],
+          "Color": [0.9, 0.9, 0.9],
+          "Anchored": true
+        }
+      }
+    ]
+  }
+}

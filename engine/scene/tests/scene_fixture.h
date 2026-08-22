@@ -49,6 +49,7 @@ struct Hierarchy
     core::NameAtom nameProperty;
     core::NameAtom transparencyProperty;
     core::NameAtom sizeProperty;
+    core::NameAtom cframeProperty;
     core::NameAtom shapeProperty;
     core::NameAtom primaryPartProperty;
 

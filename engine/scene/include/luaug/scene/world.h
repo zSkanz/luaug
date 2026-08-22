@@ -151,6 +151,88 @@ struct NameIndex
     std::unordered_map<u32, core::InstanceId> firstByName;
 };
 
+// Every component pool a `World` owns, named ONCE.
+//
+// The world's members, a snapshot's storage and the copy between them are all
+// generated from this list, so a pool that is not here does not exist and a
+// pool that is here but nowhere else fails to compile. The alternative is three
+// hand-kept lists that agree until the day somebody adds a component and
+// updates two of them -- and the symptom of that is a component that quietly
+// stops surviving a restore, which no test asks about unless somebody thought
+// to write one.
+#define LUAUG_SCENE_POOL_LIST(X)                                                                                       \
+    X(PVComponent, pvInstances)                                                                                        \
+    X(PartComponent, parts)                                                                                            \
+    X(RigidBodyComponent, rigidBodies)                                                                                 \
+    X(CharacterBodyComponent, characterBodies)                                                                         \
+    X(WeldComponent, welds)                                                                                            \
+    X(WorkspaceComponent, workspaces)                                                                                  \
+    X(ModelComponent, models)                                                                                          \
+    X(ScriptComponent, scripts)                                                                                        \
+    X(SoundComponent, sounds)                                                                                          \
+    X(AudioGroupComponent, audioGroups)                                                                                \
+    X(ScreenGuiComponent, screenGuis)                                                                                  \
+    X(UIObjectComponent, uiObjects)                                                                                    \
+    X(TextLabelComponent, textLabels)                                                                                  \
+    X(TextInputComponent, textInputs)                                                                                  \
+    X(ImageLabelComponent, imageLabels)                                                                                \
+    X(ScrollFrameComponent, scrollFrames)                                                                              \
+    X(UIListLayoutComponent, listLayouts)                                                                              \
+    X(UIPaddingComponent, uiPaddings)                                                                                  \
+    X(UICornerComponent, uiCorners)                                                                                    \
+    X(InputContextComponent, inputContexts)                                                                            \
+    X(InputActionComponent, inputActions)                                                                              \
+    X(InputBindingComponent, inputBindings)                                                                            \
+    X(MeshPartComponent, meshParts)                                                                                    \
+    X(CameraComponent, cameras)                                                                                        \
+    X(PointLightComponent, pointLights)                                                                                \
+    X(SpotLightComponent, spotLights)                                                                                  \
+    X(LightingComponent, lighting)                                                                                     \
+    X(NameIndex, nameIndices)                                                                                          \
+    X(AttributeMap, attributes)                                                                                        \
+    X(TagSet, tags)
+
+// A whole world's state, held in memory (ADR 0016's "snapshottable POD ECS
+// pools" -- foundations, not rollback).
+//
+// What it is for is the editor's Play and Stop: the world is copied when Play
+// is pressed and put back when Stop is, so a play session leaves nothing
+// behind. It is **not** a file format. Nothing here is versioned, nothing is
+// byte-stable across builds, and a snapshot means something only to the `World`
+// it came from, with the same `ClassRegistry`, `EnumRegistry` and `AtomTable`
+// still alive behind it. Serialization is a separate thing with separate
+// problems.
+//
+// Copying rather than journalling is the whole design, and it is why the
+// module was shaped the way it was: every component is POD with no invariants
+// of its own (components.h), every pool is a dense array whose removals leave
+// holes rather than reordering (component_pool.h), the hierarchy is intrusive
+// links inside the records, and an enum is `{enumId, value}` rather than a
+// pointer (value.h, enum_registry.h). So a snapshot is a per-pool copy and
+// never a traversal, and a restore is the same copy the other way.
+struct WorldSnapshot
+{
+#define LUAUG_SCENE_POOL_SNAPSHOT_MEMBER(Type, Name) ComponentPool<Type> Name;
+    LUAUG_SCENE_POOL_LIST(LUAUG_SCENE_POOL_SNAPSHOT_MEMBER)
+#undef LUAUG_SCENE_POOL_SNAPSHOT_MEMBER
+
+    // Generations and the free list included, which is what makes an
+    // `InstanceId` mean the same thing after a restore as before it.
+    core::SlotMap<InstanceRecord> instances;
+    std::unordered_map<u32, std::vector<core::InstanceId>> tagged;
+    std::vector<core::InstanceId> pendingRetire;
+    std::vector<core::InstanceId> streamingFoci;
+    // `CollisionGroups` has no default constructor because a world's table
+    // always has a `Default` group; a snapshot's is overwritten before anyone
+    // reads it, so the atom it is seeded with is never observed.
+    CollisionGroups collisionGroups{core::NameAtom{}};
+    EngineState engineState;
+    // The generator's state rather than the generator, so restoring it is the
+    // same `setState` a `Random:Clone` performs (core/random.h).
+    u64 rngState = 0;
+    u64 rngIncrement = 1;
+};
+
 class World
 {
 public:
@@ -272,6 +354,61 @@ public:
     // Tagging is independent of the tree, so a nil-parented instance is listed.
     void collectTagged(core::NameAtom tag, std::vector<core::InstanceId>& out) const;
     void collectAllTags(TagSet& out) const;
+
+    // --- Snapshot and restore ------------------------------------------------
+
+    // Everything `worldHash` calls observable -- the instance records, the
+    // hierarchy including sibling order, names, attributes, tags and every
+    // component pool -- plus the state the hash does not reach: `EngineState`,
+    // the collision-group table, the streaming foci and the world's RNG
+    // position.
+    [[nodiscard]] WorldSnapshot snapshot() const;
+
+    // Puts this world back. Instances created since the snapshot are gone,
+    // instances destroyed since it are back with their components, and an
+    // `InstanceId` taken BEFORE the snapshot resolves to the same instance
+    // afterwards -- which is what lets an editor hold a selection across a Stop.
+    // An id handed out DURING the play session resolves to nothing, and is
+    // never handed out again to mean something else (`SlotMap::restoreFrom`
+    // explains the generation bookkeeping that costs).
+    //
+    // Call it at a frame boundary with no drain in flight, the same safe point
+    // `ComponentPool::compact` asks for. The change queue is CLEARED rather
+    // than restored: its entries are facts about a world that no longer exists,
+    // and their only consumer is the VM the caller is about to rebuild.
+    //
+    // **What a restore cannot put back, and what the caller therefore owes.**
+    //
+    //   * **The Luau VM.** Script variables, connections, coroutines and the
+    //     task scheduler's timers are not this module's state and are not in
+    //     the snapshot -- ADR 0016 names Luau-state restoration an explicit
+    //     non-goal of v1, and `change_queue.h` explains why `scene` holds no
+    //     reference into the VM to restore in the first place. The caller
+    //     rebuilds the runtime. `InstanceRecord::subscribedProperties` comes
+    //     back as it was at snapshot time and the rebuilt VM re-subscribes what
+    //     it actually connects; a bit left set for a connection that no longer
+    //     exists costs an enqueue nobody consumes, which is why the mask is
+    //     restored rather than cleared.
+    //   * **The physics mirror.** `PhysicsSync` keeps a body per instance slot
+    //     and a character per id, and the backend behind it holds contacts,
+    //     velocities and sleep state that `IPhysics3D::restoreState` does not
+    //     implement (the Jolt backend answers false). A restored world's
+    //     instances therefore correspond to nothing the solver holds: the
+    //     caller destroys the mirror and builds a new one over the restored
+    //     tree.
+    //   * **Everything else derived and keyed by instance.**
+    //     `render::AnimationSystem` (a track per player, a pose per mesh part),
+    //     `render::TransformHistory` (last frame's transform, which motion
+    //     vectors read), the audio mixer's voices and the UI's layout cache are
+    //     all rebuilt from the tree rather than restored. Each already retires
+    //     what stops resolving; what a restore adds is instances that REAPPEAR,
+    //     which nothing retires. Safe order: restore, then rebuild.
+    //   * **The atom table.** Names interned during the play session stay
+    //     interned, because the table is shared and append-only. An atom's
+    //     number is never observable -- the world hash hashes text for exactly
+    //     this reason -- so a table that grew is a few bytes and not a
+    //     difference.
+    void restore(const WorldSnapshot& snapshot);
 
     // --- Frame plumbing ------------------------------------------------------
 
@@ -401,6 +538,18 @@ public:
     [[nodiscard]] const ComponentPool<AudioGroupComponent>& audioGroups() const noexcept { return m_audioGroups; }
 
 private:
+    // The pool walk `snapshot` and `restore` share, as `fn(worldPool,
+    // snapshotPool)`. Templated on both sides so one body serves a `const
+    // World&` copying out and a `World&` copying back, and each caller's lambda
+    // decides the direction.
+    template <class WorldRef, class SnapshotRef, class Fn>
+    static void eachPool(WorldRef& world, SnapshotRef& snapshot, Fn&& fn)
+    {
+#define LUAUG_SCENE_POOL_VISIT(Type, Name) fn(world.m_##Name, snapshot.Name);
+        LUAUG_SCENE_POOL_LIST(LUAUG_SCENE_POOL_VISIT)
+#undef LUAUG_SCENE_POOL_VISIT
+    }
+
     void linkChild(InstanceRecord& parentRecord, core::InstanceId parentId, core::InstanceId childId);
     void unlinkChild(core::InstanceId childId);
     void indexName(core::InstanceId parentId, core::InstanceId childId);
@@ -423,36 +572,14 @@ private:
     CollisionGroups m_collisionGroups;
 
     core::SlotMap<InstanceRecord> m_instances;
-    ComponentPool<PVComponent> m_pvInstances;
-    ComponentPool<PartComponent> m_parts;
-    ComponentPool<RigidBodyComponent> m_rigidBodies;
-    ComponentPool<CharacterBodyComponent> m_characterBodies;
-    ComponentPool<WeldComponent> m_welds;
-    ComponentPool<WorkspaceComponent> m_workspaces;
-    ComponentPool<ModelComponent> m_models;
-    ComponentPool<ScriptComponent> m_scripts;
-    ComponentPool<SoundComponent> m_sounds;
-    ComponentPool<AudioGroupComponent> m_audioGroups;
-    ComponentPool<ScreenGuiComponent> m_screenGuis;
-    ComponentPool<UIObjectComponent> m_uiObjects;
-    ComponentPool<TextLabelComponent> m_textLabels;
-    ComponentPool<TextInputComponent> m_textInputs;
-    ComponentPool<ImageLabelComponent> m_imageLabels;
-    ComponentPool<ScrollFrameComponent> m_scrollFrames;
-    ComponentPool<UIListLayoutComponent> m_listLayouts;
-    ComponentPool<UIPaddingComponent> m_uiPaddings;
-    ComponentPool<UICornerComponent> m_uiCorners;
-    ComponentPool<InputContextComponent> m_inputContexts;
-    ComponentPool<InputActionComponent> m_inputActions;
-    ComponentPool<InputBindingComponent> m_inputBindings;
-    ComponentPool<MeshPartComponent> m_meshParts;
-    ComponentPool<CameraComponent> m_cameras;
-    ComponentPool<PointLightComponent> m_pointLights;
-    ComponentPool<SpotLightComponent> m_spotLights;
-    ComponentPool<LightingComponent> m_lighting;
-    ComponentPool<NameIndex> m_nameIndices;
-    ComponentPool<AttributeMap> m_attributes;
-    ComponentPool<TagSet> m_tags;
+
+    // Declared from the same list a snapshot's storage is, so the two cannot
+    // drift. Declaration order follows the list, which is the order the pools
+    // were added in over M2 through M7.
+#define LUAUG_SCENE_POOL_MEMBER(Type, Name) ComponentPool<Type> m_##Name;
+    LUAUG_SCENE_POOL_LIST(LUAUG_SCENE_POOL_MEMBER)
+#undef LUAUG_SCENE_POOL_MEMBER
+
     // Insertion-ordered per tag, so `GetTagged` never leaks a hash order.
     std::unordered_map<u32, std::vector<core::InstanceId>> m_tagged;
 
