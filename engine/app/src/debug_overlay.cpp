@@ -802,8 +802,123 @@ void buildDefaultLayout(ImGuiID dockspace)
     ImGui::DockBuilderDockWindow("properties", right);
     ImGui::DockBuilderDockWindow("stats", right);
     ImGui::DockBuilderDockWindow("console", bottom);
+    ImGui::DockBuilderDockWindow("content", bottom);
 
     ImGui::DockBuilderFinish(dockspace);
+}
+
+// A short label for a kind, so a row says what it is without an icon set.
+[[nodiscard]] const char* contentKindLabel(ContentKind kind) noexcept
+{
+    switch (kind) {
+    case ContentKind::Folder:
+        return "dir";
+    case ContentKind::Scene:
+        return "scene";
+    case ContentKind::Mesh:
+        return "mesh";
+    case ContentKind::Texture:
+        return "tex";
+    case ContentKind::Chunk:
+        return "chunk";
+    case ContentKind::Other:
+        break;
+    }
+    return "";
+}
+
+// The project's assets, and the panel from which a scene is opened.
+//
+// **Virtualised**, and that is a measurement rather than a flourish: the quality
+// bar for this was given as Unity and Unreal, and a Content Browser is judged on
+// a tree of thousands. `ImGuiListClipper` draws only the rows a person can see,
+// so a folder of ten thousand meshes costs the same as a folder of ten.
+// `drawExplorer` beside this one does NOT do that yet, which is a thing to fix
+// rather than a precedent to follow.
+void drawContent(Editor& editor, EditorCommands& commands)
+{
+    if (!ImGui::Begin("content")) {
+        ImGui::End();
+        return;
+    }
+
+    ContentTree& tree = editor.content();
+
+    ImGui::BeginDisabled(tree.atRoot());
+    if (ImGui::Button("up"))
+        (void)tree.leave();
+    ImGui::EndDisabled();
+
+    ImGui::SameLine();
+    if (ImGui::Button("refresh"))
+        (void)tree.refresh();
+
+    ImGui::SameLine();
+    if (ImGui::Button("new folder"))
+        ImGui::OpenPopup("new-folder");
+
+    ImGui::SameLine();
+    ImGui::TextDisabled("content/%s", tree.currentFolder().c_str());
+
+    if (ImGui::BeginPopup("new-folder")) {
+        static std::array<char, 96> name{};
+        ImGui::SetNextItemWidth(220.0f);
+        const bool submitted =
+            ImGui::InputText("##folder", name.data(), name.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+        const std::string_view typed{name.data()};
+        ImGui::SameLine();
+        // Greyed rather than refused after the fact: a name a filesystem cannot
+        // carry is knowable before anybody presses anything.
+        ImGui::BeginDisabled(!ContentTree::isUsableName(typed));
+        const bool pressed = ImGui::Button("create");
+        ImGui::EndDisabled();
+
+        if ((submitted || pressed) && ContentTree::isUsableName(typed)) {
+            commands.createFolder = std::string(typed);
+            name.fill('\0');
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    ImGui::Separator();
+
+    if (ImGui::BeginChild("entries")) {
+        const std::vector<ContentEntry>& entries = tree.entries();
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(entries.size()));
+        while (clipper.Step()) {
+            for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+                const ContentEntry& entry = entries[static_cast<std::size_t>(row)];
+                ImGui::PushID(row);
+
+                const bool isOpenScene = entry.kind == ContentKind::Scene && entry.path == editor.openScenePath();
+                if (isOpenScene)
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.85f, 0.55f, 1.0f));
+
+                // Double-click, because a single click is how somebody browses
+                // and opening a scene throws away what is in the world.
+                if (ImGui::Selectable(entry.name.c_str(), isOpenScene, ImGuiSelectableFlags_AllowDoubleClick) &&
+                    ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                    if (entry.kind == ContentKind::Folder)
+                        (void)tree.enter(entry.name);
+                    else if (entry.kind == ContentKind::Scene)
+                        commands.openScene = entry.path;
+                }
+
+                if (isOpenScene)
+                    ImGui::PopStyleColor();
+
+                if (const char* label = contentKindLabel(entry.kind); label[0] != '\0') {
+                    ImGui::SameLine(0.0f, 12.0f);
+                    ImGui::TextDisabled("%s", label);
+                }
+                ImGui::PopID();
+            }
+        }
+    }
+    ImGui::EndChild();
+    ImGui::End();
 }
 
 // The editor's furniture. The panels inside it are the overlay's own, which is
@@ -829,8 +944,10 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
             buildDefaultLayout(dockspace);
     }
 
-    if (editor != nullptr)
+    if (editor != nullptr) {
         drawViewport(*editor, viewport, commands);
+        drawContent(*editor, commands);
+    }
 
     if (ImGui::Begin("explorer")) {
         if (world != nullptr && inspector != nullptr)

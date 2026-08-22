@@ -1,0 +1,115 @@
+#pragma once
+
+#include <luaug/core/types.h>
+
+#include <filesystem>
+#include <string>
+#include <vector>
+
+// A project's assets, as a tree somebody can walk.
+//
+// **The content directory IS the asset manager** (human decision, 2026-08-22).
+// A project's meshes, textures, chunks and **scenes** all live under `content/`,
+// a scene is an asset like the rest, and opening one loads it. This is the model
+// behind the panel that shows that — Unity's Project window and Unreal's
+// Content Browser are the same object.
+//
+// **Built from the SOURCE tree on disk, not from the packed archive.** What a
+// person authors is `content/`; `.luaug/content.lpack` is what a build makes of
+// it, and a browser that showed the pack would show yesterday's work and offer
+// no way to change it. `ContentMounts` already resolves a loose file over a
+// packed one for exactly this reason, and this is the same choice one layer up.
+//
+// ImGui-free on purpose, like `inspector.h` and `editor.h`: what a panel
+// DECIDES is testable and what it draws is a screenshot's business.
+
+namespace luaug::app {
+
+// What an entry is, as far as a browser cares.
+//
+// Deliberately NOT `asset::AssetKind`. That enum describes what the compiler
+// produces and has a `Raw` that means "copied through untouched"; a browser
+// describes what a person sees and needs `Folder`, which the pipeline has no
+// concept of because a pack is flat.
+enum class ContentKind
+{
+    Folder,
+    Scene,
+    Mesh,
+    Texture,
+    Chunk,
+    Other,
+};
+
+struct ContentEntry
+{
+    std::string name;
+    // Relative to the content root, with forward slashes on every platform so a
+    // path in a scene file means the same thing on all of them.
+    std::string path;
+    ContentKind kind = ContentKind::Other;
+    // Bytes, or zero for a folder. Shown rather than used: a person deciding
+    // whether a texture is the 4K one wants this and nothing else does.
+    core::u64 size = 0;
+};
+
+// Which kind a file name is, by extension. `.scene.json` before `.json`,
+// because the longer suffix is the specific one and checking the short one
+// first would call every scene a plain file.
+[[nodiscard]] ContentKind contentKindOf(std::string_view fileName) noexcept;
+
+// The extension a scene carries. One constant, because a browser filters on it,
+// a loader checks it and a save appends it — and three copies of a string is how
+// two of them end up disagreeing.
+inline constexpr std::string_view kSceneExtension = ".scene.json";
+
+class ContentTree
+{
+public:
+    // Reads the folder at `root / relative`, sorted: folders first, then files,
+    // each alphabetically. Sorted rather than left in the order the filesystem
+    // answered, because that order is not stable across machines and a browser
+    // whose contents move between two people's screens is one they cannot talk
+    // to each other about.
+    //
+    // Returns false if the folder cannot be read, which includes the ordinary
+    // case of a project with no `content/` at all.
+    bool open(const std::filesystem::path& root, std::string_view relative = {});
+
+    // Re-reads the current folder. Called when something is created, and by the
+    // panel's refresh — never per frame: walking a directory sixty times a
+    // second is the sort of thing that is invisible until somebody points a
+    // project at a network drive.
+    bool refresh();
+
+    // Into a subfolder of the current one, or up to its parent. Both are no-ops
+    // when there is nowhere to go, so a caller does not have to check first.
+    bool enter(std::string_view folderName);
+    bool leave();
+
+    [[nodiscard]] const std::vector<ContentEntry>& entries() const noexcept { return m_entries; }
+    // Relative to the root, empty at the root itself.
+    [[nodiscard]] const std::string& currentFolder() const noexcept { return m_relative; }
+    [[nodiscard]] const std::filesystem::path& root() const noexcept { return m_root; }
+    [[nodiscard]] bool atRoot() const noexcept { return m_relative.empty(); }
+
+    // The absolute path of an entry, for a caller that has to open it.
+    [[nodiscard]] std::filesystem::path absolute(const ContentEntry& entry) const;
+
+    // Makes a folder inside the current one and re-reads. False when the name is
+    // unusable or the folder already exists — reported rather than thrown,
+    // because a person typing a folder name is not an exceptional condition.
+    bool createFolder(std::string_view folderName);
+
+    // Rejects what a filesystem or a URN cannot carry: empty, a separator, a
+    // relative-path segment, or a control character. Exposed so a panel can grey
+    // out its own button rather than letting somebody press it and be refused.
+    [[nodiscard]] static bool isUsableName(std::string_view name) noexcept;
+
+private:
+    std::filesystem::path m_root;
+    std::string m_relative;
+    std::vector<ContentEntry> m_entries;
+};
+
+} // namespace luaug::app

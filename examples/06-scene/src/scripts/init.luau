@@ -7,9 +7,9 @@
 	does not. Its world is `main.scene.json`, the editor authors that file, and
 	this script is only what the world DOES.
 
-	That is the arrangement Unity, Unreal and Roblox all use, and it is what
-	makes edit → test → save a loop: a change you make in the editor has
-	somewhere to live that running the game does not overwrite.
+	That is the arrangement every mainstream engine uses, and it is what makes
+	edit → test → save a loop: a change you make in the editor has somewhere to
+	live that running the game does not overwrite.
 
 	**Open it with `luaug edit examples/06-scene`**, move something, press play,
 	press stop, press save. Then close the editor and open it again.

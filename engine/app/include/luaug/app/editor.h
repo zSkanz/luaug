@@ -1,5 +1,6 @@
 #pragma once
 
+#include <luaug/app/content_tree.h>
 #include <luaug/app/inspector.h>
 #include <luaug/app/picking.h>
 #include <luaug/core/id.h>
@@ -141,6 +142,10 @@ struct EditorCommands
     // Whether to be paused, which is only meaningful inside play mode.
     std::optional<bool> pause;
     bool save = false;
+    // A scene the browser asked to open, relative to the content root.
+    std::string openScene;
+    // A folder the browser asked to make, in its current directory.
+    std::string createFolder;
 
     void clear() noexcept { *this = EditorCommands{}; }
     [[nodiscard]] bool any() const noexcept { return play.has_value() || pause.has_value() || save; }
@@ -213,6 +218,39 @@ public:
     // person does, so the status says.
     bool save(const scene::World& world, const std::filesystem::path& path);
     bool load(scene::World& world, const std::filesystem::path& path, Inspector& inspector);
+
+    // --- The content browser -------------------------------------------------
+    //
+    // **The content directory is the asset manager**, and a scene is one of the
+    // assets in it (human decision, 2026-08-22). The editor knows which scene is
+    // open so that saving writes back to THAT one rather than to a fixed name --
+    // which is the difference between a project with scenes and a project with
+    // a scene.
+    [[nodiscard]] ContentTree& content() noexcept { return m_content; }
+    [[nodiscard]] const ContentTree& content() const noexcept { return m_content; }
+
+    // Opens a project's content root. A project with no `content/` is a normal
+    // state and not an error -- every example before `06-scene` is one.
+    void openContent(const std::filesystem::path& contentRoot);
+
+    // Loads a scene BY ITS CONTENT-RELATIVE PATH and remembers it as the open
+    // one. Leaving play mode first is the caller's business; loading a scene
+    // over a running game would restore into a world the snapshot no longer
+    // describes.
+    bool openScene(scene::World& world, std::string_view relativePath, Inspector& inspector);
+
+    // Writes the open scene back to where it came from. False when no scene is
+    // open, which is a question rather than a failure: a project that has never
+    // saved one has nothing for this to overwrite.
+    bool saveOpenScene(const scene::World& world);
+
+    // Names the scene the world already holds, without loading anything. The
+    // boot path uses it: the engine loads a project's scene before the editor
+    // exists, and the editor has to know which one that was.
+    void adoptOpenScene(std::string_view relativePath);
+
+    // Empty when no scene has been opened. Content-relative.
+    [[nodiscard]] const std::string& openScenePath() const noexcept { return m_openScene; }
 
     [[nodiscard]] const EditorStatus& status() const noexcept { return m_status; }
 
@@ -306,6 +344,8 @@ private:
     // an editor that is not playing should not be carrying an empty one.
     std::unique_ptr<scene::WorldSnapshot> m_playSnapshot;
     EditorStatus m_status;
+    ContentTree m_content;
+    std::string m_openScene;
 
     core::CFrameD m_cameraCFrame;
     bool m_cameraAdopted = false;

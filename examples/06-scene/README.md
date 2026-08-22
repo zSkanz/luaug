@@ -2,7 +2,7 @@
 
 Every example before this one builds its world in code: `init.luau` runs at boot
 and calls `Instance.new` until there is something to look at. **This one does
-not.** Its world is `main.scene.json`, and `src/scripts/init.luau` is only what
+not.** Its world is `content/scenes/main.scene.json`, and `src/scripts/init.luau` is only what
 the world *does* — one handler that turns whatever is wearing the `Spin` tag.
 
 That split is **ADR 0047**, taken at the visual editor's first review and in the
@@ -16,14 +16,19 @@ what authors the data.
 scripts\luaug.ps1 edit examples/06-scene
 ```
 
-1. Click a block in the viewport. The explorer highlights it and the properties
+1. Find `scenes/main.scene.json` in the **content** panel and double-click it.
+   The content directory is the asset manager and a scene is one of the assets
+   in it, so this is where scenes are opened from.
+2. Click a block in the viewport. The explorer highlights it and the properties
    panel fills.
-2. Change something — a colour, a size, a position.
-3. Press **play**. The world ticks and the tagged blocks turn.
-4. Press **stop**. The world goes back to exactly where you pressed play, *with
+3. Change something — a colour, a size, a position.
+4. Press **play**. The world ticks and the tagged blocks turn.
+5. Press **stop**. The world goes back to exactly where you pressed play, *with
    your change still in it*. That is what makes testing free.
-5. Press **save**. `main.scene.json` is rewritten.
-6. Close the editor and open it again. Your change is there.
+6. Press **save**. The scene you have open is rewritten — that one, not a fixed
+   name, which is the difference between a project with scenes and a project
+   with a scene.
+7. Close the editor and open it again. Your change is there.
 
 Step 4 is the one that matters. A tool where testing your work costs you your
 work is one nobody uses twice.

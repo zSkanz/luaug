@@ -183,6 +183,46 @@ bool Editor::load(scene::World& world, const std::filesystem::path& path, Inspec
     return true;
 }
 
+void Editor::adoptOpenScene(std::string_view relativePath)
+{
+    // The boot load already put a scene in the world; this is the editor being
+    // told WHICH, so the first save writes back to it rather than refusing for
+    // want of an open scene. Naming it here rather than re-loading it is the
+    // difference between the editor knowing what it has and the editor
+    // discarding a world to find out.
+    m_openScene = std::string(relativePath);
+}
+
+void Editor::openContent(const std::filesystem::path& contentRoot)
+{
+    // The return value is deliberately ignored. A project with no `content/`
+    // is every example before `06-scene`, and a browser that greeted those with
+    // an error would be wrong about all of them.
+    (void)m_content.open(contentRoot);
+}
+
+bool Editor::openScene(scene::World& world, std::string_view relativePath, Inspector& inspector)
+{
+    const std::filesystem::path absolute = m_content.root() / std::filesystem::path(relativePath);
+    if (!load(world, absolute, inspector))
+        return false;
+
+    m_openScene = std::string(relativePath);
+    // The status `load` set names the file; naming the scene is more useful,
+    // because the browser is already showing the file.
+    m_status = EditorStatus{"opened " + m_openScene, false};
+    return true;
+}
+
+bool Editor::saveOpenScene(const scene::World& world)
+{
+    if (m_openScene.empty()) {
+        m_status = EditorStatus{"no scene is open -- open one from the content browser first", true};
+        return false;
+    }
+    return save(world, m_content.root() / std::filesystem::path(m_openScene));
+}
+
 void Editor::adoptCamera(const core::CFrameD& cframe) noexcept
 {
     m_cameraCFrame = cframe;

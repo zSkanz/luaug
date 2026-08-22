@@ -24,6 +24,7 @@ luaug_add_module(app
         src/inspector.cpp
         src/picking.cpp
         src/editor.cpp
+        src/content_tree.cpp
         src/dev_control.cpp
     DEPS
         asset
@@ -141,6 +142,7 @@ luaug_add_module_tests(app
         tests/inspector_tests.cpp
         tests/picking_tests.cpp
         tests/editor_tests.cpp
+        tests/content_tree_tests.cpp
         tests/soak_tests.cpp
         tests/two_worlds_tests.cpp
         tests/project_config_tests.cpp

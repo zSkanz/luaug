@@ -422,10 +422,6 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // Whether the game was taking input last frame, so the release happens once
     // on the way out rather than every frame the editor is editing.
     bool gameHadInput = true;
-    // One scene per project for now, at the project's root, named so it is
-    // obvious in a directory listing and obvious in a diff. More than one is a
-    // milestone that has a reason for more than one.
-    const std::filesystem::path scenePath = options.scriptPath / "main.scene.json";
 
     // The explorer's selection and the queue its edits wait in. Held by the
     // frame loop rather than by the overlay because it outlives a hot reload
@@ -555,6 +551,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
     contentMounts.clear();
     contentMounts.mountDirectory(contentRoot);
+
+    // **The content directory is the asset manager, and a scene is one of the
+    // assets in it** (human decision, 2026-08-22). The browser shows the same
+    // root the engine mounts -- the SOURCE tree, not the packed archive, which
+    // is what a person authors and what `ContentMounts` already resolves over
+    // the pack for exactly this reason.
+    if (options.editor)
+        editor.openContent(contentRoot);
     if (isProject) {
         const std::filesystem::path pack = options.scriptPath / ".luaug" / "content.lpack";
         if (std::filesystem::exists(pack, pathError)) {
@@ -674,7 +678,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     //
     // A project with no scene file is not an error and never logs one. Every
     // example before `06-scene` is exactly that.
-    if (!options.scriptPath.empty() && platform::fileExists(scenePath)) {
+    const std::filesystem::path bootScene = contentRoot / "scenes" / "main.scene.json";
+    if (!options.scriptPath.empty() && platform::fileExists(bootScene)) {
+        const std::filesystem::path scenePath = bootScene;
         std::string sceneText;
         if (!platform::readTextFile(scenePath, sceneText)) {
             core::log(core::LogLevel::Warn, LUAUG_TR("scene.err.scene_unreadable"));
@@ -689,6 +695,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             else {
                 const core::I18nArg args[] = {{"count", static_cast<core::i64>(sceneReport.instances)}};
                 core::log(core::LogLevel::Info, LUAUG_TR("scene.info.scene_loaded"), args);
+                // The editor is told which scene the world holds, so its save
+                // writes back to that one rather than refusing for want of an
+                // open scene.
+                if (options.editor)
+                    editor.adoptOpenScene("scenes/main.scene.json");
             }
         }
     }
@@ -881,8 +892,18 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 }
                 if (editorCommands.pause.has_value())
                     editor.setPaused(*editorCommands.pause);
+                if (!editorCommands.openScene.empty()) {
+                    // Out of play mode first. Loading a scene while playing
+                    // would leave the snapshot describing a world that no longer
+                    // exists, and stop would restore into it.
+                    if (editor.inPlayMode())
+                        editor.stop(host->world(), inspector);
+                    (void)editor.openScene(host->world(), editorCommands.openScene, inspector);
+                }
+                if (!editorCommands.createFolder.empty())
+                    (void)editor.content().createFolder(editorCommands.createFolder);
                 if (editorCommands.save)
-                    (void)editor.save(host->world(), scenePath);
+                    (void)editor.saveOpenScene(host->world());
             }
 
             const core::InstanceId wasSelected = inspector.selection();
