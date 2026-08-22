@@ -212,6 +212,16 @@ std::string Editor::recallOpenScene(const std::filesystem::path& stateDirectory)
     return std::string(document.root()["openScene"].asString());
 }
 
+void Editor::newScene(scene::World& world, Inspector& inspector)
+{
+    scene::clearScene(world);
+
+    m_openScene.clear();
+    inspector.select(core::InstanceId{});
+    inspector.onWorldChanged();
+    m_status = EditorStatus{"new scene -- untitled until you save it", false};
+}
+
 bool Editor::saveSceneAs(const scene::World& world, std::string_view relativePath)
 {
     std::string path(relativePath);

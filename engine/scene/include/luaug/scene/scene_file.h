@@ -85,6 +85,19 @@ struct SceneIoReport
 // scene file diffable and what makes a round-trip test possible at all.
 [[nodiscard]] std::string writeScene(const World& world, SceneIoReport* report = nullptr);
 
+// Removes everything a scene describes, leaving the world otherwise intact.
+//
+// It is `readScene`'s first half, exposed because an editor asking for a NEW
+// scene wants exactly that and nothing else. Defining it here rather than in
+// the editor is what keeps "what a new scene clears" and "what a save writes"
+// the same set -- two definitions of that would disagree the first time either
+// moved.
+//
+// What survives: the services, the `Workspace` itself, and anything marked
+// generated. A streamed chunk is not somebody's authored work, and a new scene
+// is not a reason to evict the ground.
+void clearScene(World& world);
+
 // Applies a scene to a world, replacing whatever `Workspace` currently holds.
 //
 // Replacing rather than merging, because a scene IS the world's contents: a

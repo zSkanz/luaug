@@ -495,6 +495,26 @@ void readInstance(World& world, core::InstanceId parent, const JsonValue& json, 
 }
 } // namespace
 
+void clearScene(World& world)
+{
+    const core::InstanceId workspace = workspaceOf(world);
+    if (!workspace.valid())
+        return;
+
+    // Collected first. `destroy` unlinks as it goes, so walking and destroying
+    // in one pass drops the rest of the list.
+    std::vector<core::InstanceId> authored;
+    for (core::InstanceId child = world.firstChild(workspace); child.valid(); child = world.nextSibling(child)) {
+        // Not authored, so not a scene's to remove. A new scene is not a reason
+        // to evict the ground a streaming system put there.
+        if (world.generated(child))
+            continue;
+        authored.push_back(child);
+    }
+    for (const core::InstanceId child : authored)
+        (void)world.destroy(child);
+}
+
 std::string writeScene(const World& world, SceneIoReport* report)
 {
     SceneIoReport local;
@@ -538,11 +558,7 @@ std::optional<core::EngineError> readScene(World& world, std::string_view json, 
 
     // Replacing, not merging: a scene IS the world's contents, and a load that
     // merged would double everything the second time it ran.
-    std::vector<core::InstanceId> existing;
-    for (core::InstanceId child = world.firstChild(workspace); child.valid(); child = world.nextSibling(child))
-        existing.push_back(child);
-    for (const core::InstanceId child : existing)
-        (void)world.destroy(child);
+    clearScene(world);
 
     std::vector<PendingReference> pending;
     if (const JsonValue rootNode = root["root"]; rootNode.type() == core::JsonType::Object) {

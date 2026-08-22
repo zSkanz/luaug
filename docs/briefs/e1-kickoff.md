@@ -22,7 +22,7 @@ and typing a new colour into it.
 - [x] Layout persistence (`io.IniFilename` back on, with a decided location)
 - [x] The world rendered into a texture and shown in the Viewport panel
 - [x] Picking: a testable screen-point-to-ray function, and a ray that chooses an instance
-- [ ] A visible selection in the viewport — **NOT DONE**, see the Gate Record
+- [x] A visible selection in the viewport — confirmed by the human at review, 2026-08-22
 - [x] `PropertyDesc` carries the identity of the enum a property accepts
 - [x] `docKey` stops being emitted empty, so properties can carry tooltips
 - [x] D056: the `shipping` profile compiles, and a gate stage builds it
@@ -89,7 +89,7 @@ picking, and the selection highlight.
 ## Gate checklist (verbatim from roadmap)
 
 - [x] `luaug edit examples/10-open-world` opens, docks, and renders the world in its viewport; a screenshot is attached to the gate record.
-- [~] Clicking a part in the viewport selects it: the Explorer highlights the same instance, the Properties panel shows its class, and the viewport draws the selection. Proven by a headless test that drives a synthetic click through the picking function, not by eye alone.
+- [x] Clicking a part in the viewport selects it: the Explorer highlights the same instance, the Properties panel shows its class, and the viewport draws the selection. Proven by a headless test that drives a synthetic click through the picking function, not by eye alone.
 - [x] Picking has unit tests over a camera and a viewport rectangle covering: the centre of the screen, each corner, a click on empty space returning nothing, and a non-square viewport — the last because an aspect-ratio bug is invisible at the centre and wrong everywhere else.
 - [x] Editing a property in the editor changes the world: the existing safe-point drain is used unchanged and a test asserts the write lands.
 - [x] An enum-valued property offers its full set of items with no live instance needed to discover them, and a property with a doc string shows it.
@@ -176,7 +176,7 @@ green (macOS is Tier-3 and only CI can build it)
 | Gate item | Result |
 |---|---|
 | `luaug edit examples/10-open-world` opens, docks, renders the world in its viewport | **Green.** `docs/images/e1/editor-first-light.png` |
-| Clicking a part selects it: explorer, properties and viewport agree | **Half.** The pick path is proven headlessly end to end (`engine/app/tests/editor_tests.cpp`, six cases) — a synthetic click at a viewport pixel selects the part in front of the camera, and the inspector holds the selection. **Nobody has clicked one with a mouse**, and the viewport draws no selection at all, so the visible half of this item is not met |
+| Clicking a part selects it: explorer, properties and viewport agree | **Green, and only a person could have said so.** The pick path is proven headlessly end to end (`engine/app/tests/editor_tests.cpp`) — a synthetic click at a viewport pixel selects the part in front of the camera and the inspector holds it — and the outline was **confirmed working by the human at review, 2026-08-22**. It could not be confirmed any other way: three attempts to drive the window with synthetic clicks produced nothing, because SDL does not accept injected input and the ImGui shell cannot render headlessly. The editor logs what it selected, by name and class, which is the evidence that survives the window closing |
 | Picking unit tests: centre, corners, empty space, non-square viewport | **Green.** `engine/app/tests/picking_tests.cpp`, eleven cases, plus a rotated box, a ray starting inside one, and a ray parallel to a slab |
 | Editing a property in the editor changes the world | **Green by inheritance, not by new evidence.** The editor drives the existing `Inspector` unchanged, and its safe-point drain is covered by `inspector_tests.cpp`. No test drives a property edit *through the editor shell* |
 | An enum property offers its item set with no live instance; a documented property shows its doc | **Green.** `class_registry_tests.cpp` against the real generated tables (`Part.Shape` resolves to five items, `Anchored` names no enum) and `inspector_tests.cpp` |

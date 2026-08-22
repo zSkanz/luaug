@@ -917,6 +917,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 }
                 if (!editorCommands.createFolder.empty())
                     (void)editor.content().createFolder(editorCommands.createFolder);
+                if (editorCommands.newScene) {
+                    // Out of play mode first, for the reason opening a scene is:
+                    // the snapshot would describe a world that no longer exists.
+                    if (editor.inPlayMode())
+                        editor.stop(host->world(), inspector);
+                    editor.newScene(host->world(), inspector);
+                }
                 if (editorCommands.save)
                     (void)editor.saveOpenScene(host->world());
                 if (!editorCommands.saveAs.empty())

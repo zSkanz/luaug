@@ -24,11 +24,13 @@
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_sdlgpu3.h>
 #include <imgui_internal.h>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -143,69 +145,106 @@ void drawStats(const Frame& frame)
 // frame for as long as it is open, and a debug overlay that allocates a whole
 // tree every frame is a profile artefact somebody eventually has to explain.
 std::vector<TreeRow> g_rows;
-std::vector<bool> g_openAtDepth;
+// The rows a person could actually see if they scrolled: `g_rows` minus every
+// subtree under a closed ancestor. Computed before anything is drawn, because a
+// clipper needs to know how many rows exist before it decides which to draw.
+std::vector<TreeRow> g_visible;
+// Which instances are expanded, and which have been seen at all. Held here
+// rather than in ImGui's own tree state, because a clipped row's widget never
+// runs and therefore has no state to hold.
+std::unordered_set<core::u32> g_open;
+std::unordered_set<core::u32> g_openKnown;
 std::vector<const scene::PropertyDesc*> g_properties;
 
-// A flat preorder list plus one open flag per depth is the whole of the
-// collapse state: preorder guarantees the most recent row one level up IS this
-// row's parent, so a closed parent leaves its flag false and every descendant
-// reads it before drawing.
+// The instance tree, virtualised.
 //
-// Drawn flat -- Indent/Unindent rather than nested TreePush -- because the row
-// order comes from `collectTree` and not from the recursion. That is what keeps
-// the drawn order the world's order rather than the drawing code's.
+// **Every row used to be drawn every frame**, which on the flagship is 4,300
+// `TreeNodeEx` calls sixty times a second for a panel showing thirty of them.
+// The content browser beside this one clips, and applying that standard to one
+// panel and not the other was an inconsistency rather than a decision.
+//
+// Clipping a TREE is not clipping a list, and the difference is the reason this
+// is longer than it was. A clipper skips rows, and `TreeNodeEx` keeps its own
+// open/closed state -- so a row nobody drew has no state, and its children would
+// not know whether to appear. So the open set is held HERE, keyed by instance,
+// the visible rows are computed before anything is drawn, and the clipper runs
+// over that flat list. Which is what a virtualised tree view is.
 void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspector)
 {
     collectTree(world, root, g_rows);
-    g_openAtDepth.clear();
+
+    // Preorder, so an ancestor is always decided before its descendants. A row
+    // is visible when every ancestor above it is open; `hiddenBelow` remembers
+    // the shallowest closed depth rather than re-walking upwards per row.
+    g_visible.clear();
+    u32 hiddenBelow = std::numeric_limits<u32>::max();
+    for (const TreeRow& row : g_rows) {
+        if (row.depth > hiddenBelow)
+            continue;
+        hiddenBelow = std::numeric_limits<u32>::max();
+
+        g_visible.push_back(row);
+
+        const bool hasChildren = world.childCount(row.id) > 0;
+        // The services under `game` are what anyone opening this wants to see;
+        // deeper than that is a project's own tree and is its business. Seeded
+        // once per instance rather than every frame, so collapsing one stays
+        // collapsed.
+        if (hasChildren && !g_openKnown.contains(row.id.index)) {
+            g_openKnown.insert(row.id.index);
+            if (row.depth < 2)
+                g_open.insert(row.id.index);
+        }
+        if (hasChildren && !g_open.contains(row.id.index))
+            hiddenBelow = row.depth;
+    }
 
     const float indentSpacing = ImGui::GetStyle().IndentSpacing;
 
-    for (const TreeRow& row : g_rows) {
-        if (g_openAtDepth.size() <= row.depth)
-            g_openAtDepth.resize(row.depth + 1, false);
+    ImGuiListClipper clipper;
+    clipper.Begin(static_cast<int>(g_visible.size()));
+    while (clipper.Step()) {
+        for (int index = clipper.DisplayStart; index < clipper.DisplayEnd; ++index) {
+            const TreeRow& row = g_visible[static_cast<std::size_t>(index)];
+            const bool hasChildren = world.childCount(row.id) > 0;
 
-        if (row.depth > 0 && !g_openAtDepth[row.depth - 1]) {
-            // Collapsed under a closed ancestor. The flag still has to be
-            // written, or this row's own children would read whatever the
-            // previous subtree left behind at this depth.
-            g_openAtDepth[row.depth] = false;
-            continue;
+            const float indent = static_cast<float>(row.depth) * indentSpacing;
+            if (indent > 0.0f)
+                ImGui::Indent(indent);
+
+            ImGui::PushID(static_cast<int>(row.id.index));
+
+            // The arrow is its own control rather than part of the row, because
+            // opening a thing and selecting it are different intentions and a
+            // tree that conflates them makes browsing destructive.
+            if (hasChildren) {
+                if (ImGui::ArrowButton("toggle", g_open.contains(row.id.index) ? ImGuiDir_Down : ImGuiDir_Right)) {
+                    if (!g_open.insert(row.id.index).second)
+                        g_open.erase(row.id.index);
+                }
+            }
+            else {
+                ImGui::Dummy(ImVec2(ImGui::GetFrameHeight(), ImGui::GetFrameHeight()));
+            }
+            ImGui::SameLine();
+
+            const std::string_view instanceName = world.atoms().text(world.name(row.id));
+            const scene::ClassDescriptor* classDescriptor = world.classes().find(world.classOf(row.id));
+            const std::string_view className =
+                classDescriptor != nullptr ? world.atoms().text(classDescriptor->name) : std::string_view("?");
+
+            char label[192];
+            (void)std::snprintf(label, sizeof(label), "%.*s  (%.*s)", static_cast<int>(instanceName.size()),
+                                instanceName.data(), static_cast<int>(className.size()), className.data());
+
+            if (ImGui::Selectable(label, row.id == inspector.selection()))
+                inspector.select(row.id);
+
+            ImGui::PopID();
+
+            if (indent > 0.0f)
+                ImGui::Unindent(indent);
         }
-
-        const float indent = static_cast<float>(row.depth) * indentSpacing;
-        if (indent > 0.0f)
-            ImGui::Indent(indent);
-
-        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
-        if (world.childCount(row.id) == 0)
-            flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-        if (row.id == inspector.selection())
-            flags |= ImGuiTreeNodeFlags_Selected;
-
-        const std::string_view instanceName = world.atoms().text(world.name(row.id));
-        const scene::ClassDescriptor* classDescriptor = world.classes().find(world.classOf(row.id));
-        const std::string_view className =
-            classDescriptor != nullptr ? world.atoms().text(classDescriptor->name) : std::string_view("?");
-
-        // The services under `game` are what anyone opening this wants to see;
-        // deeper than that is a project's own tree and is its business.
-        if (row.depth < 2)
-            ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
-
-        ImGui::PushID(static_cast<int>(row.id.index));
-        const bool open = ImGui::TreeNodeEx("row", flags, "%.*s  (%.*s)", static_cast<int>(instanceName.size()),
-                                            instanceName.data(), static_cast<int>(className.size()), className.data());
-        if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
-            inspector.select(row.id);
-        if (open && (flags & ImGuiTreeNodeFlags_NoTreePushOnOpen) == 0)
-            ImGui::TreePop();
-        ImGui::PopID();
-
-        if (indent > 0.0f)
-            ImGui::Unindent(indent);
-
-        g_openAtDepth[row.depth] = open;
     }
 }
 
@@ -654,6 +693,14 @@ void drawTransport(Editor& editor, EditorCommands& commands)
         editor.requestStep();
     ImGui::EndDisabled();
     ImGui::SetItemTooltip("advance exactly one simulation tick");
+
+    // A world to start in. Beside save rather than in the content browser,
+    // because "give me somewhere to begin" is a thing you do to the WORLD and
+    // the browser is about files.
+    ImGui::SameLine();
+    if (ImGui::Button("new"))
+        commands.newScene = true;
+    ImGui::SetItemTooltip("empty the scene and start over -- anything unsaved is gone");
 
     ImGui::SameLine();
     // **Save asks for a name when there is nothing to overwrite.** An editor

@@ -144,6 +144,8 @@ struct EditorCommands
     // Save the scene that is open. When none is, the shell asks for a name
     // instead of guessing one -- see `saveAs`.
     bool save = false;
+    // Start over: empty what a scene describes and forget its name.
+    bool newScene = false;
     // Save to a content-relative path somebody typed. Carries the whole
     // decision, so the frame loop does not have to know what the dialog asked.
     std::string saveAs;
@@ -268,6 +270,16 @@ public:
     // untitled world somebody can build in and give a name to when they save.
     void rememberOpenScene(const std::filesystem::path& stateDirectory) const;
     [[nodiscard]] static std::string recallOpenScene(const std::filesystem::path& stateDirectory);
+
+    // Empties the world of everything a scene describes and forgets which scene
+    // was open, so the next save asks for a name.
+    //
+    // **It clears what a scene CONTAINS, not what the world is.** Services stay,
+    // the `Workspace` stays, and anything a system made stays -- a streamed
+    // chunk is not somebody's authored work and a new scene does not evict it.
+    // What goes is exactly what `writeScene` would have written, which keeps
+    // "new" and "save" describing the same set.
+    void newScene(scene::World& world, Inspector& inspector);
 
     // Writes the world to a scene that does not exist yet, and adopts it as the
     // open one. `relativePath` is content-relative and gains the extension if it
