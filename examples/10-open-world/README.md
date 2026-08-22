@@ -36,7 +36,11 @@ on a slow machine.
   frame, and the symptom is not a wrong world, it is a stutter nobody can find.
 - **The sun moves and everything follows it.** One property — `ClockTime` —
   drives the sky, the shadow direction, the ambient, the reflection in the tower
-  faces and the exposure. A full day takes four minutes.
+  faces and the exposure. A full day takes ten minutes, which is the sun
+  crossing the sky a hundred and forty-four times faster than the real one —
+  and that number is a shadow setting as much as a pacing one, because a
+  cascade's lattice lives in the LIGHT's frame and everything in the world
+  therefore drifts across it at the rate the sun turns (D053).
 - **Hot reload keeps your place.** Edit `src/scripts/init.luau` and save: the
   world is rebuilt from scratch and the character is standing where it was.
   That is `HotReloadService:SaveState` and nothing else.
