@@ -12,6 +12,7 @@
 
 namespace luaug::platform {
 
+using core::f32;
 using core::i32;
 using core::u32;
 
@@ -94,5 +95,24 @@ void setPointerVisible(bool visible);
 // The size of the drawable area in pixels, which is what a swapchain needs.
 // On a scaled display this is not the logical window size.
 [[nodiscard]] WindowSize windowPixelSize(const Window& window) noexcept;
+
+// The window's pixel density relative to its logical size: 2 on a doubled
+// display, 1 where the two agree. What `UIService.DisplayScale` reports, and 1
+// when the platform cannot say -- a game multiplying by zero is worse than one
+// multiplying by an unscaled default (D055).
+[[nodiscard]] f32 windowDisplayScale(const Window& window) noexcept;
+
+// How far in from each window edge it is safe to draw, in PIXELS: left, top,
+// right, bottom. Zero on a desktop window; a notch, a rounded corner or a
+// system gesture bar is what makes it not.
+struct WindowInsets
+{
+    i32 left = 0;
+    i32 top = 0;
+    i32 right = 0;
+    i32 bottom = 0;
+};
+
+[[nodiscard]] WindowInsets windowSafeAreaInsets(const Window& window) noexcept;
 
 } // namespace luaug::platform

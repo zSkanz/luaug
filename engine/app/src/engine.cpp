@@ -425,6 +425,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // for, and the two are different questions.
     bool pointerLocked = false;
     bool pointerVisible = true;
+    // And the same question for the overlay, which has a second author: F3.
+    // `DebugService.OverlayVisible` and the panel's own state are synced in
+    // both directions below, and this is which of the two moved (D055).
+    bool overlayVisible = false;
 
     render::TransformHistory transformHistory;
 
@@ -855,9 +859,26 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             }
         }
 
+        // **The streaming pause, which is a property that had a reader waiting
+        // for it (D055).** `StreamingManager::minimumRingResident()` exists,
+        // its own comment says it "is what `StreamingService.PauseOutsideLoadedArea`
+        // reads", and nothing had ever called it -- so a game that turned the
+        // property on got no pause and a character walking into unloaded ground
+        // fell through it, which is the exact failure the property names.
+        //
+        // **It does not weaken R10.** What this changes is WHEN a tick runs,
+        // never what a tick computes: the same ticks happen in the same order
+        // with the same inputs, and the world hash after n ticks is the hash
+        // after n ticks. The pump below keeps running while the world is
+        // paused, which is what ends the pause.
+        const bool waitingForGround = streaming.active() &&
+                                      host->world().engineState().streamingPauseOutsideLoadedArea &&
+                                      !streaming.minimumRingResident();
+        const u32 simTicks = waitingForGround ? 0u : frame.simTicks;
+
         // The simulation, before anything is drawn: rendering shows the state a
         // tick settled on, never one being written.
-        for (u32 step = 0; step < frame.simTicks; ++step) {
+        for (u32 step = 0; step < simTicks; ++step) {
             // BEFORE the tick, so that once the loop is done the history holds
             // where everything was one tick ago and the world holds where it is
             // now -- the two ends `render::extract` interpolates between (D047).
@@ -878,7 +899,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // the property still round-trips there, which is what makes a replay of
         // a game that locks its pointer legal.
         if (window != nullptr) {
-            const scene::EngineState& engineState = host->world().engineState();
+            scene::EngineState& engineState = host->world().engineState();
             if (engineState.pointerLocked != pointerLocked) {
                 pointerLocked = engineState.pointerLocked;
                 (void)platform::setPointerLocked(*window, pointerLocked);
@@ -886,6 +907,39 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             if (engineState.pointerVisible != pointerVisible) {
                 pointerVisible = engineState.pointerVisible;
                 platform::setPointerVisible(pointerVisible);
+            }
+
+            // **What the WINDOW knows, written where a script can read it
+            // (D055).** Both of these are properties of the display rather than
+            // of the world, `UIService` publishes them, and until the lint was
+            // widened to sweep `EngineState` nothing wrote either -- so
+            // `DisplayScale` was 1 on a doubled display and `SafeAreaInsets`
+            // was zero on a device with a notch, which are exactly the two
+            // machines a game gets them for. Every frame rather than on change,
+            // because they change with a window drag between two monitors and
+            // there is no event for that worth subscribing to at this price.
+            engineState.displayScale = platform::windowDisplayScale(*window);
+            const platform::WindowInsets insets = platform::windowSafeAreaInsets(*window);
+            engineState.safeAreaInsets = core::Rect{
+                .min = core::Vec2{static_cast<f32>(insets.left), static_cast<f32>(insets.top)},
+                .max = core::Vec2{static_cast<f32>(insets.right), static_cast<f32>(insets.bottom)},
+            };
+
+            // **The overlay and its property, in both directions.** A script
+            // writing `DebugService.OverlayVisible` opens the panel; F3 opening
+            // the panel writes the property back, so a game that draws its own
+            // hint from it does not go stale (D055). Without the write-back the
+            // two would disagree the moment anybody pressed the key, which is
+            // the state D030 named and this lint exists to find.
+            if (overlay.has_value()) {
+                if (engineState.overlayVisible != overlayVisible) {
+                    overlayVisible = engineState.overlayVisible;
+                    overlay->setVisible(overlayVisible);
+                }
+                else if (overlay->visible() != overlayVisible) {
+                    overlayVisible = overlay->visible();
+                    engineState.overlayVisible = overlayVisible;
+                }
             }
         }
 

@@ -6,6 +6,7 @@
 #include "luaug/platform/sdl_interop.h"
 
 #include <SDL3/SDL_mouse.h>
+#include <SDL3/SDL_rect.h>
 #include <SDL3/SDL_surface.h>
 #include <span>
 #include <string>
@@ -95,6 +96,42 @@ WindowSize windowPixelSize(const Window& window) noexcept
     // numbers from a previous call.
     SDL_GetWindowSizeInPixels(window.handle(), &size.width, &size.height);
     return size;
+}
+
+f32 windowDisplayScale(const Window& window) noexcept
+{
+    // Zero is SDL's failure answer, and a scale of zero would multiply every
+    // measurement a game makes to nothing. One is the honest fallback: it says
+    // "logical pixels are device pixels", which is what an unscaled display is.
+    const float scale = SDL_GetWindowDisplayScale(window.handle());
+    return scale > 0.0f ? scale : 1.0f;
+}
+
+WindowInsets windowSafeAreaInsets(const Window& window) noexcept
+{
+    WindowInsets insets;
+
+    // SDL reports the safe area as a RECTANGLE inside the window; what a UI
+    // wants is how much each edge takes away, so it is converted here rather
+    // than in four places downstream.
+    SDL_Rect safe{};
+    if (!SDL_GetWindowSafeArea(window.handle(), &safe))
+        return insets;
+
+    WindowSize size;
+    SDL_GetWindowSize(window.handle(), &size.width, &size.height);
+    if (size.width <= 0 || size.height <= 0)
+        return insets;
+
+    insets.left = safe.x;
+    insets.top = safe.y;
+    insets.right = size.width - (safe.x + safe.w);
+    insets.bottom = size.height - (safe.y + safe.h);
+    if (insets.right < 0)
+        insets.right = 0;
+    if (insets.bottom < 0)
+        insets.bottom = 0;
+    return insets;
 }
 
 SDL_Window* nativeWindow(const Window& window) noexcept

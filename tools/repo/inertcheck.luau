@@ -17,10 +17,21 @@
 	mentions each field, and requires that a field nothing reads corresponds to a
 	property somebody deliberately marked.
 
-	**What counts as a reader.** Every `.cpp`/`.h` under `engine/` except three
-	kinds of file, each excluded for a reason:
+	**Two places hold property state and both are swept (D055).** Component
+	pools are one; `scene::EngineState` in `world.h` is the other, and it is
+	where a service with one instance per world keeps its knobs -- the fixed
+	timestep, the streaming radii, the pointer lock, the master volume. That
+	half was invisible to this lint until M8, which is exactly how
+	`InputService.PointerLocked` sat stored and unread from M6 until a human
+	asked for mouse look and found it (D049). A lint with a blind spot the size
+	of a service is a lint that reports on the half nobody was worried about.
 
-	  * `components.h` itself -- the declaration is not a use;
+	**What counts as a reader.** Every `.cpp`/`.h` under `engine/` except the
+	file that DECLARES the state being swept, plus two kinds excluded for their
+	own reasons:
+
+	  * the declaring header itself -- `components.h` for the component sweep,
+	    `world.h` for the engine-state one -- because a declaration is not a use;
 	  * anything under a `generated/` directory -- the descriptor tables name
 	    every property whether or not anything acts on one;
 	  * `native_accessors.cpp` -- these are the getters and setters, and
@@ -52,6 +63,7 @@ local path = require("@std/path")
 local process = require("@std/process")
 
 local ComponentsHeader = "engine/scene/include/luaug/scene/components.h"
+local WorldHeader = "engine/scene/include/luaug/scene/world.h"
 local ApiDump = "api/api-dump.json"
 local EngineRoot = "engine"
 
@@ -72,6 +84,21 @@ local StorageOnly: { [string]: string } = {
     displayName = "prompt text a game reads back; the engine deliberately never acts on it",
 }
 
+--- Engine-state fields whose property is not just their name in PascalCase.
+---
+--- A service's knob is named for the service that owns it, and the field it
+--- lands in is named for the struct that holds every service at once -- so
+--- `StreamingService.LoadRadius` is `streamingLoadRadius` here. The mapping is
+--- explicit rather than derived, because a rule that stripped a prefix would
+--- also strip one from a field that meant it.
+local EngineStateProperty: { [string]: string } = {
+    requestedFixedTimestep = "FixedTimestep",
+    streamingEnabled = "Enabled",
+    streamingLoadRadius = "LoadRadius",
+    streamingMinRadius = "MinRadius",
+    streamingPauseOutsideLoadedArea = "PauseOutsideLoadedArea",
+}
+
 local function fail(message: string): never
     print(`inertcheck: ERROR: {message}`)
     return process.exit(1)
@@ -81,8 +108,14 @@ local function hasSuffix(text: string, suffix: string): boolean
     return #text >= #suffix and string.sub(text, -#suffix) == suffix
 end
 
---- Every `.cpp`/`.h` under `engine/`, minus the three kinds the header explains.
-local function readerFiles(): { string }
+--- Every `.cpp`/`.h` under `engine/`, minus the kinds the header explains.
+---
+--- `declaring` is the header whose own declarations are being swept, and it is
+--- a parameter rather than a constant because there are two of them now: a
+--- component field's declaration lives in `components.h` and an engine-state
+--- field's in `world.h`, and neither sweep may count its own declaration as a
+--- reader (D055).
+local function readerFiles(declaring: string): { string }
     local found: { string } = {}
     local pending: { string } = { EngineRoot }
 
@@ -102,7 +135,7 @@ local function readerFiles(): { string }
             if not hasSuffix(childPath, ".cpp") and not hasSuffix(childPath, ".h") then
                 continue
             end
-            if hasSuffix(childPath, "components.h") or hasSuffix(childPath, "native_accessors.cpp") then
+            if hasSuffix(childPath, declaring) or hasSuffix(childPath, "native_accessors.cpp") then
                 continue
             end
             table.insert(found, childPath)
@@ -113,13 +146,14 @@ local function readerFiles(): { string }
     return found
 end
 
---- The field names of every `*Component` struct, in declaration order.
+--- The field names of the structs in `header` whose names satisfy `wanted`, in
+--- declaration order.
 ---
---- A hand-rolled scan rather than a parser: the file is one struct per class
+--- A hand-rolled scan rather than a parser: both files are one struct per class
 --- with one field per line and no templates, which is a shape a hundred lines of
 --- pattern matching reads correctly and a C++ parser would be absurd for.
-local function componentFields(): { string }
-    local source = fs.readFileToString(ComponentsHeader)
+local function structFields(header: string, wanted: (name: string) -> boolean): { string }
+    local source = fs.readFileToString(header)
     local fields: { string } = {}
     local seen: { [string]: boolean } = {}
 
@@ -127,7 +161,7 @@ local function componentFields(): { string }
     for line in string.gmatch(source, "[^\n]*") do
         local structName = string.match(line, "^struct%s+([%a%d_]+)%s*$")
         if structName ~= nil then
-            insideComponent = string.match(structName, "Component$") ~= nil
+            insideComponent = wanted(structName)
             continue
         end
         if string.match(line, "^};") ~= nil then
@@ -197,43 +231,92 @@ local function pascalCase(field: string): string
     return string.upper(string.sub(field, 1, 1)) .. string.sub(field, 2)
 end
 
-local fields = componentFields()
-if #fields == 0 then
-    fail(`no component fields found in {ComponentsHeader} -- run this from the repository root`)
-end
-
-local sources: { string } = {}
-for _, file in readerFiles() do
-    table.insert(sources, fs.readFileToString(file))
-end
-
-local inert = inertProperties()
-local unread: { string } = {}
-
-for _, field in fields do
-    if StorageOnly[field] ~= nil then
-        continue
+--- One sweep: the fields declared in `header` by the structs `wanted` accepts,
+--- against every engine source except that header itself.
+---
+--- Returns the fields nothing reads and whose property is not marked `Inert`,
+--- and the number of sources it looked at -- which the summary prints, because
+--- a sweep that silently looked at nothing would pass.
+local function sweep(
+    header: string,
+    wanted: (name: string) -> boolean,
+    inert: { [string]: boolean },
+    propertyOf: (field: string) -> string
+): ({ string }, number, number)
+    local fields = structFields(header, wanted)
+    if #fields == 0 then
+        fail(`no fields found in {header} -- run this from the repository root`)
     end
 
-    local readers = 0
-    for _, source in sources do
-        -- `%f[%w]` is a frontier pattern: it matches the boundary before a word
-        -- character, so `image` does not match inside `imageColor`. Without it a
-        -- field would be "read" by any longer field that contains its name.
-        if string.find(source, `%f[%w]{field}%f[%W]`) ~= nil then
-            readers += 1
-            break
+    local sources: { string } = {}
+    for _, file in readerFiles(string.match(header, "([^/]+)$") :: string) do
+        table.insert(sources, fs.readFileToString(file))
+    end
+
+    local unread: { string } = {}
+    for _, field in fields do
+        if StorageOnly[field] ~= nil then
+            continue
+        end
+
+        local readers = 0
+        for _, source in sources do
+            -- `%f[%w]` is a frontier pattern: it matches the boundary before a
+            -- word character, so `image` does not match inside `imageColor`.
+            -- Without it a field would be "read" by any longer field that
+            -- contains its name.
+            if string.find(source, `%f[%w]{field}%f[%W]`) ~= nil then
+                readers += 1
+                break
+            end
+        end
+
+        if readers == 0 and not inert[propertyOf(field)] then
+            table.insert(unread, field)
         end
     end
 
-    if readers == 0 and not inert[pascalCase(field)] then
-        table.insert(unread, field)
+    return unread, #fields, #sources
+end
+
+local inert = inertProperties()
+
+local componentUnread, componentCount, componentSources = sweep(ComponentsHeader, function(name)
+    return string.match(name, "Component$") ~= nil
+end, inert, pascalCase)
+
+-- **The second sweep, and D055 is the whole reason it exists.** A service with
+-- one instance per world keeps its knobs in `EngineState` rather than in a
+-- component pool, so half the properties in the API were never swept -- which
+-- is how a pointer lock that nothing read survived from M6 to M8.
+local stateUnread, stateCount, stateSources = sweep(
+    WorldHeader,
+    function(name)
+        return name == "EngineState"
+    end,
+    inert,
+    function(field)
+        return EngineStateProperty[field] or pascalCase(field)
     end
+)
+
+local unread: { string } = {}
+for _, field in componentUnread do
+    table.insert(unread, field)
+end
+for _, field in stateUnread do
+    table.insert(unread, field)
 end
 
 if #unread > 0 then
-    for _, field in unread do
-        print(`inertcheck: {field} is stored and nothing reads it, and {pascalCase(field)} is not marked Inert`)
+    for _, field in componentUnread do
+        print(
+            `inertcheck: component field {field} is stored and nothing reads it, and {pascalCase(field)} is not marked Inert`
+        )
+    end
+    for _, field in stateUnread do
+        local property = EngineStateProperty[field] or pascalCase(field)
+        print(`inertcheck: engine state {field} is stored and nothing reads it, and {property} is not marked Inert`)
     end
     fail(
         `{#unread} field(s) stored and unread. Either something must act on the value, or its property carries `
@@ -241,4 +324,7 @@ if #unread > 0 then
     )
 end
 
-print(`inertcheck: ok -- {#fields} component field(s), {#sources} source file(s) swept`)
+print(
+    `inertcheck: ok -- {componentCount} component field(s) against {componentSources} source(s), `
+        .. `{stateCount} engine-state field(s) against {stateSources}`
+)

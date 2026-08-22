@@ -10,7 +10,7 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   (`MASTER_PROMPT.md` §6), and M4 is why that is written down. No `milestone/m8`
   tag and no `v1.0.0` tag until then.
   The brief is [`docs/briefs/m8-kickoff.md`](docs/briefs/m8-kickoff.md), with
-  five decisions, eleven Findings and a filled Gate Record. **Every scope item is
+  five decisions, twelve Findings and a filled Gate Record. **Every scope item is
   done** except the release itself, which needs a human and an account (below).
 
   **The deliverable is [`examples/10-open-world`](examples/10-open-world/)** — a
@@ -209,12 +209,20 @@ quietly.
   windowed frames. What remains is the ImGui half, and the crash handler is in
   place for the next occurrence — the next report should carry
   `luaug-crash-<pid>.dmp` and `luaug.log` from beside whatever was being run.
-- **The one thing M8 measured and did not fix is `inertcheck`'s blind spot**
-  (D049). It sweeps COMPONENT fields for a stored-and-unread property, and
-  `EngineState` — the world's own struct, where `PointerLocked` and
-  `PointerVisible` live — is not a component pool. Two properties sat there
-  doing nothing since M6 and the check that exists to catch exactly that could
-  not see them. Widening it is a small job and it is not this milestone's.
+- **`inertcheck` sweeps `EngineState` now, and widening it found three more**
+  (D055). The blind spot was real and it was the size of a service: a knob that
+  belongs to a service with one instance per world lives in the world's own
+  struct rather than in a component pool, so half the properties in the API were
+  never swept — which is how `PointerLocked` sat stored and unread from M6 to
+  M8 (D049). The three it caught the first time it ran: `DebugService.OverlayVisible`
+  was stored and the overlay was toggled only by F3; `UIService.DisplayScale`
+  said in its own comment that the host wrote it every frame and the host never
+  did, so it was 1 on a doubled display; and `StreamingService.PauseOutsideLoadedArea`
+  had a reader waiting for it — `minimumRingResident()`, whose comment says it
+  "is what `PauseOutsideLoadedArea` reads" — that nothing ever called. All three
+  are wired, and the pause is break-verified: with a minimum ring nothing can
+  satisfy, 240 frames produce zero ticks with the property on and ticks with it
+  off.
 - **A sequence of GPU runs is not a sequence of measurements** (M8 Finding 5).
   The same baseline run measured 6.25 ms first in a sweep and 4.83 ms last, and
   an earlier sweep taken without a warm-up reported `--quality=low` as slower

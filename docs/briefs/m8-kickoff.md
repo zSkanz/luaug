@@ -227,6 +227,22 @@ _(appended during the milestone)_
 
 ## Findings
 
+12. **A lint's blind spot is the shape of the thing it was written against**
+    (D055). `inertcheck` was written at M6 against component pools, because the
+    property that provoked it — `UICorner.CornerRadius` — lived in one. Every
+    property belonging to a service with a single instance per world lives
+    somewhere else entirely, in `EngineState`, and the check never looked there:
+    half the API surface, unswept, by a check whose whole purpose is that
+    nothing depends on somebody remembering.
+
+    Widening it took an afternoon and **found three the first time it ran** —
+    an overlay flag nothing applied, a display scale whose own comment claimed
+    the host wrote it every frame, and a streaming pause with a reader waiting
+    for it that nothing ever called. The lesson is not "widen the lint": it is
+    that a check inherits the blind spot of the case it was written for, and the
+    second place to look is wherever the same kind of state lives under a
+    different name.
+
 11. **A defect report that carries a RELATION is worth more than one that
     carries a symptom** (D054). "The flicker gets worse the further the camera
     is" is not a complaint, it is half a derivation: the far cascade's texel is
@@ -467,8 +483,8 @@ macOS is unverified: CI has executed zero steps since 2026-08-21.
 
 ### Defects found and fixed during the milestone
 
-Ten, and **eight of the ten came from a human running the thing** while every
-gate in the repository was green.
+Eleven, and **eight of the eleven came from a human running the thing** while
+every gate in the repository was green.
 
 | | Found by | What |
 |---|---|---|
@@ -482,6 +498,7 @@ gate in the repository was green.
 | D052 | a human, asking a question | Shadows coarse at a moderate distance: the flagship asked for 180 m of shadow on a 1024 tile, which is half a metre per texel past forty-four |
 | D053 | a human, standing still | The world pulsed and shadow edges trembled after eleven in the morning: a diffuse ambient arriving in steps, and a shadow lattice that drifts twenty-five times faster near noon than at dawn |
 | D054 | a human, moving the camera back | The remaining flicker scales with camera distance: the far cascade's edge holds still for twenty-three frames and then jumps, where the near one moves every other frame |
+| D055 | the milestone's own gate record, then a human asking for it | `inertcheck` swept component pools only, so every property a one-per-world service holds was unchecked; widening it found three more stored-and-unread |
 
 ### What this milestone does not have
 
@@ -493,6 +510,9 @@ gate in the repository was green.
   a packager, never by a scene (ADR 0044).
 - **`@luaug/signal` and `@luaug/imgui` are not shipped**, and api-design.md §1.1
   now records why rather than leaving two names to be discovered missing.
-- **`inertcheck` still cannot see `EngineState`**, which is how D049 sat there
-  since M6. Named in the ledger; not fixed here.
+- ~~**`inertcheck` cannot see `EngineState`**~~ — fixed after the gate record
+  was first written (D055). It sweeps both halves now, and the first run of the
+  widened check found three more properties in the state D030 named: an overlay
+  flag nothing applied, a display scale nobody wrote, and a streaming pause with
+  a reader waiting for it.
 - **macOS is unverified** for this milestone, as for the two before it.
