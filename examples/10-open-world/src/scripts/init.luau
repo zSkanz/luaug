@@ -64,8 +64,17 @@ local StartHour = 9.5
 --- Where a new game starts. On the terrain rather than above it: the height
 --- field is the one in `tools/generate_world.luau`, and standing a character in
 --- the air at boot would make the first second of every session a fall.
-local StartX = 0
-local StartZ = 0
+---
+--- **And on the CENTRE of a ground tile, which is not decoration (D048).** The
+--- floor is 32 m tiles whose tops sit at the height field's value at their own
+--- centre, so the four tiles meeting at the world origin have four slightly
+--- different heights -- and a character spawned exactly there stands on a step
+--- and slides off it forever, at about three centimetres a second. It is
+--- invisible in the position readout and it moves the CAMERA, which moves the
+--- shadow map's texel lattice, which makes every shadow edge in the frame
+--- dither. Measured: still to nine decimal places here, drifting at the corner.
+local StartX = 16
+local StartZ = 16
 
 --- Below this you have fallen out of the world, which in a streamed world means
 --- you outran the ground. Recovered rather than fatal.

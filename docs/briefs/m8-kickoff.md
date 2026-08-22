@@ -227,6 +227,38 @@ _(appended during the milestone)_
 
 ## Findings
 
+7. **The reported artifact was three defects with one symptom, and the root was
+   in the scene rather than in the renderer.** A human looking down in the
+   flagship reported something dark on the ground that kept changing shape.
+   Reproduced exactly as described, then reduced by holding the character still,
+   freezing the sun and proving the scene identical between the two frames — 58
+   draws, 12 visible objects, 1,320 triangles in both — which still left 10,658
+   differing pixels of 518,400, tracing every shadow edge in the frame.
+
+   The three, in the order they were removed: a day that took four minutes, so
+   the sun crossed the sky ninety times faster than the real one and every shadow
+   visibly swung; a cascade fit with no memory, refitting to its contents every
+   frame and re-quantising every edge with it; and — the root — a character
+   spawned exactly on the corner where four ground tiles of different heights
+   meet, sliding off it at three centimetres a second, which moved the camera,
+   which moved the whole shadow lattice.
+
+   **10,658 pixels became 43, and 3 with the exposure frozen.** The forty that
+   remain are automatic exposure still converging by a hair, which is the
+   stabiliser working.
+
+   The general shape is worth keeping: **the thing that moved was not in the
+   frame.** Two of the three causes were invisible in any single screenshot —
+   one was the clock and one was a position readout that showed `-0, 2, -0` for
+   a character creeping in the ninth decimal place.
+
+6. **A defect report is worth more than the gate it escapes.** Three of this
+   milestone's defects came from a human running the flagship and describing
+   what bothered them — the world vibrating (D047), the shadows crawling (D048),
+   and both times every gate in the repository was green. The instruments that
+   found them afterwards were built in minutes; what could not be manufactured
+   was the observation.
+
 5. **A sequence of GPU runs is not a sequence of measurements.** The per-feature
    sweep put the same baseline run first and last: 6.25 ms and 4.83 ms, a 23%
    difference with nothing changed between them. An earlier version of the same

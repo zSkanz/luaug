@@ -48,6 +48,17 @@ using core::Vec3;
 // slice boundary does not ripple the extent.
 constexpr f32 kFitQuantum = 1.0f / 16.0f;
 
+// How much wider than its contents a freshly fitted box is made.
+//
+// This is the fit's hysteresis, and without it the memory below buys nothing: a
+// box sized exactly to what casts stops covering it as soon as anything moves,
+// so it would refit every frame and re-quantise every shadow edge every frame,
+// which is the defect (D048). A quarter is enough that a character walking at
+// seven metres a second inside a fifteen-metre cascade keeps one box for about a
+// second, and small enough that the texel density the caster fit exists to
+// recover is not given straight back.
+constexpr f32 kFitMargin = 1.25f;
+
 } // namespace
 
 void shadowSplits(f32 nearPlane, f32 farDistance, f32 lambda, f32 (&out)[kShadowCascadeCount + 1]) noexcept
@@ -71,7 +82,7 @@ void shadowSplits(f32 nearPlane, f32 farDistance, f32 lambda, f32 (&out)[kShadow
     }
 }
 
-ShadowCascades fitShadowCascades(const ShadowFit& fit) noexcept
+ShadowCascades fitShadowCascades(const ShadowFit& fit, const ShadowCascades* previous) noexcept
 {
     ShadowCascades cascades;
 
@@ -174,14 +185,59 @@ ShadowCascades fitShadowCascades(const ShadowFit& fit) noexcept
                 // Up onto the ladder, and never past what the slice needs: a
                 // box larger than the sphere would only be spending resolution
                 // on geometry the camera cannot see.
+                //
+                // **Grown past what is wanted, on purpose.** The margin is what
+                // gives the fit below something to keep: a box sized exactly to
+                // its contents stops covering them the moment anything moves,
+                // and a box that refits every frame is the crawl this whole
+                // mechanism exists to remove (D048).
                 const f32 quantum = std::max(radius * kFitQuantum, 1e-4f);
-                extent = std::min(radius, std::ceil(std::max(wanted, quantum) / quantum) * quantum);
+                const f32 grown = std::max(wanted * kFitMargin, quantum);
+                extent = std::min(radius, std::ceil(grown / quantum) * quantum);
 
                 // The slice centre, slid in the light's own x and y onto the
                 // content's centre. Its depth along the light is left alone --
                 // that axis is the depth range's business, below.
-                const f32 wantX = (minX + maxX) * 0.5f;
-                const f32 wantY = (minY + maxY) * 0.5f;
+                f32 wantX = (minX + maxX) * 0.5f;
+                f32 wantY = (minY + maxY) * 0.5f;
+
+                // **The fit's memory (D048).** A cascade keeps last frame's box
+                // -- its exact centre and its exact extent, and therefore its
+                // exact texel lattice -- for as long as that box still covers
+                // everything that casts into this slice. What that buys is a
+                // shadow map whose edges land on the same texels frame after
+                // frame while a character walks around inside it; what it costs
+                // is a box slightly larger than the content needs.
+                //
+                // It refits when the content leaves the box, and when the
+                // content has shrunk to less than half of it -- the second half
+                // is what stops a box that once contained a tower from staying
+                // tower-sized for the rest of the session. Half rather than
+                // "any smaller" so the two rules cannot oscillate against each
+                // other.
+                if (previous != nullptr && previous->fitted && previous->boxExtent[index] > 0.0f) {
+                    const f32 keptExtent = previous->boxExtent[index];
+                    const core::DVec3& keptWorld = previous->boxCentreWorld[index];
+                    const Vec3 keptLocal{static_cast<f32>(keptWorld.x - fit.origin.x),
+                                         static_cast<f32>(keptWorld.y - fit.origin.y),
+                                         static_cast<f32>(keptWorld.z - fit.origin.z)};
+                    const f32 keptX = core::dot(lightX, keptLocal);
+                    const f32 keptY = core::dot(lightY, keptLocal);
+
+                    const bool covers = minX >= keptX - keptExtent && maxX <= keptX + keptExtent &&
+                                        minY >= keptY - keptExtent && maxY <= keptY + keptExtent;
+                    const bool worthShrinking = wanted * kFitMargin < keptExtent * 0.5f;
+                    // And never keep a box the slice no longer needs: `extent`
+                    // is capped at the slice radius above, and a kept one has to
+                    // obey the same cap or a cascade would go on spending
+                    // resolution outside what the camera can see.
+                    if (covers && !worthShrinking && keptExtent <= radius) {
+                        extent = keptExtent;
+                        wantX = keptX;
+                        wantY = keptY;
+                    }
+                }
+
                 boxCentre = centre + lightX * (wantX - core::dot(lightX, centre)) +
                             lightY * (wantY - core::dot(lightY, centre));
             }
@@ -222,10 +278,17 @@ ShadowCascades fitShadowCascades(const ShadowFit& fit) noexcept
         cascades.farDistance[index] = sliceFar;
         cascades.texelWorld[index] = texel;
         cascades.depthRange[index] = depthRange;
+        // Kept for the next frame, in world space -- see `ShadowCascades`.
+        cascades.boxCentreWorld[index] =
+            DVec3{fit.origin.x + static_cast<f64>(boxCentre.x), fit.origin.y + static_cast<f64>(boxCentre.y),
+                  fit.origin.z + static_cast<f64>(boxCentre.z)};
+        cascades.boxExtent[index] = extent;
+
         cascades.cullCentre[index] = centre;
         cascades.cullRadius[index] = radius;
     }
 
+    cascades.fitted = true;
     return cascades;
 }
 

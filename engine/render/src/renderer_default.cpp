@@ -444,6 +444,10 @@ private:
     u32 renderWidth_ = 0;
     u32 renderHeight_ = 0;
 
+    // The previous frame's cascade fit, so this frame can keep it (D048).
+    ShadowCascades shadowFit_{};
+    bool shadowFitted_ = false;
+
     GraphicsSettings settings_;
     // The tile resolution `shadowMap_` was created for, so a settings change
     // rebuilds it and a repeated one does not.
@@ -966,6 +970,9 @@ std::optional<core::EngineError> DefaultRenderer::ensureShadowMap(rhi::IDevice& 
         return core::makeError(LUAUG_TR("render.err.target_create_failed"));
 
     shadowTile_ = settings_.shadowTileResolution;
+    // A new atlas is a new texel size, so last frame's box would be remembered
+    // against a lattice that no longer exists.
+    shadowFitted_ = false;
     return std::nullopt;
 }
 
@@ -1559,7 +1566,14 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     fit.distance = settings_.shadowDistance;
     fit.tileResolution = settings_.shadowTileResolution;
 
-    const ShadowCascades cascades = fitShadowCascades(fit);
+    // Last frame's fit is handed back in, which is what lets a cascade keep the
+    // same box -- and therefore the same texel lattice -- while nothing has left
+    // it (D048). Held per renderer rather than globally, for the reason the
+    // exposure and the environment chain are: this is the history of one view,
+    // and two views in one process are two histories.
+    const ShadowCascades cascades = fitShadowCascades(fit, shadowFitted_ ? &shadowFit_ : nullptr);
+    shadowFit_ = cascades;
+    shadowFitted_ = true;
 
     // --- Shadow pass --------------------------------------------------------
     //

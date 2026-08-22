@@ -154,6 +154,21 @@ struct ShadowCascades
     // slice's own sphere, so the two numbers stopped being the same thing.
     core::Vec3 cullCentre[kShadowCascadeCount];
     f32 cullRadius[kShadowCascadeCount]{};
+
+    // **The fit's own memory, and it is what stops shadow edges crawling
+    // (D048).** A box refitted to its contents every frame changes its texel
+    // size and its lattice every frame, so every shadow edge in the picture
+    // re-quantises -- and a character jittering by micrometres is enough to do
+    // it. Fed back into the next fit, which keeps this answer for as long as it
+    // still covers what casts.
+    //
+    // In WORLD space, unlike everything above, because the camera moves: a
+    // centre remembered in camera-relative space would mean a different place
+    // one frame later, which is the crawl it exists to prevent.
+    core::DVec3 boxCentreWorld[kShadowCascadeCount];
+    f32 boxExtent[kShadowCascadeCount]{};
+    // False until a fit has run. The first frame of a run has nothing to keep.
+    bool fitted = false;
 };
 
 // Everything the fit needs, and nothing about a renderer.
@@ -206,7 +221,10 @@ struct ShadowFit
     u32 tileResolution = kShadowTileResolution;
 };
 
-[[nodiscard]] ShadowCascades fitShadowCascades(const ShadowFit& fit) noexcept;
+// `previous` is the last frame's result, or null on the first frame. It is a
+// HINT and never a constraint: a cascade keeps its box while the box still
+// covers what casts into it, and refits the moment it does not.
+[[nodiscard]] ShadowCascades fitShadowCascades(const ShadowFit& fit, const ShadowCascades* previous = nullptr) noexcept;
 
 // The practical split scheme itself, exposed because it is a claim a test can
 // check directly: `out[0]` is the near plane, `out[kShadowCascadeCount]` is
