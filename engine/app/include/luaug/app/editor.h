@@ -158,6 +158,45 @@ public:
     // person edits the object they thought they had deselected.
     std::optional<PickHit> resolvePick(const scene::World& world, Inspector& inspector) noexcept;
 
+    // --- The editor's own camera ---------------------------------------------
+    //
+    // A paused world is a world whose scripts are not running, and in this
+    // engine the camera is a script's job -- so pausing froze the view solid.
+    // An editor needs to look around a world that is holding still, which is
+    // most of what looking around is for.
+    //
+    // It writes `Workspace.CurrentCamera` rather than owning a second camera,
+    // and that is the cheap correct answer rather than a shortcut: nothing else
+    // is writing it while the world is paused, the renderer already looks
+    // through it, and a second camera would need the renderer to learn which
+    // one to use. When the world plays, the game takes its camera back on the
+    // first tick and this stops fighting for it -- which is why the drive below
+    // does nothing while playing.
+
+    // Seeds the editor camera from wherever the world's camera currently is, so
+    // pressing pause does not teleport the view. Called once, when the editor
+    // first has a camera to copy.
+    void adoptCamera(const core::CFrameD& cframe) noexcept;
+    [[nodiscard]] bool cameraAdopted() const noexcept { return m_cameraAdopted; }
+
+    // One frame of fly-camera input. `lookDelta` is in pixels of mouse
+    // movement, `move` is the WASD/QE axes in [-1, 1], `dt` is the render
+    // clock's -- the editor camera is not simulation and must not be on the
+    // fixed tick, because a paused world runs no ticks at all and a camera that
+    // waited for one could not move.
+    //
+    // Returns the transform to write. Does nothing and returns the unchanged
+    // camera while playing.
+    core::CFrameD driveCamera(core::Vec2 lookDelta, core::Vec3 move, f32 dt) noexcept;
+
+    [[nodiscard]] const core::CFrameD& cameraCFrame() const noexcept { return m_cameraCFrame; }
+
+    // Metres per second, doubled by a sprint modifier at the call site. Public
+    // because an editor that cannot change its own fly speed is one you cannot
+    // use in both a room and a four-kilometre world.
+    void setCameraSpeed(f32 metresPerSecond) noexcept;
+    [[nodiscard]] f32 cameraSpeed() const noexcept { return m_cameraSpeed; }
+
     // The ray a pixel of the viewport casts, exposed so a test can drive a
     // click without a window. The pixel is in the viewport's own space.
     [[nodiscard]] PickRay rayThrough(core::Vec2 pixelInViewport) const noexcept;
@@ -171,6 +210,15 @@ private:
     std::optional<PickRequest> m_pending;
     RunState m_run = RunState::Paused;
     bool m_stepRequested = false;
+
+    core::CFrameD m_cameraCFrame;
+    bool m_cameraAdopted = false;
+    // Radians. Held separately from the CFrame because deriving them back out
+    // of a rotation matrix every frame accumulates, and a fly camera that
+    // slowly roll-drifts is a bug people describe as "the horizon is tilting".
+    f32 m_yaw = 0.0f;
+    f32 m_pitch = 0.0f;
+    f32 m_cameraSpeed = 12.0f;
 };
 
 } // namespace luaug::app

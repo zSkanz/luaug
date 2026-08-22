@@ -639,7 +639,65 @@ void drawTransport(Editor& editor)
     ImGui::EndDisabled();
 
     ImGui::SameLine();
-    ImGui::TextDisabled(playing ? "running" : "paused -- the world is not ticking");
+    if (playing) {
+        ImGui::TextDisabled("running");
+    }
+    else {
+        ImGui::TextDisabled("paused | right-drag to look, WASD/QE to fly, wheel for speed (%.0f m/s)",
+                            static_cast<double>(editor.cameraSpeed()));
+    }
+}
+
+// The fly camera, on the right mouse button.
+//
+// RIGHT rather than left, because left is select and an editor where looking
+// around also changes what you have selected is unusable. Held rather than
+// toggled, because a mode you can forget you are in is how somebody loses a
+// minute wondering why their mouse does nothing.
+//
+// It reads ImGui's input rather than the engine's: ImGui already owns this
+// window's mouse and keyboard while the pointer is in it, and asking the
+// engine's input layer would mean two owners disagreeing about whether a
+// keystroke was consumed.
+void driveEditorCamera(Editor& editor, bool overViewport)
+{
+    const ImGuiIO& io = ImGui::GetIO();
+
+    // The scroll wheel changes speed rather than dollying the camera. A dolly
+    // duplicates what W and S already do; a speed control is the thing an open
+    // world of four kilometres and a room of four metres actually need
+    // different values of.
+    if (overViewport && io.MouseWheel != 0.0f) {
+        const f32 factor = io.MouseWheel > 0.0f ? 1.25f : 0.8f;
+        editor.setCameraSpeed(editor.cameraSpeed() * factor);
+    }
+
+    if (!ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
+        // Still drive with a zero delta: the camera has to keep moving while
+        // the keys are held and the mouse is still, and returning early here
+        // would make WASD work only while the mouse was in motion.
+        if (overViewport)
+            editor.driveCamera({}, {}, io.DeltaTime);
+        return;
+    }
+
+    // The drag has to have STARTED over the viewport. Otherwise dragging out of
+    // another panel and across this one flings the camera.
+    if (!overViewport && !ImGui::IsMouseDragging(ImGuiMouseButton_Right))
+        return;
+
+    const auto axis = [](ImGuiKey positive, ImGuiKey negative) -> f32 {
+        return (ImGui::IsKeyDown(positive) ? 1.0f : 0.0f) - (ImGui::IsKeyDown(negative) ? 1.0f : 0.0f);
+    };
+
+    const core::Vec3 move{
+        axis(ImGuiKey_D, ImGuiKey_A),
+        axis(ImGuiKey_E, ImGuiKey_Q),
+        axis(ImGuiKey_W, ImGuiKey_S),
+    };
+
+    const f32 sprint = ImGui::IsKeyDown(ImGuiKey_LeftShift) ? 4.0f : 1.0f;
+    editor.driveCamera(core::Vec2{io.MouseDelta.x, io.MouseDelta.y}, move * sprint, io.DeltaTime);
 }
 
 // The 3D view.
@@ -669,10 +727,13 @@ void drawViewport(Editor& editor, rhi::TextureHandle texture)
             // border or the space beside a letterboxed image is not a click on
             // the world, and treating it as one deselects whatever the person
             // was working on.
-            if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            const bool overImage = ImGui::IsItemHovered();
+            if (overImage && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
                 const ImVec2 mouse = ImGui::GetMousePos();
                 editor.requestPick(core::Vec2{mouse.x - origin.x, mouse.y - origin.y});
             }
+
+            driveEditorCamera(editor, overImage);
         }
     }
     ImGui::End();

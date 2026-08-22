@@ -10,6 +10,7 @@
 #include "luaug/scene/components.h"
 #include "luaug/scene/world.h"
 
+#include <cmath>
 #include <doctest/doctest.h>
 
 #include "inspector_fixture.h"
@@ -215,4 +216,94 @@ TEST_CASE("pausing mid-play stops the world at the next frame")
 
     editor.setRunState(luaug::app::RunState::Paused);
     CHECK(editor.allowedTicks(2) == 0);
+}
+
+TEST_CASE("the editor camera is seeded rather than teleported")
+{
+    Editor editor;
+    CHECK_FALSE(editor.cameraAdopted());
+
+    core::CFrameD start;
+    start.position = {12.0, 3.0, -40.0};
+    editor.adoptCamera(start);
+
+    CHECK(editor.cameraAdopted());
+    CHECK(editor.cameraCFrame().position == start.position);
+}
+
+TEST_CASE("driving does nothing until a camera has been adopted")
+{
+    Editor editor;
+    const core::CFrameD before = editor.cameraCFrame();
+
+    editor.driveCamera({50.0f, 0.0f}, {1.0f, 0.0f, 1.0f}, 1.0f);
+
+    CHECK(editor.cameraCFrame().position == before.position);
+}
+
+TEST_CASE("the game takes its camera back when the world plays")
+{
+    Editor editor;
+    core::CFrameD start;
+    start.position = {0.0, 0.0, 0.0};
+    editor.adoptCamera(start);
+    editor.setRunState(luaug::app::RunState::Playing);
+
+    editor.driveCamera({100.0f, 100.0f}, {1.0f, 1.0f, 1.0f}, 1.0f);
+
+    // Not moved and not turned: while the world is playing the script owns the
+    // camera, and an editor still writing it would be two authors for one
+    // transform.
+    CHECK(editor.cameraCFrame().position == start.position);
+}
+
+TEST_CASE("flying forward moves along the camera's own look direction")
+{
+    Editor editor;
+    editor.adoptCamera(core::CFrameD{});
+    editor.setCameraSpeed(10.0f);
+
+    // One second of forward, from the identity rotation, which looks down -Z.
+    editor.driveCamera({}, {0.0f, 0.0f, 1.0f}, 1.0f);
+    CHECK(editor.cameraCFrame().position.z < -9.0);
+    CHECK(editor.cameraCFrame().position.x == doctest::Approx(0.0));
+
+    // Turn a quarter turn and the same key goes somewhere else. This is the
+    // case that fails when movement is done in world axes rather than the
+    // camera's.
+    Editor turned;
+    turned.adoptCamera(core::CFrameD{});
+    turned.setCameraSpeed(10.0f);
+    turned.driveCamera({static_cast<float>(-1.5708 / 0.0032), 0.0f}, {}, 0.0f);
+    turned.driveCamera({}, {0.0f, 0.0f, 1.0f}, 1.0f);
+    CHECK(std::abs(turned.cameraCFrame().position.x) > 9.0);
+}
+
+TEST_CASE("pitch stops short of the pole, where a fly camera spins on its own")
+{
+    Editor editor;
+    editor.adoptCamera(core::CFrameD{});
+
+    // Far more than a quarter turn of upward mouse movement, twice, so a clamp
+    // that only holds for one frame does not pass.
+    for (int i = 0; i < 8; ++i)
+        editor.driveCamera({0.0f, -1000.0f}, {}, 0.016f);
+
+    // Straight up would put the look direction's Y at 1. The clamp keeps it
+    // just below, which is what stops yaw and look from becoming one axis.
+    const core::Mat3& basis = editor.cameraCFrame().rotation;
+    const double lookY = -static_cast<double>(basis.m[2][1]);
+    CHECK(lookY < 1.0);
+    CHECK(lookY > 0.99);
+}
+
+TEST_CASE("camera speed refuses a value that makes the camera unusable")
+{
+    Editor editor;
+
+    editor.setCameraSpeed(0.0f);
+    CHECK(editor.cameraSpeed() > 0.0f);
+
+    editor.setCameraSpeed(-5.0f);
+    CHECK(editor.cameraSpeed() > 0.0f);
 }

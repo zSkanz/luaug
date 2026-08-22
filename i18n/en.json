@@ -13,6 +13,8 @@
   "engine.cli.err.headless_needs_frames": "--headless needs --frames=N; with no window to close it would never stop.",
   "engine.cli.err.screenshot_needs_headless": "--screenshot needs --headless; a presented swapchain image cannot be read back.",
   "engine.cli.err.editor_needs_window": "--edit needs a window: the editor draws the world into a panel, and a headless session has no panel to draw it in.",
+  "engine.editor.info.selected": "Selected {name} ({class}).",
+  "engine.editor.info.deselected": "Selection cleared.",
   "engine.cli.err.capture_needs_backend": "--capture-out needs --rhi=capture; no other backend records a command stream.",
   "engine.tests.info.summary": "Conformance: {total} cases, {passed} passed, {failed} failed.",
   "engine.tests.err.load_failed": "{count} spec file(s) failed to load; a spec that does not compile is not a spec that passed.",

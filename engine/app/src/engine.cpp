@@ -200,6 +200,37 @@ void buildUiGeometry(const ui::DrawList& list, core::Vec2 viewport, std::vector<
     }
 }
 
+// The selected instance, outlined in the viewport.
+//
+// A selection that exists only in a tree view is not a selection in a 3D
+// editor: the whole reason to click a thing in the world is to see which thing
+// you clicked. Drawn from the world rather than from the render snapshot
+// because the snapshot is a filtered, culled, LOD-selected view of it -- a part
+// behind the camera or past the far plane is still selected, and an outline
+// that vanished when you turned around would be worse than none.
+//
+// Orange because nothing in a PBR scene is, and because it stays legible
+// against both the lit and the shadowed halves of a frame.
+void submitSelection(const scene::World& world, core::InstanceId selection, render::DebugDraw& draw)
+{
+    if (!selection.valid() || !world.alive(selection))
+        return;
+
+    const scene::PartComponent* part = world.parts().find(selection);
+    if (part == nullptr)
+        return;
+
+    // A hair larger than the part, so the outline sits outside the surface
+    // rather than fighting it for the same depth -- a box drawn exactly on a
+    // face z-fights along every edge, which reads as a flicker rather than as a
+    // selection.
+    constexpr f32 kOutlineMargin = 1.01f;
+    draw.wireBox(core::toRenderMatrix(part->cframe, {}),
+                 core::Vec3{part->size.x * 0.5f * kOutlineMargin, part->size.y * 0.5f * kOutlineMargin,
+                            part->size.z * 0.5f * kOutlineMargin},
+                 render::DebugColor::fromLinear(1.0f, 0.45f, 0.05f));
+}
+
 void submitWorld(const render::RenderWorld& snapshot, render::DebugDraw& draw)
 {
     for (const render::RenderPart& part : snapshot.parts) {
@@ -795,8 +826,63 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // The click was noticed at the END of the previous frame, so a
         // selection is one frame behind the mouse. That is the same frame of
         // latency a typed value already has and it is not felt at sixty hertz.
-        if (options.editor)
+        if (options.editor) {
+            const core::InstanceId wasSelected = inspector.selection();
             editor.resolvePick(host->world(), inspector);
+
+            // An editor says what you picked. It is the cheapest confirmation
+            // that a click landed on the thing under the cursor rather than on
+            // the thing behind it, and it is the only such confirmation that
+            // survives into a log somebody can read afterwards -- which matters
+            // here because the ImGui shell cannot render headlessly and so
+            // cannot be asserted by any test that does not have a person in it.
+            if (inspector.selection() != wasSelected) {
+                if (inspector.selection().valid()) {
+                    const scene::ClassDescriptor* descriptor =
+                        host->world().classes().find(host->world().classOf(inspector.selection()));
+                    const core::I18nArg args[] = {
+                        {"name", host->world().atoms().text(host->world().name(inspector.selection()))},
+                        {"class",
+                         descriptor != nullptr ? host->world().atoms().text(descriptor->name) : std::string_view{"?"}},
+                    };
+                    core::log(core::LogLevel::Info, LUAUG_TR("engine.editor.info.selected"), args);
+                }
+                else {
+                    core::log(core::LogLevel::Info, LUAUG_TR("engine.editor.info.deselected"));
+                }
+            }
+
+            // The editor's camera reaches the world here, at the same safe
+            // point as every other write, and only while paused -- `driveCamera`
+            // returns the transform unchanged once the world is playing, so the
+            // game takes its camera back on the first tick without this having
+            // to know it did.
+            //
+            // Seeded from wherever the world's camera already is, so pressing
+            // pause does not teleport the view somewhere nobody asked for.
+            if (const core::InstanceId cameraId = host->currentCamera(); cameraId.valid()) {
+                // Interned here rather than cached outside the loop, and that is
+                // the correct trade rather than the lazy one: a hot reload
+                // rebuilds the atom table with the world, so an atom held across
+                // one would name nothing. Hashing five characters on the frames
+                // somebody is flying costs less than the bug that caching it
+                // invites.
+                const core::NameAtom editorCameraProperty = host->world().atoms().intern("CFrame");
+                if (!editor.cameraAdopted()) {
+                    if (const std::optional<scene::Value> current =
+                            host->world().getProperty(cameraId, editorCameraProperty);
+                        current.has_value() && std::holds_alternative<core::CFrameD>(*current))
+                        editor.adoptCamera(std::get<core::CFrameD>(*current));
+                }
+                else if (editor.runState() == RunState::Paused) {
+                    // Through `setProperty` and not into the component, which is
+                    // ADR 0046's rule and not a formality: the property path is
+                    // what fires the changed signal, what a script watching the
+                    // camera sees, and what the world hash reads.
+                    host->world().setProperty(cameraId, editorCameraProperty, scene::Value{editor.cameraCFrame()});
+                }
+            }
+        }
 
         // The streamed world advances at the SAME safe point, and for the same
         // reason: materialising instances mid-tick is the mutation the reload
@@ -1268,6 +1354,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             }
 
             submitWorld(snapshot, debugDraw);
+
+            if (options.editor)
+                submitSelection(host->world(), inspector.selection(), debugDraw);
 
             // Read AFTER submission, because that is when the renderer knows.
             // Counted by the renderer rather than derived from the snapshot: a
