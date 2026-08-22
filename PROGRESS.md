@@ -5,10 +5,12 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- **M8 — Flagship, Hardening, Docs, v1.0 — COMPLETE, signed off 2026-08-22**,
-  tagged `milestone/m8` and `v1.0.0`. **The tags are local: pushing them and
-  creating the GitHub release need an account, and that is the one part of M8's
-  scope still waiting on a person** (below).
+- **M8 — Flagship, Hardening, Docs, v1.0 — COMPLETE, signed off 2026-08-22, and
+  RELEASED the same day**, tagged `milestone/m8` and `v1.0.0`. Every tag is on
+  `origin` and the GitHub release carries the flagship's Windows folder:
+  <https://github.com/zSkanz/luaug/releases/tag/v1.0.0>. **The repository is
+  still private, so that release is visible to the account and to nobody else** —
+  which is a decision rather than an oversight, and it is below.
   The brief is [`docs/briefs/m8-kickoff.md`](docs/briefs/m8-kickoff.md), with
   five decisions, twelve Findings and a filled Gate Record.
 
@@ -208,23 +210,22 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
 
 ## Blocked — needs human
 
-- **THE RELEASE ITSELF, and it is the last item in the roadmap.** M8's scope ends
-  with "tag `v1.0.0`, GitHub release with Windows binaries + source
-  instructions", and every part of that needs a person:
-  - **The sign-off is DONE** (2026-08-22). `MASTER_PROMPT.md` §13 asks for a
-    green M8 gate record and a human who has played `examples/10-open-world` and
-    said ship; both happened, and `milestone/m8` and `v1.0.0` are tagged in this
-    clone.
-  - **Pushing them and creating the release need an account.** §10 puts
-    "anything requiring accounts, credentials, secrets, or spending money" on
-    this list without qualification, so the two `git push --tags` and the GitHub
-    release are asked for rather than done. `CHANGELOG.md` dates `[1.0.0]` at
-    2026-08-22 and its link points at the tag, which now exists locally.
-  - **The artifact is buildable today**: `luaug build examples/10-open-world`
-    produces the folder a release would attach, and `tests/packaging` runs that
-    whole chain on every Windows gate.
-  - **And Actions is still dark** (below), so the release would carry a Tier-1
-    and Tier-2 result and no macOS one.
+- **THE RELEASE IS PUBLISHED, and what is left of it is one setting.** The
+  roadmap's last item — "tag `v1.0.0`, GitHub release with Windows binaries +
+  source instructions" — was done on 2026-08-22 on the human's word, against a
+  five-stage green gate. `LuauG-Open-World-v1.0.0-win64.zip` (6.7 MiB, from
+  `luaug build examples/10-open-world`) is attached, the notes carry the build
+  instructions and the known limits, and `milestone/m4`, `m7` and `m7.5` were
+  pushed with it — they had never left this clone, while `milestone/m8` and
+  `v1.0.0` already had, which is what the ledger got wrong before §2 corrected
+  it against the repo.
+  - **The repository is PRIVATE, so the release reaches nobody.** Making a repo
+    public is a one-way door in practice — the whole history becomes readable
+    and cloneable, and un-publishing does not un-clone — so it is §10's kind of
+    decision and it is asked rather than taken. It also decides the Actions
+    question below: public repositories do not spend quota.
+  - **And Actions is still dark**, so the release carries a Tier-1 and Tier-2
+    result and no macOS one. The notes say so in the open.
 
 - **Two agent sessions work in this repository, and the tree is divided
   (human protocol, 2026-08-21).** The other window is a REVIEW agent: it plays
@@ -275,59 +276,28 @@ Entries for the planning session and for M0 through M4 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
 
-- **2026-08-22 (session 15, Claude Opus): M8 built AND SIGNED OFF — assemble,
-  polish, prove, ship.** The flagship, the graphics settings family,
-  `luaug build` and application identity, the editor-seam proof, the performance
-  pass, the docs, the licence audit and the CHANGELOG. Five decisions, twelve
-  Findings, a filled Gate Record, and eleven defects.
+- **2026-08-22 (session 16, Claude Opus): v1.0.0 RELEASED.** Ran the §2 boot
+  sequence on a repository whose milestones were all closed, and it earned its
+  keep at step 2: the ledger said `milestone/m8` and `v1.0.0` were local and both
+  were already on `origin`, while `milestone/m4`, `m7` and `m7.5` — which it did
+  not mention — were not. The repo wins; the ledger was corrected and the three
+  pushed.
 
-  **Did:** `examples/10-open-world`; render interpolation; ADR 0044 (graphics
-  settings), 0045 (a packaged game is a folder), and ADR 0017's condition checked
-  four milestones late; a TOML reader in `core`; `tools/iconpatch` and the
-  identity chain; `tools/repo/licensecheck.luau`; `api/generator/gen_reference.luau`
-  and `docs/api/`; `docs/coming-from-roblox.md` written for real; `@luaug/camera`;
-  mouse look with a pointer lock that now actually locks.
+  **Did:** the five-stage local gate green (docs 12.3 s, luau 9.7 s, format 14 s,
+  windows 62.1 s, linux 77.2 s, 1,109 conformance cases) as the evidence for
+  publishing; `luaug build examples/10-open-world` for the artifact; and the
+  GitHub release at <https://github.com/zSkanz/luaug/releases/tag/v1.0.0>, with
+  the flagship's Windows folder attached at 6.7 MiB and notes that state the
+  build-from-source chain, the soak numbers, the known limits and the missing
+  macOS tier rather than leaving a reader to find them.
 
-  **Learned, and it is the same lesson eight times:** every one of the defects a
-  human found — D047 through D054 and the inverted camera — was
-  invisible to every gate in the repository, and two of them were invisible in
-  any single screenshot because what moved was the CLOCK and a position readout
-  showing `-0, 2, -0` for a character creeping in the ninth decimal. The
-  instruments that found them afterwards took minutes to build; the D051 one is
-  committed as `tests/screenshots/contact`, because the artifact is a single
-  pixel at the framing the previous milestone's gate used and three metres of
-  bright floor up close. What could not be manufactured was somebody playing it
-  and saying what bothered them.
+  **Learned:** a tag and a release are different objects, and `gh release list`
+  answering nothing while `git ls-remote --tags` answers plenty is what tells
+  them apart — the ledger had recorded "tagged" and read it back as "released".
 
-  **And the shadow pair is one lesson twice.** D050 and D051 are both a shadow
-  parameter that was defensible in isolation and wrong against this scene: a snap
-  reference that assumes a light which does not turn, and a bias sized for a
-  renderer that does not cull front faces. Both were found by rendering the same
-  scene with one number changed and subtracting the images — the differential
-  method D043 forced on this project, applied to a number rather than a code
-  path.
-
-  **Also learned:** a sequence of GPU runs is not a sequence of measurements —
-  the same baseline measured 6.25 ms first in a sweep and 4.83 ms last, and an
-  hour went into a regression that was the measurement order.
-
-  **Then five review rounds, and they were worth more than the build.** The
-  human played it and reported, in order: shadows flickering under a moving sun
-  (D050 — the texel snap rounded an absolute position in a light space that
-  turns); objects hovering over their own shadows (D051 — two biases paying for
-  an acne the front-face cull already prevents); shadows coarse at a moderate
-  distance (D052 — this project asked for 180 m of shadow on a 1024 tile, which
-  is half a metre per texel); the world pulsing after eleven in the morning
-  (D053 — the diffuse ambient rode the specular chain's rebuild threshold and
-  therefore arrived in steps); and the flicker scaling with camera distance
-  (D054 — the filter returns a COUNT of taps, so one texel of the map flipping
-  moved an edge by a twenty-fifth of the penumbra). Then the human read the gate
-  record's own list of what the milestone had measured and not fixed, and asked
-  for that too (D055 — the stored-and-unread lint swept component pools only,
-  and widening it found three more properties doing nothing).
-
-  **Signed off 2026-08-22**, `milestone/m8` and `v1.0.0` tagged locally. The
-  push and the GitHub release need an account and are asked for.
+  **Open, and it is a person's:** the repository is private, so the release
+  reaches the account and nobody else, and that same setting is what keeps
+  Actions dark.
 
 - **2026-08-21 (session 11, Claude Opus): M6 built and signed off.** Moved to
   the archive with the rest of M6.
