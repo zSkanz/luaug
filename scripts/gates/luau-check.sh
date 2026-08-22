@@ -156,6 +156,23 @@ lute tools/repo/vendor.luau status
 echo "== stored-and-unread properties =="
 lute tools/repo/inertcheck.luau
 
+# The API reference is generated from the same IDL and checked in like every
+# other generated artifact (roadmap M8). Compared as a DIRECTORY rather than as a
+# file list, because a class removed from the IDL has to take its page with it --
+# and a stale page is exactly the documentation that outlives what it describes.
+echo "== generated API reference is fresh =="
+reference_before="$(mktemp -d)"
+trap 'rm -f "$defs_before" "$dump_before"; rm -rf "$reference_before" "$descriptors_before"' EXIT
+cp -r docs/api/. "$reference_before"/
+lute api/generator/gen_reference.luau >/dev/null
+if ! diff -r -q "$reference_before" docs/api >/dev/null; then
+    echo "luau-check: docs/api does not match the IDL." >&2
+    echo "  Either a page was hand-edited, or api/defs changed without" >&2
+    echo "  regenerating. Both are the same fix: commit the regenerated pages." >&2
+    diff -r -u "$reference_before" docs/api | head -40 >&2
+    exit 1
+fi
+
 # R6, as a check rather than as an afternoon. M8's scope asks for a licence and
 # NOTICE audit of every vendored dependency; an audit somebody performs once is a
 # fact about one day, and a pin bump is exactly when it stops being true.

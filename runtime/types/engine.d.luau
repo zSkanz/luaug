@@ -1247,12 +1247,12 @@ declare extern type StreamingService extends Instance with
     --- `hold the world still while I do something`. Evicting while refusing to load would empty the
     --- world one ring at a time and leave nothing to come back to.
     Enabled: boolean
-    --- How far from a focus the engine tries to keep chunks resident, in studs. Best effort: a chunk
+    --- How far from a focus the engine tries to keep chunks resident, in metres. Best effort: a chunk
     --- inside it is wanted, and one outside stays resident until it passes a WIDER ring, because a
     --- single radius makes a focus standing on a boundary load and evict the same chunk every frame --
     --- and the symptom of that is not a wrong world, it is a stutter nobody can find.
     LoadRadius: number
-    --- The must-have ring, in studs. Everything inside it is guaranteed resident before a focus may
+    --- The must-have ring, in metres. Everything inside it is guaranteed resident before a focus may
     --- advance into it, so the character walks into a world that exists rather than through one that
     --- has not arrived. Read `PauseOutsideLoadedArea` for what happens when it has not.
     MinRadius: number
