@@ -156,6 +156,12 @@ lute tools/repo/vendor.luau status
 echo "== stored-and-unread properties =="
 lute tools/repo/inertcheck.luau
 
+# R6, as a check rather than as an afternoon. M8's scope asks for a licence and
+# NOTICE audit of every vendored dependency; an audit somebody performs once is a
+# fact about one day, and a pin bump is exactly when it stops being true.
+echo "== licences (R6) =="
+lute tools/repo/licensecheck.luau
+
 echo "== the CLI's own tests =="
 lute test tools/cli/tests
 

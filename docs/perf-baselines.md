@@ -467,6 +467,73 @@ M7 number to compare it against because the scene did not exist in the repositor
 then. The control row is what stands in for one: same build, same scene, one
 constant.
 
+### M8 — the flagship, and the absolute targets binding
+
+`examples/10-open-world`: a character on streamed terrain, 289 chunks of which
+about 4,300 instances are resident, a moving sun, a HUD, physics, and the M7.5
+render chain. Measured with `--headless --width=1920 --height=1080` and the
+demo's own autopilot, which walks a circuit for twenty-five seconds and flies a
+wider one for twenty-five.
+
+**The ten-minute soak, which is the gate.**
+
+| | |
+|---|---|
+| Frames | 35,939 measured (36,000 run, 60 warm-up dropped) |
+| Median | **5.35 ms** — 187 fps |
+| p99 | **8.79 ms** — 114 fps |
+| Worst | 17.23 ms, **one frame in 35,939** |
+| Frames over 16.7 ms | **1** |
+| Streaming hitches over 33 ms | **0** (worst streaming step 3.34 ms) |
+| Peak resident | 168 MiB, and the final figure is the same number |
+| Instances | 4,354 early, 4,285 late — flat, which is what a streamed world does |
+| Draws / visible objects | **72 / 1,032** |
+
+Sixty frames per second at 1080p is met with three times the headroom at the
+median, and the tail is a single frame rather than a distribution with a shoulder
+in it.
+
+**Per-feature cost, from a sweep of the same scene at 6,000 frames.** Each row is
+the same binary with one flag, so these are differences rather than separate
+builds — which is what `--quality`, `--shadow-cascades` and the rest exist for
+(ADR 0044).
+
+| Variant | Median | p99 | Worst | Frames over 16.7 ms |
+|---|---|---|---|---|
+| Baseline (`high`) | 6.25 ms | 11.33 ms | 51.87 ms | 8 |
+| `--shadow-cascades=0` | 4.79 ms | 8.86 ms | 35.72 ms | 3 |
+| `--no-bloom --no-ambient-occlusion --no-anti-aliasing` | 4.60 ms | 7.90 ms | 17.16 ms | 1 |
+| `--no-auto-exposure` | 4.59 ms | 8.16 ms | 10.65 ms | 0 |
+| `--quality=low` | 4.33 ms | 7.83 ms | 10.17 ms | 0 |
+| `--render-scale=0.5` | 4.55 ms | 8.07 ms | 12.14 ms | 0 |
+| **Baseline again, last** | **4.83 ms** | **8.37 ms** | 13.04 ms | 0 |
+
+**Read the first and last rows together before reading any of the ones between:
+they are the same run, and they differ by 23%.** A sequence of GPU runs is not a
+sequence of independent measurements — the first one gets a cool card at its
+boost clock and everything after it does not. An earlier version of this sweep,
+run without a warm-up, reported a 2.9 ms baseline and then showed `--quality=low`
+as *slower* than `high`, which is the shape a measurement takes when the variable
+is the order rather than the flag.
+
+**So the per-feature numbers above are worth about half a millisecond each and
+should be read as "roughly a millisecond and a half of shadows, a millisecond and
+a half of post".** The way to get better ones is to interleave the variants and
+repeat, which is what the next person who needs a real number should do rather
+than trusting this table to more precision than it has.
+
+**The one frame that misses 60 fps used to be sixty of them.** The demo's
+autopilot originally began its flight by placing the character nine hundred
+metres away, which replaces the entire resident set in one tick; the burst of
+materialisation that followed was the only thing in a ten-minute run over 33 ms.
+It spirals out over six seconds now. A player never teleports, and a soak that
+did was measuring something no player would ever do.
+
+**Render interpolation costs nothing measurable** (D047). Forcing `alpha` to zero
+on the same scene moves the median by less than the run-to-run spread, because
+almost every part in an open world is static and the comparison in front of the
+slerp is two `CFrameD` equality tests.
+
 **Why the budgets are so loose.** They are catastrophe detectors, not
 instruments. A CI runner's speed varies by more than the regression anyone would
 want to catch, so a budget tight enough to notice 10% would be red every other
@@ -474,10 +541,13 @@ week and would train everyone to ignore it. The threshold catches the change tha
 made a tick ten times slower; this table is where a 10% regression is actually
 visible, and comparing against it is a human's job at each milestone gate.
 
-Standing absolute targets (bind at M8, on the reference machine):
-- `examples/10-open-world`: 60 fps at 1080p; zero streaming hitches > 33 ms
-  in the scripted 5-minute fly-through; 10-minute soak with bounded memory
-  delta and zero crashes.
+Standing absolute targets, **bound at M8** on the reference machine. Each is
+followed by what it measured, so a later regression is a comparison rather than
+a judgement:
+- `examples/10-open-world`: 60 fps at 1080p; zero streaming hitches > 33 ms in
+  the scripted fly-through; 10-minute soak with bounded memory delta and zero
+  crashes. **Met**: median 5.35 ms, p99 8.79 ms, one frame of 35,939 over
+  16.7 ms, zero hitches, peak resident equal to final resident at 168 MiB.
 - Hot reload (`luaug dev`): < 500 ms from file save to behavior change
   (ADR 0024), measured by the M3 E2E test.
 - Sim: 500-instance scripted scene (M2 benchmark) and 1,000 active physics

@@ -35,7 +35,7 @@ decision.
       open world: streamed chunks (terrain + props via the M7 pipeline), Jolt
       physics, day/night cycle (sun animation + tuned tonemap), HUD, ambient
       audio, all hot-reloadable.
-- [ ] **Performance pass to absolute targets** — 60 fps at 1080p on the recorded
+- [x] **Performance pass to absolute targets** — 60 fps at 1080p on the recorded
       reference machine; the standing targets at the end of
       [`../perf-baselines.md`](../perf-baselines.md) bind here.
 - [x] **`luaug build` packaging** — distributable player + content (ADR 0045).
@@ -54,7 +54,8 @@ decision.
 - [ ] **Docs completion** — [`../coming-from-roblox.md`](../coming-from-roblox.md)
       written for real; API reference generated from the defs pipeline; README
       with screenshots.
-- [ ] **License/NOTICE audit** of every vendored dependency.
+- [x] **License/NOTICE audit** of every vendored dependency —
+      `tools/repo/licensecheck.luau`, in the Luau gate.
 - [ ] **CHANGELOG**; tag `v1.0.0`; GitHub release with Windows binaries + source
       instructions.
 
@@ -225,6 +226,31 @@ it the character instead. This is that game.
 _(appended during the milestone)_
 
 ## Findings
+
+5. **A sequence of GPU runs is not a sequence of measurements.** The per-feature
+   sweep put the same baseline run first and last: 6.25 ms and 4.83 ms, a 23%
+   difference with nothing changed between them. An earlier version of the same
+   sweep, taken without a warm-up, reported a 2.9 ms baseline and then showed
+   `--quality=low` as SLOWER than `high` — which is impossible, and is the shape
+   a measurement takes when the variable is the order rather than the flag.
+
+   It cost an hour of chasing a regression that was not there: the median had
+   apparently doubled after the interpolation work, and forcing `alpha` to zero
+   showed the same median. **The instrument was the thing that changed.** The
+   baselines record the protocol now — warm up, repeat the control last, and do
+   not read the middle rows to more precision than the two ends justify.
+
+4. **A licence audit somebody performs is a fact about one afternoon.** Written
+   as a check instead (`tools/repo/licensecheck.luau`), it immediately found more
+   than the reading had: xxHash ships its *library* under BSD-2 and its entire
+   `cli/` and `tests/` trees under GPL-2.0, about thirty files, and SDL's
+   hidapi backend carries a triple licence in six headers rather than the three
+   a first grep showed.
+
+   None of it is compiled — `SDL_HIDAPI` is `OFF` and `engine/scene` uses xxHash
+   as an include directory only — and each exemption now cites that evidence
+   rather than asserting it. **The check is that the list does not grow**, which
+   is the case a pin bump produces and a reading never catches.
 
 3. **Two gates depended on a world nothing generated, and the way that surfaced
    is the finding.** M8's own soak gate was written, the flagship's generated

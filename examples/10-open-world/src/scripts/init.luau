@@ -435,9 +435,18 @@ local function autopilot(time: number)
         return
     end
 
+    -- **Spiralled out rather than jumped to**, and that is a gate detail worth
+    -- keeping: a leg that begins by placing the character nine hundred metres
+    -- away replaces the whole resident set in one tick, and the burst of
+    -- materialisation that follows is the only thing in a ten-minute soak that
+    -- misses 60 fps. A player never teleports; a soak that does is measuring
+    -- something no player will ever do.
+    local intoLeg = time % (AutopilotLeg * 2) - AutopilotLeg
+    local reach = AutopilotWalkRadius
+        + (AutopilotFlyRadius - AutopilotWalkRadius) * math.min(1, math.max(0, intoLeg) / 6)
     local angle = time * (AutopilotFlySpeed / AutopilotFlyRadius)
-    local x = math.cos(angle) * AutopilotFlyRadius
-    local z = math.sin(angle) * AutopilotFlyRadius
+    local x = math.cos(angle) * reach
+    local z = math.sin(angle) * reach
     character.Position = vector.create(x, heightAt(x, z) + 40, z)
     cameraYaw = angle + math.pi * 0.5
 end
