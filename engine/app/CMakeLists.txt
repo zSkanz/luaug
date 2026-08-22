@@ -426,6 +426,34 @@ if(LUAUG_BUILD_TESTS)
         set_tests_properties(clock_differential PROPERTIES TIMEOUT 120)
     endif()
 
+    # The contact-shadow golden (D051), and it exists because the artifact was
+    # invisible at every framing this repository already had. A human sent a
+    # close-up of a capsule and a boulder with a band of lit floor between each
+    # object and its own shadow -- both hovering -- and the same objects in
+    # `tests/screenshots/specular` show that gap as about one pixel.
+    #
+    # Frame 15 puts the sun at half past nine, which is where a detached contact
+    # is most obvious: high enough that each shadow sits beside its object rather
+    # than stretching to the horizon, low enough that a centimetre of detachment
+    # is a centimetre of bright floor. The scene sweeps the hour with the frame
+    # number, so the two ends of the range are one flag away.
+    #
+    # `gpu-golden` like the other two: this frame is edges and soft gradients,
+    # and neither survives a move to a software rasterizer.
+    add_test(NAME screenshot_gate_contact
+        COMMAND ${CMAKE_COMMAND}
+            -DHOST=$<TARGET_FILE:luaug_host>
+            -DIMGCMP=$<TARGET_FILE:imgcmp>
+            -DGOLDEN=${CMAKE_SOURCE_DIR}/tests/screenshots/contact-0930.png
+            -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/screenshot-gate-contact.png
+            -DSCRIPT=${CMAKE_SOURCE_DIR}/tests/screenshots/contact
+            -DFRAMES=15
+            -P ${CMAKE_SOURCE_DIR}/tests/screenshots/run_screenshot_gate.cmake)
+    set_tests_properties(screenshot_gate_contact PROPERTIES
+        LABELS "gpu-golden"
+        SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
+        TIMEOUT 120)
+
     # M8's graphics settings family, as a differential. See the driver for why
     # the claim is "these two must differ" rather than a golden: a preset that
     # is parsed and then reaches nothing renders exactly what it did before.

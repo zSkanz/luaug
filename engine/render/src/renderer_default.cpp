@@ -586,9 +586,13 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
         .fragmentShader = shadowFragment,
         .vertexBuffers = buffers,
         .vertexAttributes = attributes,
-        // Front faces are culled in the shadow pass rather than back faces: it
-        // moves the depth samples to the far side of a solid object, which is
-        // the cheapest form of peter-panning control and costs nothing here.
+        // Front faces are culled in the shadow pass rather than back faces, and
+        // the measurement behind that is in D051: switching to back faces puts a
+        // regular hatched acne across every lit floor in `examples/02-meshes`.
+        // What it COSTS is the contact -- the stored depth is the far side of a
+        // solid object -- and the answer to that is not the cull mode, it is the
+        // two biases below it, which exist to fight an acne this already
+        // prevents.
         .rasterizer = {.cullMode = rhi::CullMode::Front},
         .depthStencil = {.depthTest = true, .depthWrite = true, .depthCompare = rhi::CompareOp::LessOrEqual},
         .colorTargets = {},

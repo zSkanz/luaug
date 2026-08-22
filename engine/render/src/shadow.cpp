@@ -131,6 +131,17 @@ ShadowCascades fitShadowCascades(const ShadowFit& fit, const ShadowCascades* pre
         // number. That is a bigger change than this defect needs.
         f32 extent = radius;
         Vec3 boxCentre = centre;
+        // Whether this cascade is reusing last frame's box. It decides two
+        // things: the extent and centre above, and whether the snap below runs
+        // at all -- see the comment there, which is D050.
+        bool keptBox = false;
+        // Where the box was last frame, in THIS frame's light space. The snap
+        // rounds against it rather than against the world, which is what keeps a
+        // turning light from sweeping the lattice out from under every shadow in
+        // the picture (D050).
+        f32 keptCentreX = 0.0f;
+        f32 keptCentreY = 0.0f;
+        bool hasKeptCentre = false;
         if (!fit.casters.empty()) {
             const Vec3 lightX{lightRotation.m[0][0], lightRotation.m[1][0], lightRotation.m[2][0]};
             const Vec3 lightY{lightRotation.m[0][1], lightRotation.m[1][1], lightRotation.m[2][1]};
@@ -201,40 +212,47 @@ ShadowCascades fitShadowCascades(const ShadowFit& fit, const ShadowCascades* pre
                 f32 wantX = (minX + maxX) * 0.5f;
                 f32 wantY = (minY + maxY) * 0.5f;
 
-                // **The fit's memory (D048).** A cascade keeps last frame's box
-                // -- its exact centre and its exact extent, and therefore its
-                // exact texel lattice -- for as long as that box still covers
-                // everything that casts into this slice. What that buys is a
-                // shadow map whose edges land on the same texels frame after
-                // frame while a character walks around inside it; what it costs
-                // is a box slightly larger than the content needs.
+                // **The fit's memory, and what it is FOR changed at D050.**
                 //
-                // It refits when the content leaves the box, and when the
-                // content has shrunk to less than half of it -- the second half
-                // is what stops a box that once contained a tower from staying
-                // tower-sized for the rest of the session. Half rather than
-                // "any smaller" so the two rules cannot oscillate against each
-                // other.
+                // Keeping a box outright -- same centre, same extent, same
+                // lattice -- is the most stable thing a cascade can do, and it
+                // is what happens when the content has not moved out of it. In
+                // an open world that is rarer than it sounds: the ground fills
+                // the slice, so the content's light-space bounds ARE the slice's
+                // own and they follow the camera exactly. The slack below is one
+                // texel, because the box is quantised to texels anyway and one
+                // of them at the very edge of a cascade -- inside the blend band
+                // to the next -- is not a shadow anybody can see. Without it the
+                // test failed by a hundredth of a metre every single frame, on
+                // the snap's own displacement, and the memory never engaged.
+                //
+                // When the box cannot be kept, the snap below moves it RELATIVE
+                // to where it was rather than onto a lattice fixed in the world.
+                // That distinction is the whole of this defect.
                 if (previous != nullptr && previous->fitted && previous->boxExtent[index] > 0.0f) {
                     const f32 keptExtent = previous->boxExtent[index];
                     const core::DVec3& keptWorld = previous->boxCentreWorld[index];
                     const Vec3 keptLocal{static_cast<f32>(keptWorld.x - fit.origin.x),
                                          static_cast<f32>(keptWorld.y - fit.origin.y),
                                          static_cast<f32>(keptWorld.z - fit.origin.z)};
-                    const f32 keptX = core::dot(lightX, keptLocal);
-                    const f32 keptY = core::dot(lightY, keptLocal);
+                    keptCentreX = core::dot(lightX, keptLocal);
+                    keptCentreY = core::dot(lightY, keptLocal);
+                    hasKeptCentre = true;
 
-                    const bool covers = minX >= keptX - keptExtent && maxX <= keptX + keptExtent &&
-                                        minY >= keptY - keptExtent && maxY <= keptY + keptExtent;
+                    const f32 slack = (2.0f * keptExtent) / static_cast<f32>(fit.tileResolution);
+                    const bool covers =
+                        minX >= keptCentreX - keptExtent - slack && maxX <= keptCentreX + keptExtent + slack &&
+                        minY >= keptCentreY - keptExtent - slack && maxY <= keptCentreY + keptExtent + slack;
+                    // Never keep a box far larger than the content: that is what
+                    // stops one which once held a tower staying tower-sized for
+                    // the rest of the session. Half rather than "any smaller",
+                    // so the two rules cannot oscillate against each other.
                     const bool worthShrinking = wanted * kFitMargin < keptExtent * 0.5f;
-                    // And never keep a box the slice no longer needs: `extent`
-                    // is capped at the slice radius above, and a kept one has to
-                    // obey the same cap or a cascade would go on spending
-                    // resolution outside what the camera can see.
                     if (covers && !worthShrinking && keptExtent <= radius) {
                         extent = keptExtent;
-                        wantX = keptX;
-                        wantY = keptY;
+                        wantX = keptCentreX;
+                        wantY = keptCentreY;
+                        keptBox = true;
                     }
                 }
 
@@ -245,34 +263,71 @@ ShadowCascades fitShadowCascades(const ShadowFit& fit, const ShadowCascades* pre
 
         const f32 texel = (2.0f * extent) / static_cast<f32>(fit.tileResolution);
 
-        // The snap, in f64 and against the WORLD position, for the reason
-        // `ShadowFit::origin` documents. What comes out is under half a texel
-        // and fits an f32 with room to spare, which is why the rounding happens
-        // here rather than in a shader.
-        const DVec3 centreWorld{fit.origin.x + static_cast<f64>(boxCentre.x),
-                                fit.origin.y + static_cast<f64>(boxCentre.y),
-                                fit.origin.z + static_cast<f64>(boxCentre.z)};
-        const f64 lightX = static_cast<f64>(lightRotation.m[0][0]) * centreWorld.x +
-                           static_cast<f64>(lightRotation.m[1][0]) * centreWorld.y +
-                           static_cast<f64>(lightRotation.m[2][0]) * centreWorld.z;
-        const f64 lightY = static_cast<f64>(lightRotation.m[0][1]) * centreWorld.x +
-                           static_cast<f64>(lightRotation.m[1][1]) * centreWorld.y +
-                           static_cast<f64>(lightRotation.m[2][1]) * centreWorld.z;
-
+        // **The snap, and what it rounds AGAINST is the whole of D050.**
+        //
+        // A cascade that follows the camera has to move, and moving it by a
+        // fraction of a texel drags every shadow edge across the grid it is
+        // rasterised on. The cure is to move it in WHOLE TEXELS, which is
+        // standard and which this has always done. What was wrong is the
+        // reference: it rounded `R(t) * centreWorld` -- an absolute position, in
+        // a light space that TURNS with the sun. With the box half a kilometre
+        // from the world origin and a day of ten minutes, that coordinate sweeps
+        // several texels per frame on its own, so the rounding flipped
+        // constantly and the whole shadow map jumped a texel at a time in a
+        // direction nothing in the scene explained. A human watching a tree's
+        // shadow described it exactly: not sliding, trembling.
+        //
+        // Rounding the box's MOVEMENT instead of its position fixes it, and it
+        // is the stronger statement anyway. What temporal stability asks for is
+        // that this frame's grid line up with the LAST frame's -- not with a
+        // grid fixed in the world, which stops being fixed the moment the light
+        // turns. So the delta from where the box was is what gets quantised, and
+        // the lattice is carried forward from frame to frame instead of being
+        // re-derived from an absolute that is sliding underneath it.
+        //
+        // The first frame of a run has nothing to carry, so it rounds against
+        // the world once. That is as good a starting phase as any.
+        const Vec3 lightAxisX{lightRotation.m[0][0], lightRotation.m[1][0], lightRotation.m[2][0]};
+        const Vec3 lightAxisY{lightRotation.m[0][1], lightRotation.m[1][1], lightRotation.m[2][1]};
         const auto texelD = static_cast<f64>(texel);
-        const f64 residualX = lightX - std::round(lightX / texelD) * texelD;
-        const f64 residualY = lightY - std::round(lightY / texelD) * texelD;
+
+        if (!keptBox) {
+            f64 offsetX = 0.0;
+            f64 offsetY = 0.0;
+
+            if (hasKeptCentre) {
+                const f64 deltaX = static_cast<f64>(core::dot(lightAxisX, boxCentre) - keptCentreX);
+                const f64 deltaY = static_cast<f64>(core::dot(lightAxisY, boxCentre) - keptCentreY);
+                offsetX = std::round(deltaX / texelD) * texelD - deltaX;
+                offsetY = std::round(deltaY / texelD) * texelD - deltaY;
+            }
+            else {
+                const DVec3 centreWorld{fit.origin.x + static_cast<f64>(boxCentre.x),
+                                        fit.origin.y + static_cast<f64>(boxCentre.y),
+                                        fit.origin.z + static_cast<f64>(boxCentre.z)};
+                const f64 lightPosX = static_cast<f64>(lightAxisX.x) * centreWorld.x +
+                                      static_cast<f64>(lightAxisX.y) * centreWorld.y +
+                                      static_cast<f64>(lightAxisX.z) * centreWorld.z;
+                const f64 lightPosY = static_cast<f64>(lightAxisY.x) * centreWorld.x +
+                                      static_cast<f64>(lightAxisY.y) * centreWorld.y +
+                                      static_cast<f64>(lightAxisY.z) * centreWorld.z;
+                offsetX = std::round(lightPosX / texelD) * texelD - lightPosX;
+                offsetY = std::round(lightPosY / texelD) * texelD - lightPosY;
+            }
+
+            // Applied to the CENTRE rather than folded into the view's
+            // translation, so that what is remembered for the next frame is the
+            // snapped centre and not the one before it -- otherwise the next
+            // frame would measure its delta from a position nothing was ever
+            // rendered at.
+            boxCentre = boxCentre + lightAxisX * static_cast<f32>(offsetX) + lightAxisY * static_cast<f32>(offsetY);
+        }
 
         // The depth range stays the SLICE's, not the box's: the box was narrowed
         // across the light, and how far along it a caster may stand is a
         // different question with the same answer it had before.
         const f32 depthRange = 2.0f * radius + kShadowCasterMargin;
-        Mat4 view = core::lookAt(boxCentre + direction * (radius + kShadowCasterMargin), boxCentre, up);
-        // Plus, not minus: the box's centre in light space is MINUS the view's
-        // translation, so adding the residual to the translation subtracts it
-        // from the centre and lands the box on the lattice.
-        view.m[3][0] += static_cast<f32>(residualX);
-        view.m[3][1] += static_cast<f32>(residualY);
+        const Mat4 view = core::lookAt(boxCentre + direction * (radius + kShadowCasterMargin), boxCentre, up);
 
         cascades.viewProjection[index] = orthographic(extent, 0.0f, depthRange) * view;
         cascades.farDistance[index] = sliceFar;

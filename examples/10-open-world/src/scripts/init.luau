@@ -127,6 +127,22 @@ body.CanCollide = false
 body.Anchored = false
 body.Parent = workspace
 
+-- **A lantern, and it is the flagship's caller for clustered forward shading.**
+-- M7.5 stopped the light count being eight and nothing in this demo lit
+-- anything, so the path shipped in the deliverable and was never exercised by
+-- it. A light hangs off a `BasePart` and takes its position from it (§2.2), so
+-- parenting it to the visible body is the whole of the attachment.
+--
+-- It also makes night PLAYABLE. A world with no artificial light at midnight is
+-- honest and it is a black screen; the point of a day/night cycle is that both
+-- ends are somewhere you can be.
+local lantern = Instance.new("PointLight")
+lantern.Name = "Lantern"
+lantern.Color = Color3.fromRGB(255, 214, 158)
+lantern.Range = 26
+lantern.Brightness = 0
+lantern.Parent = body
+
 local bodyWeld = Instance.new("Weld")
 bodyWeld.Part0 = character
 bodyWeld.Part1 = body
@@ -516,6 +532,11 @@ RunService.Heartbeat:Connect(function(dt: number)
     local daylight = math.clamp(math.sin((hour - 6) / 24 * math.pi * 2) * 1.4 + 0.35, 0, 1)
     Lighting.FogColor = Color3.new(0.10 + 0.59 * daylight, 0.12 + 0.64 * daylight, 0.18 + 0.66 * daylight)
     wind.Volume = 0.05 + 0.1 * daylight
+
+    -- The lantern is the inverse of the sun and it is not a step: it comes up
+    -- through dusk and goes down through dawn, so there is no frame where the
+    -- world changes lighting model between one tick and the next.
+    lantern.Brightness = 5.5 * (1 - daylight)
 
     -- Camera first, because movement is expressed in the camera's frame: a
     -- character that walked in last frame's direction turns a fraction of a

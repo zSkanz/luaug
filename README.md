@@ -4,32 +4,44 @@
 
 LuauG gives you the developer experience you already know — `Instance` trees, `game:GetService`, `task.spawn`, signals with `:Connect` — in an independent, professional engine: a modern C++ core embedding the Luau VM directly, a data-oriented ECS behind a familiar Instance facade, a swappable renderer and physics stack, deterministic fixed-tick simulation, and a code-first workflow (VS Code + CLI + sub-second hot reload). It targets complete 2D and 3D games, from small scenes to huge streamed open worlds, on desktop first, then mobile, with a console-ready architecture.
 
-> **STATUS: pre-alpha, and playable.** Eight of eleven milestones are complete
-> and human-signed-off. The engine boots a sandboxed Luau VM, opens a window,
-> runs a deterministic fixed-tick simulation over an Instance tree on an ECS,
+> **STATUS: M8 built, awaiting human review.** Ten of the eleven milestones are
+> signed off; the last one is written up and waiting for somebody to play it.
+> A milestone is complete when the human says so and not when a gate goes green
+> (`MASTER_PROMPT.md` §6), and M4 is why that is spelled out. The engine boots a sandboxed Luau VM, opens a window, runs a
+> deterministic fixed-tick simulation over an Instance tree on an ECS,
 > hot-reloads a saved script into a new world in under two milliseconds, renders
-> glTF meshes and primitive parts with forward PBR under a shadow-casting sun,
-> simulates a thousand active rigid bodies in two milliseconds a tick, and now
-> has the layer that makes those a game: rebindable input actions, a UI tree,
-> tweens, positional audio and skeletal animation — on Windows, Linux and macOS,
-> with an Android triangle proving the graphics seam on a real device.
+> a world with cascaded shadows, clustered lights, image-based lighting and a
+> post chain, simulates a thousand active rigid bodies in two milliseconds a
+> tick, streams a world larger than it holds, and packages a game into a folder
+> you can send to somebody.
 >
-> **M6 is signed off**, and its deliverable is the point: `examples/04-obby` is a
-> course you play from a tweened menu to a finish flag, with a HUD, checkpoints,
-> moving platforms, sounds and an animated character — and a gate that replays a
-> recorded input stream headless to that flag, because five systems that each
-> pass their own tests still have to work with one another.
+> **The deliverable is [`examples/10-open-world`](examples/10-open-world/)**: a
+> third-person character walking four and a half kilometres of streamed terrain
+> under a sun that crosses the sky, with a HUD, ambient sound, physics, and hot
+> reload that puts you back where you were standing. A ten-minute soak of it at
+> 1080p on the reference machine holds a **median of 5.35 ms** — one frame in
+> 35,939 misses 60 fps — with memory flat and zero streaming hitches.
 >
-> The review gate is not ceremony. M4 was written up complete and tagged on its
-> own green gate, and a human using the engine then noticed the shadow never
-> moved: the renderer had never once read the `Lighting` service. M6 was signed
-> after a person played the obby for an evening and found five more — including
-> a platform fix that was correct and unreachable, which only surfaced because
-> they re-tested a defect already marked fixed.
+> **The review gate is not ceremony, and M8 is the best evidence yet.** Four of
+> this milestone's defects came from a human running the flagship and saying what
+> bothered them, while every gate in the repository was green: the world
+> vibrating as you walk (the renderer never interpolated between ticks, and the
+> scheduler had computed the factor for it since M1), the shadows crawling (three
+> causes, the root being a character sliding off a tile corner), a pointer lock
+> that was stored and read by nothing, and a camera that turned the way you did
+> not push.
 >
 > It is written autonomously, milestone by milestone, by an AI agent (Claude
 > Opus, multi-agent orchestration) following [`MASTER_PROMPT.md`](MASTER_PROMPT.md),
 > with a human review gate at the end of every milestone.
+
+<p align="center">
+  <img src="docs/images/m8/open-world-day.png" alt="examples/10-open-world at mid-morning" width="900">
+</p>
+<p align="center">
+  <img src="docs/images/m8/open-world-daystrip.png" alt="The same world at four hours of one day" width="900">
+  <br><em>One world, one property: <code>Lighting.ClockTime</code> drives the sky, the shadows, the fog and the exposure.</em>
+</p>
 
 ## Where it is
 
@@ -43,33 +55,37 @@ LuauG gives you the developer experience you already know — `Instance` trees, 
 | ✅ | **M4.5** — correcting the environment the renderer never read, and what was found beside it | signed off, `milestone/m4.5` |
 | ✅ | **M5** — Jolt physics, queries, welds, and a character you can steer | signed off, `milestone/m5` |
 | ✅ | **M6** — input actions, UI, tweens, audio, minimal animation; `examples/04-obby` | signed off, `milestone/m6` |
-| 🔨 | **M7** — asset pipeline, async IO, streaming, floating origin | next |
-| ⬜ | **M7.5** — cascaded shadows, clustered lights, image-based lighting, post | |
-| ⬜ | **M8** — the flagship open-world demo, hardening, docs, v1.0 | |
+| ✅ | **M7** — asset pipeline, async IO, streaming, floating origin | signed off, `milestone/m7` |
+| ✅ | **M7.5** — cascaded shadows, clustered lights, image-based lighting, post | signed off, `milestone/m7.5` |
+| 🔨 | **M8** — the flagship open-world demo, hardening, docs, v1.0 | awaiting review |
 
-**What runs today:** `luaug dev` on a project, edit a `.luau` file, watch the
-world rebuild without the window closing. A glTF scene lit by forward PBR with a
-single-cascade shadow map and a day/night cycle driven from the simulation clock.
-A physical world: gravity, contacts and `Touched` as deferred signals, impulses,
-friction, collision groups, raycasts and shape queries, welds, and a capsule
-character that climbs a kerb, rides a moving platform, and is stopped by a wall
-or by another character. An Input Action System with rebindable bindings across
-keyboard and gamepad, plus the raw event surface a Roblox developer reaches for.
-UI instances over a `UDim2` layout with rounded corners, hit-testing and a glyph
-cache. Property tweens on the simulation clock, positional audio whose timeline
-the simulation owns, and glTF skeletal animation. An in-game explorer, property
-inspector, memory table and log pane that write through the same setters a script
-goes through. **1,081** conformance specs written against
-[`docs/api-design.md`](docs/api-design.md) — not against the implementation —
-pass on Windows and Linux, alongside a determinism harness that replays a
-recorded input stream and compares world hashes, and a capture-stream gate that
-compares draw commands rather than pixels.
+**What runs today.** `luaug new` scaffolds a project; `luaug dev` runs it with a
+watcher, so a saved file rebuilds the world without the window closing;
+`luaug build` turns it into a folder that runs on a machine with none of this
+installed, wearing the game's own icon. In between: a streamed world of chunks
+that arrive before you reach them, over a 64-bit floating origin; forward PBR
+with four shadow cascades, clustered lights, image-based lighting from the sky
+the engine draws, and a post chain of ambient occlusion, automatic exposure,
+bloom and FXAA; Jolt with contacts surfaced as deferred `Touched` signals,
+collision groups, queries, welds and a character that climbs, rides platforms and
+is stopped by walls; rebindable input actions across keyboard, mouse and gamepad;
+a UI tree over `UDim2` layout with real text; tweens, positional audio on the
+simulation timeline, and skeletal animation. **1,109** conformance specs written
+against [`docs/api-design.md`](docs/api-design.md) — not against the
+implementation — pass on Windows and Linux, beside a determinism harness that
+replays recorded input and compares world hashes, a capture-stream gate that
+compares draw commands rather than pixels, an editor-seam proof that runs two
+worlds and two VMs in one process, and a soak that walks the flagship for ten
+minutes and asserts the memory curve flattens.
 
-**What does not, yet:** streaming, an offline asset pipeline, image-based
-lighting, cascaded shadows, and instanced draws — the renderer still submits one
-draw call per visible object, which is the measured ceiling for a crowd
-([`docs/perf-baselines.md`](docs/perf-baselines.md)). Each arrives with the
-milestone that owns it, and [`docs/roadmap.md`](docs/roadmap.md) says which.
+**What it does not have, stated plainly.** No visual editor, no particles, no
+decals, no terrain, no `SurfaceGui`, no rich text, no navmesh, no 2D workflow, no
+multiplayer, no mobile. Each has an owner in the roadmap's post-v1 phases rather
+than a shrug, and
+[`docs/coming-from-roblox.md`](docs/coming-from-roblox.md) §5 lists them with
+where they went. A `Sound` plays a generated tone rather than a file. A property
+the engine stores and does not act on is marked `Inert` in the inspector and the
+api-dump, and a gate stops a new one appearing quietly.
 
 ## Not affiliated with Roblox
 
@@ -96,7 +112,6 @@ LuauG is an independent project. It is **not** affiliated with, endorsed by, or 
 | Audio | **miniaudio 0.11.25** | MIT-0 / Unlicense |
 | Assets | fastgltf (+ **simdjson 3.12.3**, its required parser) · meshoptimizer · basis_universal/KTX2 · stb (assimp: offline importer only) | MIT / Apache-2.0 / BSD / PD |
 | Debug UI | Dear ImGui (docking) | MIT |
-| In-game UI layout | Clay (behind Roblox-style UI Instances) | zlib |
 | Navigation (post-v1) | Recast & Detour | zlib |
 | Net transport primitives | GameNetworkingSockets · ENet | BSD-3 / MIT |
 
@@ -112,6 +127,8 @@ Everything in the default path is permissively licensed. Exact pinned commits li
 - [`docs/decisions/`](docs/decisions/) — architecture decision records (ADRs)
 - [`docs/research/`](docs/research/) — frozen research reports (Luau, Lute, ecosystem — August 2026)
 - [`docs/coming-from-roblox.md`](docs/coming-from-roblox.md) — the migration guide (habit-by-habit mapping)
+- [`docs/api/`](docs/api/) — the API reference, generated from the IDL
+- [`CHANGELOG.md`](CHANGELOG.md) — what each release contains
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — how contributions work
 
 ## v1 definition of done

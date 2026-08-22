@@ -105,19 +105,39 @@ inline constexpr f32 kShadowFilterMaxTexels = 4.0f;
 // so it grows exactly where a grazing receiver needs it and vanishes where a
 // face-on one does not.
 //
-// **In units of the FILTER's own reach, not of one texel**: a kernel that reads
-// depths four texels away needs an offset that reaches as far as it does, or its
-// widest taps land back on the surface that cast them. Unity scales its normal
-// bias by `filterSize * sqrt(2)` for the same reason and with the same diagonal
-// -- a square kernel's corner is further away than its edge (U-58).
-inline constexpr f32 kShadowNormalOffsetFilters = 1.4142136f;
+// **In units of the FILTER's own reach**, because a kernel that reads depths
+// four texels away needs an offset that reaches as far as it does, or its widest
+// taps land back on the surface that cast them.
+//
+// **Half a filter rather than the diagonal, and D051 is why.** M7.5 set this to
+// `sqrt(2)` -- a square kernel's corner is further away than its edge, and Unity
+// scales its normal bias the same way (U-58). What that ignores is which acne
+// this configuration can actually suffer: the shadow pass culls FRONT faces, so
+// what a receiver compares against is the far side of a solid object and there
+// is nothing for a lit surface to shadow itself with. The offset was therefore
+// paying for a problem the cull mode already prevents, and its only remaining
+// effect was to push every shadow away from the object casting it. A human sent
+// a close-up of a capsule and a boulder hovering over their own shadows.
+//
+// Measured on `tests/screenshots/contact` at three sun elevations: at a quarter
+// the contact is perfect and the capsule's own base begins to speckle; at half
+// it is attached at every hour with no speckle anywhere; and
+// `examples/02-meshes` at a 24-degree sun -- D044's own probe frame -- is clean
+// at both.
+inline constexpr f32 kShadowNormalOffsetFilters = 0.5f;
 
 // The residual depth bias, in METRES rather than in depth units. Depth units
 // mean different things in different cascades, because `kShadowCasterMargin`
 // makes each cascade's depth range depend on its radius -- a constant in that
 // space is a bias that detaches contact shadows in the near cascade or lets acne
 // through in the far one.
-inline constexpr f32 kShadowDepthBiasMetres = 0.02f;
+//
+// **Eight millimetres rather than twenty (D051)**, for the same reason as the
+// offset above and measured the same way: with front faces culled in the shadow
+// pass there is very little for it to correct, and what it does instead is lift
+// every shadow off the thing that casts it. Two centimetres is a visible band of
+// lit floor under a character.
+inline constexpr f32 kShadowDepthBiasMetres = 0.008f;
 
 // The fraction of a cascade's depth range over which it blends into the next.
 // The roadmap names a hard handover as one of the two tells of a first cascaded
