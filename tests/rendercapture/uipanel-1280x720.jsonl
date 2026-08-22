@@ -13,9 +13,9 @@
 {"op":"createShader","shader":5,"stage":"Vertex","bytes":972,"samplers":0,"uniformBuffers":1,"name":"shadow_depth"}
 {"op":"createShader","shader":6,"stage":"Fragment","bytes":536,"samplers":0,"uniformBuffers":0,"name":"shadow_depth"}
 {"op":"createShader","shader":7,"stage":"Vertex","bytes":5880,"samplers":0,"uniformBuffers":1,"name":"pbr"}
-{"op":"createShader","shader":8,"stage":"Fragment","bytes":47952,"samplers":11,"uniformBuffers":2,"name":"pbr"}
+{"op":"createShader","shader":8,"stage":"Fragment","bytes":73168,"samplers":11,"uniformBuffers":2,"name":"pbr"}
 {"op":"createShader","shader":9,"stage":"Vertex","bytes":8012,"samplers":0,"uniformBuffers":2,"name":"pbr_skinned"}
-{"op":"createShader","shader":10,"stage":"Fragment","bytes":48212,"samplers":11,"uniformBuffers":2,"name":"pbr_skinned"}
+{"op":"createShader","shader":10,"stage":"Fragment","bytes":73428,"samplers":11,"uniformBuffers":2,"name":"pbr_skinned"}
 {"op":"createShader","shader":11,"stage":"Vertex","bytes":2964,"samplers":0,"uniformBuffers":2,"name":"shadow_skinned"}
 {"op":"createShader","shader":12,"stage":"Fragment","bytes":828,"samplers":0,"uniformBuffers":0,"name":"shadow_skinned"}
 {"op":"createShader","shader":13,"stage":"Vertex","bytes":1272,"samplers":0,"uniformBuffers":0,"name":"sky"}
@@ -25,7 +25,7 @@
 {"op":"createShader","shader":17,"stage":"Vertex","bytes":1300,"samplers":0,"uniformBuffers":1,"name":"shadow_instanced"}
 {"op":"createShader","shader":18,"stage":"Fragment","bytes":536,"samplers":0,"uniformBuffers":0,"name":"shadow_instanced"}
 {"op":"createShader","shader":19,"stage":"Vertex","bytes":6232,"samplers":0,"uniformBuffers":1,"name":"pbr_instanced"}
-{"op":"createShader","shader":20,"stage":"Fragment","bytes":47952,"samplers":11,"uniformBuffers":2,"name":"pbr_instanced"}
+{"op":"createShader","shader":20,"stage":"Fragment","bytes":73168,"samplers":11,"uniformBuffers":2,"name":"pbr_instanced"}
 {"op":"createShader","shader":21,"stage":"Vertex","bytes":1368,"samplers":0,"uniformBuffers":0,"name":"ssao"}
 {"op":"createShader","shader":22,"stage":"Fragment","bytes":4844,"samplers":1,"uniformBuffers":1,"name":"ssao"}
 {"op":"createShader","shader":23,"stage":"Vertex","bytes":1424,"samplers":0,"uniformBuffers":0,"name":"ssao_blur"}

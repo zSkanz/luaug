@@ -69,7 +69,14 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   floor is six texels now rather than two, paid for by rotating the 5×5 kernel
   per pixel so a wide fixed grid's banding becomes fine noise: pixels changing
   by more than four levels between consecutive frames fell from 62 to 14, and
-  the worst single change from 37 to 14, at no cost in taps. Two more were found by the milestone's own work: D045
+  the worst single change from 37 to 14. **Its second round** measured the edge
+  properly — a burst of 120 frames from one run, the edge's sub-pixel position
+  tracked by a profile crossing that the ambient cannot move — and found it
+  holding still for up to twenty-five frames, then jumping 3.6 pixels, twice
+  backwards. The cause was the filter's own arithmetic: it returns a COUNT of
+  taps, so one texel of the map flipping moves the edge by a twenty-fifth of
+  the penumbra. Forty-nine taps rather than twenty-five made the worst step
+  **0.75 pixels**, and the median frame did not move. Two more were found by the milestone's own work: D045
   (`luaug new` could not find its template and had not since M3) and D046 (two
   gates depended on a generated world that nothing generated).
 

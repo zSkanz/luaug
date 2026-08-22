@@ -87,9 +87,20 @@ inline constexpr f32 kShadowRadius = 220.0f;
 // penumbra, and a shadow edge with no penumbra shows the texel grid it was
 // rasterised on. A human saw that as dashes that crawl.
 //
-// What lets the radius be world-constant now is that the kernel is 5x5 with a
-// variable step rather than 3x3 with a fixed one: twenty-five bilinear taps can
+// What lets the radius be world-constant now is that the kernel is 7x7 with a
+// variable step rather than 3x3 with a fixed one: forty-nine bilinear taps can
 // cover eight texels without the gaps that made three bands.
+//
+// **Twenty-five became forty-nine at D054's second round**, and the reason is
+// not softness -- it is the SIZE OF A STEP. A filtered shadow value is a count
+// of taps, so it can only change by one tap's worth: with twenty-five, one
+// texel of the map flipping moves the edge by a twenty-fifth of the penumbra,
+// which measured as **3.6 pixels of jump** on a still scene at a low sun.
+// With forty-nine over the same radius the same flip moves it by 0.75. The
+// edge still advances in steps -- it must, with a lattice that turns -- but
+// the steps are now under a pixel, which is the difference between a shadow
+// that creeps and one that slides. Measured at no cost: the flagship's median
+// frame did not move (`docs/perf-baselines.md`).
 //
 // The band is still a band because the two ends are still real, and **both of
 // its numbers moved at D054**, which is the third report about the same edge.

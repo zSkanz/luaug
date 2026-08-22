@@ -577,7 +577,13 @@ metres, consecutive frames subtracted:
 | Floor 4, rotated | 117 | 20 | 35 |
 | **Floor 6, rotated** | **80** | **14** | **14** |
 
-The taps are the same twenty-five, so none of it costs anything measurable.
+And then the taps themselves, because a filter returns a COUNT of them and the
+smallest change it can express is one: with twenty-five, one texel of the map
+flipping moved a shadow edge 3.58 pixels; with forty-nine over the same radius
+it moves 0.75. **Neither change is measurable in a frame** — the flagship's
+median was 2.98 ms and 2.99 ms over two 2,400-frame runs with the 7x7 kernel,
+against 3.09 with the 5x5 one, which is inside the run-to-run spread this page
+warns about. At 1080p this scene is not bound by shadow taps.
 
 **Render interpolation costs nothing measurable** (D047). Forcing `alpha` to zero
 on the same scene moves the median by less than the run-to-run spread, because

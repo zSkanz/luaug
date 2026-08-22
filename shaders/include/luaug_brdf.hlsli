@@ -378,7 +378,7 @@ float sampleCascade(Texture2D<float> atlas, SamplerState pointSampler, uint casc
     // `texelWorld * tile` metres across -- so a step of one texel is this much
     // local uv, and half that much atlas uv. The 5x5 loop below reaches two
     // steps out, so a step is half the radius.
-    const float2 step2 = ((radiusTexels * 0.5f) / (0.5f * atlasSize)) * 0.5f;
+    const float2 step2 = ((radiusTexels / 3.0f) / (0.5f * atlasSize)) * 0.5f;
 
     // The tile: cascade 0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right.
     const float2 tile = float2(float(cascade & 1u), float(cascade >> 1u)) * 0.5f;
@@ -388,17 +388,26 @@ float sampleCascade(Texture2D<float> atlas, SamplerState pointSampler, uint casc
     // split. Clamping to the tile inset by the kernel is what stops it.
     // A rotated grid reaches its own DIAGONAL, not its edge, so the inset that
     // keeps a tap inside its own tile has to allow for the corner (D054).
-    const float2 inset = step2 * 2.83f + 0.5f / atlasSize;
+    const float2 inset = step2 * 4.25f + 0.5f / atlasSize;
     const float2 lowest = tile + inset;
     const float2 highest = tile + float2(0.5f, 0.5f) - inset;
 
-    // **Twenty-five taps rather than nine, and that is the change the artifact
-    // needed.** A shadow edge is quantised onto the shadow map's texel grid, and
+    // **Forty-nine taps rather than nine, and each of the two increases answered
+    // a different artifact.**
+    //
+    // Twenty-five over nine was about COVERAGE: a penumbra several texels wide
+    // cannot be drawn by a 3x3 grid without its own samples showing as bands.
+    // Forty-nine over twenty-five is about the SIZE OF A STEP (D054): this
+    // returns a count of taps, so the smallest change it can express is one
+    // tap, and one texel of the map flipping therefore moved a shadow edge by a
+    // twenty-fifth of the penumbra -- 3.6 pixels on a still scene at a low sun,
+    // which is a visible jump. A forty-ninth of the same penumbra is 0.75.
+    // A shadow edge is quantised onto the shadow map's texel grid, and
     // what hides that quantisation is a penumbra several texels wide. A 3x3 grid
     // cannot produce one: spread it far enough to cover the step and its own
     // three samples become visible as bands, which is why the radius was clamped
-    // to three texels and why the edge stayed hard. Five by five covers the same
-    // reach with the spacing filled in.
+    // to three texels and why the edge stayed hard. Seven by seven covers the
+    // same reach with the spacing filled in, and quantises four times as finely.
     //
     // Each tap is itself a bilinear four-texel comparison, so the footprint is a
     // little wider than the loop suggests and the corners of the grid carry less
@@ -418,17 +427,17 @@ float sampleCascade(Texture2D<float> atlas, SamplerState pointSampler, uint casc
 
     float lit = 0.0f;
     [unroll]
-    for (int y = -2; y <= 2; ++y)
+    for (int y = -3; y <= 3; ++y)
     {
         [unroll]
-        for (int x = -2; x <= 2; ++x)
+        for (int x = -3; x <= 3; ++x)
         {
             const float2 turned = float2(float(x) * cosine - float(y) * sine, float(x) * sine + float(y) * cosine);
             const float2 uv = clamp(tile + local * 0.5f + turned * step2, lowest, highest);
             lit += shadowTapPcf(atlas, pointSampler, uv, reference, atlasSize);
         }
     }
-    return lit / 25.0f;
+    return lit / 49.0f;
 }
 
 // How much of the sun reaches this fragment: 1 lit, 0 fully occluded.

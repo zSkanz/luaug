@@ -252,6 +252,23 @@ _(appended during the milestone)_
     unmistakable, where the same shadow seen from a standing eye is an edge at a
     glancing angle.
 
+    **The second round is where the measurement finally became a measurement.**
+    The report came back saying the worst hour had moved from noon to nine, and
+    a proper instrument settled it: a burst of 120 consecutive frames from one
+    run, with the shadow edge's SUB-PIXEL position tracked along a scanline by
+    where the profile crosses the midpoint of its own lit and dark ends — which
+    is invariant to the ambient drifting underneath it, and the first version of
+    this measurement was not. The edge held perfectly still for five to
+    twenty-five frames, jumped 3.6 pixels, and twice jumped BACKWARDS. That
+    reversal is the whole diagnosis: the sun turns one way, so a backwards jump
+    is the rasterisation flip-flopping rather than tracking.
+
+    And the cause was in the filter's arithmetic rather than in the fit: it
+    returns a COUNT of taps, so the smallest change it can express is one of
+    them, and one texel of the map flipping therefore moved the edge by a
+    twenty-fifth of the penumbra. Forty-nine taps over the same radius made the
+    worst step 0.75 pixels, and cost nothing measurable.
+
 10. **"It starts at eleven in the morning" is a diagnosis, and it separated two
     defects nobody could have told apart from the symptom** (D053). A human
     reported the world going temporally unstable partway through the day cycle:
