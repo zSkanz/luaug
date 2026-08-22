@@ -762,3 +762,123 @@ TEST_CASE("dragging Size and CFrame through their extremes does not take the hos
     CHECK_FALSE(app::formatValue(host.world(), *host.world().getProperty(target, sizeProperty)).empty());
     CHECK_FALSE(app::formatValue(host.world(), *host.world().getProperty(target, cframeProperty)).empty());
 }
+
+// --- D067: the scene is applied BEFORE the entry scripts run -----------------
+//
+// ADR 0047's lifecycle is load-then-start and `scene_file.h` says so in its
+// opening paragraph; E1 shipped it the other way round, and the bill arrived
+// the first time somebody opened the editor on a project whose script builds
+// its own world. A scene load REPLACES the contents of `Workspace`, so applied
+// after the boot drain it destroyed every instance the script had just made
+// while the VM kept its references and its connections -- and the first tick
+// after Play raised `instance_dead` once a frame forever.
+//
+// These two cases are the order, stated as behaviour rather than as sequence:
+// what the script builds survives a boot scene, and what the scene brings is
+// there for the script to find.
+
+namespace {
+
+[[nodiscard]] core::InstanceId bootChildNamed(app::WorldHost& host, std::string_view name)
+{
+    return host.world().findFirstChild(host.workspace(), host.world().atoms().lookup(name));
+}
+
+constexpr std::string_view kOnePartScene =
+    R"({"format":"luaug-scene","version":1,"root":{"class":"Workspace","name":"Workspace",)"
+    R"("children":[{"class":"Part","name":"FromTheScene","properties":{}}]}})";
+
+} // namespace
+
+TEST_CASE("a boot scene does not destroy what the entry scripts built")
+{
+    Captured log;
+    Project project;
+    project.write("src/scripts/init.luau", R"(
+        local part = Instance.new("Part")
+        part.Name = "BuiltByScript"
+        part.Parent = workspace
+    )");
+    project.write("content/scenes/main.scene.json", kOnePartScene);
+
+    app::WorldHost host;
+    app::WorldHostOptions options = app::testing::bootOptions(project.root);
+    options.bootScene = project.root / "content" / "scenes" / "main.scene.json";
+    REQUIRE_FALSE(host.boot(options).has_value());
+
+    CHECK(host.bootSceneApplied());
+    CHECK(host.bootSceneReport().instances == 1);
+
+    const core::InstanceId built = bootChildNamed(host, "BuiltByScript");
+    REQUIRE(built.valid());
+    // The whole of the defect in one line: with the load after the drain this
+    // id was destroyed and every script handle to it was dead.
+    CHECK(host.world().alive(built));
+    CHECK(bootChildNamed(host, "FromTheScene").valid());
+}
+
+TEST_CASE("an empty boot scene leaves a scripted world alone")
+{
+    Captured log;
+    Project project;
+    project.write("src/scripts/init.luau", R"(
+        local part = Instance.new("Part")
+        part.Name = "BuiltByScript"
+        part.Parent = workspace
+    )");
+    // Exactly what `New Scene` followed by `Save As` writes, which is the file
+    // that was actually on disk when this was reported.
+    project.write("content/scenes/main.scene.json",
+                  R"({"format":"luaug-scene","version":1,"root":{"class":"Workspace",)"
+                  R"("name":"Workspace","properties":{"CurrentCamera":null},"children":[]}})");
+
+    app::WorldHost host;
+    app::WorldHostOptions options = app::testing::bootOptions(project.root);
+    options.bootScene = project.root / "content" / "scenes" / "main.scene.json";
+    REQUIRE_FALSE(host.boot(options).has_value());
+
+    const core::InstanceId built = bootChildNamed(host, "BuiltByScript");
+    REQUIRE(built.valid());
+    CHECK(host.world().alive(built));
+}
+
+TEST_CASE("a scene the entry scripts can see, because it is there before they run")
+{
+    Captured log;
+    Project project;
+    project.write("src/scripts/init.luau", R"(
+        local found = workspace:FindFirstChild("FromTheScene")
+        local marker = Instance.new("Part")
+        marker.Name = if found then "SawTheScene" else "SawNothing"
+        marker.Parent = workspace
+    )");
+    project.write("content/scenes/main.scene.json", kOnePartScene);
+
+    app::WorldHost host;
+    app::WorldHostOptions options = app::testing::bootOptions(project.root);
+    options.bootScene = project.root / "content" / "scenes" / "main.scene.json";
+    REQUIRE_FALSE(host.boot(options).has_value());
+
+    CHECK(bootChildNamed(host, "SawTheScene").valid());
+    CHECK_FALSE(bootChildNamed(host, "SawNothing").valid());
+}
+
+TEST_CASE("a boot scene that will not read is reported and the world still boots")
+{
+    Captured log;
+    Project project;
+    project.write("src/scripts/init.luau", R"(
+        local part = Instance.new("Part")
+        part.Name = "BuiltByScript"
+        part.Parent = workspace
+    )");
+    project.write("content/scenes/main.scene.json", "{ this is not a scene");
+
+    app::WorldHost host;
+    app::WorldHostOptions options = app::testing::bootOptions(project.root);
+    options.bootScene = project.root / "content" / "scenes" / "main.scene.json";
+    REQUIRE_FALSE(host.boot(options).has_value());
+
+    CHECK_FALSE(host.bootSceneApplied());
+    CHECK(bootChildNamed(host, "BuiltByScript").valid());
+}

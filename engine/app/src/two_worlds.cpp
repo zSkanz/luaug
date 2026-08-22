@@ -98,6 +98,7 @@ struct Session
         .isReload = false,
         .preserved = nullptr,
         .conformanceRoot = {},
+        .bootScene = {},
     };
     return session.host.boot(worldOptions);
 }

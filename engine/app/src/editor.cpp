@@ -416,12 +416,61 @@ void Editor::newScene(scene::World& world, Inspector& inspector)
     m_status = EditorStatus{"new scene -- untitled until you save it", false};
 }
 
-bool Editor::saveSceneAs(const scene::World& world, std::string_view relativePath)
+std::string Editor::normalizeScenePath(std::string_view typed)
 {
-    std::string path(relativePath);
+    std::string path(typed);
+
+    // Typed by a person into a box the dialog has already labelled `content/`,
+    // so the prefix is the natural thing to type and the wrong thing to keep:
+    // it resolves against the content root and makes `content/content/`. This
+    // engine met that on its first real use (D068) and it left a scene nobody
+    // could open beside one nobody meant to save.
+    for (char& c : path) {
+        if (c == '\\')
+            c = '/';
+    }
+    while (!path.empty() && path.front() == '/')
+        path.erase(path.begin());
+    constexpr std::string_view kContentPrefix = "content/";
+    while (path.compare(0, kContentPrefix.size(), kContentPrefix) == 0)
+        path.erase(0, kContentPrefix.size());
+
     if (path.size() < kSceneExtension.size() ||
         path.compare(path.size() - kSceneExtension.size(), kSceneExtension.size(), kSceneExtension) != 0) {
         path += kSceneExtension;
+    }
+    return path;
+}
+
+bool Editor::sceneNameIsUsable(std::string_view typed) noexcept
+{
+    // A drive letter or a leading slash is a path out of the project, and `..`
+    // is the same thing spelled to look like a name. Every segment has to be a
+    // name the browser could have shown, which is the rule the New Folder box
+    // already applies -- applied here too, because a Save box that accepts what
+    // a New Folder box refuses is one rule with two answers.
+    if (typed.empty() || typed.find(':') != std::string_view::npos)
+        return false;
+
+    std::size_t begin = 0;
+    while (begin <= typed.size()) {
+        const std::size_t end = typed.find('/', begin);
+        const std::string_view segment = typed.substr(begin, end == std::string_view::npos ? end : end - begin);
+        if (!ContentTree::isUsableName(segment))
+            return false;
+        if (end == std::string_view::npos)
+            break;
+        begin = end + 1;
+    }
+    return true;
+}
+
+bool Editor::saveSceneAs(const scene::World& world, std::string_view relativePath)
+{
+    const std::string path = normalizeScenePath(relativePath);
+    if (!sceneNameIsUsable(path)) {
+        m_status = EditorStatus{"\"" + std::string(relativePath) + "\" is not a path inside content/", true};
+        return false;
     }
 
     if (!save(world, m_content.root() / std::filesystem::path(path)))

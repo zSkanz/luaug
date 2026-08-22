@@ -93,6 +93,7 @@ struct Sample
             .isReload = false,
             .preserved = nullptr,
             .conformanceRoot = {},
+            .bootScene = {},
         });
         error.has_value())
         return error;

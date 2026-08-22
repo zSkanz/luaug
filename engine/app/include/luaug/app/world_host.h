@@ -21,6 +21,7 @@
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/enum_registry.h"
 #include "luaug/scene/physics_sync.h"
+#include "luaug/scene/scene_file.h"
 #include "luaug/scene/world.h"
 #include "luaug/script/modules.h"
 #include "luaug/script/runtime.h"
@@ -82,6 +83,22 @@ struct WorldHostOptions
     // suite once `game.Loaded` has fired (api-design.md §3). Empty means an
     // ordinary run.
     std::filesystem::path conformanceRoot;
+
+    // **The authored world this run starts with, applied before a single line
+    // of script has run** (ADR 0047, and `scene_file.h`'s own opening: "boot
+    // reads it and then starts the scripts"). Absolute; empty for a project
+    // with no scene, which is every example before `06-scene`.
+    //
+    // The order is the whole of D067. A scene load REPLACES the contents of
+    // `Workspace` -- it has to, or a second load would double everything -- so
+    // applying one after the boot drain destroys every instance the entry
+    // scripts just built while the VM goes on holding references to them and
+    // its connections stay connected. The next tick then raises
+    // `instance_dead` on a handle that was valid when it was taken, once per
+    // frame, forever. Loading first cannot do that: there is nothing alive yet
+    // to invalidate, and a script that builds its world builds it on top of
+    // the file rather than under it.
+    std::filesystem::path bootScene;
 };
 
 // What the conformance run reported. Read after the loop, because the run ends
@@ -153,6 +170,13 @@ public:
     // nothing (M2 Finding 19).
     // What the restore did, filled during `boot`. Zeroes on a cold boot.
     [[nodiscard]] const PreserveReport& preserveReport() const noexcept { return m_preserveReport; }
+
+    // What `bootScene` did, filled during `boot`. `applied` is false when the
+    // project has no scene and when the one it names would not read -- the
+    // caller needs the difference, because an editor only adopts a scene it
+    // actually has.
+    [[nodiscard]] bool bootSceneApplied() const noexcept { return m_bootSceneApplied; }
+    [[nodiscard]] const scene::SceneIoReport& bootSceneReport() const noexcept { return m_bootSceneReport; }
 
     [[nodiscard]] core::u64 mountedScriptCount() const;
     [[nodiscard]] core::u64 scriptLoadFailures() const;
@@ -304,6 +328,8 @@ private:
     core::InstanceId m_uiService;
     audio::AudioSystem m_audio;
     PreserveReport m_preserveReport;
+    scene::SceneIoReport m_bootSceneReport;
+    bool m_bootSceneApplied = false;
     render::DebugDraw* m_gizmos = nullptr;
 
     // Aliases from the project's `.luaurc`, read once at boot. Parsed with

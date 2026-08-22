@@ -456,6 +456,16 @@ public:
     // does not carry it — a person typing a name should not have to know it.
     bool saveSceneAs(const scene::World& world, std::string_view relativePath);
 
+    // What `saveSceneAs` will actually write, given what somebody typed. Public
+    // and pure so the dialog can show the resolved path while it is being typed
+    // rather than after it has been saved to the wrong place, and so a test can
+    // drive it without a window (D068).
+    [[nodiscard]] static std::string normalizeScenePath(std::string_view typed);
+    // Whether a normalized path stays inside `content/`. False for a drive
+    // letter, for `..`, and for anything the content browser would refuse as a
+    // name.
+    [[nodiscard]] static bool sceneNameIsUsable(std::string_view typed) noexcept;
+
     // Names the scene the world already holds, without loading anything. The
     // boot path uses it: the engine loads a project's scene before the editor
     // exists, and the editor has to know which one that was.

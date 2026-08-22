@@ -313,6 +313,33 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
     if (options.preserved != nullptr)
         restorePreserved(*m_world, m_runtime->dataModel(), *options.preserved, m_preserveReport);
 
+    // **The authored world, before the behaviour that runs on it** (ADR 0047).
+    // After the mount, so a scene that names a class a project's own code
+    // registers finds it; after the preserved restore, so a reload's carried
+    // instances are in the tree the scene replaces around them; and before the
+    // scripts, which is the half D067 was.
+    //
+    // A scene that will not read is reported and the boot continues. The world
+    // then holds whatever the scripts build, which is the same world every
+    // project before `06-scene` has -- a run that refused to start because a
+    // file was malformed would be a worse answer than a run that says so.
+    if (!options.bootScene.empty()) {
+        std::string sceneText;
+        if (!readFile(options.bootScene, sceneText)) {
+            core::log(LogLevel::Warn, LUAUG_TR("scene.err.scene_unreadable"));
+        }
+        else if (const std::optional<core::EngineError> sceneError =
+                     scene::readScene(*m_world, sceneText, &m_bootSceneReport);
+                 sceneError.has_value()) {
+            core::logText(LogLevel::Error, sceneError->message);
+        }
+        else {
+            m_bootSceneApplied = true;
+            const std::array<I18nArg, 1> args{I18nArg{"count", static_cast<core::i64>(m_bootSceneReport.instances)}};
+            core::log(LogLevel::Info, LUAUG_TR("scene.info.scene_loaded"), args);
+        }
+    }
+
     script::startScripts(m_runtime->state());
 
     // The boot drain. api-design.md §3's lifecycle reads "start each Script on

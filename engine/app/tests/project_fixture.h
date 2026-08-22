@@ -115,6 +115,7 @@ struct Captured
         .isReload = false,
         .preserved = nullptr,
         .conformanceRoot = {},
+        .bootScene = {},
     };
 }
 

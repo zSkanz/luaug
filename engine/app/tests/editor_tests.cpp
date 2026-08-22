@@ -571,3 +571,42 @@ TEST_CASE("the engine's own instances cannot be deleted or duplicated")
     CHECK_FALSE(Editor::isEngineOwned(world, ordinary, root));
     CHECK(editor.deleteInstance(world, ordinary, root, inspector));
 }
+
+// --- D068: what a person types into Save Scene As ---------------------------
+//
+// The dialog labels its box `content/` and then resolved what was typed against
+// the content root, so the natural thing to type produced `content/content/`
+// and `createDirectories` made the folder without a word. The first person to
+// use it wrote a scene into a directory nothing would ever look in.
+//
+// Normalising is the fix and it is stated as a function so the dialog can show
+// the resolved path while it is still being typed -- a preview of where a file
+// will land is worth more than a rule nobody can see.
+
+TEST_CASE("a typed scene path resolves to somewhere inside content/")
+{
+    // The prefix the dialog's own label already supplies.
+    CHECK(Editor::normalizeScenePath("content/scenes/main") == "scenes/main.scene.json");
+    CHECK(Editor::normalizeScenePath("content/content/scenes/main.scene.json") == "scenes/main.scene.json");
+    // A name, which is the common case and must not be disturbed.
+    CHECK(Editor::normalizeScenePath("main") == "main.scene.json");
+    CHECK(Editor::normalizeScenePath("scenes/main.scene.json") == "scenes/main.scene.json");
+    // Typed on Windows, where the separator on the keyboard is the other one.
+    CHECK(Editor::normalizeScenePath("scenes\\main") == "scenes/main.scene.json");
+    CHECK(Editor::normalizeScenePath("/scenes/main") == "scenes/main.scene.json");
+    // A folder legitimately called `content` INSIDE the content root survives,
+    // because the prefix that is stripped is the one the label already showed.
+    CHECK(Editor::normalizeScenePath("levels/content/main") == "levels/content/main.scene.json");
+}
+
+TEST_CASE("a scene path that leaves content/ is refused rather than created")
+{
+    CHECK(Editor::sceneNameIsUsable("scenes/main.scene.json"));
+    CHECK(Editor::sceneNameIsUsable("main.scene.json"));
+
+    CHECK_FALSE(Editor::sceneNameIsUsable(""));
+    CHECK_FALSE(Editor::sceneNameIsUsable("../main.scene.json"));
+    CHECK_FALSE(Editor::sceneNameIsUsable("scenes/../../main.scene.json"));
+    CHECK_FALSE(Editor::sceneNameIsUsable("C:/main.scene.json"));
+    CHECK_FALSE(Editor::sceneNameIsUsable("scenes//main.scene.json"));
+}

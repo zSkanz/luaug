@@ -658,6 +658,35 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // across, and the host is what a reload destroys (ADR 0024).
     script::ReloadState reloadState;
 
+    // **The scene, if the project has one** (ADR 0047), chosen here and applied
+    // by `WorldHost::boot` BEFORE it starts the scripts -- which is the order
+    // the ADR describes and `scene_file.h` states, and which D067 is the cost
+    // of having had backwards.
+    //
+    // **Which scene opens, in order: what this person had open, what the
+    // project declares, then nothing.** The first is per-person state in
+    // `.luaug/`; the second is `[project] scene` in `luaug.toml`, which is the
+    // decision a project makes about what a RUN of it starts with. Nothing is
+    // an untitled world, which is what an editor opened on an empty project
+    // should be.
+    //
+    // A project with no scene file is not an error and never logs one. Every
+    // example before `06-scene` is exactly that.
+    std::string sceneRelative;
+    if (options.editor)
+        sceneRelative = Editor::recallOpenScene(options.scriptPath / ".luaug");
+    if (sceneRelative.empty() || !platform::fileExists(contentRoot / std::filesystem::path(sceneRelative)))
+        sceneRelative = options.startupScene;
+
+    std::filesystem::path bootScene;
+    if (!options.scriptPath.empty() && !sceneRelative.empty()) {
+        const std::filesystem::path candidate = contentRoot / std::filesystem::path(sceneRelative);
+        if (platform::fileExists(candidate))
+            bootScene = candidate;
+        else
+            sceneRelative.clear();
+    }
+
     WorldHostOptions worldOptions{
         .projectPath = options.scriptPath,
         .seed = options.worldSeed,
@@ -667,61 +696,17 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         .headless = options.headless,
         .preserved = nullptr,
         .conformanceRoot = options.conformanceRoot,
+        .bootScene = bootScene,
     };
 
     auto host = std::make_unique<WorldHost>();
     if (std::optional<core::EngineError> bootError = host->boot(worldOptions); bootError.has_value())
         return bootError;
 
-    // **The scene, if the project has one** (ADR 0047). Loaded after the boot
-    // drain rather than before it, which is not where the ADR eventually puts
-    // it: the lifecycle it describes is load-then-start, and this engine's
-    // `WorldHost::boot` starts the scripts as part of booting. For a project
-    // whose scripts do not build a world -- which is what the ADR asks projects
-    // to become -- the two orders produce the same world, and `examples/06-scene`
-    // is the one that proves it. For a project that still builds its world in
-    // code, this order lets the file win, and that is the honest behaviour to
-    // ship until the lifecycle moves.
-    //
-    // A project with no scene file is not an error and never logs one. Every
-    // example before `06-scene` is exactly that.
-    // **Which scene opens, in order: what this person had open, what the project
-    // declares, then nothing.** The first is per-person state in `.luaug/`; the
-    // second is `[project] scene` in `luaug.toml`, which is the decision a
-    // project makes about what a RUN of it starts with. Nothing is an untitled
-    // world, which is what an editor opened on an empty project should be.
-    std::string sceneRelative;
-    if (options.editor)
-        sceneRelative = Editor::recallOpenScene(options.scriptPath / ".luaug");
-    if (sceneRelative.empty() || !platform::fileExists(contentRoot / std::filesystem::path(sceneRelative)))
-        sceneRelative = options.startupScene;
-
-    const std::filesystem::path bootScene =
-        sceneRelative.empty() ? std::filesystem::path{} : contentRoot / std::filesystem::path(sceneRelative);
-    if (!options.scriptPath.empty() && !bootScene.empty() && platform::fileExists(bootScene)) {
-        const std::filesystem::path scenePath = bootScene;
-        std::string sceneText;
-        if (!platform::readTextFile(scenePath, sceneText)) {
-            core::log(core::LogLevel::Warn, LUAUG_TR("scene.err.scene_unreadable"));
-        }
-        else {
-            scene::SceneIoReport sceneReport;
-            if (const std::optional<core::EngineError> sceneError =
-                    scene::readScene(host->world(), sceneText, &sceneReport);
-                sceneError.has_value()) {
-                core::logText(core::LogLevel::Error, sceneError->message);
-            }
-            else {
-                const core::I18nArg args[] = {{"count", static_cast<core::i64>(sceneReport.instances)}};
-                core::log(core::LogLevel::Info, LUAUG_TR("scene.info.scene_loaded"), args);
-                // The editor is told which scene the world holds, so its save
-                // writes back to that one rather than refusing for want of an
-                // open scene.
-                if (options.editor)
-                    editor.adoptOpenScene(sceneRelative);
-            }
-        }
-    }
+    // The editor is told which scene the world holds, so its save writes back
+    // to that one rather than refusing for want of an open scene.
+    if (options.editor && host->bootSceneApplied())
+        editor.adoptOpenScene(sceneRelative);
 
     // `game`, which is where the tree the explorer walks starts. Re-pointed
     // after every reload, because a reload destroys this world and builds

@@ -219,6 +219,7 @@ std::optional<core::EngineError> runScenario(const ReplayScenario& scenario, Rep
             .isReload = false,
             .preserved = nullptr,
             .conformanceRoot = {},
+            .bootScene = {},
         });
         error.has_value())
         return error;

@@ -1157,17 +1157,23 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
             ImGui::InputText("##scene-path", path.data(), path.size(), ImGuiInputTextFlags_EnterReturnsTrue);
         const std::string typed(path.data());
 
-        const bool carriesExtension =
-            typed.size() >= kSceneExtension.size() &&
-            std::string_view(typed).substr(typed.size() - kSceneExtension.size()) == kSceneExtension;
-        // Shown before anything is pressed. A name that grows an extension
-        // somebody did not type is a file they will look for under the wrong
-        // one.
-        ImGui::TextDisabled("saves as content/%s%s", typed.c_str(),
-                            carriesExtension ? "" : std::string(kSceneExtension).c_str());
+        // The RESOLVED path, not the typed one. The label above the box already
+        // says `content/`, so `content/scenes/main` is the natural thing to
+        // type and used to be saved verbatim into `content/content/` -- D068,
+        // found by the first person to use this dialog. Showing what will
+        // actually be written is what makes the normalisation visible instead
+        // of surprising.
+        const std::string resolved = Editor::normalizeScenePath(typed);
+        const bool usable = !typed.empty() && Editor::sceneNameIsUsable(resolved);
+        if (usable)
+            ImGui::TextDisabled("saves as content/%s", resolved.c_str());
+        else if (typed.empty())
+            ImGui::TextDisabled("saves as content/…");
+        else
+            ImGui::TextDisabled("not a path inside content/");
 
         ImGui::Spacing();
-        ImGui::BeginDisabled(typed.empty());
+        ImGui::BeginDisabled(!usable);
         const bool accepted = ImGui::Button("Save", ImVec2(120.0f, 0.0f));
         ImGui::EndDisabled();
         ImGui::SameLine();
@@ -1176,7 +1182,7 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
             ImGui::CloseCurrentPopup();
         }
 
-        if ((submitted || accepted) && !typed.empty()) {
+        if ((submitted || accepted) && usable) {
             commands.saveAs = typed;
             path.fill(0);
             ImGui::CloseCurrentPopup();
