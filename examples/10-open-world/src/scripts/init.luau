@@ -300,6 +300,60 @@ local TurnStick = Instance.new("InputBinding")
 TurnStick.KeyCode = Enum.KeyCode.RightThumbstick
 TurnStick.Parent = TurnAction
 
+--- The mouse, and it is a SEPARATE action from `Turn` on purpose.
+---
+--- A stick is a rate and a mouse is a displacement: `MouseMovement` reports the
+--- pointer's motion this tick in pixels, which is already the amount to turn by.
+--- Feeding both into one action would mean one of them was scaled by `dt`
+--- wrongly -- and a mouse multiplied by a frame time turns twice as far on a
+--- slow machine, which is the most common way a look control feels broken.
+--- `rig:Turn` takes the rate and `rig:Look` takes the displacement.
+local LookAction = Instance.new("InputAction")
+LookAction.Name = "Look"
+LookAction.Type = Enum.InputActionType.Direction2D
+LookAction.Parent = CameraControls
+
+local LookMouse = Instance.new("InputBinding")
+LookMouse.KeyCode = Enum.KeyCode.MouseMovement
+LookMouse.DisplayName = "Mouse"
+LookMouse.Parent = LookAction
+
+--- Left Alt locks and unlocks the pointer.
+---
+--- On the gameplay context rather than the camera one, because it is a state
+--- change rather than a camera motion -- and on the SIM clock, so a replay sees
+--- it happen on a tick like everything else.
+local PointerAction = Instance.new("InputAction")
+PointerAction.Name = "TogglePointer"
+PointerAction.Parent = Gameplay
+
+local PointerKey = Instance.new("InputBinding")
+PointerKey.KeyCode = Enum.KeyCode.LeftAlt
+PointerKey.DisplayName = "Left Alt"
+PointerKey.Parent = PointerAction
+
+-- **Locked at boot**, because a third-person camera that needs a click before
+-- it responds is a camera that feels broken for the first second of every
+-- session. `PointerVisible` follows it: a cursor drawn over a locked pointer
+-- sits frozen in the middle of the screen, which reads as a stuck cursor rather
+-- than as a hidden one.
+--
+-- Both are wishes rather than guarantees -- a headless run has no window to lock
+-- a pointer to, and writing them there is a no-op rather than an error.
+InputService.PointerLocked = true
+InputService.PointerVisible = false
+
+-- `StateChanged` rather than reading the state each tick, because a toggle is an
+-- EDGE: `GetState` is true for as long as the key is held, so a per-tick read
+-- would flip the lock sixty times a second while somebody leaned on Alt.
+PointerAction.StateChanged:Connect(function()
+    if not (PointerAction:GetState() :: boolean) then
+        return
+    end
+    InputService.PointerLocked = not InputService.PointerLocked
+    InputService.PointerVisible = not InputService.PointerLocked
+end)
+
 -- --- The HUD -----------------------------------------------------------------
 
 local screen = Instance.new("ScreenGui")
@@ -347,7 +401,7 @@ local hintLabel = readout("Hint")
 -- A game's own user-facing text is the GAME's, not the engine's: it is authored
 -- here in the language the project ships in, exactly as `examples/04-obby`
 -- does. R3 governs strings the ENGINE puts on a screen.
-hintLabel.Text = "WASD move · Shift sprint · Space jump · Arrows look"
+hintLabel.Text = "WASD move · Shift sprint · Space jump · Mouse look · Left Alt frees the cursor"
 
 -- --- The loop ----------------------------------------------------------------
 
@@ -467,6 +521,12 @@ RunService.Heartbeat:Connect(function(dt: number)
     -- character that walked in last frame's direction turns a fraction of a
     -- second after the camera does, which reads as drag on the controls.
     rig:Turn(TurnAction:GetState() :: Vector2, dt)
+    -- Only while the pointer is locked. Unlocked, the motion belongs to whatever
+    -- the player is doing with the cursor, and a camera that kept turning would
+    -- be reading somebody else's input.
+    if InputService.PointerLocked then
+        rig:Look(LookAction:GetState() :: Vector2)
+    end
     local forward, right = rig:Basis()
 
     character.WalkSpeed = if SprintAction:GetState() :: boolean then 13 else 7

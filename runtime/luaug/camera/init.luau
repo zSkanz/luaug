@@ -39,6 +39,16 @@ export type Rig = {
     --- `InputAction` of type `Direction2D` hands you exactly this -- and `dt`
     --- makes the rate frame-independent.
     Turn: (self: Rig, delta: Vector2, dt: number) -> (),
+    --- Turns the rig by a DISPLACEMENT rather than at a rate, which is what a
+    --- mouse gives: `Enum.KeyCode.MouseMovement` reports the pointer's motion
+    --- this tick in pixels, and that motion is already the amount to turn by.
+    ---
+    --- **Never scale a mouse by `dt`.** A stick is a rate -- held at full
+    --- deflection it should turn the same amount per second whatever the frame
+    --- rate -- and a mouse is a distance the hand already moved. Multiplying one
+    --- by the other makes a mouse that turns twice as far on a slow machine,
+    --- which is the single most common way a look control feels wrong.
+    Look: (self: Rig, delta: Vector2) -> (),
     --- Moves the camera towards where it should be. Call once per SIMULATION
     --- tick; see the note at the top for why not `PreRender`.
     Update: (self: Rig, dt: number) -> (),
@@ -61,6 +71,9 @@ export type Options = {
     Focus: number?,
     --- Radians per second at full stick deflection.
     TurnRate: number?,
+    --- Radians per PIXEL of pointer motion, for `Look`. About a quarter of a
+    --- degree per pixel, which is where most first-person defaults sit.
+    LookSensitivity: number?,
     --- How fast the camera closes the distance to where it should be, per
     --- second. Higher is stiffer; the clamp inside `Update` is what stops a
     --- frame-rate hitch teleporting it.
@@ -78,6 +91,11 @@ RigImpl.__index = RigImpl
 function RigImpl.Turn(self: any, delta: Vector2, dt: number)
     self.Yaw += self.TurnRate * delta.X * dt
     self.Height = math.clamp(self.Height + self.TurnRate * 3 * delta.Y * dt, self.MinHeight, self.MaxHeight)
+end
+
+function RigImpl.Look(self: any, delta: Vector2)
+    self.Yaw += self.LookSensitivity * delta.X
+    self.Height = math.clamp(self.Height - self.LookSensitivity * 12 * delta.Y, self.MinHeight, self.MaxHeight)
 end
 
 function RigImpl.Basis(self: any): (vector, vector)
@@ -130,6 +148,7 @@ function Camera.thirdPerson(options: Options): Rig
         Height = options.Height or 6,
         Focus = options.Focus or 2,
         TurnRate = options.TurnRate or 2.2,
+        LookSensitivity = options.LookSensitivity or 0.004,
         Smoothing = options.Smoothing or 8,
         MinHeight = options.MinHeight or 3,
         MaxHeight = options.MaxHeight or 24,

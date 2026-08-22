@@ -17,7 +17,15 @@ examples\10-open-world\run.bat --quality=low      # the same world on a weaker m
 examples\10-open-world\run.bat --headless --frames=600 --exit --screenshot=out.png
 ```
 
-**WASD** to move, **Shift** to sprint, **Space** to jump, **arrow keys** to look.
+**WASD** to move, **Shift** to sprint, **Space** to jump, **the mouse** to look,
+**Left Alt** to free the cursor and take it back. Arrow keys and a gamepad's
+right stick turn the camera too.
+
+The pointer is locked at boot, because a camera that needs a click before it
+responds feels broken for the first second of every session. The mouse and the
+stick are **separate actions** on purpose: a stick is a rate and a mouse is a
+displacement, and multiplying a mouse by a frame time makes it turn twice as far
+on a slow machine.
 
 ## What to watch for
 
