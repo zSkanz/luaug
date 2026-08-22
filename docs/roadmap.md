@@ -1084,9 +1084,27 @@ only its position moved.
      behind it, instead of showing a hard intersection line — need to sample the
      scene's depth, which is exactly the seam M7.5 was required to leave open for
      water foam and SSAO. Third caller for that one.
-   - **Decals** — a bullet hole, a puddle, graffiti, a scorch mark. A texture
-     projected onto whatever geometry is already there. Shares the depth seam
-     with particles, and shares the blended pass.
+   - **Decals — projected, never per-face** (human decision, 2026-08-21). A
+     bullet hole, a puddle, graffiti, a scorch mark. The reference API parents a
+     decal to a part and picks a `Face`, which covers that whole face and only
+     exists on an axis-aligned side of a primitive — so a bullet hole is not
+     expressible, and every shooter on that platform fabricates a thin part or a
+     surface GUI at the impact instead. Here a decal is **a thing in the world
+     with a position and an orientation**, projected onto whatever geometry is
+     already there: curved, sculpted, skinned, anything.
+
+     **The canonical input already exists and has since M5.** `Workspace:Raycast`
+     returns a `RaycastResult` carrying `Position` and `Normal`, which is exactly
+     a decal's placement — `CFrame.lookAt(hit.Position, hit.Position + hit.Normal)`
+     and a size, with no parent part and no face to choose. Whatever else the
+     class grows, that call has to remain the one-liner.
+
+     Projection reads the scene's depth, making decals the **fourth caller** of
+     the seam M7.5 was required to leave open — after water foam, SSAO and soft
+     particles. Mesh decals (clipping the hit triangles into a small hugging
+     mesh) are the alternative: more exact on complicated geometry, no depth
+     read, but CPU work per decal and access to the mesh. Choose with the reason
+     written down.
    - **Terrain** — a sculpted, collidable landscape rather than a floor made of
      parts. Jolt has a height-field shape, so the physics half is a shape type
      rather than a system; the render half is a chunked LOD surface, which is
