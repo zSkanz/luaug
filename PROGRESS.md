@@ -5,76 +5,55 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- **E1 — The Editor Opens — BUILT, awaiting review (2026-08-22).** Post-v1 phase 1,
-  opened by human decision the same day v1.0.0 shipped. `luaug edit
-  examples/10-open-world` boots a windowed host that draws a dockspace instead of
-  a game's overlay: explorer, a viewport rendering the world into its own texture,
-  properties and stats, a console, and a layout remembered in the project's
-  `.luaug/`. The picture is
-  [`docs/images/e1/editor-first-light.png`](docs/images/e1/editor-first-light.png)
-  and the brief is [`docs/briefs/e1-kickoff.md`](docs/briefs/e1-kickoff.md), with
-  five Findings and a filled Gate Record.
+- **E1 — The Editor — COMPLETE, signed off 2026-08-22**, tagged `milestone/e1`. Post-v1 phase 1,
+  opened by human decision the same day v1.0.0 shipped. `luaug edit` is an
+  application: a menu bar, dockable panels, a viewport you click and fly through,
+  **play / pause / step / stop**, **save**, a **content browser** with folders and
+  right-click menus, and **undo and redo**. The brief is
+  [`docs/briefs/e1-kickoff.md`](docs/briefs/e1-kickoff.md), with the Gate Record,
+  what the milestone became, and what it deliberately does not have.
 
-  **The shape was decided by measurement rather than by taste** (ADR 0046). Five
-  read-only passes over the repository before a line was written found that
-  ADR 0011 had already named the editor on the ImGui side four milestones
-  earlier; that a Luau editor is *blocked* rather than expensive, because the game
-  VM has no filesystem and R4 does not bend for tooling; and that
-  `engine/scene/src/world_hash.cpp:182-278` is a whole-world serializer with a
-  `Hasher` where a writer should be — which is E3's answer, found in E1's week.
+  **Read the brief's first paragraph before planning E2.** This milestone was
+  opened as "the editor opens" and closed as an editor, absorbing most of what
+  the first cut called E2. Every addition came from a person using it and every
+  one was right — but a milestone this size is not a template, and the roadmap
+  now says so where the next one is planned.
 
-  **What is honestly missing**, and it is in the Gate Record rather than buried:
-  the viewport draws no selection highlight, which was scope and was not built;
-  nobody has clicked a part with a real mouse, so the pick path is proven
-  headlessly and not visibly; and the ImGui overlay refuses to start without a
-  window, so **the editor cannot be screenshotted headlessly at all** — every
-  picture of it has to be captured from a real window. A milestone that wants a
-  golden of the editor has to make the shell render headlessly first.
+  **The shape was decided by measurement** (ADR 0046): five read-only passes over
+  the repository before a line was written found that ADR 0011 had already named
+  the editor on the ImGui side four milestones earlier; that a Luau editor is
+  *blocked* rather than expensive, because the game VM has no filesystem and R4
+  does not bend for tooling; and that `world_hash.cpp`'s deterministic walk is a
+  whole-world serializer with a `Hasher` where a writer should be.
 
-- **M8 — Flagship, Hardening, Docs, v1.0 — COMPLETE, signed off 2026-08-22, and
-  RELEASED the same day**, tagged `milestone/m8` and `v1.0.0`. Every tag is on
-  `origin` and the GitHub release carries the flagship's Windows folder:
-  <https://github.com/zSkanz/luaug/releases/tag/v1.0.0>. **The repository is
-  still private, so that release is visible to the account and to nobody else** —
-  which is a decision rather than an oversight, and it is below.
-  The brief is [`docs/briefs/m8-kickoff.md`](docs/briefs/m8-kickoff.md), with
-  five decisions, twelve Findings and a filled Gate Record.
+  **And the world became data** (ADR 0047, human decision): a scene is an asset
+  under `content/`, a project declares which one a RUN starts with, and the
+  editor remembers which one a PERSON had open. `examples/06-scene` is the first
+  project here whose world is not in its script. Code-first is not deprecated by
+  it — `Instance.new` at runtime stays first-class the way it is in Unity.
 
-  **What the review rounds cost and were worth.** The sign-off came after five
-  more defects the human found by playing it — D050 through D054 — every one of
-  them invisible to every gate in this repository, and the last of them
-  (D055) came from reading the gate record's own list of what the milestone had
-  measured and not fixed. That is eleven defects in one milestone, eight of
-  them from a person running the thing while the whole suite was green.
+  **Seven defects, six of them found by a person opening the thing**, and **five
+  of those are one architectural mistake appearing five times**: the editor
+  inheriting the game's decisions instead of taking them. The rule that resolves
+  them is one sentence and it now governs the tick, the cursor, the audio, the
+  camera and the keyboard — *while the editor is editing, the tool owns the
+  machine, and pressing play hands it back.*
 
-  **The deliverable is [`examples/10-open-world`](examples/10-open-world/)** — a
-  third-person character walking 4.35 km of streamed terrain under a sun that
-  crosses the sky, with a HUD, ambient sound, physics, mouse look and hot reload
-  that puts you back where you were standing. **Play it before reading anything
-  else**; the rest of this entry is what it took.
+  **What it does not have**, in full at the end of the brief and in short here:
+  no manipulators, no creating an instance, no multi-select; a stop that restores
+  the world and not the Luau VM; and ADR 0047's boot order still inverted. And
+  one thing that is not a gap but a limit worth knowing: **the ImGui shell cannot
+  render headlessly and SDL does not accept injected input**, so there is no
+  automated path to a picture of this editor or to a click inside it. Every image
+  in `docs/images/e1/` was captured from a real window, and every visual claim in
+  the Gate Record rests on a person having looked.
 
-  **The numbers that bind.** The ten-minute soak at 1080p on the reference
-  machine: median **5.35 ms**, p99 **8.79 ms**, **one frame of 35,939** over
-  16.7 ms, zero streaming hitches, peak resident equal to final resident at
-  168 MiB, instances flat at ~4,300. The absolute targets in
-  `docs/perf-baselines.md` said "bind at M8" and now say what they measured.
-
-  **Eight of its eleven defects were found by a human running the demo while
-  every gate was green** -- D047 through D054, plus the inverted camera. The
-  narrative moved to [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md);
-  each one is `fixed` in [`docs/defects.md`](docs/defects.md) with its full
-  diagnosis. The pattern is the entry's whole point and it has now repeated in
-  every milestone since M4.
-
-  **What is new that a reader should know about**: render interpolation
-  (`render::TransformHistory`); the graphics settings family (ADR 0044) with
-  presets, `luaug.toml` and flags, gated by a differential rather than a golden;
-  `luaug build` producing a folder that runs, with the game's own icon read back
-  out of the artifact (ADR 0045); the editor-seam proof, which is ADR 0017's
-  four-milestone-old condition finally checked — two worlds, two VMs, two
-  targets; a TOML reader in `core`; a licence audit as a standing check; the
-  generated API reference under `docs/api/`; and `@luaug/camera`.
-
+- **M8 — Flagship, Hardening, Docs, v1.0 — COMPLETE and RELEASED 2026-08-22**,
+  tagged `milestone/m8` and `v1.0.0`, both on `origin`, with the GitHub release
+  at <https://github.com/zSkanz/luaug/releases/tag/v1.0.0>. Its entry moved to
+  [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md) when E1
+  was written up. **The repository is still private**, so that release reaches
+  the account and nobody else — a decision, and it is under Blocked below.
 - **M7.5 and M7 — COMPLETE, signed off 2026-08-22 and 2026-08-21**, tagged.
   Their entries moved to [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md)
   when E1 was written up; the briefs carry the Gate Records. **The one to carry
@@ -130,25 +109,16 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
   citations. That file exists because three human-reported defects were removed
   from this one while it was being rewritten to close M4. **A close rewrites this
   file wholesale; it can no longer take the open list with it.**
-- **E1 IS NOT FINISHED, and what is left is written down rather than remembered.**
-  The loop is built — play snapshots, stop restores, save writes a scene, and the
-  five wrong-owner defects are fixed. **What was added at review and is not built
-  yet is the content browser**, and the shape was decided by the human: the
-  content directory is the asset manager and it stores every scene, so opening
-  one loads it. **The term is SCENE and never "place"** (human decision,
-  2026-08-22) — the Roblox comparison is what produced the design and is not a
-  name this engine adopts.
-
-  That **reverses** the first implementation. A scene is currently written to
-  `main.scene.json` at the project root, one per project, treated as source. It
-  should be `content/scenes/<name>.scene.json`, addressed by URN and resolved
-  through `ContentMounts` like a mesh, with as many per project as somebody
-  wants. The remaining work, in order: move scenes into the content tree; a
-  docked content browser with folders over the whole asset tree; opening a scene
-  loads it and the editor saves back to the one that is open; creating a folder
-  from the panel. **Virtualised** — the quality bar was given as Unity and
-  Unreal, and for a browser that is a measurement about a tree of thousands of
-  entries rather than an adjective. `ImGuiListClipper` is vendored and unused.
+- **E2 owes the manipulators and nothing else**, because E1 absorbed the rest.
+  Translate, rotate and scale in the viewport; creating an instance; reparenting
+  by drag; multi-select. The brief's "what E1 deliberately does not have" is the
+  full list and nothing on it was discovered late.
+- **`openworld_soak` flaked once and is D066.** It failed E1's first closing gate
+  and passed twice immediately after, on the same binary. Not quarantined -- §12
+  sets that at twice -- and written down so the second time is recognised. If the
+  diagnosis holds, the check is measuring the machine as well as the engine, and
+  widening the threshold would remove the only instrument watching a streamed
+  world for a leak.
 
 - **The phase was re-cut at E1's review and ADR 0047 is why** (human decision,
   2026-08-22). The first split put manipulators, saving and play in three
@@ -287,33 +257,42 @@ Entries for the planning session and for M0 through M4 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
 
-- **2026-08-22 (session 17, Claude Opus): E1 built — the editor opens.** Post-v1
-  phase 1 opened by human decision, specified, and its first milestone built to
-  the point where a person can look at it.
+- **2026-08-22 (session 17, Claude Opus): E1 built — the editor.** Post-v1
+  phase 1 opened by human decision, specified, and built through eight rounds of
+  review with the person using it after every one.
 
-  **Did:** five parallel read-only reconnaissance passes over the repository
-  before writing anything; ADR 0046; the phase's five milestones in the roadmap
-  with E1 specified and gated; `luaug edit`; an editor mode with a dockspace, a
-  viewport rendering into its own texture, and a layout built on first launch and
-  remembered; picking as arithmetic with eleven tests aimed at the corners; enum
-  identity and documentation reaching the runtime through the generated
-  descriptors; and D056 fixed with a gate stage that builds and links the
-  `shipping` profile every run.
+  **Did:** five parallel read-only passes over the repository before writing
+  anything; ADR 0046 and ADR 0047; the phase's milestones in the roadmap;
+  `luaug edit`; the shell, dockspace, viewport, picking and fly camera; the loop
+  — play, pause, step, stop, save — on three run states and `World::snapshot`;
+  the scene format and `examples/06-scene`; the content browser; the application
+  menu; context menus; undo and redo; and D056's `shipping` profile fixed with a
+  gate stage that builds and links it every run.
 
-  **Learned, and it is the same lesson this project keeps buying:** every test
-  passed on the first launch of the editor, and the first launch was five panels
-  in a pile with the viewport underneath them. `DockSpaceOverViewport` makes
-  docking possible and docks nothing. One screenshot said so and nothing else
-  could have.
+  **Learned, and it is one lesson said five ways.** D058 the world already
+  running, D059 the cursor vanishing, D060 the audio playing, D061 the camera
+  flickering, D062 the input going two places — five reports, one architectural
+  mistake: the editor was inheriting the game's decisions instead of taking them.
+  No amount of arbitrating who wins settles that, because the disagreement IS the
+  design. The camera was the clearest: it wrote `Workspace.CurrentCamera`, which
+  made the tool and the game two authors of one transform, and the fix was for
+  the editor to own a camera the world does not contain.
 
-  **Also learned:** a research claim is a lead rather than a fact. Testing one —
-  that `shipping` should not compile — found a *different* first failure, and
-  following it found that the release published an hour earlier is a development
-  build carrying a debug overlay and a Luau REPL. Both are recorded (D056, D057);
-  the notes on the release now say what the binary is.
+  **Also learned, and it cost a round of somebody's time**: a patch that asserts
+  half way and writes at the end writes NOTHING, and the build passed anyway
+  because the signature it would have changed had not changed either. I reported
+  the context menus as done on the strength of having run the patch rather than
+  having read the result (D064). Every script that edits this repository now
+  re-reads the file after writing and fails if what it added is not there — **an
+  edit that cannot be verified is an edit that did not happen.**
 
-  **Next:** E2 owes the selection highlight first, because it is the one E1 scope
-  item that was written down and not built.
+  **And a third time the same shape**: `setPointerLocked`'s result was discarded
+  with a `(void)`, so a refused pointer lock and a granted one looked identical
+  from outside. The log that replaced it is what turned D063 from three guesses
+  into a fact in one run.
+
+  **Next:** E2 owes the manipulators, creating an instance, reparenting by drag
+  and multi-select — and nothing else, because E1 absorbed the rest.
 
 - **2026-08-22 (session 16, Claude Opus): v1.0.0 RELEASED.** Ran the §2 boot
   sequence on a repository whose milestones were all closed, and it earned its

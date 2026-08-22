@@ -1245,18 +1245,39 @@ stop and get their change back, and save it. What was already built — the shel
 picking, the transport, the fly camera — is the first part of that milestone
 rather than the whole of it.
 
+**And re-cut once more, at the end of E1 rather than at its start**, because
+that is when it became clear what E1 had actually become. It was opened as "the
+editor opens" and closed as an editor: the loop, the content browser, the
+application menu, undo and redo, context menus, and a scene format. Every one of
+those was asked for at review, each was right, and **the honest record is that
+this milestone absorbed most of what the first cut called E2** — which is worth
+saying plainly so the next milestone is not planned as though a milestone this
+size were normal.
+
 | ID | Name | Size | Runnable artifact |
 |----|------|------|-------------------|
-| E1 | The Editor, the Loop, and the Content Browser | XL | `luaug edit`: docked panels and a viewport you can click and fly through; **play, stop and save**; and a **content browser** over a project's assets, with folders, from which **opening a scene loads it**. Open a scene, move something, press play, watch it run, press stop and get your edit back, press save, open a different scene, come back to the first one and it is as you left it |
-| E2 | The Editor Changes Things | L | Manipulators, create/delete/rename/reparent, undo/redo, multi-select — the authoring the loop makes worth having |
-| E3 | Assets and Prefabs | M | An asset browser, prefabs as scenes, and a scene that references what it uses |
+| E1 | The Editor | XXL | `luaug edit`: an application with a menu bar and dockable panels; a viewport you click, fly and select in; **play, pause, step, stop and save**; a **content browser** with folders and context menus, from which **opening a scene loads it**; **undo and redo**; and a scene format that makes a project's world data. **Built, awaiting review** |
+| E2 | Moving Things | L | Translate, rotate and scale manipulators; creating instances; reparenting by drag; multi-select — the direct manipulation the loop and the undo stack make safe |
+| E3 | Assets and Prefabs | M | Prefabs as scenes, an asset importer path from the browser, and a scene that references what it uses |
 | E4 | The Editor Ships | M | The distribution question ADR 0046 deliberately declined, and the editor's own performance gate |
+
+**What moved into E1 and why it was right.** Undo was E2's, and E1 grew delete
+and duplicate — the two actions that make its absence dangerous. The content
+browser was E3's, and it moved when a scene became an asset (ADR 0047), because
+there is no way to open a scene without somewhere to open it from. Rename and
+delete were E2's, and they arrived with the browser for the same reason.
+
+**What is left in E2 is what E1 could not have done first**: a manipulator needs
+something that keeps the change (E1's save) and something that takes it back
+(E1's undo), and designing either before those existed would have been designing
+them twice.
 
 **Why the manipulators come after the loop, which is the opposite of the first
 cut.** A manipulator without a save is a way to lose work, and an undo stack
 designed before there is a scene to undo *into* is an undo stack designed twice.
 The loop first makes every one of those tools land against something that keeps
-them.
+them — and by the end of E1 both of those foundations existed, which is why the
+manipulators are all that E2 still owes.
 
 ### E1 — The Editor, the Loop, and the Content Browser (XL)
 

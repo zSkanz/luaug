@@ -153,7 +153,38 @@ what it did not have was anything to make a newcomer use it, which is what
 
 ## Gate Record
 
-Run 2026-08-22, on the reference machine.
+**SIGNED OFF 2026-08-22.** The human opened the editor, used it across eight
+rounds of review, reported six of this milestone's seven defects by doing so, and
+said close it.
+
+Closing run, 2026-08-22, on the reference machine.
+
+**`scripts/localgate.ps1` — green on all six stages:**
+
+```
+  ok    docs (14.2 s)
+  ok    luau (10 s)
+  ok    format (13.2 s)
+  ok    windows (61.6 s)
+  ok    linux (76.3 s)
+  ok    shipping (21.5 s)
+green (macOS is Tier-3 and only CI can build it)
+```
+
+44 ctest targets on Windows and 41 in the Tier-2 container, 1,109 conformance
+cases on each.
+
+**And the run before it failed, which is recorded rather than replaced.**
+`openworld_soak` reported the world growing from 4,269 to 5,385 instances
+between the second and fourth quarters, then passed twice in a row when re-run
+alone minutes later on the same binary. It is D066, open and not quarantined --
+§12 sets that bar at flaking twice and this is once, so it is written down for
+the second time to be recognised as a second. The hypothesis the evidence
+supports is that streaming's budget is denominated in milliseconds, which makes
+the resident set sensitive to what else the machine is doing; the failing run
+shared it with a container build and an interactive editor.
+
+### The earlier run, for the record
 
 **`scripts/localgate.ps1` — green on all six stages** (the sixth is new this
 milestone):
@@ -198,19 +229,82 @@ built arrangement — explorer 351 px left, viewport centre as `CentralNode=1`,
 console below it, properties and stats tabbed right — and a second launch reads
 it back instead of rebuilding.
 
+### What this milestone became
+
+Written as a list because eight rounds of review is not a paragraph. Each line is
+something that did not exist when the milestone opened.
+
+**The application.** A menu bar — File, Edit, Window, Help — with the open scene
+named on the right. Dockable panels, a layout built on first launch and
+remembered per person, panels closable from the Window menu and recoverable with
+Reset Layout. Preferences, small and real rather than empty.
+
+**The viewport.** Picking by ray with tests aimed at the corners, a selection
+outline drawn from the world rather than the render snapshot, and a fly camera on
+the right mouse button using SDL relative mode, anchored so the cursor comes back
+where it was and with the UI frozen while it turns.
+
+**The loop.** Three run states — `Editing`, `Playing`, `Paused` — with play and
+stop sharing a button because they are opposites, and pause on its own because it
+is a different question. Play snapshots the world; stop puts it back.
+
+**The scene.** A format written by the same deterministic walk the world hash
+makes, whose oracle is itself: write, read into a fresh world, write again,
+require identical bytes. Scenes are assets under `content/`; a project declares
+which one a RUN starts with and the editor remembers which one a PERSON had open.
+What a system made — a streamed chunk — is not part of a scene.
+
+**The content browser.** The source tree rather than the packed archive,
+virtualised with `ImGuiListClipper`, with folders, creation, rename, delete, and
+opening a scene by double-click.
+
+**Undo and redo.** Snapshots rather than reversible commands, because undoing a
+delete means recreating an instance, its subtree and its ids — which
+`World::snapshot` already does correctly and a command stack does not. Bounded
+depth, drag coalescing, and a redo that a new edit throws away.
+
+**Seven defects, six found by a person opening the thing.** D058 the world
+already running, D059 the cursor vanishing, D060 the audio playing, D061 the
+camera flickering, D063 the pointer walking the UI, D064 the dead right-click,
+D065 the deletable services. The seventh, D062, was found by looking for the
+shape of the others. **Five of them are one architectural mistake appearing five
+times** — the editor inheriting the game's decisions instead of taking them — and
+the rule that resolves them is one sentence: *while the editor is editing, the
+tool owns the machine, and pressing play hands it back.* It governs the tick, the
+cursor, the audio, the camera and the keyboard.
+
+**Two ADRs.** 0046, the editor as a mode of the host binary drawn in ImGui.
+0047, the authored world becomes data and scripts become behaviour.
+
 ### What E1 deliberately does not have
 
-The three worth carrying into E2, all of them named in NOT-in-scope and none of
-them discovered late: **no selection highlight in the viewport**, which is the
-one scope item that was written down and not built and therefore the first thing
-E2 owes; no manipulator, no undo, no create or delete, and no way to save
-anything at all. The editor can change a world and cannot keep the change, which
-is E3.
+**Manipulators.** Nothing can be moved by dragging it in the viewport; a
+transform is changed by typing into the properties grid. That is E2's, and it is
+the only large thing the first cut put in E2 that is still there.
 
-**And one thing that could not be evidenced at all.** The ImGui overlay refuses
-to start without a window, so the editor cannot render headlessly and there is no
-`--screenshot` path for it. Every picture of this editor has to be taken by
-somebody, or by capturing a real window — which is what
-`docs/images/e1/editor-first-light.png` is. A milestone that wants a golden of the
-editor will have to make the shell renderable headlessly first, and that is worth
-knowing before it is promised.
+**Creating an instance**, and reparenting by drag. Duplicate exists; making a
+`Part` from nothing does not.
+
+**Multi-select.** One instance at a time, everywhere.
+
+**A VM that a stop puts back.** `World::snapshot` restores the world and not the
+Luau state, so a connection a script made during play is still connected after
+stop. The honest fix is a VM rebuild, and it is not free while projects still
+build their worlds in script — which is what ADR 0047 changes over time and what
+`examples/06-scene` exists to demonstrate.
+
+**ADR 0047's boot order.** The lifecycle it describes is load-then-start; this
+engine's `WorldHost::boot` starts the scripts as part of booting, and the scene
+is applied after. For a project whose scripts do not build a world the two orders
+agree, which is why `06-scene` works — and its own README says where they differ.
+
+**`Destroying` for an editor's delete.** A paused world runs no signal drain, so
+the editor retires what it deletes directly. No script is running to hear the
+signal while editing, and when they run again the instance was never there.
+
+**And one thing that cannot be evidenced at all**, measured rather than assumed:
+the ImGui shell refuses to start without a window and SDL does not accept
+injected input, so **there is no automated path to a picture of this editor or to
+a click inside it**. Every image in `docs/images/e1/` was captured from a real
+window. A milestone that wants a golden of the editor has to make the shell
+render headlessly first.
