@@ -337,15 +337,23 @@ local wasGrounded = true
 local sinceSave = 0
 
 --- Whether anything is drawing. `PreRender` never fires in a headless run
---- (api-design.md §2.1), so a camera driven only from there simply does not
---- move -- and the gate's screenshot is then a picture of the default camera
---- standing inside the ground. `05-streaming` learned this the same way and
---- says so in its own header; this is the general form of the fix.
+--- (api-design.md §2.1), so this is how the demo knows nobody is watching and
+--- takes over the controls itself (see `autopilot`).
 ---
---- The latch is what keeps both cases honest: with a window, the camera is
---- smoothed at the frame rate, which is what a camera should do (ADR 0039);
---- without one, the simulation tick advances it instead, so the same frame of
---- the same run is the same picture on every machine.
+--- **It is NOT what drives the camera, and that is a defect report from a human
+--- playing this scene: with the camera on `PreRender` the whole world shakes as
+--- soon as the character walks.** Measured rather than guessed -- this machine
+--- renders about a hundred frames for every sixty simulation ticks, so a camera
+--- advanced on every render frame moves smoothly while everything it is looking
+--- at moves on two frames out of three. The world then oscillates in screen
+--- space by up to a walking pace times a frame, which is exactly what "it
+--- vibrates" looks like.
+---
+--- The engine's frame scheduler computes an interpolation factor for precisely
+--- this (`Frame::alpha`, "so a 144 Hz display shows smooth motion from a 60 Hz
+--- simulation") and nothing reads it -- so v1 has no render interpolation, and
+--- a camera on the sim clock is the only way for the camera and the world to
+--- agree. Recorded as D047. Every other example already does it this way.
 local renderIsDriving = false
 
 local function advanceCamera(dt: number)
@@ -506,17 +514,21 @@ RunService.Heartbeat:Connect(function(dt: number)
 
     if not renderIsDriving then
         autopilot(RunService.SimTime)
-        advanceCamera(dt)
     end
+
+    -- On the SIM clock, with the world. See `renderIsDriving` above for the
+    -- measurement that put it here.
+    advanceCamera(dt)
 
     -- One tick of virtual press, then cleared, the same way `04-obby` does it:
     -- a touch button is an edge and an action reads a snapshot.
     InputService:SetVirtualState(Enum.KeyCode.Virtual1, 0)
 end)
 
-RunService.PreRender:Connect(function(dt: number)
+-- Connected for one purpose: to notice that something is drawing. The camera is
+-- advanced on `Heartbeat` instead, which is what stops the world shaking.
+RunService.PreRender:Connect(function()
     renderIsDriving = true
-    advanceCamera(dt)
 end)
 
 DebugService.OverlayVisible = true
