@@ -16,17 +16,17 @@ and typing a new colour into it.
 
 ## Scope checklist (from roadmap)
 
-- [ ] `luaug edit [path]` in the CLI, with i18n keys and a spawned-process test
-- [ ] An editor mode in `engine/app`, gated like `--replay` / `--bench` / `--two-worlds`
-- [ ] A dockspace with Explorer, Properties, Viewport, Console and Stats as real windows
-- [ ] Layout persistence (`io.IniFilename` back on, with a decided location)
-- [ ] The world rendered into a texture and shown in the Viewport panel
-- [ ] Picking: a testable screen-point-to-ray function, and a ray that chooses an instance
-- [ ] A visible selection in the viewport
-- [ ] `PropertyDesc` carries the identity of the enum a property accepts
-- [ ] `docKey` stops being emitted empty, so properties can carry tooltips
-- [ ] D056: the `shipping` profile compiles, and a gate stage builds it
-- [ ] D057: `luaug build` selects a profile deliberately, or says what it selects
+- [x] `luaug edit [path]` in the CLI, with i18n keys and a spawned-process test
+- [x] An editor mode in `engine/app`, gated like `--replay` / `--bench` / `--two-worlds`
+- [x] A dockspace with Explorer, Properties, Viewport, Console and Stats as real windows
+- [x] Layout persistence (`io.IniFilename` back on, with a decided location)
+- [x] The world rendered into a texture and shown in the Viewport panel
+- [x] Picking: a testable screen-point-to-ray function, and a ray that chooses an instance
+- [ ] A visible selection in the viewport — **NOT DONE**, see the Gate Record
+- [x] `PropertyDesc` carries the identity of the enum a property accepts
+- [x] `docKey` stops being emitted empty, so properties can carry tooltips
+- [x] D056: the `shipping` profile compiles, and a gate stage builds it
+- [~] D057: the release notes now say what the binary is; choosing the profile is a human decision, see the Gate Record
 
 ## NOT in scope
 
@@ -60,13 +60,13 @@ picking, and the selection highlight.
 
 ## Gate checklist (verbatim from roadmap)
 
-- [ ] `luaug edit examples/10-open-world` opens, docks, and renders the world in its viewport; a screenshot is attached to the gate record.
-- [ ] Clicking a part in the viewport selects it: the Explorer highlights the same instance, the Properties panel shows its class, and the viewport draws the selection. Proven by a headless test that drives a synthetic click through the picking function, not by eye alone.
-- [ ] Picking has unit tests over a camera and a viewport rectangle covering: the centre of the screen, each corner, a click on empty space returning nothing, and a non-square viewport — the last because an aspect-ratio bug is invisible at the centre and wrong everywhere else.
-- [ ] Editing a property in the editor changes the world: the existing safe-point drain is used unchanged and a test asserts the write lands.
-- [ ] An enum-valued property offers its full set of items with no live instance needed to discover them, and a property with a doc string shows it.
-- [ ] The `shipping` profile compiles, and a gate stage builds it.
-- [ ] `scripts/localgate.ps1` green on all five stages; `luaug check` clean; docs-lint clean.
+- [x] `luaug edit examples/10-open-world` opens, docks, and renders the world in its viewport; a screenshot is attached to the gate record.
+- [~] Clicking a part in the viewport selects it: the Explorer highlights the same instance, the Properties panel shows its class, and the viewport draws the selection. Proven by a headless test that drives a synthetic click through the picking function, not by eye alone.
+- [x] Picking has unit tests over a camera and a viewport rectangle covering: the centre of the screen, each corner, a click on empty space returning nothing, and a non-square viewport — the last because an aspect-ratio bug is invisible at the centre and wrong everywhere else.
+- [x] Editing a property in the editor changes the world: the existing safe-point drain is used unchanged and a test asserts the write lands.
+- [x] An enum-valued property offers its full set of items with no live instance needed to discover them, and a property with a doc string shows it.
+- [x] The `shipping` profile compiles, and a gate stage builds it.
+- [x] `scripts/localgate.ps1` green on every stage; `luaug check` clean; docs-lint clean.
 - [ ] **A human opens the editor on the flagship and says whether it is an editor** — the gate item that is deliberately not automatable, and the one every milestone since M4 has proven is where the real defects come from.
 
 ## Findings
@@ -95,10 +95,94 @@ them, so the v1.0.0 binary published an hour earlier is a development build,
 carrying the debug overlay and a Luau REPL into a release whose notes described
 a player. The notes now say so.
 
+**Finding 3 — a dockspace arranges nothing, and one screenshot said so.** The
+first launch of the editor put every panel at ImGui's default position, which is
+the same position: five windows in a pile with the viewport at the bottom of it.
+Every test passed. `DockSpaceOverViewport` makes docking *possible* and does not
+dock anything, so a default layout has to be built with `DockBuilder` on the
+first run and only when no saved layout exists. This is the milestone's own
+instance of the pattern this project keeps paying for -- and the cheapest one
+yet, because looking cost one screenshot.
+
+**Finding 4 — the shipping gate earned itself back on its first real use.** The
+stage added for D056 caught three private fields on `DebugOverlay` that nothing
+reads when ImGui is compiled out -- one of them a member I had added and never
+used. MSVC says nothing about any of them; Clang's `-Wunused-private-field` under
+`-Werror` says all three. The header's own design forbids `#ifdef`, so the honest
+answer was `[[maybe_unused]]`, which states the true thing: a shipping build is
+*meant* to be in that state.
+
+**Finding 5 — `doctest::Approx` holds a double, and the Linux tier is why anybody
+finds out.** Every float comparison in the new tests promoted silently under
+MSVC and failed under Clang's `-Wdouble-promotion`. The repository already had
+the idiom (`static_cast<f64>` at the comparison, `engine/core/tests/math_tests.cpp`);
+what it did not have was anything to make a newcomer use it, which is what
+`-Werror` on the second compiler is for.
+
 ## Attempted / abandoned
 
 (append during the milestone)
 
 ## Gate Record
 
-Filled at milestone end, before human review.
+Run 2026-08-22, on the reference machine.
+
+**`scripts/localgate.ps1` — green on all six stages** (the sixth is new this
+milestone):
+
+```
+  ok    docs (15.3 s)
+  ok    luau (10.7 s)
+  ok    format (16.4 s)
+  ok    windows (73.7 s)
+  ok    linux (93.6 s)
+  ok    shipping (29.7 s)
+green (macOS is Tier-3 and only CI can build it)
+```
+
+44 ctest targets on Windows and 41 in the Tier-2 container, both with
+1,109 conformance cases passing. `luaug check` clean, docs-lint clean.
+
+**Item by item.**
+
+| Gate item | Result |
+|---|---|
+| `luaug edit examples/10-open-world` opens, docks, renders the world in its viewport | **Green.** `docs/images/e1/editor-first-light.png` |
+| Clicking a part selects it: explorer, properties and viewport agree | **Half.** The pick path is proven headlessly end to end (`engine/app/tests/editor_tests.cpp`, six cases) — a synthetic click at a viewport pixel selects the part in front of the camera, and the inspector holds the selection. **Nobody has clicked one with a mouse**, and the viewport draws no selection at all, so the visible half of this item is not met |
+| Picking unit tests: centre, corners, empty space, non-square viewport | **Green.** `engine/app/tests/picking_tests.cpp`, eleven cases, plus a rotated box, a ray starting inside one, and a ray parallel to a slab |
+| Editing a property in the editor changes the world | **Green by inheritance, not by new evidence.** The editor drives the existing `Inspector` unchanged, and its safe-point drain is covered by `inspector_tests.cpp`. No test drives a property edit *through the editor shell* |
+| An enum property offers its item set with no live instance; a documented property shows its doc | **Green.** `class_registry_tests.cpp` against the real generated tables (`Part.Shape` resolves to five items, `Anchored` names no enum) and `inspector_tests.cpp` |
+| The `shipping` profile compiles, and a gate stage builds it | **Green.** D056 fixed; `scripts/gates/shipping-build.sh` builds and links it every run |
+| Full local gate, `luaug check`, docs-lint | **Green**, above |
+| **A human opens the editor and says whether it is an editor** | **Not done.** This is the milestone's sign-off and it is deliberately not automatable |
+
+**The picture.** `docs/images/e1/editor-first-light.png` is the editor on the
+flagship: the explorer showing the real tree from `DataModel` down through
+`Workspace`, the character, the welds and all 289 streamed chunks; the viewport
+rendering the world at 10.07 ms; properties and stats tabbed; the console
+carrying the run's own log. The world is dark in it because the working tree had
+`StartHour = 22.5` at the time, which is somebody's edit and not a setting of the
+editor's.
+
+**Layout persistence is verified by its artifact rather than by eye.** After a
+first launch `examples/10-open-world/.luaug/editor-layout.ini` contains the
+built arrangement — explorer 351 px left, viewport centre as `CentralNode=1`,
+console below it, properties and stats tabbed right — and a second launch reads
+it back instead of rebuilding.
+
+### What E1 deliberately does not have
+
+The three worth carrying into E2, all of them named in NOT-in-scope and none of
+them discovered late: **no selection highlight in the viewport**, which is the
+one scope item that was written down and not built and therefore the first thing
+E2 owes; no manipulator, no undo, no create or delete, and no way to save
+anything at all. The editor can change a world and cannot keep the change, which
+is E3.
+
+**And one thing that could not be evidenced at all.** The ImGui overlay refuses
+to start without a window, so the editor cannot render headlessly and there is no
+`--screenshot` path for it. Every picture of this editor has to be taken by
+somebody, or by capturing a real window — which is what
+`docs/images/e1/editor-first-light.png` is. A milestone that wants a golden of the
+editor will have to make the shell renderable headlessly first, and that is worth
+knowing before it is promised.

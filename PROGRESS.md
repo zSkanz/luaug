@@ -5,6 +5,32 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
+- **E1 — The Editor Opens — BUILT, awaiting review (2026-08-22).** Post-v1 phase 1,
+  opened by human decision the same day v1.0.0 shipped. `luaug edit
+  examples/10-open-world` boots a windowed host that draws a dockspace instead of
+  a game's overlay: explorer, a viewport rendering the world into its own texture,
+  properties and stats, a console, and a layout remembered in the project's
+  `.luaug/`. The picture is
+  [`docs/images/e1/editor-first-light.png`](docs/images/e1/editor-first-light.png)
+  and the brief is [`docs/briefs/e1-kickoff.md`](docs/briefs/e1-kickoff.md), with
+  five Findings and a filled Gate Record.
+
+  **The shape was decided by measurement rather than by taste** (ADR 0046). Five
+  read-only passes over the repository before a line was written found that
+  ADR 0011 had already named the editor on the ImGui side four milestones
+  earlier; that a Luau editor is *blocked* rather than expensive, because the game
+  VM has no filesystem and R4 does not bend for tooling; and that
+  `engine/scene/src/world_hash.cpp:182-278` is a whole-world serializer with a
+  `Hasher` where a writer should be — which is E3's answer, found in E1's week.
+
+  **What is honestly missing**, and it is in the Gate Record rather than buried:
+  the viewport draws no selection highlight, which was scope and was not built;
+  nobody has clicked a part with a real mouse, so the pick path is proven
+  headlessly and not visibly; and the ImGui overlay refuses to start without a
+  window, so **the editor cannot be screenshotted headlessly at all** — every
+  picture of it has to be captured from a real window. A milestone that wants a
+  golden of the editor has to make the shell render headlessly first.
+
 - **M8 — Flagship, Hardening, Docs, v1.0 — COMPLETE, signed off 2026-08-22, and
   RELEASED the same day**, tagged `milestone/m8` and `v1.0.0`. Every tag is on
   `origin` and the GitHub release carries the flagship's Windows folder:
@@ -33,60 +59,12 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   168 MiB, instances flat at ~4,300. The absolute targets in
   `docs/perf-baselines.md` said "bind at M8" and now say what they measured.
 
-  **Eight defects came from a human running the demo while every gate was green**,
-  which is the pattern this project keeps paying for and keeps being right about.
-  D047: the world vibrated as you walked — the engine had never interpolated
-  between ticks, and `Frame::alpha` had been computed and read by nothing since
-  M1. D048: the shadows crawled — three causes, and the root was a character
-  sliding off a tile corner at 3 cm/s, which moved the camera, which moved the
-  whole shadow lattice. D049: `InputService.PointerLocked` was stored and read by
-  nothing, so a mouse look had nothing to switch on, and the camera turned the
-  way you did not push. D050: the shadows flickered under a moving sun — the
-  texel snap rounded an ABSOLUTE position in a light space that turns, so the
-  lattice swept out from under every shadow in the picture; rounding the box's
-  MOVEMENT instead is the fix, and it is the stronger statement anyway. D051:
-  objects hovered over their own shadows — a normal offset of 1.41 filters and a
-  2 cm depth bias, both paying for an acne that this renderer's front-face cull
-  already prevents. D052: the shadows were coarse at a moderate distance, and
-  the flagship's own project file was why — `shadow_distance = 180` on the
-  preset's 1024 tile put everything past forty-four metres on a **half-metre
-  grid**; 140 m on a 2048 tile measures 0.20 m per texel and costs nothing, the
-  larger tile's fill being handed back by the shorter distance's culled casters.
-  The same measurement convicted `ultra`, which had been spending its
-  four-times atlas on range rather than density (0.32 m per texel against
-  `high`'s 0.35), and the test written for it caught a third thing:
-  `--quality=low` took the Low preset and then let the project file put its
-  4096-pixel atlas back on top. D053: from about eleven in the morning of the
-  in-game clock the world went temporally unstable with nothing moving — two
-  defects under one symptom, separated by the report's own detail that it began
-  at an HOUR rather than after a duration. The larger half was not a shadow at
-  all: the diffuse ambient rode on the specular chain's rebuild threshold, so
-  the light every matte surface receives held still for a hundred frames and
-  then stepped by a per cent — 68% of the ground changing on one frame while the
-  sky beside it did not. It has its own threshold now, and the shader's copy
-  walks towards it: **peak-to-mean 6.99 became 1.27**, at 0.2 ms. The smaller
-  half is the shadow edge and is inherent — a cascade's lattice lives in the
-  light's rotating frame, so a fixed point drifts across it twenty-five times
-  faster near noon than at dawn — and is mitigated by a penumbra one texel wider
-  and by D052's finer texels. D054 is the third report about that same edge and
-  the one that named the relation: the flicker scales with camera DISTANCE.
-  Measuring it turned the relation around — the step is about the same size on
-  screen at every distance, and what changes is the frequency, from every other
-  frame in the near cascade to one jump every twenty-three frames in the far
-  one, which is why one reads as motion and the other as a jump. The penumbra's
-  floor is six texels now rather than two, paid for by rotating the 5×5 kernel
-  per pixel so a wide fixed grid's banding becomes fine noise: pixels changing
-  by more than four levels between consecutive frames fell from 62 to 14, and
-  the worst single change from 37 to 14. **Its second round** measured the edge
-  properly — a burst of 120 frames from one run, the edge's sub-pixel position
-  tracked by a profile crossing that the ambient cannot move — and found it
-  holding still for up to twenty-five frames, then jumping 3.6 pixels, twice
-  backwards. The cause was the filter's own arithmetic: it returns a COUNT of
-  taps, so one texel of the map flipping moves the edge by a twenty-fifth of
-  the penumbra. Forty-nine taps rather than twenty-five made the worst step
-  **0.75 pixels**, and the median frame did not move. Two more were found by the milestone's own work: D045
-  (`luaug new` could not find its template and had not since M3) and D046 (two
-  gates depended on a generated world that nothing generated).
+  **Eight of its eleven defects were found by a human running the demo while
+  every gate was green** -- D047 through D054, plus the inverted camera. The
+  narrative moved to [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md);
+  each one is `fixed` in [`docs/defects.md`](docs/defects.md) with its full
+  diagnosis. The pattern is the entry's whole point and it has now repeated in
+  every milestone since M4.
 
   **What is new that a reader should know about**: render interpolation
   (`render::TransformHistory`); the graphics settings family (ADR 0044) with
@@ -97,25 +75,11 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   targets; a TOML reader in `core`; a licence audit as a standing check; the
   generated API reference under `docs/api/`; and `@luaug/camera`.
 
-- **M7.5 — Looking Like an Engine — COMPLETE, signed off 2026-08-22**, tagged
-  `milestone/m7.5`. Four cascades, clustered forward shading, image-based
-  lighting and the post chain; **15,390 draw calls became 22** for the same 4,002
-  visible objects. Its sixteen decisions, seventeen Findings and filled Gate
-  Record are in [`docs/briefs/m7.5-kickoff.md`](docs/briefs/m7.5-kickoff.md), and
-  the pair of pictures that is its deliverable is in `docs/images/m7.5/`.
-  **The one thing to carry forward**: five defects were recorded and seven more
-  found inside the milestone, and seven of the ten were found by looking at a
-  picture or a number rather than by a test — D043 most of all, where the
-  instanced path shipped drawing nothing and three independent green instruments
-  agreed with the empty frame.
-- **M7 — Scaling the World — COMPLETE, signed off 2026-08-21**, tagged
-  `milestone/m7`. The offline asset pipeline, the job system and async IO, the
-  per-World floating origin, chunked streaming, runtime LOD, the transport seam
-  and the assimp importer. Eleven Findings and a filled Gate Record with its six
-  measured items are in [`docs/briefs/m7-kickoff.md`](docs/briefs/m7-kickoff.md).
-  **The one to carry forward is D040**: header changes had been rebuilding
-  NOTHING on Windows since the project started, so every incremental build was
-  silently reusing stale objects — which is why `chcp 65001` is in the gate.
+- **M7.5 and M7 — COMPLETE, signed off 2026-08-22 and 2026-08-21**, tagged.
+  Their entries moved to [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md)
+  when E1 was written up; the briefs carry the Gate Records. **The one to carry
+  forward is D040**: header changes had been rebuilding NOTHING on Windows since
+  the project started, which is why `chcp 65001` is in the gate.
 - **M6 — Playing the World — COMPLETE, signed off 2026-08-21**, tagged
   `milestone/m6`. Input, UI, tweens, audio and skeletal animation, with
   `examples/04-obby` playable end to end; three ADRs (0039, 0040, 0041), fifteen
@@ -166,6 +130,15 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
   citations. That file exists because three human-reported defects were removed
   from this one while it was being rewritten to close M4. **A close rewrites this
   file wholesale; it can no longer take the open list with it.**
+- **D057 is the one open decision, and it has a third exit nobody had named.**
+  `luaug build` packages a `dev`-profile host, so the released v1.0.0 binary
+  carries the debug overlay and a Luau REPL — verified in the shipped bytes, and
+  the release notes now say so. The two obvious fixes are both bad: shipping a
+  profile that has never run a test, or reversing ADR 0045 to package bytecode.
+  The third is that `LUAUG_DEBUG_UI` and `LUAUG_LUAU_COMPILER` are **independent
+  options that only happen to be tied to the same profile string**, so a fourth
+  profile — no ImGui, keeps the compiler — costs one `cmake_dependent_option`
+  condition. That is a human's call and it is asked here rather than taken.
 - **D004 — the inspector crash while dragging `Size`/`CFrame` — is still open and
   still not reproduced**, and it is the only open row in the register. Two halves
   are ruled out: the write path driven through zero, negative, 1e30 and infinity
@@ -275,6 +248,34 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
 Entries for the planning session and for M0 through M4 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
+
+- **2026-08-22 (session 17, Claude Opus): E1 built — the editor opens.** Post-v1
+  phase 1 opened by human decision, specified, and its first milestone built to
+  the point where a person can look at it.
+
+  **Did:** five parallel read-only reconnaissance passes over the repository
+  before writing anything; ADR 0046; the phase's five milestones in the roadmap
+  with E1 specified and gated; `luaug edit`; an editor mode with a dockspace, a
+  viewport rendering into its own texture, and a layout built on first launch and
+  remembered; picking as arithmetic with eleven tests aimed at the corners; enum
+  identity and documentation reaching the runtime through the generated
+  descriptors; and D056 fixed with a gate stage that builds and links the
+  `shipping` profile every run.
+
+  **Learned, and it is the same lesson this project keeps buying:** every test
+  passed on the first launch of the editor, and the first launch was five panels
+  in a pile with the viewport underneath them. `DockSpaceOverViewport` makes
+  docking possible and docks nothing. One screenshot said so and nothing else
+  could have.
+
+  **Also learned:** a research claim is a lead rather than a fact. Testing one —
+  that `shipping` should not compile — found a *different* first failure, and
+  following it found that the release published an hour earlier is a development
+  build carrying a debug overlay and a Luau REPL. Both are recorded (D056, D057);
+  the notes on the release now say what the binary is.
+
+  **Next:** E2 owes the selection highlight first, because it is the one E1 scope
+  item that was written down and not built.
 
 - **2026-08-22 (session 16, Claude Opus): v1.0.0 RELEASED.** Ran the §2 boot
   sequence on a repository whose milestones were all closed, and it earned its

@@ -1296,7 +1296,7 @@ would be writing four of them from a position that has not seen an editor run.
   - An enum-valued property offers its full set of items with no live instance
     needed to discover them, and a property with a doc string shows it.
   - The `shipping` profile compiles, and a gate stage builds it.
-  - `scripts/localgate.ps1` green on all five stages; `luaug check` clean;
+  - `scripts/localgate.ps1` green on every stage; `luaug check` clean;
     docs-lint clean.
   - **A human opens the editor on the flagship and says whether it is an editor**
     — the gate item that is deliberately not automatable, and the one every
