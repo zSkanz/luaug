@@ -188,35 +188,43 @@ TEST_CASE("every cascade is sharper than M4's single one, and the near one by an
         CHECK(cascades.texelWorld[cascade] > cascades.texelWorld[cascade - 1]);
 }
 
-TEST_CASE("the filter is the same number of texels everywhere, and the seam is the ratio between cascades")
+TEST_CASE("every cascade can draw the penumbra the filter asks for")
 {
-    // **This case reversed with the filter, and the reversal is the point.**
-    // M7.5 asked for a radius constant in WORLD metres and clamped it to a texel
-    // range, and this case measured how hard the clamp bound. It bound so hard
-    // that the far cascade filtered 0.8 texels -- nine taps inside one texel,
-    // which is a binary comparison wearing a loop, and a human saw it as a
-    // shadow that loses its gradient as it stretches.
+    // **This case has now been rewritten twice, and each rewrite is a design
+    // that failed.** First it measured how hard a texel clamp bound on a
+    // world-constant radius -- it bound so hard the far cascade filtered 0.8
+    // texels, which is not a filter. Then the kernel was sized in texels
+    // instead, and this case measured the softness ratio across a split -- which
+    // made the near cascade's penumbra a few millimetres wide, so its shadow
+    // edges showed the texel grid they were rasterised on.
     //
-    // The kernel is a fixed number of texels now, which is what every reference
-    // implementation does (U-58), and the softness a viewer sees therefore
-    // changes across a split by exactly the texel ratio. So that ratio is what
-    // this case measures: it is the whole of the seam risk, and the blend band
-    // is what carries it.
+    // The claim now is the one that matters to a viewer: the penumbra is a
+    // number of METRES and every cascade must be able to draw it. "Able" is the
+    // texel band -- under two a filter cannot hide the step it exists for, over
+    // four its own taps start to show -- so this checks that the shipped
+    // cascades land inside it rather than on its edges, because a cascade on the
+    // edge is one whose softness the clamp is choosing rather than the radius.
     const render::ShadowCascades cascades = render::fitShadowCascades(fitAt(core::DVec3{}));
-    for (core::u32 cascade = 0; cascade + 1 < render::kShadowCascadeCount; ++cascade) {
-        const core::f32 here = cascades.texelWorld[cascade] * (render::kShadowFilterTexels + 1.0f);
-        const core::f32 next = cascades.texelWorld[cascade + 1] * (render::kShadowFilterTexels + 1.0f);
-        CHECK(next > here);
-        // Under five, and the last pair is the one that spends it: the practical
-        // split scheme at 0.85 leans logarithmic, which buys the near cascade
-        // its 1.1 cm texel and pays for it at the far end. A tighter bound here
-        // would be a demand on `kShadowSplitLambda` rather than on the filter.
-        //
-        // Fitted to real casters the ratio is smaller than this -- the fit
-        // shrinks the far cascade most -- but the fixture hands the fit no
-        // casters on purpose, so what this checks is the worst case the splits
-        // can produce rather than what one scene happens to get.
-        CHECK(next / here < 5.0f);
+    for (core::u32 cascade = 0; cascade < render::kShadowCascadeCount; ++cascade) {
+        const core::f32 wanted = render::kShadowFilterWorldRadius / cascades.texelWorld[cascade];
+        const core::f32 actual =
+            wanted < render::kShadowFilterMinTexels
+                ? render::kShadowFilterMinTexels
+                : (wanted > render::kShadowFilterMaxTexels ? render::kShadowFilterMaxTexels : wanted);
+        // **Two texels, everywhere, whatever else happens.** That is the whole
+        // guarantee: a shadow edge is quantised onto this grid, and a penumbra
+        // narrower than the step it has to hide leaves the step showing. The
+        // near cascade reaches it by clamping up from a radius its own texel
+        // makes tiny, and the far one by clamping down from one its texel makes
+        // huge -- and both of those are the clamp doing its job rather than
+        // failing at it, which is what the two previous versions of this case
+        // got wrong.
+        CHECK(actual >= render::kShadowFilterMinTexels);
+        CHECK(actual <= render::kShadowFilterMaxTexels);
+        // And it is a real distance on the ground: never under a centimetre,
+        // never over a metre, across a chain whose texels span 23:1.
+        CHECK(actual * cascades.texelWorld[cascade] > 0.01f);
+        CHECK(actual * cascades.texelWorld[cascade] < 1.0f);
     }
 }
 

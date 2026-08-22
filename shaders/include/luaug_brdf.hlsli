@@ -318,9 +318,12 @@ float sampleCascade(Texture2D<float> atlas, SamplerState pointSampler, uint casc
     const float texelWorld = CascadeTexelWorld[cascade];
     const float depthRange = max(CascadeDepthRange[cascade], 1e-3f);
 
-    // The filter's own width in world metres: the kernel steps `ShadowParams.x`
-    // texels and a 3x3 reaches one step out, so it spans two of them.
-    const float filterWorld = texelWorld * (ShadowParams.x + 1.0f);
+    // The kernel's reach, in texels and then in world metres. `ShadowParams.x` is
+    // a penumbra in METRES and this is where it meets the cascade it has to be
+    // drawn on; `shadow.h` carries the whole argument for why it is metres again
+    // and why the band is [2, 4].
+    const float radiusTexels = clamp(ShadowParams.x / max(texelWorld, 1e-6f), 2.0f, 4.0f);
+    const float filterWorld = texelWorld * radiusTexels;
 
     // Normal-offset bias, replacing a depth-only one: displacing the sample
     // along the surface normal is what survives a grazing receiver, and it
@@ -352,15 +355,11 @@ float sampleCascade(Texture2D<float> atlas, SamplerState pointSampler, uint casc
     // constant in depth units means a different distance in every cascade.
     const float reference = ndc.z - ShadowParams.w / depthRange;
 
-    // The kernel's step, in TEXELS, and see `shadow.h` for why it is texels. A
-    // step under one leaves nine taps inside a single texel, which is not a
-    // filter -- it is the binary comparison it was meant to soften, wearing a
-    // loop.
-    const float radiusTexels = max(ShadowParams.x, 1.0f);
     // A cascade's tile spans half the atlas, and its own extent is
     // `texelWorld * tile` metres across -- so a step of one texel is this much
-    // local uv, and half that much atlas uv.
-    const float2 step2 = (radiusTexels / (0.5f * atlasSize)) * 0.5f;
+    // local uv, and half that much atlas uv. The 5x5 loop below reaches two
+    // steps out, so a step is half the radius.
+    const float2 step2 = ((radiusTexels * 0.5f) / (0.5f * atlasSize)) * 0.5f;
 
     // The tile: cascade 0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right.
     const float2 tile = float2(float(cascade & 1u), float(cascade >> 1u)) * 0.5f;
@@ -368,22 +367,34 @@ float sampleCascade(Texture2D<float> atlas, SamplerState pointSampler, uint casc
     // The atlas's whole tax, and it is four lines: a tap that walks off a tile
     // reads the NEIGHBOURING cascade's depth, which is a bright seam along the
     // split. Clamping to the tile inset by the kernel is what stops it.
-    const float2 inset = step2 + 0.5f / atlasSize;
+    const float2 inset = step2 * 2.0f + 0.5f / atlasSize;
     const float2 lowest = tile + inset;
     const float2 highest = tile + float2(0.5f, 0.5f) - inset;
 
+    // **Twenty-five taps rather than nine, and that is the change the artifact
+    // needed.** A shadow edge is quantised onto the shadow map's texel grid, and
+    // what hides that quantisation is a penumbra several texels wide. A 3x3 grid
+    // cannot produce one: spread it far enough to cover the step and its own
+    // three samples become visible as bands, which is why the radius was clamped
+    // to three texels and why the edge stayed hard. Five by five covers the same
+    // reach with the spacing filled in.
+    //
+    // Each tap is itself a bilinear four-texel comparison, so the footprint is a
+    // little wider than the loop suggests and the corners of the grid carry less
+    // weight than a disc would give them. That is the trade a square kernel
+    // makes and it is invisible at this size.
     float lit = 0.0f;
     [unroll]
-    for (int y = -1; y <= 1; ++y)
+    for (int y = -2; y <= 2; ++y)
     {
         [unroll]
-        for (int x = -1; x <= 1; ++x)
+        for (int x = -2; x <= 2; ++x)
         {
             const float2 uv = clamp(tile + local * 0.5f + float2(x, y) * step2, lowest, highest);
             lit += shadowTapPcf(atlas, pointSampler, uv, reference, atlasSize);
         }
     }
-    return lit / 9.0f;
+    return lit / 25.0f;
 }
 
 // How much of the sun reaches this fragment: 1 lit, 0 fully occluded.

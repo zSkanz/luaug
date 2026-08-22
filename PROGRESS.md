@@ -153,19 +153,13 @@ quietly.
   citations. That file exists because three human-reported defects were removed
   from this one while it was being rewritten to close M4. **A close rewrites this
   file wholesale; it can no longer take the open list with it.**
-- **D044 — the sun's shadows break into hatched dashes as they stretch — is open
-  and is NOT the cascade fit**, which is what the fit commit says about itself.
-  Eleven things are ruled out in the row, each with a build and a measurement,
-  and the one that removes the artifact removes the shadow with it. The next
-  measurement has since been made: the streaks are regions where the receiver is
-  more than a METRE behind the stored depth, with a one-pixel boundary. **Acne
-  oscillates around zero; this does not** -- they are real shadows whose EDGE is
-  quantised onto the texel grid with no penumbra to hide it, which is why every
-  bias failed. What is left is a wider kernel rather than another constant.
-  **The instrument works now, and the reason it did not was misdiagnosed twice:**
-  replacing the forward pass's colour leaves its uniforms unused, dead-code
-  elimination drops them, and the pipeline stops being creatable -- the flat
-  frame was a frame with no pipeline, not a bad exposure.
+- **D044 is closed, and it took three designs for the shadow filter.** The
+  hatched dashes were never acne -- a probe reported the receiver more than a
+  METRE behind the stored depth with a one-pixel boundary, which is a real shadow
+  whose edge is quantised onto the texel grid. What hides that is a penumbra, and
+  nine taps cannot draw one: spread a 3x3 far enough and its own samples band.
+  Twenty-five can, so the radius went back to being metres. **It costs 0.54 ms at
+  1080p**, which is in `perf-baselines.md` with the tap count named as the dial.
 - **D004 — the inspector crash while dragging `Size`/`CFrame` — is still open and
   still not reproduced.** Two halves are ruled out: the write path driven through
   zero, negative, 1e30 and infinity with a render extraction every frame, and 25

@@ -72,45 +72,44 @@ inline constexpr f32 kShadowCasterMargin = 25.0f;
 // rejects what it does not cover.
 inline constexpr f32 kShadowRadius = 220.0f;
 
-// The filter's step, in shadow TEXELS, and it is texels rather than metres on
-// purpose -- which is a reversal, and the reason is measured.
+// The penumbra, in WORLD metres, and the texel band the kernel will accept for
+// it.
 //
-// M7.5 shipped a world-constant radius of five centimetres, on the argument that
-// a kernel fixed in texels makes softness change as an object crosses a split.
-// The argument is right and the implementation could not honour it: a cascade
-// chain spans 23:1 in texel size, so five centimetres asks for 4.4 texels in the
-// near cascade and 0.19 in the far one, and both ends hit the clamp. What
-// actually shipped was three texels near and **0.8 texels far** -- a 3x3 kernel
-// whose nine taps land inside one texel, which is not a filter. Its output is
-// very nearly the binary comparison it was meant to soften, and it stair-steps
-// on the texel grid. A human reported that as "the shadow loses resolution in
-// the gradient, and the gradient grows as the shadow stretches", which is
-// exactly what a 21 cm-wide hard step in the far cascade looks like beside a
-// 3.4 cm soft one in the near.
+// **This is the third answer to the same question and the first one that can be
+// true, because the kernel changed underneath it.** M7.5 asked for a
+// world-constant radius and clamped it to [0.8, 3.0] texels; the clamp was
+// forced because a 3x3 grid cannot span more than a few texels without banding,
+// and the chain's 23:1 texel ratio pushed both ends into it -- the far cascade
+// ended up filtering 0.8 texels, which is nine taps inside one texel and is not
+// a filter at all. Sizing the kernel in texels instead fixed that end and made
+// the near end worse: with the cascade fitted to its casters a texel is about a
+// millimetre and a half, so a few texels of kernel is a few millimetres of
+// penumbra, and a shadow edge with no penumbra shows the texel grid it was
+// rasterised on. A human saw that as dashes that crawl.
 //
-// So the kernel is a fixed number of texels, which is what Unity, Godot and
-// Unreal all do (U-58): the penumbra then grows with the cascade, and hiding
-// that is the blend band's job rather than the clamp's. What makes it work here
-// is the fitted cascade -- with the box sized to the casters instead of to the
-// camera's reach, the chain's texel ratio is a fraction of what it was, so the
-// softness a viewer sees across a split changes by much less than the numbers
-// above suggest.
+// What lets the radius be world-constant now is that the kernel is 5x5 with a
+// variable step rather than 3x3 with a fixed one: twenty-five bilinear taps can
+// cover eight texels without the gaps that made three bands.
 //
-// One texel of step gives a 3x3 kernel a two-texel span, which is Unity's
-// `filterSize = texelSize * (filter + 1)` at its smallest useful setting.
-inline constexpr f32 kShadowFilterTexels = 2.0f;
+// The band is still a band because the two ends are still real. Below two
+// texels a filter cannot hide the step it is there to hide; above four the taps
+// spread far enough apart to show themselves. What is different is that the
+// range in between now covers every cascade the fit produces, so the clamp
+// stopped being where the design lives.
+inline constexpr f32 kShadowFilterWorldRadius = 0.05f;
+inline constexpr f32 kShadowFilterMinTexels = 2.0f;
+inline constexpr f32 kShadowFilterMaxTexels = 4.0f;
 
 // Normal-offset bias, replacing M4's depth-only one (ADR 0038). The sample is
 // displaced along the surface normal, scaled by the sine of the light angle --
 // so it grows exactly where a grazing receiver needs it and vanishes where a
 // face-on one does not.
 //
-// **In units of the FILTER's width, not of one texel**, which is the second half
-// of the same correction: a kernel that reaches N texels out reads depths from N
-// texels away, so the offset that keeps it off its own surface has to reach as
-// far as the kernel does. Unity scales its normal bias by `filterSize * sqrt(2)`
-// for the same reason and with the same diagonal -- a square kernel's corner is
-// further away than its edge (U-58).
+// **In units of the FILTER's own reach, not of one texel**: a kernel that reads
+// depths four texels away needs an offset that reaches as far as it does, or its
+// widest taps land back on the surface that cast them. Unity scales its normal
+// bias by `filterSize * sqrt(2)` for the same reason and with the same diagonal
+// -- a square kernel's corner is further away than its edge (U-58).
 inline constexpr f32 kShadowNormalOffsetFilters = 1.4142136f;
 
 // The residual depth bias, in METRES rather than in depth units. Depth units

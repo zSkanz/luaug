@@ -422,6 +422,14 @@ write.
 | M7.5 | `examples/02-meshes` with a frozen sun | `win-msvc-dev` | median frame | 1.41 ms | isolates the environment prefilter |
 | M7.5 | `examples/02-meshes` | `win-msvc-dev` | draw calls / visible objects | 61 / 11 | eleven objects across six passes |
 
+**The shadow kernel went from nine taps to twenty-five after the milestone**, so
+a shadow edge has a penumbra wide enough to hide the texel grid it was
+rasterised on (D044). It costs 0.54 ms at 1080p in `examples/02-meshes` -- 1.51
+to 2.01 -- which is a third of that frame and the largest single cost the
+renderer has taken since M7.5 closed. **The tap count is the dial** if that is
+judged too much: nine could not span the penumbra without banding, which is the
+whole reason for the change, but sixteen might.
+
 **`examples/02-meshes` went from 0.46 ms at M4.5 to 1.51 ms**, and that is not a
 regression in the sense the 10% clause means. M4.5's frame was a shadow pass, a
 sky, a forward pass and a tonemap; this one is a shadow ATLAS of four cascades, a
