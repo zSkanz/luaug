@@ -171,9 +171,15 @@ quietly.
   ground half is fixed; a wall walked into still fires nothing, because the
   character's non-ground contacts are not on the `IPhysics3D` seam. That is a
   seam widening rather than a fix.
-- **D026 — the capture gate records an upload's SIZE and not its contents**, so
-  the quads a frame draws are invisible to the blocking render gate. What holds
-  the line meanwhile is in the row.
+- **D026 is fixed**: an upload records what it carried, not how many bytes it
+  was. The obvious fix -- the same content hash `bindUniforms` has used since
+  M4.5 -- does not work, and the Tier-2 run is what said so: **a hash has no
+  tolerance**, so a computed float one bit from a quantization boundary hashes to
+  an unrelated number, and over a few thousand of them something always lands on
+  a boundary. What ships is continuous -- the mean of the float words and the
+  mean step between them -- beside an exact hash of the words that were never
+  floats. The margin is measured: the two compilers agree to better than 1e-4,
+  and moving one UI quad four tenths of a pixel moves the mean by 1.4e-2.
 - **ADR 0043 is PROPOSED and needs a human.** ADR 0037 requires a human-approved
   ADR to touch the frozen RHI, and M7.5 touches it: one additive field,
   `VertexBufferLayout::perInstance`, defaulting to false. The alternatives that

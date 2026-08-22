@@ -23,6 +23,17 @@
 //     carries travels through `bindUniforms`, and the gate was looking at how
 //     many bytes went past. A gate that cannot see the values is a gate that
 //     can only report that the frame still has the same shape.
+//   - **And so are buffer uploads, since M7.5 (D026).** The same hole, one seam
+//     over: every vertex, index and per-instance transform a frame draws travels
+//     through `upload`, and that call recorded a byte count. Two UI goldens at
+//     different resolutions would have been byte-identical if only the quads had
+//     moved, and that is what found it. The digest is chosen by the buffer's own
+//     `BufferUsage`, recorded at `createBuffer`: index data is integers and is
+//     hashed exactly, everything else is floats and is hashed on the quantized
+//     grid below.
+//
+//     `uploadTexture` is still by size, and that is measured rather than
+//     conceded -- see `textureDigestIsPortable` below.
 
 #include "luaug/rhi/backends.h"
 #include "luaug/rhi/capture.h"
@@ -32,15 +43,16 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace luaug::rhi {
 namespace {
 
 constexpr i64 kQuantizeScale = 10000;
 
-std::string quantized(f32 value)
+std::string quantized(f64 value)
 {
-    const auto scaled = static_cast<i64>(std::llround(static_cast<f64>(value) * static_cast<f64>(kQuantizeScale)));
+    const auto scaled = static_cast<i64>(std::llround(value * static_cast<f64>(kQuantizeScale)));
     const bool negative = scaled < 0;
     const auto magnitude = static_cast<u64>(negative ? -scaled : scaled);
 
@@ -56,19 +68,164 @@ std::string quantized(f32 value)
     return out;
 }
 
-// The 64-bit FNV-1a of a uniform block's *quantized* contents.
+// The 64-bit FNV-1a of a block of data, read either as f32 on the quantized grid
+// or as raw 32-bit words.
 //
-// Quantized rather than hashed raw, and it is the whole reason this is usable in
-// a golden compared byte-for-byte on two tiers: the raw bytes of a matrix
+// **Quantized rather than hashed raw is the whole reason this is usable in a
+// golden compared byte-for-byte on two tiers**: the raw bytes of a matrix
 // product differ between MSVC and Clang in the last bit, and a hash turns one
 // bit into a completely different number. Rounding each float onto the same
 // four-decimal grid the rest of the stream uses gives the digest exactly the
-// tolerance `real` already has, and no more.
+// tolerance `real` already has, and no more. D024 is what happens when a
+// cross-build comparison is made of numbers that were never promised to match.
 //
+// **Integers get no such tolerance and need none.** An index buffer holds exact
+// u32 values that no compiler rounds, and quantizing them as floats would be
+// worse than useless: index 1,000 read as an f32 is a denormal around 1.4e-42,
+// which lands on the same grid point as zero, so every index buffer in the
+// engine would digest alike. That is D042's mistake -- reinterpreting a word
+// instead of converting it -- and it is why the caller passes the KIND rather
+// than the digest guessing.
+enum class DigestKind
+{
+    QuantizedFloat,
+    ExactWord,
+};
+
+// **Not every word in a "float" buffer is a float, and no test on the bits can
+// tell you which is which.**
+//
+// A `render::UiVertex` is two f32 and then four u8 of colour. Read as an f32,
+// that colour is whatever its bytes happen to spell: an opaque one has 0xFF at
+// the top, an exponent of all ones, so a NaN; one with alpha 127 is a perfectly
+// ordinary NORMAL float of about 1.7e38; one with alpha 0 is a denormal. All
+// three were met in one buffer, and the middle one is the interesting case --
+// nothing about 1.7e38 says "this was never a number".
+//
+// So the rule is by MAGNITUDE rather than by classification: a word is treated
+// as a number when it is zero, or a normal float inside the band real geometry
+// lives in. Nothing this engine draws has a coordinate, a normal, a texture
+// coordinate or a matrix element of a million, and anything that big is a bit
+// pattern wearing a float's clothes.
+//
+// **Sending packed data down the exact path costs nothing**, because packed data
+// is the same bytes on every compiler -- it is arithmetic, not storage, that
+// diverges between them. That is what makes this split safe rather than a guess.
+inline constexpr f32 kQuantizableCeiling = 1.0e6f;
+
+[[nodiscard]] inline bool quantizable(f32 value) noexcept
+{
+    return value == 0.0f || (std::isnormal(value) && value <= kQuantizableCeiling && value >= -kQuantizableCeiling);
+}
+
+// What an upload carried, in a form two different compilers can agree on.
+//
+// **A hash cannot do this job, and the attempt is what proved it.** D026's fix
+// first shipped as an FNV of the quantized words, exactly like the uniform
+// digest below, and the two tiers disagreed on precisely the buffers whose
+// contents are COMPUTED rather than read from a file: the primitive-shape meshes
+// and the UI vertices. The reason is structural rather than fixable -- a hash
+// has no tolerance, so a value one bit apart on either side of a quantization
+// boundary hashes to two unrelated numbers, and over a few thousand floats some
+// value always lands on a boundary. Coarsening the grid moves the boundaries
+// rather than removing them; it was tried, and it made a third buffer fail.
+//
+// So the float half is described by CONTINUOUS quantities, and by MEANS rather
+// than totals. That is what buys the margin: the disagreement between two
+// compilers over a whole buffer is a fraction of one value's last bit divided by
+// the word count, while a quad that moved or a colour that changed shifts the
+// mean by orders of magnitude more.
+//
+//   * mean sees any value change.
+//   * flow is the mean step between consecutive words, which also sees a
+//     REORDERING that leaves the mean alone.
+//   * packed is an exact hash of the words that were never floats -- indices,
+//     colours, bit patterns -- because integers need no tolerance and deserve
+//     none. It matches on both tiers, which is measured rather than assumed.
+struct UploadSummary
+{
+    u64 words = 0;
+    u64 packedWords = 0;
+    std::string packed;
+    f32 mean = 0.0f;
+    f32 flow = 0.0f;
+};
+
+[[nodiscard]] std::string hexOf(u64 hash)
+{
+    std::string out;
+    out.reserve(16);
+    for (int shift = 60; shift >= 0; shift -= 4)
+        out += "0123456789abcdef"[(hash >> shift) & 0xFull];
+    return out;
+}
+
+[[nodiscard]] UploadSummary summarize(std::span<const std::byte> data, DigestKind kind)
+{
+    UploadSummary summary;
+    u64 hash = 1469598103934665603ull;
+    const auto fold = [&hash](u64 value) {
+        for (int shift = 0; shift < 64; shift += 8) {
+            hash ^= (value >> shift) & 0xFFull;
+            hash *= 1099511628211ull;
+        }
+    };
+
+    f64 sum = 0.0;
+    f64 flow = 0.0;
+    f64 previous = 0.0;
+    u64 counted = 0;
+    usize offset = 0;
+    for (; offset + sizeof(u32) <= data.size(); offset += sizeof(u32)) {
+        ++summary.words;
+        u32 word = 0;
+        std::memcpy(&word, data.data() + offset, sizeof(word));
+
+        f32 value = 0.0f;
+        std::memcpy(&value, data.data() + offset, sizeof(value));
+        // An index buffer is exact integers that no compiler rounds, so the
+        // caller says so and the whole thing is hashed. Reading one as f32 would
+        // be worse than useless: index 1,000 is a denormal around 1.4e-42, so
+        // every index buffer in the engine would summarise alike. That is D042's
+        // mistake -- reinterpreting a word instead of converting it -- which is
+        // why the KIND comes from `BufferDesc` rather than from the bytes.
+        if (kind == DigestKind::ExactWord || !quantizable(value)) {
+            ++summary.packedWords;
+            fold(static_cast<u64>(word));
+            continue;
+        }
+
+        const auto current = static_cast<f64>(value);
+        sum += current;
+        flow += current > previous ? current - previous : previous - current;
+        previous = current;
+        ++counted;
+    }
+    // A tail of fewer than four bytes, which cannot happen today and must not
+    // silently vanish if it ever does.
+    for (; offset < data.size(); ++offset) {
+        ++summary.packedWords;
+        fold(static_cast<u64>(std::to_integer<unsigned char>(data[offset])));
+    }
+
+    if (counted > 0) {
+        summary.mean = static_cast<f32>(sum / static_cast<f64>(counted));
+        summary.flow = static_cast<f32>(flow / static_cast<f64>(counted));
+    }
+    summary.packed = hexOf(hash);
+    return summary;
+}
+
 // Every uniform block this engine binds is an array of f32 rows -- the
-// `static_assert`s in `render/shader_types.h` are what say so -- so the block is
-// read as floats. A tail of fewer than four bytes is folded in raw, which cannot
-// happen today and must not silently vanish if it ever does.
+// `static_assert`s in `render/shader_types.h` are what say so.
+//
+// **This is an exact hash of computed floats and it is standing on luck**, for
+// the reason `summarize` above spells out: nothing stops a matrix element from
+// landing on a quantization boundary and hashing differently on the other tier.
+// It has not happened in three milestones because a uniform block is hundreds of
+// bytes rather than thousands, and because most of what it carries is exact --
+// zeros, ones, and identity rows. If it ever does happen, the answer is here,
+// already written and already measured.
 [[nodiscard]] std::string uniformDigest(std::span<const std::byte> data)
 {
     u64 hash = 1469598103934665603ull;
@@ -83,6 +240,12 @@ std::string quantized(f32 value)
     for (; offset + sizeof(f32) <= data.size(); offset += sizeof(f32)) {
         f32 value = 0.0f;
         std::memcpy(&value, data.data() + offset, sizeof(value));
+        if (!quantizable(value)) {
+            u32 word = 0;
+            std::memcpy(&word, data.data() + offset, sizeof(word));
+            fold(static_cast<u64>(word));
+            continue;
+        }
         // Through the same `llround` `quantized` uses, so a value that prints
         // one way cannot hash another.
         const auto scaled = static_cast<i64>(std::llround(static_cast<f64>(value) * static_cast<f64>(kQuantizeScale)));
@@ -93,11 +256,7 @@ std::string quantized(f32 value)
     for (; offset < data.size(); ++offset)
         fold(static_cast<u64>(std::to_integer<unsigned char>(data[offset])));
 
-    std::string out;
-    out.reserve(16);
-    for (int shift = 60; shift >= 0; shift -= 4)
-        out += "0123456789abcdef"[(hash >> shift) & 0xFull];
-    return out;
+    return hexOf(hash);
 }
 
 std::string escaped(std::string_view text)
@@ -259,7 +418,7 @@ public:
 
     Line& num(std::string_view key, u64 value) { return raw(key, std::to_string(value)); }
     Line& num(std::string_view key, i64 value) { return raw(key, std::to_string(value)); }
-    Line& real(std::string_view key, f32 value) { return raw(key, quantized(value)); }
+    Line& real(std::string_view key, f32 value) { return raw(key, quantized(static_cast<f64>(value))); }
 
     Line& str(std::string_view key, std::string_view value)
     {
@@ -289,10 +448,59 @@ private:
 
 class CaptureDevice;
 
+// What a resource holds, remembered from its `create` call so an upload can pick
+// a digest without guessing at the bytes. Indexed by handle id, which starts at
+// one per kind and is never reused, so a vector is the whole data structure.
+//
+// **The kind has to come from the description, not from the data.** Nothing in a
+// span of bytes says whether it is a float or an index, and the one time this
+// engine guessed at that -- `uint4` over a stream of floats -- it cost two
+// milestones of broken skinning (D042).
+class ResourceKinds
+{
+public:
+    void recordBuffer(u32 id, BufferUsage usage)
+    {
+        // Index data is exact integers that no compiler rounds. Everything else
+        // a buffer carries here is f32: mesh attributes, and the per-instance
+        // transforms of `render::GpuInstance`.
+        set(bufferKinds_, id, hasUsage(usage, BufferUsage::Index) ? DigestKind::ExactWord : DigestKind::QuantizedFloat);
+    }
+
+    void recordTexture(u32 id, TextureFormat format)
+    {
+        // Only the 32-bit float formats can be read as f32. A half-float or a
+        // unorm has to be hashed as the exact words it is -- which is a stricter
+        // comparison than `real` makes anywhere else in this file, and see the
+        // note on `uploadTexture` for what that turned out to cost.
+        const bool wide = format == TextureFormat::R32Float || format == TextureFormat::Rgba32Float;
+        set(textureKinds_, id, wide ? DigestKind::QuantizedFloat : DigestKind::ExactWord);
+    }
+
+    [[nodiscard]] DigestKind buffer(u32 id) const noexcept { return get(bufferKinds_, id); }
+    [[nodiscard]] DigestKind texture(u32 id) const noexcept { return get(textureKinds_, id); }
+
+private:
+    static void set(std::vector<DigestKind>& kinds, u32 id, DigestKind kind)
+    {
+        if (kinds.size() <= id)
+            kinds.resize(static_cast<usize>(id) + 1, DigestKind::QuantizedFloat);
+        kinds[id] = kind;
+    }
+
+    [[nodiscard]] static DigestKind get(const std::vector<DigestKind>& kinds, u32 id) noexcept
+    {
+        return id < kinds.size() ? kinds[id] : DigestKind::QuantizedFloat;
+    }
+
+    std::vector<DigestKind> bufferKinds_;
+    std::vector<DigestKind> textureKinds_;
+};
+
 class CaptureCmdList final : public ICmdList
 {
 public:
-    explicit CaptureCmdList(std::string& stream) noexcept : stream_(stream) {}
+    CaptureCmdList(std::string& stream, const ResourceKinds& kinds) noexcept : stream_(stream), kinds_(kinds) {}
 
     void beginRenderPass(const RenderPassDesc& desc) override
     {
@@ -423,21 +631,37 @@ public:
                        .finish();
     }
 
+    // D026: the vertices, indices and per-instance transforms a frame draws, by
+    // content rather than by byte count. This call recorded a size through M7.5,
+    // so two UI goldens at different resolutions would have been byte-identical
+    // if only the quads had moved -- which is how it was found.
     void upload(BufferHandle buffer, std::span<const std::byte> data, u32 offsetBytes) override
     {
+        const UploadSummary summary = summarize(data, kinds_.buffer(buffer.id));
         stream_ += Line("upload")
                        .num("buffer", static_cast<u64>(buffer.id))
                        .num("bytes", static_cast<u64>(data.size()))
                        .num("offset", static_cast<u64>(offsetBytes))
+                       .num("words", summary.words)
+                       .num("packedWords", summary.packedWords)
+                       .str("packed", summary.packed)
+                       .real("mean", summary.mean)
+                       .real("flow", summary.flow)
                        .finish();
     }
 
     void uploadTexture(TextureHandle texture, std::span<const std::byte> data, u32 mipLevel) override
     {
+        const UploadSummary summary = summarize(data, kinds_.texture(texture.id));
         stream_ += Line("uploadTexture")
                        .num("texture", static_cast<u64>(texture.id))
                        .num("bytes", static_cast<u64>(data.size()))
                        .num("mip", static_cast<u64>(mipLevel))
+                       .num("words", summary.words)
+                       .num("packedWords", summary.packedWords)
+                       .str("packed", summary.packed)
+                       .real("mean", summary.mean)
+                       .real("flow", summary.flow)
                        .finish();
     }
 
@@ -450,12 +674,13 @@ public:
 
 private:
     std::string& stream_;
+    const ResourceKinds& kinds_;
 };
 
 class CaptureDevice final : public IDevice
 {
 public:
-    CaptureDevice() : cmdList_(stream_) {}
+    CaptureDevice() : cmdList_(stream_, kinds_) {}
 
     [[nodiscard]] BackendId backend() const noexcept override { return BackendId::Capture; }
 
@@ -488,6 +713,7 @@ public:
     [[nodiscard]] BufferHandle createBuffer(const BufferDesc& desc) override
     {
         const BufferHandle handle{nextBuffer_++};
+        kinds_.recordBuffer(handle.id, desc.usage);
         stream_ += Line("createBuffer")
                        .num("buffer", static_cast<u64>(handle.id))
                        .num("usage", static_cast<u64>(desc.usage))
@@ -500,6 +726,7 @@ public:
     [[nodiscard]] TextureHandle createTexture(const TextureDesc& desc) override
     {
         const TextureHandle handle{nextTexture_++};
+        kinds_.recordTexture(handle.id, desc.format);
         stream_ += Line("createTexture")
                        .num("texture", static_cast<u64>(handle.id))
                        .str("format", name(desc.format))
@@ -610,6 +837,8 @@ private:
     }
 
     std::string stream_;
+    // Declared before `cmdList_`, which holds a reference to it.
+    ResourceKinds kinds_;
     CaptureCmdList cmdList_;
 
     // Per-kind counters starting at 1, so an id is stable regardless of what
