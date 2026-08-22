@@ -188,30 +188,35 @@ TEST_CASE("every cascade is sharper than M4's single one, and the near one by an
         CHECK(cascades.texelWorld[cascade] > cascades.texelWorld[cascade - 1]);
 }
 
-TEST_CASE("the filter radius is clamped, and the clamp is where the seam risk is")
+TEST_CASE("the filter is the same number of texels everywhere, and the seam is the ratio between cascades")
 {
-    // The roadmap requires a filter radius constant in WORLD space, and shadow.h
-    // records that it is clamped to a texel range because a 3x3 kernel spread
-    // over twenty texels bands. This case is what says how badly the clamp
-    // binds with the shipped splits: if adjacent cascades ever differ by more
-    // than the clamp's own range, the filter's world width jumps at that split
-    // and the blend band is carrying the whole difference.
+    // **This case reversed with the filter, and the reversal is the point.**
+    // M7.5 asked for a radius constant in WORLD metres and clamped it to a texel
+    // range, and this case measured how hard the clamp bound. It bound so hard
+    // that the far cascade filtered 0.8 texels -- nine taps inside one texel,
+    // which is a binary comparison wearing a loop, and a human saw it as a
+    // shadow that loses its gradient as it stretches.
+    //
+    // The kernel is a fixed number of texels now, which is what every reference
+    // implementation does (U-58), and the softness a viewer sees therefore
+    // changes across a split by exactly the texel ratio. So that ratio is what
+    // this case measures: it is the whole of the seam risk, and the blend band
+    // is what carries it.
     const render::ShadowCascades cascades = render::fitShadowCascades(fitAt(core::DVec3{}));
-    for (core::u32 cascade = 0; cascade < render::kShadowCascadeCount; ++cascade) {
-        const core::f32 wanted = render::kShadowFilterWorldRadius / cascades.texelWorld[cascade];
-        const core::f32 clamped =
-            wanted < render::kShadowFilterMinTexels
-                ? render::kShadowFilterMinTexels
-                : (wanted > render::kShadowFilterMaxTexels ? render::kShadowFilterMaxTexels : wanted);
-        // Within a factor of six of what was asked for, everywhere. Six rather
-        // than one because the clamp exists precisely to refuse the extreme
-        // ends, and a test that demanded one would be demanding the clamp be
-        // removed. It binds hardest on the FAR cascade, where a quarter-metre
-        // texel makes the minimum of 0.8 texels wider than the radius asked
-        // for -- a shadow at a hundred metres is softer than one at five, which
-        // is the right direction for the wrong reason.
-        CHECK(clamped * cascades.texelWorld[cascade] < render::kShadowFilterWorldRadius * 6.0f);
-        CHECK(clamped * cascades.texelWorld[cascade] > render::kShadowFilterWorldRadius * 0.2f);
+    for (core::u32 cascade = 0; cascade + 1 < render::kShadowCascadeCount; ++cascade) {
+        const core::f32 here = cascades.texelWorld[cascade] * (render::kShadowFilterTexels + 1.0f);
+        const core::f32 next = cascades.texelWorld[cascade + 1] * (render::kShadowFilterTexels + 1.0f);
+        CHECK(next > here);
+        // Under five, and the last pair is the one that spends it: the practical
+        // split scheme at 0.85 leans logarithmic, which buys the near cascade
+        // its 1.1 cm texel and pays for it at the far end. A tighter bound here
+        // would be a demand on `kShadowSplitLambda` rather than on the filter.
+        //
+        // Fitted to real casters the ratio is smaller than this -- the fit
+        // shrinks the far cascade most -- but the fixture hands the fit no
+        // casters on purpose, so what this checks is the worst case the splits
+        // can produce rather than what one scene happens to get.
+        CHECK(next / here < 5.0f);
     }
 }
 

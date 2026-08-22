@@ -318,12 +318,20 @@ float sampleCascade(Texture2D<float> atlas, SamplerState pointSampler, uint casc
     const float texelWorld = CascadeTexelWorld[cascade];
     const float depthRange = max(CascadeDepthRange[cascade], 1e-3f);
 
+    // The filter's own width in world metres: the kernel steps `ShadowParams.x`
+    // texels and a 3x3 reaches one step out, so it spans two of them.
+    const float filterWorld = texelWorld * (ShadowParams.x + 1.0f);
+
     // Normal-offset bias, replacing a depth-only one: displacing the sample
     // along the surface normal is what survives a grazing receiver, and it
     // scales with the SINE of the light angle so it grows exactly where it is
     // needed and vanishes where it is not.
+    //
+    // Measured against the FILTER rather than against one texel. A kernel that
+    // reads depths a texel away needs an offset that reaches as far as it does,
+    // or the widest taps land back on the surface that cast them.
     const float slope = sqrt(saturate(1.0f - nol * nol));
-    const float3 offset = normal * (texelWorld * ShadowParams.y * slope);
+    const float3 offset = normal * (filterWorld * ShadowParams.y * slope);
 
     const float4 lightClip = mul(CascadeViewProjection[cascade], float4(position + offset, 1.0f));
     const float3 ndc = lightClip.xyz / lightClip.w;
@@ -344,10 +352,11 @@ float sampleCascade(Texture2D<float> atlas, SamplerState pointSampler, uint casc
     // constant in depth units means a different distance in every cascade.
     const float reference = ndc.z - ShadowParams.w / depthRange;
 
-    // The filter radius, constant in world metres and clamped to a texel range.
-    // The clamp is the honest part: a 3x3 kernel spread over twenty texels is
-    // four samples of a large region rather than a filter, and it bands.
-    const float radiusTexels = clamp(ShadowParams.x / max(texelWorld, 1e-6f), 0.8f, 3.0f);
+    // The kernel's step, in TEXELS, and see `shadow.h` for why it is texels. A
+    // step under one leaves nine taps inside a single texel, which is not a
+    // filter -- it is the binary comparison it was meant to soften, wearing a
+    // loop.
+    const float radiusTexels = max(ShadowParams.x, 1.0f);
     // A cascade's tile spans half the atlas, and its own extent is
     // `texelWorld * tile` metres across -- so a step of one texel is this much
     // local uv, and half that much atlas uv.

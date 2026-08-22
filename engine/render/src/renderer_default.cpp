@@ -1480,7 +1480,13 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             // box is sized to the casters and the sphere is sized to what the
             // camera can see, and those stopped being the same number when the
             // box learned to be smaller than the slice.
-            const CullSphere cull{cascades.cullCentre[index], cascades.cullRadius[index]};
+            // Shrunk by the filter's reach, the way Unity's
+            // `cullingSphere.w -= filterSize` is (U-58): a fragment at the very
+            // edge of a cascade has taps that step outside it, and a caster
+            // culled because its centre was outside would leave those taps
+            // reading empty depth.
+            const f32 filterReach = cascades.texelWorld[index] * (kShadowFilterTexels + 1.0f);
+            const CullSphere cull{cascades.cullCentre[index], cascades.cullRadius[index] + filterReach};
             drawGeometry(cmd, world, meshes, cascades.viewProjection[index], shadowPipeline_, shadowSkinnedPipeline_,
                          Selection::Shadow, &cull);
         }
@@ -1640,8 +1646,8 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             frame.cascadeTexelWorld[index] = cascades.texelWorld[index];
             frame.cascadeDepthRange[index] = cascades.depthRange[index];
         }
-        frame.shadowParams[0] = kShadowFilterWorldRadius;
-        frame.shadowParams[1] = kShadowNormalOffsetTexels;
+        frame.shadowParams[0] = kShadowFilterTexels;
+        frame.shadowParams[1] = kShadowNormalOffsetFilters;
         frame.shadowParams[2] = kShadowCascadeBlend;
         frame.shadowParams[3] = kShadowDepthBiasMetres;
 
