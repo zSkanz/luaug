@@ -902,7 +902,19 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         const bool waitingForGround = streaming.active() &&
                                       host->world().engineState().streamingPauseOutsideLoadedArea &&
                                       !streaming.minimumRingResident();
-        const u32 simTicks = waitingForGround ? 0u : frame.simTicks;
+        u32 simTicks = waitingForGround ? 0u : frame.simTicks;
+
+        // **The editor's transport, and it gates ticks by exactly the same
+        // argument the streaming pause above makes** (D058): what this changes
+        // is WHEN a tick runs, never what a tick computes. Paused takes none,
+        // a step takes one, playing takes what the frame owed and this line
+        // does nothing at all.
+        //
+        // A paused editor still shows a built world: `WorldHost::boot` runs
+        // every entry script in its own drain before the first frame and
+        // advances no clock, so tick zero is a world rather than an absence.
+        if (options.editor)
+            simTicks = editor.allowedTicks(simTicks);
 
         // The simulation, before anything is drawn: rendering shows the state a
         // tick settled on, never one being written.

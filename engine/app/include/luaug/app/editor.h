@@ -84,6 +84,24 @@ struct PickRequest
     core::Vec2 pixel;
 };
 
+// Whether the world this editor is looking at is being simulated.
+//
+// **An editor opens paused, and that is the whole point of having this**
+// (D058). A world that is ticking is a world whose properties are being
+// written by scripts sixty times a second, so somebody typing into the
+// properties grid is arguing with the game and losing.
+//
+// There is deliberately no `Stopped`. In an editor, stop returns the world to
+// what it was before play began -- to the EDITED state -- and nothing in this
+// engine can remember an edited state yet, because nothing can serialize a
+// world. That is E3, and a button that silently discarded a person's work would
+// be worse than no button.
+enum class RunState
+{
+    Paused,
+    Playing,
+};
+
 class Editor
 {
 public:
@@ -103,6 +121,36 @@ public:
     void requestPick(core::Vec2 pixelInViewport) noexcept { m_pending = PickRequest{pixelInViewport}; }
     [[nodiscard]] bool pickPending() const noexcept { return m_pending.has_value(); }
 
+    [[nodiscard]] RunState runState() const noexcept { return m_run; }
+    void setRunState(RunState state) noexcept { m_run = state; }
+
+    // Ask for exactly one tick while paused. A step is how somebody watches a
+    // thing happen instead of inferring it from before and after, and it is the
+    // one control a paused editor cannot do without.
+    void requestStep() noexcept { m_stepRequested = true; }
+
+    // How many of the frame's owed ticks the world may actually take.
+    //
+    // Playing: all of them, unchanged -- the editor is not a second scheduler
+    // and must not become one. Paused: none, unless a step was asked for, and
+    // then exactly one however many the frame owed. Consuming the request here
+    // rather than at the button is what makes a step one tick rather than one
+    // tick per frame the button stays held.
+    [[nodiscard]] core::u32 allowedTicks(core::u32 owed) noexcept
+    {
+        if (m_run == RunState::Playing)
+            return owed;
+        // The request survives a frame that owed nothing. A step is a promise
+        // that one tick will happen, not that one will happen if the frame
+        // arrived at a convenient moment -- and at sixty hertz a frame owing
+        // zero ticks is common enough that swallowing the press would make the
+        // button feel broken.
+        if (!m_stepRequested || owed == 0)
+            return 0;
+        m_stepRequested = false;
+        return 1u;
+    }
+
     // Resolves a pending pick against the world and hands the result to the
     // inspector. Returns what was hit, or nothing when the click landed on
     // empty space -- which clears the selection, because clicking nothing in a
@@ -121,6 +169,8 @@ private:
     core::DVec3 m_cameraOrigin;
     bool m_hasCamera = false;
     std::optional<PickRequest> m_pending;
+    RunState m_run = RunState::Paused;
+    bool m_stepRequested = false;
 };
 
 } // namespace luaug::app

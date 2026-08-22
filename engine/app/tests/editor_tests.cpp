@@ -166,3 +166,53 @@ TEST_CASE("a click nearer the top of the viewport picks the higher of two parts"
     REQUIRE(lower.has_value());
     CHECK(lower->instance == low);
 }
+
+TEST_CASE("an editor opens paused, because a ticking world overwrites what you type into it")
+{
+    Editor editor;
+    CHECK(editor.runState() == luaug::app::RunState::Paused);
+    CHECK(editor.allowedTicks(4) == 0);
+}
+
+TEST_CASE("playing does not become a second scheduler")
+{
+    Editor editor;
+    editor.setRunState(luaug::app::RunState::Playing);
+
+    // Whatever the frame owed, unchanged -- including the catch-up clamp's
+    // maximum and a frame that owed nothing.
+    CHECK(editor.allowedTicks(4) == 4);
+    CHECK(editor.allowedTicks(1) == 1);
+    CHECK(editor.allowedTicks(0) == 0);
+}
+
+TEST_CASE("a step is one tick, once")
+{
+    Editor editor;
+    editor.requestStep();
+
+    CHECK(editor.allowedTicks(4) == 1);
+    // The next frame owes ticks again and must not take one: a step that
+    // repeated while the world stayed paused would be play with extra steps.
+    CHECK(editor.allowedTicks(4) == 0);
+}
+
+TEST_CASE("a step asked for on a frame that owes nothing is not swallowed")
+{
+    Editor editor;
+    editor.requestStep();
+
+    CHECK(editor.allowedTicks(0) == 0);
+    CHECK(editor.allowedTicks(1) == 1);
+    CHECK(editor.allowedTicks(1) == 0);
+}
+
+TEST_CASE("pausing mid-play stops the world at the next frame")
+{
+    Editor editor;
+    editor.setRunState(luaug::app::RunState::Playing);
+    REQUIRE(editor.allowedTicks(2) == 2);
+
+    editor.setRunState(luaug::app::RunState::Paused);
+    CHECK(editor.allowedTicks(2) == 0);
+}

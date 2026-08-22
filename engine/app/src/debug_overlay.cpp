@@ -615,6 +615,33 @@ void drawConsole(script::ScriptRuntime* runtime)
     ImGui::SetKeyboardFocusHere(-1);
 }
 
+// Play, pause and step, above the image they act on.
+//
+// **There is no Stop, and its absence is deliberate** (D058). Stop means "put
+// the world back the way it was before I pressed play", and this engine cannot
+// remember an edited world yet -- nothing can serialize one. A Stop that
+// silently rebuilt from the scripts would throw away whatever somebody had
+// changed, which is worse than a button that is not there.
+void drawTransport(Editor& editor)
+{
+    const bool playing = editor.runState() == RunState::Playing;
+
+    // One button that reads as the thing it will DO, not the state it is in.
+    // A button labelled with the current state is the oldest way to make
+    // somebody press the wrong one.
+    if (ImGui::Button(playing ? "pause" : "play"))
+        editor.setRunState(playing ? RunState::Paused : RunState::Playing);
+
+    ImGui::SameLine();
+    ImGui::BeginDisabled(playing);
+    if (ImGui::Button("step"))
+        editor.requestStep();
+    ImGui::EndDisabled();
+
+    ImGui::SameLine();
+    ImGui::TextDisabled(playing ? "running" : "paused -- the world is not ticking");
+}
+
 // The 3D view.
 //
 // The panel IS the image: no padding, because a margin of window background
@@ -628,6 +655,8 @@ void drawViewport(Editor& editor, rhi::TextureHandle texture)
     ImGui::PopStyleVar();
 
     if (open) {
+        drawTransport(editor);
+
         const ImVec2 size = ImGui::GetContentRegionAvail();
         const ImVec2 origin = ImGui::GetCursorScreenPos();
         editor.setViewport(ViewportRect{origin.x, origin.y, size.x, size.y});
