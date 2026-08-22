@@ -1065,7 +1065,9 @@ user decision #7", which had put the 2D layer first — that item is unchanged a
 only its position moved.
 
 1. **Visual editor** — built on the engine (Studio-like, phase 2 of the
-   original vision).
+   original vision). **Opened 2026-08-22 by human decision** and specified below
+   under "Phase 1 detail"; it is the first work this repository does that v1's
+   roadmap did not already contain.
 2. **Effects and world content** — added 2026-08-21 by human decision, after an
    audit of what this engine will not have that others do turned up a group with
    no owner anywhere: not in v1, not in any post-v1 phase, and no recorded reason.
@@ -1193,3 +1195,109 @@ only its position moved.
    reload (only if the world-restart budget proves insufficient), Box3D as a
    second 3D physics backend when it reaches 1.0.
 
+
+## Phase 1 detail — the visual editor
+
+Opened 2026-08-22 by human decision, the first sequence this repository builds
+that the v1 roadmap did not contain. The shape is settled by **ADR 0046**: the
+editor is a mode of the `luaug-host` binary drawn in Dear ImGui, launched by
+`luaug edit`, driving the `Inspector` model that already exists. Read the ADR
+before this section — it records the two shapes that were rejected and why, and
+one of them was rejected because the sandbox would have had to be opened to
+allow it.
+
+**The starting position is better than the phase's size suggests**, and five
+reconnaissance passes measured it rather than assumed it. Already built and
+tested: a property grid that walks the generated descriptor tables with no
+switch on any class name (`engine/app/src/inspector.cpp`, nine doctest cases
+against classes it has never seen); writes queued and drained through
+`World::setProperty` at the frame's safe point; five distinguishable refusal
+outcomes; a preorder tree flattener; a Luau REPL against the live VM; ImGui
+vendored on the docking branch with tables, multi-select, drag-and-drop and a
+list clipper; and `--two-worlds`, which proves two worlds and two Luau VMs alive
+in one process. **What is absent is smaller and sharper**: no picking at all — a
+repo-wide search for `ScreenPointToRay`, `unproject` or `WorldToScreen` finds
+only prose in `docs/api-design.md` — no selection highlight, no manipulator, no
+undo, no dockspace, no scene file format, and no way for the engine to write a
+file (`engine/platform/include/luaug/platform/file.h` reads and never writes).
+
+**The sequence, and only E1 is specified.** E2 through E5 are ordered intent in
+the same sense as the phase list above: each gets its detail and its gate at its
+own kickoff, from what the milestone before it learned. Writing five gates today
+would be writing four of them from a position that has not seen an editor run.
+
+| ID | Name | Size | Runnable artifact |
+|----|------|------|-------------------|
+| E1 | The Editor Opens | M | `luaug edit examples/10-open-world`: docked panels, the world in a viewport, click a tower and its properties are there and editable |
+| E2 | The Editor Changes Things | M | Manipulators, create/delete/rename/reparent, undo/redo, multi-select — a small scene built by hand |
+| E3 | The Editor Saves | L | A scene file format and its ADR: move a part, save, relaunch, it is where you left it |
+| E4 | The Editor Plays | M | Play and stop inside the editor on the two-worlds seam, with the edit world intact afterwards |
+| E5 | The Editor Ships | M | Asset browser, prefabs, and the distribution question ADR 0046 deliberately declined |
+
+### E1 — The Editor Opens (M)
+
+- **Goal:** an editor that opens a real project, shows it, lets you choose a
+  thing in it with the mouse, and lets you change that thing — nothing more. The
+  milestone is deliberately short of manipulators and of saving, because both are
+  large and neither can be designed honestly before somebody has used the
+  selection they depend on.
+- **Scope:**
+  - `luaug edit [path]` in the CLI, following `tools/cli/main.luau`'s existing
+    shape: an `if` branch, `rejectUnknownFlags` with the exact allowed set, a
+    `cli.edit.*` catalog key for every user-facing line (R3), and a test that
+    drives the real command line in a spawned process rather than calling `run`.
+  - An **editor mode** in `engine/app`, gated the way `--replay`, `--bench` and
+    `--two-worlds` already are, that boots a windowed host and draws an editor
+    instead of a game's overlay.
+  - **A dockspace and real panels.** `drawShell`'s single `Begin("LuauG")` with
+    everything stacked inside becomes a dockspace host with Explorer, Properties,
+    Viewport, Console and Stats as dockable windows, and `io.IniFilename` is
+    turned back on with a decided location so a layout survives a restart.
+  - **The world in a viewport panel.** The renderer already draws into an
+    arbitrary `RenderTarget` and does it headlessly every day; the editor renders
+    into a texture and shows it in a panel, which is what makes the panels around
+    it worth having.
+  - **Picking, which is the milestone's one genuinely new mechanism.** A screen
+    point becomes a ray in world space and the ray chooses an instance. It is
+    written as a testable function over a camera and a viewport rectangle, not
+    as a lambda inside a UI callback, because a picking bug that can only be
+    reproduced by clicking is a bug nobody fixes twice.
+  - **A selection you can see.** The selected instance is outlined or boxed in
+    the viewport through the debug-draw path that already exists. A selection
+    that only appears in a tree view is not a selection in a 3D editor.
+  - **The two reflection gaps that a real property grid cannot work around**,
+    both additive to a pipeline that already exists: `PropertyDesc` gains the
+    identity of the enum a property accepts — today the overlay recovers it from
+    the current value, so a combo cannot be filled without a live instance — and
+    `docKey` stops being emitted empty, so a property can carry the tooltip the
+    IDL already wrote for it.
+  - **D056 and D057**, because ADR 0046's editor lives behind `LUAUG_DEBUG_UI`
+    and that flag is profile-gated, so this milestone is where the profile gating
+    stops being fiction. At minimum: the `shipping` profile compiles, something
+    builds it every gate, and `luaug build` either selects it or the release says
+    plainly what it selects instead.
+- **NOT in scope, and stated so it is not drifted into:** manipulators of any
+  kind, undo, creating or deleting instances, reparenting, multi-select, saving
+  anything at all, a scene file format, an asset browser, prefabs, play/stop, a
+  second window, and any distribution of the editor as a downloadable product.
+- **Gate (definition of done):**
+  - `luaug edit examples/10-open-world` opens, docks, and renders the world in
+    its viewport; a screenshot is attached to the gate record.
+  - Clicking a part in the viewport selects it: the Explorer highlights the same
+    instance, the Properties panel shows its class, and the viewport draws the
+    selection. Proven by a headless test that drives a synthetic click through
+    the picking function, not by eye alone.
+  - Picking has unit tests over a camera and a viewport rectangle covering: the
+    centre of the screen, each corner, a click on empty space returning nothing,
+    and a non-square viewport — the last because an aspect-ratio bug is invisible
+    at the centre and wrong everywhere else.
+  - Editing a property in the editor changes the world: the existing safe-point
+    drain is used unchanged and a test asserts the write lands.
+  - An enum-valued property offers its full set of items with no live instance
+    needed to discover them, and a property with a doc string shows it.
+  - The `shipping` profile compiles, and a gate stage builds it.
+  - `scripts/localgate.ps1` green on all five stages; `luaug check` clean;
+    docs-lint clean.
+  - **A human opens the editor on the flagship and says whether it is an editor**
+    — the gate item that is deliberately not automatable, and the one every
+    milestone since M4 has proven is where the real defects come from.

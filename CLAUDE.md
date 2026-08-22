@@ -9,17 +9,18 @@ digest for any agent touching this repo.**
 LuauG — an open-source (Apache-2.0) standalone game engine: C++ core embedding
 Luau 0.734 directly, Roblox-familiar Instance/Service API over a data-oriented
 ECS, deterministic fixed-tick simulation, SDL3 + custom RHI (SDL3 GPU default),
-Jolt physics, code-first DX with hot reload. **Pre-alpha, M0 through M6 signed
-off**: the host boots a sandboxed VM, runs a deterministic tick over an Instance
-tree, hot-reloads in under two milliseconds, renders glTF meshes and primitive
-parts with forward PBR under a shadowed sun, simulates a world with mass — rigid
-bodies, contacts, collision groups, queries, welds and a character that walks and
-rides platforms — and plays: input actions, UI, tweens, audio and skeletal
-animation, with `examples/04-obby` playable from menu to finish flag. **M7 is
-next** and is the roadmap's asset pipeline, async IO, streaming and floating
-origin. The engine is built milestone by milestone per
-`docs/roadmap.md`; `PROGRESS.md` says where things stand, and it is the file to
-trust when this paragraph and it disagree.
+Jolt physics, code-first DX with hot reload. **v1.0.0 is released** — M0 through
+M8 signed off, every milestone tagged, and the release published on 2026-08-22:
+the host boots a sandboxed VM, runs a deterministic tick over an Instance tree,
+hot-reloads in under two milliseconds, renders a world through cascaded shadows,
+clustered lights, image-based lighting and a post chain, simulates it with Jolt,
+streams it in chunks around a floating origin, and plays it — input actions, UI,
+tweens, audio and skeletal animation — with `examples/10-open-world` walkable
+from a built folder. **The visual editor is what comes next** (post-v1 phase 1,
+human decision 2026-08-22), and it is the first thing this repository builds that
+the roadmap does not already specify. The engine is built milestone by milestone
+per `docs/roadmap.md`; `PROGRESS.md` says where things stand, and it is the file
+to trust when this paragraph and it disagree.
 
 ## Commands
 
