@@ -562,6 +562,23 @@ still scene under a moving sun: the frame-to-frame change went from a mean of
 mean 6.99 to 1.27. Baking it exactly, every frame, costs 0.55 ms instead of
 0.2 and measures no better.
 
+**A shadow edge steps by one texel whatever else is true, and what changes with
+distance is how often** (D054). Measured on a still probe under the flagship's
+clock: the near cascade's lattice drifts about half a texel per frame near noon,
+so its edge moves every other frame and reads as motion; the far cascade drifts
+a twentieth of a texel and holds still for twenty-three frames before jumping,
+which reads as a jump. Widening the texel-band floor from two to six and
+rotating the 5x5 kernel per pixel — measured with the casters at forty-five
+metres, consecutive frames subtracted:
+
+| | Pixels changing >2 levels | >4 levels | Worst single change |
+|---|---|---|---|
+| Floor 3 texels, fixed grid | 227 | 62 | 37 |
+| Floor 4, rotated | 117 | 20 | 35 |
+| **Floor 6, rotated** | **80** | **14** | **14** |
+
+The taps are the same twenty-five, so none of it costs anything measurable.
+
 **Render interpolation costs nothing measurable** (D047). Forcing `alpha` to zero
 on the same scene moves the median by less than the run-to-run spread, because
 almost every part in an open world is static and the comparison in front of the

@@ -293,6 +293,25 @@ float3 evaluateEnvironment(Surface surface, Texture2D environmentMap, SamplerSta
 // are six ALU instructions. So the frozen `SamplerDesc` gains no compare state
 // and the result is the same arithmetic (ADR 0043).
 
+// A per-pixel angle in [0, 2pi), from the pixel's own coordinates and nothing
+// else (D054).
+//
+// Jimenez's interleaved gradient noise, which is the standard cheap choice for
+// exactly this job: it decorrelates NEIGHBOURING pixels while staying perfectly
+// stable in time, because it is a function of the pixel position alone. A
+// kernel rotated by it turns the one artifact a wide fixed grid produces --
+// concentric bands, where every pixel in a region samples the same five rings --
+// into fine noise that the eye reads as a soft edge.
+//
+// Stability in time is the property that matters here and is why this is not a
+// random number: a dither that changed per frame would trade a shadow that
+// steps for a shadow that boils.
+float shadowKernelAngle(float2 pixel)
+{
+    const float noise = frac(52.9829189f * frac(dot(pixel, float2(0.06711056f, 0.00583715f))));
+    return noise * 6.28318530718f;
+}
+
 // One tap: hardware-PCF's own answer, computed rather than sampled.
 float shadowTapPcf(Texture2D<float> atlas, SamplerState pointSampler, float2 uv, float reference, float2 atlasSize)
 {
@@ -313,7 +332,7 @@ float shadowTapPcf(Texture2D<float> atlas, SamplerState pointSampler, float2 uv,
 
 // One cascade, 3x3 taps of the above. Returns 1 where the sun reaches.
 float sampleCascade(Texture2D<float> atlas, SamplerState pointSampler, uint cascade, float3 position, float3 normal,
-                    float nol, float2 atlasSize)
+                    float nol, float2 atlasSize, float2 pixel)
 {
     const float texelWorld = CascadeTexelWorld[cascade];
     const float depthRange = max(CascadeDepthRange[cascade], 1e-3f);
@@ -322,7 +341,7 @@ float sampleCascade(Texture2D<float> atlas, SamplerState pointSampler, uint casc
     // a penumbra in METRES and this is where it meets the cascade it has to be
     // drawn on; `shadow.h` carries the whole argument for why it is metres again
     // and why the band is [2, 4].
-    const float radiusTexels = clamp(ShadowParams.x / max(texelWorld, 1e-6f), 3.0f, 4.0f);
+    const float radiusTexels = clamp(ShadowParams.x / max(texelWorld, 1e-6f), 6.0f, 8.0f);
     const float filterWorld = texelWorld * radiusTexels;
 
     // Normal-offset bias, replacing a depth-only one: displacing the sample
@@ -367,7 +386,9 @@ float sampleCascade(Texture2D<float> atlas, SamplerState pointSampler, uint casc
     // The atlas's whole tax, and it is four lines: a tap that walks off a tile
     // reads the NEIGHBOURING cascade's depth, which is a bright seam along the
     // split. Clamping to the tile inset by the kernel is what stops it.
-    const float2 inset = step2 * 2.0f + 0.5f / atlasSize;
+    // A rotated grid reaches its own DIAGONAL, not its edge, so the inset that
+    // keeps a tap inside its own tile has to allow for the corner (D054).
+    const float2 inset = step2 * 2.83f + 0.5f / atlasSize;
     const float2 lowest = tile + inset;
     const float2 highest = tile + float2(0.5f, 0.5f) - inset;
 
@@ -383,6 +404,18 @@ float sampleCascade(Texture2D<float> atlas, SamplerState pointSampler, uint casc
     // little wider than the loop suggests and the corners of the grid carry less
     // weight than a disc would give them. That is the trade a square kernel
     // makes and it is invisible at this size.
+    // **Rotated per pixel, and D054 is why.** The grid below is what hides a
+    // shadow map's texel steps, and the wider it reaches the better it hides
+    // them -- but a fixed grid spread over six texels puts its twenty-five taps
+    // a texel and a half apart, and every pixel in a region then samples the
+    // same five rings. That is banding, and it is what the [2, 4] clamp this
+    // replaces existed to avoid. Turning each pixel's grid by its own angle
+    // costs two trig calls and spends the same taps on a different five rings
+    // per pixel, which reads as a soft edge instead.
+    float sine = 0.0f;
+    float cosine = 0.0f;
+    sincos(shadowKernelAngle(pixel), sine, cosine);
+
     float lit = 0.0f;
     [unroll]
     for (int y = -2; y <= 2; ++y)
@@ -390,7 +423,8 @@ float sampleCascade(Texture2D<float> atlas, SamplerState pointSampler, uint casc
         [unroll]
         for (int x = -2; x <= 2; ++x)
         {
-            const float2 uv = clamp(tile + local * 0.5f + float2(x, y) * step2, lowest, highest);
+            const float2 turned = float2(float(x) * cosine - float(y) * sine, float(x) * sine + float(y) * cosine);
+            const float2 uv = clamp(tile + local * 0.5f + turned * step2, lowest, highest);
             lit += shadowTapPcf(atlas, pointSampler, uv, reference, atlasSize);
         }
     }
@@ -404,7 +438,7 @@ float sampleCascade(Texture2D<float> atlas, SamplerState pointSampler, uint casc
 // being derived from `SV_Position`, because deriving it would need the
 // projection this stage is not given.
 float sampleSunShadow(Texture2D<float> atlas, SamplerState pointSampler, float3 position, float3 normal, float nol,
-                      float viewDepth)
+                      float viewDepth, float2 pixel)
 {
     uint width = 0;
     uint height = 0;
@@ -424,7 +458,7 @@ float sampleSunShadow(Texture2D<float> atlas, SamplerState pointSampler, float3 
         }
     }
 
-    const float lit = sampleCascade(atlas, pointSampler, cascade, position, normal, nol, atlasSize);
+    const float lit = sampleCascade(atlas, pointSampler, cascade, position, normal, nol, atlasSize, pixel);
 
     // Blend over a BAND rather than switching at a plane, which the roadmap
     // names as the second tell of a first cascaded implementation. A hard
@@ -439,7 +473,7 @@ float sampleSunShadow(Texture2D<float> atlas, SamplerState pointSampler, float3 
         return lit;
     }
 
-    const float next = sampleCascade(atlas, pointSampler, cascade + 1u, position, normal, nol, atlasSize);
+    const float next = sampleCascade(atlas, pointSampler, cascade + 1u, position, normal, nol, atlasSize, pixel);
     return lerp(lit, next, blend);
 }
 

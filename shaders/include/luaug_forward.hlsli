@@ -223,7 +223,8 @@ float4 shadeForward(Interpolants input)
     const float3 sunDirection = normalize(SunDirectionBrightness.xyz);
     const float sunNol = saturate(dot(normal, sunDirection));
     const float shadow =
-        sampleSunShadow(ShadowMap, ShadowSampler, input.ShadingPosition, normal, sunNol, input.ViewDepth);
+        sampleSunShadow(ShadowMap, ShadowSampler, input.ShadingPosition, normal, sunNol, input.ViewDepth,
+                        input.Position.xy);
     const float3 sunRadiance = SunColorUnused.rgb * (SunDirectionBrightness.w * shadow);
     float3 color = shadeDirect(surface, sunDirection, sunRadiance);
 

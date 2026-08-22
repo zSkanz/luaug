@@ -10,7 +10,7 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   (`MASTER_PROMPT.md` §6), and M4 is why that is written down. No `milestone/m8`
   tag and no `v1.0.0` tag until then.
   The brief is [`docs/briefs/m8-kickoff.md`](docs/briefs/m8-kickoff.md), with
-  five decisions, ten Findings and a filled Gate Record. **Every scope item is
+  five decisions, eleven Findings and a filled Gate Record. **Every scope item is
   done** except the release itself, which needs a human and an account (below).
 
   **The deliverable is [`examples/10-open-world`](examples/10-open-world/)** — a
@@ -25,7 +25,7 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   168 MiB, instances flat at ~4,300. The absolute targets in
   `docs/perf-baselines.md` said "bind at M8" and now say what they measured.
 
-  **Seven defects came from a human running the demo while every gate was green**,
+  **Eight defects came from a human running the demo while every gate was green**,
   which is the pattern this project keeps paying for and keeps being right about.
   D047: the world vibrated as you walked — the engine had never interpolated
   between ticks, and `Frame::alpha` had been computed and read by nothing since
@@ -60,7 +60,16 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   half is the shadow edge and is inherent — a cascade's lattice lives in the
   light's rotating frame, so a fixed point drifts across it twenty-five times
   faster near noon than at dawn — and is mitigated by a penumbra one texel wider
-  and by D052's finer texels. Two more were found by the milestone's own work: D045
+  and by D052's finer texels. D054 is the third report about that same edge and
+  the one that named the relation: the flicker scales with camera DISTANCE.
+  Measuring it turned the relation around — the step is about the same size on
+  screen at every distance, and what changes is the frequency, from every other
+  frame in the near cascade to one jump every twenty-three frames in the far
+  one, which is why one reads as motion and the other as a jump. The penumbra's
+  floor is six texels now rather than two, paid for by rotating the 5×5 kernel
+  per pixel so a wide fixed grid's banding becomes fine noise: pixels changing
+  by more than four levels between consecutive frames fell from 62 to 14, and
+  the worst single change from 37 to 14, at no cost in taps. Two more were found by the milestone's own work: D045
   (`luaug new` could not find its template and had not since M3) and D046 (two
   gates depended on a generated world that nothing generated).
 

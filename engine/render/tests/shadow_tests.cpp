@@ -200,8 +200,9 @@ TEST_CASE("every cascade can draw the penumbra the filter asks for")
     //
     // The claim now is the one that matters to a viewer: the penumbra is a
     // number of METRES and every cascade must be able to draw it. "Able" is the
-    // texel band -- under two a filter cannot hide the step it exists for, over
-    // four its own taps start to show -- so this checks that the shipped
+    // texel band -- under six a filter cannot hide the step it exists for, over
+    // eight its own taps start to show even rotated -- so this checks that the
+    // shipped
     // cascades land inside it rather than on its edges, because a cascade on the
     // edge is one whose softness the clamp is choosing rather than the radius.
     const render::ShadowCascades cascades = render::fitShadowCascades(fitAt(core::DVec3{}));
@@ -211,7 +212,7 @@ TEST_CASE("every cascade can draw the penumbra the filter asks for")
             wanted < render::kShadowFilterMinTexels
                 ? render::kShadowFilterMinTexels
                 : (wanted > render::kShadowFilterMaxTexels ? render::kShadowFilterMaxTexels : wanted);
-        // **Two texels, everywhere, whatever else happens.** That is the whole
+        // **Six texels, everywhere, whatever else happens (D054).** That is the whole
         // guarantee: a shadow edge is quantised onto this grid, and a penumbra
         // narrower than the step it has to hide leaves the step showing. The
         // near cascade reaches it by clamping up from a radius its own texel
@@ -222,9 +223,17 @@ TEST_CASE("every cascade can draw the penumbra the filter asks for")
         CHECK(actual >= render::kShadowFilterMinTexels);
         CHECK(actual <= render::kShadowFilterMaxTexels);
         // And it is a real distance on the ground: never under a centimetre,
-        // never over a metre, across a chain whose texels span 23:1.
+        // never over two and a half metres, across a chain whose texels span
+        // 23:1.
+        //
+        // **The ceiling was one metre until D054.** The floor of the texel band
+        // is what the far cascade gets -- out there the authored penumbra is a
+        // fraction of a texel and the clamp is the only thing speaking -- and
+        // six texels of a third of a metre is two metres of penumbra. That is
+        // the trade the defect asked for: a shadow at eighty metres that is
+        // soft rather than one that advances in visible steps as the sun turns.
         CHECK(actual * cascades.texelWorld[cascade] > 0.01f);
-        CHECK(actual * cascades.texelWorld[cascade] < 1.0f);
+        CHECK(actual * cascades.texelWorld[cascade] < 2.5f);
     }
 }
 

@@ -227,6 +227,31 @@ _(appended during the milestone)_
 
 ## Findings
 
+11. **A defect report that carries a RELATION is worth more than one that
+    carries a symptom** (D054). "The flicker gets worse the further the camera
+    is" is not a complaint, it is half a derivation: the far cascade's texel is
+    larger, so the same one-texel step is larger — except that measuring it
+    showed the step is about the same size on screen at every distance, and what
+    actually changes is the FREQUENCY. The near cascade's lattice drifts half a
+    texel per frame near noon and its edge moves every other frame; the far one
+    drifts a twentieth and holds still for twenty-three frames before jumping.
+    **Frequent small steps read as motion and one step every four hundred
+    milliseconds reads as a jump**, which is why the near field always looked
+    fine.
+
+    That reframing is what chose the fix. The step cannot be removed without a
+    temporal filter this renderer does not have, so the penumbra has to be wide
+    enough to hide it — and the only thing that sets the penumbra in a far
+    cascade is the texel band's floor, because out there the authored five
+    centimetres is a fraction of one texel. Six texels rather than two, paid for
+    by rotating the kernel per pixel so that the banding a wide fixed grid
+    produces becomes fine noise instead.
+
+    **And the same human handed over the instrument**: point the camera straight
+    down. A shadow seen from above is a shape whose motion between two frames is
+    unmistakable, where the same shadow seen from a standing eye is an edge at a
+    glancing angle.
+
 10. **"It starts at eleven in the morning" is a diagnosis, and it separated two
     defects nobody could have told apart from the symptom** (D053). A human
     reported the world going temporally unstable partway through the day cycle:
@@ -425,7 +450,7 @@ macOS is unverified: CI has executed zero steps since 2026-08-21.
 
 ### Defects found and fixed during the milestone
 
-Nine, and **seven of the nine came from a human running the thing** while every
+Ten, and **eight of the ten came from a human running the thing** while every
 gate in the repository was green.
 
 | | Found by | What |
@@ -439,6 +464,7 @@ gate in the repository was green.
 | D051 | a human, with a close-up | Objects hovered over their own shadows: two biases paying for an acne the cull mode already prevents |
 | D052 | a human, asking a question | Shadows coarse at a moderate distance: the flagship asked for 180 m of shadow on a 1024 tile, which is half a metre per texel past forty-four |
 | D053 | a human, standing still | The world pulsed and shadow edges trembled after eleven in the morning: a diffuse ambient arriving in steps, and a shadow lattice that drifts twenty-five times faster near noon than at dawn |
+| D054 | a human, moving the camera back | The remaining flicker scales with camera distance: the far cascade's edge holds still for twenty-three frames and then jumps, where the near one moves every other frame |
 
 ### What this milestone does not have
 

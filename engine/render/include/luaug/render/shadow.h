@@ -91,14 +91,34 @@ inline constexpr f32 kShadowRadius = 220.0f;
 // variable step rather than 3x3 with a fixed one: twenty-five bilinear taps can
 // cover eight texels without the gaps that made three bands.
 //
-// The band is still a band because the two ends are still real. Below two
-// texels a filter cannot hide the step it is there to hide; above four the taps
-// spread far enough apart to show themselves. What is different is that the
-// range in between now covers every cascade the fit produces, so the clamp
-// stopped being where the design lives.
+// The band is still a band because the two ends are still real, and **both of
+// its numbers moved at D054**, which is the third report about the same edge.
+//
+// The floor is what a FAR cascade gets, because out there the authored
+// penumbra is a fraction of a texel and the clamp is the only thing speaking.
+// It is what decides whether the one-texel step a rotating light forces is
+// visible, and two texels was not enough: a human watching from a distance
+// still saw the edge advance in discrete jumps. Six is, and the measurement is
+// in `docs/perf-baselines.md` -- on a still scene at forty-five metres, pixels
+// changing by more than four levels between consecutive frames fell from 62 to
+// 14, and the worst single change from 37 to 14.
+//
+// What made six affordable is that the kernel is now ROTATED PER PIXEL
+// (`luaug_brdf.hlsli`). The old ceiling of four existed because twenty-five
+// taps spread wider than that sample the same five rings in every pixel of a
+// region, which is banding; turning each pixel's grid by its own angle spends
+// the same taps on different rings and the banding becomes fine noise. The
+// ceiling is eight now for the same reason.
+//
+// The NEAR cascade is barely touched by any of this: its texel is a millimetre
+// and a half, so `kShadowFilterWorldRadius` divided by it lands inside the band
+// on its own and the world-space penumbra is still the five centimetres this
+// file authored. Contact was re-measured at three sun elevations on
+// `tests/screenshots/contact` after the change, because a wider filter scales
+// the normal offset with it and that is exactly what D051 was about.
 inline constexpr f32 kShadowFilterWorldRadius = 0.05f;
-inline constexpr f32 kShadowFilterMinTexels = 3.0f;
-inline constexpr f32 kShadowFilterMaxTexels = 4.0f;
+inline constexpr f32 kShadowFilterMinTexels = 6.0f;
+inline constexpr f32 kShadowFilterMaxTexels = 8.0f;
 
 // Normal-offset bias, replacing M4's depth-only one (ADR 0038). The sample is
 // displaced along the surface normal, scaled by the sine of the light angle --
