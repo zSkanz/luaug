@@ -1019,7 +1019,7 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
     would make the phase-2 editor pay a refactor, and this check is how that is
     found while it is still cheap.
   - **Networking is the second caller, which is why this matters more than it
-    did when it was only the editor's.** The post-v1 multiplayer design (post-v1 phase 3)
+    did when it was only the editor's.** The post-v1 multiplayer design (post-v1 phase 4)
     puts an authoritative world and a replica in one process over a loopback
     transport — the fastest multiplayer development environment there is, and
     impossible if anything here assumes one world. A seam with two callers is
@@ -1058,19 +1058,59 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
 
 ## Post-v1 phases (ordered intent, not scheduled)
 
-**Reordered 2026-08-21 by human decision**, from 1-2-3-4-5 to the sequence
+**Reordered and extended 2026-08-21 by human decision**, from 1-2-3-4-5 to the sequence
 below: the visual editor first because it multiplies everything after it, then
-the 2D layer, then multiplayer, then mobile. This supersedes "first item, per
+effects and world content, then the 2D layer, then multiplayer, then mobile. This supersedes "first item, per
 user decision #7", which had put the 2D layer first — that item is unchanged and
 only its position moved.
 
 1. **Visual editor** — built on the engine (Studio-like, phase 2 of the
    original vision).
-2. **2D layer** — sprites, tilemaps, Box2D 3.1, dedicated 2D workflow (user
+2. **Effects and world content** — added 2026-08-21 by human decision, after an
+   audit of what this engine will not have that others do turned up a group with
+   no owner anywhere: not in v1, not in any post-v1 phase, and no recorded reason.
+   Being honest about v1 in `api-design.md` is not the same as scheduling, and
+   this is the scheduling. It sits after the editor because most of it is
+   *authored* — a particle system and a terrain are both miserable to tune
+   without one.
+
+   - **Particles** (`ParticleEmitter`, named in `api-design.md` as not-in-v1).
+     **The most visible gap of the group**: without it a game has no fire, smoke,
+     sparks, dust, impact or magic, and there is no way to fake it. Terrain can
+     be a mesh and global illumination can be a well-chosen ambient; a missing
+     particle system has no workaround. Most of what it needs already exists —
+     the sorted blended pass (M4.5), instanced draws (M7.5), and the texture
+     path (M7). **Soft particles** — fading a quad as it approaches the geometry
+     behind it, instead of showing a hard intersection line — need to sample the
+     scene's depth, which is exactly the seam M7.5 was required to leave open for
+     water foam and SSAO. Third caller for that one.
+   - **Decals** — a bullet hole, a puddle, graffiti, a scorch mark. A texture
+     projected onto whatever geometry is already there. Shares the depth seam
+     with particles, and shares the blended pass.
+   - **Terrain** — a sculpted, collidable landscape rather than a floor made of
+     parts. Jolt has a height-field shape, so the physics half is a shape type
+     rather than a system; the render half is a chunked LOD surface, which is
+     what M7's streaming and LOD chain already do for meshes. The open question
+     is authoring: height field or voxel, and the answer decides whether caves
+     are possible.
+   - **`SurfaceGui` and billboards** — the UI tree rendered in world space: a
+     screen on a wall, a name over a head, a health bar that follows a body. The
+     tree, the layout and the `ui2d` pass all exist since M6; what does not is
+     putting that output somewhere other than the screen. **Note for whoever
+     builds it:** this is world-space UI and therefore part of the world image —
+     it is *not* the screen-space UI pass that the frame-generation constraint
+     says must be composited last. Two different things with the same word in
+     them.
+   - **Rich text** — colour, weight and size varying inside one label. The glyph
+     cache is already keyed by **face, size and codepoint** (M6, from the human's
+     own font decision), so a label carrying three sizes and two weights already
+     fits the cache that exists. That decision was made for user-supplied fonts
+     and pays here a second time.
+3. **2D layer** — sprites, tilemaps, Box2D 3.1, dedicated 2D workflow (user
    decision #7 made this the first item; the human moved it to second on
    2026-08-21), together with **navmesh integration**
    (NavigationService over the existing Recast/Detour seam, ADR 0022).
-3. **Multiplayer/replication** — official server authority + prediction over the
+4. **Multiplayer/replication** — official server authority + prediction over the
    deterministic fixed-tick foundations; `ITransport` becomes the replication
    channel. **Designed and approved by the human on 2026-08-21**, and ready to
    start as soon as v1 ships. The shape below is a commitment, not a sketch: what
@@ -1129,9 +1169,9 @@ only its position moved.
    declared class nothing implements is exactly what `instances.api.luau`
    forbids. The names are already reserved — `Enum.RunContext`, `src/client` and
    `src/server` — and reserving is all v1 owes.
-4. **Mobile** — Android first (bgfx RHI backend for the GLES2 long tail;
+5. **Mobile** — Android first (bgfx RHI backend for the GLES2 long tail;
    NCG on Android), then iOS (interpreter-only; no JIT).
-5. **Ecosystem** — FMOD/Wwise audio module alternatives, per-module hot
+6. **Ecosystem** — FMOD/Wwise audio module alternatives, per-module hot
    reload (only if the world-restart budget proves insufficient), Box3D as a
    second 3D physics backend when it reaches 1.0.
 
