@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <vector>
 
@@ -225,7 +227,20 @@ struct EnvironmentCache
     // Which level this frame uploads. Advances every frame regardless of
     // anything, which is the whole point.
     u32 cursor = 0;
+    // What the shader is given, and what the last bake produced. They are two
+    // fields because the second one STEPS: it is only recomputed when the sky
+    // has drifted past `kEnvironmentRebuildCosine`, which is about once every
+    // hundred frames under a fast day cycle, and a diffuse ambient that arrives
+    // in steps is a world whose every matte surface pulses at once (D053).
     Vec3 irradiance[9]{};
+    Vec3 irradianceTarget[9]{};
+    // The sky the target was projected from, which is a different question from
+    // the one `target` above answers -- see `irradianceStale`.
+    SkyParams irradianceSky;
+    // And what LAST FRAME's sky was, which is a third question again: it is how
+    // a clock being scrubbed is told apart from a clock running.
+    SkyParams previousSky;
+    bool hasPreviousSky = false;
     // Kept resident rather than rebuilt into one scratch buffer: the upload
     // happens every frame and the bake does not, so the pixels have to outlive
     // the bake that made them. About 171 KiB for the whole chain.
@@ -236,6 +251,18 @@ struct EnvironmentCache
     // to be worth the work. The sun moving is the common case; the horizon
     // colour changing is a script writing `Lighting.FogColor` and is rare, so it
     // is tested exactly rather than with a threshold.
+    // The diffuse half's own test. Same shape as `stale`, four times tighter,
+    // and cheap enough to be: see the note where it is called.
+    [[nodiscard]] bool irradianceStale(const SkyParams& params) const noexcept
+    {
+        if (!everBaked)
+            return true;
+        if (core::dot(params.sunDirection, irradianceSky.sunDirection) < kIrradianceRebuildCosine)
+            return true;
+        return !(params.horizonColor == irradianceSky.horizonColor && params.zenithColor == irradianceSky.zenithColor &&
+                 params.sunColor == irradianceSky.sunColor);
+    }
+
     [[nodiscard]] bool stale(const SkyParams& params) const noexcept
     {
         if (!everBaked)
@@ -1270,12 +1297,6 @@ void DefaultRenderer::updateEnvironment(rhi::ICmdList& cmd, const SkyParams& par
         bakeEnvironmentLevel(environment_.target, size, roughness, environmentSampleCount(level),
                              environment_.levels[level]);
         environment_.dirty[level] = false;
-        // Irradiance rides on level zero because it is the same projection of
-        // the same sky, and because a diffuse ambient lagging the specular one
-        // would read as a colour shift on every matte surface while the sun
-        // moves.
-        if (level == 0)
-            bakeIrradianceSh(environment_.target, environment_.irradiance);
     };
 
     if (!brdfUploaded_) {
@@ -1287,20 +1308,68 @@ void DefaultRenderer::updateEnvironment(rhi::ICmdList& cmd, const SkyParams& par
         brdfUploaded_ = true;
     }
 
+    // **The diffuse half has its own staleness, four times tighter than the
+    // specular one (D053).** What the specular chain pays for a rebuild is six
+    // texture bakes and six uploads; what this pays is one projection of the
+    // sky onto nine numbers. They are different prices and they were sharing a
+    // threshold, which set the diffuse one by what the expensive half could
+    // afford -- and a light every matte surface receives is exactly the one that
+    // must not arrive in steps.
+    if (environment_.irradianceStale(params)) {
+        environment_.irradianceSky = params;
+        bakeIrradianceSh(params, environment_.irradianceTarget);
+    }
+
     if (environment_.stale(params)) {
         environment_.target = params;
         for (bool& level : environment_.dirty)
             level = true;
     }
 
+    // **A sun that jumps is a cut, not a motion, and it is taken whole.**
+    //
+    // The blend below is sized for a sky the clock walks across. A sky that
+    // arrives somewhere else between one frame and the next is a script
+    // scrubbing `ClockTime`, a scene loading, or a fixture that steps a quarter
+    // of an hour per frame -- and easing into those over a fifth of a second is
+    // a fade nobody asked for. The threshold is the specular chain's own: a sun
+    // that moves further than that in ONE frame is moving faster than the
+    // environment can track at all, so there is nothing to protect.
+    const bool cut = !environment_.everBaked || !environment_.hasPreviousSky ||
+                     core::dot(params.sunDirection, environment_.previousSky.sunDirection) < kEnvironmentRebuildCosine;
+    environment_.previousSky = params;
+    environment_.hasPreviousSky = true;
+
     if (!environment_.everBaked) {
         for (u32 level = 0; level < kEnvironmentMipCount; ++level) {
             bakeLevel(level);
             uploadLevel(level);
         }
+        for (u32 index = 0; index < 9; ++index)
+            environment_.irradiance[index] = environment_.irradianceTarget[index];
         environment_.everBaked = true;
         environment_.cursor = 0;
         return;
+    }
+
+    // **The diffuse ambient walks towards its target rather than arriving at it
+    // (D053).** The bake above happens on one frame in about a hundred; before
+    // this, its result was handed to the shader whole on that frame, so the
+    // light every matte surface in the world receives held still and then
+    // stepped by about a per cent. A human running the flagship reported the
+    // ground pulsing, and said it started around eleven in the morning -- which
+    // is the hour band where the sky's irradiance changes fastest with the sun
+    // in this model, so the accumulated step is largest.
+    //
+    // A per-frame rate rather than a time constant, which is the same shape the
+    // exposure adaptation two hundred lines below uses and keeps a headless run
+    // reproducible. At a twelfth per frame a step is spread over about a fifth
+    // of a second: slow enough that no frame carries a visible jump, fast
+    // enough that the ambient is never more than one bake behind the sky.
+    const f32 rate = cut ? 1.0f : kEnvironmentIrradianceRate;
+    for (u32 index = 0; index < 9; ++index) {
+        environment_.irradiance[index] = environment_.irradiance[index] +
+                                         (environment_.irradianceTarget[index] - environment_.irradiance[index]) * rate;
     }
 
     const u32 level = environment_.cursor;

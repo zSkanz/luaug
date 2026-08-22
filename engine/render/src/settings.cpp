@@ -58,12 +58,22 @@ GraphicsSettings settingsFor(QualityLevel quality) noexcept
     case QualityLevel::Ultra:
         // The one preset that spends MORE than the engine's default. Its whole
         // content is shadow quality, because that is where this renderer's
-        // remaining headroom visibly goes: four times the atlas and a shadow
-        // distance that reaches past the fog.
+        // remaining headroom visibly goes: four times the atlas, spent on
+        // DENSITY rather than on range.
+        //
+        // **160 metres rather than 220, and D052 is why.** A cascade's texel is
+        // its box divided by its tile, and the far cascade's box is set by the
+        // frustum's cross-section at the shadow distance -- so pushing the
+        // distance out costs resolution in proportion. At 220 metres the far
+        // cascade measured 0.32 m per texel against High's 0.35: four times the
+        // atlas bought nine per cent, and a preset called Ultra was, for
+        // anything past thirty metres, exactly as blocky as the one below it.
+        // At 160 it measures 0.23 -- half again finer than High, and still a
+        // third further out.
         settings.renderScale = 1.0f;
         settings.shadowTileResolution = 2048;
         settings.shadowCascades = 4;
-        settings.shadowDistance = 220.0f;
+        settings.shadowDistance = 160.0f;
         settings.lightBudget = kMaxClusteredLights;
         settings.bloom = true;
         settings.ambientOcclusion = true;

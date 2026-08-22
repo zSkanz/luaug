@@ -97,7 +97,7 @@ inline constexpr f32 kShadowRadius = 220.0f;
 // range in between now covers every cascade the fit produces, so the clamp
 // stopped being where the design lives.
 inline constexpr f32 kShadowFilterWorldRadius = 0.05f;
-inline constexpr f32 kShadowFilterMinTexels = 2.0f;
+inline constexpr f32 kShadowFilterMinTexels = 3.0f;
 inline constexpr f32 kShadowFilterMaxTexels = 4.0f;
 
 // Normal-offset bias, replacing M4's depth-only one (ADR 0038). The sample is

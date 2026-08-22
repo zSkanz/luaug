@@ -27,7 +27,24 @@ port = 4560
 # player's machine. `--quality=low` on the command line still wins, because the
 # flags are the outer layer (ADR 0044).
 quality = "high"
-# Further than the preset's 120 m, because this is an open world and the thing
-# a shadow says here is where the towers are. It costs texel density in the far
-# cascade, which is the trade a distant landmark is worth.
-shadow_distance = 180.0
+# **Both of these are one decision, and D052 is the measurement behind it.**
+#
+# A cascade's texel is its box divided by its tile, and the far cascade's box is
+# set by the frustum's cross-section at the shadow distance -- so distance is
+# paid for in resolution, everywhere, at once. This file used to ask for 180 m
+# on the preset's 1024 tile and call it "the trade a distant landmark is worth".
+# What that bought was 0.52 m per texel for everything past forty-four metres:
+# a tree's shadow at fifty metres was drawn on a half-metre grid, and a human
+# playing it asked whether shadows losing that much resolution was normal.
+#
+# 140 m on a 2048 tile measures 0.20 m per texel in the same cascade -- two and
+# a half times finer, and the towers still cast. The bill is a 4096-pixel atlas
+# (64 MiB) and four times the shadow rasterisation, which measured as nothing:
+# 2.81 ms median against 2.89 for the old pair over 2,400 frames at 1080p, twice
+# each in alternating order, because the shorter distance hands back in culled
+# casters roughly what the larger tile costs in fill.
+#
+# A player who answers `--quality=low` gets the Low preset and NEITHER of these:
+# a file's per-key entries refine the level it names, and they go with it.
+shadow_resolution = 2048
+shadow_distance = 140.0

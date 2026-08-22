@@ -227,6 +227,71 @@ _(appended during the milestone)_
 
 ## Findings
 
+10. **"It starts at eleven in the morning" is a diagnosis, and it separated two
+    defects nobody could have told apart from the symptom** (D053). A human
+    reported the world going temporally unstable partway through the day cycle:
+    the ground pulsing, shadow edges trembling, everything still. The detail
+    that mattered was that it began at an HOUR rather than after a duration,
+    which rules out anything that accumulates and points at something whose rate
+    depends on where the sun is.
+
+    Two things did. **The larger one was not a shadow at all**: the diffuse
+    ambient rode on the specular chain's rebuild threshold, so the light every
+    matte surface receives held still for a hundred frames and then stepped by a
+    per cent — 68% of the ground changing on one frame while the sky beside it
+    did not. **The smaller one is the shadow edge**, and it is inherent: a
+    cascade's lattice lives in the light's own rotating frame, so a fixed world
+    point drifts across it at 0.02 texels per frame at dawn and 0.50 near noon.
+    The first is fixed; the second is mitigated with a wider penumbra and
+    smaller texels, and named honestly.
+
+    **The general shape: a threshold shared by two things with different prices
+    is set by the expensive one.** Six texture bakes and a projection onto nine
+    numbers were sharing `kEnvironmentRebuildCosine`, and the cheap half was
+    paying the expensive half's rate.
+
+9. **Reach in a shadow map is paid for in resolution, everywhere, at once** —
+   and the flagship's own project file was the thing paying (D052). A human
+   asked whether it was normal for a shadow to lose that much resolution at a
+   moderate distance. Half the answer is yes: a cascade is chosen by where the
+   shadow LANDS, so nothing about a distant caster coarsens its shadow on nearby
+   ground. The other half was ours: `shadow_distance = 180` on a 1024 tile put
+   everything past forty-four metres on a **half-metre grid**, and the file's own
+   comment had called that "the trade a distant landmark is worth" without ever
+   measuring what the trade cost.
+
+   Measured by dumping each fitted box, the fix was obvious and free: 140 m on a
+   2048 tile is 0.20 m per texel, at 2.81 ms against 2.89: a larger tile costs
+   fill and a shorter distance hands it straight back in culled casters.
+
+   **The same measurement convicted the preset above it.** `ultra` spent its
+   four-times atlas on range rather than density — 0.32 m per texel against
+   `high`'s 0.35, which is nine per cent for four times the memory. A preset
+   nobody had measured looked, from thirty metres out, exactly like the one
+   below it.
+
+   And a third thing fell out while writing the test for it: `--quality=low`
+   took the Low preset and then let the project file put its 4096-pixel atlas
+   back on top. **A file's per-key entries refine the level that file names, so
+   they go with it** — now written into ADR 0044, and covered by the first test
+   `project_config.cpp` has ever had.
+
+8. **A shadow parameter is not right or wrong on its own; it is right against a
+   scene, and both of this milestone's last two defects were parameters that had
+   never met one.** D050's texel snap rounded an ABSOLUTE position in a light
+   space that turns — correct for a sun that stands still, and a lattice that
+   sweeps out from under every shadow in the picture for one that does not; the
+   fix is to round the box's MOVEMENT, which is the stronger statement anyway.
+   D051's normal offset was a square kernel's diagonal and its depth bias two
+   centimetres, both sized for shadow acne that this renderer's front-face cull
+   already prevents, and what they actually did was lift every object off its own
+   shadow.
+
+   Both were found the same way: render the same scene twice with one number
+   changed and subtract the images. **That is D043's differential method applied
+   to a constant rather than to a code path**, and it is the only instrument in
+   the repository that can see a defect a golden was recorded with.
+
 7. **The reported artifact was three defects with one symptom, and the root was
    in the scene rather than in the renderer.** A human looking down in the
    flagship reported something dark on the ground that kept changing shape.
@@ -333,4 +398,58 @@ _(appended during the milestone)_
 
 ## Gate Record
 
-_(filled at milestone end, before human review)_
+Filled 2026-08-22, before human review. Every command below was run on the
+reference machine (`docs/perf-baselines.md`); the milestone is **not** complete
+until a human plays the demo and says so (`MASTER_PROMPT.md` §6, §13).
+
+### The roadmap's eight
+
+| Gate item | Result |
+|---|---|
+| 10-minute scripted soak, zero crashes, bounded memory delta | **Pass.** 35,939 measured frames at 1080p: median 5.35 ms, p99 8.79 ms, worst 17.23 ms, **one frame over 16.7 ms**, zero streaming hitches, peak resident 168 MiB **equal to** final resident, instances 4,354 early against 4,285 late. `ok: true`, no failures. |
+| 60 fps at 1080p on the reference machine | **Pass**, with three times the headroom at the median. The numbers above, and the per-feature sweep in `docs/perf-baselines.md`. |
+| every example launches and its automated run passes | **Pass.** `00-clear`, `01-instances`, `02-meshes`, `03-physics-playground`, `04-obby`, `05-streaming` and `10-open-world` all run headless to a screenshot; the obby, the audio soak and the animation replays are three of the 44 ctest targets, and the two soaks (`streaming_soak`, `openworld_soak`) are two more. |
+| clean-machine CI job: fresh clone → bootstrap → build → `luaug new` template project runs | **Pass locally, and it found two defects doing it.** `tests/packaging` runs `luaug new`, `luaug build`, the built folder executed **with no arguments**, and the icon read back out of the artifact — on every Windows gate run. It found D045 (`luaug new` could not find its own template) on its first execution. D046 is the other half: two M7 gates depended on a generated world that nothing generated, which is exactly what a fresh clone exposes. **Actions itself is dark** (see the ledger), so the CI job that would run this on a clean runner has not. |
+| determinism replay green | **Pass.** `determinism` and `replay_gates` green on both tiers; 1,109 conformance cases. Render interpolation was built so it cannot touch this: `TransformHistory` lives in `render`, `scene`'s components are untouched, and every recorded trace still matches. |
+| `luaug check` clean repo-wide | **Pass.** `luau-analyze` strict, StyLua, the i18n lint, the layering check, `inertcheck`, the vendor/narrowing check, and now `licensecheck` — 19 vendored dependencies, every licence present and permissive. |
+| docs-lint clean | **Pass.** Relative links, version consistency, the R7 sweep, the ledger's shape, every example's launcher, and the defect register's numbering, states and citations. |
+| **a human plays the demo and signs off** | **Outstanding, and it is the gate.** |
+
+### The full local gate
+
+`scripts/localgate.ps1`, all five stages green: docs, luau, format, windows,
+linux. **44 ctest targets on Windows** and 41 in the Tier-2 container, 1,109
+conformance cases on both, 335 files clang-formatted at the pinned 18.
+
+macOS is unverified: CI has executed zero steps since 2026-08-21.
+
+### Defects found and fixed during the milestone
+
+Nine, and **seven of the nine came from a human running the thing** while every
+gate in the repository was green.
+
+| | Found by | What |
+|---|---|---|
+| D045 | the milestone's own work | `luaug new` could not find its template, and had not since the CLI's commands moved into `commands/` at M3 |
+| D046 | the milestone's own work | `streaming_soak` and `asset_determinism` depended on a generated world that nothing generated |
+| D047 | a human, walking | The world vibrated: the engine never interpolated between ticks, and `Frame::alpha` had been computed and read by nothing since M1 |
+| D048 | a human, looking down | Shadows crawled. Three causes; the root was a character sliding off a tile corner at 3 cm/s, which moved the camera, which moved the shadow lattice |
+| D049 | a human, asking for mouse look | `InputService.PointerLocked` was stored and read by nothing, and the camera turned the way you did not push |
+| D050 | a human, watching a tree | Shadows flickered as the sun moved: the texel snap rounded an absolute position in a light space that turns |
+| D051 | a human, with a close-up | Objects hovered over their own shadows: two biases paying for an acne the cull mode already prevents |
+| D052 | a human, asking a question | Shadows coarse at a moderate distance: the flagship asked for 180 m of shadow on a 1024 tile, which is half a metre per texel past forty-four |
+| D053 | a human, standing still | The world pulsed and shadow edges trembled after eleven in the morning: a diffuse ambient arriving in steps, and a shadow lattice that drifts twenty-five times faster near noon than at dawn |
+
+### What this milestone does not have
+
+- **`luaug build` produces a Windows folder and refuses every other target.** A
+  packaging path no tier here can execute is one that ships broken.
+- **The packaged game ships Luau source rather than bytecode** (ADR 0045), which
+  amends `api-design.md` §4 and says what it would take to change.
+- **No in-game quality slider.** The settings family is configured by a player or
+  a packager, never by a scene (ADR 0044).
+- **`@luaug/signal` and `@luaug/imgui` are not shipped**, and api-design.md §1.1
+  now records why rather than leaving two names to be discovered missing.
+- **`inertcheck` still cannot see `EngineState`**, which is how D049 sat there
+  since M6. Named in the ledger; not fixed here.
+- **macOS is unverified** for this milestone, as for the two before it.

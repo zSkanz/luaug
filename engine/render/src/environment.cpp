@@ -80,6 +80,55 @@ struct LevelJob
     u16* out = nullptr;
 };
 
+// Defined below, and used by the row job above it -- the two are the same
+// projection and belong next to each other rather than in file order.
+void shBasis(Vec3 d, f32 (&out)[9]) noexcept;
+
+// The irradiance projection's grid, and one row's worth of the sum. Sized for
+// a nine-coefficient projection of a sky whose only sharp feature is the sun's
+// disc: coarser than this and the disc falls between samples, which makes the
+// ambient flicker as the sun crosses a grid line -- the very defect the
+// per-frame bake exists to remove (D053).
+constexpr u32 kIrradianceThetaSteps = 64;
+constexpr u32 kIrradiancePhiSteps = 128;
+
+struct IrradianceJob
+{
+    const SkyParams* params = nullptr;
+    // One row's nine coefficients, summed in row order by the caller so the
+    // result does not depend on the worker count.
+    Vec3 rows[kIrradianceThetaSteps][9]{};
+};
+
+void bakeIrradianceRows(void* user, usize begin, usize end, u32) noexcept
+{
+    auto& job = *static_cast<IrradianceJob*>(user);
+    const f32 dTheta = kPi / static_cast<f32>(kIrradianceThetaSteps);
+    const f32 dPhi = 2.0f * kPi / static_cast<f32>(kIrradiancePhiSteps);
+
+    for (usize t = begin; t < end; ++t) {
+        const f32 theta = (static_cast<f32>(t) + 0.5f) * dTheta;
+        const f32 sinTheta = std::sin(theta);
+        const f32 cosTheta = std::cos(theta);
+        const f32 weight = sinTheta * dTheta * dPhi;
+
+        Vec3 row[9]{};
+        for (u32 p = 0; p < kIrradiancePhiSteps; ++p) {
+            const f32 phi = (static_cast<f32>(p) + 0.5f) * dPhi;
+            const Vec3 d{sinTheta * std::cos(phi), cosTheta, sinTheta * std::sin(phi)};
+            const Vec3 radiance = evaluateSky(*job.params, d);
+
+            f32 basis[9]{};
+            shBasis(d, basis);
+            for (u32 i = 0; i < 9; ++i)
+                row[i] = row[i] + radiance * (basis[i] * weight);
+        }
+
+        for (u32 i = 0; i < 9; ++i)
+            job.rows[t][i] = row[i];
+    }
+}
+
 void bakeRows(void* user, usize begin, usize end, u32) noexcept
 {
     const auto& job = *static_cast<const LevelJob*>(user);
@@ -377,26 +426,23 @@ void bakeIrradianceSh(const SkyParams& params, Vec3 (&out)[9]) noexcept
     // A uniform grid in (theta, phi) with the sine weight, rather than a walk
     // over the octahedral texels: the octahedron's solid angle per texel is not
     // constant and the Jacobian that corrects it is more code than this loop.
-    constexpr u32 kThetaSteps = 64;
-    constexpr u32 kPhiSteps = 128;
-    const f32 dTheta = kPi / static_cast<f32>(kThetaSteps);
-    const f32 dPhi = 2.0f * kPi / static_cast<f32>(kPhiSteps);
+    IrradianceJob job{.params = &params};
 
-    for (u32 t = 0; t < kThetaSteps; ++t) {
-        const f32 theta = (static_cast<f32>(t) + 0.5f) * dTheta;
-        const f32 sinTheta = std::sin(theta);
-        const f32 cosTheta = std::cos(theta);
-        for (u32 p = 0; p < kPhiSteps; ++p) {
-            const f32 phi = (static_cast<f32>(p) + 0.5f) * dPhi;
-            const Vec3 d{sinTheta * std::cos(phi), cosTheta, sinTheta * std::sin(phi)};
-            const Vec3 radiance = evaluateSky(params, d);
-            const f32 weight = sinTheta * dTheta * dPhi;
+    // **Split across workers, and D053 is why it had to be.** This runs on every
+    // frame now rather than on one frame in six hundred, because a diffuse
+    // ambient that updates in steps is a world that pulses. Measured serial at
+    // 0.6 ms, which is a fifth of the flagship's frame; the same eight thousand
+    // sky evaluations across the render pool cost a tenth of that.
+    //
+    // The reduction below runs over the rows IN ORDER, so the sum is the same
+    // however many workers this machine has -- floating-point addition is not
+    // associative, and a golden that depended on a core count would not be one.
+    jobs::parallelFor("environment.irradiance", jobs::Domain::Render, 0, kIrradianceThetaSteps, 4, &bakeIrradianceRows,
+                      &job);
 
-            f32 basis[9]{};
-            shBasis(d, basis);
-            for (u32 i = 0; i < 9; ++i)
-                out[i] = out[i] + radiance * (basis[i] * weight);
-        }
+    for (u32 t = 0; t < kIrradianceThetaSteps; ++t) {
+        for (u32 i = 0; i < 9; ++i)
+            out[i] = out[i] + job.rows[t][i];
     }
 
     // Ramamoorthi and Hanrahan's cosine-lobe convolution, already divided by pi

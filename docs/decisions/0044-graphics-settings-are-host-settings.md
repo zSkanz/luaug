@@ -47,6 +47,19 @@ said anything" and "somebody asked for the default" stay different answers. The
 result is clamped once, at the last door, so a hand-edited file cannot ask for a
 render scale of zero.
 
+**A preset the player names replaces the file's per-key entries as well as its
+level** — added at D052, and it is the one rule in this stack that is not
+implied by "each layer overrides the one before". A file's `shadow_resolution`
+is a refinement *of the level that file names*: "high, but the shadows reach
+further, because this world's landmarks are far away". Somebody typing
+`--quality=low` is saying that level is not available on this machine, and
+carrying its refinements across would hand a weak machine the single heaviest
+dial in the file while every other one was turned down. So layer 2 applies only
+when layer 3 named no preset; layer 3's own per-key flags always do, because
+they were typed by the same person as the preset. Layer 2's non-graphics half —
+the window title, the identity, the icon — is untouched by any of this: those
+are not performance dials.
+
 **A running script is not a fourth layer, and that is the decision inside the
 decision.** The roadmap's own sentence forbids it: a script is the scene, and a
 scene that could write these would be deciding a stranger's GPU budget. What

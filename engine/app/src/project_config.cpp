@@ -131,7 +131,17 @@ ProjectConfig loadProjectConfig(const std::filesystem::path& projectRoot, const 
     // saying "not on this machine".
     config.graphics = render::settingsFor(overrides.quality.value_or(level));
 
-    applyFile(document, config.graphics);
+    // **And when it wins, it wins whole (D052).** A file's per-key graphics
+    // entries are refinements OF the level it names -- "high, but the shadows
+    // reach further, because this world's landmarks are far away". A player who
+    // answers `--quality=low` is saying that level is not available on this
+    // machine, so its refinements are not either: keeping them would hand a weak
+    // machine the single heaviest dial in the file while everything around it
+    // was turned down, which is the opposite of what was asked for. The
+    // command line's own per-key flags still apply, because those were typed by
+    // the same person as the preset.
+    if (!overrides.quality)
+        applyFile(document, config.graphics);
     applyOverrides(overrides, config.graphics);
     config.graphics = render::clampSettings(config.graphics);
     return config;

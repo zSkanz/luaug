@@ -136,12 +136,34 @@ body.Parent = workspace
 -- It also makes night PLAYABLE. A world with no artificial light at midnight is
 -- honest and it is a black screen; the point of a day/night cycle is that both
 -- ends are somewhere you can be.
+--
+-- **It hangs BESIDE the character rather than inside them**, and that is not
+-- decoration. A point light takes its position from the part it is parented to,
+-- so a light at the body's own centre is a light every one of that body's
+-- surfaces faces away from: at midnight the character was a black silhouette
+-- standing in a pool of its own light, which is the one thing a carried lantern
+-- must not look like. The post is a hand's width out and shoulder-high,
+-- invisible because what a player should see is the light and not the fixture.
+local lanternPost = Instance.new("Part")
+lanternPost.Name = "LanternPost"
+lanternPost.Size = Vector3.new(0.2, 0.2, 0.2)
+lanternPost.Transparency = 1
+lanternPost.CanCollide = false
+lanternPost.Anchored = false
+lanternPost.Parent = workspace
+
+local lanternWeld = Instance.new("Weld")
+lanternWeld.Part0 = character
+lanternWeld.Part1 = lanternPost
+lanternWeld.C0 = CFrame.new(0.85, 0.5, 0)
+lanternWeld.Parent = workspace
+
 local lantern = Instance.new("PointLight")
 lantern.Name = "Lantern"
 lantern.Color = Color3.fromRGB(255, 214, 158)
 lantern.Range = 26
 lantern.Brightness = 0
-lantern.Parent = body
+lantern.Parent = lanternPost
 
 local bodyWeld = Instance.new("Weld")
 bodyWeld.Part0 = character

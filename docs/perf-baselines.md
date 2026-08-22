@@ -529,6 +529,39 @@ materialisation that followed was the only thing in a ten-minute run over 33 ms.
 It spirals out over six seconds now. A player never teleports, and a soak that
 did was measuring something no player would ever do.
 
+**Shadow distance is paid for in resolution, everywhere, at once** (D052), and
+this is the table to look at before choosing one. A cascade's texel is its box
+divided by its tile, and the far cascade's box is set by the frustum's
+cross-section at the shadow distance — so the last cascade is where the whole
+choice shows up. Measured on the flagship's own camera (70 degrees, 16:9), by
+dumping each fitted box:
+
+| Tile | Distance | Far cascade starts | Far cascade texel |
+|---|---|---|---|
+| 1024 | 120 m (the `high` preset) | 31 m | 0.35 m |
+| 1024 | 180 m (the flagship's first answer) | 44 m | **0.52 m** |
+| 2048 | 220 m (`ultra`, before D052) | 44 m | 0.32 m |
+| 2048 | 160 m (`ultra`, now) | 39 m | 0.23 m |
+| 2048 | 140 m (the flagship, now) | 35 m | **0.20 m** |
+
+Two things fall out of it. **Doubling the tile and shortening the distance is
+free**: 2.81 ms median against 2.89 ms for the pair it replaced, over 2,400
+frames at 1080p run twice each in alternating order — a larger tile costs fill
+and a shorter distance hands it back in culled casters. And **`ultra` was
+spending its four-times atlas on range rather than density**, which is how a
+preset above `high` ended up drawing a fifty-metre shadow on a grid nine per
+cent finer than the preset below it.
+
+**The diffuse ambient costs 0.2 ms a frame and buys a world that does not
+pulse** (D053). Re-projecting the sky onto nine coefficients four times as often
+as the specular chain rebuilds, and walking the shader's copy towards the result
+rather than handing it over whole, moved the flagship's median from 2.85 ms to
+3.07 ms over four alternating 2,400-frame runs. What it bought is measured on a
+still scene under a moving sun: the frame-to-frame change went from a mean of
+42,577 with a 297,810 spike to a mean of 8,039 with a 10,250 one — peak over
+mean 6.99 to 1.27. Baking it exactly, every frame, costs 0.55 ms instead of
+0.2 and measures no better.
+
 **Render interpolation costs nothing measurable** (D047). Forcing `alpha` to zero
 on the same scene moves the median by less than the run-to-run spread, because
 almost every part in an open world is static and the comparison in front of the

@@ -1968,7 +1968,7 @@
 {"op":"bindUniforms","stage":"Fragment","slot":0,"bytes":128,"digest":"aeb842ab8d090710"}
 {"op":"draw","vertices":3,"instances":1,"firstVertex":0,"firstInstance":0}
 {"op":"setPipeline","pipeline":4}
-{"op":"bindUniforms","stage":"Fragment","slot":0,"bytes":608,"digest":"5201e65728a5ae1c"}
+{"op":"bindUniforms","stage":"Fragment","slot":0,"bytes":608,"digest":"a27b7ec8427aeb14"}
 {"op":"bindUniforms","stage":"Vertex","slot":0,"bytes":208,"digest":"66eebd0b32a9f0b2"}
 {"op":"bindUniforms","stage":"Fragment","slot":1,"bytes":64,"digest":"c2edab489babbca6"}
 {"op":"bindTextures","stage":"Fragment","firstSlot":0,"count":11}
@@ -3284,7 +3284,7 @@
 {"op":"bindUniforms","stage":"Fragment","slot":0,"bytes":128,"digest":"87a797b98b083d78"}
 {"op":"draw","vertices":3,"instances":1,"firstVertex":0,"firstInstance":0}
 {"op":"setPipeline","pipeline":4}
-{"op":"bindUniforms","stage":"Fragment","slot":0,"bytes":608,"digest":"9d59c2df7e13b96c"}
+{"op":"bindUniforms","stage":"Fragment","slot":0,"bytes":608,"digest":"c21ad78915f06be4"}
 {"op":"bindUniforms","stage":"Vertex","slot":0,"bytes":208,"digest":"4c20e8a9f1397ea7"}
 {"op":"bindUniforms","stage":"Fragment","slot":1,"bytes":64,"digest":"c2edab489babbca6"}
 {"op":"bindTextures","stage":"Fragment","firstSlot":0,"count":11}

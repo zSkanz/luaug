@@ -170,4 +170,30 @@ void bakeBrdfLut(u32 size, std::span<u16> out);
 // times too large to make subtle. Nothing rougher than a mirror can show it.
 inline constexpr f32 kEnvironmentRebuildCosine = 0.99985f;
 
+// How much of the way towards a freshly baked irradiance the shader's copy moves
+// each frame (D053).
+//
+// **The note above is right about the specular chain and was wrong about the
+// diffuse one.** A degree of staleness in a mirror's reflection is a step
+// nothing rougher than a mirror can show; the same degree in the nine
+// coefficients every matte surface reads is a step the WHOLE WORLD shows at
+// once, because it is the light those surfaces are lit by. Measured on a still
+// scene under a moving sun, the bake frame changed 68% of the ground by about a
+// level of eight-bit output while the sky beside it barely moved, and the frames
+// between it changed almost nothing -- which is the definition of a pulse.
+//
+// So the diffuse half is smoothed instead of being handed over whole. A twelfth
+// per frame spreads a bake over about a fifth of a second, which is far below
+// what an eye tracks and far above the interval between bakes; the ambient is
+// never more than one bake behind the sky, and that lag is a per cent of a
+// quantity nobody can point at.
+inline constexpr f32 kEnvironmentIrradianceRate = 1.0f / 12.0f;
+
+// And the diffuse half re-projects four times as often as the specular chain
+// rebuilds, because it costs a four-hundredth of what that does: one projection
+// of the sky onto nine coefficients against six texture bakes and six uploads.
+// A quarter of a degree, so that even before the smoothing above each step is a
+// quarter of the size the shared threshold produced.
+inline constexpr f32 kIrradianceRebuildCosine = 0.99999f;
+
 } // namespace luaug::render

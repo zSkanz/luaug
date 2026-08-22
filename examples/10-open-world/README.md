@@ -40,6 +40,15 @@ on a slow machine.
 - **Hot reload keeps your place.** Edit `src/scripts/init.luau` and save: the
   world is rebuilt from scratch and the character is standing where it was.
   That is `HotReloadService:SaveState` and nothing else.
+- **The shadows are drawn on a grid, and `luaug.toml` chooses how fine.** A
+  cascaded shadow map picks its cascade from where a shadow LANDS, not from
+  where its caster stands, so what sets the resolution of a tree's shadow at
+  fifty metres is the *far* cascade — and that cascade's box is the frustum's
+  own cross-section at the shadow distance. This project asks for 140 m on a
+  2048 tile, which is 0.20 m per texel out there; its first answer was 180 m on
+  the preset's 1024 tile, which was 0.52 m and looked it (D052). The table is in
+  `docs/perf-baselines.md`, and it is the first thing to read before making a
+  world's shadows reach further.
 - **The towers are navigation.** One every half kilometre, because a procedural
   world without landmarks is a treadmill: correct, streamed, and impossible to
   find your way across.

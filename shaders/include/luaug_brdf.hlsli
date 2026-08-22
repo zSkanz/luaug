@@ -322,7 +322,7 @@ float sampleCascade(Texture2D<float> atlas, SamplerState pointSampler, uint casc
     // a penumbra in METRES and this is where it meets the cascade it has to be
     // drawn on; `shadow.h` carries the whole argument for why it is metres again
     // and why the band is [2, 4].
-    const float radiusTexels = clamp(ShadowParams.x / max(texelWorld, 1e-6f), 2.0f, 4.0f);
+    const float radiusTexels = clamp(ShadowParams.x / max(texelWorld, 1e-6f), 3.0f, 4.0f);
     const float filterWorld = texelWorld * radiusTexels;
 
     // Normal-offset bias, replacing a depth-only one: displacing the sample

@@ -25,7 +25,7 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   168 MiB, instances flat at ~4,300. The absolute targets in
   `docs/perf-baselines.md` said "bind at M8" and now say what they measured.
 
-  **Four defects came from a human running the demo while every gate was green**,
+  **Seven defects came from a human running the demo while every gate was green**,
   which is the pattern this project keeps paying for and keeps being right about.
   D047: the world vibrated as you walked — the engine had never interpolated
   between ticks, and `Frame::alpha` had been computed and read by nothing since
@@ -33,7 +33,34 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   sliding off a tile corner at 3 cm/s, which moved the camera, which moved the
   whole shadow lattice. D049: `InputService.PointerLocked` was stored and read by
   nothing, so a mouse look had nothing to switch on, and the camera turned the
-  way you did not push. Two more were found by the milestone's own work: D045
+  way you did not push. D050: the shadows flickered under a moving sun — the
+  texel snap rounded an ABSOLUTE position in a light space that turns, so the
+  lattice swept out from under every shadow in the picture; rounding the box's
+  MOVEMENT instead is the fix, and it is the stronger statement anyway. D051:
+  objects hovered over their own shadows — a normal offset of 1.41 filters and a
+  2 cm depth bias, both paying for an acne that this renderer's front-face cull
+  already prevents. D052: the shadows were coarse at a moderate distance, and
+  the flagship's own project file was why — `shadow_distance = 180` on the
+  preset's 1024 tile put everything past forty-four metres on a **half-metre
+  grid**; 140 m on a 2048 tile measures 0.20 m per texel and costs nothing, the
+  larger tile's fill being handed back by the shorter distance's culled casters.
+  The same measurement convicted `ultra`, which had been spending its
+  four-times atlas on range rather than density (0.32 m per texel against
+  `high`'s 0.35), and the test written for it caught a third thing:
+  `--quality=low` took the Low preset and then let the project file put its
+  4096-pixel atlas back on top. D053: from about eleven in the morning of the
+  in-game clock the world went temporally unstable with nothing moving — two
+  defects under one symptom, separated by the report's own detail that it began
+  at an HOUR rather than after a duration. The larger half was not a shadow at
+  all: the diffuse ambient rode on the specular chain's rebuild threshold, so
+  the light every matte surface receives held still for a hundred frames and
+  then stepped by a per cent — 68% of the ground changing on one frame while the
+  sky beside it did not. It has its own threshold now, and the shader's copy
+  walks towards it: **peak-to-mean 6.99 became 1.27**, at 0.2 ms. The smaller
+  half is the shadow edge and is inherent — a cascade's lattice lives in the
+  light's rotating frame, so a fixed point drifts across it twenty-five times
+  faster near noon than at dawn — and is mitigated by a penumbra one texel wider
+  and by D052's finer texels. Two more were found by the milestone's own work: D045
   (`luaug new` could not find its template and had not since M3) and D046 (two
   gates depended on a generated world that nothing generated).
 
@@ -273,13 +300,24 @@ there when this file passed its ~300-line cap.
   and `docs/api/`; `docs/coming-from-roblox.md` written for real; `@luaug/camera`;
   mouse look with a pointer lock that now actually locks.
 
-  **Learned, and it is the same lesson three times:** every one of the four
-  defects a human found — D047, D048, D049 and the inverted camera — was
+  **Learned, and it is the same lesson seven times:** every one of the defects a
+  human found — D047 through D053 and the inverted camera — was
   invisible to every gate in the repository, and two of them were invisible in
   any single screenshot because what moved was the CLOCK and a position readout
   showing `-0, 2, -0` for a character creeping in the ninth decimal. The
-  instruments that found them afterwards took minutes to build. What could not be
-  manufactured was somebody playing it and saying what bothered them.
+  instruments that found them afterwards took minutes to build; the D051 one is
+  committed as `tests/screenshots/contact`, because the artifact is a single
+  pixel at the framing the previous milestone's gate used and three metres of
+  bright floor up close. What could not be manufactured was somebody playing it
+  and saying what bothered them.
+
+  **And the shadow pair is one lesson twice.** D050 and D051 are both a shadow
+  parameter that was defensible in isolation and wrong against this scene: a snap
+  reference that assumes a light which does not turn, and a bias sized for a
+  renderer that does not cull front faces. Both were found by rendering the same
+  scene with one number changed and subtracting the images — the differential
+  method D043 forced on this project, applied to a number rather than a code
+  path.
 
   **Also learned:** a sequence of GPU runs is not a sequence of measurements —
   the same baseline measured 6.25 ms first in a sweep and 4.83 ms last, and an

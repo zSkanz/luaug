@@ -139,6 +139,7 @@ luaug_add_module_tests(app
         tests/inspector_tests.cpp
         tests/soak_tests.cpp
         tests/two_worlds_tests.cpp
+        tests/project_config_tests.cpp
 )
 
 if(LUAUG_BUILD_TESTS)
