@@ -1247,7 +1247,7 @@ rather than the whole of it.
 
 | ID | Name | Size | Runnable artifact |
 |----|------|------|-------------------|
-| E1 | The Editor, and the Loop | XL | `luaug edit`: docked panels and a viewport you can click and fly through; **play, stop and save**. Open a scene, move something, press play, watch it run, press stop and get your edit back, press save, close the editor, reopen it and it is there |
+| E1 | The Editor, the Loop, and the Content Browser | XL | `luaug edit`: docked panels and a viewport you can click and fly through; **play, stop and save**; and a **content browser** over a project's assets, with folders, from which **opening a scene loads it**. Open a scene, move something, press play, watch it run, press stop and get your edit back, press save, open a different scene, come back to the first one and it is as you left it |
 | E2 | The Editor Changes Things | L | Manipulators, create/delete/rename/reparent, undo/redo, multi-select — the authoring the loop makes worth having |
 | E3 | Assets and Prefabs | M | An asset browser, prefabs as scenes, and a scene that references what it uses |
 | E4 | The Editor Ships | M | The distribution question ADR 0046 deliberately declined, and the editor's own performance gate |
@@ -1258,7 +1258,46 @@ designed before there is a scene to undo *into* is an undo stack designed twice.
 The loop first makes every one of those tools land against something that keeps
 them.
 
-### E1 — The Editor Opens (M)
+### E1 — The Editor, the Loop, and the Content Browser (XL)
+
+**Scope added 2026-08-22, at review, on the human's word, and recorded here
+before any of it was built** — which is this project's mechanism for scope
+surviving the session that agreed to it.
+
+**A scene is an asset, and the content directory holds all of them.** That
+settles a question ADR 0047 left open and that the first implementation guessed
+wrong: a scene was written to `main.scene.json` at the project's root, one per
+project, treated as source beside `src/`. It is not. A scene lives under
+`content/` with the meshes and the textures, a project has as many as it likes,
+and opening one loads it.
+
+**The word is SCENE, everywhere and without exception** (human decision,
+2026-08-22). The comparison that produced this design was to a Roblox place, and
+that is a comparison and not a name: nothing in this engine — no class, no file
+extension, no directory, no doc, no identifier — is called a place. A `.unity`
+scene and a `.umap` level are the same object under two other names, and this
+engine has picked its own and keeps it.
+
+- **Scenes move into the content tree.** `content/scenes/<name>.scene.json`,
+  addressed by URN like everything else there, resolved by `ContentMounts` — so
+  a loose scene overrides a packed one and the dev loop keeps working the way it
+  already does for a mesh.
+- **A content browser panel**, over the project's whole asset tree: **folders**,
+  navigation, and the kinds the pipeline already knows (`Mesh`, `Texture`,
+  `Chunk`, `Raw`) plus scenes. Not a file dialog — a panel, docked, the way
+  Unity's Project window and Unreal's Content Browser are, because an asset
+  browser you have to open is one nobody uses.
+- **Opening a scene loads it**, and the editor knows which scene is open, says
+  so, and saves back to that one.
+- **Creating a folder** from the panel, because a browser that can only read a
+  tree somebody else made is half a browser.
+- **Quality bar, stated because it was asked for in these terms**: Unity and
+  Unreal level, which for a browser means it stays responsive over a tree with
+  thousands of entries. That is a measurement and not an adjective — the panel
+  is virtualised (ImGui ships `ImGuiListClipper` and the DebugShell does not use
+  it yet) and the tree is walked once and cached, never per frame.
+
+### The rest of E1, as originally cut
 
 - **Goal:** an editor that opens a real project, shows it, lets you choose a
   thing in it with the mouse, and lets you change that thing — nothing more. The

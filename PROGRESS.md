@@ -130,6 +130,26 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
   citations. That file exists because three human-reported defects were removed
   from this one while it was being rewritten to close M4. **A close rewrites this
   file wholesale; it can no longer take the open list with it.**
+- **E1 IS NOT FINISHED, and what is left is written down rather than remembered.**
+  The loop is built — play snapshots, stop restores, save writes a scene, and the
+  five wrong-owner defects are fixed. **What was added at review and is not built
+  yet is the content browser**, and the shape was decided by the human: the
+  content directory is the asset manager and it stores every scene, so opening
+  one loads it. **The term is SCENE and never "place"** (human decision,
+  2026-08-22) — the Roblox comparison is what produced the design and is not a
+  name this engine adopts.
+
+  That **reverses** the first implementation. A scene is currently written to
+  `main.scene.json` at the project root, one per project, treated as source. It
+  should be `content/scenes/<name>.scene.json`, addressed by URN and resolved
+  through `ContentMounts` like a mesh, with as many per project as somebody
+  wants. The remaining work, in order: move scenes into the content tree; a
+  docked content browser with folders over the whole asset tree; opening a scene
+  loads it and the editor saves back to the one that is open; creating a folder
+  from the panel. **Virtualised** — the quality bar was given as Unity and
+  Unreal, and for a browser that is a measurement about a tree of thousands of
+  entries rather than an adjective. `ImGuiListClipper` is vendored and unused.
+
 - **The phase was re-cut at E1's review and ADR 0047 is why** (human decision,
   2026-08-22). The first split put manipulators, saving and play in three
   milestones; the review said in one sentence that edit, test and save are one

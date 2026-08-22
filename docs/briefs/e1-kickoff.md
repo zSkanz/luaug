@@ -28,6 +28,34 @@ and typing a new colour into it.
 - [x] D056: the `shipping` profile compiles, and a gate stage builds it
 - [~] D057: the release notes now say what the binary is; choosing the profile is a human decision, see the Gate Record
 
+## Scope added at review (2026-08-22), on the human's word
+
+The review turned E1 from "the editor opens" into the whole loop, and then added
+the content browser to it. Both were asked for as E1's own scope and as its
+priority, and both are recorded here because a session that compacts its memory
+keeps the files and not the conversation.
+
+- [x] **The loop**: play remembers the world, stop puts it back, save writes it
+- [x] Three run states — `Editing`, `Playing`, `Paused` — because "editing" and
+      "paused in play mode" are not the same state and a two-state model makes
+      the play button a toggle between things that are not opposites
+- [x] The five wrong-owner defects: the tick (D058), the cursor (D059), the
+      audio (D060), the camera (D061) and the input (D062)
+- [ ] **A scene is an asset, and `content/` holds all of them.** Scenes move to
+      `content/scenes/<name>.scene.json`, addressed by URN, resolved through
+      `ContentMounts` like any other asset. This REVERSES the first
+      implementation, which put one scene per project at the project root
+- [ ] **A content browser panel** over the project's asset tree, with folders,
+      docked beside the others
+- [ ] **Opening a scene loads it**; the editor knows which one is open and saves
+      back to that one
+- [ ] **Creating a folder** from the panel
+- [ ] The term is **scene**, never "place" (human decision, 2026-08-22): the
+      Roblox comparison produced the design and is not a name this engine takes
+- [ ] Virtualised, because the quality bar was stated as Unity and Unreal and
+      for a browser that means it stays responsive over thousands of entries —
+      `ImGuiListClipper` is vendored and nothing in this repository uses it yet
+
 ## NOT in scope
 
 Manipulators of any kind. Undo or redo. Creating, deleting, renaming or
