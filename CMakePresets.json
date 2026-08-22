@@ -41,6 +41,7 @@
     { "name": "win-msvc-shipping", "inherits": "win-msvc",    "cacheVariables": { "CMAKE_BUILD_TYPE": "Release",        "LUAUG_PROFILE": "shipping" } },
     { "name": "linux-clang-debug", "inherits": "linux-clang", "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug",          "LUAUG_PROFILE": "debug" } },
     { "name": "linux-clang-dev",   "inherits": "linux-clang", "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "LUAUG_PROFILE": "dev" } },
+    { "name": "linux-clang-shipping", "inherits": "linux-clang", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release",     "LUAUG_PROFILE": "shipping" } },
     { "name": "linux-clang-asan",  "inherits": "linux-clang", "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "LUAUG_PROFILE": "dev", "LUAUG_SANITIZE": "address,undefined" } },
     { "name": "macos-clang-dev",   "inherits": "macos-clang", "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "LUAUG_PROFILE": "dev" } }
   ],
@@ -50,6 +51,7 @@
     { "name": "win-msvc-shipping", "configurePreset": "win-msvc-shipping", "environment": { "VSLANG": "1033" } },
     { "name": "linux-clang-debug", "configurePreset": "linux-clang-debug" },
     { "name": "linux-clang-dev",   "configurePreset": "linux-clang-dev" },
+    { "name": "linux-clang-shipping", "configurePreset": "linux-clang-shipping" },
     { "name": "linux-clang-asan",  "configurePreset": "linux-clang-asan" },
     { "name": "macos-clang-dev",   "configurePreset": "macos-clang-dev" }
   ],

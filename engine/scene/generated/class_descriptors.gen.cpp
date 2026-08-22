@@ -4,10 +4,14 @@
 // hand edit is a change that survives exactly until the next build
 // (architecture.md section 4).
 //
-// Every `docKey` below is empty on purpose. The doc text lives in the IDL and
-// nothing in the engine formats a doc key yet: turning it into a catalog entry
-// and a hover string is the M3 documentation pipeline (gen_docs and the docs
-// JSON, docs/roadmap.md). An empty key here is that decision, not an omission.
+// Every `.doc` below is the IDL's own English prose, not a catalog key: the
+// audience for a reflection tooltip is whoever is building a game, and a
+// `TextKey` is a hash with nothing on the other end of it unless the catalog is
+// loaded. See `class_registry.h` for the whole of that reasoning.
+//
+// Anything outside printable ASCII is written as a three-digit octal escape, so
+// these files stay pure ASCII whatever a compiler believes their source charset
+// to be, and the bytes reaching the program are the IDL's own UTF-8.
 
 #include "class_descriptors.gen.h"
 
@@ -44,7 +48,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "This instance's name; siblings may share one, and renaming into an awaited name satisfies a WaitForChild waiter exactly as parenting a new child does.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
             .get = native::getInstanceName,
             .set = native::setInstanceName,
@@ -55,7 +59,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The instance this one hangs under, nil when unparented; assigning it appends this instance last among its new siblings, assigning the current parent again changes nothing, and assigning after Destroy raises.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
             .get = native::getInstanceParent,
             .set = native::setInstanceParent,
@@ -66,7 +70,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = true,
             .inert = false,
-            .docKey = {},
+            .doc = "The name of this instance's class; typeof answers Instance whatever the class, so this is what tells two classes apart.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
             .get = native::getInstanceClassName,
             .set = nullptr,
@@ -78,133 +82,133 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("FindFirstChild"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "The first direct child with that name in document order, or nil; there is no recursive form in v1, so depth is a GetDescendants loop.",
         },
         MethodDesc{
             .name = atoms.intern("FindFirstChildOfClass"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "The first direct child whose ClassName is exactly className, or nil; asking for BasePart therefore never finds a Part.",
         },
         MethodDesc{
             .name = atoms.intern("FindFirstChildWhichIsA"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "The first direct child that IsA className, or nil; matching runs through the class hierarchy, so abstract base names are accepted.",
         },
         MethodDesc{
             .name = atoms.intern("FindFirstAncestor"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "The nearest ancestor with that name, searching upward from Parent; the instance itself is never a candidate.",
         },
         MethodDesc{
             .name = atoms.intern("FindFirstAncestorOfClass"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "The nearest ancestor whose ClassName is exactly className, searching upward from Parent; the instance itself is never a candidate.",
         },
         MethodDesc{
             .name = atoms.intern("GetChildren"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "A fresh array of the direct children in child order, which is the order they were parented; the caller owns it, so destroying while iterating is safe.",
         },
         MethodDesc{
             .name = atoms.intern("GetDescendants"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "A fresh array of every descendant in document order -- child order taken depth-first, preorder -- which is the order the Find family tie-breaks on.",
         },
         MethodDesc{
             .name = atoms.intern("WaitForChild"),
             .yields = true,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Parks the caller until a child of that name exists here and returns it, returning immediately when one already does; with a timeout, expiry returns nil, and without one the wait is unbounded and warns after five sim-seconds.",
         },
         MethodDesc{
             .name = atoms.intern("IsA"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Whether this instance is of that class or descends from it; a string naming no class answers false rather than raising, because the point is to test names you do not trust.",
         },
         MethodDesc{
             .name = atoms.intern("IsAncestorOf"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Whether descendant sits anywhere below this instance; read strictly, so an instance is not its own ancestor.",
         },
         MethodDesc{
             .name = atoms.intern("IsDescendantOf"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Whether this instance sits anywhere below ancestor; read strictly, so an instance is not its own descendant.",
         },
         MethodDesc{
             .name = atoms.intern("Clone"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Deep-copies this subtree unparented -- children, properties, attributes and tags at every depth -- rewiring object references that point inside the copy and leaving those that point outside it on the originals.",
         },
         MethodDesc{
             .name = atoms.intern("Destroy"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Removes this instance and its children from the tree synchronously, clears its tags, locks Parent to nil and defers Destroying; the handle stops resolving at the end of that drain.",
         },
         MethodDesc{
             .name = atoms.intern("GetAttribute"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "The value of that attribute, or nil when it has never been set; attribute names are case-sensitive.",
         },
         MethodDesc{
             .name = atoms.intern("SetAttribute"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Sets that attribute, or removes it when value is nil; a table, an Instance or a function raises and leaves any previous value in place, and an empty name raises.",
         },
         MethodDesc{
             .name = atoms.intern("GetAttributes"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "A fresh table of this instance's attributes, which the caller owns.",
         },
         MethodDesc{
             .name = atoms.intern("GetAttributeChangedSignal"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "The signal fired when that attribute changes; any name is accepted, because an attribute that has never been set is a reasonable thing to wait for.",
         },
         MethodDesc{
             .name = atoms.intern("GetPropertyChangedSignal"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "The signal fired when that property changes -- the same object on every call, carrying no value so its type stays independent of the property's; a name the class does not have raises.",
         },
         MethodDesc{
             .name = atoms.intern("AddTag"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Adds a tag to this instance, a no-op when it is already present; tags are pure instance state, so a nil-parented instance still carries and is found by them.",
         },
         MethodDesc{
             .name = atoms.intern("RemoveTag"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Removes a tag from this instance, a no-op when it is absent.",
         },
         MethodDesc{
             .name = atoms.intern("HasTag"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Whether this instance currently carries that tag.",
         },
         MethodDesc{
             .name = atoms.intern("GetTags"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "A fresh array of this instance's tags, which the caller owns.",
         },
     }};
     static std::array<EventDesc, 7> instanceEvents;
@@ -212,44 +216,44 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
         EventDesc{
             .name = atoms.intern("ChildAdded"),
             .slot = 0,
-            .docKey = {},
+            .doc = "Fired after an instance is parented to this one, carrying that child.",
         },
         EventDesc{
             .name = atoms.intern("ChildRemoved"),
             .slot = 1,
-            .docKey = {},
+            .doc = "Fired after an instance stops being parented to this one, carrying that child.",
         },
         EventDesc{
             .name = atoms.intern("DescendantAdded"),
             .slot = 2,
-            .docKey = {},
+            .doc = "Fired after an instance is added anywhere below this one, carrying that descendant.",
         },
         EventDesc{
             .name = atoms.intern("DescendantRemoving"),
             .slot = 3,
-            .docKey = {},
+            .doc = "Fired as an instance leaves the subtree below this one, carrying that descendant; leaving is fully observed before arriving.",
         },
         EventDesc{
             .name = atoms.intern("AncestryChanged"),
             .slot = 4,
-            .docKey = {},
+            .doc = "Fired on a moved instance and then on each of its descendants in document order, carrying the instance whose ancestry changed and its new parent, nil when it was unparented.",
         },
         EventDesc{
             .name = atoms.intern("AttributeChanged"),
             .slot = 5,
-            .docKey = {},
+            .doc = "Fired when any attribute of this instance changes, carrying the attribute name.",
         },
         EventDesc{
             .name = atoms.intern("Destroying"),
             .slot = 6,
-            .docKey = {},
+            .doc = "Fired once when Destroy is called, carrying nothing; the tree mutation has already happened and only the signal is deferred.",
         },
     }};
     ClassDescriptor instanceDesc;
     instanceDesc.name = atoms.intern("Instance");
     instanceDesc.flags = ClassFlags::Abstract | ClassFlags::NotCreatable;
     instanceDesc.defaultName = atoms.intern("Instance");
-    instanceDesc.docKey = {};
+    instanceDesc.doc = "The root of the class hierarchy: a node in the tree, carrying a name, a parent, attributes and tags.";
     instanceDesc.properties = instanceProperties;
     instanceDesc.methods = instanceMethods;
     instanceDesc.events = instanceEvents;
@@ -264,7 +268,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Where this object's pivot sits relative to the object itself; the identity puts it at the centre. Set it to a hinge edge and PivotTo rotates about that edge.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_cframe"),
             .get = native::getPVInstancePivotOffset,
             .set = native::setPVInstancePivotOffset,
@@ -276,13 +280,13 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("GetPivot"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "This object's pivot in world space.",
         },
         MethodDesc{
             .name = atoms.intern("PivotTo"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Moves this object so its pivot lands on target. A Model moves every part under it and keeps their relative layout; a BasePart or Camera moves itself.",
         },
     }};
     ClassDescriptor pVInstanceDesc;
@@ -290,7 +294,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     pVInstanceDesc.super = instanceClass;
     pVInstanceDesc.flags = ClassFlags::Abstract | ClassFlags::NotCreatable;
     pVInstanceDesc.defaultName = atoms.intern("PVInstance");
-    pVInstanceDesc.docKey = {};
+    pVInstanceDesc.doc = "The base of everything with a position and orientation in the world: a pivot to move it by, and an offset saying where that pivot sits. BasePart, Model and Camera are the three.";
     pVInstanceDesc.properties = pVInstanceProperties;
     pVInstanceDesc.methods = pVInstanceMethods;
     pVInstanceDesc.attachComponents = native::attachPVComponents;
@@ -303,7 +307,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     folderDesc.super = instanceClass;
     folderDesc.flags = ClassFlags::None;
     folderDesc.defaultName = atoms.intern("Folder");
-    folderDesc.docKey = {};
+    folderDesc.doc = "A node with no behaviour of its own, for grouping instances; mounting src/scripts also builds one per subdirectory.";
     classes.registerClass(folderDesc);
 
     // --- Model ---
@@ -315,7 +319,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The part this model's pivot follows; Clone rewires it to the copy, since it is the reference into a cloned subtree that catches people.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
             .get = native::getModelPrimaryPart,
             .set = native::setModelPrimaryPart,
@@ -327,7 +331,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("GetExtentsSize"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "The size in metres of the smallest box enclosing every part in this model.",
         },
     }};
     ClassDescriptor modelDesc;
@@ -335,7 +339,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     modelDesc.super = pVInstanceClass;
     modelDesc.flags = ClassFlags::None;
     modelDesc.defaultName = atoms.intern("Model");
-    modelDesc.docKey = {};
+    modelDesc.doc = "A group of parts handled as one object, with a pivot to move it by and an extents box to measure it with.";
     modelDesc.properties = modelProperties;
     modelDesc.methods = modelMethods;
     modelDesc.attachComponents = native::attachModelComponents;
@@ -351,7 +355,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether this script starts at boot; writing it afterwards has no effect in v1, neither stopping a running script nor starting one that did not run, because what sets it acts before the boot it applies to.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getScriptEnabled,
             .set = native::setScriptEnabled,
@@ -362,7 +366,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     scriptDesc.super = instanceClass;
     scriptDesc.flags = ClassFlags::NotCreatable;
     scriptDesc.defaultName = atoms.intern("Script");
-    scriptDesc.docKey = {};
+    scriptDesc.doc = "An entry-point Luau file, mounted from src/scripts at boot and started on its own coroutine; modules are required by string and never appear in the tree.";
     scriptDesc.properties = scriptProperties;
     scriptDesc.attachComponents = native::attachScriptComponents;
     scriptDesc.detachComponents = native::detachScriptComponents;
@@ -377,7 +381,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "This part's transform in world space, and the f64 source of truth Position and Orientation are read back from.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_cframe"),
             .get = native::getBasePartCFrame,
             .set = native::setBasePartCFrame,
@@ -388,7 +392,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "This part's world position, the f32 rounding of the CFrame translation; gameplay math past a few kilometres from the origin belongs on CFrame instead.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector"),
             .get = native::getBasePartPosition,
             .set = native::setBasePartPosition,
@@ -399,7 +403,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "This part's world rotation as intrinsic YXZ euler angles in degrees.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector"),
             .get = native::getBasePartOrientation,
             .set = native::setBasePartOrientation,
@@ -410,7 +414,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "This part's dimensions in metres along its own axes.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector"),
             .get = native::getBasePartSize,
             .set = native::setBasePartSize,
@@ -421,7 +425,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "This part's color; channels are not clamped to 0-1, so a value above one is a legal tint rather than an error.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
             .get = native::getBasePartColor,
             .set = native::setBasePartColor,
@@ -432,7 +436,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "How see-through this part is, 0 fully opaque and 1 fully invisible.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getBasePartTransparency,
             .set = native::setBasePartTransparency,
@@ -443,7 +447,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether the simulation moves this part. An anchored part is immovable scenery that other parts collide with and gravity ignores -- not a very heavy part, a different kind of body -- so writing this rebuilds it in the simulation and keeps its transform.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getBasePartAnchored,
             .set = native::setBasePartAnchored,
@@ -454,7 +458,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether this part physically stops anything. A part with this off still reports Touched, which is what makes a checkpoint, a trigger volume or a pickup work: things pass through it and it notices.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getBasePartCanCollide,
             .set = native::setBasePartCanCollide,
@@ -465,7 +469,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether raycasts, shapecasts and box queries can see this part. Independent of CanCollide, because a part that blocks movement and a part a camera ray should ignore are different questions.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getBasePartCanQuery,
             .set = native::setBasePartCanQuery,
@@ -476,7 +480,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The named group deciding which other parts this one collides with, registered through `PhysicsService:RegisterCollisionGroup`. An unregistered name is an error rather than a silent fallback to Default: the failure mode of a typo here is a wall players walk through, which is expensive to find and cheap to refuse.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
             .get = native::getBasePartCollisionGroup,
             .set = native::setBasePartCollisionGroup,
@@ -487,7 +491,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "How much this surface resists sliding, 0 frictionless and 1 very grippy. The value the solver uses for a contact combines both surfaces' -- one slippery part is enough to make a pair slide.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
             .get = native::getBasePartFriction,
             .set = native::setBasePartFriction,
@@ -498,7 +502,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "How much of an impact this surface gives back, 0 a dead stop and 1 a perfect bounce. Combined across a contact pair the same way Friction is.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_zero_to_one"),
             .get = native::getBasePartRestitution,
             .set = native::setBasePartRestitution,
@@ -509,7 +513,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Mass per cubic metre. Mass is this times the volume the Size and Shape describe, and there is no Mass property precisely so that the two cannot be set to contradict each other.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_above_zero"),
             .get = native::getBasePartDensity,
             .set = native::setBasePartDensity,
@@ -520,7 +524,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = true,
             .inert = false,
-            .docKey = {},
+            .doc = "How fast this part is moving, in metres per second, as of the last simulation tick. Read-only: a velocity assignment is an impulse with the mass divided out, and `ApplyImpulse` is that operation under a name that says what it does.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector"),
             .get = native::getBasePartLinearVelocity,
             .set = nullptr,
@@ -531,7 +535,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = true,
             .inert = false,
-            .docKey = {},
+            .doc = "How fast this part is spinning, in radians per second about each world axis, as of the last simulation tick.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector"),
             .get = native::getBasePartAngularVelocity,
             .set = nullptr,
@@ -543,7 +547,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("ApplyImpulse"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Adds an instantaneous change of momentum at the part's centre of mass, in kilogram-metres per second. Applied at the next simulation tick and ignored by an anchored part, which has no momentum to change.",
         },
     }};
     static std::array<EventDesc, 2> basePartEvents;
@@ -551,12 +555,12 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
         EventDesc{
             .name = atoms.intern("Touched"),
             .slot = 7,
-            .docKey = {},
+            .doc = "Fires once when another part begins touching this one, with the part it touched. Deferred like every signal here (ADR 0015), so it arrives at the next resumption point rather than inside the solver. A pair that stays in contact fires once, not once per tick -- including across the moment the simulation puts both parts to sleep.",
         },
         EventDesc{
             .name = atoms.intern("TouchEnded"),
             .slot = 8,
-            .docKey = {},
+            .doc = "Fires when a pair that was touching stops. Destroying a part does NOT fire it for that part's contacts: the instance is gone, and a signal on an instance nobody can reach is a signal nobody can handle.",
         },
     }};
     ClassDescriptor basePartDesc;
@@ -564,7 +568,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     basePartDesc.super = pVInstanceClass;
     basePartDesc.flags = ClassFlags::Abstract;
     basePartDesc.defaultName = atoms.intern("BasePart");
-    basePartDesc.docKey = {};
+    basePartDesc.doc = "The abstract base of every solid object in the world: a transform, a size and a look.";
     basePartDesc.properties = basePartProperties;
     basePartDesc.methods = basePartMethods;
     basePartDesc.events = basePartEvents;
@@ -578,10 +582,11 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
         PropertyDesc{
             .name = atoms.intern("Shape"),
             .type = ValueType::EnumItem,
+            .enumName = atoms.intern("PartShape"),
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Which primitive solid this part is. It drives BOTH the geometry that is drawn and the collider that is simulated, which is the point: a `Ball` that rolled like a box would be the kind of divergence nobody can see in a screenshot.\012\012**`Size` is the full extent, and two shapes read it slightly differently so that the mesh agrees with the collider.** A `Ball` is a sphere of the LARGEST half-extent, so a non-uniform `Size` gives a ball that sticks out of its own box rather than an ellipsoid you cannot collide with. A `Cylinder` and a `Capsule` stand along Y, take their diameter from the larger of X and Z, and take their full height from Y -- caps included. A capsule's caps are hemispheres the collider never stretches, so `Size.y == 2 * Size.x` is where the drawn shape and the simulated one agree exactly; away from it the drawn ends are slightly oval.\012\012A `Wedge` is a ramp with its tall face towards -Z, so an unrotated one is walked UP as you walk towards -Z. Its collider is deliberately the whole box (\302\247" "2.2's physics notes).",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getPartShape,
             .set = native::setPartShape,
@@ -592,7 +597,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     partDesc.super = basePartClass;
     partDesc.flags = ClassFlags::None;
     partDesc.defaultName = atoms.intern("Part");
-    partDesc.docKey = {};
+    partDesc.doc = "The primitive solid: a part whose geometry is one of a small set of shapes rather than an imported mesh.";
     partDesc.properties = partProperties;
     classes.registerClass(partDesc);
 
@@ -605,7 +610,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The anchor: the part the other one follows. It may itself be simulated, anchored, or a CharacterBody -- whatever moves it, Part1 goes with it.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
             .get = native::getWeldPart0,
             .set = native::setWeldPart0,
@@ -616,7 +621,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The driven part. While the weld is active it is moved by the weld and by nothing else: gravity does not reach it, and writing its CFrame is overwritten at the next tick.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
             .get = native::getWeldPart1,
             .set = native::setWeldPart1,
@@ -627,7 +632,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The attachment on Part0. The weld holds `Part0.CFrame * C0` equal to `Part1.CFrame * C1`, which is the one sentence that says where both offsets go.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_cframe"),
             .get = native::getWeldC0,
             .set = native::setWeldC0,
@@ -638,7 +643,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The attachment on Part1, in the same relationship.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_cframe"),
             .get = native::getWeldC1,
             .set = native::setWeldC1,
@@ -649,7 +654,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether the weld holds. Disabling it hands Part1 back to the simulation where it stands, with no velocity -- it is released rather than thrown.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getWeldEnabled,
             .set = native::setWeldEnabled,
@@ -660,7 +665,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     weldDesc.super = instanceClass;
     weldDesc.flags = ClassFlags::None;
     weldDesc.defaultName = atoms.intern("Weld");
-    weldDesc.docKey = {};
+    weldDesc.doc = "Holds one part at a fixed offset from another. **A transform weld, not a solver constraint**: Part1 stops being independently simulated and is driven from Part0 every tick, so welding a MeshPart to a CharacterBody keeps the two together without anything asking the solver's permission. Welding two dynamic parts so the SOLVER treats them as one rigid assembly is a different feature and is not this one. A weld whose two parts are already joined by another weld, directly or through a chain, is refused: welds form a graph and a cycle has no resolution order.";
     weldDesc.properties = weldProperties;
     weldDesc.attachComponents = native::attachWeldComponents;
     weldDesc.detachComponents = native::detachWeldComponents;
@@ -675,7 +680,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The anchor, as on Weld.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
             .get = native::getWeldConstraintPart0,
             .set = native::setWeldConstraintPart0,
@@ -686,7 +691,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The driven part, as on Weld.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
             .get = native::getWeldConstraintPart1,
             .set = native::setWeldConstraintPart1,
@@ -697,7 +702,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether the joint holds. Going from false to true captures the relative transform afresh, which is how a part is re-welded somewhere else: move it, then enable.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getWeldConstraintEnabled,
             .set = native::setWeldConstraintEnabled,
@@ -708,7 +713,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = true,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether it is currently holding: Enabled, with both parts set and both in the world. The distinction matters because a constraint with one part missing is not an error -- it is half-built, which is what every script that assigns the two properties on separate lines briefly produces.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getWeldConstraintActive,
             .set = nullptr,
@@ -719,7 +724,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     weldConstraintDesc.super = instanceClass;
     weldConstraintDesc.flags = ClassFlags::None;
     weldConstraintDesc.defaultName = atoms.intern("WeldConstraint");
-    weldConstraintDesc.docKey = {};
+    weldConstraintDesc.doc = "The same joint, with the offset CAPTURED rather than authored. When it becomes active it records where the two parts are relative to each other and holds that; a Weld is told the relationship and a WeldConstraint reads it off the world. That difference is the whole reason both names exist: authoring an offset by hand for two parts already in the right place is arithmetic nobody should have to do, and capturing one when you meant to specify it is a joint that silently depends on where things happened to be.";
     weldConstraintDesc.properties = weldConstraintProperties;
     weldConstraintDesc.attachComponents = native::attachWeldConstraintComponents;
     weldConstraintDesc.detachComponents = native::detachWeldConstraintComponents;
@@ -734,7 +739,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "How fast Move drives the character along the ground, in metres per second. The direction passed to Move is scaled by this, so a half-length direction walks at half speed.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
             .get = native::getCharacterBodyWalkSpeed,
             .set = native::setCharacterBodyWalkSpeed,
@@ -745,7 +750,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The upward speed Jump imparts, in metres per second. How high that reaches depends on `Workspace.Gravity`, which is the relationship a game tunes rather than a height.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
             .get = native::getCharacterBodyJumpSpeed,
             .set = native::setCharacterBodyJumpSpeed,
@@ -756,7 +761,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The steepest ground, in degrees from horizontal, the character can stand and walk on. Anything steeper is a wall it slides down rather than a floor it stands on.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_slope_degrees"),
             .get = native::getCharacterBodyMaxSlopeAngle,
             .set = native::setCharacterBodyMaxSlopeAngle,
@@ -767,7 +772,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The tallest ledge, in metres, the character walks over rather than into. This is the single number that separates a character from a capsule: at zero, a kerb stops it.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
             .get = native::getCharacterBodyAutoStepHeight,
             .set = native::setCharacterBodyAutoStepHeight,
@@ -778,7 +783,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = true,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether the character is standing on something walkable as of the last simulation tick. The same fact `State` reports, as the boolean a jump check actually wants.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getCharacterBodyGrounded,
             .set = nullptr,
@@ -786,10 +791,11 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
         PropertyDesc{
             .name = atoms.intern("State"),
             .type = ValueType::EnumItem,
+            .enumName = atoms.intern("CharacterState"),
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = true,
             .inert = false,
-            .docKey = {},
+            .doc = "Grounded or Airborne. Ground too steep to walk on reads as Airborne, because the question this answers is whether the character is supported.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getCharacterBodyState,
             .set = nullptr,
@@ -801,13 +807,13 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("Move"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Sets the direction to walk in for the next simulation tick, in world space. Only the horizontal part is used -- vertical movement is gravity's and Jump's -- and the vector is scaled by WalkSpeed rather than normalised, so a shorter one walks slower. Call it every tick while moving; a character told nothing stops.",
         },
         MethodDesc{
             .name = atoms.intern("Jump"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Launches the character upward at JumpSpeed at the next simulation tick, wherever it is. It does NOT check Grounded, deliberately: `LinearVelocity` is read-only, so a mid-air check here would make a double jump, a wall jump and a triple jump impossible to write at all. `if character.Grounded then character:Jump() end` is the old behaviour in one line, in the game, where a jump policy belongs -- and coyote time and jump buffering become counters beside it. Calling it every frame is flying: that is the game's bug, and it is the same in every engine that offers a mechanism rather than a policy. The TICK stays engine-side: the velocity is applied at the next simulation step and never inside the call, or a replay diverges.",
         },
     }};
     static std::array<EventDesc, 1> characterBodyEvents;
@@ -815,7 +821,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
         EventDesc{
             .name = atoms.intern("Landed"),
             .slot = 9,
-            .docKey = {},
+            .doc = "Fires when the character becomes Grounded after being Airborne, with the part it landed on -- nil when that is terrain no instance owns. Deferred like every signal here.",
         },
     }};
     ClassDescriptor characterBodyDesc;
@@ -823,7 +829,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     characterBodyDesc.super = basePartClass;
     characterBodyDesc.flags = ClassFlags::None;
     characterBodyDesc.defaultName = atoms.intern("CharacterBody");
-    characterBodyDesc.docKey = {};
+    characterBodyDesc.doc = "A capsule that walks: the player, or anything that should climb a ramp and step over a kerb instead of tumbling. It is a controller rather than a rigid body -- it sweeps its own shape and moves at the velocity you give it, which is why it does not tip over and why gravity is yours to apply through Move. There is no Humanoid and no HumanoidRootPart: this is one instance (\302\247" "2.7 divergence 13). Two characters BLOCK each other and neither pushes the other. Walking into somebody who is standing still stops you and leaves them where they were, however fast you were going and however long you keep walking -- shoving, knockback and crowd flow are game rules, and a game writes them by moving the other character itself. What holds the block is the rigid body inside the capsule, so CollisionGroup decides it like any other pair: two characters in a group set never to collide with itself walk straight through one another.";
     characterBodyDesc.properties = characterBodyProperties;
     characterBodyDesc.methods = characterBodyMethods;
     characterBodyDesc.events = characterBodyEvents;
@@ -840,7 +846,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Safe,
             .readOnly = true,
             .inert = false,
-            .docKey = {},
+            .doc = "The version of the engine runtime executing this VM, as `luaug.toml` pins it. Read-only: the runtime is chosen before the VM exists, so nothing a script does can change it.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
             .get = native::getDataModelEngineVersion,
             .set = nullptr,
@@ -851,7 +857,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Safe,
             .readOnly = true,
             .inert = false,
-            .docKey = {},
+            .doc = "The version of the Luau language runtime this engine build embeds. Read-only, and fixed per engine release: a language upgrade is an engine release rather than a silent change underneath a running project.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
             .get = native::getDataModelLuauVersion,
             .set = nullptr,
@@ -863,25 +869,25 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("GetService"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Returns the service of this name, creating it on the first request. Services are singletons: every later call returns the same instance, and it is an ordinary child of `game` once created. A string literal gives an exactly typed result; a name computed at runtime gives the general `Instance`, which is the honest cost of not knowing the name at analysis time. An unknown name raises `scene.err.unknown_service`.",
         },
         MethodDesc{
             .name = atoms.intern("FindService"),
             .yields = false,
             .threadSafety = ThreadSafety::ReadParallel,
-            .docKey = {},
+            .doc = "Returns the service of this name if it already exists, and `nil` otherwise. It creates nothing, so it answers whether a service is in use rather than forcing it into existence -- which is the whole difference from `GetService`.",
         },
         MethodDesc{
             .name = atoms.intern("BindToClose"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Registers a function to run while the game is shutting down, for work that has to happen before the process ends. The callbacks run against a capped timeout and the shutdown proceeds when it expires, finished or not: a close handler is a chance to finish, never a veto.",
         },
         MethodDesc{
             .name = atoms.intern("Shutdown"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Ends the run. The registered `BindToClose` callbacks are given their timeout and the process then exits. This is how a game closes itself deliberately.",
         },
     }};
     static std::array<EventDesc, 1> dataModelEvents;
@@ -889,7 +895,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
         EventDesc{
             .name = atoms.intern("Loaded"),
             .slot = 7,
-            .docKey = {},
+            .doc = "Fires once, after every entry script has had its first resumption. Connecting at file scope inside an entry script still works: the fire is deferred like every other, so a handler registered while the world is still being built is registered in time. It carries no arguments.",
         },
     }};
     ClassDescriptor dataModelDesc;
@@ -897,7 +903,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     dataModelDesc.super = instanceClass;
     dataModelDesc.flags = ClassFlags::NotCreatable;
     dataModelDesc.defaultName = atoms.intern("DataModel");
-    dataModelDesc.docKey = {};
+    dataModelDesc.doc = "The root of the instance tree, reached through the `game` global. Services are its children: `Workspace` and `ScriptService` exist from boot and every other service is created by its first `GetService`. It is the services' parent rather than one of them.";
     dataModelDesc.properties = dataModelProperties;
     dataModelDesc.methods = dataModelMethods;
     dataModelDesc.events = dataModelEvents;
@@ -912,7 +918,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The acceleration applied to every unanchored part, in metres per second squared. SI and signed, so the default points down; a game wanting moon gravity scales it rather than reaching for a separate multiplier.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector"),
             .get = native::getWorkspaceGravity,
             .set = native::setWorkspaceGravity,
@@ -923,7 +929,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The camera the world is rendered from. Nil renders nothing rather than falling back to a camera the engine invented, because a view nobody asked for is harder to debug than a black frame that says why.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
             .get = native::getWorkspaceCurrentCamera,
             .set = native::setWorkspaceCurrentCamera,
@@ -935,19 +941,19 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("Raycast"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "The nearest thing a ray from `origin` hits, or nil. The direction is NOT normalised: its length is how far the ray reaches, so `direction * 100` is a hundred-metre ray. A tie between two surfaces at the same distance resolves the same way on every run, because a query whose answer depends on traversal order is a replay divergence waiting for a body count to change (R10).",
         },
         MethodDesc{
             .name = atoms.intern("Spherecast"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "The same question with a sphere swept along the ray instead of a point. This is what a camera boom or a character's ground check wants: a ray slips through a gap narrower than the thing it is standing in for.",
         },
         MethodDesc{
             .name = atoms.intern("GetBodiesInBox"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Every part overlapping an oriented box, as a fresh array in a stable order -- one entry per part however many of its surfaces are inside. `size` is the full extent, matching `BasePart.Size`.",
         },
     }};
     ClassDescriptor workspaceDesc;
@@ -955,7 +961,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     workspaceDesc.super = instanceClass;
     workspaceDesc.flags = ClassFlags::Service | ClassFlags::NotCreatable;
     workspaceDesc.defaultName = atoms.intern("Workspace");
-    workspaceDesc.docKey = {};
+    workspaceDesc.doc = "The root of the 3D scene, reached through the `workspace` global as well as through `game:GetService`. Whatever is parented under it is in the world and whatever is not, is not.";
     workspaceDesc.properties = workspaceProperties;
     workspaceDesc.methods = workspaceMethods;
     workspaceDesc.attachComponents = native::attachWorkspaceComponents;
@@ -971,7 +977,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::ReadParallel,
             .readOnly = true,
             .inert = false,
-            .docKey = {},
+            .doc = "The simulation clock, in seconds, at the current tick. It is constant for the whole tick -- deferred drains included -- and advances by `PhysicsService.FixedTimestep` between ticks. This is the clock simulation code reads: the wall clock is forbidden to it, there is no `tick()`, and `os.clock` is for profiling and never for gameplay. It stops advancing while the world is paused.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getRunServiceSimTime,
             .set = nullptr,
@@ -983,19 +989,19 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("Pause"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Pauses the world. The simulation clock stops, so `SimTime` stops advancing and no `task.wait` or `task.delay` timer comes due; rendering and the debug overlay keep running. Idempotent: pausing a paused world is a no-op, not an error.",
         },
         MethodDesc{
             .name = atoms.intern("Resume"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Restarts a paused world, and its clock with it. Idempotent: resuming a running world is a no-op, not an error.",
         },
         MethodDesc{
             .name = atoms.intern("IsPaused"),
             .yields = false,
             .threadSafety = ThreadSafety::ReadParallel,
-            .docKey = {},
+            .doc = "Whether the world is currently paused. Since `Pause` and `Resume` are both idempotent, this is how code tells the two states apart rather than by watching a call fail.",
         },
     }};
     static std::array<EventDesc, 5> runServiceEvents;
@@ -1003,27 +1009,27 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
         EventDesc{
             .name = atoms.intern("PreRender"),
             .slot = 7,
-            .docKey = {},
+            .doc = "Fires at render rate, before the frame is drawn, carrying the variable time in seconds since the previous render. It never fires in a headless run: headless is the same scheduler minus the render steps, and this is one of them. It stays connectable so that shared code need not branch on it -- but a handler connected to it in a headless process is a handler that will not run.",
         },
         EventDesc{
             .name = atoms.intern("PreAnimation"),
             .slot = 8,
-            .docKey = {},
+            .doc = "The first phase of a sim tick, before animation is evaluated, carrying the fixed tick duration in seconds.",
         },
         EventDesc{
             .name = atoms.intern("PreSimulation"),
             .slot = 9,
-            .docKey = {},
+            .doc = "Fires each sim tick after animation and before the simulation step, carrying the fixed tick duration in seconds.",
         },
         EventDesc{
             .name = atoms.intern("PostSimulation"),
             .slot = 10,
-            .docKey = {},
+            .doc = "Fires each sim tick immediately after the simulation step, carrying the fixed tick duration in seconds.",
         },
         EventDesc{
             .name = atoms.intern("Heartbeat"),
             .slot = 11,
-            .docKey = {},
+            .doc = "The last phase of a sim tick, carrying the fixed tick duration in seconds. It fires at the sim tick rate like the three phases before it, and it is the usual place for per-tick gameplay work that wants to see the state the tick settled on.",
         },
     }};
     ClassDescriptor runServiceDesc;
@@ -1031,7 +1037,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     runServiceDesc.super = instanceClass;
     runServiceDesc.flags = ClassFlags::Service | ClassFlags::NotCreatable;
     runServiceDesc.defaultName = atoms.intern("RunService");
-    runServiceDesc.docKey = {};
+    runServiceDesc.doc = "The frame loop: the phase signals per-frame work hangs off, and the clock that work reads. In frame order they are `PreRender` at render rate with a variable delta, then `PreAnimation`, `PreSimulation`, `PostSimulation` and `Heartbeat` at the fixed sim tick rate. That rate split is the point of the service: render-rate work and simulation work are different jobs and get different signals.";
     runServiceDesc.properties = runServiceProperties;
     runServiceDesc.methods = runServiceMethods;
     runServiceDesc.events = runServiceEvents;
@@ -1043,7 +1049,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     scriptServiceDesc.super = instanceClass;
     scriptServiceDesc.flags = ClassFlags::Service | ClassFlags::NotCreatable;
     scriptServiceDesc.defaultName = atoms.intern("ScriptService");
-    scriptServiceDesc.docKey = {};
+    scriptServiceDesc.doc = "The mount point for entry scripts. At boot every `src/scripts/**/*.luau` file becomes a `Script` child of it, with subdirectories as `Folder`s, and the `script` global inside a running entry script is that script's own instance here. It has no properties or methods of its own: the tree is the API.";
     classes.registerClass(scriptServiceDesc);
 
     // --- StreamingService ---
@@ -1055,7 +1061,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::ReadParallel,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether the world streams at all. Turning it off FREEZES the current set rather than draining it: nothing new is scheduled and nothing resident is evicted, which is what makes it usable as `hold the world still while I do something`. Evicting while refusing to load would empty the world one ring at a time and leave nothing to come back to.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getStreamingServiceEnabled,
             .set = native::setStreamingServiceEnabled,
@@ -1066,7 +1072,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::ReadParallel,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "How far from a focus the engine tries to keep chunks resident, in metres. Best effort: a chunk inside it is wanted, and one outside stays resident until it passes a WIDER ring, because a single radius makes a focus standing on a boundary load and evict the same chunk every frame -- and the symptom of that is not a wrong world, it is a stutter nobody can find.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_positive"),
             .get = native::getStreamingServiceLoadRadius,
             .set = native::setStreamingServiceLoadRadius,
@@ -1077,7 +1083,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::ReadParallel,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The must-have ring, in metres. Everything inside it is guaranteed resident before a focus may advance into it, so the character walks into a world that exists rather than through one that has not arrived. Read `PauseOutsideLoadedArea` for what happens when it has not.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_positive"),
             .get = native::getStreamingServiceMinRadius,
             .set = native::setStreamingServiceMinRadius,
@@ -1088,7 +1094,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::ReadParallel,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether the simulation waits when the minimum ring is not yet resident. A familiar streaming pause, and the alternative is a character falling through ground that has not loaded. It is a pause and not a rollback: the tick simply does not advance.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getStreamingServicePauseOutsideLoadedArea,
             .set = native::setStreamingServicePauseOutsideLoadedArea,
@@ -1100,19 +1106,19 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("AddFocus"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Streams the world around this instance as well. A focus is normally the character or the camera; several are legal and the engine keeps a chunk that any of them wants. An instance with no position in the world is refused, because a focus that cannot be located would silently anchor the world at the origin.",
         },
         MethodDesc{
             .name = atoms.intern("RemoveFocus"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Stops streaming around it. Removing the last focus does not unload the world: it stops anything being wanted, and what is resident stays until something wants it gone.",
         },
         MethodDesc{
             .name = atoms.intern("LoadAreaAsync"),
             .yields = true,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Yields until every chunk within `radius` of `position` is resident. What a teleport calls before it moves the character, so the destination exists when they arrive. Returns immediately when the area is already loaded, and raises rather than hanging when the world has no chunks there at all.",
         },
     }};
     static std::array<EventDesc, 2> streamingServiceEvents;
@@ -1120,12 +1126,12 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
         EventDesc{
             .name = atoms.intern("AreaLoaded"),
             .slot = 7,
-            .docKey = {},
+            .doc = "Fires when an area a script asked for has finished loading. Deferred like every signal.",
         },
         EventDesc{
             .name = atoms.intern("InstanceStreamedOut"),
             .slot = 8,
-            .docKey = {},
+            .doc = "Fires for each instance that left the world while a script still held a reference to it. Streamed out means REPARENTED TO NIL rather than destroyed, so the handle a script holds still resolves -- it is a husk, and reading it is legal. An instance nothing referenced is simply destroyed and does not fire this.",
         },
     }};
     ClassDescriptor streamingServiceDesc;
@@ -1133,7 +1139,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     streamingServiceDesc.super = instanceClass;
     streamingServiceDesc.flags = ClassFlags::Service | ClassFlags::NotCreatable;
     streamingServiceDesc.defaultName = atoms.intern("StreamingService");
-    streamingServiceDesc.docKey = {};
+    streamingServiceDesc.doc = "The streamed world's controls (api-design.md \302\247" "2.1). A world too large to hold is divided into a uniform grid of chunks; this service decides which of them are resident, by distance to the foci a game names. Streaming is a system rather than scene-root state, which is why it is a service and not a property of `Workspace`. The per-frame cost is budgeted in TIME rather than in a count of chunks, because a chunk's cost varies with what is in it.";
     streamingServiceDesc.properties = streamingServiceProperties;
     streamingServiceDesc.methods = streamingServiceMethods;
     streamingServiceDesc.events = streamingServiceEvents;
@@ -1146,25 +1152,25 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("GetTagged"),
             .yields = false,
             .threadSafety = ThreadSafety::ReadParallel,
-            .docKey = {},
+            .doc = "Returns every instance currently carrying this tag, as a fresh array the caller owns. Tags are pure instance state with no relationship to the tree, so an instance parented to `nil` is returned like any other.",
         },
         MethodDesc{
             .name = atoms.intern("GetInstanceAddedSignal"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Returns the signal that fires with each instance that gains this tag. It is deferred like every signal, so a handler sees the instance at the next resumption point rather than inside the `AddTag` call that added it.",
         },
         MethodDesc{
             .name = atoms.intern("GetInstanceRemovedSignal"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Returns the signal that fires with each instance that loses this tag, whether through `RemoveTag` or through `Destroy`, which strips every tag the instance carried. The fire is deferred, and a destroyed handle still resolves for the drain in which it arrives, so a handler can still read what it lost before the instance goes.",
         },
         MethodDesc{
             .name = atoms.intern("GetAllTags"),
             .yields = false,
             .threadSafety = ThreadSafety::ReadParallel,
-            .docKey = {},
+            .doc = "Returns the set of tags currently carried by at least one instance, as a fresh array -- not every name ever seen. It updates synchronously with `AddTag` and `RemoveTag`, so a tag leaves it the moment its last carrier drops it, even though the signal reporting that drop is deferred like everything else.",
         },
     }};
     ClassDescriptor tagServiceDesc;
@@ -1172,7 +1178,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     tagServiceDesc.super = instanceClass;
     tagServiceDesc.flags = ClassFlags::Service | ClassFlags::NotCreatable;
     tagServiceDesc.defaultName = atoms.intern("TagService");
-    tagServiceDesc.docKey = {};
+    tagServiceDesc.doc = "Finds instances by tag. Tags themselves are free-form string labels on an instance and are added, removed and tested through `Instance` -- `AddTag`, `RemoveTag`, `HasTag`, `GetTags`. What lives here are the queries that span the whole world, and the signals that report a tag coming and going.";
     tagServiceDesc.methods = tagServiceMethods;
     classes.registerClass(tagServiceDesc);
 
@@ -1185,7 +1191,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether the debug overlay is drawn. It starts off, shipped builds included, so a game can offer the overlay deliberately instead of needing a different build to get it.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getDebugServiceOverlayVisible,
             .set = native::setDebugServiceOverlayVisible,
@@ -1197,43 +1203,43 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("DrawLine"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Draws a line between two world positions for one frame. Headless there is no renderer and the call is a silent no-op rather than an error, so debug drawing left in shared code cannot fail a headless test.",
         },
         MethodDesc{
             .name = atoms.intern("DrawBox"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Draws the wireframe of a box at this frame, with these dimensions in metres, for one frame. A silent no-op in a headless run, like every gizmo.",
         },
         MethodDesc{
             .name = atoms.intern("DrawSphere"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Draws the wireframe of a sphere at this world position, with this radius in metres, for one frame. A silent no-op in a headless run, like every gizmo.",
         },
         MethodDesc{
             .name = atoms.intern("GetStat"),
             .yields = false,
             .threadSafety = ThreadSafety::ReadParallel,
-            .docKey = {},
+            .doc = "Reads a named instrumentation counter -- `FPS`, `FrameTimeMs`, `PhysicsBodies`, `InstanceCount`, `DrawCalls`, `MeshLodDraws`, `LuaMemoryKB` and the rest, plus whatever `SetCustomStat` has published. An unregistered name raises `scene.err.unknown_stat` instead of returning zero: a misspelt stat is a bug in the caller, and a debug surface that answers zero hides that bug in the one place people are already confused.",
         },
         MethodDesc{
             .name = atoms.intern("SetCustomStat"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Publishes a game-defined number under this name, readable afterwards through `GetStat` and shown on the stats panel. A value that is not a number raises like any other typed-argument mismatch.",
         },
         MethodDesc{
             .name = atoms.intern("ShowPanel"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Opens one panel of the overlay by name. The built-ins are `Stats`, `Scene`, `Log`, `Streaming` and `Physics`; an unknown panel raises `scene.err.unknown_stat`.",
         },
         MethodDesc{
             .name = atoms.intern("HidePanel"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Closes one panel of the overlay by name, taking the same names as `ShowPanel`. An unknown panel raises `scene.err.unknown_stat`.",
         },
     }};
     static std::array<EventDesc, 1> debugServiceEvents;
@@ -1241,7 +1247,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
         EventDesc{
             .name = atoms.intern("MessageOut"),
             .slot = 7,
-            .docKey = {},
+            .doc = "Fires for every console message, carrying the text and its level. `print` and `warn` each produce exactly one deferred fire with their text verbatim, at `Info` and `Warning`. Engine messages arrive pre-formatted with their key in front, as in `[scene.err.parent_cycle] ...`, so a handler matching on a key substring sees engine output while one matching prose sees script output. Contained handler errors and the re-entrancy cap's dropped-fire log come through here too.",
         },
     }};
     ClassDescriptor debugServiceDesc;
@@ -1249,7 +1255,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     debugServiceDesc.super = instanceClass;
     debugServiceDesc.flags = ClassFlags::Service | ClassFlags::NotCreatable;
     debugServiceDesc.defaultName = atoms.intern("DebugService");
-    debugServiceDesc.docKey = {};
+    debugServiceDesc.doc = "The debug overlay and the engine's own instrumentation. The service is present in shipped builds with the overlay off unless a game turns it on, so the panels, the stats and the log stream are available to a shipped game that wants them. The gizmo calls are a development aid and draw nothing at all in a headless run.";
     debugServiceDesc.properties = debugServiceProperties;
     debugServiceDesc.methods = debugServiceMethods;
     debugServiceDesc.events = debugServiceEvents;
@@ -1262,19 +1268,19 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("SaveState"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Stores a value under `key` so the world built by the next reload can read it back. The value is converted to an engine-side copy at the moment of the call, because the VM holding the original is what a reload destroys -- so nil, booleans, numbers, strings, buffers, and tables of those are accepted, while a function, a thread, an Instance or a cyclic table raises `script.err.unsavable_state`. Raising beats dropping: a reload that quietly loses state is worse than one that says what it could not keep.",
         },
         MethodDesc{
             .name = atoms.intern("LoadState"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Reads back what `SaveState` stored under `key` before the reload, or nil if nothing did. The value is a fresh copy built in this VM; mutating it changes nothing that a later reload will see, and only another `SaveState` does.",
         },
         MethodDesc{
             .name = atoms.intern("IsReload"),
             .yields = false,
             .threadSafety = ThreadSafety::Safe,
-            .docKey = {},
+            .doc = "Whether this world was built by a hot reload rather than by starting the engine. It is how a script knows to look for what it left behind instead of building it again -- the instances tagged `PreserveOnReload` are already in the tree by the time any entry script runs.",
         },
     }};
     static std::array<EventDesc, 2> hotReloadServiceEvents;
@@ -1282,12 +1288,12 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
         EventDesc{
             .name = atoms.intern("PreReload"),
             .slot = 7,
-            .docKey = {},
+            .doc = "Fires on the outgoing world when a reload has been requested and before anything is torn down, which is the last moment `SaveState` can be called and have the value survive. Its handlers are drained before the new world is built, so the reload waits for them.",
         },
         EventDesc{
             .name = atoms.intern("PostReload"),
             .slot = 8,
-            .docKey = {},
+            .doc = "Fires on the world a reload just built, after every entry script has had its first resumption and the preserved state is already in place. A handler connected at file scope therefore sees a world that is finished rather than one still being assembled.",
         },
     }};
     ClassDescriptor hotReloadServiceDesc;
@@ -1295,7 +1301,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     hotReloadServiceDesc.super = instanceClass;
     hotReloadServiceDesc.flags = ClassFlags::Service | ClassFlags::NotCreatable | ClassFlags::DevOnly;
     hotReloadServiceDesc.defaultName = atoms.intern("HotReloadService");
-    hotReloadServiceDesc.docKey = {};
+    hotReloadServiceDesc.doc = "The hot-reload loop as a script can see it (ADR 0024). Present in development builds only: a shipped game has no reload to observe, and a service that existed there and never fired would be a documented no-op. A reload rebuilds the world from source and keeps nothing by default -- what survives is what `SaveState` stored and what was tagged `PreserveOnReload`.";
     hotReloadServiceDesc.methods = hotReloadServiceMethods;
     hotReloadServiceDesc.events = hotReloadServiceEvents;
     classes.registerClass(hotReloadServiceDesc);
@@ -1309,7 +1315,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::ReadParallel,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The duration of one simulation tick, in seconds, and therefore the grid every timing guarantee is expressed against: `task.wait(1)` is exactly 60 ticks at the default 1/60, on every machine and every run. Express durations as multiples of it and the same code stays correct at 30 Hz or at 240 Hz. Writable from M5, and a write takes effect at the next frame start rather than mid-tick: the accumulator, the timer wheel and the solver all read it, and changing it between two of those reads inside one frame is a class of bug worth designing out. Values outside 1/240 to 1/30 are refused.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_fixed_timestep"),
             .get = native::getPhysicsServiceFixedTimestep,
             .set = native::setPhysicsServiceFixedTimestep,
@@ -1321,19 +1327,19 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("RegisterCollisionGroup"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Declares a collision group. Registering a name that already exists is a no-op rather than an error, which is what lets a script register its groups at file scope and survive a hot reload. The group collides with everything until told otherwise.",
         },
         MethodDesc{
             .name = atoms.intern("CollisionGroupSetCollidable"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Sets whether parts in two groups collide with each other. Symmetric: setting a against b sets b against a, because a one-way collision is not a thing a solver can express.",
         },
         MethodDesc{
             .name = atoms.intern("GetRegisteredCollisionGroups"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Every registered group name, in registration order, `Default` first. A fresh array on every call, and ordered rather than hashed so that iterating it cannot leak a container's own order into a simulation (R10).",
         },
     }};
     ClassDescriptor physicsServiceDesc;
@@ -1341,7 +1347,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     physicsServiceDesc.super = instanceClass;
     physicsServiceDesc.flags = ClassFlags::Service | ClassFlags::NotCreatable;
     physicsServiceDesc.defaultName = atoms.intern("PhysicsService");
-    physicsServiceDesc.docKey = {};
+    physicsServiceDesc.doc = "The simulation tick grid and the physics controls that do not belong on an individual part. It shipped before any physics did because `FixedTimestep` is a scheduler property that physics merely names, and everything about scheduling and timing is expressed against it.";
     physicsServiceDesc.properties = physicsServiceProperties;
     physicsServiceDesc.methods = physicsServiceMethods;
     classes.registerClass(physicsServiceDesc);
@@ -1353,13 +1359,13 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("Create"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "A tween that will move each named property of `instance` to its goal. Created stopped: `Play` starts it.\012\012Every goal is validated NOW rather than at the first write -- a property the class does not have, a read-only one, or a value of the wrong type raises here, where the caller is. The alternative is a tween that plays for half a second and then reports a typo. Only properties the engine can interpolate are accepted: numbers, vectors, CFrames, Color3s, Vector2s, UDims, UDim2s and Rects. A boolean or a string goal raises, because there is no halfway between two of either.",
         },
         MethodDesc{
             .name = atoms.intern("GetValue"),
             .yields = false,
             .threadSafety = ThreadSafety::Safe,
-            .docKey = {},
+            .doc = "The eased value of `alpha` under that curve -- the same arithmetic a tween uses, exposed so a game can ease something the tween system does not own. `alpha` is not clamped, and several styles leave 0-1 on purpose (`Back`, `Elastic`).",
         },
     }};
     ClassDescriptor tweenServiceDesc;
@@ -1367,7 +1373,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     tweenServiceDesc.super = instanceClass;
     tweenServiceDesc.flags = ClassFlags::Service | ClassFlags::NotCreatable;
     tweenServiceDesc.defaultName = atoms.intern("TweenService");
-    tweenServiceDesc.docKey = {};
+    tweenServiceDesc.doc = "Property animation (\302\247" "2.1). It exists so that \"move this over half a second, easing out\" is one call rather than a `Heartbeat` handler with a timer in it -- and so that the engine, not the game, owns the arithmetic that makes two such animations agree.";
     tweenServiceDesc.methods = tweenServiceMethods;
     classes.registerClass(tweenServiceDesc);
 }

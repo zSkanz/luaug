@@ -16,7 +16,7 @@
 #
 # Usage:
 #   scripts/localgate.ps1              # everything -- what you run before a push
-#   scripts/localgate.ps1 -Only docs   # one stage: docs | luau | format | windows | linux
+#   scripts/localgate.ps1 -Only docs   # one stage: docs | luau | format | windows | linux | shipping
 #   scripts/localgate.ps1 -SkipLinux   # ONLY when Docker is genuinely unavailable
 #   scripts/localgate.ps1 -Only format -Fix   # rewrite the C++ tree instead of checking it
 #
@@ -28,7 +28,7 @@
 [CmdletBinding()]
 param(
     [switch]$SkipLinux,
-    [ValidateSet('docs', 'luau', 'format', 'windows', 'linux')]
+    [ValidateSet('docs', 'luau', 'format', 'windows', 'linux', 'shipping')]
     [string]$Only,
     # Only meaningful with -Only format: reformat in place rather than report.
     # Off by default, because a gate that edits your tree without being asked is
@@ -58,7 +58,7 @@ function Invoke-Stage {
     # Both container stages answer to the same switch: -SkipLinux means "Docker
     # is not available here", and the formatting gate runs in that same image
     # because that is where the pinned clang-format lives.
-    if (($Name -eq 'linux' -or $Name -eq 'format') -and $SkipLinux) { return }
+    if (($Name -eq 'linux' -or $Name -eq 'format' -or $Name -eq 'shipping') -and $SkipLinux) { return }
 
     Write-Host ""
     Write-Host "=== $Name ===" -ForegroundColor Cyan
@@ -259,6 +259,39 @@ Invoke-Stage 'linux' {
         -v "luaug-tier2-build:/build" `
         luaug-tier2:latest bash scripts/gates/linux-build.sh
     if ($LASTEXITCODE -ne 0) { throw "the Tier-2 build or tests failed" }
+}
+
+# The one profile no other stage builds, and therefore the one that spent an
+# unknown number of commits not compiling at all (D056). It is here rather than
+# folded into the Windows stage for two reasons: the check is a shell script, so
+# both callers can run the same file the way CLAUDE.md asks, and Clang with
+# warnings-as-errors is the stricter reader of the `#if`s that only this profile
+# takes.
+#
+# Cost: it builds `luaug_host` alone -- the shipping binary, compiled and linked
+# -- and not the tree around it. The reasoning is in the script, and the short
+# version is that only what LUAUG_LUAU_COMPILER and LUAUG_DEBUG_UI gate can rot
+# differently here, and all of it is reachable from that one executable. A few
+# seconds warm, one full Release build of the vendored tree cold.
+#
+# Last, because it is the stage most likely to be cold, and a run that fails
+# should say so before spending that.
+Invoke-Stage 'shipping' {
+    Initialize-Tier2Image
+    docker volume create luaug-tier2-build | Out-Null
+
+    $existing = docker ps -aq --filter 'name=^luaug-shipping-gate$'
+    if ($existing) { docker rm -f luaug-shipping-gate | Out-Null }
+
+    # The same named volume the Linux stage uses: the two presets write to
+    # different subdirectories of it, so the vendored fetches and the ccache-less
+    # object trees both survive between runs and neither stage disturbs the
+    # other.
+    docker run --name luaug-shipping-gate `
+        -v "${repo}:/repo" `
+        -v "luaug-tier2-build:/build" `
+        luaug-tier2:latest bash scripts/gates/shipping-build.sh
+    if ($LASTEXITCODE -ne 0) { throw "the shipping profile failed to build" }
 }
 
 Pop-Location

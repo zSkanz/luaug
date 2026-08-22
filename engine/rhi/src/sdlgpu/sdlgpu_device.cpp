@@ -353,6 +353,10 @@ public:
         return entry != nullptr ? *entry : nullptr;
     }
     [[nodiscard]] TextureEntry* texture(TextureHandle handle) noexcept { return slot(textures_, handle.id); }
+    [[nodiscard]] const TextureEntry* texture(TextureHandle handle) const noexcept
+    {
+        return (handle.id != 0 && handle.id <= textures_.size()) ? &textures_[handle.id - 1] : nullptr;
+    }
     [[nodiscard]] SDL_GPUSampler* sampler(SamplerHandle handle) noexcept
     {
         SDL_GPUSampler** entry = slot(samplers_, handle.id);
@@ -889,6 +893,16 @@ SDL_GPURenderPass* nativeRenderPass(const IDevice& device) noexcept
 {
     const SdlGpuDevice* self = asSdlGpu(device);
     return self != nullptr ? self->renderPass() : nullptr;
+}
+
+SDL_GPUTexture* nativeTexture(const IDevice& device, TextureHandle handle) noexcept
+{
+    const SdlGpuDevice* self = asSdlGpu(device);
+    if (self == nullptr)
+        return nullptr;
+
+    const TextureEntry* entry = self->texture(handle);
+    return entry != nullptr ? entry->texture : nullptr;
 }
 
 DeviceResult createSdlGpuDevice(const DeviceDesc& desc, core::EngineError* outError)

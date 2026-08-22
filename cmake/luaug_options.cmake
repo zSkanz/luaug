@@ -8,7 +8,17 @@
 
 include(CMakeDependentOption)
 
-option(LUAUG_BUILD_TESTS "Build C++ unit and integration tests" ON)
+# The C++ suite drives the engine through Luau SOURCE -- every conformance and
+# integration case is a script, and `sandbox_tests.cpp` compiles chunks with
+# `luau_compile` directly to ask what a chunk can reach. None of that exists in
+# the shipping profile, which links no compiler (ADR 0002), so a test suite built
+# there would be one that cannot run. Dependent rather than plain for the same
+# reason LUAUG_DEBUG_UI is: the profile is not something a `-D` should be able to
+# contradict by accident. It is also what keeps the shipping gate cheap -- that
+# profile builds the shipping binary and nothing else.
+cmake_dependent_option(LUAUG_BUILD_TESTS
+    "Build C++ unit and integration tests" ON
+    "NOT LUAUG_PROFILE STREQUAL \"shipping\"" OFF)
 
 # The Luau compiler is present in every profile except shipping, which loads
 # precompiled bytecode only (ADR 0002). Expressed as a dependent option so the

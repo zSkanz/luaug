@@ -10,6 +10,7 @@
 #include "luaug/app/backends.h"
 #include "luaug/app/debug_overlay.h"
 #include "luaug/app/dev_control.h"
+#include "luaug/app/editor.h"
 #include "luaug/app/frame_scheduler.h"
 #include "luaug/app/inspector.h"
 #include "luaug/app/reload.h"
@@ -370,8 +371,21 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // exist until the device owns the window. Compiled out entirely in shipping
     // (ADR 0011), where the constructor is a no-op and active() is false.
     std::optional<DebugOverlay> overlay;
-    if (window != nullptr)
-        overlay.emplace(*window, *device);
+    if (window != nullptr) {
+        // The layout lives inside the project it belongs to, not beside the
+        // executable: two projects open in turn should not fight over one
+        // arrangement of panels.
+        const std::filesystem::path layout =
+            options.editor ? options.scriptPath / ".luaug" / "editor-layout.ini" : std::filesystem::path{};
+        overlay.emplace(*window, *device, options.editor ? Shell::Editor : Shell::Overlay,
+                        options.editor ? layout.string() : std::string{});
+    }
+
+    // The editor's model and the texture its viewport is drawn into. Both are
+    // inert unless `--edit` asked for them, and the target is not created until
+    // a panel has said how big it is.
+    Editor editor;
+    ViewportTarget viewportTarget;
 
     // The explorer's selection and the queue its edits wait in. Held by the
     // frame loop rather than by the overlay because it outlives a hot reload
@@ -770,6 +784,20 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // world that never issued the ids it names.
         inspector.applyPending(host->world());
 
+        // A click resolves here too, and AFTER the drain rather than before:
+        // whatever was typed into the old selection lands before the selection
+        // becomes something else. Walking the world for a pick is only a read,
+        // but doing it here rather than inside the UI callback that noticed the
+        // click is what keeps what a click selects independent of where in the
+        // panel tree it happened to be handled -- the same discipline the
+        // writes above are under, for the same reason.
+        //
+        // The click was noticed at the END of the previous frame, so a
+        // selection is one frame behind the mouse. That is the same frame of
+        // latency a typed value already has and it is not felt at sixty hertz.
+        if (options.editor)
+            editor.resolvePick(host->world(), inspector);
+
         // The streamed world advances at the SAME safe point, and for the same
         // reason: materialising instances mid-tick is the mutation the reload
         // below is forbidden for. Two milliseconds is architecture.md §10's
@@ -1079,6 +1107,25 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             targetHeight = swapchain.height;
         }
 
+        // In the editor the world is not drawn to the screen: it is drawn into
+        // the viewport panel's own texture, and the shell is drawn to the
+        // screen on top. Everything between here and the overlay's pass
+        // therefore renders at the PANEL's resolution -- which is what makes
+        // the aspect ratio, the UI layout and the picking ray all agree with
+        // the image somebody is looking at.
+        const rhi::TextureHandle present = target;
+        if (options.editor && target.valid()) {
+            const ViewportRect& panel = editor.viewport();
+            const core::u32 wantWidth = static_cast<core::u32>(panel.width > 1.0f ? panel.width : 1.0f);
+            const core::u32 wantHeight = static_cast<core::u32>(panel.height > 1.0f ? panel.height : 1.0f);
+            if (viewportTarget.resize(*device, wantWidth, wantHeight)) {
+                target = viewportTarget.texture();
+                targetFormat = kOffscreenFormat;
+                targetWidth = viewportTarget.width();
+                targetHeight = viewportTarget.height();
+            }
+        }
+
         if (target.valid()) {
             ensureDebugPass(targetFormat);
 
@@ -1123,6 +1170,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // window's: an offscreen render at 640x360 has to produce the
             // layout that resolution would, which is the whole of what the
             // two-resolution goldens check.
+            // The matrices the image was drawn with, not the ones the next
+            // frame will use. A pick taken against a fresher camera lands
+            // wherever the camera moved to between the click and the walk,
+            // which is invisible standing still and wrong while walking.
+            if (options.editor && snapshot.camera.valid)
+                editor.setCamera(snapshot.camera.projection, snapshot.camera.view, snapshot.camera.origin);
+
             const core::Vec2 uiViewport{static_cast<f32>(targetWidth), static_cast<f32>(targetHeight)};
             if (uiViewport != lastUiViewport) {
                 // A scale is a fraction of something that just changed, so
@@ -1315,8 +1369,27 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
             // Its own pass, on top of the finished frame, after ours closed and
             // before submit -- the ordering the overlay's contract asks for.
-            if (overlay.has_value())
-                overlay->render(*cmd, target, frame);
+            //
+            // In the editor it goes to the SCREEN while everything above went
+            // to the panel's texture, and the screen has had nothing written to
+            // it this frame -- so it is cleared first. Without that, whatever
+            // the dockspace leaves transparent shows a previous frame or worse.
+            if (options.editor && present.valid() && present != target) {
+                const std::array<rhi::ColorAttachment, 1> clear{rhi::ColorAttachment{
+                    .texture = present,
+                    .loadOp = rhi::LoadOp::Clear,
+                    .storeOp = rhi::StoreOp::Store,
+                    .clearColor = {0.06f, 0.06f, 0.07f, 1.0f},
+                }};
+                cmd->beginRenderPass({.colorAttachments = clear, .debugName = "editor-backdrop"});
+                cmd->endRenderPass();
+            }
+
+            if (overlay.has_value()) {
+                if (options.editor)
+                    overlay->setEditorTarget(&editor, viewportTarget.texture());
+                overlay->render(*cmd, options.editor && present.valid() ? present : target, frame);
+            }
         }
 
         // Cleared once the frame is over. A `DrawLine` from a task resumed

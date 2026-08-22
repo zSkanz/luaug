@@ -4,10 +4,14 @@
 // hand edit is a change that survives exactly until the next build
 // (architecture.md section 4).
 //
-// Every `docKey` below is empty on purpose. The doc text lives in the IDL and
-// nothing in the engine formats a doc key yet: turning it into a catalog entry
-// and a hover string is the M3 documentation pipeline (gen_docs and the docs
-// JSON, docs/roadmap.md). An empty key here is that decision, not an omission.
+// Every `.doc` below is the IDL's own English prose, not a catalog key: the
+// audience for a reflection tooltip is whoever is building a game, and a
+// `TextKey` is a hash with nothing on the other end of it unless the catalog is
+// loaded. See `class_registry.h` for the whole of that reasoning.
+//
+// Anything outside printable ASCII is written as a three-digit octal escape, so
+// these files stay pure ASCII whatever a compiler believes their source charset
+// to be, and the bytes reaching the program are the IDL's own UTF-8.
 
 #include "class_descriptors.gen.h"
 
@@ -49,7 +53,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether this context and its actions take part in resolution at all. A disabled context consumes nothing, so a lower-priority one bound to the same key starts firing the tick this goes false -- which is exactly what closing a menu should do.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getInputContextEnabled,
             .set = native::setInputContextEnabled,
@@ -60,7 +64,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Resolution order, highest first. It orders FALLTHROUGH and nothing else -- in particular it does not decide which clock the context is dispatched on, which is `Rate` (ADR 0039). Ties are broken by a stable order the engine reproduces on every run (R10), so two contexts at the same priority never swap places between one run and the next.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getInputContextPriority,
             .set = native::setInputContextPriority,
@@ -71,7 +75,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether this context CONSUMES the inputs its bindings name, hiding them from every lower-priority context. A modal dialog sinks; a HUD does not. Sinking is per input and not per context: a sinking context that binds Escape hides Escape and leaves W alone.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getInputContextSink,
             .set = native::setInputContextSink,
@@ -79,10 +83,11 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("Rate"),
             .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("InputRate"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Which clock this context is dispatched on (ADR 0039). `Simulation` by default, because that is the safe one: an action nobody thought about fires where R10 holds and where the input replay can see it. `Render` is for camera look and for UI, and an action read from a Render context is frame-rate-dependent by construction.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getInputContextRate,
             .set = native::setInputContextRate,
@@ -93,7 +98,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     inputContextDesc.super = instanceClass;
     inputContextDesc.flags = scene::ClassFlags::None;
     inputContextDesc.defaultName = atoms.intern("InputContext");
-    inputContextDesc.docKey = {};
+    inputContextDesc.doc = "A group of `InputAction` children that are live together (\302\247" "2.4, ADR 0029). A menu opening is one context enabled and another disabled, rather than a pile of conditionals inside every handler. Parent it anywhere -- the convention is under the Script that owns it -- because a context is reached by being enabled, not by where it sits.";
     inputContextDesc.properties = inputContextProperties;
     inputContextDesc.attachComponents = native::attachInputContextComponents;
     inputContextDesc.detachComponents = native::detachInputContextComponents;
@@ -105,10 +110,11 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("Type"),
             .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("InputActionType"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "What this action produces, and therefore what `GetState` returns. It belongs to the action rather than to the binding, because one action may be driven by a key, a stick and an on-screen button at once and all three have to answer in the same currency.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getInputActionType,
             .set = native::setInputActionType,
@@ -119,7 +125,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether this action resolves. A disabled action consumes nothing even inside a sinking context, so disabling one hands its input back to whatever is underneath.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getInputActionEnabled,
             .set = native::setInputActionEnabled,
@@ -131,13 +137,13 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("GetState"),
             .yields = false,
             .threadSafety = scene::ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "This action's value as of the current tick -- a boolean for `Bool`, a number for `Direction1D`, a `Vector2` for `Direction2D` and `ViewportPosition`, and a `vector` for `Direction3D`. It is a SNAPSHOT: two calls inside one tick agree, and a recorded input stream hands the same answers back with no hardware attached, which is what makes the replay gate a replay of input rather than of a bot.",
         },
         scene::MethodDesc{
             .name = atoms.intern("GetPreferredBinding"),
             .yields = false,
             .threadSafety = scene::ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "The binding a prompt should draw for this action -- \"Press [E]\". With a device type, the first child binding belonging to that family in document order; without one, the family of `InputService.LastInputDeviceType`, so a prompt follows whatever the player last touched. nil when the action has no binding for that device.",
         },
     }};
     static std::array<scene::EventDesc, 3> inputActionEvents;
@@ -145,17 +151,17 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::EventDesc{
             .name = atoms.intern("Pressed"),
             .slot = 7,
-            .docKey = {},
+            .doc = "Fired on the tick a `Bool` action becomes true. Never fires for any other action type: an axis has no moment of being pressed.",
         },
         scene::EventDesc{
             .name = atoms.intern("Released"),
             .slot = 8,
-            .docKey = {},
+            .doc = "Fired on the tick a `Bool` action becomes false, including when the action or its context is disabled while it was held -- a held key that stops being delivered has been released as far as the game is concerned, and leaving it stuck true is how a character keeps running after a menu opens.",
         },
         scene::EventDesc{
             .name = atoms.intern("StateChanged"),
             .slot = 9,
-            .docKey = {},
+            .doc = "Fired on any tick this action's value changed, whatever its type. It carries NO arguments and the handler reads `GetState()` -- the same arrangement `Destroying` and `GetPropertyChangedSignal` use, and for the same reason (ADR 0039): the queue between the engine and the VM carries POD facts, an action's value is one of four types, and a signal whose argument had to be rebuilt at drain time would be a fire that captured nothing. Input dispatches once per tick, so the value read in the handler is the value that caused the fire.",
         },
     }};
     scene::ClassDescriptor inputActionDesc;
@@ -163,7 +169,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     inputActionDesc.super = instanceClass;
     inputActionDesc.flags = scene::ClassFlags::None;
     inputActionDesc.defaultName = atoms.intern("InputAction");
-    inputActionDesc.docKey = {};
+    inputActionDesc.doc = "A named thing the player can do, decoupled from the input that does it (\302\247" "2.4, ADR 0029). Game code connects to the action; `InputBinding` children say what drives it. That indirection is the whole point: rebinding is a property write, and a prompt can ask the action what key to draw.\012\012Parent it to an `InputContext`. An action outside one is inert -- resolution walks contexts, so an action nothing groups is an action nothing dispatches.";
     inputActionDesc.properties = inputActionProperties;
     inputActionDesc.methods = inputActionMethods;
     inputActionDesc.events = inputActionEvents;
@@ -177,10 +183,11 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("KeyCode"),
             .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("KeyCode"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The input this binding names. `Unknown` means unbound, which is why the enum carries that item: an unset binding is expressible without the property being nullable, and the engine's value domain stays a closed set (ADR 0039).",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getInputBindingKeyCode,
             .set = native::setInputBindingKeyCode,
@@ -188,10 +195,11 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("Up"),
             .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("KeyCode"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The composite key for +Y, on a `Direction1D` or `Direction2D` action. The four composites are how a keyboard drives an axis: W/A/S/D is one binding, not four.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getInputBindingUp,
             .set = native::setInputBindingUp,
@@ -199,10 +207,11 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("Down"),
             .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("KeyCode"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The composite key for -Y.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getInputBindingDown,
             .set = native::setInputBindingDown,
@@ -210,10 +219,11 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("Left"),
             .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("KeyCode"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The composite key for -X.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getInputBindingLeft,
             .set = native::setInputBindingLeft,
@@ -221,10 +231,11 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("Right"),
             .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("KeyCode"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The composite key for +X.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getInputBindingRight,
             .set = native::setInputBindingRight,
@@ -235,7 +246,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "What this binding's value is multiplied by before it reaches the action. Mouse look wants a small one and a stick wants 1; a negative one inverts an axis, which is what a settings screen's \"invert Y\" writes.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getInputBindingScale,
             .set = native::setInputBindingScale,
@@ -246,7 +257,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "What a prompt shows for this binding. A localization key is allowed and is the intended use (\302\247" "6): a binding that says \"ui.prompt.interact\" translates and one that says \"Interact\" does not. Empty means the engine has nothing to offer and the prompt should fall back to the key's own name.\012\012**The engine never acts on this and never will**, which is what makes it different from an `Inert` property: it is data a GAME reads back through `GetPreferredBinding` to draw its own prompt. There is no prompt widget in v1 and there is not meant to be one -- a rebinding screen is a game''s screen.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
             .get = native::getInputBindingDisplayName,
             .set = native::setInputBindingDisplayName,
@@ -257,7 +268,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "A glyph for this binding, as an `asset://` URI. Empty means none.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
             .get = native::getInputBindingImage,
             .set = native::setInputBindingImage,
@@ -265,10 +276,11 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("DeviceType"),
             .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("InputDeviceType"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = true,
             .inert = false,
-            .docKey = {},
+            .doc = "Which device family this binding belongs to, DERIVED from `KeyCode` (ADR 0039). It is read-only because a settable one could disagree with the key beside it -- `DeviceType = Gamepad` on a binding whose KeyCode is W is a statement the engine would then have to choose whether to believe. Anything that is not a gamepad input reports `KeyboardMouse`, `Unknown` included.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getInputBindingDeviceType,
             .set = nullptr,
@@ -279,7 +291,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     inputBindingDesc.super = instanceClass;
     inputBindingDesc.flags = scene::ClassFlags::None;
     inputBindingDesc.defaultName = atoms.intern("InputBinding");
-    inputBindingDesc.docKey = {};
+    inputBindingDesc.doc = "One physical input that drives its parent `InputAction` (\302\247" "2.4). An action may have several, and they are ORed: a key, a gamepad stick and a UI button on one action are three ways to do one thing.\012\012Which fields matter depends on the parent's `Type`. A `Bool` action reads `KeyCode`; a `Direction2D` action reads either `KeyCode` naming a 2D source such as `LeftThumbstick`, or the four composite keys. A binding whose fields do not suit its parent is inert rather than an error -- an action's type is a property somebody can change after the binding was built.";
     inputBindingDesc.properties = inputBindingProperties;
     inputBindingDesc.attachComponents = native::attachInputBindingComponents;
     inputBindingDesc.detachComponents = native::detachInputBindingComponents;
@@ -294,7 +306,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether the pointer is locked to the window and reporting motion instead of position -- what a first-person camera wants. While it is locked, `GetPointerPosition` keeps reporting the position the pointer had when it was locked, because there is no other honest answer, and a `Direction2D` action bound to `MouseMovement` is the way to read the motion.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getInputServicePointerLocked,
             .set = native::setInputServicePointerLocked,
@@ -305,7 +317,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether the system cursor is drawn. Independent of `PointerLocked`, because the two are separate wishes: a strategy game hides the cursor during a cutscene without locking it.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getInputServicePointerVisible,
             .set = native::setInputServicePointerVisible,
@@ -313,10 +325,11 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("LastInputDeviceType"),
             .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("InputDeviceType"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = true,
             .inert = false,
-            .docKey = {},
+            .doc = "The device family the player most recently used, which is what a HUD switches its prompts on. It changes on a real input and not on a resting one: a gamepad stick drifting inside its dead zone does not steal the prompts from a keyboard.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getInputServiceLastInputDeviceType,
             .set = nullptr,
@@ -328,19 +341,19 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("GetPointerPosition"),
             .yields = false,
             .threadSafety = scene::ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "The pointer in window pixels, origin at the top left, as of the current tick. A snapshot like every other input read: two calls inside one tick agree.",
         },
         scene::MethodDesc{
             .name = atoms.intern("IsKeyDown"),
             .yields = false,
             .threadSafety = scene::ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Whether that key, button or trigger is held as of the current tick. The shortest thing this API can be asked, and the reason there is no separate sugar module for it.\012\012It reads the device SNAPSHOT and ignores what the UI consumed, which is the opposite of the events'' second argument -- a poll asks what the hardware is doing and an event asks what happened to the game. A caller who wants the UI-aware answer wants an `InputAction`, which is also the one that can be rebound.\012\012An analogue source counts as down past half deflection, which is the same rule a `Bool` action applies to one.",
         },
         scene::MethodDesc{
             .name = atoms.intern("SetVirtualState"),
             .yields = false,
             .threadSafety = scene::ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Drives one of the `Virtual` key codes from something that is not hardware -- a HUD button, an on-screen thumbstick, an accessibility control for a player who cannot hold a key (\302\247" "2.4).\012\012**It writes into the same device snapshot a keyboard writes into**, which is what makes it one input model rather than two: the value binds through an ordinary `InputBinding`, resolves in the ordinary order, is eaten by an ordinary sinking context, and is carried by the recorded stream a replay hands back. A seam that reached past the snapshot would be a HUD button M6''s own gate could not see.\012\012**It carries a value, not a press.** Write 1 and 0 for a button; write anything between for a slider or the axis of a thumbstick. Bound to a `Bool` action the value counts as pressed past half deflection, which is the rule every analogue source follows.\012\012The value STICKS until it is written again -- a button that is held is a 1 nobody has cleared -- and losing window focus clears it with everything else, so a press cannot survive an alt-tab. Refuses any key code that is not one of the `Virtual` family: writing to `Space` would be a script pretending to be a keyboard.",
         },
     }};
     static std::array<scene::EventDesc, 5> inputServiceEvents;
@@ -348,27 +361,27 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::EventDesc{
             .name = atoms.intern("InputBegan"),
             .slot = 7,
-            .docKey = {},
+            .doc = "Fired on the tick an input STARTS -- a key pressed, a button pushed, a trigger crossing half deflection (\302\247" "2.4, ADR 0041).\012\012**`uiConsumed` is the second argument for a reason: read it.** It is true when the interface already took this input -- the pointer was over an element, or a `TextInput` had focus -- and a handler that ignores it is a handler that fires the gun when the player clicks a button and jumps when they type a `w` into a chat box.\012\012**What this costs, stated where it is read: a key handled here cannot be rebound.** It does not appear in a remapping screen, because nothing in the tree says it exists. An `InputAction` does appear, binds a keyboard key and a gamepad button to one name, and is what a shipped game should use -- this is the direct, familiar option beside it, and it is the right one for a prototype, a debug key, or anything a player will never remap.\012\012It fires on the SIMULATION clock, from the Input Action System''s own dispatch, so a handler that writes to the world replays exactly. Camera look at render rate is an `InputContext` with `Rate = Enum.InputRate.Render`.",
         },
         scene::EventDesc{
             .name = atoms.intern("InputChanged"),
             .slot = 8,
-            .docKey = {},
+            .doc = "Fired on a tick an input MOVED without starting or ending: pointer motion, the wheel, a stick or a trigger's deflection. `Position` and `Delta` carry it.\012\012One fire per tick per source at most, with the deltas ACCUMULATED since the last one -- several device events land in a tick and a handler that saw only the last would lose most of a fast flick. The same rebinding cost as `InputBegan` applies.",
         },
         scene::EventDesc{
             .name = atoms.intern("InputEnded"),
             .slot = 9,
-            .docKey = {},
+            .doc = "Fired on the tick an input STOPS. It fires for everything held when the window loses focus, so a handler that pairs `InputBegan` with this one never leaks a press -- which is the failure that leaves a character walking into a wall after an alt-tab.\012\012`uiConsumed` carries what it carried when the input began, so a press that started on a button is still marked consumed when it is released off one.",
         },
         scene::EventDesc{
             .name = atoms.intern("InputDeviceChanged"),
             .slot = 10,
-            .docKey = {},
+            .doc = "Fired when `LastInputDeviceType` changes, so a prompt redraws once rather than polling.",
         },
         scene::EventDesc{
             .name = atoms.intern("WindowFocusChanged"),
             .slot = 11,
-            .docKey = {},
+            .doc = "Fired when the game window gains or loses keyboard focus. Losing focus releases every held input, so an alt-tab does not leave a character walking into a wall.",
         },
     }};
     scene::ClassDescriptor inputServiceDesc;
@@ -376,7 +389,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     inputServiceDesc.super = instanceClass;
     inputServiceDesc.flags = scene::ClassFlags::Service | scene::ClassFlags::NotCreatable;
     inputServiceDesc.defaultName = atoms.intern("InputService");
-    inputServiceDesc.docKey = {};
+    inputServiceDesc.doc = "The host of the Input Action System (\302\247" "2.4, ADR 0029) and the only place device-wide state is readable. There is no UserInputService, no ContextActionService and no Mouse: one input model, rebindable and promptable by default (divergence #3).";
     inputServiceDesc.properties = inputServiceProperties;
     inputServiceDesc.methods = inputServiceMethods;
     inputServiceDesc.events = inputServiceEvents;

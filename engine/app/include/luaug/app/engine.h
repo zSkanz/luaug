@@ -100,6 +100,16 @@ struct EngineOptions
     // Print a frame-time summary at exit. Off by default because the numbers
     // are wall-clock and a run that is not being measured should not pay for
     // keeping them (R10 forbids simulation reading them at all).
+    // The visual editor rather than a game (ADR 0046, post-v1 phase 1). A normal
+    // windowed session in every other respect: the same world, the same tick,
+    // the same renderer -- what changes is that the world is drawn into a panel
+    // and the shell around it can select and edit what it draws.
+    //
+    // Not a mode that hijacks the loop the way `--replay` and `--two-worlds`
+    // do, and deliberately so: an editor that ran a different loop from the game
+    // would be an editor that shows you something other than your game.
+    bool editor = false;
+
     bool frameStats = false;
 
     // M7's gate, as a flag. Empty writes no report and asserts nothing.

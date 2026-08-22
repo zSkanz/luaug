@@ -19,6 +19,8 @@
 // `--rhi=null` inert rather than undefined.
 #pragma once
 
+#include <luaug/rhi/types.h>
+
 #include <SDL3/SDL_gpu.h>
 
 namespace luaug::rhi {
@@ -35,5 +37,17 @@ class IDevice;
 // The render pass currently open on this frame's command list, or null when
 // none is. It dies at the matching `endRenderPass()`; nothing may store it.
 [[nodiscard]] SDL_GPURenderPass* nativeRenderPass(const IDevice& device) noexcept;
+
+// The texture behind a handle, for the same consumer and on the same grounds as
+// everything above it: ImGui's `ImTextureID` **is** an `SDL_GPUTexture*` at the
+// pinned version, so an editor showing a rendered world inside a panel has no
+// other way to name the thing it is showing. Wrapping it would re-describe
+// SDL_GPU in a second vocabulary for one caller, which is what this file exists
+// to refuse.
+//
+// Null for a handle this device does not own and for a device that is not this
+// backend's. Valid until the texture is destroyed, which the caller who created
+// it controls.
+[[nodiscard]] SDL_GPUTexture* nativeTexture(const IDevice& device, TextureHandle handle) noexcept;
 
 } // namespace luaug::rhi

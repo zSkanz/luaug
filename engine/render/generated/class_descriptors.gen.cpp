@@ -4,10 +4,14 @@
 // hand edit is a change that survives exactly until the next build
 // (architecture.md section 4).
 //
-// Every `docKey` below is empty on purpose. The doc text lives in the IDL and
-// nothing in the engine formats a doc key yet: turning it into a catalog entry
-// and a hover string is the M3 documentation pipeline (gen_docs and the docs
-// JSON, docs/roadmap.md). An empty key here is that decision, not an omission.
+// Every `.doc` below is the IDL's own English prose, not a catalog key: the
+// audience for a reflection tooltip is whoever is building a game, and a
+// `TextKey` is a hash with nothing on the other end of it unless the catalog is
+// loaded. See `class_registry.h` for the whole of that reasoning.
+//
+// Anything outside printable ASCII is written as a three-digit octal escape, so
+// these files stay pure ASCII whatever a compiler believes their source charset
+// to be, and the bytes reaching the program are the IDL's own UTF-8.
 
 #include "class_descriptors.gen.h"
 
@@ -51,7 +55,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The glTF file this part renders. Setting it replaces the geometry; a file that fails to import leaves the previous mesh in place and reports why, because a part that silently becomes invisible is harder to diagnose than one that says it could not load.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
             .get = native::getMeshPartMeshContent,
             .set = native::setMeshPartMeshContent,
@@ -59,10 +63,11 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("CollisionFidelity"),
             .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("CollisionFidelity"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "How closely the collision shape follows the rendered geometry.\012\012`Box` names a shape rather than an accuracy and is honoured exactly: a caller who asked for the bounding box gets it even when the mesh's geometry is loaded. Every other value asks for the geometry, and what it gets is a CONVEX HULL -- a hull is what a rigid-body solver can use directly, and a concave triangle mesh is a different shape class with different rules (it cannot be dynamic) that nothing in v1 asks for.\012\012A mesh whose points have not arrived yet collides as its bounding box, which is the state of every `MeshPart` in the frame before its file finishes loading: a body with no shape for one frame is a body that falls through the floor. So does a mesh too degenerate to make a solid from -- three points are a triangle, not a hull.\012\012The property reads back what was written rather than what it resolved to, because a value that silently became another value is worse than one that says what it did.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getMeshPartCollisionFidelity,
             .set = native::setMeshPartCollisionFidelity,
@@ -73,7 +78,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     meshPartDesc.super = basePartClass;
     meshPartDesc.flags = scene::ClassFlags::None;
     meshPartDesc.defaultName = atoms.intern("MeshPart");
-    meshPartDesc.docKey = {};
+    meshPartDesc.doc = "A part whose geometry is an imported mesh rather than a primitive solid. One file is one mesh: a model made of several pieces is several MeshParts, which is the shape \302\247" "2.6's prefab example already assumes.";
     meshPartDesc.properties = meshPartProperties;
     meshPartDesc.attachComponents = native::attachMeshPartComponents;
     meshPartDesc.detachComponents = native::detachMeshPartComponents;
@@ -88,7 +93,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Where the camera is and which way it looks. The look direction is the CFrame's LookVector, which is -Z.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_cframe"),
             .get = native::getCameraCFrame,
             .set = native::setCameraCFrame,
@@ -99,7 +104,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The vertical field of view in degrees. Clamped to a sane open interval: zero and 180 both produce a projection matrix that renders nothing.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_cone_degrees"),
             .get = native::getCameraFieldOfView,
             .set = native::setCameraFieldOfView,
@@ -110,7 +115,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Distance in metres to the near clip plane. Small values buy little and cost depth precision everywhere, so this is worth raising rather than lowering.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_above_zero"),
             .get = native::getCameraNearPlane,
             .set = native::setCameraNearPlane,
@@ -121,7 +126,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Distance in metres to the far clip plane; geometry beyond it is not drawn.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_above_zero"),
             .get = native::getCameraFarPlane,
             .set = native::setCameraFarPlane,
@@ -132,7 +137,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     cameraDesc.super = pVInstanceClass;
     cameraDesc.flags = scene::ClassFlags::None;
     cameraDesc.defaultName = atoms.intern("Camera");
-    cameraDesc.docKey = {};
+    cameraDesc.doc = "The viewpoint the world is rendered from. A camera is an ordinary instance a script owns and moves; the engine never takes it over, which is why there is no CameraType.";
     cameraDesc.properties = cameraProperties;
     cameraDesc.attachComponents = native::attachCameraComponents;
     cameraDesc.detachComponents = native::detachCameraComponents;
@@ -147,7 +152,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The light's colour, multiplied by Brightness. Not clamped, so a channel above one is a legal over-bright tint.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
             .get = native::getPointLightColor,
             .set = native::setPointLightColor,
@@ -158,7 +163,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "How much light this emits. Zero is off without the instance having to be destroyed.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
             .get = native::getPointLightBrightness,
             .set = native::setPointLightBrightness,
@@ -169,7 +174,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The radius in metres beyond which this light contributes nothing, which is what lets the renderer skip it for distant geometry.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
             .get = native::getPointLightRange,
             .set = native::setPointLightRange,
@@ -180,7 +185,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = true,
-            .docKey = {},
+            .doc = "Whether this light should cast shadows. Stored and reported faithfully, and not yet acted on: this release casts shadows from the sun alone.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getPointLightShadows,
             .set = native::setPointLightShadows,
@@ -191,7 +196,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     pointLightDesc.super = instanceClass;
     pointLightDesc.flags = scene::ClassFlags::None;
     pointLightDesc.defaultName = atoms.intern("PointLight");
-    pointLightDesc.docKey = {};
+    pointLightDesc.doc = "A light radiating equally in every direction from its parent's position. Parent it to a BasePart or an Attachment; a light with no such ancestor lights nothing.";
     pointLightDesc.properties = pointLightProperties;
     pointLightDesc.attachComponents = native::attachPointLightComponents;
     pointLightDesc.detachComponents = native::detachPointLightComponents;
@@ -206,7 +211,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The light's colour, multiplied by Brightness.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
             .get = native::getSpotLightColor,
             .set = native::setSpotLightColor,
@@ -217,7 +222,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "How much light this emits.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
             .get = native::getSpotLightBrightness,
             .set = native::setSpotLightBrightness,
@@ -228,7 +233,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The distance in metres beyond which this light contributes nothing.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
             .get = native::getSpotLightRange,
             .set = native::setSpotLightRange,
@@ -239,7 +244,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The full width of the cone in degrees.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_cone_degrees"),
             .get = native::getSpotLightAngle,
             .set = native::setSpotLightAngle,
@@ -250,7 +255,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = true,
-            .docKey = {},
+            .doc = "Whether this light should cast shadows. Stored and not yet acted on, as on PointLight.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getSpotLightShadows,
             .set = native::setSpotLightShadows,
@@ -261,7 +266,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     spotLightDesc.super = instanceClass;
     spotLightDesc.flags = scene::ClassFlags::None;
     spotLightDesc.defaultName = atoms.intern("SpotLight");
-    spotLightDesc.docKey = {};
+    spotLightDesc.doc = "A light confined to a cone about its parent's forward direction. A sibling of PointLight rather than a subclass of it: the two share four properties and no behaviour.";
     spotLightDesc.properties = spotLightProperties;
     spotLightDesc.attachComponents = native::attachSpotLightComponents;
     spotLightDesc.detachComponents = native::detachSpotLightComponents;
@@ -274,7 +279,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("LoadAnimation"),
             .yields = false,
             .threadSafety = scene::ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "A track for one clip. Everything after a `#` is the clip's NAME inside the file, and a string with no `#` is a clip name in this player's own mesh -- so the common case is `player:LoadAnimation(\"Walk\")`.\012\012A path before the `#` must be the mesh this player is under. v1 has no asset pipeline (M7 is where a clip becomes addressable on its own), so a clip exists only inside the file its skeleton came from, and a URN naming a different file loads nothing rather than playing the wrong rig.\012\012**Load a track once and keep it.** It always returns a track, even for a clip that is not there -- a mesh that has not finished loading would otherwise make an ordinary frame a nil index -- and every call is a handle the VM holds until the world goes away.",
         },
     }};
     scene::ClassDescriptor animationPlayerDesc;
@@ -282,7 +287,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     animationPlayerDesc.super = instanceClass;
     animationPlayerDesc.flags = scene::ClassFlags::None;
     animationPlayerDesc.defaultName = atoms.intern("AnimationPlayer");
-    animationPlayerDesc.docKey = {};
+    animationPlayerDesc.doc = "Plays a skinned mesh's animation clips (\302\247" "2.2). **Parent it to the `MeshPart` whose skeleton the clips belong to** -- that is where it looks for them, and an `AnimationPlayer` parented anywhere else finds nothing rather than guessing.\012\012It stores nothing: the tracks are the state, and each one is a handle a script holds rather than a child in the tree. Sampling happens at `PreAnimation` on the SimClock, so a clip's position at a given tick is the same in a replay as it was live.\012\012v1 is clip playback and linear blending -- no state machines, no IK, no root motion (roadmap M6).";
     animationPlayerDesc.methods = animationPlayerMethods;
     classes.registerClass(animationPlayerDesc);
 
@@ -295,7 +300,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The hour of day, 0 to 24, wrapping rather than clamping so that adding a delta every tick never has to check. It is the ONLY input to the sun's direction, which is what makes a replay light the same way the live run did.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getLightingClockTime,
             .set = native::setLightingClockTime,
@@ -306,7 +311,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Degrees north of the equator, which tilts the sun's arc across the sky. The second and last input to SunDirection.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_latitude_degrees"),
             .get = native::getLightingGeographicLatitude,
             .set = native::setLightingGeographicLatitude,
@@ -317,7 +322,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Flat light reaching every surface from every direction. A stand-in for bounced light until there is any; not clamped, so it can be pushed above one deliberately.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
             .get = native::getLightingAmbient,
             .set = native::setLightingAmbient,
@@ -328,7 +333,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "How strong the sun is, independent of its colour.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
             .get = native::getLightingBrightness,
             .set = native::setLightingBrightness,
@@ -339,7 +344,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "What distance fades towards between FogStart and FogEnd.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
             .get = native::getLightingFogColor,
             .set = native::setLightingFogColor,
@@ -350,7 +355,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Distance in metres at which fog begins.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
             .get = native::getLightingFogStart,
             .set = native::setLightingFogStart,
@@ -361,7 +366,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Distance in metres at which fog is total. Equal to or below FogStart means no fog at all, which is how fog is turned off without a separate flag.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
             .get = native::getLightingFogEnd,
             .set = native::setLightingFogEnd,
@@ -372,7 +377,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Exposure in EV stops, on top of the automatic exposure the renderer measures from the frame itself. Zero means whatever it measured; +1 is twice the light and -1 is half, which is the unit a camera uses. It is a look rather than a limit, so it is not clamped.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_exposure_stops"),
             .get = native::getLightingExposureCompensation,
             .set = native::setLightingExposureCompensation,
@@ -383,7 +388,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::ReadParallel,
             .readOnly = true,
             .inert = false,
-            .docKey = {},
+            .doc = "The unit vector pointing from the world towards the sun, derived from ClockTime and GeographicLatitude and nothing else -- no wall clock and no accumulated state, so the same ClockTime always gives the same direction.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector"),
             .get = native::getLightingSunDirection,
             .set = nullptr,
@@ -394,7 +399,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     lightingDesc.super = instanceClass;
     lightingDesc.flags = scene::ClassFlags::Service | scene::ClassFlags::NotCreatable;
     lightingDesc.defaultName = atoms.intern("Lighting");
-    lightingDesc.docKey = {};
+    lightingDesc.doc = "Day/night and the environment every surface is lit against. The sun is service state rather than an instance, because there is exactly one of it and its direction is derived rather than authored.";
     lightingDesc.properties = lightingProperties;
     lightingDesc.attachComponents = native::attachLightingComponents;
     lightingDesc.detachComponents = native::detachLightingComponents;

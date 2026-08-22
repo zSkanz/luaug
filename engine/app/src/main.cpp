@@ -131,6 +131,10 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
             options.exitAfterFrames = true;
             continue;
         }
+        if (arg == "--edit") {
+            options.editor = true;
+            continue;
+        }
         if (arg == "--frame-stats") {
             options.frameStats = true;
             continue;
@@ -372,6 +376,14 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
     // target the engine owns, which is why the harness uses it.
     if (!options.screenshotPath.empty() && !options.headless) {
         luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.screenshot_needs_headless"));
+        return kExitUsage;
+    }
+
+    // An editor with no window is not an editor. Refusing beats quietly
+    // starting a headless session that draws the world into a texture nobody
+    // will ever see.
+    if (options.editor && options.headless) {
+        luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.editor_needs_window"));
         return kExitUsage;
     }
 

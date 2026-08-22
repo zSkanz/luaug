@@ -22,6 +22,8 @@ luaug_add_module(app
         src/streaming_host.cpp
         src/debug_overlay.cpp
         src/inspector.cpp
+        src/picking.cpp
+        src/editor.cpp
         src/dev_control.cpp
     DEPS
         asset
@@ -137,6 +139,8 @@ luaug_add_module_tests(app
         tests/world_host_tests.cpp
         tests/debug_overlay_tests.cpp
         tests/inspector_tests.cpp
+        tests/picking_tests.cpp
+        tests/editor_tests.cpp
         tests/soak_tests.cpp
         tests/two_worlds_tests.cpp
         tests/project_config_tests.cpp

@@ -74,6 +74,27 @@ struct PropertyDesc
 {
     core::NameAtom name{};
     ValueType type = ValueType::Nil;
+
+    // For `ValueType::EnumItem`, the NAME of the enum this property accepts;
+    // an empty atom for every other type. `EnumRegistry::findId` turns it into
+    // an `EnumId`.
+    //
+    // A name and not an id, for the reason `world_hash.cpp` hashes a class by
+    // name: an `EnumId` is assigned by `EnumRegistry::registerEnum` in
+    // registration order, so it is a fact about one registry rather than about
+    // the property. These descriptor arrays have static storage and are shared
+    // by every registry a process builds -- a test fixture's among them -- so an
+    // id baked in here would name a different enum in the second one. The
+    // generated `*EnumId` constants stay what a hand-written accessor validates
+    // against; this costs one hash probe, and only on the path that populates a
+    // combo box.
+    //
+    // Recorded at all because the alternative is recovering the enum from a
+    // property's CURRENT VALUE, which cannot answer for a property that has none
+    // and cannot answer at all without a live instance. A property's legal
+    // domain is a fact about the class.
+    core::NameAtom enumName{};
+
     ThreadSafety threadSafety = ThreadSafety::Unsafe;
     bool readOnly = false;
     // Backed, stored, read back faithfully -- and nothing acts on it yet. Not
@@ -84,8 +105,28 @@ struct PropertyDesc
     // nothing happen.
     bool inert = false;
 
-    // The doc text from the IDL, resolved through the catalog (ADR 0019).
-    core::TextKey docKey{};
+    // The property's own documentation, in English, from the IDL. Points at
+    // generated static storage and is never null: `""` is what a hand-built
+    // descriptor carries, so a caller needs no null check before printing it.
+    //
+    // Prose and not a `core::TextKey`, which is what this field was until a
+    // property grid needed to show it. Three reasons, and the first is the one
+    // that decides it:
+    //
+    //   * R3 governs what a PLAYER reads. This is API reference text, read by
+    //     whoever is building the engine or a game -- the same audience
+    //     `debug_overlay.h` states its own literals are for.
+    //   * `gen_dts` and `gen_reference` already emit these sentences verbatim
+    //     from the same IDL field. A catalog key would make the catalog a second
+    //     home for prose that is generated from the IDL either way, and two
+    //     homes for one sentence is what generating it was meant to prevent.
+    //   * `i18n/en.json` is loaded at boot by every shipped game. Putting the
+    //     whole API reference in it would cost every player the documentation
+    //     for a panel shipping builds do not draw -- and a `TextKey` carries
+    //     only a hash, so a tool holding this descriptor without that catalog
+    //     would have nothing at all.
+    const char* doc = "";
+
     // Raised when `set` rejects the value. Generated from the property's type,
     // so every rejection names something specific rather than "invalid value".
     core::TextKey errKeyOnInvalidSet{};
@@ -110,7 +151,8 @@ struct MethodDesc
     core::NameAtom name{};
     bool yields = false;
     ThreadSafety threadSafety = ThreadSafety::Unsafe;
-    core::TextKey docKey{};
+    // English prose from the IDL, never null. See `PropertyDesc::doc`.
+    const char* doc = "";
 };
 
 struct EventDesc
@@ -119,7 +161,8 @@ struct EventDesc
     // Index into the instance's signal slots, assigned by the generator so that
     // a fire is an array offset rather than a name lookup.
     u16 slot = 0;
-    core::TextKey docKey{};
+    // English prose from the IDL, never null. See `PropertyDesc::doc`.
+    const char* doc = "";
 };
 
 struct ClassDescriptor
@@ -131,7 +174,8 @@ struct ClassDescriptor
     // The `Name` a fresh instance carries; the class name unless the IDL says
     // otherwise.
     core::NameAtom defaultName{};
-    core::TextKey docKey{};
+    // English prose from the IDL, never null. See `PropertyDesc::doc`.
+    const char* doc = "";
 
     // Views into generated static storage, which outlives the registry. The
     // arrays hold only what the class *declares*; inherited members are found

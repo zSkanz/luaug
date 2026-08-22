@@ -190,6 +190,15 @@ bool editable(const scene::PropertyDesc& descriptor) noexcept
     return kind != EditorKind::ReadOnlyText && kind != EditorKind::InstanceRef;
 }
 
+scene::EnumId enumDomainOf(const scene::EnumRegistry& enums, const scene::PropertyDesc& descriptor) noexcept
+{
+    if (descriptor.type != scene::ValueType::EnumItem)
+        return scene::InvalidEnum;
+    // `findId` on an empty atom answers `InvalidEnum` already, so a hand-built
+    // descriptor that names no enum falls out here rather than needing a case.
+    return enums.findId(descriptor.enumName);
+}
+
 const char* propertyTag(const scene::PropertyDesc& descriptor) noexcept
 {
     if (descriptor.readOnly)

@@ -1,11 +1,17 @@
+#include "luaug/core/name_atom.h"
+#include "luaug/scene/class_registry.h"
+#include "luaug/scene/enum_registry.h"
+
 #include <doctest/doctest.h>
 
 // doctest stringifies whatever a CHECK compares, and that needs the stream
 // operators for std::string and std::string_view to be visible here.
 #include <ostream>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "class_descriptors.gen.h"
 #include "scene_fixture.h"
 
 using luaug::scene::ClassDescriptor;
@@ -128,4 +134,69 @@ TEST_CASE("descriptors carry their flags and default names")
 
     CHECK(schema.classes.find(InvalidClass) == nullptr);
     CHECK(schema.classes.find(9999) == nullptr);
+}
+
+TEST_CASE("the generated tables carry the enum a property accepts, and its documentation")
+{
+    // The REAL tables, not the fixture's: what a property grid reads is what
+    // `gen_cpp.luau` emitted, and both fields are emitted or neither is.
+    luaug::core::AtomTable atoms;
+    luaug::scene::ClassRegistry classes;
+    luaug::scene::EnumRegistry enums;
+    luaug::scene::generated::registerClasses(classes, atoms);
+    luaug::scene::generated::registerEnums(enums, atoms);
+
+    const luaug::scene::ClassId part = classes.findId(atoms.intern("Part"));
+    REQUIRE(part != InvalidClass);
+
+    const luaug::scene::PropertyDesc* shape = classes.findProperty(part, atoms.intern("Shape"));
+    REQUIRE(shape != nullptr);
+    CHECK(shape->type == luaug::scene::ValueType::EnumItem);
+
+    // The name resolves to the id `registerEnums` assigned, which is the whole
+    // contract: the descriptor records a name precisely because the id is a fact
+    // about one registry and this table is shared by all of them.
+    CHECK(enums.findId(shape->enumName) == luaug::scene::generated::PartShapeEnumId);
+
+    const luaug::scene::EnumDescriptor* shapes = enums.find(enums.findId(shape->enumName));
+    REQUIRE(shapes != nullptr);
+    // Five shapes, offered by an editor with no `Part` created and no value read.
+    CHECK(shapes->items.size() == 5);
+
+    // A read-only enum property answers the same way. Its domain is what it can
+    // REPORT, and a panel still has to name the item it is showing.
+    const luaug::scene::ClassId character = classes.findId(atoms.intern("CharacterBody"));
+    REQUIRE(character != InvalidClass);
+    const luaug::scene::PropertyDesc* state = classes.findProperty(character, atoms.intern("State"));
+    REQUIRE(state != nullptr);
+    CHECK(enums.findId(state->enumName) == luaug::scene::generated::CharacterStateEnumId);
+
+    // A property that is not an enum names none, rather than naming whatever
+    // atom happened to sit at zero.
+    const luaug::scene::PropertyDesc* anchored = classes.findProperty(part, atoms.intern("Anchored"));
+    REQUIRE(anchored != nullptr);
+    CHECK_FALSE(anchored->enumName.valid());
+
+    // The IDL's prose reaches the runtime rather than staying in a file nothing
+    // at runtime reads. Asserted as a substring, because the sentence is the
+    // IDL's to reword and the tooltip's job is only to carry it.
+    CHECK(std::string_view(anchored->doc).find("Whether the simulation moves this part.") == 0);
+    CHECK(std::string_view(shape->doc).find("Which primitive solid this part is.") == 0);
+
+    // Every declared property on `Part`'s ancestry has some, because the IDL
+    // makes `Doc` mandatory and a blank tooltip is how that stops being true.
+    for (luaug::scene::ClassId id = part; id != InvalidClass;) {
+        const luaug::scene::ClassDescriptor* descriptor = classes.find(id);
+        REQUIRE(descriptor != nullptr);
+        CHECK_FALSE(std::string_view(descriptor->doc).empty());
+        for (const luaug::scene::PropertyDesc& property : descriptor->properties) {
+            INFO("property ", atoms.text(property.name));
+            CHECK_FALSE(std::string_view(property.doc).empty());
+        }
+        for (const luaug::scene::MethodDesc& method : descriptor->methods)
+            CHECK_FALSE(std::string_view(method.doc).empty());
+        for (const luaug::scene::EventDesc& event : descriptor->events)
+            CHECK_FALSE(std::string_view(event.doc).empty());
+        id = descriptor->super;
+    }
 }

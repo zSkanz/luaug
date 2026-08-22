@@ -260,9 +260,12 @@ struct Fixture
                 .get = &getNilReference,
                 .set = nullptr,
             },
+            // Documented on the BASE class, so that the sweep is shown to carry
+            // prose through the inheritance walk and not only off the leaf.
             scene::PropertyDesc{
                 .name = atoms.intern("Flag"),
                 .type = scene::ValueType::Bool,
+                .doc = "Whether the thing is flagged.",
                 .get = &getFlag,
                 .set = &setFlag,
             },
@@ -319,12 +322,22 @@ struct Fixture
                 .get = &getLink,
                 .set = &setLink,
             },
+            // Names its enum and carries prose, which is what the generator
+            // emits for a real one: the panel has to be able to answer "what
+            // does this accept" and "what is this for" from the descriptor
+            // alone, with no instance in hand.
             scene::PropertyDesc{
                 .name = atoms.intern("Mood"),
                 .type = scene::ValueType::EnumItem,
+                .enumName = atoms.intern("Mood"),
+                .doc = "How the widget feels about being inspected.",
                 .get = &getMood,
                 .set = &setMood,
             },
+            // Deliberately carries neither, because a hand-built descriptor is
+            // allowed to: `doc` has to read as an empty string rather than as a
+            // null pointer, and the enum lookup has to answer "no enum" rather
+            // than reach for one.
             scene::PropertyDesc{
                 .name = atoms.intern("Nothing"),
                 .type = scene::ValueType::Nil,

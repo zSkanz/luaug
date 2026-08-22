@@ -6,8 +6,14 @@
 #include "luaug/script/signals.h"
 
 #include <lua.h>
-#include <luacode.h>
 #include <lualib.h>
+
+// ADR 0002: the shipping profile links Luau.VM and Luau.CodeGen only, so this
+// header does not exist in that build. Everything under the guard is the one
+// source-to-bytecode path this module has.
+#if LUAUG_LUAU_COMPILER
+#include <luacode.h>
+#endif
 
 #include <algorithm>
 #include <cstdlib>
@@ -26,6 +32,8 @@ namespace {
 }
 
 // --- Loading -----------------------------------------------------------------
+
+#if LUAUG_LUAU_COMPILER
 
 // The one compile in the engine, so the options that make `Vector3.new` a
 // constant live in exactly one place (ADR 0013). `chunkName` is what
@@ -59,6 +67,22 @@ namespace {
     }
     return true;
 }
+
+#else
+
+// A build with no compiler refuses source rather than quietly loading nothing.
+// The refusal is placed HERE, at the single point where source would have
+// become bytecode, so every caller -- `require`, the entry-script mount --
+// reports it through the failure path it already has, keyed and logged the same
+// way a syntax error is. The reason travels as the `{message}` of that error,
+// key-prefixed, because a refusal is an engine message and R3 governs those.
+[[nodiscard]] bool loadChunk(lua_State*, std::string_view, std::string_view, std::string& outError)
+{
+    outError = core::formatKeyPrefixed(LUAUG_TR("script.err.no_compiler"));
+    return false;
+}
+
+#endif
 
 // The chunk name of whatever called `require`, without the `@`. Empty at the
 // top of a C boundary, which is what makes a relative specifier from there a

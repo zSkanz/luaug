@@ -4,10 +4,14 @@
 // hand edit is a change that survives exactly until the next build
 // (architecture.md section 4).
 //
-// Every `docKey` below is empty on purpose. The doc text lives in the IDL and
-// nothing in the engine formats a doc key yet: turning it into a catalog entry
-// and a hover string is the M3 documentation pipeline (gen_docs and the docs
-// JSON, docs/roadmap.md). An empty key here is that decision, not an omission.
+// Every `.doc` below is the IDL's own English prose, not a catalog key: the
+// audience for a reflection tooltip is whoever is building a game, and a
+// `TextKey` is a hash with nothing on the other end of it unless the catalog is
+// loaded. See `class_registry.h` for the whole of that reasoning.
+//
+// Anything outside printable ASCII is written as a three-digit octal escape, so
+// these files stay pure ASCII whatever a compiler believes their source charset
+// to be, and the bytes reaching the program are the IDL's own UTF-8.
 
 #include "class_descriptors.gen.h"
 
@@ -49,7 +53,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "A multiplier, not a level in decibels: 0 is silent, 1 is unchanged, and above 1 is louder and will clip if the material was already near full scale. Nesting is not supported -- a group parented to a group is just an instance parented to an instance, and only a `Sound`'s own `Group` is read.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
             .get = native::getAudioGroupVolume,
             .set = native::setAudioGroupVolume,
@@ -60,7 +64,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     audioGroupDesc.super = instanceClass;
     audioGroupDesc.flags = scene::ClassFlags::None;
     audioGroupDesc.defaultName = atoms.intern("AudioGroup");
-    audioGroupDesc.docKey = {};
+    audioGroupDesc.doc = "A mixing bus (\302\247" "2.1, \302\247" "2.2). A `Sound` whose `Group` names one has its volume multiplied by the group's, which is how \"turn the music down\" is one property rather than a loop over every music track.\012\012Named `AudioGroup` rather than `SoundGroup` for the reason \302\247" "2.5's divergence 19 gives: the service is `AudioService`, and one prefix across a family beats two.";
     audioGroupDesc.properties = audioGroupProperties;
     audioGroupDesc.attachComponents = native::attachAudioGroupComponents;
     audioGroupDesc.detachComponents = native::detachAudioGroupComponents;
@@ -75,7 +79,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The audio, as an `asset://` URI. WAV, MP3, FLAC and Ogg Vorbis, decoded once and cached: a sound does not re-read its file sixty times a second.\012\012A URI that names nothing still PLAYS, as a generated tone whose pitch comes from a hash of the id. A sound that went silent because a file was missing is a bug report about the sound; a placeholder that is audibly a placeholder is one about the file. `DebugService:GetStat(\"AudioClipsMissing\")` is how a script asks which it got.\012\012Where in the file the sound is comes from `TimePosition` every frame rather than from a cursor the mixer keeps, so the audio is a function of the simulation and a replay reproduces it (M6 brief, Decision 9).",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
             .get = native::getSoundContent,
             .set = native::setSoundContent,
@@ -86,7 +90,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether the timeline is advancing. Writing it is the same as calling `Play` or `Stop`, and reading it is how a script asks without keeping its own flag.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getSoundPlaying,
             .set = native::setSoundPlaying,
@@ -97,7 +101,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether reaching the end wraps to the start instead of stopping. A looped sound never fires `Ended`, because it never does.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getSoundLooped,
             .set = native::setSoundLooped,
@@ -108,7 +112,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "A multiplier, combined with the group's and with the listener distance. The default is half rather than full because a game with several sounds at once and every one at 1 is a game that clips, and the first thing anybody does is turn them all down.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
             .get = native::getSoundVolume,
             .set = native::setSoundVolume,
@@ -119,7 +123,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "How fast the timeline runs, and therefore the pitch. 2 is an octave up and half the duration. Zero is refused rather than treated as a pause -- `Playing` is what pauses, and a speed of zero would be a sound that never ends.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_above_zero"),
             .get = native::getSoundPlaybackSpeed,
             .set = native::setSoundPlaybackSpeed,
@@ -130,7 +134,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Where the timeline is, in seconds. Writable, which is how a script seeks; the write lands on the next tick like every other, and past the end it stops or wraps exactly as arriving there would.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
             .get = native::getSoundTimePosition,
             .set = native::setSoundTimePosition,
@@ -141,7 +145,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "How far the listener can be before a positional sound starts getting quieter. Inside it the sound is at full `Volume`; ignored entirely for a 2D sound.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
             .get = native::getSoundRollOffMinDistance,
             .set = native::setSoundRollOffMinDistance,
@@ -152,7 +156,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "How far the listener can be before a positional sound is silent. Between the two distances it fades linearly -- linear rather than inverse-square because a game's audible range is a design decision rather than a physical one, and an inverse square makes the far half of it inaudible.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
             .get = native::getSoundRollOffMaxDistance,
             .set = native::setSoundRollOffMaxDistance,
@@ -163,7 +167,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The bus this sound's volume is multiplied by, or nil for none.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
             .get = native::getSoundGroup,
             .set = native::setSoundGroup,
@@ -175,19 +179,19 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("Play"),
             .yields = false,
             .threadSafety = scene::ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Starts it from `TimePosition`, which is 0 for a sound that has never played and wherever `Stop` left it otherwise. Playing one that is already playing is a no-op rather than a restart -- restarting is `TimePosition = 0` and then this.",
         },
         scene::MethodDesc{
             .name = atoms.intern("Pause"),
             .yields = false,
             .threadSafety = scene::ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Stops the timeline where it is. `Play` resumes from there.",
         },
         scene::MethodDesc{
             .name = atoms.intern("Stop"),
             .yields = false,
             .threadSafety = scene::ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Stops it and rewinds to the start. `Ended` does NOT fire: it is a past-tense fact about reaching the end, and code that awards something when a jingle finishes must not be fooled by one that was cut off.",
         },
     }};
     static std::array<scene::EventDesc, 2> soundEvents;
@@ -195,12 +199,12 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::EventDesc{
             .name = atoms.intern("Ended"),
             .slot = 7,
-            .docKey = {},
+            .doc = "Fired on the tick the timeline reaches the end of a sound that is not `Looped`. From the SIM timeline rather than from the mixer, so it lands on the same tick in a replay, in a headless run, and on a machine whose audio buffer is four times the size.",
         },
         scene::EventDesc{
             .name = atoms.intern("Loaded"),
             .slot = 8,
-            .docKey = {},
+            .doc = "Fired when this sound's `Content` has been decoded and is ready to play. **Fires immediately in v1**, because a sound has nothing to load until M7's asset pipeline -- declared now so that code written today does not have to change when it does.",
         },
     }};
     scene::ClassDescriptor soundDesc;
@@ -208,7 +212,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     soundDesc.super = instanceClass;
     soundDesc.flags = scene::ClassFlags::None;
     soundDesc.defaultName = atoms.intern("Sound");
-    soundDesc.docKey = {};
+    soundDesc.doc = "One sound, playing or not (\302\247" "2.2). **Parent it to a `BasePart` and it is positional**; parent it anywhere else and it is 2D. That is the whole of the 3D switch, and it is a property of where the instance sits rather than a flag that could disagree with it.\012\012**Its timeline is the SimClock's, not the mixer's** (M6 brief, Decision 9). `TimePosition` advances by `FixedTimestep * PlaybackSpeed` per tick and `Ended` fires from that timeline, so a replay reproduces both exactly and a headless run with no audio device produces the same `Ended` on the same tick as a run with speakers. What the speakers do is downstream of the simulation and never an input to it -- otherwise a script reading `TimePosition` would be reading the wall clock through a side door (R10).";
     soundDesc.properties = soundProperties;
     soundDesc.methods = soundMethods;
     soundDesc.events = soundEvents;
@@ -225,7 +229,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Multiplied into every sound, after its own volume and its group's. The one a settings screen writes.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
             .get = native::getAudioServiceMasterVolume,
             .set = native::setAudioServiceMasterVolume,
@@ -237,7 +241,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("PlayLocal"),
             .yields = false,
             .threadSafety = scene::ThreadSafety::Unsafe,
-            .docKey = {},
+            .doc = "Creates a 2D `Sound`, plays it, and destroys it when it ends. For the fire-and-forget case -- a click, a pickup -- where holding an instance to clean up later is all ceremony. The `Sound` is returned so that the volume can still be set on the tick it starts; keeping it past `Ended` is holding a destroyed instance.",
         },
     }};
     scene::ClassDescriptor audioServiceDesc;
@@ -245,7 +249,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     audioServiceDesc.super = instanceClass;
     audioServiceDesc.flags = scene::ClassFlags::Service | scene::ClassFlags::NotCreatable;
     audioServiceDesc.defaultName = atoms.intern("AudioService");
-    audioServiceDesc.docKey = {};
+    audioServiceDesc.doc = "Mixing and the listener (\302\247" "2.1). **The listener is `Workspace.CurrentCamera`** and is not settable: a game with two ideas about where the player is hearing from is a game with a bug, and the camera is already the one thing that answers that question.";
     audioServiceDesc.properties = audioServiceProperties;
     audioServiceDesc.methods = audioServiceMethods;
     classes.registerClass(audioServiceDesc);

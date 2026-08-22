@@ -4,10 +4,14 @@
 // hand edit is a change that survives exactly until the next build
 // (architecture.md section 4).
 //
-// Every `docKey` below is empty on purpose. The doc text lives in the IDL and
-// nothing in the engine formats a doc key yet: turning it into a catalog entry
-// and a hover string is the M3 documentation pipeline (gen_docs and the docs
-// JSON, docs/roadmap.md). An empty key here is that decision, not an omission.
+// Every `.doc` below is the IDL's own English prose, not a catalog key: the
+// audience for a reflection tooltip is whoever is building a game, and a
+// `TextKey` is a hash with nothing on the other end of it unless the catalog is
+// loaded. See `class_registry.h` for the whole of that reasoning.
+//
+// Anything outside printable ASCII is written as a three-digit octal escape, so
+// these files stay pure ASCII whatever a compiler believes their source charset
+// to be, and the bytes reaching the program are the IDL's own UTF-8.
 
 #include "class_descriptors.gen.h"
 
@@ -49,7 +53,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether this tree is laid out and drawn at all. A disabled ScreenGui costs one boolean read per frame; it does not cost a layout.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getScreenGuiEnabled,
             .set = native::setScreenGuiEnabled,
@@ -60,7 +64,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Which ScreenGui draws on top when two overlap, highest last. `ZIndex` orders WITHIN a tree and this orders BETWEEN trees, so a HUD and a modal never have to agree on a shared numbering.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getScreenGuiDisplayOrder,
             .set = native::setScreenGuiDisplayOrder,
@@ -71,7 +75,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether this tree lays out inside `UIService.SafeAreaInsets` rather than against the whole window. On by default: a full-bleed background is the exception and a HUD clipped by a notch is the failure.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getScreenGuiScreenInsets,
             .set = native::setScreenGuiScreenInsets,
@@ -82,7 +86,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     screenGuiDesc.super = instanceClass;
     screenGuiDesc.flags = scene::ClassFlags::None;
     screenGuiDesc.defaultName = atoms.intern("ScreenGui");
-    screenGuiDesc.docKey = {};
+    screenGuiDesc.doc = "The root of one screen-space UI tree, parented to `UIService` (\302\247" "2.2). Everything under it is laid out against the window and drawn over the world.\012\012It is the unit of layout: a write that changes a layout marks the nearest ScreenGui dirty, and a screen nothing changed does not run the solver at all. That is a design constraint rather than an optimisation -- the milestone's benchmark asserts ZERO solver invocations on an idle frame, because \"about zero microseconds\" is a measurement of the clock.";
     screenGuiDesc.properties = screenGuiProperties;
     screenGuiDesc.attachComponents = native::attachScreenGuiComponents;
     screenGuiDesc.detachComponents = native::detachScreenGuiComponents;
@@ -97,7 +101,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Where this object's `AnchorPoint` sits inside its parent.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_udim2"),
             .get = native::getUIObjectPosition,
             .set = native::setUIObjectPosition,
@@ -108,7 +112,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "How big it is, relative to its parent plus an offset. Overridden on an axis that `AutomaticSize` covers.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_udim2"),
             .get = native::getUIObjectSize,
             .set = native::setUIObjectSize,
@@ -119,7 +123,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Which point of THIS object `Position` places, in fractions of its own size. (0,0) is its top-left corner and (0.5,0.5) its middle -- which is what makes centring something one property rather than an arithmetic apology.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector2"),
             .get = native::getUIObjectAnchorPoint,
             .set = native::setUIObjectAnchorPoint,
@@ -130,7 +134,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Degrees clockwise about the anchor point. It rotates the DRAWING and not the layout: a rotated element still occupies its unrotated rectangle, which is what stops one spinning icon reflowing a list every frame.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getUIObjectRotation,
             .set = native::setUIObjectRotation,
@@ -141,7 +145,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The fill behind the object's own content. No `3` suffix (\302\247" "2.5, divergence #11).",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
             .get = native::getUIObjectBackgroundColor,
             .set = native::setUIObjectBackgroundColor,
@@ -152,7 +156,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "0 opaque, 1 invisible. A fully transparent background still lays out and still hit-tests -- `Visible` is the property that stops both.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getUIObjectBackgroundTransparency,
             .set = native::setUIObjectBackgroundTransparency,
@@ -163,7 +167,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether this object and its descendants are laid out, drawn and hit-tested. All three together: an invisible element that still swallowed clicks is the defect this sentence exists to rule out.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getUIObjectVisible,
             .set = native::setUIObjectVisible,
@@ -174,7 +178,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Draw order within this ScreenGui, highest last, ties broken by document order. It does not affect layout and does not nest: one flat ordering across the tree, because a per-parent stacking context is the part of CSS nobody can hold in their head.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getUIObjectZIndex,
             .set = native::setUIObjectZIndex,
@@ -185,7 +189,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Where this child sits in a `UIListLayout` whose `SortOrder` is `LayoutOrder`. Ignored otherwise.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getUIObjectLayoutOrder,
             .set = native::setUIObjectLayoutOrder,
@@ -193,10 +197,11 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("AutomaticSize"),
             .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("AutomaticSize"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Which axes size themselves to fit the contents, overriding that half of `Size`.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getUIObjectAutomaticSize,
             .set = native::setUIObjectAutomaticSize,
@@ -207,7 +212,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether descendants are clipped to this object's rectangle. What a scrolling list needs and what a drop shadow must not have.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getUIObjectClipsDescendants,
             .set = native::setUIObjectClipsDescendants,
@@ -218,7 +223,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = true,
             .inert = false,
-            .docKey = {},
+            .doc = "Where the solver put this object's top-left corner, in window pixels. Read-only because it is an OUTPUT: writing it would be arguing with the layout rather than changing it. Valid after the layout that produced it, which is the frame the property was read in.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector2"),
             .get = native::getUIObjectAbsolutePosition,
             .set = nullptr,
@@ -229,7 +234,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = true,
             .inert = false,
-            .docKey = {},
+            .doc = "The size the solver gave it, in window pixels.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector2"),
             .get = native::getUIObjectAbsoluteSize,
             .set = nullptr,
@@ -240,17 +245,17 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::EventDesc{
             .name = atoms.intern("Activated"),
             .slot = 7,
-            .docKey = {},
+            .doc = "Fired when a pointer press and release both land on this object. Device-neutral by design (\302\247" "2.5, divergence #17): a click, a tap and a bound gamepad button all produce it, which is why there is no `MouseButton1Click`.",
         },
         scene::EventDesc{
             .name = atoms.intern("PointerEntered"),
             .slot = 8,
-            .docKey = {},
+            .doc = "Fired when the pointer moves onto this object. Replaces `MouseEnter`, and is named for a pointer rather than a mouse because a finger is one too.",
         },
         scene::EventDesc{
             .name = atoms.intern("PointerExited"),
             .slot = 9,
-            .docKey = {},
+            .doc = "Fired when the pointer moves off it.",
         },
     }};
     scene::ClassDescriptor uIObjectDesc;
@@ -258,7 +263,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     uIObjectDesc.super = instanceClass;
     uIObjectDesc.flags = scene::ClassFlags::Abstract | scene::ClassFlags::NotCreatable;
     uIObjectDesc.defaultName = atoms.intern("UIObject");
-    uIObjectDesc.docKey = {};
+    uIObjectDesc.doc = "Anything that occupies a rectangle on screen (\302\247" "2.2). Every property here is one the layout solver or the 2D pass reads, which is what makes it the base rather than a convenience.\012\012Coordinates are `UDim2`: a fraction of the parent plus a pixel offset, on each axis. That pair is what lets one layout be correct at every resolution, and it is why the goldens this milestone records are taken at two.";
     uIObjectDesc.properties = uIObjectProperties;
     uIObjectDesc.events = uIObjectEvents;
     uIObjectDesc.attachComponents = native::attachUIObjectComponents;
@@ -271,7 +276,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     frameDesc.super = uIObjectClass;
     frameDesc.flags = scene::ClassFlags::None;
     frameDesc.defaultName = atoms.intern("Frame");
-    frameDesc.docKey = {};
+    frameDesc.doc = "A rectangle and nothing else: a background, a border of children, and the layout it imposes on them. The element every UI is mostly made of.";
     classes.registerClass(frameDesc);
 
     // --- TextLabel ---
@@ -283,7 +288,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "What it says. UTF-8, and a codepoint the font has no glyph for draws the font's `.notdef` box rather than nothing: a label that silently drops characters is the failure mode that ships.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
             .get = native::getTextLabelText,
             .set = native::setTextLabelText,
@@ -294,7 +299,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "No `3` suffix (\302\247" "2.5, divergence #11).",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
             .get = native::getTextLabelTextColor,
             .set = native::setTextLabelTextColor,
@@ -305,7 +310,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The em size in pixels. An atlas is rasterized per font and integer size, so a fractional one is rounded for rasterization and the layout still uses what was asked for.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getTextLabelTextSize,
             .set = native::setTextLabelTextSize,
@@ -316,7 +321,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The typeface, as an `asset://` URI to a TrueType file. Empty is the engine's own default face -- **Inter**, OFL 1.1, vendored and staged beside the binary -- and so is the literal name `Inter`.\012\012A name that cannot be resolved falls back to the default and says so ONCE rather than once a frame: a label that vanished because its font name had a typo is a bug report about the label. A build whose content directory has no font at all falls back further, to a built-in vector face that is ASCII only, one weight and no kerning -- text still draws, which is the point of having a fallback.\012\012Glyphs are rasterised on demand and cached by face, size and codepoint, so a `TextSize` a tween is animating costs one entry per quarter-pixel rather than one per frame.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
             .get = native::getTextLabelFont,
             .set = native::setTextLabelFont,
@@ -324,10 +329,11 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("HorizontalAlignment"),
             .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("HorizontalAlignment"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Where the text sits across the box. One alignment vocabulary shared with the layouts (\302\247" "2.5, divergence #23).",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getTextLabelHorizontalAlignment,
             .set = native::setTextLabelHorizontalAlignment,
@@ -335,10 +341,11 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("VerticalAlignment"),
             .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("VerticalAlignment"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Where it sits down the box.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getTextLabelVerticalAlignment,
             .set = native::setTextLabelVerticalAlignment,
@@ -349,7 +356,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether lines break at the box's width. Breaks at spaces, and mid-word only for a word wider than the box -- a word cut in half at a random letter is worse than one that overhangs.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getTextLabelTextWrapped,
             .set = native::setTextLabelTextWrapped,
@@ -360,7 +367,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether `TextSize` is ignored and the text is rasterized at whatever size fills the box. Re-rasterized rather than scaled: there is no distance field in v1, and a stretched bitmap is what \"scaled text\" usually means and looks like.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getTextLabelTextScaled,
             .set = native::setTextLabelTextScaled,
@@ -371,7 +378,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     textLabelDesc.super = uIObjectClass;
     textLabelDesc.flags = scene::ClassFlags::None;
     textLabelDesc.defaultName = atoms.intern("TextLabel");
-    textLabelDesc.docKey = {};
+    textLabelDesc.doc = "Text in a box (\302\247" "2.2). No RichText in v1, and no complex-script shaping -- codepoints are laid out left to right with kerning, which ADR 0011 records as a flagged i18n gap with a HarfBuzz seam behind it.";
     textLabelDesc.properties = textLabelProperties;
     textLabelDesc.attachComponents = native::attachTextLabelComponents;
     textLabelDesc.detachComponents = native::detachTextLabelComponents;
@@ -383,7 +390,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     textButtonDesc.super = textLabelClass;
     textButtonDesc.flags = scene::ClassFlags::None;
     textButtonDesc.defaultName = atoms.intern("TextButton");
-    textButtonDesc.docKey = {};
+    textButtonDesc.doc = "A `TextLabel` that is meant to be pressed. It adds no property: `Activated`, `PointerEntered` and `PointerExited` are on `UIObject` because anything can be pressed, and what makes this a button is that it is the class a reader recognizes as one.";
     classes.registerClass(textButtonDesc);
 
     // --- TextInput ---
@@ -395,7 +402,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Drawn in place of `Text` while it is empty and the field is unfocused.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
             .get = native::getTextInputPlaceholderText,
             .set = native::setTextInputPlaceholderText,
@@ -406,12 +413,12 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::EventDesc{
             .name = atoms.intern("Focused"),
             .slot = 10,
-            .docKey = {},
+            .doc = "Fired when this field starts receiving keystrokes. Focus is taken by a press and released by a press elsewhere; there is deliberately no settable `Focused` property beside this, because two fields could then both believe they had it.",
         },
         scene::EventDesc{
             .name = atoms.intern("FocusLost"),
             .slot = 11,
-            .docKey = {},
+            .doc = "Fired when it stops. `submitted` is true when the field was left by pressing Return rather than by clicking away -- the difference between \"the player finished\" and \"the player went somewhere else\".",
         },
     }};
     scene::ClassDescriptor textInputDesc;
@@ -419,7 +426,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     textInputDesc.super = textLabelClass;
     textInputDesc.flags = scene::ClassFlags::None;
     textInputDesc.defaultName = atoms.intern("TextInput");
-    textInputDesc.docKey = {};
+    textInputDesc.doc = "A single-line editable field (\302\247" "2.2). Typed text, backspace and a caret; no selection, no clipboard, no undo and no IME composition beyond what the platform delivers as text.";
     textInputDesc.properties = textInputProperties;
     textInputDesc.events = textInputEvents;
     textInputDesc.attachComponents = native::attachTextInputComponents;
@@ -435,7 +442,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The picture, as an `asset://` URI. A compiled texture out of a pack or an ordinary PNG out of a source tree; both work, because dev mode is the mode people spend their time in.\012\012Empty draws nothing but still fills the background. A URI that names nothing, and a picture that has been asked for but has not finished loading, both draw as a flat `ImageColor` rectangle -- the same thing, because from a frame's point of view they are.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
             .get = native::getImageLabelImage,
             .set = native::setImageLabelImage,
@@ -446,7 +453,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Multiplied into the image, so one white glyph sheet can be drawn in any colour. White leaves it alone.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
             .get = native::getImageLabelImageColor,
             .set = native::setImageLabelImageColor,
@@ -454,10 +461,11 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("ScaleType"),
             .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("ScaleType"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "How the picture fits the box.\012\012`Tile` is BOUNDED: past about four thousand tiles the picture stretches instead, because a one-pixel image tiled over a full-screen frame is nearly a million quads and the frame that built them would be the hitch. A visibly wrong picture is one somebody can find; a frame that stops responding is not.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getImageLabelScaleType,
             .set = native::setImageLabelScaleType,
@@ -468,7 +476,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "For `ScaleType.Slice`, where the nine-slice cuts are, in SOURCE pixels. The four corners are drawn at their own size whatever the box is, which is how a panel keeps its rounded corners.\012\012A box narrower than its own two corners collapses the middle rather than drawing the corners on top of each other.\012\012An inverted or empty rectangle is kept as given rather than corrected: a slice quietly fixed up is a panel that draws wrong with no way to find out why.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_rect"),
             .get = native::getImageLabelSliceCenter,
             .set = native::setImageLabelSliceCenter,
@@ -479,7 +487,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     imageLabelDesc.super = uIObjectClass;
     imageLabelDesc.flags = scene::ClassFlags::None;
     imageLabelDesc.defaultName = atoms.intern("ImageLabel");
-    imageLabelDesc.docKey = {};
+    imageLabelDesc.doc = "A picture in a box (\302\247" "2.2).";
     imageLabelDesc.properties = imageLabelProperties;
     imageLabelDesc.attachComponents = native::attachImageLabelComponents;
     imageLabelDesc.detachComponents = native::detachImageLabelComponents;
@@ -491,7 +499,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     imageButtonDesc.super = imageLabelClass;
     imageButtonDesc.flags = scene::ClassFlags::None;
     imageButtonDesc.defaultName = atoms.intern("ImageButton");
-    imageButtonDesc.docKey = {};
+    imageButtonDesc.doc = "An `ImageLabel` that is meant to be pressed, and the same argument `TextButton` carries: it adds nothing, and it is the class a reader recognizes.";
     classes.registerClass(imageButtonDesc);
 
     // --- ScrollFrame ---
@@ -503,7 +511,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "How big the scrollable area is. Children lay out against this rather than against the frame's own size.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_udim2"),
             .get = native::getScrollFrameCanvasSize,
             .set = native::setScrollFrameCanvasSize,
@@ -514,7 +522,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "How far the canvas is scrolled, in pixels. Clamped to what the canvas allows on the next layout, so a write past the end settles at the end rather than showing emptiness.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector2"),
             .get = native::getScrollFrameCanvasPosition,
             .set = native::setScrollFrameCanvasPosition,
@@ -525,7 +533,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "In pixels; zero draws no bar and still scrolls, which is what a touch surface wants.\012\012A bar appears only on an axis that can actually move: a canvas that fits its region gets none, because a bar for an axis with nowhere to go is a bar that lies. The thumb is as long a fraction of the track as the view is of the canvas, and never shorter than the bar is wide -- a thumb of two pixels in a very long canvas is a thumb nobody can grab.\012\012Both parts take their colour from the frame's own `BackgroundColor`, at a quarter and three quarters alpha. v1 has no theme, and a hard-coded grey would be wrong on half of them.\012\012The bar is drawn OUTSIDE the region's own clip, or it would scroll away with the content it reports on.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getScrollFrameScrollBarThickness,
             .set = native::setScrollFrameScrollBarThickness,
@@ -536,7 +544,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     scrollFrameDesc.super = uIObjectClass;
     scrollFrameDesc.flags = scene::ClassFlags::None;
     scrollFrameDesc.defaultName = atoms.intern("ScrollFrame");
-    scrollFrameDesc.docKey = {};
+    scrollFrameDesc.doc = "A `Frame` whose contents can be larger than it is (\302\247" "2.2). It clips its descendants whatever `ClipsDescendants` says -- a scrolling region that did not clip would not be one.";
     scrollFrameDesc.properties = scrollFrameProperties;
     scrollFrameDesc.attachComponents = native::attachScrollFrameComponents;
     scrollFrameDesc.detachComponents = native::detachScrollFrameComponents;
@@ -548,10 +556,11 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("FillDirection"),
             .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("FillDirection"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Which way the line runs.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getUIListLayoutFillDirection,
             .set = native::setUIListLayoutFillDirection,
@@ -562,7 +571,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "The gap BETWEEN children, not around them -- `UIPadding` is what puts space around the outside. Scale is a fraction of the parent along the fill direction.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_udim"),
             .get = native::getUIListLayoutPadding,
             .set = native::setUIListLayoutPadding,
@@ -570,10 +579,11 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("HorizontalAlignment"),
             .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("HorizontalAlignment"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Where the line sits across the parent.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getUIListLayoutHorizontalAlignment,
             .set = native::setUIListLayoutHorizontalAlignment,
@@ -581,10 +591,11 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("VerticalAlignment"),
             .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("VerticalAlignment"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Where it sits down the parent.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getUIListLayoutVerticalAlignment,
             .set = native::setUIListLayoutVerticalAlignment,
@@ -592,10 +603,11 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("SortOrder"),
             .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("SortOrder"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "What order the children go in.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getUIListLayoutSortOrder,
             .set = native::setUIListLayoutSortOrder,
@@ -606,7 +618,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Whether the line breaks into a second one when it runs out of room, rather than overflowing.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getUIListLayoutWraps,
             .set = native::setUIListLayoutWraps,
@@ -617,7 +629,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     uIListLayoutDesc.super = instanceClass;
     uIListLayoutDesc.flags = scene::ClassFlags::None;
     uIListLayoutDesc.defaultName = atoms.intern("UIListLayout");
-    uIListLayoutDesc.docKey = {};
+    uIListLayoutDesc.doc = "Stacks its parent's `UIObject` children in a line (\302\247" "2.2). A modifier rather than a container: it is parented BESIDE the things it arranges, so adding one to a Frame does not reparent anything.\012\012A child laid out by one keeps its `Size` and loses its `Position` -- the layout decides where each one goes, which is what a layout is.";
     uIListLayoutDesc.properties = uIListLayoutProperties;
     uIListLayoutDesc.attachComponents = native::attachUIListLayoutComponents;
     uIListLayoutDesc.detachComponents = native::detachUIListLayoutComponents;
@@ -632,7 +644,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Scale is a fraction of the parent's own height.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_udim"),
             .get = native::getUIPaddingPaddingTop,
             .set = native::setUIPaddingPaddingTop,
@@ -643,7 +655,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Scale is a fraction of the parent's own height.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_udim"),
             .get = native::getUIPaddingPaddingBottom,
             .set = native::setUIPaddingPaddingBottom,
@@ -654,7 +666,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Scale is a fraction of the parent's own width.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_udim"),
             .get = native::getUIPaddingPaddingLeft,
             .set = native::setUIPaddingPaddingLeft,
@@ -665,7 +677,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Scale is a fraction of the parent's own width.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_udim"),
             .get = native::getUIPaddingPaddingRight,
             .set = native::setUIPaddingPaddingRight,
@@ -676,7 +688,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     uIPaddingDesc.super = instanceClass;
     uIPaddingDesc.flags = scene::ClassFlags::None;
     uIPaddingDesc.defaultName = atoms.intern("UIPadding");
-    uIPaddingDesc.docKey = {};
+    uIPaddingDesc.doc = "Insets its parent's content on each side (\302\247" "2.2). Like `UIListLayout`, a modifier parented beside what it affects.";
     uIPaddingDesc.properties = uIPaddingProperties;
     uIPaddingDesc.attachComponents = native::attachUIPaddingComponents;
     uIPaddingDesc.detachComponents = native::detachUIPaddingComponents;
@@ -691,7 +703,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .docKey = {},
+            .doc = "Scale is a fraction of the parent's SHORTER side, so a pill shape is `UDim.new(0.5, 0)` whatever the box's proportions.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_udim"),
             .get = native::getUICornerCornerRadius,
             .set = native::setUICornerCornerRadius,
@@ -702,7 +714,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     uICornerDesc.super = instanceClass;
     uICornerDesc.flags = scene::ClassFlags::None;
     uICornerDesc.defaultName = atoms.intern("UICorner");
-    uICornerDesc.docKey = {};
+    uICornerDesc.doc = "Rounds its parent's corners (\302\247" "2.2). It changes the DRAWING and not the layout or the hit test: a rounded button is still a rectangle to the solver and to the pointer, which is what keeps a corner radius from being a geometry problem.";
     uICornerDesc.properties = uICornerProperties;
     uICornerDesc.attachComponents = native::attachUICornerComponents;
     uICornerDesc.detachComponents = native::detachUICornerComponents;
@@ -717,7 +729,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = true,
             .inert = false,
-            .docKey = {},
+            .doc = "How far in from each window edge it is safe to draw, in pixels -- what a notch, a rounded corner or a system gesture bar takes away. Zero on a desktop window, which is why a HUD that ignores it looks fine until it does not.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_rect"),
             .get = native::getUIServiceSafeAreaInsets,
             .set = nullptr,
@@ -728,7 +740,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = true,
             .inert = false,
-            .docKey = {},
+            .doc = "The window's pixel density relative to its logical size: 2 on a doubled display. UI coordinates are in PIXELS, so this is what a game multiplies by when it wants a measurement to mean the same physical size on two screens.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getUIServiceDisplayScale,
             .set = nullptr,
@@ -739,7 +751,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     uIServiceDesc.super = instanceClass;
     uIServiceDesc.flags = scene::ClassFlags::Service | scene::ClassFlags::NotCreatable;
     uIServiceDesc.defaultName = atoms.intern("UIService");
-    uIServiceDesc.docKey = {};
+    uIServiceDesc.doc = "The parent of every `ScreenGui` and the source of the two numbers a layout needs about the screen it is on (\302\247" "2.1). It takes the PlayerGui role without taking the Player: there is no `Players` service in v1 and a UI does not need one.";
     uIServiceDesc.properties = uIServiceProperties;
     classes.registerClass(uIServiceDesc);
 }

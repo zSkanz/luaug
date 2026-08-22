@@ -34,9 +34,16 @@
 	  implements them. Declaring every one the definitions reference is the
 	  point: a missing implementation is then a link error rather than a null
 	  function pointer that reads as `nil` at runtime.
-	- Doc keys. `docKey` is emitted empty, because nothing in the engine
-	  formats one yet; the docs pipeline is `gen_docs` and the docs JSON, which
-	  docs/roadmap.md places in M3. The doc text stays in the IDL until then.
+	- Doc KEYS. The prose itself is emitted, verbatim and in English, into
+	  `.doc` on every descriptor -- the property grid needs a tooltip and a
+	  `TextKey` is a hash with nothing on the other end of it. R3 governs what a
+	  PLAYER reads; this text is the API reference, read by whoever is building
+	  a game, and `gen_dts` and `gen_reference` already emit the same sentences
+	  verbatim from the same field. Routing this third copy through the catalog
+	  would put every paragraph of the reference into `i18n/en.json`, which
+	  every shipped game loads at boot, to be resolved by a panel that shipping
+	  builds do not draw. `class_registry.h` carries the same note where the
+	  field is declared.
 	- Anything about components. `Class.Storage` and `Property.Native` are
 	  *names* of hand-written functions, so this generator never learns what a
 	  component is -- moving a property's storage is a change in one C++ file.
@@ -220,6 +227,54 @@ local function valueTypeOf(typeName: string): string?
     return nil
 end
 
+--- The enum an `Enum.X` type names, or `nil` for any other type. The same
+--- pattern `valueTypeOf` matches, kept separate because one answers *which*
+--- `ValueType` and this one answers *which enum* -- and `PropertyDesc` now
+--- records both.
+local function enumNameOf(typeName: string): string?
+    local bare = string.match(typeName, "^(.-)%?$") or typeName
+    return string.match(bare, "^Enum%.([%w_]+)$")
+end
+
+--- A C++ string literal for arbitrary IDL prose.
+---
+--- Anything outside printable ASCII goes out as a three-digit OCTAL escape
+--- rather than as itself. These files are byte-compared by the Luau gate and
+--- compiled by three toolchains, and a raw UTF-8 byte inside a narrow literal
+--- means whatever the compiler's source charset says it means -- MSVC's is the
+--- system code page unless somebody remembered a flag, and the IDL's prose
+--- carries both a section sign and a pi. Three digits and not a hex escape,
+--- because a hex escape has no length limit and swallows the character after it.
+---
+--- A digit following an octal escape SPLITS the literal into two adjacent ones.
+--- The escape is already three digits long and cannot absorb a fourth, but MSVC
+--- warns about the shape regardless (C4125) and warnings are errors on
+--- `engine/`, so the gap is what keeps the generated file compiling.
+local function cppString(text: string): string
+    local out: { string } = { '"' }
+    local afterOctal = false
+    for index = 1, #text do
+        local byte = string.byte(text, index) :: number
+        local c = string.sub(text, index, index)
+        if afterOctal and byte >= 0x30 and byte <= 0x39 then
+            table.insert(out, '" "')
+        end
+        afterOctal = false
+        if c == "\\" then
+            table.insert(out, "\\\\")
+        elseif c == '"' then
+            table.insert(out, '\\"')
+        elseif byte >= 0x20 and byte < 0x7F then
+            table.insert(out, c)
+        else
+            table.insert(out, string.format("\\%03o", byte))
+            afterOctal = true
+        end
+    end
+    table.insert(out, '"')
+    return table.concat(out)
+end
+
 --- The base name of the hand-written accessor pair. `Native` is an override,
 --- not a requirement: the M2 surface was scoped so that every declared property
 --- is one the engine implements, so the name is derived as `<Class><Property>`
@@ -292,6 +347,14 @@ for _, class in AllClasses do
 end
 
 local Enums: { Schema.Enum } = orEmpty(Definition.Enums)
+--- Every declared enum, so that a property typed `Enum.Something` that no enum
+--- declares is a generator error rather than a `PropertyDesc` naming a domain
+--- the registry will never resolve. `check.luau` cannot catch it: the type is a
+--- string, and a misspelling is still a well-formed one.
+local EnumNames: { [string]: boolean } = {}
+for _, enumeration in Enums do
+    EnumNames[enumeration.Name] = true
+end
 local Ordered: { Schema.Class } = sortedByHierarchy(AllClasses)
 
 --- One `{h, cpp}` pair, held until every module has generated cleanly. Nothing
@@ -411,10 +474,14 @@ local function generate(target: Module)
         emit(line)
     end
     emit("//")
-    emit("// Every `docKey` below is empty on purpose. The doc text lives in the IDL and")
-    emit("// nothing in the engine formats a doc key yet: turning it into a catalog entry")
-    emit("// and a hover string is the M3 documentation pipeline (gen_docs and the docs")
-    emit("// JSON, docs/roadmap.md). An empty key here is that decision, not an omission.")
+    emit("// Every `.doc` below is the IDL's own English prose, not a catalog key: the")
+    emit("// audience for a reflection tooltip is whoever is building a game, and a")
+    emit("// `TextKey` is a hash with nothing on the other end of it unless the catalog is")
+    emit("// loaded. See `class_registry.h` for the whole of that reasoning.")
+    emit("//")
+    emit("// Anything outside printable ASCII is written as a three-digit octal escape, so")
+    emit("// these files stay pure ASCII whatever a compiler believes their source charset")
+    emit("// to be, and the bytes reaching the program are the IDL's own UTF-8.")
     emit("")
     emit(`#include "class_descriptors.gen.h"`)
     emit("")
@@ -543,13 +610,31 @@ local function generate(target: Module)
                     errorKey = "scene.err.unknown_property"
                 end
 
+                -- The enum's NAME and not its `EnumId`: the id is assigned by
+                -- `EnumRegistry::registerEnum` in registration order, and these
+                -- tables are `static` and shared by every registry a process
+                -- builds. `class_registry.h` states the rest of the reasoning.
+                local enumName = enumNameOf(property.Type)
+                if enumName ~= nil and not EnumNames[enumName] then
+                    table.insert(Errors, `{class.Name}.{property.Name}: no enum named "{enumName}" is declared`)
+                    enumName = nil
+                elseif enumName == nil and valueType == "EnumItem" then
+                    table.insert(
+                        Errors,
+                        `{class.Name}.{property.Name}: type "{property.Type}" is an EnumItem with no enum name`
+                    )
+                end
+
                 emit(`        {scope}PropertyDesc\{`)
                 emit(`            .name = atoms.intern("{property.Name}"),`)
                 emit(`            .type = {scope}ValueType::{valueType},`)
+                if enumName ~= nil then
+                    emit(`            .enumName = atoms.intern("{enumName}"),`)
+                end
                 emit(`            .threadSafety = {scope}ThreadSafety::{property.ThreadSafety or "Unsafe"},`)
                 emit(`            .readOnly = {if property.ReadOnly == true then "true" else "false"},`)
                 emit(`            .inert = {if property.Inert == true then "true" else "false"},`)
-                emit("            .docKey = {},")
+                emit(`            .doc = {cppString(property.Doc)},`)
                 emit(`            .errKeyOnInvalidSet = LUAUG_TR("{errorKey}"),`)
                 emit(`            .get = {getter},`)
                 emit(`            .set = {setter},`)
@@ -568,7 +653,7 @@ local function generate(target: Module)
                 emit(`            .name = atoms.intern("{method.Name}"),`)
                 emit(`            .yields = {if method.Yields == true then "true" else "false"},`)
                 emit(`            .threadSafety = {scope}ThreadSafety::{method.ThreadSafety or "Unsafe"},`)
-                emit("            .docKey = {},")
+                emit(`            .doc = {cppString(method.Doc)},`)
                 emit("        },")
             end
             emit("    }};")
@@ -584,7 +669,7 @@ local function generate(target: Module)
                 emit(`        {scope}EventDesc\{`)
                 emit(`            .name = atoms.intern("{event.Name}"),`)
                 emit(`            .slot = {slot},`)
-                emit("            .docKey = {},")
+                emit(`            .doc = {cppString(event.Doc)},`)
                 emit("        },")
                 slot += 1
             end
@@ -599,7 +684,7 @@ local function generate(target: Module)
         end
         emit(`    {descriptor}.flags = {flagsExpression(class)};`)
         emit(`    {descriptor}.defaultName = atoms.intern("{class.DefaultName or class.Name}");`)
-        emit(`    {descriptor}.docKey = \{};`)
+        emit(`    {descriptor}.doc = {cppString(class.Doc)};`)
         if #properties > 0 then
             emit(`    {descriptor}.properties = {prefix}Properties;`)
         end

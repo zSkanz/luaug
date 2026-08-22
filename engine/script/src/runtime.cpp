@@ -15,8 +15,14 @@
 #include "luaug/script/tweens.h"
 
 #include <lua.h>
-#include <luacode.h>
 #include <lualib.h>
+
+// ADR 0002: shipping links Luau.VM and Luau.CodeGen only, and this header comes
+// with the Compiler that profile drops. `runSource` refuses below rather than
+// pretending to have run something.
+#if LUAUG_LUAU_COMPILER
+#include <luacode.h>
+#endif
 
 #include <algorithm>
 #include <cstdlib>
@@ -336,6 +342,17 @@ std::optional<core::EngineError> ScriptRuntime::runSource(std::string_view sourc
     if (L == nullptr)
         return core::makeError(LUAUG_TR("script.err.vm_not_booted"));
 
+#if !LUAUG_LUAU_COMPILER
+    // ADR 0002: this profile loads precompiled bytecode only, and there is no
+    // bytecode unit type yet (ADR 0045 ships a game as source). So the honest
+    // answer to "run this source" here is a catalogued refusal -- not a silent
+    // success that leaves the caller believing a script is running.
+    (void)source;
+    (void)category;
+    // The chunk name goes in `detail`, which is developer context and never
+    // localised -- the message itself says what the build cannot do, once.
+    return core::makeError(LUAUG_TR("script.err.no_compiler"), {}, std::string(chunkName));
+#else
     size_t bytecodeSize = 0;
     lua_CompileOptions options{};
     options.optimizationLevel = 2;
@@ -397,6 +414,7 @@ std::optional<core::EngineError> ScriptRuntime::runSource(std::string_view sourc
 
     lua_pop(L, 1); // the thread
     return std::nullopt;
+#endif
 }
 
 void ScriptRuntime::stepTweens(f64 fixedDt)

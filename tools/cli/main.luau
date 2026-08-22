@@ -19,6 +19,7 @@ local buildAssets = require("./commands/build-assets")
 local catalog = require("./catalog")
 local check = require("./commands/check")
 local dev = require("./commands/dev")
+local edit = require("./commands/edit")
 local fmt = require("./commands/fmt")
 local new = require("./commands/new")
 local test = require("./commands/test")
@@ -122,6 +123,15 @@ local function main(): number
             headless = parsed.flags.headless ~= nil,
             port = if parsed.flags.port ~= nil then tonumber(parsed.flags.port) else nil,
         })
+    end
+
+    if parsed.command == "edit" then
+        -- No flags at all: `--headless` would be an editor with no window, and
+        -- there is no dev server here for a `--port` to name.
+        if not rejectUnknownFlags(parsed, {}) then
+            return 2
+        end
+        return edit.run({ path = firstPositional(parsed, ".") })
     end
 
     if parsed.command == "test" then

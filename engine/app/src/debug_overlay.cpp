@@ -19,9 +19,11 @@
 #include <cfloat>
 #include <cstdio>
 #include <deque>
+#include <filesystem>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_sdlgpu3.h>
+#include <imgui_internal.h>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -376,7 +378,22 @@ void drawEditor(scene::World& world, Inspector& inspector, core::InstanceId id, 
     }
     case EditorKind::EnumCombo: {
         const scene::EnumValue value = std::get<scene::EnumValue>(*current);
-        const scene::EnumDescriptor* enumDescriptor = world.enums().find(value.enumId);
+
+        // The domain comes from the DESCRIPTOR, not from the value in the field.
+        // Reading it off the value made the combo depend on the instance being
+        // there and holding something -- an unset enum property offered no items
+        // at all, and there was no way to ask what a property accepts without
+        // creating one first. `enumDomainOf` answers from the class.
+        //
+        // The value's own enum is the fallback and not the source: a hand-built
+        // registry (the fixtures) may declare a property without naming its
+        // enum, and a field that then rendered nothing would be a regression
+        // dressed as a refactor.
+        scene::EnumId domain = enumDomainOf(world.enums(), descriptor);
+        if (domain == scene::InvalidEnum)
+            domain = value.enumId;
+
+        const scene::EnumDescriptor* enumDescriptor = world.enums().find(domain);
         const std::string preview = formatValue(world, *current);
         if (enumDescriptor == nullptr) {
             ImGui::TextUnformatted(preview.c_str());
@@ -387,8 +404,9 @@ void drawEditor(scene::World& world, Inspector& inspector, core::InstanceId id, 
             // therefore not something a panel gets to re-sort either.
             for (const scene::EnumItemDesc& item : enumDescriptor->items) {
                 const std::string itemName(world.atoms().text(item.name));
-                if (ImGui::Selectable(itemName.c_str(), item.value == value.value))
-                    inspector.enqueue(id, descriptor.name, scene::Value{scene::EnumValue{value.enumId, item.value}});
+                const bool selected = domain == value.enumId && item.value == value.value;
+                if (ImGui::Selectable(itemName.c_str(), selected))
+                    inspector.enqueue(id, descriptor.name, scene::Value{scene::EnumValue{domain, item.value}});
             }
             ImGui::EndCombo();
         }
@@ -433,6 +451,20 @@ void drawProperties(scene::World& world, Inspector& inspector)
 
             const std::string_view propertyName = world.atoms().text(descriptor->name);
             ImGui::Text("%.*s", static_cast<int>(propertyName.size()), propertyName.data());
+
+            // The IDL's own prose for this property, which now rides on the
+            // descriptor rather than staying in a file nothing at runtime reads
+            // (`class_registry.h` says why it is prose and not a catalog key).
+            // Wrapped, because these are paragraphs and an unwrapped tooltip is
+            // one line as wide as the sentence.
+            if (descriptor->doc[0] != 0 && ImGui::IsItemHovered()) {
+                ImGui::BeginTooltip();
+                ImGui::PushTextWrapPos(ImGui::GetFontSize() * 32.0f);
+                ImGui::TextUnformatted(descriptor->doc);
+                ImGui::PopTextWrapPos();
+                ImGui::EndTooltip();
+            }
+
             if (const char* tag = propertyTag(*descriptor); tag != nullptr) {
                 ImGui::SameLine();
                 ImGui::TextDisabled("%s", tag);
@@ -583,6 +615,125 @@ void drawConsole(script::ScriptRuntime* runtime)
     ImGui::SetKeyboardFocusHere(-1);
 }
 
+// The 3D view.
+//
+// The panel IS the image: no padding, because a margin of window background
+// around a rendered world reads as a bug rather than as a frame. Its rectangle
+// is handed to the editor every frame because that rectangle is the only thing
+// that maps a mouse position onto a ray.
+void drawViewport(Editor& editor, rhi::TextureHandle texture)
+{
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    const bool open = ImGui::Begin("viewport");
+    ImGui::PopStyleVar();
+
+    if (open) {
+        const ImVec2 size = ImGui::GetContentRegionAvail();
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        editor.setViewport(ViewportRect{origin.x, origin.y, size.x, size.y});
+
+        SDL_GPUTexture* native = texture.valid() ? rhi::nativeTexture(*g_device, texture) : nullptr;
+        if (native != nullptr && size.x >= 1.0f && size.y >= 1.0f) {
+            ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)), size);
+
+            // Hovering the IMAGE, not the window: a click on the tab, the
+            // border or the space beside a letterboxed image is not a click on
+            // the world, and treating it as one deselects whatever the person
+            // was working on.
+            if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                const ImVec2 mouse = ImGui::GetMousePos();
+                editor.requestPick(core::Vec2{mouse.x - origin.x, mouse.y - origin.y});
+            }
+        }
+    }
+    ImGui::End();
+}
+
+// The arrangement somebody gets the first time they open the editor.
+//
+// Without this every panel is placed at ImGui's default position, which is the
+// same position, so the first launch is five windows in a pile with the
+// viewport at the bottom of it -- which is what the first run of this shell
+// actually looked like. A dockspace does not arrange anything by itself; it
+// only makes arranging possible.
+//
+// Built once, and only when there is no saved layout: `DockBuilderRemoveNode`
+// would throw away the arrangement somebody chose.
+void buildDefaultLayout(ImGuiID dockspace)
+{
+    ImGui::DockBuilderRemoveNode(dockspace);
+    ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->Size);
+
+    // The centre is the world and everything else is furniture around it, which
+    // is the one thing every editor of this shape agrees on.
+    ImGuiID centre = dockspace;
+    const ImGuiID left = ImGui::DockBuilderSplitNode(centre, ImGuiDir_Left, 0.22f, nullptr, &centre);
+    const ImGuiID right = ImGui::DockBuilderSplitNode(centre, ImGuiDir_Right, 0.28f, nullptr, &centre);
+    const ImGuiID bottom = ImGui::DockBuilderSplitNode(centre, ImGuiDir_Down, 0.26f, nullptr, &centre);
+
+    ImGui::DockBuilderDockWindow("viewport", centre);
+    ImGui::DockBuilderDockWindow("explorer", left);
+    ImGui::DockBuilderDockWindow("properties", right);
+    ImGui::DockBuilderDockWindow("stats", right);
+    ImGui::DockBuilderDockWindow("console", bottom);
+
+    ImGui::DockBuilderFinish(dockspace);
+}
+
+// The editor's furniture. The panels inside it are the overlay's own, which is
+// the whole argument of ADR 0046: what an editor mostly is, this engine already
+// had.
+void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,
+                     script::ScriptRuntime* runtime, Editor* editor, rhi::TextureHandle viewport, bool& laidOut)
+{
+    // A transparent central node, so a layout that has not been built yet shows
+    // the frame underneath instead of a slab of grey.
+    const ImGuiID dockspace =
+        ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
+
+    // `DockBuilderGetNode` answers null until the dockspace exists, and a saved
+    // layout has already put windows into it by the time it does -- so "nobody
+    // has arranged this yet" is the node having no split and no window, which is
+    // exactly the state a first launch is in.
+    if (!laidOut) {
+        laidOut = true;
+        const ImGuiDockNode* node = ImGui::DockBuilderGetNode(dockspace);
+        if (node == nullptr || (!node->IsSplitNode() && node->Windows.Size == 0))
+            buildDefaultLayout(dockspace);
+    }
+
+    if (editor != nullptr)
+        drawViewport(*editor, viewport);
+
+    if (ImGui::Begin("explorer")) {
+        if (world != nullptr && inspector != nullptr)
+            drawExplorer(*world, root, *inspector);
+    }
+    ImGui::End();
+
+    if (ImGui::Begin("properties")) {
+        if (world != nullptr && inspector != nullptr) {
+            drawProperties(*world, *inspector);
+            drawWriteLog(*world, *inspector);
+        }
+    }
+    ImGui::End();
+
+    // Draws with no VM for the same reason it does in the overlay: the LOG half
+    // is what somebody wants when the VM failed to boot.
+    if (ImGui::Begin("console"))
+        drawConsole(runtime);
+    ImGui::End();
+
+    if (ImGui::Begin("stats")) {
+        drawStats(frame);
+        if (runtime != nullptr)
+            drawMemory(*runtime);
+    }
+    ImGui::End();
+}
+
 void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,
                script::ScriptRuntime* runtime)
 {
@@ -622,8 +773,14 @@ void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, I
 
 } // namespace
 
-DebugOverlay::DebugOverlay(platform::Window& window, rhi::IDevice& device)
+DebugOverlay::DebugOverlay(platform::Window& window, rhi::IDevice& device, Shell shell, std::string layoutPath)
+    : shell_(shell), layoutPath_(std::move(layoutPath))
 {
+    // The editor IS the application, so it is up from the first frame. F3 still
+    // works and still hides it, which is the cheapest way to look at the world
+    // without the furniture.
+    visible_ = shell_ == Shell::Editor;
+
     SDL_Window* sdlWindow = platform::nativeWindow(window);
     SDL_GPUDevice* gpuDevice = rhi::nativeDevice(device);
 
@@ -658,9 +815,20 @@ DebugOverlay::DebugOverlay(platform::Window& window, rhi::IDevice& device)
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     // Otherwise ImGui writes imgui.ini into the working directory, which under
     // CTest is the source tree (R14) and for a game is wherever it happened to
-    // be launched from. Remembered window positions are not state this engine
-    // has decided to keep.
+    // be launched from. Remembered window positions are not state a GAME has
+    // decided to keep -- but they are exactly what an editor owes somebody who
+    // arranged their panels once, so `Shell::Editor` names a file inside the
+    // project it opened.
     io.IniFilename = nullptr;
+    if (shell_ == Shell::Editor && !layoutPath_.empty()) {
+        // ImGui writes the file and never the directory above it, and a project
+        // that has not been built yet has no `.luaug/`. Failing here would mean
+        // a layout that silently never persists, which is worse than a layout
+        // that never existed.
+        std::error_code ec;
+        std::filesystem::create_directories(std::filesystem::path(layoutPath_).parent_path(), ec);
+        io.IniFilename = layoutPath_.c_str();
+    }
     ImGui::StyleColorsDark();
 
     if (!ImGui_ImplSDL3_InitForSDLGPU(sdlWindow)) {
@@ -733,7 +901,10 @@ void DebugOverlay::render(rhi::ICmdList& cmd, rhi::TextureHandle target, const F
     ImGui_ImplSDLGPU3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
-    drawShell(frame, world_, root_, inspector_, runtime_);
+    if (shell_ == Shell::Editor)
+        drawEditorShell(frame, world_, root_, inspector_, runtime_, editor_, viewportTexture_, layoutBuilt_);
+    else
+        drawShell(frame, world_, root_, inspector_, runtime_);
     ImGui::Render();
 
     ImDrawData* drawData = ImGui::GetDrawData();
@@ -764,26 +935,6 @@ void DebugOverlay::render(rhi::ICmdList& cmd, rhi::TextureHandle target, const F
     cmd.popDebugGroup();
 }
 
-#else
-
-// ADR 0011: a shipping build contains no ImGui, so the overlay contains no
-// behaviour. The class keeps its shape and its signatures -- that is what lets
-// the frame loop call it without an #ifdef -- and active() answers false, which
-// is how anything that asks finds out there is nothing here.
-
-DebugOverlay::DebugOverlay(platform::Window&, rhi::IDevice&)
-{}
-
-DebugOverlay::~DebugOverlay() = default;
-
-void DebugOverlay::handleEvents(std::span<const platform::Event>)
-{}
-
-void DebugOverlay::render(rhi::ICmdList&, rhi::TextureHandle, const Frame&)
-{}
-
-#endif
-
 void DebugOverlay::captureLog()
 {
     ConsoleLog& log = console();
@@ -806,5 +957,32 @@ void DebugOverlay::captureLog()
             sink.previous(level, text);
     });
 }
+
+#else
+
+// ADR 0011: a shipping build contains no ImGui, so the overlay contains no
+// behaviour. The class keeps its shape and its signatures -- that is what lets
+// the frame loop call it without an #ifdef -- and active() answers false, which
+// is how anything that asks finds out there is nothing here.
+
+DebugOverlay::DebugOverlay(platform::Window&, rhi::IDevice&, Shell, std::string)
+{}
+
+DebugOverlay::~DebugOverlay() = default;
+
+void DebugOverlay::handleEvents(std::span<const platform::Event>)
+{}
+
+void DebugOverlay::render(rhi::ICmdList&, rhi::TextureHandle, const Frame&)
+{}
+
+// Nothing to capture INTO: the ring buffer and the console pane that reads it
+// live in the half of this file that ImGui compiles. Leaving the process log
+// sink alone is the whole behaviour -- the log FILE keeps every line, which is
+// where a shipping build's log was always going to be read from.
+void DebugOverlay::captureLog()
+{}
+
+#endif
 
 } // namespace luaug::app

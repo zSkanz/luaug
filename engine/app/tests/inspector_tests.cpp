@@ -14,6 +14,7 @@
 #include "luaug/app/inspector.h"
 #include "luaug/core/id.h"
 #include "luaug/scene/class_registry.h"
+#include "luaug/scene/enum_registry.h"
 #include "luaug/scene/value.h"
 #include "luaug/scene/world.h"
 
@@ -32,6 +33,7 @@ using luaug::app::collectTree;
 using luaug::app::editable;
 using luaug::app::editorFor;
 using luaug::app::EditorKind;
+using luaug::app::enumDomainOf;
 using luaug::app::formatValue;
 using luaug::app::Inspector;
 using luaug::app::propertyTag;
@@ -374,4 +376,80 @@ TEST_CASE("a property that is stored and unread says so")
     both.readOnly = true;
     both.inert = true;
     CHECK(std::string_view(propertyTag(both)) == "(ro)");
+}
+
+TEST_CASE("an enum property's item set comes from the descriptor, with no instance in hand")
+{
+    Fixture fixture;
+
+    // No `World`, no instance, no value: an editor's property grid populates a
+    // combo box before anything of the class exists, and reading the enum off a
+    // property's CURRENT VALUE could never answer that -- nor answer at all for
+    // a property whose value is unset.
+    const scene::PropertyDesc* mood = fixture.classes.findProperty(fixture.widgetClass, fixture.atom("Mood"));
+    REQUIRE(mood != nullptr);
+    REQUIRE(mood->type == scene::ValueType::EnumItem);
+
+    const scene::EnumId domain = enumDomainOf(fixture.enums, *mood);
+    CHECK(domain == fixture.moodEnum);
+
+    const scene::EnumDescriptor* enumDescriptor = fixture.enums.find(domain);
+    REQUIRE(enumDescriptor != nullptr);
+
+    // Declaration order and the declared values, not indices: `Cross` is 7.
+    std::vector<std::string> items;
+    std::vector<int> values;
+    for (const scene::EnumItemDesc& item : enumDescriptor->items) {
+        items.emplace_back(fixture.atoms.text(item.name));
+        values.push_back(static_cast<int>(item.value));
+    }
+    CHECK(items == std::vector<std::string>{"Calm", "Cross"});
+    CHECK(values == std::vector<int>{0, 7});
+}
+
+TEST_CASE("a property that is not an enum, or names an enum nobody registered, has no domain")
+{
+    Fixture fixture;
+
+    const scene::PropertyDesc* count = fixture.classes.findProperty(fixture.widgetClass, fixture.atom("Count"));
+    REQUIRE(count != nullptr);
+    CHECK(enumDomainOf(fixture.enums, *count) == scene::InvalidEnum);
+
+    // An `EnumItem` property whose descriptor names nothing -- which a
+    // hand-built one is allowed to be. The answer is "no domain", not the first
+    // enum registered, because an `EnumId` of 0 is what a zero-initialised
+    // `EnumValue` already means.
+    scene::PropertyDesc unnamed;
+    unnamed.type = scene::ValueType::EnumItem;
+    CHECK(enumDomainOf(fixture.enums, unnamed) == scene::InvalidEnum);
+
+    // And a name this registry does not know is a miss rather than a guess.
+    scene::PropertyDesc stranger;
+    stranger.type = scene::ValueType::EnumItem;
+    stranger.enumName = fixture.atom("Weather");
+    CHECK(enumDomainOf(fixture.enums, stranger) == scene::InvalidEnum);
+}
+
+TEST_CASE("a property's documentation reaches the runtime, through the inherited sweep as well")
+{
+    Fixture fixture;
+
+    std::vector<const scene::PropertyDesc*> properties;
+    collectProperties(fixture.classes, fixture.widgetClass, properties);
+
+    std::unordered_map<std::string, std::string> docs;
+    for (const scene::PropertyDesc* descriptor : properties) {
+        // Never null, so a panel can print it without a guard.
+        REQUIRE(descriptor->doc != nullptr);
+        docs.emplace(std::string(fixture.atoms.text(descriptor->name)), std::string(descriptor->doc));
+    }
+
+    // Declared on the leaf, and declared on the base and reached through the
+    // ancestry walk -- the tooltip has to work for `Instance.Name` too.
+    CHECK(docs.at("Mood") == "How the widget feels about being inspected.");
+    CHECK(docs.at("Flag") == "Whether the thing is flagged.");
+
+    // A descriptor that carries none reads as empty, not as a null pointer.
+    CHECK(docs.at("Nothing").empty());
+    CHECK(std::string_view(scene::PropertyDesc{}.doc).empty());
 }

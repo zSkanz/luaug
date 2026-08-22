@@ -39,6 +39,7 @@
 #include "luaug/core/name_atom.h"
 #include "luaug/core/types.h"
 #include "luaug/scene/class_registry.h"
+#include "luaug/scene/enum_registry.h"
 #include "luaug/scene/value.h"
 #include "luaug/scene/world.h"
 
@@ -111,6 +112,18 @@ enum class EditorKind : core::u8
 };
 
 [[nodiscard]] EditorKind editorFor(scene::ValueType type) noexcept;
+
+// The enum a property accepts, from the DESCRIPTOR and not from whatever the
+// property currently holds. `scene::InvalidEnum` when the property is not an
+// enum property, or when this registry does not know the enum it names.
+//
+// The distinction is the whole point: an editor populates a combo box from a
+// property's legal domain, and asking a value what enum it belongs to cannot
+// answer for a property that has no value yet, cannot answer without a live
+// instance at all, and cannot answer for a class nothing has been created from.
+// `PropertyDesc::enumName` is a fact about the class, so this is too.
+[[nodiscard]] scene::EnumId enumDomainOf(const scene::EnumRegistry& enums,
+                                         const scene::PropertyDesc& descriptor) noexcept;
 
 // Whether the panel offers a live widget for this property. `readOnly` is
 // honoured HERE as well as by the setter, because a field that accepts a drag
