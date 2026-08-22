@@ -18,6 +18,7 @@
 #include <array>
 #include <cfloat>
 #include <cstdio>
+#include <cstring>
 #include <deque>
 #include <filesystem>
 #include <imgui.h>
@@ -154,6 +155,15 @@ std::vector<TreeRow> g_visible;
 // runs and therefore has no state to hold.
 std::unordered_set<core::u32> g_open;
 std::unordered_set<core::u32> g_openKnown;
+// Which world the two sets above describe. They are keyed by instance INDEX and
+// indices are recycled, so carrying them across a world would let a new instance
+// inherit whether a dead one was expanded.
+core::u64 g_explorerWorld = 0;
+// Whether the right-drag in progress BEGAN over the viewport image. Latched on
+// the press, because that is the only moment the question can be answered: once
+// the pointer is held it stops reporting a position, and asking afterwards lets
+// a right-click in any panel become a camera turn.
+bool g_lookLatched = false;
 std::vector<const scene::PropertyDesc*> g_properties;
 
 // The instance tree, virtualised.
@@ -169,9 +179,24 @@ std::vector<const scene::PropertyDesc*> g_properties;
 // not know whether to appear. So the open set is held HERE, keyed by instance,
 // the visible rows are computed before anything is drawn, and the clipper runs
 // over that flat list. Which is what a virtualised tree view is.
-void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspector)
+// `commands` and `dialogs` are null in the F3 overlay, and that is the
+// distinction rather than a convenience: **the overlay inspects and the editor
+// edits.** Offering Delete over a running game would be offering an edit whose
+// only result is a world nobody can put back.
+void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspector, EditorCommands* commands,
+                  EditorDialogs* dialogs)
 {
     collectTree(world, root, g_rows);
+
+    // **A new world opens collapsed.** Loading a scene, starting a new one or
+    // stopping a play session all arrive here as a world nobody has expanded
+    // anything in yet -- and a tree that remembered would be showing somebody
+    // the shape of the scene they just closed.
+    if (g_explorerWorld != inspector.worldGeneration()) {
+        g_explorerWorld = inspector.worldGeneration();
+        g_open.clear();
+        g_openKnown.clear();
+    }
 
     // Preorder, so an ancestor is always decided before its descendants. A row
     // is visible when every ancestor above it is open; `hiddenBelow` remembers
@@ -192,7 +217,11 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
         // collapsed.
         if (hasChildren && !g_openKnown.contains(row.id.index)) {
             g_openKnown.insert(row.id.index);
-            if (row.depth < 2)
+            // **The root only.** Its children are the services, which is the
+            // list somebody wants on opening; what is INSIDE them is the scene,
+            // and showing all of it means scrolling past a world to find the
+            // thing you came for.
+            if (row.depth == 0)
                 g_open.insert(row.id.index);
         }
         if (hasChildren && !g_open.contains(row.id.index))
@@ -239,6 +268,31 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
 
             if (ImGui::Selectable(label, row.id == inspector.selection()))
                 inspector.select(row.id);
+
+            // **Right-clicking selects first.** A menu that acted on whatever
+            // was selected before would delete the wrong thing the first time
+            // somebody right-clicked without looking.
+            if (commands != nullptr && dialogs != nullptr && ImGui::BeginPopupContextItem("row-menu")) {
+                if (row.id != inspector.selection())
+                    inspector.select(row.id);
+
+                const bool engineOwned = Editor::isEngineOwned(world, row.id, root);
+                if (ImGui::MenuItem("Rename...", nullptr, false, !engineOwned)) {
+                    dialogs->renameTarget = row.id;
+                    dialogs->renameContentPath.clear();
+                    dialogs->renameSeed = std::string(instanceName);
+                    dialogs->renameInstance = true;
+                }
+                // Greyed rather than refused afterwards. The rule lives in
+                // `Editor` because it is a rule about the world; the menu
+                // reflects it so nobody presses a thing that cannot happen.
+                if (ImGui::MenuItem("Duplicate", nullptr, false, !engineOwned))
+                    commands->duplicateInstance = row.id;
+                ImGui::Separator();
+                if (ImGui::MenuItem("Delete", nullptr, false, !engineOwned))
+                    commands->deleteInstance = row.id;
+                ImGui::EndPopup();
+            }
 
             ImGui::PopID();
 
@@ -763,12 +817,18 @@ void reportLookInput(Editor& editor, bool overViewport)
     if (overViewport && io.MouseWheel != 0.0f)
         editor.setCameraSpeed(editor.cameraSpeed() * (io.MouseWheel > 0.0f ? 1.25f : 0.8f));
 
+    // **Latched on the press, and only there.** The first version asked "over
+    // the viewport OR dragging", and `IsMouseDragging` becomes true a pixel
+    // after a press ANYWHERE -- so a right-click in the explorer turned into a
+    // camera turn: the pointer locked, motion stopped reaching ImGui, and the
+    // context menu that click was asking for never appeared.
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+        g_lookLatched = overViewport;
+    if (!ImGui::IsMouseDown(ImGuiMouseButton_Right))
+        g_lookLatched = false;
+
     Editor::LookInput look;
-    // Held, and begun over the image. `IsMouseDragging` is what carries the
-    // second half across frames once the pointer has been hidden and no longer
-    // reports a position anybody can test.
-    look.active =
-        ImGui::IsMouseDown(ImGuiMouseButton_Right) && (overViewport || ImGui::IsMouseDragging(ImGuiMouseButton_Right));
+    look.active = g_lookLatched;
 
     if (look.active) {
         const auto axis = [](ImGuiKey positive, ImGuiKey negative) -> f32 {
@@ -888,7 +948,7 @@ void buildDefaultLayout(ImGuiID dockspace)
 // so a folder of ten thousand meshes costs the same as a folder of ten.
 // `drawExplorer` beside this one does NOT do that yet, which is a thing to fix
 // rather than a precedent to follow.
-void drawContent(Editor& editor, EditorCommands& commands, bool& open)
+void drawContent(Editor& editor, EditorCommands& commands, bool& open, EditorDialogs& dialogs)
 {
     if (!ImGui::Begin("content", &open)) {
         ImGui::End();
@@ -907,32 +967,13 @@ void drawContent(Editor& editor, EditorCommands& commands, bool& open)
         (void)tree.refresh();
 
     ImGui::SameLine();
+    // The shell's dialog, so the toolbar button and the folder's own
+    // right-click menu reach the same one.
     if (ImGui::Button("new folder"))
-        ImGui::OpenPopup("new-folder");
+        dialogs.newFolder = true;
 
     ImGui::SameLine();
     ImGui::TextDisabled("content/%s", tree.currentFolder().c_str());
-
-    if (ImGui::BeginPopup("new-folder")) {
-        static std::array<char, 96> name{};
-        ImGui::SetNextItemWidth(220.0f);
-        const bool submitted =
-            ImGui::InputText("##folder", name.data(), name.size(), ImGuiInputTextFlags_EnterReturnsTrue);
-        const std::string_view typed{name.data()};
-        ImGui::SameLine();
-        // Greyed rather than refused after the fact: a name a filesystem cannot
-        // carry is knowable before anybody presses anything.
-        ImGui::BeginDisabled(!ContentTree::isUsableName(typed));
-        const bool pressed = ImGui::Button("create");
-        ImGui::EndDisabled();
-
-        if ((submitted || pressed) && ContentTree::isUsableName(typed)) {
-            commands.createFolder = std::string(typed);
-            name.fill('\0');
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
-    }
 
     ImGui::Separator();
 
@@ -962,12 +1003,38 @@ void drawContent(Editor& editor, EditorCommands& commands, bool& open)
                 if (isOpenScene)
                     ImGui::PopStyleColor();
 
+                if (ImGui::BeginPopupContextItem("entry-menu")) {
+                    if (entry.kind == ContentKind::Scene && ImGui::MenuItem("Open"))
+                        commands.openScene = entry.path;
+                    if (ImGui::MenuItem("Rename...")) {
+                        dialogs.renameTarget = {};
+                        dialogs.renameContentPath = entry.path;
+                        dialogs.renameSeed = ContentTree::stemOf(entry);
+                        dialogs.renameContent = true;
+                    }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Delete"))
+                        dialogs.deleteContentPath = entry.path;
+                    ImGui::EndPopup();
+                }
+
                 if (const char* label = contentKindLabel(entry.kind); label[0] != '\0') {
                     ImGui::SameLine(0.0f, 12.0f);
                     ImGui::TextDisabled("%s", label);
                 }
                 ImGui::PopID();
             }
+        }
+
+        // The space below the rows. Right-clicking nothing is how somebody asks
+        // about the FOLDER rather than about a thing in it.
+        if (ImGui::BeginPopupContextWindow("folder-menu",
+                                           ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
+            if (ImGui::MenuItem("New Folder..."))
+                dialogs.newFolder = true;
+            if (ImGui::MenuItem("Refresh"))
+                (void)tree.refresh();
+            ImGui::EndPopup();
         }
     }
     ImGui::EndChild();
@@ -984,8 +1051,7 @@ void drawContent(Editor& editor, EditorCommands& commands, bool& open)
 // Drawn BEFORE the dockspace, because `DockSpaceOverViewport` measures the work
 // area and a menu bar declared after it would overlap the panels by its own
 // height.
-void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands, bool& wantSaveAs,
-                 bool& wantPreferences, bool& wantAbout)
+void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands, EditorDialogs& dialogs)
 {
     if (!ImGui::BeginMainMenuBar())
         return;
@@ -1000,7 +1066,7 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
         if (ImGui::MenuItem("Save Scene", nullptr, false, !editor.openScenePath().empty()))
             commands.save = true;
         if (ImGui::MenuItem("Save Scene As..."))
-            wantSaveAs = true;
+            dialogs.saveAs = true;
         ImGui::Separator();
         if (ImGui::MenuItem("Exit"))
             commands.quit = true;
@@ -1008,14 +1074,20 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
     }
 
     if (ImGui::BeginMenu("Edit")) {
-        // Present and disabled, deliberately. They are E2's, and an Edit menu
-        // without them would make somebody wonder where they went: a disabled
-        // item says "not yet" where an absent one says "never".
-        ImGui::MenuItem("Undo", nullptr, false, false);
-        ImGui::MenuItem("Redo", nullptr, false, false);
+        // Named after what they will undo. "Undo" alone leaves somebody to find
+        // out by pressing it, which for a delete is finding out too late.
+        const std::string undoLabel =
+            editor.history().canUndo() ? "Undo " + std::string(editor.history().undoLabel()) : std::string("Undo");
+        const std::string redoLabel =
+            editor.history().canRedo() ? "Redo " + std::string(editor.history().redoLabel()) : std::string("Redo");
+
+        if (ImGui::MenuItem(undoLabel.c_str(), "Ctrl+Z", false, editor.history().canUndo()))
+            commands.undo = true;
+        if (ImGui::MenuItem(redoLabel.c_str(), "Ctrl+Y", false, editor.history().canRedo()))
+            commands.redo = true;
         ImGui::Separator();
         if (ImGui::MenuItem("Preferences..."))
-            wantPreferences = true;
+            dialogs.preferences = true;
         ImGui::EndMenu();
     }
 
@@ -1036,7 +1108,7 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
 
     if (ImGui::BeginMenu("Help")) {
         if (ImGui::MenuItem("About LuauG"))
-            wantAbout = true;
+            dialogs.about = true;
         ImGui::EndMenu();
     }
 
@@ -1057,19 +1129,18 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
 // viewport could not be opened from the menu -- which is exactly what a Save As
 // has to be. Modal, because each of these is a question with an answer, and one
 // left half-answered behind a panel is one somebody loses track of.
-void drawEditorDialogs(Editor& editor, EditorCommands& commands, bool& wantSaveAs, bool& wantPreferences,
-                       bool& wantAbout)
+void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& dialogs)
 {
-    if (wantSaveAs) {
-        wantSaveAs = false;
+    if (dialogs.saveAs) {
+        dialogs.saveAs = false;
         ImGui::OpenPopup("Save Scene As");
     }
-    if (wantPreferences) {
-        wantPreferences = false;
+    if (dialogs.preferences) {
+        dialogs.preferences = false;
         ImGui::OpenPopup("Preferences");
     }
-    if (wantAbout) {
-        wantAbout = false;
+    if (dialogs.about) {
+        dialogs.about = false;
         ImGui::OpenPopup("About LuauG");
     }
 
@@ -1136,6 +1207,113 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, bool& wantSaveA
         ImGui::EndPopup();
     }
 
+    if (dialogs.renameInstance || dialogs.renameContent) {
+        ImGui::OpenPopup("Rename");
+    }
+    if (dialogs.newFolder) {
+        dialogs.newFolder = false;
+        ImGui::OpenPopup("New Folder");
+    }
+    if (!dialogs.deleteContentPath.empty())
+        ImGui::OpenPopup("Delete");
+
+    ImGui::SetNextWindowSize(ImVec2(400.0f, 0.0f), ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("Rename", nullptr, ImGuiWindowFlags_NoResize)) {
+        static std::array<char, 128> name{};
+        // Seeded once, on the frame the dialog opens. Copying every frame would
+        // overwrite what the person is typing with what they started from.
+        if (dialogs.renameInstance || dialogs.renameContent) {
+            name.fill(0);
+            const std::size_t count = std::min(dialogs.renameSeed.size(), name.size() - 1);
+            std::memcpy(name.data(), dialogs.renameSeed.data(), count);
+            dialogs.renameInstance = false;
+            dialogs.renameContent = false;
+        }
+
+        ImGui::SetNextItemWidth(-1.0f);
+        ImGui::SetKeyboardFocusHere();
+        const bool submitted =
+            ImGui::InputText("##rename", name.data(), name.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+        const std::string typed(name.data());
+
+        ImGui::Spacing();
+        ImGui::BeginDisabled(typed.empty());
+        const bool accepted = ImGui::Button("Rename", ImVec2(120.0f, 0.0f));
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))) {
+            dialogs.renameTarget = {};
+            dialogs.renameContentPath.clear();
+            ImGui::CloseCurrentPopup();
+        }
+
+        if ((submitted || accepted) && !typed.empty()) {
+            if (dialogs.renameTarget.valid()) {
+                commands.renameInstance = dialogs.renameTarget;
+                commands.renameInstanceTo = typed;
+            }
+            else if (!dialogs.renameContentPath.empty()) {
+                commands.renameContent = dialogs.renameContentPath;
+                commands.renameContentTo = typed;
+            }
+            dialogs.renameTarget = {};
+            dialogs.renameContentPath.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(400.0f, 0.0f), ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("New Folder", nullptr, ImGuiWindowFlags_NoResize)) {
+        static std::array<char, 128> folder{};
+        ImGui::SetNextItemWidth(-1.0f);
+        const bool submitted =
+            ImGui::InputText("##folder", folder.data(), folder.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+        const std::string typed(folder.data());
+
+        ImGui::Spacing();
+        // Greyed before the press rather than refused after it: a name a
+        // filesystem cannot carry is knowable while it is being typed.
+        ImGui::BeginDisabled(!ContentTree::isUsableName(typed));
+        const bool accepted = ImGui::Button("Create", ImVec2(120.0f, 0.0f));
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))) {
+            folder.fill(0);
+            ImGui::CloseCurrentPopup();
+        }
+
+        if ((submitted || accepted) && ContentTree::isUsableName(typed)) {
+            commands.createFolder = typed;
+            folder.fill(0);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(440.0f, 0.0f), ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("Delete", nullptr, ImGuiWindowFlags_NoResize)) {
+        // **Named, not counted.** "Delete 1 item?" is a question nobody can
+        // answer; the path is what tells somebody whether they meant it.
+        ImGui::TextWrapped("Delete content/%s?", dialogs.deleteContentPath.c_str());
+        ImGui::Spacing();
+        ImGui::TextDisabled("This removes the file from disk. A folder goes with everything in it, and there is no "
+                            "undo for either.");
+        ImGui::Spacing();
+
+        if (ImGui::Button("Delete", ImVec2(120.0f, 0.0f))) {
+            commands.deleteContent = dialogs.deleteContentPath;
+            dialogs.deleteContentPath.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))) {
+            dialogs.deleteContentPath.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
     ImGui::SetNextWindowSize(ImVec2(430.0f, 0.0f), ImGuiCond_Appearing);
     if (ImGui::BeginPopupModal("About LuauG", nullptr, ImGuiWindowFlags_NoResize)) {
         ImGui::TextUnformatted("LuauG");
@@ -1160,7 +1338,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // a menu bar declared after it would sit on top of the panels by its own
     // height.
     if (editor != nullptr)
-        drawMenuBar(*editor, panels, commands, dialogs.saveAs, dialogs.preferences, dialogs.about);
+        drawMenuBar(*editor, panels, commands, dialogs);
 
     // A transparent central node, so a layout that has not been built yet shows
     // the frame underneath instead of a slab of grey.
@@ -1192,13 +1370,13 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         if (panels.viewport)
             drawViewport(*editor, viewport, commands, panels.viewport);
         if (panels.content)
-            drawContent(*editor, commands, panels.content);
+            drawContent(*editor, commands, panels.content, dialogs);
     }
 
     if (panels.explorer) {
         if (ImGui::Begin("explorer", &panels.explorer)) {
             if (world != nullptr && inspector != nullptr)
-                drawExplorer(*world, root, *inspector);
+                drawExplorer(*world, root, *inspector, &commands, &dialogs);
         }
         ImGui::End();
     }
@@ -1230,9 +1408,6 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         ImGui::End();
     }
 
-    // After every panel has been declared, because focusing a window ImGui has
-    // not seen this frame does nothing. Only on the frame the default layout
-    // was built: a person who later chose the console should find the console.
     // **Escape lets go of the selection, from anywhere.** Deselecting is a thing
     // a person does constantly and it needs a key that works wherever they are
     // looking -- the explorer, the viewport, the content browser.
@@ -1245,13 +1420,26 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !ImGui::IsAnyItemActive() && !popupOpen)
         commands.clearSelection = true;
 
+    // Ctrl+Z and Ctrl+Y, under the same rule Escape is: not while a field has
+    // the keyboard, because Ctrl+Z inside a text box is the box's own undo and
+    // taking it would make typing a name unrecoverable.
+    if (!ImGui::IsAnyItemActive() && !popupOpen && ImGui::GetIO().KeyCtrl) {
+        if (ImGui::IsKeyPressed(ImGuiKey_Z, false))
+            commands.undo = true;
+        if (ImGui::IsKeyPressed(ImGuiKey_Y, false))
+            commands.redo = true;
+    }
+
     if (commands.wantSaveAs) {
         commands.wantSaveAs = false;
         dialogs.saveAs = true;
     }
     if (editor != nullptr)
-        drawEditorDialogs(*editor, commands, dialogs.saveAs, dialogs.preferences, dialogs.about);
+        drawEditorDialogs(*editor, commands, dialogs);
 
+    // After every panel has been declared, because focusing a window ImGui has
+    // not seen this frame does nothing. Only on the frame the default layout
+    // was built: a person who later chose the console should find the console.
     if (builtThisFrame)
         ImGui::SetWindowFocus("content");
 }
@@ -1271,7 +1459,7 @@ void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, I
         if (world != nullptr && inspector != nullptr) {
             ImGui::SeparatorText("explorer");
             if (ImGui::BeginChild("explorer", ImVec2(0.0f, 200.0f), ImGuiChildFlags_Borders))
-                drawExplorer(*world, root, *inspector);
+                drawExplorer(*world, root, *inspector, nullptr, nullptr);
             ImGui::EndChild();
 
             ImGui::SeparatorText("properties");

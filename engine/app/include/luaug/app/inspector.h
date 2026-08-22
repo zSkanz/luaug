@@ -189,6 +189,11 @@ public:
 
     [[nodiscard]] usize pendingCount() const noexcept { return pending_.size(); }
 
+    // What is waiting, for a caller that has to know BEFORE the drain -- which
+    // the undo stack does: it records the world as it was, and "as it was"
+    // stops being true the moment `applyPending` runs.
+    [[nodiscard]] const PendingWrite& pendingAt(usize index) const noexcept { return pending_[index]; }
+
     // The FrameStart drain. Every queued write goes through
     // `World::setProperty` -- the same call a script's assignment makes -- and
     // its result is recorded whatever it was.
@@ -209,12 +214,20 @@ public:
     // them.
     void onWorldChanged() noexcept;
 
+    // How many worlds this inspector has seen. A panel holding state keyed by
+    // `InstanceId` -- which the explorer's expanded set is -- has to throw it
+    // away when the world does, because slot indices are RECYCLED: a new
+    // instance landing in a dead one's slot would inherit whether it was
+    // expanded, and on a big scene that reads as rows opening by themselves.
+    [[nodiscard]] core::u64 worldGeneration() const noexcept { return worldGeneration_; }
+
     static constexpr usize OutcomeHistory = 8;
 
 private:
     void recordOutcome(const WriteOutcome& outcome);
 
     core::InstanceId selection_;
+    core::u64 worldGeneration_ = 0;
     std::vector<PendingWrite> pending_;
     std::vector<WriteOutcome> outcomes_;
 };

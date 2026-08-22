@@ -101,6 +101,25 @@ public:
     // because a person typing a folder name is not an exceptional condition.
     bool createFolder(std::string_view folderName);
 
+    // Renames an entry inside the current folder and re-reads. False when the
+    // name is unusable, when something already carries it, or when the rename
+    // itself fails.
+    //
+    // **A file's extension is not the person's to lose.** Renaming
+    // `main.scene.json` to `level` produces `level.scene.json`, because the
+    // suffix is what makes it a scene and typing a name is not asking to stop
+    // being one.
+    bool rename(const ContentEntry& entry, std::string_view newName);
+
+    // Removes an entry and re-reads. A folder goes with everything in it, which
+    // is what a person means and is why the caller is expected to have asked
+    // first.
+    bool remove(const ContentEntry& entry);
+
+    // The part of a name before the extension this kind carries, for a rename
+    // box to start from: `main` for `main.scene.json`, not `main.scene`.
+    [[nodiscard]] static std::string stemOf(const ContentEntry& entry);
+
     // Rejects what a filesystem or a URN cannot carry: empty, a separator, a
     // relative-path segment, or a control character. Exposed so a panel can grey
     // out its own button rather than letting somebody press it and be refused.

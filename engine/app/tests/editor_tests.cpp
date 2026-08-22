@@ -426,3 +426,148 @@ TEST_CASE("pressing play twice does not move the point stop returns to")
     CHECK(world.alive(original));
     CHECK_FALSE(world.alive(spawned));
 }
+
+TEST_CASE("undo puts back what a delete took, subtree and all")
+{
+    // The case that decided the design. Undoing a property write is remembering
+    // a value; undoing a DELETE is recreating an instance, everything under it,
+    // and the ids anybody was holding. A reversible-command stack is where that
+    // goes wrong, and `World::snapshot` already does it correctly.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId parent = fixture.widget(world, "Tower");
+    const core::InstanceId child = fixture.widget(world, "Door");
+    (void)world.setParent(child, parent);
+
+    REQUIRE(editor.deleteInstance(world, parent, {}, inspector));
+    // Gone for good, not merely marked: a paused world runs no signal drain, so
+    // the editor retires what it deletes rather than leaving a record that
+    // answers `alive` until somebody presses play.
+    CHECK_FALSE(world.alive(parent));
+    CHECK_FALSE(world.alive(child));
+
+    REQUIRE(editor.undo(world, inspector));
+    CHECK(world.alive(parent));
+    // The subtree came with it, and by the SAME id -- which is what makes a
+    // reference somebody was holding still mean something.
+    CHECK(world.alive(child));
+    CHECK(world.parentOf(child) == parent);
+}
+
+TEST_CASE("redo does it again, and a new edit throws the redo away")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId first = fixture.widget(world, "First");
+    REQUIRE(editor.deleteInstance(world, first, {}, inspector));
+    REQUIRE(editor.undo(world, inspector));
+    CHECK(world.alive(first));
+
+    REQUIRE(editor.redo(world, inspector));
+    CHECK_FALSE(world.alive(first));
+
+    REQUIRE(editor.undo(world, inspector));
+    CHECK(editor.history().canRedo());
+
+    // A future that no longer happens. Keeping it would let a redo apply a
+    // change to a world that has moved on, which is the one way an undo stack
+    // destroys work rather than restoring it.
+    const core::InstanceId second = fixture.widget(world, "Second");
+    editor.history().record(world, "Edit");
+    CHECK_FALSE(editor.history().canRedo());
+    CHECK(world.alive(second));
+}
+
+TEST_CASE("a drag on one property is one step, and two properties are two")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+
+    // The same key, over and over, is what a drag looks like from here.
+    for (int frame = 0; frame < 120; ++frame)
+        editor.history().record(world, "Edit", 42);
+    CHECK(editor.history().canUndo());
+
+    Editor counted;
+    for (int frame = 0; frame < 120; ++frame)
+        counted.history().record(world, "Edit", 42);
+    // One step, not a hundred and twenty. Walking back through a two-second
+    // drag one frame at a time is not undo.
+    int steps = 0;
+    while (counted.history().undo(world))
+        ++steps;
+    CHECK(steps == 1);
+
+    Editor separate;
+    separate.history().record(world, "Edit", 1);
+    separate.history().record(world, "Edit", 2);
+    steps = 0;
+    while (separate.history().undo(world))
+        ++steps;
+    CHECK(steps == 2);
+}
+
+TEST_CASE("the stack has a floor and drops the oldest rather than growing")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+
+    for (std::size_t step = 0; step < luaug::app::UndoStack::Depth + 20; ++step)
+        editor.history().record(world, "Edit");
+
+    std::size_t steps = 0;
+    while (editor.history().undo(world))
+        ++steps;
+    CHECK(steps == luaug::app::UndoStack::Depth);
+}
+
+TEST_CASE("stopping a play session clears the history")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId part = fixture.widget(world, "Part");
+    REQUIRE(editor.deleteInstance(world, part, {}, inspector));
+    REQUIRE(editor.history().canUndo());
+
+    editor.play(world);
+    editor.stop(world, inspector);
+
+    // The edits before it belong to a world the restore has just replaced.
+    CHECK_FALSE(editor.history().canUndo());
+}
+
+TEST_CASE("the engine's own instances cannot be deleted or duplicated")
+{
+    // A service is reached through `GetService`, there is one per world, and the
+    // engine makes it whether or not anybody asked. Deleting one leaves a world
+    // that cannot answer a call every script makes; duplicating one makes "one
+    // per world" false.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    // The fixture has no service classes, so the rule is checked through the
+    // other half of it: an instance with no parent is the world's root.
+    const core::InstanceId root = fixture.widget(world, "DataModel");
+    CHECK(Editor::isEngineOwned(world, root, root));
+    CHECK_FALSE(editor.deleteInstance(world, root, root, inspector));
+    CHECK(world.alive(root));
+    CHECK(editor.status().failed);
+
+    const core::InstanceId ordinary = fixture.widget(world, "Part");
+    (void)world.setParent(ordinary, root);
+    CHECK_FALSE(Editor::isEngineOwned(world, ordinary, root));
+    CHECK(editor.deleteInstance(world, ordinary, root, inspector));
+}

@@ -883,6 +883,22 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // Before the reload, deliberately. A write queued against the outgoing
         // world is dropped by `onWorldChanged` rather than replayed against a
         // world that never issued the ids it names.
+        // **Recorded before the write, because undo restores what was there.**
+        // A whole frame's queued edits are one step: they were typed in one
+        // frame and a person undoing thinks of them as one thing.
+        //
+        // The coalesce key is the instance and the property, so a drag on one
+        // value is a single step however many frames it lasts. Two different
+        // properties in a row are two steps, which is what somebody who set a
+        // size and then a colour expects to walk back through.
+        if (options.editor && inspector.pendingCount() > 0) {
+            const PendingWrite& first = inspector.pendingAt(0);
+            const bool oneProperty = inspector.pendingCount() == 1;
+            const core::u64 key =
+                oneProperty ? (static_cast<core::u64>(first.target.index) << 32) | first.property.id : 0;
+            editor.history().record(host->world(), "Edit", key);
+        }
+
         inspector.applyPending(host->world());
 
         // A click resolves here too, and AFTER the drain rather than before:
@@ -921,10 +937,42 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 }
                 if (!editorCommands.createFolder.empty())
                     (void)editor.content().createFolder(editorCommands.createFolder);
+
+                if (editorCommands.deleteInstance.valid())
+                    (void)editor.deleteInstance(host->world(), editorCommands.deleteInstance,
+                                                host->runtime().dataModel(), inspector);
+                if (editorCommands.duplicateInstance.valid())
+                    (void)editor.duplicateInstance(host->world(), editorCommands.duplicateInstance,
+                                                   host->runtime().dataModel(), inspector);
+                if (editorCommands.renameInstance.valid())
+                    (void)editor.renameInstance(host->world(), editorCommands.renameInstance,
+                                                host->runtime().dataModel(), editorCommands.renameInstanceTo);
+
+                // Content actions resolve the entry by path, because the tree
+                // may have been re-read between the click and here -- and an
+                // index into a list that moved is how a delete hits the row
+                // below the one somebody chose.
+                if (!editorCommands.deleteContent.empty() || !editorCommands.renameContent.empty()) {
+                    const std::string& wanted = editorCommands.deleteContent.empty() ? editorCommands.renameContent
+                                                                                     : editorCommands.deleteContent;
+                    for (const ContentEntry& entry : editor.content().entries()) {
+                        if (entry.path != wanted)
+                            continue;
+                        if (!editorCommands.deleteContent.empty())
+                            (void)editor.content().remove(entry);
+                        else
+                            (void)editor.content().rename(entry, editorCommands.renameContentTo);
+                        break;
+                    }
+                }
                 // File > Exit. The same door the window's own close button is,
                 // so a person who reached for the menu gets the same shutdown.
                 if (editorCommands.quit)
                     quit = true;
+                if (editorCommands.undo)
+                    (void)editor.undo(host->world(), inspector);
+                if (editorCommands.redo)
+                    (void)editor.redo(host->world(), inspector);
                 if (editorCommands.clearSelection)
                     inspector.select(core::InstanceId{});
                 if (editorCommands.newScene) {

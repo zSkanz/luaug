@@ -3,6 +3,7 @@
 #include <luaug/core/json_writer.h>
 #include <luaug/platform/file.h>
 #include <luaug/rhi/device.h>
+#include <luaug/scene/class_registry.h>
 #include <luaug/scene/scene_file.h>
 #include <luaug/scene/world.h>
 
@@ -127,6 +128,9 @@ void Editor::stop(scene::World& world, Inspector& inspector)
 
     world.restore(*m_playSnapshot);
     m_playSnapshot.reset();
+    // A play session's changes were never edits, and the edits before it belong
+    // to a world this restore has just replaced.
+    m_history.clear();
 
     // A selection made DURING play can name something the restore removed. The
     // id would resolve to whatever the slot holds now, which is either nothing
@@ -212,10 +216,200 @@ std::string Editor::recallOpenScene(const std::filesystem::path& stateDirectory)
     return std::string(document.root()["openScene"].asString());
 }
 
+void UndoStack::record(const scene::World& world, std::string label, core::u64 coalesceKey)
+{
+    // Consecutive work on the same thing is one step. A drag on a colour writes
+    // a value every frame, and without this a two-second drag buries everything
+    // before it under a hundred and twenty steps of the same colour.
+    if (coalesceKey != 0 && !m_undo.empty() && m_undo.back().key == coalesceKey)
+        return;
+
+    // Anything ahead of here is a future that no longer happens. Keeping it
+    // would let a redo after a new edit apply a change to a world that has
+    // moved on -- which is the one way an undo stack can destroy work rather
+    // than restore it.
+    m_redo.clear();
+
+    m_undo.push_back(Step{world.snapshot(), std::move(label), coalesceKey});
+    while (m_undo.size() > Depth)
+        m_undo.pop_front();
+}
+
+bool UndoStack::undo(scene::World& world)
+{
+    if (m_undo.empty())
+        return false;
+
+    // The world as it is now becomes the redo, carrying the label of the step
+    // being undone -- so "Redo Delete" names the thing it will do again rather
+    // than the thing before it.
+    Step step = std::move(m_undo.back());
+    m_undo.pop_back();
+    m_redo.push_back(Step{world.snapshot(), step.label, 0});
+    world.restore(step.state);
+    return true;
+}
+
+bool UndoStack::redo(scene::World& world)
+{
+    if (m_redo.empty())
+        return false;
+
+    Step step = std::move(m_redo.back());
+    m_redo.pop_back();
+    m_undo.push_back(Step{world.snapshot(), step.label, 0});
+    world.restore(step.state);
+    return true;
+}
+
+std::string_view UndoStack::undoLabel() const noexcept
+{
+    return m_undo.empty() ? std::string_view{} : std::string_view{m_undo.back().label};
+}
+
+std::string_view UndoStack::redoLabel() const noexcept
+{
+    return m_redo.empty() ? std::string_view{} : std::string_view{m_redo.back().label};
+}
+
+void UndoStack::clear() noexcept
+{
+    m_undo.clear();
+    m_redo.clear();
+}
+
+bool Editor::undo(scene::World& world, Inspector& inspector)
+{
+    const std::string label(m_history.undoLabel());
+    if (!m_history.undo(world))
+        return false;
+
+    if (!world.alive(inspector.selection()))
+        inspector.select(core::InstanceId{});
+    inspector.onWorldChanged();
+
+    m_status = EditorStatus{"undid " + label, false};
+    return true;
+}
+
+bool Editor::redo(scene::World& world, Inspector& inspector)
+{
+    const std::string label(m_history.redoLabel());
+    if (!m_history.redo(world))
+        return false;
+
+    if (!world.alive(inspector.selection()))
+        inspector.select(core::InstanceId{});
+    inspector.onWorldChanged();
+
+    m_status = EditorStatus{"redid " + label, false};
+    return true;
+}
+
+bool Editor::isEngineOwned(const scene::World& world, core::InstanceId id, core::InstanceId root) noexcept
+{
+    if (!world.alive(id))
+        return false;
+    if (id == root)
+        return true;
+
+    const scene::ClassDescriptor* descriptor = world.classes().find(world.classOf(id));
+    return descriptor != nullptr && scene::hasFlag(descriptor->flags, scene::ClassFlags::Service);
+}
+
+bool Editor::deleteInstance(scene::World& world, core::InstanceId id, core::InstanceId root, Inspector& inspector)
+{
+    if (!world.alive(id))
+        return false;
+
+    if (isEngineOwned(world, id, root)) {
+        m_status =
+            EditorStatus{"that one belongs to the engine -- services and the world itself cannot be deleted", true};
+        return false;
+    }
+
+    const std::string name(world.atoms().text(world.name(id)));
+    m_history.record(world, "Delete " + name);
+    if (!world.destroy(id))
+        return false;
+
+    // **Retired here, because nothing else will while the editor is editing.**
+    // `destroy` marks and unlinks; the record stops resolving in
+    // `retireDestroyed`, which runs at the end of a signal drain -- and a paused
+    // world runs no drains, so a deleted instance would keep answering `alive`
+    // until somebody pressed play.
+    //
+    // The `Destroying` signal is therefore not fired for an editor's delete, and
+    // that is the honest reading rather than an oversight: while editing, no
+    // script is running to hear it. When a scene's scripts start running again
+    // they do so against a world where the instance was never there.
+    world.retireDestroyed();
+
+    // The selection cannot outlive what it names. `destroy` leaves the handle
+    // resolving until the end of the drain that carries `Destroying`, so this
+    // is asked as a question about the tree rather than about the id.
+    if (inspector.selection() == id)
+        inspector.select(core::InstanceId{});
+
+    m_status = EditorStatus{"deleted " + name + " -- there is no undo yet; reopening the scene brings it back", false};
+    return true;
+}
+
+bool Editor::duplicateInstance(scene::World& world, core::InstanceId id, core::InstanceId root, Inspector& inspector)
+{
+    if (!world.alive(id))
+        return false;
+
+    const core::InstanceId parent = world.parentOf(id);
+    if (!parent.valid())
+        return false;
+
+    if (isEngineOwned(world, id, root)) {
+        // "One per world" is what a service IS. A second one would make every
+        // `GetService` a question with two answers.
+        m_status = EditorStatus{"a service is one per world, so there is no second one to make", true};
+        return false;
+    }
+
+    m_history.record(world, "Duplicate " + std::string(world.atoms().text(world.name(id))));
+    const core::InstanceId copy = world.clone(id);
+    if (!copy.valid())
+        return false;
+
+    (void)world.setParent(copy, parent);
+    // Selected, because the reason to duplicate a thing is to change the copy
+    // and not to admire it.
+    inspector.select(copy);
+
+    m_status = EditorStatus{"duplicated " + std::string(world.atoms().text(world.name(id))), false};
+    return true;
+}
+
+bool Editor::renameInstance(scene::World& world, core::InstanceId id, core::InstanceId root, std::string_view name)
+{
+    if (!world.alive(id) || name.empty())
+        return false;
+
+    if (isEngineOwned(world, id, root)) {
+        // **A script reaches a service by NAME** -- `game.Workspace` is a
+        // lookup, not a keyword -- so renaming one breaks every line that does
+        // it, in files nothing here can see.
+        m_status = EditorStatus{"a service's name is how scripts find it, so it is not one to change", true};
+        return false;
+    }
+
+    m_history.record(world, "Rename " + std::string(world.atoms().text(world.name(id))));
+    world.setName(id, world.atoms().intern(name));
+    m_status = EditorStatus{"renamed to " + std::string(name), false};
+    return true;
+}
+
 void Editor::newScene(scene::World& world, Inspector& inspector)
 {
     scene::clearScene(world);
 
+    // Undoing into a world that no longer exists is not undoing.
+    m_history.clear();
     m_openScene.clear();
     inspector.select(core::InstanceId{});
     inspector.onWorldChanged();
@@ -265,6 +459,7 @@ bool Editor::openScene(scene::World& world, std::string_view relativePath, Inspe
         return false;
 
     m_openScene = std::string(relativePath);
+    m_history.clear();
     // The status `load` set names the file; naming the scene is more useful,
     // because the browser is already showing the file.
     m_status = EditorStatus{"opened " + m_openScene, false};

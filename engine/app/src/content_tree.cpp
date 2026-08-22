@@ -157,6 +157,97 @@ std::filesystem::path ContentTree::absolute(const ContentEntry& entry) const
     return m_root / std::filesystem::path(entry.path);
 }
 
+namespace {
+// The suffix a kind carries, or empty. Kept beside `contentKindOf` so the two
+// answers cannot drift: one decides what a name IS and this one decides what
+// part of it says so.
+[[nodiscard]] std::string_view extensionFor(ContentKind kind) noexcept
+{
+    switch (kind) {
+    case ContentKind::Scene:
+        return kSceneExtension;
+    case ContentKind::Chunk:
+        return ".chunk.json";
+    case ContentKind::Folder:
+    case ContentKind::Mesh:
+    case ContentKind::Texture:
+    case ContentKind::Other:
+        break;
+    }
+    return {};
+}
+} // namespace
+
+std::string ContentTree::stemOf(const ContentEntry& entry)
+{
+    const std::string_view extension = extensionFor(entry.kind);
+    if (!extension.empty() && entry.name.size() > extension.size() &&
+        lowered(entry.name).compare(entry.name.size() - extension.size(), extension.size(), extension) == 0) {
+        return entry.name.substr(0, entry.name.size() - extension.size());
+    }
+
+    // Anything else keeps whatever it has. A `.glb` renamed by its stem would
+    // stop being a mesh, and this browser is not the place that decides a
+    // texture is no longer one.
+    const std::string::size_type dot = entry.name.rfind('.');
+    return dot == std::string::npos || entry.kind == ContentKind::Folder ? entry.name : entry.name.substr(0, dot);
+}
+
+bool ContentTree::rename(const ContentEntry& entry, std::string_view newName)
+{
+    if (!isUsableName(newName) || m_root.empty())
+        return false;
+
+    std::string target(newName);
+    // The suffix is put back rather than required. Somebody typing a name is
+    // not asking for the file to stop being what it is.
+    if (const std::string_view extension = extensionFor(entry.kind);
+        !extension.empty() &&
+        (target.size() < extension.size() ||
+         lowered(target).compare(target.size() - extension.size(), extension.size(), extension) != 0)) {
+        target += std::string(extension);
+    }
+    else if (entry.kind != ContentKind::Folder && extensionFor(entry.kind).empty()) {
+        // A mesh or a texture keeps the extension it arrived with.
+        if (const std::string::size_type dot = entry.name.rfind('.'); dot != std::string::npos)
+            target += entry.name.substr(dot);
+    }
+
+    if (target == entry.name)
+        return true;
+
+    std::filesystem::path folder = m_root;
+    if (!m_relative.empty())
+        folder /= std::filesystem::path(m_relative);
+
+    std::error_code ec;
+    // Refused rather than silently replacing. Two files with one name is a
+    // question, and answering it by destroying one of them is not an answer.
+    if (std::filesystem::exists(folder / std::filesystem::path(target), ec))
+        return false;
+
+    std::filesystem::rename(folder / std::filesystem::path(entry.name), folder / std::filesystem::path(target), ec);
+    if (ec)
+        return false;
+
+    return refresh();
+}
+
+bool ContentTree::remove(const ContentEntry& entry)
+{
+    if (m_root.empty())
+        return false;
+
+    std::error_code ec;
+    // `remove_all` because a folder means the folder, and a delete that left
+    // the contents behind would be a folder somebody cannot get rid of.
+    const std::uintmax_t removed = std::filesystem::remove_all(absolute(entry), ec);
+    if (ec || removed == 0)
+        return false;
+
+    return refresh();
+}
+
 bool ContentTree::createFolder(std::string_view folderName)
 {
     if (!isUsableName(folderName) || m_root.empty())

@@ -311,6 +311,7 @@ void Inspector::applyPending(scene::World& world)
 
 void Inspector::onWorldChanged() noexcept
 {
+    ++worldGeneration_;
     selection_ = core::InstanceId{};
     pending_.clear();
     outcomes_.clear();

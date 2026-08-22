@@ -8,6 +8,7 @@
 #include <luaug/rhi/types.h>
 #include <luaug/scene/world.h>
 
+#include <deque>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -139,6 +140,22 @@ struct EditorDialogs
     bool saveAs = false;
     bool preferences = false;
     bool about = false;
+    bool newFolder = false;
+
+    // A rename in flight. The seed is what the box opens with -- the current
+    // name, because renaming is usually editing a name rather than replacing
+    // one.
+    bool renameInstance = false;
+    bool renameContent = false;
+    core::InstanceId renameTarget;
+    std::string renameContentPath;
+    std::string renameSeed;
+
+    // A delete waiting to be confirmed. **Content only.** Deleting a file is
+    // the one action here that survives the editor closing, so it is the one
+    // that asks; an instance is recovered by reopening the scene, which is a
+    // door a person already knows.
+    std::string deleteContentPath;
 };
 
 struct EditorPanels
@@ -186,6 +203,30 @@ struct EditorCommands
     // Close the editor. The menu's File > Exit, which is the one every
     // application has and the one people reach for before the window button.
     bool quit = false;
+    // --- What a right-click asked for ----------------------------------------
+    //
+    // Every one of these mutates a world or a directory, so none of them acts
+    // where it was clicked: they are drained at the frame's safe point like the
+    // property writes and the pick, for the reason that has not changed -- a
+    // panel behind this one is still drawing from what they would change.
+
+    // Delete an instance and everything under it.
+    core::InstanceId deleteInstance;
+    // A copy of an instance, beside it.
+    core::InstanceId duplicateInstance;
+    // Rename an instance. Both halves or neither.
+    core::InstanceId renameInstance;
+    std::string renameInstanceTo;
+
+    // Content-relative. Delete removes a folder with everything in it.
+    std::string deleteContent;
+    std::string renameContent;
+    std::string renameContentTo;
+
+    // Step back, or forward again.
+    bool undo = false;
+    bool redo = false;
+
     // Let go of whatever is selected. Escape, from anywhere in the shell.
     bool clearSelection = false;
     // Put the panels back where they started. Not "close everything" -- a
@@ -197,8 +238,68 @@ struct EditorCommands
     [[nodiscard]] bool any() const noexcept
     {
         return play.has_value() || pause.has_value() || save || newScene || quit || resetLayout || clearSelection ||
-               !saveAs.empty() || !openScene.empty() || !createFolder.empty();
+               undo || redo || deleteInstance.valid() || duplicateInstance.valid() || renameInstance.valid() ||
+               !saveAs.empty() || !openScene.empty() || !createFolder.empty() || !deleteContent.empty() ||
+               !renameContent.empty();
     }
+};
+
+// The undo stack, and it is snapshots rather than commands.
+//
+// **The reversible-command design is the one this does NOT use, and the reason
+// is the delete.** Undoing a property write is remembering a value; undoing a
+// delete is recreating an instance, its whole subtree, its attributes and tags,
+// and every reference anybody held to it -- with the same ids, or every one of
+// those references is now pointing at nothing. `World::snapshot` already does
+// exactly that, and does it correctly: the generation work behind it exists so
+// a handle taken before a restore still resolves after one.
+//
+// The price is memory, and it is bounded rather than argued about: a fixed
+// number of steps, oldest dropped. A step is the world's component pools, which
+// for an authored scene is small and for a streamed world is not -- so the cap
+// is a number somebody can move when a measurement says to, not a guess
+// defended forever.
+//
+// **What is not in it**: saving, creating a folder, deleting a file. Undo is of
+// the WORLD, not of the disk. A Ctrl+Z that resurrected a deleted file would be
+// a promise that cannot be kept every time, and one that is kept sometimes is
+// worse than one nobody made.
+class UndoStack
+{
+public:
+    // Records the state to come back to, labelled with what is about to happen.
+    //
+    // `coalesceKey` joins consecutive actions into one step when it repeats,
+    // which is what keeps a two-second drag on a colour from burying everything
+    // before it under a hundred and twenty steps. Empty never coalesces.
+    void record(const scene::World& world, std::string label, core::u64 coalesceKey = 0);
+
+    bool undo(scene::World& world);
+    bool redo(scene::World& world);
+
+    [[nodiscard]] bool canUndo() const noexcept { return !m_undo.empty(); }
+    [[nodiscard]] bool canRedo() const noexcept { return !m_redo.empty(); }
+    // What undoing would undo, for a menu item that says so rather than saying
+    // "Undo" and leaving somebody to find out.
+    [[nodiscard]] std::string_view undoLabel() const noexcept;
+    [[nodiscard]] std::string_view redoLabel() const noexcept;
+
+    // After a scene load, a new scene, or a stop. Undoing into a world that no
+    // longer exists is not undoing.
+    void clear() noexcept;
+
+    static constexpr core::usize Depth = 64;
+
+private:
+    struct Step
+    {
+        scene::WorldSnapshot state;
+        std::string label;
+        core::u64 key = 0;
+    };
+
+    std::deque<Step> m_undo;
+    std::deque<Step> m_redo;
 };
 
 // What the last save or load did, kept so the shell can say it. A save that
@@ -310,6 +411,36 @@ public:
     void rememberOpenScene(const std::filesystem::path& stateDirectory) const;
     [[nodiscard]] static std::string recallOpenScene(const std::filesystem::path& stateDirectory);
 
+    // Whether an instance is one of the engine's own -- a service, or the root.
+    //
+    // **A service is not a thing somebody put in the world**: it is reached
+    // through `GetService`, there is one per world, and the engine creates it
+    // whether or not anybody wanted it. Deleting one would leave a world that
+    // cannot answer a call every script makes, and duplicating one would make
+    // "one per world" false. The IDL already says which classes these are, so
+    // this asks the class rather than a list of names that would go stale.
+    // `root` is `game`, passed rather than inferred. "Has no parent" was the
+    // first version of this test and it is wrong: an instance parented to nil is
+    // a loose instance, not the world's root, and treating the two alike made
+    // the editor refuse to delete anything somebody had detached.
+    [[nodiscard]] static bool isEngineOwned(const scene::World& world, core::InstanceId id,
+                                            core::InstanceId root) noexcept;
+
+    // Deletes an instance and everything under it. Refuses the scene's root and
+    // every service: the world itself is not a thing inside the world.
+    //
+    // **There is no undo yet** -- it is E2's -- and the honest safety net is
+    // the one a person already knows: the scene is a file, so reopening it
+    // brings back everything that was not saved. The status says so when this
+    // happens rather than leaving somebody to discover it.
+    bool deleteInstance(scene::World& world, core::InstanceId id, core::InstanceId root, Inspector& inspector);
+
+    // A copy beside the original, selected, because the reason to duplicate
+    // something is to change the copy.
+    bool duplicateInstance(scene::World& world, core::InstanceId id, core::InstanceId root, Inspector& inspector);
+
+    bool renameInstance(scene::World& world, core::InstanceId id, core::InstanceId root, std::string_view name);
+
     // Empties the world of everything a scene describes and forgets which scene
     // was open, so the next save asks for a name.
     //
@@ -334,6 +465,16 @@ public:
     [[nodiscard]] const std::string& openScenePath() const noexcept { return m_openScene; }
 
     [[nodiscard]] const EditorStatus& status() const noexcept { return m_status; }
+
+    [[nodiscard]] UndoStack& history() noexcept { return m_history; }
+    [[nodiscard]] const UndoStack& history() const noexcept { return m_history; }
+
+    // Steps back, and says what it undid. The selection is dropped when the
+    // step it named is gone, for the reason `stop` drops it: an id that resolves
+    // to whatever now occupies the slot is a properties grid pointed at
+    // somebody else.
+    bool undo(scene::World& world, Inspector& inspector);
+    bool redo(scene::World& world, Inspector& inspector);
 
     // Ask for exactly one tick while paused. A step is how somebody watches a
     // thing happen instead of inferring it from before and after, and it is the
@@ -449,6 +590,7 @@ private:
     EditorStatus m_status;
     ContentTree m_content;
     std::string m_openScene;
+    UndoStack m_history;
 
     core::CFrameD m_cameraCFrame;
     bool m_cameraAdopted = false;
