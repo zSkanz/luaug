@@ -225,6 +225,13 @@ ctest --preset win-msvc-dev --output-on-failure || exit /b 1
     # file mutated by the test, and the reload confirmed over the WebSocket.
     & lute test tests/hotreload
     if ($LASTEXITCODE -ne 0) { throw "the hot-reload gate failed" }
+
+    # M8's packaging chain: `luaug new`, `luaug build`, the built folder RUN with
+    # no arguments, and the icon read back out of the artifact. Here rather than
+    # in ctest because it drives the CLI, which is a Lute application -- and
+    # because `--target win64` is a Windows artifact, which is this stage.
+    & lute test tests/packaging
+    if ($LASTEXITCODE -ne 0) { throw "the packaging gate failed" }
 }
 
 Invoke-Stage 'linux' {

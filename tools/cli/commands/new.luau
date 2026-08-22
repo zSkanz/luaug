@@ -28,8 +28,28 @@ local Templates = { starter = true }
 
 --- Where this CLI's own files live, so the template and the engine definitions
 --- are found relative to the installation rather than to the caller's cwd.
+--- **Found by walking up rather than by counting, and that is D045.** It
+--- counted two directories up from its own source, which was right while this
+--- command lived at `tools/cli/new.luau` and stopped being right the moment it
+--- moved into `commands/`. Nothing said so: the command still ran and failed
+--- inside `listDirectory` on a path with `../..` in the middle of it. A count
+--- is a fact about a directory layout that no check holds still; looking for
+--- the thing being looked for is not.
 local function cliRoot(): string
     local here = string.match(debug.info(1, "s"), "^(.*)[/\\][^/\\]+$") or "tools/cli"
+    local current = here
+    for _ = 1, 8 do
+        if fs.exists(projectlib.joined(current, "templates", "starter")) then
+            return current
+        end
+        local parent = projectlib.joined(current, "..")
+        if parent == current then
+            break
+        end
+        current = parent
+    end
+    -- The old answer, so a failure names a path a reader recognises rather than
+    -- an empty string turning every path below into a relative one.
     return projectlib.joined(here, "..", "..")
 end
 

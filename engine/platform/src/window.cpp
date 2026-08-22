@@ -5,6 +5,8 @@
 #include "luaug/platform/platform.h"
 #include "luaug/platform/sdl_interop.h"
 
+#include <SDL3/SDL_surface.h>
+#include <span>
 #include <string>
 
 #include "window_impl.h"
@@ -41,6 +43,26 @@ WindowPtr createWindow(const WindowDesc& desc, core::EngineError* outError)
     }
 
     return WindowPtr(new Window(handle));
+}
+
+bool setWindowIcon(Window& window, std::span<const std::byte> rgba, i32 width, i32 height)
+{
+    if (width <= 0 || height <= 0 ||
+        rgba.size() != static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4u) {
+        return false;
+    }
+
+    // `SDL_CreateSurfaceFrom` does not copy, and `SDL_SetWindowIcon` does --
+    // SDL duplicates the pixels into its own storage -- so the surface and the
+    // caller's bytes may both go away as soon as this returns.
+    SDL_Surface* surface =
+        SDL_CreateSurfaceFrom(width, height, SDL_PIXELFORMAT_RGBA32, const_cast<std::byte*>(rgba.data()), width * 4);
+    if (surface == nullptr)
+        return false;
+
+    const bool ok = SDL_SetWindowIcon(window.handle(), surface);
+    SDL_DestroySurface(surface);
+    return ok;
 }
 
 u32 windowId(const Window& window) noexcept

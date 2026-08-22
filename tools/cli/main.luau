@@ -14,6 +14,7 @@
 
 local process = require("@std/process")
 
+local build = require("./commands/build")
 local buildAssets = require("./commands/build-assets")
 local catalog = require("./catalog")
 local check = require("./commands/check")
@@ -159,6 +160,18 @@ local function main(): number
             path = firstPositional(parsed, "."),
             output = parsed.flags.output,
             verify = parsed.flags.verify ~= nil,
+        })
+    end
+
+    if parsed.command == "build" then
+        if not rejectUnknownFlags(parsed, { "output", "target", "force" }) then
+            return 2
+        end
+        return build.run({
+            path = firstPositional(parsed, "."),
+            output = parsed.flags.output,
+            target = parsed.flags.target or build.SupportedTarget,
+            force = parsed.flags.force ~= nil,
         })
     end
 

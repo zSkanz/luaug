@@ -1,0 +1,24 @@
+// The Windows resource that gives an executable its icon, and nothing else.
+//
+// It lives beside the artwork rather than beside a target because two targets
+// carry it -- the host, and the platform tests, which are the only thing that
+// can prove the resource can be read back out of a binary.
+//
+// **This is the artifact's identity, not a file beside it** (roadmap M8). A PNG
+// next to the binary survives until the first install, move or pack; a resource
+// travels with the executable wherever it goes, and it is what Explorer, the
+// taskbar and the Alt-Tab switcher read.
+//
+// The icon is `branding/icon/luaug.ico`, which carries every size from 16 to
+// 256 in one resource -- the OS picks per context, and a single 256 downscaled
+// by the shell is what makes an icon look cheap in a title bar.
+//
+// **It is the engine's mark and it is the FALLBACK.** A game built with
+// `luaug build` has this resource replaced with its own, from `[project] icon`
+// in its `luaug.toml`: an engine whose games all wear the engine's face is a
+// template, not an engine. `tools/iconpatch` does the replacing and can read
+// the result back out again, which is what makes the claim checkable.
+//
+// Ordinal 1 rather than a name, because that is what `luaug build` looks for and
+// what the shell picks when it wants "the application's icon".
+1 ICON "icon/luaug.ico"

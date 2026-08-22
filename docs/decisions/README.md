@@ -85,3 +85,4 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0042](0042-vendoring-may-narrow-to-the-paths-a-build-uses.md) | A vendored row may narrow to the upstream paths the build uses |
 | [0043](0043-per-instance-vertex-stepping.md) | The frozen RHI gains per-instance vertex stepping, and nothing else |
 | [0044](0044-graphics-settings-are-host-settings.md) | Graphics settings are host settings, in three layers |
+| [0045](0045-a-packaged-game-is-a-folder-that-ships-source.md) | A packaged game is a folder, and it ships Luau source |

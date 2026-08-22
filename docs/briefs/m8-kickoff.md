@@ -38,7 +38,7 @@ decision.
 - [ ] **Performance pass to absolute targets** — 60 fps at 1080p on the recorded
       reference machine; the standing targets at the end of
       [`../perf-baselines.md`](../perf-baselines.md) bind here.
-- [ ] **`luaug build` packaging** — distributable player + content.
+- [x] **`luaug build` packaging** — distributable player + content (ADR 0045).
 - [x] **Graphics settings, as a family rather than a number** — shadow
       resolution, cascade count and distance, render scale, light budget and
       post toggles stop being `constexpr`. Engine settings, not `Lighting`
@@ -46,7 +46,7 @@ decision.
       and ADR 0044 is the answer).
 - [x] **Prove the editor seam is still open** — two `WorldHost`s alive at once,
       each with its own `ScriptRuntime`, rendered into two targets.
-- [ ] **Application identity** — `branding/` wired up; a game built with
+- [x] **Application identity** — `branding/` wired up; a game built with
       `luaug build` takes its icon from `[project] icon` in `luaug.toml`;
       embedded in the artifact, all sizes in one resource, taskbar identity on
       Windows, and **verified by reading the resource back out of the built
@@ -225,6 +225,20 @@ it the character instead. This is that game.
 _(appended during the milestone)_
 
 ## Findings
+
+2. **`luaug new` had not worked since the CLI's commands moved into a
+   subdirectory, and the way it was found is the finding.** M8 needed a
+   scaffolded project to package, typed the first `luaug new` of the milestone,
+   and it failed outright: `cliRoot` counted two directories up from its own
+   source, which was right at `tools/cli/new.luau` and wrong at
+   `tools/cli/commands/new.luau`.
+
+   Two milestones of gates went green over it. The CLI's own suite covers
+   `toml` and `version`; the scaffolder had no test at all, and the M3 gate that
+   signed it off ran it by hand — before the move. **A count is a fact about a
+   directory layout that no check holds still**, so the fix walks up looking for
+   `templates/starter` instead of counting, and `tests/packaging` now scaffolds
+   with the real `new.run` on every Windows gate run. Recorded as D045.
 
 1. **A renderer is not stateless per view, and the seam proof is what said so.**
    The first version shared one `IRenderer` between the two worlds, on the

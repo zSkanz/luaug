@@ -45,6 +45,11 @@ struct ProjectConfig
     // titled window when a project does not name itself.
     std::string name;
 
+    // `[project] id` -- reverse-DNS, and on Windows the identity the shell
+    // groups taskbar buttons and pinned shortcuts by. Two games built with this
+    // engine that shared one id would share one taskbar button.
+    std::string id;
+
     // `[window] title`, or empty. **The game's own string, not the engine's**:
     // it is passed through rather than translated, which is the split
     // `log()`/`logText()` already draws and which `WindowDesc` reserved a

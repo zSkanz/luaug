@@ -11,6 +11,8 @@
 
 #include <filesystem>
 #include <optional>
+#include <string_view>
+#include <vector>
 
 namespace luaug::platform {
 
@@ -71,6 +73,29 @@ void shutdown();
 // not include it, so the name would have to be set by `app` or by `jobs` making
 // OS calls of its own. Neither is worth the #ifdefs for a string a profiler
 // shows.
+
+// The icon this executable carries in its own resources, as the bytes the
+// resource holds -- a PNG for every entry `branding/icon/luaug.ico` contains.
+// Empty where the platform has no such thing, which is everywhere but Windows
+// today (roadmap M8: the macOS and Linux halves are a bundle's `Info.plist` and
+// a `.desktop` entry, and both belong to a packaging step).
+//
+// **Read from the artifact rather than from a file beside it**, which is the
+// whole point: a game built with `luaug build` has that resource replaced with
+// its own, so this returns the GAME's icon in a packaged build and the engine's
+// mark in a development one, with no path to configure and nothing to install.
+//
+// The bytes are returned undecoded because decoding is `asset`'s (L2) and this
+// is L1. `app` is the layer that can see both.
+[[nodiscard]] std::vector<std::byte> applicationIconBytes();
+
+// The identity Windows groups taskbar buttons and pinned shortcuts by. Without
+// it a pinned shortcut loses its icon and two games built with this engine
+// group under one button, because the shell falls back to the executable path.
+//
+// Reverse-DNS, from `[project] id`. A no-op on every other platform, and a
+// no-op for an empty id.
+void setApplicationId(std::string_view id);
 
 struct Paths
 {

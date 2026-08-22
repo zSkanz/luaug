@@ -8,6 +8,11 @@ id = "dev.local.{{name}}"
 version = "0.1.0"
 # The engine series this project targets. `luaug doctor` compares it.
 engine = "0.1"
+# The game's own icon, embedded in the artifact by `luaug build` -- a multi-size
+# `.ico` on Windows. Without it a built game wears the engine's mark, which is
+# the fallback and not the intent: an engine whose games all wear the engine's
+# face is a template, not an engine.
+# icon = "assets/icon.ico"
 
 [window]
 title = "{{name}}"

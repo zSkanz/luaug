@@ -105,6 +105,8 @@ ProjectConfig loadProjectConfig(const std::filesystem::path& projectRoot, const 
 
     if (const std::optional<std::string_view> value = document.string("project.name"))
         config.name = *value;
+    if (const std::optional<std::string_view> value = document.string("project.id"))
+        config.id = *value;
     if (const std::optional<std::string_view> value = document.string("project.icon"))
         config.icon = *value;
     if (const std::optional<std::string_view> value = document.string("window.title"))

@@ -1133,7 +1133,7 @@ wrong reason.
 | `luaug new [template]` | scaffold (`starter`, `obby`, `openworld-demo`) |
 | `luaug dev` | asset watcher/importer (@lute/fs.watch) + WS hot-reload server (@std/net) + runtime in dev mode w/ overlay |
 | `luaug run` | runtime, no watch |
-| `luaug build --target win64` | Luau bytecode compile (O2), content-addressed asset pack, single-folder/exe output |
+| `luaug build --target win64` | The distributable folder: the host binary under the game's name and wearing its icon, the engine's content beside it, and the game in `game/` — which the player mounts when given no script. Ships Luau **source** rather than bytecode; ADR 0045 says why, and amends this row |
 | `luaug asset import\|list\|hash` | assimp offline → glTF 2.0 canonical → runtime formats (engine mesh, KTX2/BCn textures, ogg/wav); crypto-digest cache in `.luaug/cache` |
 | `luaug test [--engine]` | `lute test` for pure `tests/**/*.test.luau`; `--engine` boots the headless runtime exposing the same @std/test-compatible runner with the engine API available |
 | `luaug check` | `luau-lsp analyze` with the generated settings/defs (CI-ready) + StyLua check + i18n lint |

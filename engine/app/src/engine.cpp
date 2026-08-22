@@ -19,6 +19,7 @@
 #include "luaug/app/ui_text.h"
 #include "luaug/app/world_host.h"
 #include "luaug/asset/content.h"
+#include "luaug/asset/image.h"
 #include "luaug/core/build_info.h"
 #include "luaug/core/json_writer.h"
 #include "luaug/core/log.h"
@@ -324,6 +325,24 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             &error);
         if (window == nullptr)
             return error;
+
+        // The window wears whatever icon this executable carries in its own
+        // resources (roadmap M8). Nothing is configured and nothing is
+        // installed: a packaged game had that resource replaced by
+        // `luaug build`, so the same three lines dress the engine's dev host in
+        // the LuauG mark and a shipped game in its own.
+        //
+        // Every failure here is silent and survivable -- a platform with no
+        // per-window icon, an icon that will not decode, a build with no
+        // resource at all. A window with the default icon is a cosmetic loss;
+        // refusing to open one is not.
+        if (const std::vector<std::byte> iconBytes = platform::applicationIconBytes(); !iconBytes.empty()) {
+            asset::Image icon;
+            if (!asset::decodeImage(iconBytes, icon).has_value() && icon.valid()) {
+                (void)platform::setWindowIcon(*window, icon.pixels, static_cast<i32>(icon.width),
+                                              static_cast<i32>(icon.height));
+            }
+        }
 
         if (!device->claimWindow(*window))
             return core::makeError(LUAUG_TR("rhi.err.window_claim_failed"), {}, "SDL_ClaimWindowForGPUDevice");

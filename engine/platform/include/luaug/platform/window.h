@@ -5,6 +5,7 @@
 #include "luaug/core/text_key.h"
 #include "luaug/core/types.h"
 
+#include <cstddef>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -53,6 +54,17 @@ struct WindowDeleter
 };
 
 using WindowPtr = std::unique_ptr<Window, WindowDeleter>;
+
+// Dresses a window in an already-decoded RGBA image, top row first.
+//
+// Decoded rather than encoded because the decoder lives in `asset` (L2) and
+// this module is L1; `app` is the layer that can see both and is the one that
+// calls this, with what `applicationIconBytes()` returned.
+//
+// False when the pixels do not describe an image, or where the platform has no
+// per-window icon -- macOS takes its icon from the bundle and never from a
+// window, and that is not a failure.
+[[nodiscard]] bool setWindowIcon(Window& window, std::span<const std::byte> rgba, i32 width, i32 height);
 
 // Null on failure, with `outError` filled when it is not null. Requires a
 // successful init().

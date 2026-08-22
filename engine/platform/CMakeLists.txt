@@ -44,6 +44,16 @@ luaug_add_module_tests(platform
         SDL3::SDL3-static
 )
 
+# The same icon resource `luaug_host` carries, linked into the test binary so
+# that `applicationIconBytes()` has something to find. An executable is the only
+# thing that can hold one, so the test has to BE one -- there is no way to check
+# this against a library.
+if(WIN32 AND LUAUG_BUILD_TESTS)
+    target_sources(luaug_platform_tests PRIVATE "${CMAKE_SOURCE_DIR}/branding/luaug.rc")
+    set_property(SOURCE "${CMAKE_SOURCE_DIR}/branding/luaug.rc" APPEND PROPERTY OBJECT_DEPENDS
+        "${CMAKE_SOURCE_DIR}/branding/icon/luaug.ico")
+endif()
+
 if(LUAUG_BUILD_TESTS)
     target_compile_definitions(luaug_platform_tests PRIVATE
         LUAUG_TEST_CATALOG="${CMAKE_SOURCE_DIR}/i18n/en.json")

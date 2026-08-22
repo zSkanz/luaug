@@ -1,7 +1,7 @@
 {
   "$comment": "CLI catalog — English (the only launch locale, ADR 0019). Separate from the engine's i18n/en.json because the CLI and the engine ship and translate separately (api-design.md §6). Keys are cli.*. tools/repo/i18nlint.luau checks that every key the CLI names exists here, and that no user-facing string is written at a call site (rule R3).",
 
-  "cli.usage": "Usage: luaug <command> [options]\n\n  dev [path]       run the project with a watcher attached; a saved file rebuilds the world\n  test [path]      run the conformance suite on the headless engine\n  check [path]     luau-analyze, StyLua and the i18n lint\n  fmt [path]       format every Luau file with StyLua\n  build-assets     compile the content directory into a pack and a manifest\n  new <name>       scaffold a project from the starter template\n\n  --help           this text\n  --version        the CLI and engine versions",
+  "cli.usage": "Usage: luaug <command> [options]\n\n  dev [path]       run the project with a watcher attached; a saved file rebuilds the world\n  test [path]      run the conformance suite on the headless engine\n  check [path]     luau-analyze, StyLua and the i18n lint\n  fmt [path]       format every Luau file with StyLua\n  build-assets     compile the content directory into a pack and a manifest\n  build [path]     the distributable folder: the player, the engine content and the game\n  new <name>       scaffold a project from the starter template\n\n  --help           this text\n  --version        the CLI and engine versions",
   "cli.err.unknown_command": "Unknown command \"{command}\". Run luaug --help for the list.",
   "cli.err.no_command": "No command given. Run luaug --help for the list.",
   "cli.err.unknown_option": "Unknown option \"{option}\" for luaug {command}.",
@@ -45,6 +45,14 @@
 
   "cli.fmt.formatted": "Formatted {count} file(s).",
 
+  "cli.build.done": "Built {path}. Run {executable} inside it; the whole folder is the product.",
+  "cli.build.icon": "The artifact carries the icon from {path}, read back out of it to be sure.",
+  "cli.build.err.unknown_target": "No target named \"{target}\". v1 builds {supported} and says so rather than producing a folder that cannot run.",
+  "cli.build.err.wrong_host": "Building {target} needs a Windows machine: the artifact is a Windows binary with a Windows icon resource in it.",
+  "cli.build.err.no_engine_content": "The engine has no content directory at {path}; a build without it would ship a player that cannot load its own message catalog.",
+  "cli.build.err.output_exists": "{path} already exists and was not written by luaug build. Pass --force to clear it, or choose another --output.",
+  "cli.build.err.icon_failed": "The icon at {path} could not be put into the artifact, so the game would have shipped wearing the engine's face.",
+  "cli.build.warn.no_iconpatch": "iconpatch was not found, so the artifact keeps the engine's icon. Build it, or set LUAUG_ICONPATCH.",
   "cli.new.created": "Created {path}. Next: cd {name} && rokit install && luaug dev",
   "cli.new.err.exists": "{path} already exists.",
   "cli.new.err.unknown_template": "No template named \"{name}\". The v1 template is \"starter\".",

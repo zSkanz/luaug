@@ -86,6 +86,21 @@ add_executable(luaug_host src/main.cpp)
 set_target_properties(luaug_host PROPERTIES OUTPUT_NAME luaug-host)
 target_link_libraries(luaug_host PRIVATE luaug::app luaug::warnings)
 
+# The application's identity, embedded in the artifact rather than left beside
+# it (roadmap M8). Windows only here because a Windows icon IS a PE resource;
+# the macOS and Linux halves are a bundle's `Info.plist` and a `.desktop` entry,
+# and both belong to a packaging step neither of this machine's two tiers can
+# run. `luaug.rc` says what this is and why a game replaces it.
+if(WIN32)
+    target_sources(luaug_host PRIVATE "${CMAKE_SOURCE_DIR}/branding/luaug.rc")
+    # So a change to the artwork rebuilds the binary that carries it. CMake does
+    # not scan an .rc for its dependencies, and an icon that silently kept the
+    # previous build's bytes is exactly the regression the read-back check
+    # exists to catch -- it should never have to.
+    set_property(SOURCE "${CMAKE_SOURCE_DIR}/branding/luaug.rc" APPEND PROPERTY OBJECT_DEPENDS
+        "${CMAKE_SOURCE_DIR}/branding/icon/luaug.ico")
+endif()
+
 # The catalog ships beside the binary as content, because the host resolves it
 # relative to its own location rather than the source tree -- the same shape a
 # packaged build uses (architecture.md §8).

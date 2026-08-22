@@ -92,6 +92,10 @@ add_subdirectory(tools/imgcmp)
 # runtime: it is what `luaug build-assets` drives.
 add_subdirectory(tools/assetc)
 
+# The application-identity tool (M8). Windows-only inside; see its CMakeLists
+# for why a Windows icon has no portable writer.
+add_subdirectory(tools/iconpatch)
+
 # Standalone native samples, after every module they may link. They consume the
 # engine and nothing in the engine consumes them, so they come last.
 add_subdirectory(samples)

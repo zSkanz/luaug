@@ -403,22 +403,34 @@ int main(int argc, char** argv)
     for (int i = 1; i < argc; ++i)
         args.emplace_back(argv[i]);
 
-    if (args.empty()) {
+    // **A packaged game is a folder that runs** (roadmap M8). `luaug build`
+    // produces `<Game>.exe` beside a `game/` directory, and the player is this
+    // same host: given no script, it mounts the project next to itself. That is
+    // the whole of what makes the artifact double-clickable, and it is a
+    // convention rather than a configuration file, because a configuration file
+    // would be a second thing that can go missing.
+    const std::filesystem::path packagedProject = luaug::platform::paths().executableDir / "game";
+    std::error_code packagedError;
+    const bool hasPackagedProject = std::filesystem::is_directory(packagedProject, packagedError);
+
+    if (args.empty() && !hasPackagedProject) {
         luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.no_script"));
         return kExitUsage;
     }
 
-    if (args[0] == "--version") {
+    if (!args.empty() && args[0] == "--version") {
         printVersion();
         return kExitOk;
     }
 
-    if (args[0] == "--help") {
+    if (!args.empty() && args[0] == "--help") {
         luaug::core::log(LogLevel::Info, LUAUG_TR("engine.cli.usage"));
         return kExitOk;
     }
 
     luaug::app::EngineOptions options;
+    if (hasPackagedProject)
+        options.scriptPath = packagedProject;
     luaug::app::GraphicsOverrides graphicsOverrides;
     bool sizeFromFlags = false;
     if (const int usageExit = parseOptions(args, options, graphicsOverrides, sizeFromFlags); usageExit != kExitOk)
@@ -445,6 +457,12 @@ int main(int argc, char** argv)
 
         options.graphics = config.graphics;
         options.windowTitle = config.windowTitle;
+
+        // Before any window exists, because the shell reads a process's
+        // identity when it first shows one -- and a pinned shortcut that lost
+        // its icon is not something a later call can undo.
+        luaug::platform::setApplicationId(config.id);
+
         if (!sizeFromFlags && config.windowWidth > 0 && config.windowHeight > 0) {
             options.width = config.windowWidth;
             options.height = config.windowHeight;

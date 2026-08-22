@@ -9,6 +9,8 @@
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_platform_defines.h>
 #include <chrono>
+#include <string>
+#include <vector>
 
 #if defined(_WIN32)
 // windows.h FIRST: psapi.h declares its functions with the Win32 typedefs and
@@ -22,6 +24,9 @@
 // clang-format off
 #include <windows.h>
 #include <psapi.h>
+// `SetCurrentProcessExplicitAppUserModelID` lives here, and shobjidl_core.h has
+// the same ordering requirement psapi.h does.
+#include <shobjidl_core.h>
 // clang-format on
 #elif defined(__linux__)
 #include <cstdio>
@@ -170,6 +175,81 @@ u64 residentBytes() noexcept
     return static_cast<u64>(info.resident_size);
 #else
     return 0;
+#endif
+}
+
+std::vector<std::byte> applicationIconBytes()
+{
+#if defined(_WIN32)
+    // Ordinal 1, which is what `luaug.rc` names and what `luaug build` replaces.
+    // The GROUP is what an executable's icon actually is: a directory of sizes,
+    // each naming an `RT_ICON` of its own.
+    const HRSRC groupHandle = ::FindResourceW(nullptr, MAKEINTRESOURCEW(1), MAKEINTRESOURCEW(14 /* RT_GROUP_ICON */));
+    if (groupHandle == nullptr)
+        return {};
+    const HGLOBAL group = ::LoadResource(nullptr, groupHandle);
+    if (group == nullptr)
+        return {};
+    const auto* directory = static_cast<const unsigned char*>(::LockResource(group));
+    if (directory == nullptr)
+        return {};
+
+    const auto count = static_cast<u32>(directory[4]) | (static_cast<u32>(directory[5]) << 8);
+    if (count == 0)
+        return {};
+
+    // The LARGEST entry, because this is a window icon and the compositor
+    // downscales. A group directory entry is 14 bytes: width, height, colours,
+    // reserved, planes, bit count, byte count, and the id of its `RT_ICON`.
+    u32 bestId = 0;
+    u32 bestPixels = 0;
+    for (u32 index = 0; index < count; ++index) {
+        const unsigned char* entry = directory + 6 + static_cast<std::size_t>(index) * 14u;
+        // Zero means 256 in an icon directory, which is the size that matters
+        // most here and the one a naive read discards.
+        const u32 width = entry[0] == 0 ? 256u : entry[0];
+        const u32 height = entry[1] == 0 ? 256u : entry[1];
+        const u32 id = static_cast<u32>(entry[12]) | (static_cast<u32>(entry[13]) << 8);
+        if (width * height > bestPixels) {
+            bestPixels = width * height;
+            bestId = id;
+        }
+    }
+    if (bestId == 0)
+        return {};
+
+    const HRSRC iconHandle = ::FindResourceW(nullptr, MAKEINTRESOURCEW(bestId), MAKEINTRESOURCEW(3 /* RT_ICON */));
+    if (iconHandle == nullptr)
+        return {};
+    const DWORD size = ::SizeofResource(nullptr, iconHandle);
+    const HGLOBAL icon = ::LoadResource(nullptr, iconHandle);
+    if (icon == nullptr || size == 0)
+        return {};
+    const auto* bytes = static_cast<const std::byte*>(::LockResource(icon));
+    if (bytes == nullptr)
+        return {};
+
+    return std::vector<std::byte>(bytes, bytes + size);
+#else
+    return {};
+#endif
+}
+
+void setApplicationId([[maybe_unused]] std::string_view id)
+{
+#if defined(_WIN32)
+    if (id.empty())
+        return;
+
+    // The API takes UTF-16 and an id is ASCII reverse-DNS, so the widening is
+    // the whole conversion. Failure is ignored on purpose: the shell has
+    // already decided this process's identity by the time a window exists, and
+    // a game that cannot set it still runs.
+    std::wstring wide;
+    wide.reserve(id.size());
+    for (const char c : id)
+        wide.push_back(static_cast<wchar_t>(static_cast<unsigned char>(c)));
+    (void)::SetCurrentProcessExplicitAppUserModelID(wide.c_str());
 #endif
 }
 

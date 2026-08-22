@@ -400,3 +400,46 @@ TEST_CASE("readFile fails without touching the caller's buffer")
     CHECK_FALSE(luaug::platform::readTextFile(std::filesystem::temp_directory_path(), text));
     CHECK(text == "kept");
 }
+
+// --- Application identity (roadmap M8) ---------------------------------------
+//
+// This test binary links `branding/luaug.rc`, the same resource `luaug-host`
+// carries, precisely so this claim can be made at all: an icon is a property of
+// an EXECUTABLE, and no library can be asked whether it has one.
+
+TEST_CASE("an executable can read its own icon back out of itself")
+{
+    const std::vector<std::byte> icon = luaug::platform::applicationIconBytes();
+
+#if defined(_WIN32)
+    // The whole failure this closes is an icon that is wrong and breaks
+    // nothing: the program runs, the window opens, and it wears the wrong face.
+    // Nothing fails, so nothing reports it -- unless something reads it back.
+    REQUIRE_FALSE(icon.empty());
+
+    // Every entry of `branding/icon/luaug.ico` is PNG-compressed, which is not
+    // decoration: the window icon is decoded by stb_image, and a BMP-encoded
+    // icon entry would need a DIB reader nothing in this engine has. If the
+    // artwork is ever regenerated with BMP entries, this is where it says so
+    // rather than in a window that quietly has no icon.
+    REQUIRE(icon.size() > 8);
+    CHECK(static_cast<unsigned char>(icon[0]) == 0x89);
+    CHECK(static_cast<char>(icon[1]) == 'P');
+    CHECK(static_cast<char>(icon[2]) == 'N');
+    CHECK(static_cast<char>(icon[3]) == 'G');
+#else
+    // Empty rather than an error: a Linux window's icon comes from a `.desktop`
+    // entry and a macOS one from the bundle, so there is nothing in the
+    // executable to find and that is not a failure.
+    CHECK(icon.empty());
+#endif
+}
+
+TEST_CASE("setting the application id is safe to call with nothing to set")
+{
+    // Idempotent and total, because it runs before anything else on a path where
+    // a project may not name itself. The assertion is that none of these faults.
+    luaug::platform::setApplicationId("");
+    luaug::platform::setApplicationId("dev.local.luaug-test");
+    luaug::platform::setApplicationId("dev.local.luaug-test");
+}
