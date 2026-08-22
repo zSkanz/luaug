@@ -11,11 +11,16 @@
 # whose output the determinism test hashes.
 cmake_minimum_required(VERSION 3.24)
 
-foreach(required HOST ASSETC PROJECT REPORT)
+foreach(required HOST ASSETC PROJECT REPORT GENERATOR REPO WORLD)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "run_soak_gate.cmake needs -D${required}=")
     endif()
 endforeach()
+
+# The world before the pack. See `tests/support/ensure_generated_world.cmake`:
+# both of the gates that consume a generated world used to assume somebody had
+# already run the generator by hand (D046).
+include("${CMAKE_CURRENT_LIST_DIR}/../support/ensure_generated_world.cmake")
 
 set(built "${PROJECT}/.luaug")
 file(MAKE_DIRECTORY "${built}")

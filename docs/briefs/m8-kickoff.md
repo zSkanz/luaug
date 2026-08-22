@@ -31,7 +31,7 @@ decision.
 
 ## Scope checklist (from roadmap)
 
-- [ ] **`examples/10-open-world`** — third-person character exploring a large
+- [x] **`examples/10-open-world`** — third-person character exploring a large
       open world: streamed chunks (terrain + props via the M7 pipeline), Jolt
       physics, day/night cycle (sun animation + tuned tonemap), HUD, ambient
       audio, all hot-reloadable.
@@ -225,6 +225,18 @@ it the character instead. This is that game.
 _(appended during the milestone)_
 
 ## Findings
+
+3. **Two gates depended on a world nothing generated, and the way that surfaced
+   is the finding.** M8's own soak gate was written, the flagship's generated
+   world was deleted to prove the gate would rebuild it, and it did not —
+   because M7's two gates over `examples/05-streaming` had never rebuilt
+   anything either. They passed on this machine because a hand-run had left the
+   world on disk, and neither has ever run in CI: the last all-green run across
+   all three tiers predates both of them.
+
+   **A gate whose input is produced by a step nobody automated is a gate that
+   reports on whatever the last person left behind.** Fixed for all three by one
+   included script, break-verified by deleting the world. Recorded as D046.
 
 2. **`luaug new` had not worked since the CLI's commands moved into a
    subdirectory, and the way it was found is the finding.** M8 needed a

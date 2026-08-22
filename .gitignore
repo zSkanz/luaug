@@ -78,3 +78,7 @@ luaug-crash-*.txt
 # for "no giant binary assets in the repo", and generated JSON is the same thing
 # wearing a text extension. `run.bat` regenerates it when it is missing.
 examples/05-streaming/content/world/
+
+# `examples/10-open-world`'s world is generated the same way and for the same
+# reason: 289 chunk sources, 4.8 MB of JSON, from a hundred committed lines.
+examples/10-open-world/content/world/

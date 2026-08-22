@@ -260,6 +260,9 @@ if(LUAUG_BUILD_TESTS)
             -DASSETC=$<TARGET_FILE:assetc>
             -DCONTENT=${CMAKE_SOURCE_DIR}/examples/05-streaming/content
             -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/asset-determinism
+            -DGENERATOR=${CMAKE_SOURCE_DIR}/examples/05-streaming/tools/generate_world.luau
+            -DREPO=${CMAKE_SOURCE_DIR}
+            -DWORLD=${CMAKE_SOURCE_DIR}/examples/05-streaming/content/world
             -DMIN_FILES=290
             -P ${CMAKE_SOURCE_DIR}/tests/assetdeterminism/run_determinism_gate.cmake)
     set_tests_properties(asset_determinism PROPERTIES TIMEOUT 600)
@@ -286,12 +289,47 @@ if(LUAUG_BUILD_TESTS)
             -DHOST=$<TARGET_FILE:luaug_host>
             -DASSETC=$<TARGET_FILE:assetc>
             -DPROJECT=${CMAKE_SOURCE_DIR}/examples/05-streaming
+            -DGENERATOR=${CMAKE_SOURCE_DIR}/examples/05-streaming/tools/generate_world.luau
+            -DREPO=${CMAKE_SOURCE_DIR}
+            -DWORLD=${CMAKE_SOURCE_DIR}/examples/05-streaming/content/world
             -DREPORT=${CMAKE_CURRENT_BINARY_DIR}/streaming-soak.json
             -DFRAMES=18000
             -DCEILING_MB=192
             -DMIN_INSTANCES=1000
             -P ${CMAKE_SOURCE_DIR}/tests/streamsoak/run_soak_gate.cmake)
     set_tests_properties(streaming_soak PROPERTIES TIMEOUT 600)
+
+    # M8's gate: the ten-minute soak over the flagship, at the length a test
+    # suite can afford to run every time. **The full ten minutes is a milestone
+    # gate step and is recorded in the brief**; this is a hundred seconds of
+    # simulation, which is two whole autopilot cycles -- a walk leg and a flight
+    # leg twice each.
+    #
+    # A hundred seconds is not an arbitrary length. The soak's flatten check
+    # compares the second quarter of a run against the fourth, and the demo's
+    # autopilot alternates between a walk and a flight every twenty-five
+    # seconds -- so at this length both quarters land on the same leg, and the
+    # comparison is between like and like rather than between a walk and a
+    # flight.
+    #
+    # The ceiling is 384 MiB against 169 measured. Loose on purpose, as M7's
+    # is: it is a backstop for a leak the growth check somehow misses, and a
+    # ceiling with no headroom is a gate that goes red when an allocator
+    # changes.
+    add_test(NAME openworld_soak
+        COMMAND ${CMAKE_COMMAND}
+            -DHOST=$<TARGET_FILE:luaug_host>
+            -DASSETC=$<TARGET_FILE:assetc>
+            -DPROJECT=${CMAKE_SOURCE_DIR}/examples/10-open-world
+            -DGENERATOR=${CMAKE_SOURCE_DIR}/examples/10-open-world/tools/generate_world.luau
+            -DREPO=${CMAKE_SOURCE_DIR}
+            -DWORLD=${CMAKE_SOURCE_DIR}/examples/10-open-world/content/world
+            -DREPORT=${CMAKE_CURRENT_BINARY_DIR}/openworld-soak.json
+            -DFRAMES=6000
+            -DCEILING_MB=384
+            -DMIN_INSTANCES=2000
+            -P ${CMAKE_SOURCE_DIR}/tests/streamsoak/run_soak_gate.cmake)
+    set_tests_properties(openworld_soak PROPERTIES TIMEOUT 900)
 
     add_test(NAME perf_budget
         COMMAND luaug_host --bench=${CMAKE_SOURCE_DIR}/tests/bench --bench-repeats=1)

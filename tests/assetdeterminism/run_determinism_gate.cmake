@@ -14,11 +14,15 @@
 # make impossible, and therefore the one worth checking.
 cmake_minimum_required(VERSION 3.24)
 
-foreach(required ASSETC CONTENT WORKDIR)
+foreach(required ASSETC CONTENT WORKDIR GENERATOR REPO WORLD)
     if(NOT DEFINED ${required})
         message(FATAL_ERROR "run_determinism_gate.cmake needs -D${required}=")
     endif()
 endforeach()
+
+# The world before either build. Both compilations read the same sources, so a
+# missing world would make this compare two empty packs and pass (D046).
+include("${CMAKE_CURRENT_LIST_DIR}/../support/ensure_generated_world.cmake")
 
 function(compile_into label)
     set(out "${WORKDIR}/${label}")
