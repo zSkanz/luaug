@@ -13,6 +13,7 @@ luaug_add_module(app
         src/preserved.cpp
         src/reload.cpp
         src/replay.cpp
+        src/two_worlds.cpp
         src/bench.cpp
         src/screenshot.cpp
         src/soak.cpp
@@ -121,6 +122,7 @@ luaug_add_module_tests(app
         tests/debug_overlay_tests.cpp
         tests/inspector_tests.cpp
         tests/soak_tests.cpp
+        tests/two_worlds_tests.cpp
 )
 
 if(LUAUG_BUILD_TESTS)
@@ -369,6 +371,24 @@ if(LUAUG_BUILD_TESTS)
                 -P ${CMAKE_SOURCE_DIR}/tests/rendercapture/run_clock_differential.cmake)
         set_tests_properties(clock_differential PROPERTIES TIMEOUT 120)
     endif()
+
+    # M8's editor-seam proof, and ADR 0017's standing condition coming due: two
+    # `WorldHost`s alive at once, each with its own `ScriptRuntime` -- two Luau
+    # VMs -- rendered into two targets.
+    #
+    # Not a `gpu-golden`: there is no checked-in image and no reference GPU. What
+    # it compares is this machine's own renders against each other, which is why
+    # it is a gate everywhere rather than only where the golden was recorded. It
+    # skips where there is no device, like every other test that needs one.
+    add_test(NAME editor_seam
+        COMMAND ${CMAKE_COMMAND}
+            -DHOST=$<TARGET_FILE:luaug_host>
+            -DROOT=${CMAKE_SOURCE_DIR}/tests/twoworlds
+            -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/two-worlds
+            -P ${CMAKE_SOURCE_DIR}/tests/twoworlds/run_two_worlds_gate.cmake)
+    set_tests_properties(editor_seam PROPERTIES
+        SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
+        TIMEOUT 180)
 
     # The M1 gate's reference screenshot: render a frame on a real GPU, read it
     # back, and compare against a checked-in golden with tools/imgcmp.

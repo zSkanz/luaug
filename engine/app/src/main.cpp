@@ -5,6 +5,7 @@
 #include "luaug/app/bench.h"
 #include "luaug/app/engine.h"
 #include "luaug/app/replay.h"
+#include "luaug/app/two_worlds.h"
 #include "luaug/core/build_info.h"
 #include "luaug/core/error.h"
 #include "luaug/core/i18n.h"
@@ -210,6 +211,14 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
             options.replayRecord = true;
             continue;
         }
+        if (arg.starts_with("--two-worlds=")) {
+            options.twoWorldsRoot = std::filesystem::path(arg.substr(arg.find('=') + 1));
+            continue;
+        }
+        if (arg.starts_with("--two-worlds-out=")) {
+            options.twoWorldsOutDir = std::filesystem::path(arg.substr(arg.find('=') + 1));
+            continue;
+        }
         if (arg.starts_with("--bench=")) {
             options.benchRoot = std::filesystem::path(arg.substr(8));
             continue;
@@ -243,7 +252,7 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
     // budget and no backend, because it never opens a device at all. Validating
     // it as though it were a session would demand `--headless --frames=N` for a
     // mode in which neither means anything.
-    if (!options.replayRoot.empty() || !options.benchRoot.empty())
+    if (!options.replayRoot.empty() || !options.benchRoot.empty() || !options.twoWorldsRoot.empty())
         return kExitOk;
 
     // A conformance run needs a ceiling for the same reason, and a generous one:
@@ -362,6 +371,26 @@ int main(int argc, char** argv)
         if (const std::optional<luaug::core::EngineError> error =
                 luaug::app::runBenchmarks(options.benchRoot, options.benchRepeats, results)) {
             luaug::core::logText(LogLevel::Error, error->message);
+            return kExitScriptError;
+        }
+        return kExitOk;
+    }
+
+    if (!options.twoWorldsRoot.empty()) {
+        if (const std::optional<luaug::core::EngineError> error = luaug::app::runTwoWorldsGate({
+                .root = options.twoWorldsRoot,
+                .outputDir = options.twoWorldsOutDir,
+                .backend = options.backend,
+                .ticks = options.frames == 0 ? 8 : options.frames,
+                .width = options.width,
+                .height = options.height,
+            })) {
+            luaug::core::logText(LogLevel::Error, error->message);
+
+            // Same mapping the session path uses, and for the same reason: a
+            // runner with no driver has not found anything about the seam.
+            if (error->key.hash == LUAUG_TR("rhi.err.device_create_failed").hash)
+                return kExitNoGraphicsDevice;
             return kExitScriptError;
         }
         return kExitOk;

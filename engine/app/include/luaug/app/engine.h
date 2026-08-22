@@ -64,6 +64,17 @@ struct EngineOptions
     // against it. The only way a legitimate semantic change gets a new golden.
     bool replayRecord = false;
 
+    // Runs the editor-seam proof over this directory, which holds two projects
+    // `a/` and `b/` (see `two_worlds.h`). A mode rather than a flag on a normal
+    // run: what it compares is three sessions against each other, so there is
+    // no single session for the frame budget or the screenshot path to describe.
+    std::filesystem::path twoWorldsRoot;
+
+    // Where that proof leaves its four PNGs, or empty to write none. The
+    // assertions compare pixels in memory, so the files are evidence for a
+    // human and never an input to the result.
+    std::filesystem::path twoWorldsOutDir;
+
     // Runs the simulation benchmarks over this directory. Like a replay it
     // opens no device: what it measures is the tick, and a tick that depended
     // on a swapchain would be the finding rather than the measurement.

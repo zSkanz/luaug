@@ -43,7 +43,7 @@ decision.
       resolution, cascade count and distance, render scale, light budget and
       post toggles stop being `constexpr`. Engine settings, not `Lighting`
       properties: a scene must not decide the player's GPU budget (ADR 0038).
-- [ ] **Prove the editor seam is still open** — two `WorldHost`s alive at once,
+- [x] **Prove the editor seam is still open** — two `WorldHost`s alive at once,
       each with its own `ScriptRuntime`, rendered into two targets.
 - [ ] **Application identity** — `branding/` wired up; a game built with
       `luaug build` takes its icon from `[project] icon` in `luaug.toml`;
@@ -211,7 +211,26 @@ _(appended during the milestone)_
 
 ## Findings
 
-_(appended during the milestone)_
+1. **A renderer is not stateless per view, and the seam proof is what said so.**
+   The first version shared one `IRenderer` between the two worlds, on the
+   reasoning that a renderer is pipelines and scratch buffers rather than scene
+   state (ADR 0027). It went red immediately: world A drifted by 453,908 bytes
+   and world B by 1,054,072 against their own solo renders.
+
+   Neither number was a leak of scene DATA. A renderer carries scene HISTORY --
+   the exposure it has adapted towards, and the environment chain it bakes one
+   level per frame (M7.5, Decision 5) -- so the third frame the renderer had ever
+   drawn was never going to match the first, whatever world was in front of it.
+   Two worlds need two renderers, which `renderer.h` already implies for a
+   different reason: "a caller that renders into two formats needs two
+   renderers".
+
+   **The general shape, and it is why the failure was useful rather than
+   annoying: a differential over an instrument with memory is a differential over
+   the instrument as well.** The fix is not tolerance, it is holding the frame
+   COUNT equal and giving each world its own history. Both are in the harness and
+   both are commented, because the next person to add a temporal pass will
+   otherwise rediscover this by watching a green gate turn red.
 
 ## Gate Record
 
