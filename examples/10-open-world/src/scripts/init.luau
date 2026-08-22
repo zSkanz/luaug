@@ -45,10 +45,15 @@ local UIService = game:GetService("UIService")
 
 -- --- Constants ---------------------------------------------------------------
 
---- How long a full day takes, in seconds of SIMULATION time. Long enough that
---- an hour of game time is a few seconds of watching and short enough that a
---- five-minute session sees a sunrise, a noon and a dusk.
-local DayLength = 240
+--- How long a full day takes, in seconds of SIMULATION time.
+---
+--- **Ten minutes rather than four, and a human playing it is why** (D048). At
+--- four minutes the sun crosses the sky ninety times faster than the real one:
+--- every shadow in the frame visibly swings and stretches while you stand
+--- still, which reads as something moving on the ground rather than as a time
+--- of day. Ten minutes still shows a sunrise, a noon and a dusk inside the soak
+--- and inside a session somebody would actually sit through.
+local DayLength = 600
 
 --- The hour a fresh run opens on. Mid-morning: the sun is high enough to light
 --- the ground and low enough to throw the shadows that say where the towers

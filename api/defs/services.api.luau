@@ -377,7 +377,7 @@ local Classes: { Schema.Class } = {
                 Default = "1024",
                 ThreadSafety = "ReadParallel",
                 ErrorKey = "scene.err.number_positive",
-                Doc = "How far from a focus the engine tries to keep chunks resident, in studs. Best effort: a "
+                Doc = "How far from a focus the engine tries to keep chunks resident, in metres. Best effort: a "
                     .. "chunk inside it is wanted, and one outside stays resident until it passes a WIDER ring, "
                     .. "because a single radius makes a focus standing on a boundary load and evict the same "
                     .. "chunk every frame -- and the symptom of that is not a wrong world, it is a stutter "
@@ -389,7 +389,7 @@ local Classes: { Schema.Class } = {
                 Default = "512",
                 ThreadSafety = "ReadParallel",
                 ErrorKey = "scene.err.number_positive",
-                Doc = "The must-have ring, in studs. Everything inside it is guaranteed resident before a focus "
+                Doc = "The must-have ring, in metres. Everything inside it is guaranteed resident before a focus "
                     .. "may advance into it, so the character walks into a world that exists rather than "
                     .. "through one that has not arrived. Read `PauseOutsideLoadedArea` for what happens when it "
                     .. "has not.",
