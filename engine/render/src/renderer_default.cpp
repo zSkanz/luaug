@@ -360,6 +360,10 @@ private:
     // The per-instance vertex stream, and the plan that indexes it. Rebuilt
     // every frame, uploaded once before any render pass -- uploading inside one
     // is what `rhi.err.upload_inside_pass` refuses, and rightly.
+    // Scratch for the shadow fit, kept across frames so a frame allocates
+    // nothing for it.
+    std::vector<ShadowCasterBounds> casterBounds_;
+
     rhi::BufferHandle instanceBuffer_{};
     std::vector<GpuInstance> instanceStaging_;
     std::vector<InstanceBatch> batches_;
@@ -1429,6 +1433,16 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     fit.tanHalfFovY = world.camera.projection.m[1][1] != 0.0f ? 1.0f / world.camera.projection.m[1][1] : 0.3f;
     fit.nearPlane = world.camera.nearPlane;
     fit.origin = world.camera.origin;
+
+    // What can cast, handed to the fit so a cascade can be sized to it. The two
+    // numbers are already on every `DrawItem`; nothing is computed here that the
+    // extraction did not compute.
+    casterBounds_.clear();
+    casterBounds_.reserve(world.draws.size());
+    for (const DrawItem& draw : world.draws)
+        casterBounds_.push_back(ShadowCasterBounds{draw.boundsCenter, draw.boundsRadius});
+    fit.casters = casterBounds_;
+
     const ShadowCascades cascades = fitShadowCascades(fit);
 
     // --- Shadow pass --------------------------------------------------------
@@ -1462,13 +1476,11 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
                             .height = static_cast<core::i32>(kShadowTileResolution)});
 
             // The cascade's sphere, in the same camera-relative space the fit
-            // used and the draws are in. The radius is recovered from the texel
-            // size rather than returned separately: it is the same number the
-            // fit divided by the tile resolution.
-            const CullSphere cull{
-                fit.forward * ((splits[index] + splits[index + 1]) * 0.5f),
-                cascades.texelWorld[index] * 0.5f * tile,
-            };
+            // used and the draws are in. It comes BACK from the fit now: the
+            // box is sized to the casters and the sphere is sized to what the
+            // camera can see, and those stopped being the same number when the
+            // box learned to be smaller than the slice.
+            const CullSphere cull{cascades.cullCentre[index], cascades.cullRadius[index]};
             drawGeometry(cmd, world, meshes, cascades.viewProjection[index], shadowPipeline_, shadowSkinnedPipeline_,
                          Selection::Shadow, &cull);
         }

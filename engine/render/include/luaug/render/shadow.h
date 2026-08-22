@@ -19,6 +19,8 @@
 #include "luaug/core/math.h"
 #include "luaug/core/types.h"
 
+#include <span>
+
 namespace luaug::render {
 
 using core::f32;
@@ -103,6 +105,15 @@ inline constexpr f32 kShadowDepthBiasMetres = 0.02f;
 // reason a filter that changes width is.
 inline constexpr f32 kShadowCascadeBlend = 0.12f;
 
+// One thing that can cast a shadow, as the fit sees it: a bounding sphere in the
+// snapshot's camera-relative space. The same two numbers `DrawItem` already
+// carries, handed over so the fit can size a cascade to what is really there.
+struct ShadowCasterBounds
+{
+    core::Vec3 centre;
+    f32 radius = 0.0f;
+};
+
 // What the fit produces, and what the frame uniforms carry.
 struct ShadowCascades
 {
@@ -118,6 +129,11 @@ struct ShadowCascades
     // The cascade's ortho depth range in metres, so a bias in metres can be
     // turned into one in depth units.
     f32 depthRange[kShadowCascadeCount]{};
+    // The sphere a caster is culled against, in camera-relative space. Returned
+    // rather than recovered from the texel size: the box is no longer the
+    // slice's own sphere, so the two numbers stopped being the same thing.
+    core::Vec3 cullCentre[kShadowCascadeCount];
+    f32 cullRadius[kShadowCascadeCount]{};
 };
 
 // Everything the fit needs, and nothing about a renderer.
@@ -142,6 +158,25 @@ struct ShadowFit
     f32 tanHalfFovY = 0.3f;
     f32 nearPlane = 0.1f;
     core::DVec3 origin;
+    // Everything that can cast into this frame. **What this buys is the whole of
+    // the fix**: a cascade fitted to the camera's frustum slice is a box sized
+    // by what the camera might see, and a directional light near the horizon
+    // projects a flat world into a thin band inside it. Measured on a sunrise
+    // frame of `examples/02-meshes` by binding the atlas to the resolve pass and
+    // looking at it: the entire scene landed in 500 by 90 texels of a 1024 by
+    // 1024 tile, so a one-metre object's shadow was drawn with a handful of them
+    // and came out as dashes that crawled as the sun moved.
+    //
+    // Fitting the box to the casters recovers that, and it is exact rather than
+    // approximate for the reason that makes shadow maps work at all: the
+    // projection IS along the light, so a caster's shadow lands at its own
+    // light-space x and y. A receiver outside those bounds cannot be shadowed by
+    // anything, and the "outside the cascade is lit" answer the sampler already
+    // gives is the right one there.
+    //
+    // Empty is a legal input and means "fit the slice", which is what every unit
+    // test hands it and what a frame with no geometry gets.
+    std::span<const ShadowCasterBounds> casters;
 };
 
 [[nodiscard]] ShadowCascades fitShadowCascades(const ShadowFit& fit) noexcept;

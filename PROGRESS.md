@@ -153,6 +153,15 @@ quietly.
   citations. That file exists because three human-reported defects were removed
   from this one while it was being rewritten to close M4. **A close rewrites this
   file wholesale; it can no longer take the open list with it.**
+- **D044 — the sun's shadows break into hatched dashes as they stretch — is open
+  and is NOT the cascade fit**, which is what the fit commit says about itself.
+  Eleven things are ruled out in the row, each with a build and a measurement,
+  and the one that removes the artifact removes the shadow with it. The next
+  step is named there: read the stored depth against the receiver's for one
+  dashed texel. **Shader-side visualisation is unavailable for that** -- writing
+  a constant into the forward pass's colour makes the entire frame come out one
+  flat colour, because the automatic exposure collapses on it, and getting that
+  instrument back is worth doing before the next attempt.
 - **D004 — the inspector crash while dragging `Size`/`CFrame` — is still open and
   still not reproduced.** Two halves are ruled out: the write path driven through
   zero, negative, 1e30 and infinity with a render extraction every frame, and 25
