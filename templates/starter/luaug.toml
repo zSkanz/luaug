@@ -17,3 +17,21 @@ size = [1280, 720]
 # The port `luaug dev` listens on. The engine dials out to it and never listens
 # itself (ADR 0035).
 port = 4560
+
+[graphics]
+# The quality family (ADR 0044). Three layers, each overriding the one before:
+# this preset, then the individual keys below it, then the host's own flags --
+# so `luaug run --quality=low` is a player saying "not on this machine".
+#
+# These are ENGINE settings and not `Lighting` properties: `Lighting` describes
+# the world, and these describe the machine it is being shown on.
+quality = "high"
+# render_scale = 1.0        # 0.5 to 1.0; the world renders at this fraction, the UI does not
+# shadow_resolution = 1024  # one cascade's tile, in texels
+# shadow_cascades = 4       # 0 through 4; 0 is "the sun casts no shadow"
+# shadow_distance = 120.0   # metres
+# light_budget = 256
+# bloom = true
+# ambient_occlusion = true
+# anti_aliasing = true
+# auto_exposure = true

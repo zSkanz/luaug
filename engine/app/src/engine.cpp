@@ -317,6 +317,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             {
                 .titleKey = LUAUG_TR("platform.window.title"),
                 .titleArgs = titleArgs,
+                .title = options.windowTitle,
                 .width = options.width,
                 .height = options.height,
             },
@@ -530,6 +531,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             return;
         }
         renderer = render::createDefaultRenderer();
+        // Before `create`, because the shadow atlas is sized by the settings and
+        // building it twice on the first frame would be a wasted allocation the
+        // size of the whole map.
+        renderer->setSettings(options.graphics);
         if (auto error = renderer->create(*device, shaders, colorFormat); error.has_value()) {
             core::logText(LogLevel::Warn, error->message);
             renderer.reset();

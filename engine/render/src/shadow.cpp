@@ -83,7 +83,7 @@ ShadowCascades fitShadowCascades(const ShadowFit& fit) noexcept
     const Mat4 lightRotation = core::lookAt(Vec3{}, -direction, up);
 
     f32 splits[kShadowCascadeCount + 1]{};
-    shadowSplits(fit.nearPlane, kShadowDistance, kShadowSplitLambda, splits);
+    shadowSplits(fit.nearPlane, fit.distance, kShadowSplitLambda, splits);
 
     for (u32 index = 0; index < kShadowCascadeCount; ++index) {
         const f32 sliceNear = splits[index];
@@ -187,7 +187,7 @@ ShadowCascades fitShadowCascades(const ShadowFit& fit) noexcept
             }
         }
 
-        const f32 texel = (2.0f * extent) / static_cast<f32>(kShadowTileResolution);
+        const f32 texel = (2.0f * extent) / static_cast<f32>(fit.tileResolution);
 
         // The snap, in f64 and against the WORLD position, for the reason
         // `ShadowFit::origin` documents. What comes out is under half a texel

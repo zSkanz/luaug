@@ -3,6 +3,7 @@
 
 #include "luaug/core/error.h"
 #include "luaug/core/types.h"
+#include "luaug/render/settings.h"
 #include "luaug/rhi/types.h"
 
 #include <filesystem>
@@ -118,6 +119,16 @@ struct EngineOptions
     // What "the world loaded" means for this particular scene. Zero asserts
     // nothing; see `soak.h` for why a soak needs to be told.
     u64 soakMinimumInstances = 0;
+
+    // The quality family, already resolved through its three layers by the time
+    // it gets here (project_config.h): a preset, the project file, the flags.
+    // The host applies it to the renderer and never re-derives it.
+    render::GraphicsSettings graphics;
+
+    // The game's own window title, passed through rather than translated -- it
+    // is the game's string and not the engine's (R3, and the split
+    // `log()`/`logText()` draws). Empty uses the engine's titled window.
+    std::string windowTitle;
 
     i32 width = 1280;
     i32 height = 720;

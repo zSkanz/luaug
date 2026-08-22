@@ -9,8 +9,12 @@
 #include <system_error>
 #include <utility>
 
+#include "number_parse.h"
+
 namespace luaug::core {
 namespace {
+
+using detail::decimalToDouble;
 
 // Bounds the recursion rather than the grammar: the parser descends with the
 // document, so a corrupt or hostile file that is nothing but '[' must reach a
@@ -44,35 +48,6 @@ void appendUtf8(std::string& out, u32 codepoint)
         out.push_back(static_cast<char>(0x80u | ((codepoint >> 6) & 0x3Fu)));
         out.push_back(static_cast<char>(0x80u | (codepoint & 0x3Fu)));
     }
-}
-
-// strtod rather than std::from_chars: the floating-point overloads of
-// from_chars are still missing from one of the standard libraries the engine
-// builds against, and strtod is the correctly-rounded conversion available on
-// all of them. It reads the *locale's* decimal separator, so the separator is
-// substituted rather than assumed -- nothing here calls setlocale, but a
-// dependency that does must not silently turn 1.5 into 1.
-//
-// False when the magnitude overflows to infinity. JSON cannot express that and
-// no caller can use it, so it is a diagnostic rather than a HUGE_VAL that looks
-// like a number. Underflow to zero is left alone: it is the value.
-bool decimalToDouble(std::string_view token, f64& out)
-{
-    std::string buffer(token);
-
-    const char* separator = std::localeconv()->decimal_point;
-    if (separator != nullptr && std::string_view{separator} != ".") {
-        const usize dot = buffer.find('.');
-        if (dot != std::string::npos)
-            buffer.replace(dot, 1, separator);
-    }
-
-    const f64 value = std::strtod(buffer.c_str(), nullptr);
-    if (std::isinf(value))
-        return false;
-
-    out = value;
-    return true;
 }
 
 } // namespace

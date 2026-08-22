@@ -30,7 +30,8 @@ WindowPtr createWindow(const WindowDesc& desc, core::EngineError* outError)
     if (!desc.visible)
         flags |= SDL_WINDOW_HIDDEN;
 
-    const std::string title = core::engineCatalog().format(desc.titleKey, desc.titleArgs);
+    const std::string title =
+        desc.title.empty() ? core::engineCatalog().format(desc.titleKey, desc.titleArgs) : std::string(desc.title);
 
     SDL_Window* handle = SDL_CreateWindow(title.c_str(), desc.width, desc.height, flags);
     if (handle == nullptr) {

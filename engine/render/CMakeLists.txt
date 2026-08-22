@@ -24,6 +24,7 @@ luaug_add_module(render
         src/lighting.cpp
         src/native_accessors.cpp
         src/renderer_default.cpp
+        src/settings.cpp
         src/mesh_loader.cpp
         src/scene_types.cpp
         src/shadow.cpp
@@ -66,6 +67,7 @@ luaug_add_module_tests(render
         tests/render_world_tests.cpp
         tests/mesh_cache_tests.cpp
         tests/lighting_tests.cpp
+        tests/settings_tests.cpp
         tests/shadow_tests.cpp
         tests/animation_tests.cpp
 )

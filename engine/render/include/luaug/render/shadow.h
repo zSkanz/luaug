@@ -197,6 +197,13 @@ struct ShadowFit
     // Empty is a legal input and means "fit the slice", which is what every unit
     // test hands it and what a frame with no geometry gets.
     std::span<const ShadowCasterBounds> casters;
+
+    // The two numbers M8 turned from constants into settings (ADR 0044). They
+    // default to what the constants above say, so every existing caller and
+    // every unit test still describes the shipped configuration by saying
+    // nothing.
+    f32 distance = kShadowDistance;
+    u32 tileResolution = kShadowTileResolution;
 };
 
 [[nodiscard]] ShadowCascades fitShadowCascades(const ShadowFit& fit) noexcept;

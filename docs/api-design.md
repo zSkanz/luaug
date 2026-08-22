@@ -1054,10 +1054,39 @@ from `Heartbeat` on the same tick come due on the same tick.
 
 **Config format: `luaug.toml`** (consistent with rokit.toml/pesde.toml;
 comments; static). Sections: `[project]` name, id (reverse-DNS), version,
-`engine = "0.1"`; `[window]` title, size; `[dev]` port; `[assets]` extra
+`engine = "0.1"`, `icon`; `[window]` title, size; `[dev]` port; `[assets]` extra
 source dirs, import options; `[permissions]` net_serve, fs_paths (§7);
-`[memory]` optional script-heap hard cap and budget overrides; `[build]`
-targets, bytecode opt level.
+`[memory]` optional script-heap hard cap and budget overrides; `[graphics]`
+the quality family (below); `[build]` targets, bytecode opt level.
+
+**`[graphics]` — the quality family (M8, ADR 0044).** These are *engine*
+settings and not `Lighting` properties: `Lighting` describes the world and
+travels with the scene, while these describe the machine it is being shown on.
+A script cannot write them, deliberately — a scene must not decide the player's
+GPU budget.
+
+```toml
+[graphics]
+quality = "high"          # low | medium | high | ultra -- a named set of every field below
+render_scale = 1.0        # 0.5 to 1.0; the world renders at this fraction, the UI does not
+shadow_resolution = 1024  # one cascade's tile, in texels; the atlas is two tiles by two
+shadow_cascades = 4       # 0 through 4; 0 is "the sun casts no shadow"
+shadow_distance = 120.0   # metres
+light_budget = 256        # how many lights one frame may carry
+bloom = true
+ambient_occlusion = true
+anti_aliasing = true
+auto_exposure = true
+```
+
+Three layers, each overriding the one before: the preset, then this table, then
+the host's own flags (`--quality=`, `--render-scale=`, `--no-bloom`, …). `high`
+is exactly what the engine ships with, so a project that says nothing gets it.
+
+**`[project] icon`** is a project-relative path to a PNG or a multi-size `.ico`.
+The dev host sets it on its window; `luaug build` embeds it in the packaged
+artifact, because a game built with this engine wears its own face rather than
+the engine's.
 
 **`luaug new my-game` template:**
 ```

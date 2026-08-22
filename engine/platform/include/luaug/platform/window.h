@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <span>
+#include <string_view>
 
 namespace luaug::platform {
 
@@ -26,11 +27,17 @@ struct WindowSize
 struct WindowDesc
 {
     // A window title is user-facing text, so it is a catalog key rather than a
-    // string (R3). Titles authored by a game -- which are not the engine's to
-    // translate -- will need a passthrough setter, the same split log()/
-    // logText() already draws; nothing in M1 sets one, so it does not exist yet.
+    // string (R3). Used when `title` below is empty, which is every window the
+    // engine opens for itself.
     core::TextKey titleKey;
     std::span<const core::I18nArg> titleArgs{};
+
+    // The passthrough this struct reserved at M1 and M8 needed: a title
+    // AUTHORED BY A GAME, from `[window] title` in its own project file. It is
+    // not the engine's string and there is nothing to translate it against --
+    // the same split `log()` and `logText()` already draw. Non-empty wins over
+    // `titleKey`.
+    std::string_view title{};
 
     i32 width = 1280;
     i32 height = 720;

@@ -11,6 +11,7 @@ luaug_add_module(app
         src/backends.cpp
         src/engine.cpp
         src/preserved.cpp
+        src/project_config.cpp
         src/reload.cpp
         src/replay.cpp
         src/two_worlds.cpp
@@ -371,6 +372,21 @@ if(LUAUG_BUILD_TESTS)
                 -P ${CMAKE_SOURCE_DIR}/tests/rendercapture/run_clock_differential.cmake)
         set_tests_properties(clock_differential PROPERTIES TIMEOUT 120)
     endif()
+
+    # M8's graphics settings family, as a differential. See the driver for why
+    # the claim is "these two must differ" rather than a golden: a preset that
+    # is parsed and then reaches nothing renders exactly what it did before.
+    add_test(NAME graphics_settings_differential
+        COMMAND ${CMAKE_COMMAND}
+            -DHOST=$<TARGET_FILE:luaug_host>
+            -DIMGCMP=$<TARGET_FILE:imgcmp>
+            -DSCRIPT=${CMAKE_SOURCE_DIR}/tests/screenshots/specular
+            -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/settings-differential
+            -DFRAMES=120
+            -P ${CMAKE_SOURCE_DIR}/tests/screenshots/run_settings_differential.cmake)
+    set_tests_properties(graphics_settings_differential PROPERTIES
+        SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
+        TIMEOUT 180)
 
     # M8's editor-seam proof, and ADR 0017's standing condition coming due: two
     # `WorldHost`s alive at once, each with its own `ScriptRuntime` -- two Luau

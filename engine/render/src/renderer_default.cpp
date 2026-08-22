@@ -3,6 +3,7 @@
 #include "luaug/render/clusters.h"
 #include "luaug/render/environment.h"
 #include "luaug/render/renderer.h"
+#include "luaug/render/settings.h"
 #include "luaug/render/shader_types.h"
 #include "luaug/render/shadow.h"
 
@@ -19,6 +20,10 @@ using core::f32;
 using core::Mat4;
 using core::u32;
 using core::Vec3;
+
+// Further than any camera in this engine can see, so a cascade boundary set to
+// it is never the one a fragment selects.
+constexpr f32 kUnreachableDistance = 1.0e9f;
 
 constexpr rhi::TextureFormat kHdrFormat = rhi::TextureFormat::Rgba16Float;
 constexpr rhi::TextureFormat kDepthFormat = rhi::TextureFormat::D32Float;
@@ -136,6 +141,29 @@ void fullscreenPass(rhi::ICmdList& cmd, rhi::PipelineHandle pipeline, rhi::Textu
     cmd.endRenderPass();
 }
 
+// A pass that clears a target and draws nothing.
+//
+// What it is for: a post pass that a setting switched off still has a texture
+// downstream of it, and a texture the renderer samples must never hold whatever
+// the allocator handed back. Clearing is both cheaper than the pass it replaces
+// and the only answer that does not depend on the contents of memory -- the
+// alternative, binding it anyway and multiplying by zero, turns an uninitialised
+// NaN into a black frame.
+void clearPass(rhi::ICmdList& cmd, rhi::TextureHandle target, u32 width, u32 height, std::string_view name,
+               rhi::ColorRgba color)
+{
+    const std::array<rhi::ColorAttachment, 1> attachment{rhi::ColorAttachment{
+        .texture = target,
+        .loadOp = rhi::LoadOp::Clear,
+        .storeOp = rhi::StoreOp::Store,
+        .clearColor = color,
+    }};
+    cmd.beginRenderPass({.colorAttachments = attachment, .debugName = name});
+    cmd.setViewport({.width = static_cast<f32>(width), .height = static_cast<f32>(height)});
+    cmd.setScissor({.width = static_cast<core::i32>(width), .height = static_cast<core::i32>(height)});
+    cmd.endRenderPass();
+}
+
 [[nodiscard]] u32 environmentLevelSize(u32 level) noexcept
 {
     const u32 size = kEnvironmentBaseSize >> level;
@@ -228,11 +256,30 @@ public:
     void render(rhi::IDevice& device, rhi::ICmdList& cmd, const RenderTarget& target, const RenderWorld& world,
                 const MeshCache& meshes) override;
     [[nodiscard]] bool valid() const noexcept override { return valid_; }
-    [[nodiscard]] f32 shadowRadius() const noexcept override { return kShadowRadius; }
+
+    // Scaled with the shadow distance, because that is what it describes: the
+    // fit's own radius is derived from how far the sun casts, and a setting that
+    // halved the distance while extraction kept every caster within 220 metres
+    // would be paying for casters no cascade covers.
+    //
+    // Zero when the sun casts into no cascades at all, which is what turns the
+    // whole caster-retention rule off rather than leaving it running for a
+    // shadow map nothing writes.
+    [[nodiscard]] f32 shadowRadius() const noexcept override
+    {
+        if (settings_.shadowCascades == 0)
+            return 0.0f;
+        return kShadowRadius * (settings_.shadowDistance / kShadowDistance);
+    }
+
     [[nodiscard]] RendererStats stats() const noexcept override { return stats_; }
+
+    void setSettings(const GraphicsSettings& settings) override;
+    [[nodiscard]] const GraphicsSettings& settings() const noexcept override { return settings_; }
 
 private:
     [[nodiscard]] std::optional<core::EngineError> ensureTargets(rhi::IDevice& device, u32 width, u32 height);
+    [[nodiscard]] std::optional<core::EngineError> ensureShadowMap(rhi::IDevice& device);
     // Which draws one call submits. `Shadow` takes every item in the list --
     // a caster outside the view still casts into it -- while the two forward
     // selectors take only what the camera can see, each from its own pass.
@@ -389,6 +436,19 @@ private:
     // looks like a driver problem.
     u32 width_ = 0;
     u32 height_ = 0;
+
+    // What the settings resolve to for this frame: the world is rendered at a
+    // fraction of the output and the final resolve upscales it. `width_` above
+    // is what the internal chain was BUILT for, and these two are what it is
+    // built for now -- the same number until a render scale is set.
+    u32 renderWidth_ = 0;
+    u32 renderHeight_ = 0;
+
+    GraphicsSettings settings_;
+    // The tile resolution `shadowMap_` was created for, so a settings change
+    // rebuilds it and a repeated one does not.
+    u32 shadowTile_ = 0;
+
     bool defaultsUploaded_ = false;
     bool brdfUploaded_ = false;
 };
@@ -819,14 +879,7 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
         return core::makeError(LUAUG_TR("render.err.target_create_failed"));
     }
 
-    shadowMap_ = device.createTexture({
-        .format = kShadowFormat,
-        .usage = rhi::TextureUsage::DepthStencilTarget | rhi::TextureUsage::Sampled,
-        .width = kShadowAtlasResolution,
-        .height = kShadowAtlasResolution,
-        .debugName = "shadow-atlas",
-    });
-    if (!shadowMap_.valid()) {
+    if (ensureShadowMap(device).has_value()) {
         destroy(device);
         return core::makeError(LUAUG_TR("render.err.target_create_failed"));
     }
@@ -890,10 +943,48 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
     return std::nullopt;
 }
 
+// The atlas is always two tiles by two, whatever the cascade count: fewer
+// cascades buy submission rather than memory, and `shadowTileResolution` is the
+// dial that buys memory (settings.h).
+std::optional<core::EngineError> DefaultRenderer::ensureShadowMap(rhi::IDevice& device)
+{
+    if (shadowMap_.valid() && shadowTile_ == settings_.shadowTileResolution)
+        return std::nullopt;
+
+    if (shadowMap_.valid())
+        device.destroy(shadowMap_);
+
+    const u32 atlas = settings_.shadowTileResolution * 2;
+    shadowMap_ = device.createTexture({
+        .format = kShadowFormat,
+        .usage = rhi::TextureUsage::DepthStencilTarget | rhi::TextureUsage::Sampled,
+        .width = atlas,
+        .height = atlas,
+        .debugName = "shadow-atlas",
+    });
+    if (!shadowMap_.valid())
+        return core::makeError(LUAUG_TR("render.err.target_create_failed"));
+
+    shadowTile_ = settings_.shadowTileResolution;
+    return std::nullopt;
+}
+
+void DefaultRenderer::setSettings(const GraphicsSettings& settings)
+{
+    // Clamped here as well as at every source, because this is the last door: a
+    // caller that builds a `GraphicsSettings` by hand should not be able to ask
+    // for a render scale of zero and get a target of no pixels.
+    settings_ = clampSettings(settings);
+}
+
 std::optional<core::EngineError> DefaultRenderer::ensureTargets(rhi::IDevice& device, u32 width, u32 height)
 {
     if (hdr_.valid() && width == width_ && height == height_)
         return std::nullopt;
+
+    // `width`/`height` arrive already scaled -- see `render`, which is the one
+    // place the settings' render scale is applied, so that nothing downstream
+    // has to remember to.
 
     for (rhi::TextureHandle* texture : {&hdr_, &depth_, &ldr_, &occlusion_, &occlusionBlur_, &luminance64_,
                                         &luminance8_, &exposure_[0], &exposure_[1]}) {
@@ -1379,7 +1470,22 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
 {
     if (!valid_ || !target.color.valid() || target.width == 0 || target.height == 0)
         return;
-    if (ensureTargets(device, target.width, target.height).has_value())
+
+    // **The one place the render scale is applied.** Everything below draws the
+    // WORLD at `renderWidth_` by `renderHeight_` and only the final resolve
+    // writes `target`, so a reduced scale costs every per-pixel pass at once
+    // and costs the 2D pass -- which the host draws afterwards, at the target's
+    // own size -- nothing at all.
+    const auto scaled = [&](u32 value) {
+        const auto result = static_cast<u32>(static_cast<f32>(value) * settings_.renderScale + 0.5f);
+        return result > 0 ? result : 1u;
+    };
+    renderWidth_ = scaled(target.width);
+    renderHeight_ = scaled(target.height);
+
+    if (ensureShadowMap(device).has_value())
+        return;
+    if (ensureTargets(device, renderWidth_, renderHeight_).has_value())
         return;
 
     if (!defaultsUploaded_) {
@@ -1414,7 +1520,15 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         cmd.upload(instanceBuffer_, asBytes(instanceStaging_.data(), instanceStaging_.size() * sizeof(GpuInstance)), 0);
     }
 
-    buildClusters(world.camera, world.lights, clusters_);
+    // The light budget, applied where the lights enter the frame. Truncation
+    // rather than selection: extraction order is deterministic (R10), so which
+    // lights survive a budget is the same answer on every machine and in every
+    // replay of the same world.
+    const std::span<const RenderLight> budgetedLights =
+        world.lights.size() > settings_.lightBudget
+            ? std::span<const RenderLight>(world.lights.data(), settings_.lightBudget)
+            : std::span<const RenderLight>(world.lights);
+    buildClusters(world.camera, budgetedLights, clusters_);
     cmd.uploadTexture(clusterGrid_, asBytes(clusters_.grid.data(), clusters_.grid.size() * sizeof(f32)), 0);
     cmd.uploadTexture(lightIndices_, asBytes(clusters_.indices.data(), clusters_.indices.size() * sizeof(f32)), 0);
     cmd.uploadTexture(lightData_, asBytes(clusters_.lightData.data(), clusters_.lightData.size() * sizeof(f32)), 0);
@@ -1442,6 +1556,8 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     for (const DrawItem& draw : world.draws)
         casterBounds_.push_back(ShadowCasterBounds{draw.boundsCenter, draw.boundsRadius});
     fit.casters = casterBounds_;
+    fit.distance = settings_.shadowDistance;
+    fit.tileResolution = settings_.shadowTileResolution;
 
     const ShadowCascades cascades = fitShadowCascades(fit);
 
@@ -1462,18 +1578,23 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     });
     if (world.camera.valid) {
         f32 splits[kShadowCascadeCount + 1]{};
-        shadowSplits(world.camera.nearPlane, kShadowDistance, kShadowSplitLambda, splits);
+        shadowSplits(world.camera.nearPlane, settings_.shadowDistance, kShadowSplitLambda, splits);
 
-        for (u32 index = 0; index < kShadowCascadeCount; ++index) {
-            const auto tile = static_cast<f32>(kShadowTileResolution);
+        // **A cascade nothing renders into is a cascade that is cleared, and a
+        // cleared depth of 1 reads as lit.** That is the whole mechanism behind
+        // `shadowCascades` being a setting: the sampler needs no idea how many
+        // there are, because a fragment that selects a tile nobody drew into
+        // gets the same answer as one that falls outside a cascade entirely.
+        for (u32 index = 0; index < settings_.shadowCascades; ++index) {
+            const auto tile = static_cast<f32>(settings_.shadowTileResolution);
             const f32 x = static_cast<f32>(index & 1u) * tile;
             const f32 y = static_cast<f32>(index >> 1u) * tile;
             cmd.setPipeline(shadowPipeline_);
             cmd.setViewport({.x = x, .y = y, .width = tile, .height = tile});
             cmd.setScissor({.x = static_cast<core::i32>(x),
                             .y = static_cast<core::i32>(y),
-                            .width = static_cast<core::i32>(kShadowTileResolution),
-                            .height = static_cast<core::i32>(kShadowTileResolution)});
+                            .width = static_cast<core::i32>(settings_.shadowTileResolution),
+                            .height = static_cast<core::i32>(settings_.shadowTileResolution)});
 
             // The cascade's sphere, in the same camera-relative space the fit
             // used and the draws are in. It comes BACK from the fit now: the
@@ -1511,8 +1632,8 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         .depthStencil = {.texture = depth_, .loadOp = rhi::LoadOp::Clear, .storeOp = rhi::StoreOp::Store},
         .debugName = "depth-prepass",
     });
-    cmd.setViewport({.width = static_cast<f32>(target.width), .height = static_cast<f32>(target.height)});
-    cmd.setScissor({.width = static_cast<core::i32>(target.width), .height = static_cast<core::i32>(target.height)});
+    cmd.setViewport({.width = static_cast<f32>(renderWidth_), .height = static_cast<f32>(renderHeight_)});
+    cmd.setScissor({.width = static_cast<core::i32>(renderWidth_), .height = static_cast<core::i32>(renderHeight_)});
     if (world.camera.valid) {
         cmd.setPipeline(depthPrepassPipeline_);
         drawGeometry(cmd, world, meshes, world.camera.viewProjection, depthPrepassPipeline_,
@@ -1528,10 +1649,15 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     // else -- the sun has a shadow map that answers whether IT reaches a surface
     // (brief, Decision 13).
     cmd.pushDebugGroup("occlusion");
-    {
-        const u32 occlusionWidth = target.width > 1 ? target.width / 2 : 1;
-        const u32 occlusionHeight = target.height > 1 ? target.height / 2 : 1;
-
+    const u32 occlusionWidth = renderWidth_ > 1 ? renderWidth_ / 2 : 1;
+    const u32 occlusionHeight = renderHeight_ > 1 ? renderHeight_ / 2 : 1;
+    if (!settings_.ambientOcclusion) {
+        // White is "nothing is occluded", which is what the forward pass
+        // multiplies its ambient term by when this one is switched off.
+        clearPass(cmd, occlusion_, occlusionWidth, occlusionHeight, "occlusion-off",
+                  rhi::ColorRgba{1.0f, 1.0f, 1.0f, 1.0f});
+    }
+    else {
         GpuSsaoUniforms ssao;
         ssao.projection[0] = world.camera.projection.m[0][0] != 0.0f ? 1.0f / world.camera.projection.m[0][0] : 1.0f;
         ssao.projection[1] = world.camera.projection.m[1][1] != 0.0f ? 1.0f / world.camera.projection.m[1][1] : 1.0f;
@@ -1585,8 +1711,8 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         .depthStencil = {.texture = depth_, .loadOp = rhi::LoadOp::Load, .storeOp = rhi::StoreOp::Store},
         .debugName = "forward",
     });
-    cmd.setViewport({.width = static_cast<f32>(target.width), .height = static_cast<f32>(target.height)});
-    cmd.setScissor({.width = static_cast<core::i32>(target.width), .height = static_cast<core::i32>(target.height)});
+    cmd.setViewport({.width = static_cast<f32>(renderWidth_), .height = static_cast<f32>(renderHeight_)});
+    cmd.setScissor({.width = static_cast<core::i32>(renderWidth_), .height = static_cast<core::i32>(renderHeight_)});
 
     if (world.camera.valid) {
         GpuSkyUniforms skyUniforms;
@@ -1642,7 +1768,14 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
                                 : 0.0f;
         for (u32 index = 0; index < kShadowCascadeCount; ++index) {
             frame.cascadeViewProjection[index] = cascades.viewProjection[index];
-            frame.cascadeFar[index] = cascades.farDistance[index];
+            // A cascade past the setting's count was never rendered into, so its
+            // boundary is pushed past anything a frame can hold: the selection
+            // loop then stops at the last cascade that WAS rendered, and a
+            // fragment beyond it selects the empty tile and comes back lit. The
+            // blend band makes that a fade rather than a plane, which is what a
+            // shadow distance ending should look like anyway.
+            frame.cascadeFar[index] =
+                index < settings_.shadowCascades ? cascades.farDistance[index] : kUnreachableDistance;
             frame.cascadeTexelWorld[index] = cascades.texelWorld[index];
             frame.cascadeDepthRange[index] = cascades.depthRange[index];
         }
@@ -1666,10 +1799,10 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         frame.lightCountUnused[0] = static_cast<f32>(clusters_.lightCount);
         frame.clusterParams[0] = clusters_.sliceScale;
         frame.clusterParams[1] = clusters_.sliceBias;
-        frame.viewportParams[0] = static_cast<f32>(target.width);
-        frame.viewportParams[1] = static_cast<f32>(target.height);
-        frame.viewportParams[2] = 1.0f / static_cast<f32>(target.width);
-        frame.viewportParams[3] = 1.0f / static_cast<f32>(target.height);
+        frame.viewportParams[0] = static_cast<f32>(renderWidth_);
+        frame.viewportParams[1] = static_cast<f32>(renderHeight_);
+        frame.viewportParams[2] = 1.0f / static_cast<f32>(renderWidth_);
+        frame.viewportParams[3] = 1.0f / static_cast<f32>(renderHeight_);
 
         cmd.setPipeline(pbrPipeline_);
         cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&frame, sizeof(frame)));
@@ -1703,10 +1836,20 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     exposureIndex_ = nextExposure;
 
     cmd.pushDebugGroup("exposure");
-    {
+    if (!settings_.autoExposure) {
+        // A neutral gain, written directly. Skipping the three passes is the
+        // point of the setting -- what is left is `ExposureCompensation` and
+        // `Lighting.Brightness`, which is exactly the fixed exposure the engine
+        // had before M7.5 metered anything.
+        clearPass(cmd, exposure_[nextExposure], 1, 1, "exposure-fixed", rhi::ColorRgba{1.0f, 1.0f, 1.0f, 1.0f});
+        // So that switching metering back on adapts instantly from the frame it
+        // measures rather than from the neutral value it finds.
+        exposureInitialised_ = false;
+    }
+    else {
         GpuLuminanceUniforms luminance;
-        luminance.texelRate[0] = 1.0f / static_cast<f32>(target.width);
-        luminance.texelRate[1] = 1.0f / static_cast<f32>(target.height);
+        luminance.texelRate[0] = 1.0f / static_cast<f32>(renderWidth_);
+        luminance.texelRate[1] = 1.0f / static_cast<f32>(renderHeight_);
         const std::array<rhi::TextureBinding, 1> hdrBinding{rhi::TextureBinding{hdr_, linearSampler_}};
         fullscreenPass(cmd, luminanceDownPipeline_, luminance64_, 64, 64, "luminance-down", hdrBinding,
                        asBytes(&luminance, sizeof(luminance)));
@@ -1739,9 +1882,16 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     // because a `ColorAttachment` names a texture and not a mip level. The
     // threshold is applied once, on the way in.
     cmd.pushDebugGroup("bloom");
-    {
-        u32 sourceWidth = target.width;
-        u32 sourceHeight = target.height;
+    if (!settings_.bloom) {
+        // Black adds nothing, and the tonemap adds `bloom_[0]` unconditionally.
+        // Cheaper than the eight passes it replaces and, unlike leaving the
+        // chain's textures alone, does not depend on what was in them.
+        clearPass(cmd, bloom_[0], bloomLevelSize(renderWidth_, 0), bloomLevelSize(renderHeight_, 0), "bloom-off",
+                  rhi::ColorRgba{0.0f, 0.0f, 0.0f, 1.0f});
+    }
+    else {
+        u32 sourceWidth = renderWidth_;
+        u32 sourceHeight = renderHeight_;
         for (u32 level = 0; level < kBloomLevels; ++level) {
             GpuBloomUniforms bloom;
             bloom.texelRadius[0] = 1.0f / static_cast<f32>(sourceWidth);
@@ -1753,23 +1903,23 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             }
             const std::array<rhi::TextureBinding, 1> source{
                 rhi::TextureBinding{level == 0 ? hdr_ : bloom_[level - 1], linearSampler_}};
-            sourceWidth = bloomLevelSize(target.width, level);
-            sourceHeight = bloomLevelSize(target.height, level);
+            sourceWidth = bloomLevelSize(renderWidth_, level);
+            sourceHeight = bloomLevelSize(renderHeight_, level);
             fullscreenPass(cmd, bloomDownPipeline_, bloom_[level], sourceWidth, sourceHeight, "bloom-down", source,
                            asBytes(&bloom, sizeof(bloom)));
         }
 
         for (u32 level = kBloomLevels - 1; level > 0; --level) {
             GpuBloomUniforms bloom;
-            bloom.texelRadius[0] = 1.0f / static_cast<f32>(bloomLevelSize(target.width, level));
-            bloom.texelRadius[1] = 1.0f / static_cast<f32>(bloomLevelSize(target.height, level));
+            bloom.texelRadius[0] = 1.0f / static_cast<f32>(bloomLevelSize(renderWidth_, level));
+            bloom.texelRadius[1] = 1.0f / static_cast<f32>(bloomLevelSize(renderHeight_, level));
             bloom.texelRadius[2] = 1.0f;
             const std::array<rhi::TextureBinding, 1> source{rhi::TextureBinding{bloom_[level], linearSampler_}};
             // `LoadOp::Load`, because the pipeline blends ADDITIVELY into what
             // the downsample already put there -- reading and writing one target
             // in one pass is what every backend refuses.
-            fullscreenPass(cmd, bloomUpPipeline_, bloom_[level - 1], bloomLevelSize(target.width, level - 1),
-                           bloomLevelSize(target.height, level - 1), "bloom-up", source, asBytes(&bloom, sizeof(bloom)),
+            fullscreenPass(cmd, bloomUpPipeline_, bloom_[level - 1], bloomLevelSize(renderWidth_, level - 1),
+                           bloomLevelSize(renderHeight_, level - 1), "bloom-up", source, asBytes(&bloom, sizeof(bloom)),
                            rhi::LoadOp::Load);
         }
     }
@@ -1788,8 +1938,16 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     const std::array<rhi::TextureBinding, 3> tonemapBindings{
         rhi::TextureBinding{hdr_, linearSampler_}, rhi::TextureBinding{bloom_[0], linearSampler_},
         rhi::TextureBinding{exposure_[nextExposure], linearSampler_}};
+
+    // With anti-aliasing on, this writes the LDR texture the resolve reads and
+    // the resolve is what reaches the target. With it off, this IS the resolve
+    // -- and it is also where a reduced render scale is upscaled, because a
+    // fullscreen pass into a larger target sampling a smaller source is exactly
+    // a bilinear upscale.
     cmd.pushDebugGroup("tonemap");
-    fullscreenPass(cmd, tonemapPipeline_, ldr_, target.width, target.height, "tonemap", tonemapBindings,
+    fullscreenPass(cmd, tonemapPipeline_, settings_.antiAliasing ? ldr_ : target.color,
+                   settings_.antiAliasing ? renderWidth_ : target.width,
+                   settings_.antiAliasing ? renderHeight_ : target.height, "tonemap", tonemapBindings,
                    asBytes(&tonemap, sizeof(tonemap)));
     cmd.popDebugGroup();
 
@@ -1799,14 +1957,20 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     // than temporal on purpose (M7.5 brief, Decision 10), and nothing here
     // forecloses a temporal pass -- which would replace this one rather than
     // fight it.
-    GpuFxaaUniforms fxaa;
-    fxaa.texel[0] = 1.0f / static_cast<f32>(target.width);
-    fxaa.texel[1] = 1.0f / static_cast<f32>(target.height);
-    const std::array<rhi::TextureBinding, 1> ldrBinding{rhi::TextureBinding{ldr_, linearSampler_}};
-    cmd.pushDebugGroup("fxaa");
-    fullscreenPass(cmd, fxaaPipeline_, target.color, target.width, target.height, "fxaa", ldrBinding,
-                   asBytes(&fxaa, sizeof(fxaa)));
-    cmd.popDebugGroup();
+    if (settings_.antiAliasing) {
+        GpuFxaaUniforms fxaa;
+        // The SOURCE's texel, not the target's. FXAA walks an edge in the image
+        // it is reading, and at a reduced render scale that image is smaller
+        // than what it writes -- a step sized in output texels would look for
+        // edges at the wrong spacing and find none.
+        fxaa.texel[0] = 1.0f / static_cast<f32>(renderWidth_);
+        fxaa.texel[1] = 1.0f / static_cast<f32>(renderHeight_);
+        const std::array<rhi::TextureBinding, 1> ldrBinding{rhi::TextureBinding{ldr_, linearSampler_}};
+        cmd.pushDebugGroup("fxaa");
+        fullscreenPass(cmd, fxaaPipeline_, target.color, target.width, target.height, "fxaa", ldrBinding,
+                       asBytes(&fxaa, sizeof(fxaa)));
+        cmd.popDebugGroup();
+    }
 }
 
 std::unique_ptr<IRenderer> createDefaultRenderer()

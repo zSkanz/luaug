@@ -81,3 +81,7 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0038](0038-visual-fidelity-is-a-v1-target.md) | What the renderer draws is judged against a stated reference, and visual fidelity is a v1 target |
 | [0039](0039-input-context-rate-and-total-enums.md) | An InputContext declares its dispatch rate, and the IAS's enums are total |
 | [0040](0040-udim2-layout-is-arithmetic-not-a-solver.md) | UDim2 layout is arithmetic, not a constraint problem; v1 does not call Clay |
+| [0041](0041-inputservice-gains-a-raw-event-surface.md) | `InputService` gains a raw event surface, fed from the IAS dispatch |
+| [0042](0042-vendoring-may-narrow-to-the-paths-a-build-uses.md) | A vendored row may narrow to the upstream paths the build uses |
+| [0043](0043-per-instance-vertex-stepping.md) | The frozen RHI gains per-instance vertex stepping, and nothing else |
+| [0044](0044-graphics-settings-are-host-settings.md) | Graphics settings are host settings, in three layers |

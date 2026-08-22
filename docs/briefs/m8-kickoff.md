@@ -39,10 +39,11 @@ decision.
       reference machine; the standing targets at the end of
       [`../perf-baselines.md`](../perf-baselines.md) bind here.
 - [ ] **`luaug build` packaging** — distributable player + content.
-- [ ] **Graphics settings, as a family rather than a number** — shadow
+- [x] **Graphics settings, as a family rather than a number** — shadow
       resolution, cascade count and distance, render scale, light budget and
       post toggles stop being `constexpr`. Engine settings, not `Lighting`
-      properties: a scene must not decide the player's GPU budget (ADR 0038).
+      properties: a scene must not decide the player's GPU budget (ADR 0038,
+      and ADR 0044 is the answer).
 - [x] **Prove the editor seam is still open** — two `WorldHost`s alive at once,
       each with its own `ScriptRuntime`, rendered into two targets.
 - [ ] **Application identity** — `branding/` wired up; a game built with
@@ -83,7 +84,11 @@ decision.
 - **Cross-platform determinism.** ADR 0025 level B stands; the `churn10k`
   judgement and Jolt's `CROSS_PLATFORM_DETERMINISTIC` switch remain human
   questions in the ledger.
-- **A second Luau-facing service beyond the one the settings family needs.**
+- **An in-game quality slider.** The settings family ships without a Luau
+  surface, which is not an omission: the roadmap's own sentence — a scene must
+  not decide the player's GPU budget — forbids a script writing them, and a
+  slider needs exactly that. ADR 0044 §Alternatives records what a post-v1
+  version would have to solve.
 
 ## Subagent plan
 
@@ -109,7 +114,7 @@ work, and this session's operating instruction forbids fan-out besides.
 
 ## The decisions this brief makes
 
-### 1. Graphics settings are a process-level struct, and the game may write it
+### 1. Graphics settings are host settings, and a script may not write them
 
 `Lighting` describes the world; a quality setting describes the machine. The two
 must not be the same object, because a scene that shipped with a 4096-texel
@@ -117,25 +122,35 @@ shadow map would be deciding how a stranger's laptop spends its frame — which 
 the whole of ADR 0038 §3's argument for putting this here rather than in
 `Lighting`.
 
-So the settings live in one `GraphicsSettings` struct, sourced in three layers,
+So the settings live in one `render::GraphicsSettings`, sourced in three layers,
 each overriding the one before:
 
-1. A **quality preset** — `Low`, `Medium`, `High`, `Ultra` — which is a named
-   set of every field.
-2. **`luaug.toml` `[graphics]`**, which is the game author's default for their
-   own content.
-3. **`luaug-host` flags**, which is what the gate and a person debugging use.
+1. A **quality preset** — `low`, `medium`, `high`, `ultra` — a named set of
+   every field. **`high` is exactly what M7.5 shipped, to the value**, which is
+   a requirement rather than a coincidence: every pixel golden in this
+   repository was recorded against those constants.
+2. **`luaug.toml` `[graphics]`**, the game author's default for their content.
+3. **`luaug-host` flags**, which is what a gate, a perf sweep and a person
+   debugging use.
 
-And a fourth source that is not a layer because it happens later: **the running
-game may write them**, through a service, exactly the way an options menu needs
-to. Persistence is the game's — this is the `InputBinding` precedent quoted in
-the NOT-in-scope list, and it is deliberate that the two answers match.
+**A running script is not a fourth layer**, and that is the decision inside the
+decision. The roadmap's own sentence forbids it — a script *is* the scene — so
+what v1 ships is a family a player or a packager configures, and what it does
+not ship is an in-game quality slider. ADR 0044 records that, what it costs, and
+what would have to be true to change it.
 
-**They are outside the world hash.** A replay does not record them and a
-determinism gate does not read them: nothing in `render` may reach the
-simulation (R10), so a machine that renders at half scale must still hash
-identically to one that does not. That is an assertion this milestone makes with
-a differential rather than a claim it makes in prose.
+**They are structurally outside the simulation, and a machine says so.**
+`GraphicsSettings` lives in `render` (L4); `scene` is L3 and may not include it,
+and `tools/repo/checklayers.luau` derives the layering from real `#include`
+edges. A settings value reaching the world hash is a red gate rather than a
+discovery. The replay harness makes the same point from the other side: it
+creates no device and no renderer at all, so there is nothing for a quality
+level to change.
+
+**The family is gated by a differential rather than a golden.** `low` and
+`ultra` must render the same scene to *different* images. A preset that is
+parsed and then reaches nothing renders exactly what it did before, and no
+golden can see that.
 
 ### 2. The editor-seam proof is a differential, not a boot
 

@@ -4,6 +4,7 @@
 #include "luaug/app/backends.h"
 #include "luaug/app/bench.h"
 #include "luaug/app/engine.h"
+#include "luaug/app/project_config.h"
 #include "luaug/app/replay.h"
 #include "luaug/app/two_worlds.h"
 #include "luaug/core/build_info.h"
@@ -94,11 +95,26 @@ void printVersion()
 // would be a dependency (R5) bought for nothing, and the engine's real CLI is
 // `luaug` (M3), which lives in Lute and is the thing users will actually type.
 // This is the host's own switchboard.
-int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptions& options)
+int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptions& options,
+                 luaug::app::GraphicsOverrides& graphics, bool& sizeFromFlags)
 {
     const auto numericValue = [](std::string_view text, luaug::core::u64& out) {
         const auto result = std::from_chars(text.data(), text.data() + text.size(), out);
         return result.ec == std::errc{} && result.ptr == text.data() + text.size();
+    };
+
+    // `strtod` rather than `from_chars`, for the reason `core/json.cpp` records:
+    // the floating-point overloads of from_chars are missing from one of the
+    // standard libraries this engine builds against. The WHOLE token has to
+    // convert, so `--render-scale=0.75x` is a usage error rather than 0.75.
+    const auto decimalValue = [](std::string_view text, double& out) {
+        const std::string buffer(text);
+        char* end = nullptr;
+        const double value = std::strtod(buffer.c_str(), &end);
+        if (end != buffer.c_str() + buffer.size())
+            return false;
+        out = value;
+        return true;
     };
 
     for (const std::string_view arg : args) {
@@ -164,6 +180,10 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
                 return kExitUsage;
             }
             (arg.starts_with("--width=") ? options.width : options.height) = static_cast<luaug::core::i32>(parsed);
+            // Remembered so `[window] size` in the project file can fill in for
+            // a size nobody asked for and stay out of the way of one somebody
+            // did.
+            sizeFromFlags = true;
             continue;
         }
         if (arg.starts_with("--frames=")) {
@@ -231,6 +251,77 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
             }
             continue;
         }
+        // --- The graphics settings family (roadmap M8, ADR 0044) -----------
+        //
+        // The outermost of the three layers: a preset, then the project file,
+        // then these. Each is an OVERRIDE rather than a value, so that "nobody
+        // said anything" and "somebody asked for the default" stay different
+        // answers -- see `project_config.h`.
+        if (arg.starts_with("--quality=")) {
+            const std::string_view value = arg.substr(arg.find('=') + 1);
+            const std::optional<luaug::render::QualityLevel> level = luaug::render::parseQuality(value);
+            if (!level.has_value()) {
+                const std::array<I18nArg, 2> badValue{I18nArg{"option", arg}, I18nArg{"value", value}};
+                luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.bad_value"), badValue);
+                return kExitUsage;
+            }
+            graphics.quality = *level;
+            continue;
+        }
+        if (arg.starts_with("--render-scale=") || arg.starts_with("--shadow-distance=")) {
+            const std::string_view value = arg.substr(arg.find('=') + 1);
+            double parsed = 0.0;
+            if (!decimalValue(value, parsed) || parsed <= 0.0) {
+                const std::array<I18nArg, 2> badValue{I18nArg{"option", arg}, I18nArg{"value", value}};
+                luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.bad_value"), badValue);
+                return kExitUsage;
+            }
+            if (arg.starts_with("--render-scale="))
+                graphics.renderScale = static_cast<luaug::core::f32>(parsed);
+            else
+                graphics.shadowDistance = static_cast<luaug::core::f32>(parsed);
+            continue;
+        }
+        if (arg.starts_with("--shadow-resolution=") || arg.starts_with("--shadow-cascades=") ||
+            arg.starts_with("--light-budget=")) {
+            const std::string_view value = arg.substr(arg.find('=') + 1);
+            luaug::core::u64 parsed = 0;
+            // Zero is legal for two of the three -- no cascades is "the sun
+            // casts no shadow" and no lights is a scene lit by the sky alone --
+            // so only the resolution refuses it.
+            if (!numericValue(value, parsed) || (arg.starts_with("--shadow-resolution=") && parsed == 0)) {
+                const std::array<I18nArg, 2> badValue{I18nArg{"option", arg}, I18nArg{"value", value}};
+                luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.bad_value"), badValue);
+                return kExitUsage;
+            }
+            if (arg.starts_with("--shadow-resolution="))
+                graphics.shadowResolution = static_cast<luaug::core::u32>(parsed);
+            else if (arg.starts_with("--shadow-cascades="))
+                graphics.shadowCascades = static_cast<luaug::core::u32>(parsed);
+            else
+                graphics.lightBudget = static_cast<luaug::core::u32>(parsed);
+            continue;
+        }
+        // Both directions, because a preset is a starting point rather than a
+        // menu: somebody on `low` may still want bloom, and somebody measuring
+        // may want the frame held still with `--no-auto-exposure`.
+        if (arg == "--bloom" || arg == "--no-bloom") {
+            graphics.bloom = arg == "--bloom";
+            continue;
+        }
+        if (arg == "--ambient-occlusion" || arg == "--no-ambient-occlusion") {
+            graphics.ambientOcclusion = arg == "--ambient-occlusion";
+            continue;
+        }
+        if (arg == "--anti-aliasing" || arg == "--no-anti-aliasing") {
+            graphics.antiAliasing = arg == "--anti-aliasing";
+            continue;
+        }
+        if (arg == "--auto-exposure" || arg == "--no-auto-exposure") {
+            graphics.autoExposure = arg == "--auto-exposure";
+            continue;
+        }
+
         if (arg.starts_with("--rhi=")) {
             const std::optional<luaug::rhi::BackendId> backend = luaug::app::parseBackendId(arg.substr(6));
             if (!backend.has_value()) {
@@ -328,8 +419,37 @@ int main(int argc, char** argv)
     }
 
     luaug::app::EngineOptions options;
-    if (const int usageExit = parseOptions(args, options); usageExit != kExitOk)
+    luaug::app::GraphicsOverrides graphicsOverrides;
+    bool sizeFromFlags = false;
+    if (const int usageExit = parseOptions(args, options, graphicsOverrides, sizeFromFlags); usageExit != kExitOk)
         return usageExit;
+
+    // The project file, and the three-layer resolution it completes. A bare
+    // script has no project and gets the preset plus the flags, which is the
+    // same code path with an empty root.
+    {
+        std::error_code projectError;
+        const bool isProject =
+            !options.scriptPath.empty() && std::filesystem::is_directory(options.scriptPath, projectError);
+        std::string configDiagnostic;
+        const luaug::app::ProjectConfig config = luaug::app::loadProjectConfig(
+            isProject ? options.scriptPath : std::filesystem::path{}, graphicsOverrides, &configDiagnostic);
+
+        if (!configDiagnostic.empty()) {
+            // Named and survivable, like a content pack that will not open: a
+            // malformed project file leaves the engine's own defaults standing
+            // rather than refusing to start, and says which line stopped it.
+            const std::array<I18nArg, 1> configArgs{I18nArg{"reason", configDiagnostic}};
+            luaug::core::log(LogLevel::Warn, LUAUG_TR("app.warn.project_config"), configArgs);
+        }
+
+        options.graphics = config.graphics;
+        options.windowTitle = config.windowTitle;
+        if (!sizeFromFlags && config.windowWidth > 0 && config.windowHeight > 0) {
+            options.width = config.windowWidth;
+            options.height = config.windowHeight;
+        }
+    }
 
     // The two artifacts `architecture.md` §app has promised since M0, and the
     // reason they are HERE: `core` is L0 and cannot ask where a file belongs,

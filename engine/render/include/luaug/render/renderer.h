@@ -18,6 +18,7 @@
 #include "luaug/core/error.h"
 #include "luaug/render/mesh_cache.h"
 #include "luaug/render/render_world.h"
+#include "luaug/render/settings.h"
 #include "luaug/render/shader_library.h"
 #include "luaug/rhi/device.h"
 
@@ -78,6 +79,17 @@ public:
     // worth keeping as a caster, and the number belongs to the pass list rather
     // than to the host -- a renderer with cascades would answer differently.
     [[nodiscard]] virtual core::f32 shadowRadius() const noexcept = 0;
+
+    // The quality family this renderer honours (roadmap M8, ADR 0044). Applying
+    // one may rebuild targets, which is why it is a call rather than a field
+    // read every frame: the shadow atlas is sized by it.
+    //
+    // Here rather than on `RenderWorld` because a settings value is not scene
+    // state. `extract` produces what the world contains; this is what the
+    // machine can afford, and mixing the two would put a stranger's GPU budget
+    // into the scene that gets hashed.
+    virtual void setSettings(const GraphicsSettings& settings) = 0;
+    [[nodiscard]] virtual const GraphicsSettings& settings() const noexcept = 0;
 
     // What the last frame actually submitted.
     //
