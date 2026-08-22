@@ -5,7 +5,8 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- **M7.5 — Looking Like an Engine — done and awaiting review.**
+- **M7.5 — Looking Like an Engine — COMPLETE, signed off 2026-08-22**, tagged
+  `milestone/m7.5`.
   The brief is [`docs/briefs/m7.5-kickoff.md`](docs/briefs/m7.5-kickoff.md), with
   sixteen decisions, seventeen Findings and a filled Gate Record. **Every scope item
   and every gate item is done**: four cascades in one atlas with a
@@ -26,14 +27,17 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   **The RHI freeze held for everything except one additive field.** ADR 0038
   predicted four places it would break and three of the predictions were wrong in
   the useful direction — the technique changed instead of the interface.
-  **ADR 0043 is PROPOSED and needs the human**, because ADR 0037 requires a
-  human-approved ADR to touch the frozen surface and this touches it.
+  **ADR 0043 is ACCEPTED** (human, 2026-08-22): the frozen RHI gains one additive
+  field, `VertexBufferLayout::perInstance`, defaulting to false. ADR 0037's
+  process worked exactly as written -- four predicted breaks, three answered by
+  changing the technique instead of the interface, and one conversation for the
+  field that landed.
   **The review pass also added Decision 16**: geometric specular antialiasing
   ships, measured, and the measurement says it buys nothing in current content —
   both of this engine's specular sources are already band-limited, one of them by
   a roughness floor M4 added for exactly this reason. Written down as a cost with
   its numbers rather than as a feature.
-  **Three defects recorded (D041, D042, D043)** and seven more found and fixed
+  **Five defects recorded (D041 to D044, and D026 with them)** and seven more found and fixed
   inside the milestone; seven of the ten were found by looking at a picture or a
   number rather than by a test. **D043 is the one a reviewer should read first**:
   the instanced path shipped drawing nothing — both instanced shaders built the
@@ -51,6 +55,16 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   palette, because the indices travel as floats and both skinned shaders
   declared their input as integers. `capture_gate_skinned` ran green through it
   all, because it watches the palette and the palette was right.
+  **The review round after submission is the part worth reading**, because it
+  cost more than the milestone's own last week and it changed what the milestone
+  claims. Four defects came out of it, and three were found by a human looking at
+  the screen rather than by anything the milestone built: the instanced path
+  drawing nothing (D043), which invalidated the headline perf number; the capture
+  gate blind to what an upload carried (D026); a character that could not touch a
+  wall (D028); and the shadow edge that had no penumbra (D044, three designs
+  deep). **The pattern the milestone opened with held to the end** -- the gates
+  were green through all of it, and the pictures were not.
+
 - **M7 — Scaling the World — COMPLETE, signed off 2026-08-21**, tagged
   `milestone/m7`.
   The brief is [`docs/briefs/m7-kickoff.md`](docs/briefs/m7-kickoff.md), with a

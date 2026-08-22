@@ -1,6 +1,6 @@
 # 0043 — The frozen RHI gains per-instance vertex stepping, and nothing else
 
-- Status: proposed — awaiting human approval (ADR 0037 requires it)
+- Status: accepted — human approval, 2026-08-22 (ADR 0037 requires it)
 - Date: 2026-08-21
 
 ## Context
