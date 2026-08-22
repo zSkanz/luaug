@@ -30,7 +30,7 @@ using core::LogLevel;
 // a directory walk, because the set is the engine's own surface (ADR 0030) and
 // discovering it from a directory would make an accidentally-shipped file part
 // of the API.
-constexpr std::string_view RuntimeModules[] = {"camera", "signal", "testing"};
+constexpr std::string_view RuntimeModules[] = {"camera", "testing"};
 
 // The conformance runner, as an ordinary entry script.
 //

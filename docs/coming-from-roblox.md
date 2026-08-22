@@ -220,14 +220,15 @@ serializes it like any other state.
 ### BindableEvent → `Signal.new()`
 
 ```lua
-local Signal = require("@luaug/signal")
-local died = Signal.new()
+local died: Signal<string> = Signal.new()
 died:Connect(function(who: string) end)
 died:Fire("player")
 ```
 
-An Instance was the wrong shape for a typed callback list. BindableFunction is a
-plain function.
+`Signal` is a **global datatype**, not a module to require and not an Instance to
+parent: an Instance was the wrong shape for a typed callback list.
+`BindableFunction` is a plain function. Delivery is deferred, like every other
+signal in the engine, and handler errors are contained one at a time.
 
 ### Humanoid → `CharacterBody`
 

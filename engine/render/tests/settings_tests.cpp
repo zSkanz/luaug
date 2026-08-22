@@ -4,6 +4,8 @@
 
 #include <doctest/doctest.h>
 
+#include "luaug_test_nearly.h"
+
 using namespace luaug::render;
 
 TEST_CASE("High is exactly what the engine shipped before there were presets")
@@ -15,10 +17,10 @@ TEST_CASE("High is exactly what the engine shipped before there were presets")
     // Finding 4).
     const GraphicsSettings high = settingsFor(QualityLevel::High);
 
-    CHECK(high.renderScale == doctest::Approx(1.0f));
+    CHECK(luaug::testing::nearly(high.renderScale, 1.0f));
     CHECK(high.shadowTileResolution == kShadowTileResolution);
     CHECK(high.shadowCascades == kShadowCascadeCount);
-    CHECK(high.shadowDistance == doctest::Approx(kShadowDistance));
+    CHECK(luaug::testing::nearly(high.shadowDistance, kShadowDistance));
     CHECK(high.lightBudget == kMaxClusteredLights);
     CHECK(high.bloom);
     CHECK(high.ambientOcclusion);
@@ -77,7 +79,7 @@ TEST_CASE("a hand-edited project file cannot ask for something the renderer cann
     tooLarge.shadowTileResolution = 8192;
     // 2048 rather than 4096, because the atlas is two tiles across and 4096 is
     // the 2D size the weakest conforming device is required to support.
-    CHECK(clampSettings(tooLarge).renderScale == doctest::Approx(1.0f));
+    CHECK(luaug::testing::nearly(clampSettings(tooLarge).renderScale, 1.0f));
     CHECK(clampSettings(tooLarge).shadowTileResolution == 2048u);
 
     // Rounded DOWN to a power of two rather than refused: a project file asking

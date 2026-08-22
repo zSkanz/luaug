@@ -75,6 +75,20 @@ struct Parsed
     std::string error;
 };
 
+// Two constructors rather than braces at each return, and Clang is why: a
+// designated initializer that omits a trailing field is `-Wmissing-field-
+// initializers`, which is an error here, and MSVC says nothing about it. Naming
+// every field at twenty return sites would say the same thing twenty times.
+[[nodiscard]] Parsed parsedValue(ScalarValue value, std::string_view rest)
+{
+    return Parsed{.ok = true, .value = std::move(value), .rest = rest, .error = {}};
+}
+
+[[nodiscard]] Parsed parsedError(std::string_view rest, std::string error)
+{
+    return Parsed{.ok = false, .value = {}, .rest = rest, .error = std::move(error)};
+}
+
 [[nodiscard]] Parsed parseBasicString(std::string_view text)
 {
     std::string out;
@@ -82,7 +96,7 @@ struct Parsed
         const char c = text[index];
         if (c == '\\') {
             if (index + 1 >= text.size())
-                return {.ok = false, .rest = text, .error = "unterminated string"};
+                return parsedError(text, "unterminated string");
             const char escape = text[index + 1];
             switch (escape) {
             case 'n':
@@ -99,52 +113,56 @@ struct Parsed
                 out.push_back(escape);
                 break;
             default:
-                return {.ok = false, .rest = text, .error = std::string("unsupported escape \\") + escape};
+                return parsedError(text, std::string("unsupported escape \\") + escape);
             }
             ++index;
             continue;
         }
         if (c == '"') {
-            return {.ok = true,
-                    .value = {.kind = ScalarValue::Kind::String, .text = std::move(out)},
-                    .rest = text.substr(index + 1)};
+            return parsedValue(
+                ScalarValue{.kind = ScalarValue::Kind::String, .text = std::move(out), .number = 0.0, .boolean = false},
+                text.substr(index + 1));
         }
         out.push_back(c);
     }
-    return {.ok = false, .rest = text, .error = "unterminated string"};
+    return parsedError(text, "unterminated string");
 }
 
 [[nodiscard]] Parsed parseLiteralString(std::string_view text)
 {
     const usize closing = text.find('\'', 1);
     if (closing == std::string_view::npos)
-        return {.ok = false, .rest = text, .error = "unterminated literal string"};
-    return {.ok = true,
-            .value = {.kind = ScalarValue::Kind::String, .text = std::string(text.substr(1, closing - 1))},
-            .rest = text.substr(closing + 1)};
+        return parsedError(text, "unterminated literal string");
+    return parsedValue(ScalarValue{.kind = ScalarValue::Kind::String,
+                                   .text = std::string(text.substr(1, closing - 1)),
+                                   .number = 0.0,
+                                   .boolean = false},
+                       text.substr(closing + 1));
 }
 
 [[nodiscard]] Parsed parseScalar(std::string_view text)
 {
     const std::string_view body = trim(text);
     if (body.empty())
-        return {.ok = false, .rest = body, .error = "expected a value"};
+        return parsedError(body, "expected a value");
 
     if (body.front() == '"')
         return parseBasicString(body);
     if (body.front() == '\'')
         return parseLiteralString(body);
     if (body.front() == '[')
-        return {.ok = false, .rest = body, .error = "a nested array is not part of this subset"};
+        return parsedError(body, "a nested array is not part of this subset");
 
     const usize end = body.find_first_of(",] \t");
     const std::string_view token = body.substr(0, end == std::string_view::npos ? body.size() : end);
     const std::string_view rest = body.substr(token.size());
 
     if (token == "true")
-        return {.ok = true, .value = {.kind = ScalarValue::Kind::Boolean, .boolean = true}, .rest = rest};
+        return parsedValue(ScalarValue{.kind = ScalarValue::Kind::Boolean, .text = {}, .number = 0.0, .boolean = true},
+                           rest);
     if (token == "false")
-        return {.ok = true, .value = {.kind = ScalarValue::Kind::Boolean, .boolean = false}, .rest = rest};
+        return parsedValue(ScalarValue{.kind = ScalarValue::Kind::Boolean, .text = {}, .number = 0.0, .boolean = false},
+                           rest);
 
     // Underscores are legal digit separators in TOML numbers, so the token is
     // copied to strip them before it is read.
@@ -160,10 +178,12 @@ struct Parsed
     if (!digits.empty() && digits.find_first_not_of("+-.eE0123456789") == std::string::npos) {
         f64 parsedNumber = 0.0;
         if (detail::decimalToDouble(digits, parsedNumber))
-            return {.ok = true, .value = {.kind = ScalarValue::Kind::Number, .number = parsedNumber}, .rest = rest};
+            return parsedValue(
+                ScalarValue{.kind = ScalarValue::Kind::Number, .text = {}, .number = parsedNumber, .boolean = false},
+                rest);
     }
 
-    return {.ok = false, .rest = body, .error = "not a value this reader supports: " + std::string(token)};
+    return parsedError(body, "not a value this reader supports: " + std::string(token));
 }
 
 // Splits `a.b.c` into a normalised dotted key, honouring quoted segments.
@@ -338,7 +358,7 @@ TomlDocument::ParseResult TomlDocument::parse(std::string_view text, std::string
             entries_.push_back(std::move(entry));
     }
 
-    return ParseResult{.ok = true};
+    return ParseResult{.ok = true, .diagnostic = {}, .line = 0};
 }
 
 const TomlDocument::Entry* TomlDocument::find(std::string_view key) const noexcept

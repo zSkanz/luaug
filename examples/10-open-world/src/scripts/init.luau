@@ -34,6 +34,8 @@
 ---      rebuilt from scratch, and the character is standing where it was. That
 ---      is `HotReloadService:SaveState` and nothing else.
 
+local cameraRigs = require("@luaug/camera")
+
 local AudioService = game:GetService("AudioService")
 local DebugService = game:GetService("DebugService")
 local HotReloadService = game:GetService("HotReloadService")
@@ -160,13 +162,17 @@ StreamingService:AddFocus(character)
 
 -- --- Camera and sky ----------------------------------------------------------
 
-local camera = Instance.new("Camera")
-camera.Name = "FollowCamera"
-camera.FieldOfView = 70
-camera.NearPlane = 0.1
-camera.FarPlane = 1200
-camera.Parent = workspace
-workspace.CurrentCamera = camera
+-- The third-person rig from `@luaug/camera`, which exists because three
+-- examples in this repository hand-rolled the same forty lines before it did.
+-- It creates the `Camera`, assigns it to `workspace.CurrentCamera`, and places
+-- it before the first frame rather than easing it in from the world origin.
+local rig = cameraRigs.thirdPerson({
+    Subject = character,
+    Distance = 11,
+    Height = 6,
+    Focus = 2,
+    FarPlane = 1200,
+})
 
 Lighting.GeographicLatitude = 34
 Lighting.Ambient = Color3.fromRGB(16, 18, 24)
@@ -345,8 +351,6 @@ hintLabel.Text = "WASD move · Shift sprint · Space jump · Arrows look"
 
 -- --- The loop ----------------------------------------------------------------
 
-local cameraYaw = 0.6
-local cameraHeight = 6
 local wasGrounded = true
 local sinceSave = 0
 
@@ -356,32 +360,11 @@ local sinceSave = 0
 ---
 --- **It is NOT what drives the camera, and that is a defect report from a human
 --- playing this scene: with the camera on `PreRender` the whole world shakes as
---- soon as the character walks.** Measured rather than guessed -- this machine
---- renders about a hundred frames for every sixty simulation ticks, so a camera
---- advanced on every render frame moves smoothly while everything it is looking
---- at moves on two frames out of three. The world then oscillates in screen
---- space by up to a walking pace times a frame, which is exactly what "it
---- vibrates" looks like.
----
---- The engine's frame scheduler computes an interpolation factor for precisely
---- this (`Frame::alpha`, "so a 144 Hz display shows smooth motion from a 60 Hz
---- simulation") and nothing reads it -- so v1 has no render interpolation, and
---- a camera on the sim clock is the only way for the camera and the world to
---- agree. Recorded as D047. Every other example already does it this way.
+--- soon as the character walks** (D047). The rig is advanced on `Heartbeat`,
+--- with the world, and `@luaug/camera`'s own header says why in more detail.
 local renderIsDriving = false
 
-local function advanceCamera(dt: number)
-    local focus = character.Position + vector.create(0, 2.0, 0)
-    local forward = vector.create(-math.sin(cameraYaw), 0, -math.cos(cameraYaw))
-    local wanted = focus - forward * 11 + vector.create(0, cameraHeight, 0)
-    local eye = camera.CFrame.Position
-    -- Framerate-independent smoothing, and the clamp is what keeps a hitch from
-    -- teleporting the camera: at 5 fps `8 * dt` is 1.6, which would snap.
-    eye += (wanted - eye) * math.min(1, 8 * dt)
-    camera.CFrame = CFrame.lookAt(eye, focus)
-end
-
---- The hour of the day as a string a HUD can show. `ClockTime` is a float and
+--- The hour of the day as a string a HUD can show. `ClockTime` is a float, and
 --- "14.37" is a number rather than a time.
 local function clockText(hour: number): string
     local whole = math.floor(hour)
@@ -445,7 +428,7 @@ local function autopilot(time: number)
         end
         -- The camera has to follow on this leg too, or every soak screenshot is
         -- of the spot the character started from.
-        cameraYaw = angle + math.pi * 0.5
+        rig.Yaw = angle + math.pi * 0.5
         return
     end
 
@@ -462,7 +445,7 @@ local function autopilot(time: number)
     local x = math.cos(angle) * reach
     local z = math.sin(angle) * reach
     character.Position = vector.create(x, heightAt(x, z) + 40, z)
-    cameraYaw = angle + math.pi * 0.5
+    rig.Yaw = angle + math.pi * 0.5
 end
 
 RunService.Heartbeat:Connect(function(dt: number)
@@ -483,12 +466,8 @@ RunService.Heartbeat:Connect(function(dt: number)
     -- Camera first, because movement is expressed in the camera's frame: a
     -- character that walked in last frame's direction turns a fraction of a
     -- second after the camera does, which reads as drag on the controls.
-    local turn = TurnAction:GetState() :: Vector2
-    cameraYaw += 2.2 * turn.X * dt
-    cameraHeight = math.clamp(cameraHeight + 6 * turn.Y * dt, 3, 24)
-
-    local forward = vector.create(-math.sin(cameraYaw), 0, -math.cos(cameraYaw))
-    local right = vector.create(math.cos(cameraYaw), 0, -math.sin(cameraYaw))
+    rig:Turn(TurnAction:GetState() :: Vector2, dt)
+    local forward, right = rig:Basis()
 
     character.WalkSpeed = if SprintAction:GetState() :: boolean then 13 else 7
 
@@ -541,7 +520,7 @@ RunService.Heartbeat:Connect(function(dt: number)
 
     -- On the SIM clock, with the world. See `renderIsDriving` above for the
     -- measurement that put it here.
-    advanceCamera(dt)
+    rig:Update(dt)
 
     -- One tick of virtual press, then cleared, the same way `04-obby` does it:
     -- a touch button is an edge and an action reads a snapshot.
