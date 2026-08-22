@@ -408,4 +408,34 @@ if(LUAUG_BUILD_TESTS)
         LABELS "gpu-golden"
         SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
         TIMEOUT 120)
+
+    # The INSTANCED path's golden, and it exists because that path shipped at
+    # M7.5 drawing nothing at all (D043). Every gate the milestone had was
+    # satisfied: the draw-call count fell from 15,250 to 22, the command stream
+    # matched its capture, and the frame got eight times faster -- because the
+    # geometry was being transformed off-screen. **A command stream and a
+    # counter can both be right about a frame that is empty**, and the only
+    # instrument that can tell is one that looks at pixels.
+    #
+    # `tests/screenshots/specular` is eight identical polished spheres, which is
+    # a batch of eight and therefore the instanced path, plus a floor that is
+    # not. It is also the evidence scene for geometric specular antialiasing --
+    # one scene, because both claims are about what a curved metal surface
+    # LOOKS like.
+    #
+    # `gpu-golden` for the same reason `screenshot_gate` is: this frame has
+    # edges, and edges do not survive a move to a software rasterizer.
+    add_test(NAME screenshot_gate_instanced
+        COMMAND ${CMAKE_COMMAND}
+            -DHOST=$<TARGET_FILE:luaug_host>
+            -DIMGCMP=$<TARGET_FILE:imgcmp>
+            -DGOLDEN=${CMAKE_SOURCE_DIR}/tests/screenshots/specular-frame120.png
+            -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/screenshot-gate-instanced.png
+            -DSCRIPT=${CMAKE_SOURCE_DIR}/tests/screenshots/specular
+            -DFRAMES=120
+            -P ${CMAKE_SOURCE_DIR}/tests/screenshots/run_screenshot_gate.cmake)
+    set_tests_properties(screenshot_gate_instanced PROPERTIES
+        LABELS "gpu-golden"
+        SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
+        TIMEOUT 180)
 endif()

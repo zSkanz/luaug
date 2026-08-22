@@ -209,7 +209,12 @@ float4 shadeForward(Interpolants input)
     const float3 mappedNormal = normalize(mul(normalize(tangentNormal), frame));
     const float3 normal = normalize(lerp(geometricNormal, mappedNormal, TextureFlags.y));
 
-    const Surface surface = makeSurface(input.ShadingPosition, normal, baseColor.rgb, metallic, roughness);
+    Surface surface = makeSurface(input.ShadingPosition, normal, baseColor.rgb, metallic, roughness);
+    // Widened by the normal variation this pixel covers, before anything reads
+    // it -- the sun, the punctual lights and the environment all shade through
+    // `Alpha`, and a highlight that is stable for one of them and not the others
+    // would be worse than no correction at all.
+    surface.Alpha = antiAliasedAlpha(surface.Alpha, geometricNormal);
 
     // The sun. Its direction already points from the world towards it, so the
     // dot against a normal needs no negation. Its COLOUR is new at M7.5: the

@@ -7,15 +7,17 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 - **M7.5 — Looking Like an Engine — done and awaiting review.**
   The brief is [`docs/briefs/m7.5-kickoff.md`](docs/briefs/m7.5-kickoff.md), with
-  fifteen decisions, thirteen Findings and a filled Gate Record. **Every scope item
+  sixteen decisions, seventeen Findings and a filled Gate Record. **Every scope item
   and every gate item is done**: four cascades in one atlas with a
   world-constant filter and a blend band, clustered forward shading on a 16×9×24
   grid, image-based lighting by the split sum, the post chain — depth prepass,
   ambient occlusion, automatic exposure, bloom, FXAA — instanced draws, and both
   design constraints answered while the pass list was open.
   **The number that is not about looking**: the horde scene goes from
-  30.99 ms and **15,390 draw calls** to 3.72 ms and
-  **22**, for the same 4,002 visible objects. The whole new chain costs about a
+  31.45 ms and **15,390 draw calls** to 3.83 ms and
+  **22**, for the same 4,002 visible objects — and those are the numbers from
+  AFTER D043, because the first set was measured on a frame that was drawing
+  almost none of the scene. The whole new chain costs about a
   millisecond at 1080p, priced per feature.
   **The deliverable is a pair of pictures** in `docs/images/m7.5/`, the
   `milestone/m7` build beside this one at the same camera and clock. The day
@@ -26,9 +28,24 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   the useful direction — the technique changed instead of the interface.
   **ADR 0043 is PROPOSED and needs the human**, because ADR 0037 requires a
   human-approved ADR to touch the frozen surface and this touches it.
-  **Two defects recorded (D041, D042)** and seven more found and fixed inside the
-  milestone; six of the nine were found by looking at a picture or a number
-  rather than by a test. **D042 is the one to read**: a human asked what a dark
+  **The review pass also added Decision 16**: geometric specular antialiasing
+  ships, measured, and the measurement says it buys nothing in current content —
+  both of this engine's specular sources are already band-limited, one of them by
+  a roughness floor M4 added for exactly this reason. Written down as a cost with
+  its numbers rather than as a feature.
+  **Three defects recorded (D041, D042, D043)** and seven more found and fixed
+  inside the milestone; seven of the ten were found by looking at a picture or a
+  number rather than by a test. **D043 is the one a reviewer should read first**:
+  the instanced path shipped drawing nothing — both instanced shaders built the
+  per-instance model matrix transposed, so every instanced vertex left the
+  frustum — and the milestone's three independent instruments all agreed with
+  that frame. The draw-call gate read 22 against 4,002, which is what working
+  instancing looks like; the capture goldens matched, because the command stream
+  was correct; and the frame was eight times faster, because it was empty. It was
+  found by rendering a picture. `screenshot_gate_instanced` is the standing check,
+  and the proof is a differential: instanced and non-instanced are now
+  byte-identical, where 87% of pixels differed before. **D042 is the other one to
+  read**: a human asked what a dark
   square above the obby's character was, and the answer was that skinning had
   been broken since M6 -- every joint but index 0 read past the end of its
   palette, because the indices travel as floats and both skinned shaders
@@ -290,6 +307,44 @@ quietly.
 Entries for the planning session and for M0 through M4 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
+
+- **2026-08-21 (session 14, Claude Opus): M7.5 review pass — three items from
+  the human, and the instanced path was drawing nothing.**
+
+  **The SSAO noise was not the SSAO** and the three ranked hypotheses were all
+  wrong, each refuted by a number rather than by reading. The shipped
+  16-sample-plus-blur frame matches a 256-SAMPLE reference to 0.4% on the
+  reporter's own metric; its error against that reference is 0.122 where the
+  unblurred frame's is 2.110. Relaxing the bilateral tolerance fifty-fold moves
+  it by 0.001, both separable passes are present and on different axes, and
+  widening the blur makes the image worse rather than better. The variation the
+  report measured is there and survives forcing occlusion to one — it is
+  silhouette and shadow-edge aliasing on a shallow transparent edge, which is
+  FXAA's limit, not the blur's.
+
+  **Geometric specular antialiasing implemented** (`antiAliasedAlpha`,
+  Kaplanyan/Tokuyoshi, Filament's constants read from its source and registered as
+  U-57 — the recalled 0.25/0.18 were both wrong and the recalled algebra was one
+  square out). It ships, and Decision 16 records that it currently buys nothing:
+  no reduction in measured temporal flicker and double the error against a 16x
+  supersampled reference, because both specular sources here are already
+  band-limited — the environment by its own 128-texel octahedral resolution, and
+  punctual specular by the `LuaugMinRoughness` floor M4 added for this exact
+  reason. Toksvig named as out.
+
+  **D043 — the instanced path shipped drawing nothing**, and the scene built for
+  the specular question is what found it: eight identical spheres over an empty
+  floor. Both instanced shaders assembled the model matrix from four columns with
+  a constructor that fills rows, so every instanced vertex left the frustum. The
+  milestone's three instruments all agreed with the empty frame — the draw-call
+  gate, the capture goldens and the frame time. Fixed, re-measured (3.83 ms, and
+  the control 31.45 ms), and covered by `screenshot_gate_instanced`; instanced and
+  non-instanced renders are byte-identical now, against 87% of pixels differing
+  before.
+
+  **Motion vectors: recorded, both ways.** FXAA ships, no velocity buffer exists,
+  and temporal upscaling is as far away as it was before M7.5 —
+  `docs/architecture.md` says it where somebody planning the work will look.
 
 - **2026-08-21 (session 13, Claude Opus): M7.5 built — the renderer's second
   half.** Four cascades in one atlas with a world-constant filter and a blend

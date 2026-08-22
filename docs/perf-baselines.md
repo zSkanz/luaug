@@ -335,8 +335,20 @@ either: it is a container with no window, no device and a warm page cache.
 
 Captured with `luaug-host <project> --headless --width=1920 --height=1080
 --frames=300 --exit --frame-stats`, median of the 289 frames after ten warm-up
-frames, three runs. The spread across the three runs of the horde scene was 2%
-(3.716, 3.693 and 3.768 ms).
+frames, three runs. The spread across the three runs of the horde scene was 1.5%
+(3.826, 3.776 and 3.832 ms).
+
+**These horde numbers are the RE-MEASURED ones, and the first set was taken on a
+frame that was not drawing the scene (D043).** Both instanced shaders assembled
+the per-instance model matrix transposed, so every instanced vertex left the
+frustum: the field of two thousand enemies rendered as an empty floor with only
+the player on it. The measurement said 3.72 ms at 22 draw calls, which is the
+number a working instanced path also gives -- twenty-four thousand triangles at
+1080p are not what this frame is spending its time on, so removing all of them
+moved the median by 3%. **A performance number cannot tell you whether the frame
+contained the scene**, and neither could the draw-call gate this milestone was
+asked for, nor the command-stream goldens, which were all correct. The check that
+can is `screenshot_gate_instanced`, and it is standing now.
 
 **Two numbers per row now, and the second one is the point.** `DrawCalls` and
 `VisibleObjects` were the same number until this milestone: a run of objects that
@@ -353,9 +365,16 @@ now, because M7.5 is where the answer became a number something defends.
 
 | Horde, 2,000 enemies | Frame | Draw calls | Visible objects |
 |---|---|---|---|
-| Instanced, as shipped | **3.72 ms** | **22** | 4,002 |
-| Same build, instanced path disabled | 30.99 ms | 15,390 | 4,002 |
-| Instanced, pinned to two cores | 4.07 ms | 22 | 4,002 |
+| Instanced, as shipped | **3.83 ms** | **22** | 4,002 |
+| Same build, instanced path disabled | 31.45 ms | 15,390 | 4,002 |
+| Instanced, pinned to two cores | 4.04 ms | 22 | 4,002 |
+
+**The control row is also the correctness check now.** With D043 fixed, the
+instanced frame and the same frame with the instanced path disabled are
+BYTE-IDENTICAL at 960x540 -- zero differing pixels. Before the fix, 87% of the
+frame differed. That comparison costs one extra render and is the only instrument
+that could have told these two rows apart, because everything else about them --
+the command stream, the counters, the timings -- was consistent with both.
 
 The control row is the same binary with one constant raised past any real run --
 the same sort, the same passes, the same shaders. That is what makes it a control
@@ -394,10 +413,11 @@ write.
 
 | Milestone | Scene | Preset | Metric | Value | Budget/Gate |
 |---|---|---|---|---|---|
-| M7.5 | `tests/perf/horde` (2,000 enemies, one mesh, one material, 1080p) | `win-msvc-dev` | median frame | **3.72 ms** | — |
+| M7.5 | `tests/perf/horde` (2,000 enemies, one mesh, one material, 1080p) | `win-msvc-dev` | median frame | **3.83 ms** | re-measured after D043 |
 | M7.5 | `tests/perf/horde` | `win-msvc-dev` | draw calls / visible objects | **22 / 4,002** | not equal, which is the gate |
-| M7.5 | `tests/perf/horde`, instanced path disabled | `win-msvc-dev` | median frame | 30.99 ms | the control |
-| M7.5 | `tests/perf/horde`, two cores | `win-msvc-dev` | median frame | 4.07 ms | the reduced-CPU row |
+| M7.5 | `tests/perf/horde`, instanced path disabled | `win-msvc-dev` | median frame | 31.45 ms | the control |
+| M7.5 | `tests/perf/horde`, instanced vs. disabled | `win-msvc-dev` | differing pixels | **0** | the check the counters could not make |
+| M7.5 | `tests/perf/horde`, two cores | `win-msvc-dev` | median frame | 4.04 ms | the reduced-CPU row |
 | M7.5 | `examples/02-meshes` (1080p) | `win-msvc-dev` | median frame | **1.51 ms** | — |
 | M7.5 | `examples/02-meshes` with a frozen sun | `win-msvc-dev` | median frame | 1.41 ms | isolates the environment prefilter |
 | M7.5 | `examples/02-meshes` | `win-msvc-dev` | draw calls / visible objects | 61 / 11 | eleven objects across six passes |

@@ -40,12 +40,20 @@ struct VertexInput
     float4 InstanceAlphaUnused : TEXCOORD8;
 };
 
-// `core::Mat4` stores `m[column][row]`, so four columns assembled in order are
-// the matrix HLSL's `mul(M, v)` expects -- the same convention `column_major` on
-// the uniform blocks spells out.
+// `core::Mat4` stores `m[column][row]`, so the four attributes ARE the matrix's
+// four columns -- and **HLSL's `float4x4(a, b, c, d)` constructor fills ROWS**.
+// Handing it four columns therefore builds the TRANSPOSE, which is what this
+// shader did until somebody looked at the horde instead of counting its draw
+// calls (D043). `mul(M^T, p)` puts a dot product of the translation into `w`, so
+// every instanced vertex went somewhere off-screen and the pass drew nothing.
+//
+// `column_major` on the uniform blocks is not the same statement: it describes
+// how a matrix is LAID OUT IN MEMORY, and a vertex attribute has no layout to
+// declare -- it arrives as four separate vectors and how they are assembled is
+// this function's business.
 float4x4 instanceModel(VertexInput input)
 {
-    return float4x4(input.ModelColumn0, input.ModelColumn1, input.ModelColumn2, input.ModelColumn3);
+    return transpose(float4x4(input.ModelColumn0, input.ModelColumn1, input.ModelColumn2, input.ModelColumn3));
 }
 
 Interpolants VertexMain(VertexInput input)
@@ -59,10 +67,12 @@ Interpolants VertexMain(VertexInput input)
     output.ViewDepth = output.Position.w;
 
     // The cofactor matrix of the rotation-scale block, so a non-uniform scale
-    // tilts the normal instead of shearing it.
-    const float3 a = float3(model[0][0], model[0][1], model[0][2]);
-    const float3 b = float3(model[1][0], model[1][1], model[1][2]);
-    const float3 c = float3(model[2][0], model[2][1], model[2][2]);
+    // tilts the normal instead of shearing it. Read straight off the attributes
+    // rather than out of `model`: these are the transformed basis vectors, which
+    // is what the matrix's COLUMNS are, and indexing a `float4x4` gives rows.
+    const float3 a = input.ModelColumn0.xyz;
+    const float3 b = input.ModelColumn1.xyz;
+    const float3 c = input.ModelColumn2.xyz;
     const float3x3 normalMatrix = float3x3(cross(b, c), cross(c, a), cross(a, b));
 
     output.Normal = mul(normalMatrix, input.Normal);

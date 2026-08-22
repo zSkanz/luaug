@@ -37,8 +37,10 @@ struct Interpolants
 Interpolants VertexMain(VertexInput input)
 {
     Interpolants output;
+    // Transposed, and see `pbr_instanced.hlsl` for why: the attributes are the
+    // matrix's columns and HLSL's constructor fills rows (D043).
     const float4x4 model =
-        float4x4(input.ModelColumn0, input.ModelColumn1, input.ModelColumn2, input.ModelColumn3);
+        transpose(float4x4(input.ModelColumn0, input.ModelColumn1, input.ModelColumn2, input.ModelColumn3));
     output.Position = mul(LightViewProjection, mul(model, float4(input.Position, 1.0f)));
     return output;
 }

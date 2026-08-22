@@ -68,6 +68,55 @@ Surface makeSurface(float3 position, float3 normal, float3 baseColor, float meta
     return surface;
 }
 
+// How much of the filter kernel's normal variance is believed, and how far the
+// widening is ever allowed to go. Filament's published defaults, and they are a
+// STARTING POINT rather than a derivation -- the variance is a fudge for the
+// fact that a pixel's normal distribution is not really a Gaussian, and the
+// threshold exists because the estimate blows up on a silhouette, where the
+// derivative of the normal is meaningless rather than large.
+static const float LuaugSpecularAaVariance = 0.15f;
+static const float LuaugSpecularAaThreshold = 0.2f;
+
+// Geometric specular antialiasing: the roughness this PIXEL sees, rather than
+// the roughness the surface has.
+//
+// M7.5 gave the engine a specular reflection of an environment, and a specular
+// lobe narrower than the pixel it lands in is a highlight with nowhere stable to
+// sit -- the camera moves half a pixel, the lobe falls on a different sample,
+// and a curved metal crawls. **Anti-aliasing the image cannot reach it**:
+// `fxaa.hlsl` looks for a contrast step along an EDGE, and this is a point
+// flickering in the middle of a smooth surface, with no edge under it.
+//
+// So the lobe is widened instead, by exactly the normal variation the pixel
+// covers. Kaplanyan 2016 ("Stable Specular Highlights"), Tokuyoshi 2017, and
+// Tokuyoshi and Kaplanyan 2019 ("Improved Geometric Specular Antialiasing"), in
+// the screen-space derivative form Filament ships. The normals inside a pixel
+// are treated as a Gaussian, GGX's own lobe is another, and convolving two
+// Gaussians adds their variances -- which is all the arithmetic below is.
+//
+// **The GEOMETRIC normal, deliberately, and not the mapped one.** A normal map
+// has the same failure at distance for a different reason -- a mip level
+// averages normals and the average is shorter than one, which is the very
+// information Toksvig's factor recovers -- and recovering it needs the map's own
+// mip chain rather than this pixel's derivatives. That is an asset-pipeline
+// decision and it is out of scope here, named rather than implied.
+//
+// **Raising roughness globally would also stop the crawl**, and it is the wrong
+// fix: it stops the reflection too. The point is to widen only where the normal
+// varies within the pixel, which on a flat wall is nowhere.
+float antiAliasedAlpha(float alpha, float3 geometricNormal)
+{
+    const float3 du = ddx(geometricNormal);
+    const float3 dv = ddy(geometricNormal);
+    const float variance = LuaugSpecularAaVariance * (dot(du, du) + dot(dv, dv));
+    const float kernelAlpha = min(2.0f * variance, LuaugSpecularAaThreshold);
+    // The variances compose in alpha SQUARED, which is where the two Gaussians
+    // actually add. Filament writes these same three lines around a round trip
+    // through perceptual roughness; the round trip is two square roots that
+    // cancel, so this skips it and stays in the parameter GGX is evaluated in.
+    return sqrt(saturate(alpha * alpha + kernelAlpha));
+}
+
 // Trowbridge-Reitz / GGX. The squared denominator is what gives the long tail
 // that separates a GGX highlight from a Blinn-Phong one.
 float distributionGgx(float noh, float alpha)

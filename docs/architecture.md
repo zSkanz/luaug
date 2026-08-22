@@ -276,6 +276,23 @@ namespace luaug::render {
   DebugDraw& debugDraw();       // lines/boxes/spheres/text, dev builds; available from M1
 }
 ```
+**Anti-aliasing is FXAA, and there are no motion vectors** (M7.5, and the
+roadmap's design constraint asked for this either way). FXAA is spatial: it needs
+the final image and nothing else, so `RenderWorld` gained no previous-frame
+transform, no draw writes a velocity target, and `RenderCamera::jitter` exists as
+a field that is zero everywhere. **What that costs is named rather than left to
+be discovered**: a temporal upscaler (FSR2, XeSS) and frame generation are
+exactly as far away as they were before M7.5, because both need the per-pixel
+motion vector that does not exist, and producing one is a second render target
+and a previous transform on every object -- renderer-wide work, not a pass. It
+did not become closer because the engine now has a depth buffer it can sample;
+depth is the cheap half.
+
+Specular aliasing, which FXAA cannot reach because it is a point flickering
+inside a surface rather than a step along an edge, is answered in the shading
+instead: `antiAliasedAlpha` widens the GGX lobe by the normal variation a pixel
+covers (Kaplanyan/Tokuyoshi; `shaders/include/luaug_brdf.hlsli`).
+
 Alternative renderers (deferred, GPU-driven) are build-time selections like
 any backend and may not reach into scene or rhi internals. A 2D sprite pass
 slot is reserved before ui2d for the post-v1 2D layer. Meshlet data ships in
