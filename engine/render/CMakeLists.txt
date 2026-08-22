@@ -25,6 +25,7 @@ luaug_add_module(render
         src/native_accessors.cpp
         src/renderer_default.cpp
         src/settings.cpp
+        src/transform_history.cpp
         src/mesh_loader.cpp
         src/scene_types.cpp
         src/shadow.cpp

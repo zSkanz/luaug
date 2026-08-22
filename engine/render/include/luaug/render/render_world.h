@@ -24,6 +24,7 @@
 #include "luaug/render/animation.h"
 #include "luaug/render/mesh_cache.h"
 #include "luaug/render/shader_types.h"
+#include "luaug/render/transform_history.h"
 #include "luaug/rhi/types.h"
 
 #include <vector>
@@ -389,6 +390,18 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
              // animate -- a capture harness, a screenshot tool. Null means every
              // skinned mesh comes out in bind pose, which is what an unanimated
              // one should look like.
-             const AnimationSystem* animation, RenderWorld& out);
+             const AnimationSystem* animation,
+             // Where this frame sits between the last tick and the next, and
+             // where everything was at the tick before it (`transform_history.h`,
+             // D047). Zero and null draw the world exactly as the last tick left
+             // it, which is what every headless run does -- a golden has to be
+             // the tick, not a point between two of them.
+             //
+             // **The camera is interpolated with everything else**, because what
+             // has to be consistent is the TIME the frame is drawn at: a world
+             // evaluated at `t + alpha` seen from a camera at `t` slides forward
+             // and snaps back once a tick, which is the artifact this exists to
+             // remove rather than a smaller version of it.
+             f32 alpha, const TransformHistory* history, RenderWorld& out);
 
 } // namespace luaug::render

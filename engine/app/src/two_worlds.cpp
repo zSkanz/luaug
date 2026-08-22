@@ -141,8 +141,11 @@ void closeSession(Session& session, rhi::IDevice& device)
         (void)session.loader.sync(device, *cmd, session.host.world(), session.host.workspace(), session.meshes,
                                   session.library);
 
+        // No interpolation: this proof renders exactly at the tick, which is
+        // what every headless run does and what makes two of its frames
+        // comparable at all (D047).
         render::extract(session.host.world(), session.host.workspace(), session.host.lighting(), session.library,
-                        aspect, session.renderer->shadowRadius(), session.host.animation(), snapshot);
+                        aspect, session.renderer->shadowRadius(), session.host.animation(), 0.0f, nullptr, snapshot);
 
         session.renderer->render(device, *cmd,
                                  {

@@ -32,11 +32,13 @@ constexpr f32 kDegreesToRadians = kPi / 180.0f;
 // it (api-design.md §2.2). A light with no such ancestor lights nothing, which
 // is why this returns false rather than defaulting to the origin -- a lamp that
 // silently moved to (0,0,0) is worse than a lamp that is off.
-[[nodiscard]] bool lightAnchor(const scene::World& world, core::InstanceId id, CFrameD& out) noexcept
+[[nodiscard]] bool lightAnchor(const scene::World& world, core::InstanceId id, CFrameD& out,
+                               core::InstanceId& anchorId) noexcept
 {
     for (core::InstanceId cursor = world.parentOf(id); cursor.valid(); cursor = world.parentOf(cursor)) {
         if (const scene::PartComponent* part = world.parts().find(cursor); part != nullptr) {
             out = part->cframe;
+            anchorId = cursor;
             return true;
         }
     }
@@ -177,11 +179,29 @@ const MeshLibrary::Entry* MeshLibrary::find(core::NameAtom content) const noexce
 }
 
 void extract(const scene::World& world, core::InstanceId root, core::InstanceId lightingHost, const MeshLibrary& meshes,
-             f32 viewportAspect, f32 shadowRadius, const AnimationSystem* animation, RenderWorld& out)
+             f32 viewportAspect, f32 shadowRadius, const AnimationSystem* animation, f32 alpha,
+             const TransformHistory* history, RenderWorld& out)
 {
     out.clear();
     if (!root.valid())
         return;
+
+    // Where a thing is at the fractional time this frame is being drawn at
+    // (`transform_history.h`, D047). Every transform below goes through it, so
+    // the whole frame -- camera, parts, meshes, the anchors lights hang off --
+    // is evaluated at one time rather than at several.
+    //
+    // Anything with no previous transform is drawn where it is: something that
+    // streamed in this tick has no earlier position to come from, and smearing
+    // it in from a stale slot would be worse than the step it replaces.
+    const auto at = [&](core::InstanceId id, const CFrameD& current) -> CFrameD {
+        if (history == nullptr || alpha <= 0.0f)
+            return current;
+        const CFrameD* earlier = history->previous(id);
+        if (earlier == nullptr)
+            return current;
+        return core::lerp(*earlier, current, static_cast<core::f64>(alpha));
+    };
 
     // --- The camera, and therefore the space everything else is expressed in --
     //
@@ -194,8 +214,9 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
     const bool cameraUsable = world.alive(cameraId) && !world.destroyed(cameraId);
     const scene::CameraComponent* camera = cameraUsable ? world.cameras().find(cameraId) : nullptr;
     if (camera != nullptr) {
+        const CFrameD cameraFrame = at(cameraId, camera->cframe);
         out.camera.valid = true;
-        out.camera.origin = camera->cframe.position;
+        out.camera.origin = cameraFrame.position;
         out.camera.nearPlane = camera->nearPlane;
         out.camera.farPlane = camera->farPlane;
 
@@ -204,7 +225,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         // would apply it twice -- which looks correct near the world origin and
         // is catastrophically wrong a kilometre out, i.e. exactly where ADR 0014
         // says the f64 path has to hold.
-        CFrameD orientation = camera->cframe;
+        CFrameD orientation = cameraFrame;
         orientation.position = DVec3{};
         out.camera.view = core::toRenderMatrix(core::inverse(orientation), DVec3{});
         const f32 aspect = viewportAspect > 0.0f ? viewportAspect : 1.0f;
@@ -265,7 +286,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             return;
         }
         out.parts.push_back(RenderPart{
-            .cframe = part.cframe,
+            .cframe = at(id, part.cframe),
             .size = part.size,
             .color = part.color,
             .transparency = part.transparency,
@@ -279,8 +300,10 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         if (!inWorld(world, id, root))
             return;
         CFrameD anchor;
-        if (!lightAnchor(world, id, anchor))
+        core::InstanceId anchorId;
+        if (!lightAnchor(world, id, anchor, anchorId))
             return;
+        anchor = at(anchorId, anchor);
         out.lights.push_back(RenderLight{
             .kind = LightKind::Point,
             .position = core::toVec3(anchor.position - origin),
@@ -299,8 +322,10 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         if (!inWorld(world, id, root))
             return;
         CFrameD anchor;
-        if (!lightAnchor(world, id, anchor))
+        core::InstanceId anchorId;
+        if (!lightAnchor(world, id, anchor, anchorId))
             return;
+        anchor = at(anchorId, anchor);
         // A spot points along its anchor's LookVector, which is -Z (ADR
         // 0013's convention, stated in core/math.h).
         const Vec3 forward = core::transformDirection(anchor, Vec3{0.0f, 0.0f, -1.0f});
@@ -344,7 +369,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         if (entry == nullptr || !entry->mesh.valid())
             return;
 
-        const Mat4 transform = core::toRenderMatrix(part->cframe, origin);
+        const Mat4 transform = core::toRenderMatrix(at(id, part->cframe), origin);
         const AABB worldBounds = core::transformed(transform, entry->bounds);
 
         // The palette, appended once per MESH rather than once per section: a
@@ -420,17 +445,17 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             // `Transparency` and whatever alpha the material arrived with.
             // The shader computes the same product, and it has to -- this is
             // what the draw was sorted by.
-            const f32 alpha = (1.0f - part->transparency) * out.materials[materialSlot].uniforms.baseColor[3];
+            const f32 opacity = (1.0f - part->transparency) * out.materials[materialSlot].uniforms.baseColor[3];
             // Fully invisible draws nothing at all, in either pass. That is
             // the debug path's existing rule (`submitWorld` skips a part at
             // `transparency >= 1`), and consistency with it matters more
             // here than the shadow question the roadmap left closed: a
             // shadow cast by something nobody can see is a defect whoever
             // sees it will report.
-            if (alpha <= 0.0f)
+            if (opacity <= 0.0f)
                 continue;
 
-            const bool transparent = alpha < 1.0f;
+            const bool transparent = opacity < 1.0f;
             const Vec3 centre = core::center(worldBounds);
             const f32 depth = core::length(centre);
             // Back-to-front for the blended pass, and the inversion happens
@@ -447,7 +472,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
                 .mesh = entry->mesh,
                 .section = section,
                 .material = materialSlot,
-                .alpha = alpha,
+                .alpha = opacity,
                 .transparent = transparent,
                 .boundsCenter = core::center(worldBounds),
                 .boundsRadius = 0.5f * core::length(core::size(worldBounds)),
@@ -490,12 +515,12 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         if (entry == nullptr)
             return;
 
-        const f32 alpha = 1.0f - part.transparency;
-        if (alpha <= 0.0f)
+        const f32 opacity = 1.0f - part.transparency;
+        if (opacity <= 0.0f)
             return;
 
         const Mat4 transform =
-            core::toRenderMatrix(part.cframe, origin) * core::scaling(primitiveScale(part.shape, part.size));
+            core::toRenderMatrix(at(id, part.cframe), origin) * core::scaling(primitiveScale(part.shape, part.size));
         const AABB worldBounds = core::transformed(transform, entry->bounds);
 
         ++out.candidateDraws;
@@ -534,7 +559,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             partMaterials.push_back(ResolvedPartMaterial{part.color, materialSlot});
         }
 
-        const bool transparent = alpha < 1.0f;
+        const bool transparent = opacity < 1.0f;
         const f32 depth = core::length(core::center(worldBounds));
         const f32 sortDepth = transparent ? kMaxSortDepth - depth : depth;
         out.draws.push_back(DrawItem{
@@ -544,7 +569,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             .mesh = entry->mesh,
             .section = 0,
             .material = materialSlot,
-            .alpha = alpha,
+            .alpha = opacity,
             .transparent = transparent,
             .boundsCenter = core::center(worldBounds),
             .boundsRadius = 0.5f * core::length(core::size(worldBounds)),

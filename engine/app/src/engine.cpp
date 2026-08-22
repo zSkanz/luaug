@@ -34,6 +34,7 @@
 #include "luaug/render/render_world.h"
 #include "luaug/render/renderer.h"
 #include "luaug/render/shader_library.h"
+#include "luaug/render/transform_history.h"
 #include "luaug/render/ui_renderer.h"
 #include "luaug/rhi/device.h"
 #include "luaug/ui/ui.h"
@@ -414,6 +415,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // put the whole materialisation burst in the measured window.
     SoakRecorder soak(60);
     core::u64 lastFrameNs = 0;
+
+    // Where everything was one tick ago (D047). Owned by the frame loop rather
+    // than by the world, because it is not world state: a reload replaces the
+    // host and this simply starts again, which is right -- a reloaded world has
+    // no previous frame to have come from.
+    render::TransformHistory transformHistory;
 
     render::MeshLibrary meshLibrary;
     render::MeshCache meshCache;
@@ -844,8 +851,23 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
         // The simulation, before anything is drawn: rendering shows the state a
         // tick settled on, never one being written.
-        for (u32 step = 0; step < frame.simTicks; ++step)
+        for (u32 step = 0; step < frame.simTicks; ++step) {
+            // BEFORE the tick, so that once the loop is done the history holds
+            // where everything was one tick ago and the world holds where it is
+            // now -- the two ends `render::extract` interpolates between (D047).
+            transformHistory.capture(host->world());
             host->tick();
+        }
+
+        // Where this frame sits between those two ticks.
+        //
+        // **Zero on the synthetic clock, by construction and not by accident.**
+        // A headless run drives exactly one fixed step per frame, so its frames
+        // ARE the ticks -- and every golden in this repository was recorded that
+        // way. Interpolating a headless frame by the accumulator's rounding
+        // residue would move every recorded uniform in its last bits for no
+        // gain at all.
+        const f32 renderAlpha = syntheticClock ? 0.0f : frame.alpha;
 
         // What the speakers do is a consequence of the simulation and never an
         // input to it (M6 brief, Decision 9), which is why this is after the
@@ -1012,7 +1034,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 targetHeight == 0 ? 1.0f : static_cast<f32>(targetWidth) / static_cast<f32>(targetHeight);
             const f32 shadowRadius = renderer != nullptr && renderer->valid() ? renderer->shadowRadius() : 0.0f;
             render::extract(host->world(), host->workspace(), host->lighting(), meshLibrary, aspect, shadowRadius,
-                            host->animation(), snapshot);
+                            host->animation(), renderAlpha, &transformHistory, snapshot);
             // The UI is laid out against the TARGET's size rather than the
             // window's: an offscreen render at 640x360 has to produce the
             // layout that resolution would, which is the whole of what the
