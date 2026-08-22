@@ -185,6 +185,18 @@ core::NameAtom World::name(core::InstanceId id) const noexcept
     return record == nullptr ? core::NameAtom{} : record->name;
 }
 
+void World::setGenerated(core::InstanceId id, bool generated) noexcept
+{
+    if (InstanceRecord* record = m_instances.find(id); record != nullptr)
+        record->generated = generated;
+}
+
+bool World::generated(core::InstanceId id) const noexcept
+{
+    const InstanceRecord* record = m_instances.find(id);
+    return record != nullptr && record->generated;
+}
+
 void World::setName(core::InstanceId id, core::NameAtom newName)
 {
     InstanceRecord* record = m_instances.find(id);

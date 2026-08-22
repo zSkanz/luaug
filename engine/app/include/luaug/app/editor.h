@@ -141,14 +141,23 @@ struct EditorCommands
     std::optional<bool> play;
     // Whether to be paused, which is only meaningful inside play mode.
     std::optional<bool> pause;
+    // Save the scene that is open. When none is, the shell asks for a name
+    // instead of guessing one -- see `saveAs`.
     bool save = false;
+    // Save to a content-relative path somebody typed. Carries the whole
+    // decision, so the frame loop does not have to know what the dialog asked.
+    std::string saveAs;
     // A scene the browser asked to open, relative to the content root.
     std::string openScene;
     // A folder the browser asked to make, in its current directory.
     std::string createFolder;
 
     void clear() noexcept { *this = EditorCommands{}; }
-    [[nodiscard]] bool any() const noexcept { return play.has_value() || pause.has_value() || save; }
+    [[nodiscard]] bool any() const noexcept
+    {
+        return play.has_value() || pause.has_value() || save || !saveAs.empty() || !openScene.empty() ||
+               !createFolder.empty();
+    }
 };
 
 // What the last save or load did, kept so the shell can say it. A save that
@@ -243,6 +252,27 @@ public:
     // open, which is a question rather than a failure: a project that has never
     // saved one has nothing for this to overwrite.
     bool saveOpenScene(const scene::World& world);
+
+    // --- Remembering, across a restart ---------------------------------------
+    //
+    // **Which scene was open is state that belongs to a PERSON, not to a
+    // project.** Two people working on the same repository were last looking at
+    // different things, and a project file that recorded one of them would make
+    // the other's editor jump somewhere on every pull. So it lives in
+    // `.luaug/`, beside the panel layout and gitignored for the same reason,
+    // while `[project] scene` in `luaug.toml` says which scene a RUN starts
+    // with — which is a decision the project does make.
+    //
+    // The fallback chain when the editor opens: the remembered scene if it still
+    // exists, then the project's declared one, then nothing — and nothing is an
+    // untitled world somebody can build in and give a name to when they save.
+    void rememberOpenScene(const std::filesystem::path& stateDirectory) const;
+    [[nodiscard]] static std::string recallOpenScene(const std::filesystem::path& stateDirectory);
+
+    // Writes the world to a scene that does not exist yet, and adopts it as the
+    // open one. `relativePath` is content-relative and gains the extension if it
+    // does not carry it — a person typing a name should not have to know it.
+    bool saveSceneAs(const scene::World& world, std::string_view relativePath);
 
     // Names the scene the world already holds, without loading anything. The
     // boot path uses it: the engine loads a project's scene before the editor

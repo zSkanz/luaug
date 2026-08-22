@@ -656,8 +656,49 @@ void drawTransport(Editor& editor, EditorCommands& commands)
     ImGui::SetItemTooltip("advance exactly one simulation tick");
 
     ImGui::SameLine();
-    if (ImGui::Button("save"))
-        commands.save = true;
+    // **Save asks for a name when there is nothing to overwrite.** An editor
+    // that invented one would put somebody's first hour of work in a file they
+    // did not choose and cannot find, which is the whole reason every editor
+    // has this dialog.
+    const bool untitled = editor.openScenePath().empty();
+    if (ImGui::Button(untitled ? "save as..." : "save")) {
+        if (untitled)
+            ImGui::OpenPopup("save-scene-as");
+        else
+            commands.save = true;
+    }
+    if (!untitled)
+        ImGui::SetItemTooltip("%s", editor.openScenePath().c_str());
+
+    if (ImGui::BeginPopup("save-scene-as")) {
+        static std::array<char, 160> path{};
+        ImGui::TextDisabled("content/");
+        ImGui::SameLine(0.0f, 0.0f);
+        ImGui::SetNextItemWidth(300.0f);
+        const bool submitted =
+            ImGui::InputText("##scene-path", path.data(), path.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+        const std::string_view typed{path.data()};
+
+        // The extension is added if it is missing, so a person typing a name
+        // does not have to know it -- and shown, so they can see what they will
+        // get before they press anything.
+        ImGui::TextDisabled("saves as content/%.*s%s", static_cast<int>(typed.size()), typed.data(),
+                            typed.size() >= kSceneExtension.size() &&
+                                    typed.substr(typed.size() - kSceneExtension.size()) == kSceneExtension
+                                ? ""
+                                : std::string(kSceneExtension).c_str());
+
+        ImGui::BeginDisabled(typed.empty());
+        const bool pressed = ImGui::Button("save");
+        ImGui::EndDisabled();
+
+        if ((submitted || pressed) && !typed.empty()) {
+            commands.saveAs = std::string(typed);
+            path.fill(0);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
 
     ImGui::SameLine();
     switch (run) {
@@ -801,8 +842,13 @@ void buildDefaultLayout(ImGuiID dockspace)
     ImGui::DockBuilderDockWindow("explorer", left);
     ImGui::DockBuilderDockWindow("properties", right);
     ImGui::DockBuilderDockWindow("stats", right);
-    ImGui::DockBuilderDockWindow("console", bottom);
+    // Content first, so it is the tab that opens. The two share a node on
+    // purpose -- they are both "the thing under the viewport" and neither
+    // deserves permanent floor space -- but which one greets somebody is a
+    // decision rather than a consequence of call order, so it is also set
+    // explicitly below.
     ImGui::DockBuilderDockWindow("content", bottom);
+    ImGui::DockBuilderDockWindow("console", bottom);
 
     ImGui::DockBuilderFinish(dockspace);
 }
@@ -937,11 +983,14 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // layout has already put windows into it by the time it does -- so "nobody
     // has arranged this yet" is the node having no split and no window, which is
     // exactly the state a first launch is in.
+    bool builtThisFrame = false;
     if (!laidOut) {
         laidOut = true;
         const ImGuiDockNode* node = ImGui::DockBuilderGetNode(dockspace);
-        if (node == nullptr || (!node->IsSplitNode() && node->Windows.Size == 0))
+        if (node == nullptr || (!node->IsSplitNode() && node->Windows.Size == 0)) {
             buildDefaultLayout(dockspace);
+            builtThisFrame = true;
+        }
     }
 
     if (editor != nullptr) {
@@ -975,6 +1024,12 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
             drawMemory(*runtime);
     }
     ImGui::End();
+
+    // After every panel has been declared, because focusing a window ImGui has
+    // not seen this frame does nothing. Only on the frame the default layout
+    // was built: a person who later chose the console should find the console.
+    if (builtThisFrame)
+        ImGui::SetWindowFocus("content");
 }
 
 void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,

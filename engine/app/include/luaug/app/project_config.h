@@ -65,6 +65,17 @@ struct ProjectConfig
     // to embed it in the packaged artifact.
     std::string icon;
 
+    // `[project] scene` -- the scene a RUN of this project starts with, as a
+    // content-relative path (`scenes/main.scene.json`).
+    //
+    // Declared rather than found by convention. A fixed filename the engine
+    // looks for is a rule nobody can see in a project that has three scenes,
+    // and "which one starts" is a decision a project makes -- the same decision
+    // the first entry of Unity's build settings is. Empty means the project
+    // starts with whatever its scripts build, which is every example before
+    // `06-scene`.
+    std::string scene;
+
     render::GraphicsSettings graphics;
 };
 

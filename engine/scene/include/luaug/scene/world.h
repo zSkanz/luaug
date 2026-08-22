@@ -62,6 +62,22 @@ struct InstanceRecord
     // `Parent` is locked (api-design.md divergence #25).
     bool destroyed = false;
 
+    // **Created by a system rather than authored by a person**, and therefore
+    // not part of a scene.
+    //
+    // A streamed chunk is the case that forced this: `StreamingGlue` puts a
+    // `Folder` of real `Part`s into `Workspace` as a focus moves, and a save
+    // taken at that moment wrote a recording of where the streaming happened to
+    // be -- 40 chunks and 1.4 MB of terrain that already has a format of its
+    // own, frozen into a file that is supposed to describe a project. Unity
+    // spells the same idea `HideFlags.DontSave`.
+    //
+    // It is deliberately NOT in the world hash. The hash asks what the
+    // simulation is, and a streamed part is as real to a tick as an authored
+    // one; this asks what a person wrote down, which is a different question
+    // with a different answer.
+    bool generated = false;
+
     // Which of the class's first 64 properties have a listener. A write to an
     // unsubscribed property enqueues nothing, which is what lets 10k parts move
     // every tick for free while nobody is watching (architecture.md §4). Past
@@ -273,6 +289,13 @@ public:
     // --- Naming --------------------------------------------------------------
 
     [[nodiscard]] core::NameAtom name(core::InstanceId id) const noexcept;
+
+    // Marks an instance as made by a system rather than authored, so a scene
+    // does not record it. Applies to the whole subtree at write time -- marking
+    // a chunk's folder is enough, and marking every part inside it would be the
+    // same statement a thousand times.
+    void setGenerated(core::InstanceId id, bool generated) noexcept;
+    [[nodiscard]] bool generated(core::InstanceId id) const noexcept;
 
     // Relinks the parent's name chains, so a rename can satisfy a
     // `WaitForChild` that was parked on the new name (api-design.md §2.2).

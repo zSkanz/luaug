@@ -469,6 +469,7 @@ int main(int argc, char** argv)
 
         options.graphics = config.graphics;
         options.windowTitle = config.windowTitle;
+        options.startupScene = config.scene;
 
         // Before any window exists, because the shell reads a process's
         // identity when it first shows one -- and a pinned shortcut that lost

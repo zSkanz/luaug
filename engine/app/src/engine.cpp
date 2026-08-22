@@ -419,6 +419,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // a panel has said how big it is.
     Editor editor;
     ViewportTarget viewportTarget;
+    // What was last written to `.luaug/editor.json`, so the write happens on a
+    // change rather than every frame.
+    std::string rememberedScene;
     // Whether the game was taking input last frame, so the release happens once
     // on the way out rather than every frame the editor is editing.
     bool gameHadInput = true;
@@ -678,8 +681,20 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     //
     // A project with no scene file is not an error and never logs one. Every
     // example before `06-scene` is exactly that.
-    const std::filesystem::path bootScene = contentRoot / "scenes" / "main.scene.json";
-    if (!options.scriptPath.empty() && platform::fileExists(bootScene)) {
+    // **Which scene opens, in order: what this person had open, what the project
+    // declares, then nothing.** The first is per-person state in `.luaug/`; the
+    // second is `[project] scene` in `luaug.toml`, which is the decision a
+    // project makes about what a RUN of it starts with. Nothing is an untitled
+    // world, which is what an editor opened on an empty project should be.
+    std::string sceneRelative;
+    if (options.editor)
+        sceneRelative = Editor::recallOpenScene(options.scriptPath / ".luaug");
+    if (sceneRelative.empty() || !platform::fileExists(contentRoot / std::filesystem::path(sceneRelative)))
+        sceneRelative = options.startupScene;
+
+    const std::filesystem::path bootScene =
+        sceneRelative.empty() ? std::filesystem::path{} : contentRoot / std::filesystem::path(sceneRelative);
+    if (!options.scriptPath.empty() && !bootScene.empty() && platform::fileExists(bootScene)) {
         const std::filesystem::path scenePath = bootScene;
         std::string sceneText;
         if (!platform::readTextFile(scenePath, sceneText)) {
@@ -699,7 +714,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // writes back to that one rather than refusing for want of an
                 // open scene.
                 if (options.editor)
-                    editor.adoptOpenScene("scenes/main.scene.json");
+                    editor.adoptOpenScene(sceneRelative);
             }
         }
     }
@@ -904,6 +919,16 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     (void)editor.content().createFolder(editorCommands.createFolder);
                 if (editorCommands.save)
                     (void)editor.saveOpenScene(host->world());
+                if (!editorCommands.saveAs.empty())
+                    (void)editor.saveSceneAs(host->world(), editorCommands.saveAs);
+
+                // Remembered on CHANGE rather than at exit: an editor that only
+                // wrote this on a clean shutdown would forget everything the one
+                // time somebody most wants it -- after a crash.
+                if (editor.openScenePath() != rememberedScene) {
+                    rememberedScene = editor.openScenePath();
+                    editor.rememberOpenScene(options.scriptPath / ".luaug");
+                }
             }
 
             const core::InstanceId wasSelected = inspector.selection();

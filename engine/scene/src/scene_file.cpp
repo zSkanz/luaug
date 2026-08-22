@@ -170,8 +170,14 @@ void collectPaths(const World& world, core::InstanceId id, const std::string& pr
     const std::string path = prefix.empty() ? std::string(world.atoms().text(world.name(id)))
                                             : prefix + "." + std::string(world.atoms().text(world.name(id)));
     out.emplace(id.index, path);
-    for (core::InstanceId child = world.firstChild(id); child.valid(); child = world.nextSibling(child))
+    for (core::InstanceId child = world.firstChild(id); child.valid(); child = world.nextSibling(child)) {
+        // Not written, so not nameable. A path collected for something the file
+        // will not contain is a reference that resolves to nothing on load,
+        // which is worse than the null the dropped-reference count reports.
+        if (world.generated(child))
+            continue;
         collectPaths(world, child, path, out);
+    }
 }
 
 void writeInstance(JsonWriter& out, const World& world, core::InstanceId id,
@@ -245,8 +251,14 @@ void writeInstance(JsonWriter& out, const World& world, core::InstanceId id,
         out.beginArray();
         // Sibling order, which is observable through `GetChildren` and is
         // therefore part of what a scene has to reproduce.
-        for (core::InstanceId child = world.firstChild(id); child.valid(); child = world.nextSibling(child))
+        for (core::InstanceId child = world.firstChild(id); child.valid(); child = world.nextSibling(child)) {
+            // A system made it, so nobody wrote it down and a scene does not
+            // record it -- and the whole subtree goes with it, because the parts
+            // inside a streamed chunk were not separately authored either.
+            if (world.generated(child))
+                continue;
             writeInstance(out, world, child, paths, report);
+        }
         out.endArray();
     }
 

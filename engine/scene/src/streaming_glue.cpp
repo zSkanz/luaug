@@ -59,6 +59,11 @@ core::f64 StreamingGlue::materialize(asset::ChunkId id, const asset::Chunk& chun
         "Chunk_" + std::to_string(id.x) + "_" + std::to_string(id.z) + "_" + std::to_string(id.layer);
     m_world.setName(resident.folder, m_world.atoms().intern(folderName));
     (void)m_world.setParent(resident.folder, m_root);
+    // Made by streaming, not authored by anybody, so a scene does not record it.
+    // Marking the folder is enough: the serializer skips a marked instance and
+    // everything under it, and the parts inside were never separately written
+    // down either.
+    m_world.setGenerated(resident.folder, true);
 
     resident.instances.reserve(chunk.instances.size());
     for (const asset::ChunkInstance& source : chunk.instances) {

@@ -1,0 +1,22 @@
+# The first project in this repository whose world is DATA (ADR 0047).
+#
+# `scene` is the decision that makes it one: it names what a RUN of this project
+# starts with, the way the first entry of a build settings list does. Without it
+# the engine would have to look for a filename by convention, which is a rule
+# nobody can see in a project that has three scenes.
+#
+# Which scene the EDITOR opens is a different question with a different answer:
+# it is whatever that person last had open, remembered in `.luaug/editor.json`,
+# falling back to this one. Two people working on the same repository were last
+# looking at different things, and a project file that recorded one of them
+# would move the other's editor on every pull.
+
+[project]
+name = "LuauG Scene"
+id = "dev.luaug.scene"
+version = "1.0.0"
+engine = "0.1"
+scene = "scenes/main.scene.json"
+
+[window]
+title = "LuauG — Scene"

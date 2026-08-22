@@ -267,3 +267,55 @@ TEST_CASE("the scene's root applies to the Workspace that already exists")
     CHECK(std::get<std::string>(reloaded.world.getAttribute(target, reloaded.atom("SceneName"))) == "home");
     CHECK(reloaded.world.hasTag(target, reloaded.atom("Authored")));
 }
+
+TEST_CASE("what a system made is not in the scene, and neither is what is under it")
+{
+    // The case that forced this: a save taken while the flagship was streaming
+    // wrote 40 chunk folders and 1.4 MB of terrain into a file meant to describe
+    // a project. A streamed part is as real to a tick as an authored one -- the
+    // world hash counts it and must -- but nobody wrote it down, so a scene does
+    // not record it.
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+    (void)partUnder(fixture, workspace, "Authored", {});
+
+    const core::InstanceId chunk = fixture.world.create(fixture.schema.folderClass);
+    fixture.world.setName(chunk, fixture.atom("Chunk_0_0_0"));
+    (void)fixture.world.setParent(chunk, workspace);
+    fixture.world.setGenerated(chunk, true);
+    (void)partUnder(fixture, chunk, "Terrain", {});
+
+    SceneIoReport report;
+    const std::string text = scene::writeScene(fixture.world, &report);
+
+    CHECK(text.find("Authored") != std::string::npos);
+    CHECK(text.find("Chunk_0_0_0") == std::string::npos);
+    // The whole subtree, not just the folder. Marking every part inside a chunk
+    // would be the same statement a thousand times.
+    CHECK(text.find("Terrain") == std::string::npos);
+}
+
+TEST_CASE("a reference to something a system made is dropped rather than dangling")
+{
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+
+    const core::InstanceId chunk = fixture.world.create(fixture.schema.folderClass);
+    fixture.world.setName(chunk, fixture.atom("Chunk_0_0_0"));
+    (void)fixture.world.setParent(chunk, workspace);
+    fixture.world.setGenerated(chunk, true);
+    const core::InstanceId terrain = partUnder(fixture, chunk, "Terrain", {});
+
+    const core::InstanceId model = fixture.world.create(fixture.schema.modelClass);
+    fixture.world.setName(model, fixture.atom("Marker"));
+    (void)fixture.world.setParent(model, workspace);
+    (void)fixture.world.setProperty(model, fixture.schema.primaryPartProperty, scene::Value{terrain});
+
+    SceneIoReport report;
+    const std::string text = scene::writeScene(fixture.world, &report);
+
+    // A path collected for something the file will not contain is a reference
+    // that resolves to nothing on load, which is worse than a counted null.
+    CHECK(report.droppedReferences >= 1);
+    CHECK(text.find("Terrain") == std::string::npos);
+}

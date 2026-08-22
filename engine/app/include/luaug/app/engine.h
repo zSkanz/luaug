@@ -110,6 +110,15 @@ struct EngineOptions
     // would be an editor that shows you something other than your game.
     bool editor = false;
 
+    // `[project] scene` -- the scene a run of this project starts with,
+    // content-relative. Empty means the project starts with whatever its scripts
+    // build, which is every example before `06-scene`.
+    //
+    // The EDITOR may open a different one: it remembers what the person had open
+    // and falls back to this. Which scene a run starts with is the project's
+    // decision; which scene an editor opens is the person's.
+    std::string startupScene;
+
     bool frameStats = false;
 
     // M7's gate, as a flag. Empty writes no report and asserts nothing.

@@ -1,4 +1,6 @@
 #include <luaug/app/editor.h>
+#include <luaug/core/json.h>
+#include <luaug/core/json_writer.h>
 #include <luaug/platform/file.h>
 #include <luaug/rhi/device.h>
 #include <luaug/scene/scene_file.h>
@@ -180,6 +182,51 @@ bool Editor::load(scene::World& world, const std::filesystem::path& path, Inspec
     if (report.unknownClasses > 0)
         message += " (" + std::to_string(report.unknownClasses) + " unknown class(es) skipped)";
     m_status = EditorStatus{message, false};
+    return true;
+}
+
+void Editor::rememberOpenScene(const std::filesystem::path& stateDirectory) const
+{
+    // JSON of one field rather than the bare path, because the second thing an
+    // editor wants to remember arrives sooner than anybody expects and a file
+    // that is only a string has nowhere to put it.
+    core::JsonWriter writer;
+    writer.beginObject();
+    writer.field("openScene", m_openScene);
+    writer.endObject();
+
+    (void)platform::createDirectories(stateDirectory);
+    (void)platform::writeTextFile(stateDirectory / "editor.json", writer.text());
+}
+
+std::string Editor::recallOpenScene(const std::filesystem::path& stateDirectory)
+{
+    std::string text;
+    if (!platform::readTextFile(stateDirectory / "editor.json", text))
+        return {};
+
+    core::JsonDocument document;
+    if (const core::JsonDocument::ParseResult parsed = document.parse(text); !parsed.ok)
+        return {};
+
+    return std::string(document.root()["openScene"].asString());
+}
+
+bool Editor::saveSceneAs(const scene::World& world, std::string_view relativePath)
+{
+    std::string path(relativePath);
+    if (path.size() < kSceneExtension.size() ||
+        path.compare(path.size() - kSceneExtension.size(), kSceneExtension.size(), kSceneExtension) != 0) {
+        path += kSceneExtension;
+    }
+
+    if (!save(world, m_content.root() / std::filesystem::path(path)))
+        return false;
+
+    m_openScene = path;
+    // The browser is showing the folder this was written into, and it does not
+    // know a file appeared in it.
+    (void)m_content.refresh();
     return true;
 }
 
