@@ -1226,13 +1226,29 @@ the same sense as the phase list above: each gets its detail and its gate at its
 own kickoff, from what the milestone before it learned. Writing five gates today
 would be writing four of them from a position that has not seen an editor run.
 
+**Re-cut 2026-08-22, at E1's review, by human decision.** The first sequence
+below put manipulators in one milestone, saving in another and play in a third —
+which optimised for whoever implements it and not for whoever uses it. The
+review said so in one sentence: *an engine without stop is not an engine — how
+are we going to edit, test and save?* **Edit, test and save are one loop**, and
+an editor that delivers a third of a loop three times is not usable in between.
+So E2 is now the loop, whole, and it is large on purpose. ADR 0047 is the
+decision underneath it: the authored world becomes data and scripts become
+behaviour, the way Unity, Unreal and Roblox all arrange it.
+
 | ID | Name | Size | Runnable artifact |
 |----|------|------|-------------------|
-| E1 | The Editor Opens | M | `luaug edit examples/10-open-world`: docked panels, the world in a viewport, click a tower and its properties are there and editable |
-| E2 | The Editor Changes Things | M | Manipulators, create/delete/rename/reparent, undo/redo, multi-select — a small scene built by hand |
-| E3 | The Editor Saves | L | A scene file format and its ADR: move a part, save, relaunch, it is where you left it |
-| E4 | The Editor Plays | M | Play and stop inside the editor on the two-worlds seam, with the edit world intact afterwards |
-| E5 | The Editor Ships | M | Asset browser, prefabs, and the distribution question ADR 0046 deliberately declined |
+| E1 | The Editor Opens | M | `luaug edit examples/10-open-world`: docked panels, the world in a viewport, click a tower and its properties are there and editable. **Built, awaiting review** |
+| E2 | The Loop — Edit, Test, Save | XL | Open a scene, move something, press play, watch it run, press stop and get your edit back, press save, close the editor, open it again and it is there |
+| E3 | The Editor Changes Things | L | Manipulators, create/delete/rename/reparent, undo/redo, multi-select, an editor camera — the authoring the loop makes worth having |
+| E4 | Assets and Prefabs | M | An asset browser, prefabs as scenes, and a scene that references what it uses |
+| E5 | The Editor Ships | M | The distribution question ADR 0046 deliberately declined, and the editor's own performance gate |
+
+**Why E3 comes after E2 rather than before it, which is the opposite of the
+first cut.** A manipulator without a save is a way to lose work, and an undo
+stack designed before there is a scene to undo *into* is an undo stack designed
+twice. The loop first makes every one of E3's tools land against something that
+keeps them.
 
 ### E1 — The Editor Opens (M)
 

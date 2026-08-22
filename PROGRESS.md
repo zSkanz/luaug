@@ -130,6 +130,24 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
   citations. That file exists because three human-reported defects were removed
   from this one while it was being rewritten to close M4. **A close rewrites this
   file wholesale; it can no longer take the open list with it.**
+- **The phase was re-cut at E1's review and ADR 0047 is why** (human decision,
+  2026-08-22). The first split put manipulators, saving and play in three
+  milestones; the review said in one sentence that edit, test and save are one
+  loop and an editor that delivers a third of it three times is not usable in
+  between. **E2 is now the loop, whole**, and underneath it the authored world
+  becomes DATA and scripts become BEHAVIOUR — the Unity, Unreal and Roblox
+  arrangement, asked for in those words. Code-first does not die: `Instance.new`
+  at runtime stays first-class, and what moves is where the world a project
+  *starts* with is written down.
+
+  **Three things E2 needs that do not exist**, each already named in a comment by
+  somebody who expected this day: `World::snapshot()`, cited five times across
+  `engine/scene` as the reason every component is trivially copyable and never
+  written; a file-writing capability, because `platform/file.h` reads and never
+  writes and the game VM must not be the one given it (R4); and the scene format
+  itself, whose strongest candidate is `world_hash.cpp:182-278` with a writer
+  where its `Hasher` is.
+
 - **D057 is the one open decision, and it has a third exit nobody had named.**
   `luaug build` packages a `dev`-profile host, so the released v1.0.0 binary
   carries the debug overlay and a Luau REPL — verified in the shipped bytes, and
