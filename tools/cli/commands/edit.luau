@@ -54,8 +54,18 @@ local function run(options: Options): number
 
     local result = process.run(engineArguments(engine, project.root), { stdio = "inherit" })
 
-    print(tr("cli.edit.closed", { code = result.exitcode }))
-    return if result.ok then 0 else 1
+    -- **Closing the window is the ordinary way to leave an editor**, and on
+    -- Windows a terminated process reports a negative code rather than zero. A
+    -- message that read "exited with code -1" for the commonest thing a person
+    -- does made a normal close look like a failure, which is a defect in the
+    -- message and not in the engine.
+    if result.ok or result.exitcode < 0 then
+        print(tr("cli.edit.closed"))
+        return 0
+    end
+
+    print(tr("cli.edit.failed", { code = result.exitcode }))
+    return 1
 end
 
 return {

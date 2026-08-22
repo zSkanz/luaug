@@ -129,6 +129,8 @@
   "asset.manifest.err.malformed": "The content manifest is malformed: {detail}.",
   "asset.manifest.err.missing_blob": "The content manifest names {content}, but the pack beside it does not hold it.",
   "app.warn.project_config": "The project file could not be read, so the engine's own defaults are in effect: {reason}",
+  "app.warn.pointer_lock_refused": "The window refused to hold the pointer, so turning the camera will stop at the edge of the screen.",
+  "app.info.pointer_lock": "Pointer {state}.",
   "app.info.pack_mounted": "Mounted content pack {path}.",
   "app.info.streaming_world": "Streaming a world of {count} chunk(s).",
   "app.warn.image_missing": "The picture {content} is not in any mounted content directory, so the label it names draws as a flat colour.",

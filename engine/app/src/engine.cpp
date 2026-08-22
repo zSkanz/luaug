@@ -422,6 +422,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // What was last written to `.luaug/editor.json`, so the write happens on a
     // change rather than every frame.
     std::string rememberedScene;
+    // This frame's relative pointer motion, accumulated from the events.
+    core::Vec2 editorLookDelta;
+    // Where the pointer was when it was last free, so a hold can put it back.
+    core::Vec2 editorPointerAnchor;
     // Whether the game was taking input last frame, so the release happens once
     // on the way out rather than every frame the editor is editing.
     bool gameHadInput = true;
@@ -917,6 +921,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 }
                 if (!editorCommands.createFolder.empty())
                     (void)editor.content().createFolder(editorCommands.createFolder);
+                // File > Exit. The same door the window's own close button is,
+                // so a person who reached for the menu gets the same shutdown.
+                if (editorCommands.quit)
+                    quit = true;
+                if (editorCommands.clearSelection)
+                    inspector.select(core::InstanceId{});
                 if (editorCommands.newScene) {
                     // Out of play mode first, for the reason opening a scene is:
                     // the snapshot would describe a world that no longer exists.
@@ -1146,12 +1156,42 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // keeps the property honest and keeps a replay of a game that locks
             // its pointer legal.
             const bool editorOwnsPointer = options.editor && editing(editor.runState());
-            const bool wantLocked = !editorOwnsPointer && engineState.pointerLocked;
-            const bool wantVisible = editorOwnsPointer || engineState.pointerVisible;
+            // **While turning the camera the pointer is hidden and held**, which
+            // is SDL's relative mode and is what puts the cursor back exactly
+            // where it was when the button is released. Without it a right-drag
+            // walks the cursor across the desktop and out of the window, and the
+            // turn stops when it leaves.
+            const bool editorLooking = editorOwnsPointer && editor.lookInput().active;
+            const bool wantLocked = editorOwnsPointer ? editorLooking : engineState.pointerLocked;
+            const bool wantVisible = editorOwnsPointer ? !editorLooking : engineState.pointerVisible;
 
             if (wantLocked != pointerLocked) {
                 pointerLocked = wantLocked;
-                (void)platform::setPointerLocked(*window, pointerLocked);
+                // Logged on the transition, not per frame. It separates two
+                // failures that look identical from the outside: an editor that
+                // never asked to hold the pointer, and a window that refused.
+                if (options.editor) {
+                    const core::I18nArg args[] = {
+                        {"state", pointerLocked ? std::string_view{"held"} : std::string_view{"released"}}};
+                    core::log(core::LogLevel::Info, LUAUG_TR("app.info.pointer_lock"), args);
+                }
+                // The result is checked rather than discarded. A pointer lock
+                // that silently did not happen looks exactly like one that did
+                // -- the cursor is hidden either way -- and the difference only
+                // shows up as a camera that stops turning at the edge of the
+                // screen, which is a thing somebody reports and nobody can
+                // explain.
+                if (!platform::setPointerLocked(*window, pointerLocked))
+                    core::log(core::LogLevel::Warn, LUAUG_TR("app.warn.pointer_lock_refused"));
+
+                // **Anchored back to where the hold began** (D063). SDL
+                // accumulates a logical position from the relative motion and
+                // warps the real cursor there on the way out, so without this a
+                // look that turned the camera around leaves the cursor against
+                // a window edge. Every editor puts it back under the hand that
+                // was holding the button.
+                if (!pointerLocked)
+                    platform::setPointerPosition(*window, editorPointerAnchor.x, editorPointerAnchor.y);
             }
             if (wantVisible != pointerVisible) {
                 pointerVisible = wantVisible;
@@ -1287,6 +1327,37 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // held when play stopped is not still held when play starts again.
             // That is the alt-tab case the function was written for, arriving
             // through a different door.
+            // **The motion, taken relative rather than differenced.** Once the
+            // pointer is locked its POSITION stops moving, so a camera driven
+            // from two positions stops turning at exactly the moment it is being
+            // asked to. `platform::Event` says so at the field itself.
+            editorLookDelta = {};
+            for (const platform::Event& event : events) {
+                if (event.type == platform::EventType::MouseMoved) {
+                    editorLookDelta.x += event.pointerDeltaX;
+                    editorLookDelta.y += event.pointerDeltaY;
+                    // Only while the pointer is free. In relative mode the
+                    // position SDL reports is a logical one it accumulates from
+                    // the motion, so recording it here would anchor the cursor
+                    // to wherever the camera took it -- which is the defect this
+                    // is the other half of.
+                    if (!pointerLocked)
+                        editorPointerAnchor = core::Vec2{event.pointerX, event.pointerY};
+                }
+            }
+
+            // Driven HERE rather than at the frame's safe point, because this is
+            // where the motion arrives: the loop pumps events after the ticks,
+            // and a camera fed at the safe point would be turning on the
+            // previous frame's mouse. It moves on the RENDER clock and not the
+            // tick, because a world that is not ticking is exactly when somebody
+            // is flying it.
+            if (options.editor && editing(editor.runState()) && editor.cameraAdopted()) {
+                const Editor::LookInput& look = editor.lookInput();
+                (void)editor.driveCamera(look.active ? editorLookDelta : core::Vec2{}, look.move,
+                                         static_cast<f32>(frame.renderDt));
+            }
+
             const bool gameTakesInput = !options.editor || editor.inPlayMode();
             if (gameTakesInput) {
                 host->pumpInput(events);

@@ -198,7 +198,9 @@ private:
     // member rather than a static so it belongs to an overlay rather than to
     // the process.
     [[maybe_unused]] bool layoutBuilt_ = false;
-    EditorCommands commands_;
+    [[maybe_unused]] EditorCommands commands_;
+    [[maybe_unused]] EditorPanels panels_;
+    [[maybe_unused]] EditorDialogs dialogs_;
     [[maybe_unused]] Editor* editor_ = nullptr;
     [[maybe_unused]] rhi::TextureHandle viewportTexture_;
 };

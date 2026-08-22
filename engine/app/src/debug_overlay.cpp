@@ -706,46 +706,17 @@ void drawTransport(Editor& editor, EditorCommands& commands)
     // **Save asks for a name when there is nothing to overwrite.** An editor
     // that invented one would put somebody's first hour of work in a file they
     // did not choose and cannot find, which is the whole reason every editor
-    // has this dialog.
+    // has this dialog. The dialog itself lives at the shell's level, because
+    // File > Save Scene As has to reach the same one.
     const bool untitled = editor.openScenePath().empty();
     if (ImGui::Button(untitled ? "save as..." : "save")) {
         if (untitled)
-            ImGui::OpenPopup("save-scene-as");
+            commands.wantSaveAs = true;
         else
             commands.save = true;
     }
     if (!untitled)
         ImGui::SetItemTooltip("%s", editor.openScenePath().c_str());
-
-    if (ImGui::BeginPopup("save-scene-as")) {
-        static std::array<char, 160> path{};
-        ImGui::TextDisabled("content/");
-        ImGui::SameLine(0.0f, 0.0f);
-        ImGui::SetNextItemWidth(300.0f);
-        const bool submitted =
-            ImGui::InputText("##scene-path", path.data(), path.size(), ImGuiInputTextFlags_EnterReturnsTrue);
-        const std::string_view typed{path.data()};
-
-        // The extension is added if it is missing, so a person typing a name
-        // does not have to know it -- and shown, so they can see what they will
-        // get before they press anything.
-        ImGui::TextDisabled("saves as content/%.*s%s", static_cast<int>(typed.size()), typed.data(),
-                            typed.size() >= kSceneExtension.size() &&
-                                    typed.substr(typed.size() - kSceneExtension.size()) == kSceneExtension
-                                ? ""
-                                : std::string(kSceneExtension).c_str());
-
-        ImGui::BeginDisabled(typed.empty());
-        const bool pressed = ImGui::Button("save");
-        ImGui::EndDisabled();
-
-        if ((submitted || pressed) && !typed.empty()) {
-            commands.saveAs = std::string(typed);
-            path.fill(0);
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
-    }
 
     ImGui::SameLine();
     switch (run) {
@@ -771,56 +742,45 @@ void drawTransport(Editor& editor, EditorCommands& commands)
     }
 }
 
-// The fly camera, on the right mouse button.
+// What the mouse and keyboard are asking the viewport for.
 //
-// RIGHT rather than left, because left is select and an editor where looking
-// around also changes what you have selected is unusable. Held rather than
-// toggled, because a mode you can forget you are in is how somebody loses a
-// minute wondering why their mouse does nothing.
+// **It reports and does not act.** The camera is driven by the frame loop,
+// because turning it puts the pointer into relative mode and in relative mode
+// ImGui has no absolute position to difference -- so `io.MouseDelta` is zero
+// exactly when the camera needs it. The motion comes from the platform's own
+// events; what a UI callback can still answer is whether somebody is asking.
 //
-// It reads ImGui's input rather than the engine's: ImGui already owns this
-// window's mouse and keyboard while the pointer is in it, and asking the
-// engine's input layer would mean two owners disagreeing about whether a
-// keystroke was consumed.
-void driveEditorCamera(Editor& editor, bool overViewport)
+// RIGHT button, not left: left is select, and an editor where looking around
+// changes what you have selected is unusable. Held rather than toggled, because
+// a mode you can forget you are in is how a minute goes missing.
+void reportLookInput(Editor& editor, bool overViewport)
 {
     const ImGuiIO& io = ImGui::GetIO();
 
-    // The scroll wheel changes speed rather than dollying the camera. A dolly
-    // duplicates what W and S already do; a speed control is the thing an open
-    // world of four kilometres and a room of four metres actually need
-    // different values of.
-    if (overViewport && io.MouseWheel != 0.0f) {
-        const f32 factor = io.MouseWheel > 0.0f ? 1.25f : 0.8f;
-        editor.setCameraSpeed(editor.cameraSpeed() * factor);
+    // The wheel changes SPEED rather than dollying. A dolly duplicates what W
+    // and S already do; a speed control is the thing a four-kilometre world and
+    // a four-metre room need different values of.
+    if (overViewport && io.MouseWheel != 0.0f)
+        editor.setCameraSpeed(editor.cameraSpeed() * (io.MouseWheel > 0.0f ? 1.25f : 0.8f));
+
+    Editor::LookInput look;
+    // Held, and begun over the image. `IsMouseDragging` is what carries the
+    // second half across frames once the pointer has been hidden and no longer
+    // reports a position anybody can test.
+    look.active =
+        ImGui::IsMouseDown(ImGuiMouseButton_Right) && (overViewport || ImGui::IsMouseDragging(ImGuiMouseButton_Right));
+
+    if (look.active) {
+        const auto axis = [](ImGuiKey positive, ImGuiKey negative) -> f32 {
+            return (ImGui::IsKeyDown(positive) ? 1.0f : 0.0f) - (ImGui::IsKeyDown(negative) ? 1.0f : 0.0f);
+        };
+        const f32 sprint = ImGui::IsKeyDown(ImGuiKey_LeftShift) ? 4.0f : 1.0f;
+        look.move =
+            core::Vec3{axis(ImGuiKey_D, ImGuiKey_A), axis(ImGuiKey_E, ImGuiKey_Q), axis(ImGuiKey_W, ImGuiKey_S)} *
+            sprint;
     }
 
-    if (!ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
-        // Still drive with a zero delta: the camera has to keep moving while
-        // the keys are held and the mouse is still, and returning early here
-        // would make WASD work only while the mouse was in motion.
-        if (overViewport)
-            editor.driveCamera({}, {}, io.DeltaTime);
-        return;
-    }
-
-    // The drag has to have STARTED over the viewport. Otherwise dragging out of
-    // another panel and across this one flings the camera.
-    if (!overViewport && !ImGui::IsMouseDragging(ImGuiMouseButton_Right))
-        return;
-
-    const auto axis = [](ImGuiKey positive, ImGuiKey negative) -> f32 {
-        return (ImGui::IsKeyDown(positive) ? 1.0f : 0.0f) - (ImGui::IsKeyDown(negative) ? 1.0f : 0.0f);
-    };
-
-    const core::Vec3 move{
-        axis(ImGuiKey_D, ImGuiKey_A),
-        axis(ImGuiKey_E, ImGuiKey_Q),
-        axis(ImGuiKey_W, ImGuiKey_S),
-    };
-
-    const f32 sprint = ImGui::IsKeyDown(ImGuiKey_LeftShift) ? 4.0f : 1.0f;
-    editor.driveCamera(core::Vec2{io.MouseDelta.x, io.MouseDelta.y}, move * sprint, io.DeltaTime);
+    editor.setLookInput(look);
 }
 
 // The 3D view.
@@ -829,13 +789,13 @@ void driveEditorCamera(Editor& editor, bool overViewport)
 // around a rendered world reads as a bug rather than as a frame. Its rectangle
 // is handed to the editor every frame because that rectangle is the only thing
 // that maps a mouse position onto a ray.
-void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& commands)
+void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& commands, bool& open)
 {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-    const bool open = ImGui::Begin("viewport");
+    const bool visible = ImGui::Begin("viewport", &open);
     ImGui::PopStyleVar();
 
-    if (open) {
+    if (visible) {
         drawTransport(editor, commands);
 
         const ImVec2 size = ImGui::GetContentRegionAvail();
@@ -856,7 +816,7 @@ void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& co
                 editor.requestPick(core::Vec2{mouse.x - origin.x, mouse.y - origin.y});
             }
 
-            driveEditorCamera(editor, overImage);
+            reportLookInput(editor, overImage);
         }
     }
     ImGui::End();
@@ -928,9 +888,9 @@ void buildDefaultLayout(ImGuiID dockspace)
 // so a folder of ten thousand meshes costs the same as a folder of ten.
 // `drawExplorer` beside this one does NOT do that yet, which is a thing to fix
 // rather than a precedent to follow.
-void drawContent(Editor& editor, EditorCommands& commands)
+void drawContent(Editor& editor, EditorCommands& commands, bool& open)
 {
-    if (!ImGui::Begin("content")) {
+    if (!ImGui::Begin("content", &open)) {
         ImGui::End();
         return;
     }
@@ -1014,13 +974,194 @@ void drawContent(Editor& editor, EditorCommands& commands)
     ImGui::End();
 }
 
+// The application menu, which every engine has and which this one did not.
+//
+// **A menu bar is not decoration: it is where a person looks for a thing they
+// cannot see.** A panel closed by accident, a scene saved under a new name, the
+// preferences -- none of those have anywhere else to live, and an editor that
+// puts them only on toolbar buttons is one where closing a panel is permanent.
+//
+// Drawn BEFORE the dockspace, because `DockSpaceOverViewport` measures the work
+// area and a menu bar declared after it would overlap the panels by its own
+// height.
+void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands, bool& wantSaveAs,
+                 bool& wantPreferences, bool& wantAbout)
+{
+    if (!ImGui::BeginMainMenuBar())
+        return;
+
+    if (ImGui::BeginMenu("File")) {
+        if (ImGui::MenuItem("New Scene"))
+            commands.newScene = true;
+        ImGui::Separator();
+        // Greyed rather than hidden when there is nothing to save to: the item
+        // has to be where somebody expects it even when it cannot act, or they
+        // conclude the editor cannot do it at all.
+        if (ImGui::MenuItem("Save Scene", nullptr, false, !editor.openScenePath().empty()))
+            commands.save = true;
+        if (ImGui::MenuItem("Save Scene As..."))
+            wantSaveAs = true;
+        ImGui::Separator();
+        if (ImGui::MenuItem("Exit"))
+            commands.quit = true;
+        ImGui::EndMenu();
+    }
+
+    if (ImGui::BeginMenu("Edit")) {
+        // Present and disabled, deliberately. They are E2's, and an Edit menu
+        // without them would make somebody wonder where they went: a disabled
+        // item says "not yet" where an absent one says "never".
+        ImGui::MenuItem("Undo", nullptr, false, false);
+        ImGui::MenuItem("Redo", nullptr, false, false);
+        ImGui::Separator();
+        if (ImGui::MenuItem("Preferences..."))
+            wantPreferences = true;
+        ImGui::EndMenu();
+    }
+
+    if (ImGui::BeginMenu("Window")) {
+        ImGui::MenuItem("Explorer", nullptr, &panels.explorer);
+        ImGui::MenuItem("Properties", nullptr, &panels.properties);
+        ImGui::MenuItem("Viewport", nullptr, &panels.viewport);
+        ImGui::MenuItem("Content", nullptr, &panels.content);
+        ImGui::MenuItem("Console", nullptr, &panels.console);
+        ImGui::MenuItem("Stats", nullptr, &panels.stats);
+        ImGui::Separator();
+        // Not "close everything": somebody who has lost a panel behind another
+        // wants the arrangement back, not an empty window.
+        if (ImGui::MenuItem("Reset Layout"))
+            commands.resetLayout = true;
+        ImGui::EndMenu();
+    }
+
+    if (ImGui::BeginMenu("Help")) {
+        if (ImGui::MenuItem("About LuauG"))
+            wantAbout = true;
+        ImGui::EndMenu();
+    }
+
+    // Which scene this is, right-aligned. The menu bar is the best-placed thing
+    // to answer that, and it is the question somebody asks just before saving
+    // over something.
+    const std::string open = editor.openScenePath().empty() ? std::string("untitled") : editor.openScenePath();
+    const float width = ImGui::CalcTextSize(open.c_str()).x;
+    ImGui::SameLine(ImGui::GetWindowWidth() - width - 16.0f);
+    ImGui::TextDisabled("%s", open.c_str());
+
+    ImGui::EndMainMenuBar();
+}
+
+// The dialogs, at the shell's level rather than inside a panel.
+//
+// A popup belongs to the window that opened it, so one living inside the
+// viewport could not be opened from the menu -- which is exactly what a Save As
+// has to be. Modal, because each of these is a question with an answer, and one
+// left half-answered behind a panel is one somebody loses track of.
+void drawEditorDialogs(Editor& editor, EditorCommands& commands, bool& wantSaveAs, bool& wantPreferences,
+                       bool& wantAbout)
+{
+    if (wantSaveAs) {
+        wantSaveAs = false;
+        ImGui::OpenPopup("Save Scene As");
+    }
+    if (wantPreferences) {
+        wantPreferences = false;
+        ImGui::OpenPopup("Preferences");
+    }
+    if (wantAbout) {
+        wantAbout = false;
+        ImGui::OpenPopup("About LuauG");
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(470.0f, 0.0f), ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("Save Scene As", nullptr, ImGuiWindowFlags_NoResize)) {
+        static std::array<char, 160> path{};
+        ImGui::TextDisabled("Scenes live under the project's content directory.");
+        ImGui::Spacing();
+
+        ImGui::TextUnformatted("content/");
+        ImGui::SameLine(0.0f, 0.0f);
+        ImGui::SetNextItemWidth(330.0f);
+        const bool submitted =
+            ImGui::InputText("##scene-path", path.data(), path.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+        const std::string typed(path.data());
+
+        const bool carriesExtension =
+            typed.size() >= kSceneExtension.size() &&
+            std::string_view(typed).substr(typed.size() - kSceneExtension.size()) == kSceneExtension;
+        // Shown before anything is pressed. A name that grows an extension
+        // somebody did not type is a file they will look for under the wrong
+        // one.
+        ImGui::TextDisabled("saves as content/%s%s", typed.c_str(),
+                            carriesExtension ? "" : std::string(kSceneExtension).c_str());
+
+        ImGui::Spacing();
+        ImGui::BeginDisabled(typed.empty());
+        const bool accepted = ImGui::Button("Save", ImVec2(120.0f, 0.0f));
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))) {
+            path.fill(0);
+            ImGui::CloseCurrentPopup();
+        }
+
+        if ((submitted || accepted) && !typed.empty()) {
+            commands.saveAs = typed;
+            path.fill(0);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(470.0f, 0.0f), ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("Preferences", nullptr, ImGuiWindowFlags_NoResize)) {
+        // Deliberately small and deliberately real. An empty preferences window
+        // is a promise; one holding the setting somebody actually reaches for is
+        // a place the next setting knows where to go.
+        ImGui::SeparatorText("Viewport");
+        f32 speed = editor.cameraSpeed();
+        if (ImGui::DragFloat("Camera speed (m/s)", &speed, 0.5f, 0.1f, 2000.0f, "%.1f"))
+            editor.setCameraSpeed(speed);
+        ImGui::TextDisabled("The scroll wheel changes this while flying, too.");
+
+        ImGui::Spacing();
+        ImGui::SeparatorText("Where these live");
+        ImGui::TextWrapped("The panel layout and the scene you had open are per-person and are kept in the project's "
+                           ".luaug directory. What a RUN of the project starts with is the project's own decision, "
+                           "and lives in luaug.toml.");
+
+        ImGui::Spacing();
+        if (ImGui::Button("Close", ImVec2(120.0f, 0.0f)))
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(430.0f, 0.0f), ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("About LuauG", nullptr, ImGuiWindowFlags_NoResize)) {
+        ImGui::TextUnformatted("LuauG");
+        ImGui::TextDisabled("An open-source game engine scripted in Luau.");
+        ImGui::Spacing();
+        ImGui::TextDisabled("Apache-2.0. The editor is post-v1 phase 1.");
+        ImGui::Spacing();
+        if (ImGui::Button("Close", ImVec2(120.0f, 0.0f)))
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+}
+
 // The editor's furniture. The panels inside it are the overlay's own, which is
 // the whole argument of ADR 0046: what an editor mostly is, this engine already
 // had.
 void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,
                      script::ScriptRuntime* runtime, Editor* editor, rhi::TextureHandle viewport, bool& laidOut,
-                     EditorCommands& commands)
+                     EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs)
 {
+    // Before the dockspace. `DockSpaceOverViewport` measures the work area, and
+    // a menu bar declared after it would sit on top of the panels by its own
+    // height.
+    if (editor != nullptr)
+        drawMenuBar(*editor, panels, commands, dialogs.saveAs, dialogs.preferences, dialogs.about);
+
     // A transparent central node, so a layout that has not been built yet shows
     // the frame underneath instead of a slab of grey.
     const ImGuiID dockspace =
@@ -1031,50 +1172,86 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // has arranged this yet" is the node having no split and no window, which is
     // exactly the state a first launch is in.
     bool builtThisFrame = false;
-    if (!laidOut) {
+    if (!laidOut || commands.resetLayout) {
+        const bool asked = commands.resetLayout;
+        commands.resetLayout = false;
         laidOut = true;
         const ImGuiDockNode* node = ImGui::DockBuilderGetNode(dockspace);
-        if (node == nullptr || (!node->IsSplitNode() && node->Windows.Size == 0)) {
+        // Asked for, or never arranged. `DockBuilderRemoveNode` throws away an
+        // arrangement somebody chose, so it only runs when they said so or when
+        // there is nothing to throw away.
+        if (asked || node == nullptr || (!node->IsSplitNode() && node->Windows.Size == 0)) {
             buildDefaultLayout(dockspace);
             builtThisFrame = true;
+            if (asked)
+                panels = EditorPanels{};
         }
     }
 
     if (editor != nullptr) {
-        drawViewport(*editor, viewport, commands);
-        drawContent(*editor, commands);
+        if (panels.viewport)
+            drawViewport(*editor, viewport, commands, panels.viewport);
+        if (panels.content)
+            drawContent(*editor, commands, panels.content);
     }
 
-    if (ImGui::Begin("explorer")) {
-        if (world != nullptr && inspector != nullptr)
-            drawExplorer(*world, root, *inspector);
-    }
-    ImGui::End();
-
-    if (ImGui::Begin("properties")) {
-        if (world != nullptr && inspector != nullptr) {
-            drawProperties(*world, *inspector);
-            drawWriteLog(*world, *inspector);
+    if (panels.explorer) {
+        if (ImGui::Begin("explorer", &panels.explorer)) {
+            if (world != nullptr && inspector != nullptr)
+                drawExplorer(*world, root, *inspector);
         }
+        ImGui::End();
     }
-    ImGui::End();
+
+    if (panels.properties) {
+        if (ImGui::Begin("properties", &panels.properties)) {
+            if (world != nullptr && inspector != nullptr) {
+                drawProperties(*world, *inspector);
+                drawWriteLog(*world, *inspector);
+            }
+        }
+        ImGui::End();
+    }
 
     // Draws with no VM for the same reason it does in the overlay: the LOG half
     // is what somebody wants when the VM failed to boot.
-    if (ImGui::Begin("console"))
-        drawConsole(runtime);
-    ImGui::End();
-
-    if (ImGui::Begin("stats")) {
-        drawStats(frame);
-        if (runtime != nullptr)
-            drawMemory(*runtime);
+    if (panels.console) {
+        if (ImGui::Begin("console", &panels.console))
+            drawConsole(runtime);
+        ImGui::End();
     }
-    ImGui::End();
+
+    if (panels.stats) {
+        if (ImGui::Begin("stats", &panels.stats)) {
+            drawStats(frame);
+            if (runtime != nullptr)
+                drawMemory(*runtime);
+        }
+        ImGui::End();
+    }
 
     // After every panel has been declared, because focusing a window ImGui has
     // not seen this frame does nothing. Only on the frame the default layout
     // was built: a person who later chose the console should find the console.
+    // **Escape lets go of the selection, from anywhere.** Deselecting is a thing
+    // a person does constantly and it needs a key that works wherever they are
+    // looking -- the explorer, the viewport, the content browser.
+    //
+    // Only when nothing else has a claim on it, and the order matters: a modal
+    // is closed by Escape and a text field cancels its edit with it, and taking
+    // the key from either would make the shell's own dialogs unclosable. So it
+    // is asked for last, after everything that could have wanted it.
+    const bool popupOpen = ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !ImGui::IsAnyItemActive() && !popupOpen)
+        commands.clearSelection = true;
+
+    if (commands.wantSaveAs) {
+        commands.wantSaveAs = false;
+        dialogs.saveAs = true;
+    }
+    if (editor != nullptr)
+        drawEditorDialogs(*editor, commands, dialogs.saveAs, dialogs.preferences, dialogs.about);
+
     if (builtThisFrame)
         ImGui::SetWindowFocus("content");
 }
@@ -1222,8 +1399,20 @@ void DebugOverlay::handleEvents(std::span<const platform::Event> events)
     // ImGui models far more input than the engine does -- text, mouse capture,
     // window focus -- so it reads the untranslated stream. That stream existing
     // at all is what sdl_interop.h is for.
-    for (const SDL_Event& raw : platform::rawEvents())
+    // **While the camera is being turned, the UI does not see the mouse move**
+    // (D063). SDL keeps posting motion in relative mode -- with a logical
+    // position it accumulates from the deltas -- so without this the hidden
+    // cursor walks across the panels, highlighting rows in the explorer and
+    // hovering buttons nobody is pointing at.
+    //
+    // Motion only. The button going up still has to arrive, or ImGui would
+    // believe it is held forever and the turn would never end.
+    const bool looking = editor_ != nullptr && editor_->lookInput().active;
+    for (const SDL_Event& raw : platform::rawEvents()) {
+        if (looking && raw.type == SDL_EVENT_MOUSE_MOTION)
+            continue;
         ImGui_ImplSDL3_ProcessEvent(&raw);
+    }
 
     for (const platform::Event& event : events) {
         // Repeats excluded: holding F3 down should not strobe the panel.
@@ -1247,7 +1436,8 @@ void DebugOverlay::render(rhi::ICmdList& cmd, rhi::TextureHandle target, const F
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
     if (shell_ == Shell::Editor)
-        drawEditorShell(frame, world_, root_, inspector_, runtime_, editor_, viewportTexture_, layoutBuilt_, commands_);
+        drawEditorShell(frame, world_, root_, inspector_, runtime_, editor_, viewportTexture_, layoutBuilt_, commands_,
+                        panels_, dialogs_);
     else
         drawShell(frame, world_, root_, inspector_, runtime_);
     ImGui::Render();

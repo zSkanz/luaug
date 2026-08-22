@@ -42,8 +42,14 @@ while IFS=: read -r file link; do
         err "broken relative link: $link" "$file"
         status=1
     fi
-done < <(grep -RnoE '\]\(([^)#h][^):]*)\)' --include='*.md' \
-    --exclude-dir=third_party . |
+# Tracked files only, for the reason the legal sweep below gives in full: a
+# working tree also holds what this repository does not publish -- a scratch
+# note, a draft, a folder somebody is still assembling -- and sweeping those
+# makes the gate depend on whose machine it runs on. It failed on exactly
+# that: an untracked `art/` directory with a half-written relative path in it.
+# The legal sweep learned this and this check had not.
+done < <(git ls-files -z -- '*.md' ':(exclude)third_party' \
+    | xargs -0 grep -noE '\]\(([^)#h][^):]*)\)' 2>/dev/null |
     sed -E 's/^([^:]+):[0-9]+:\]\(([^)]*)\)/\1:\2/')
 
 # --- Pinned versions are named identically everywhere -----------------------

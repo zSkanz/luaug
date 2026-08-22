@@ -1,6 +1,5 @@
 {
   "$comment": "CLI catalog — English (the only launch locale, ADR 0019). Separate from the engine's i18n/en.json because the CLI and the engine ship and translate separately (api-design.md §6). Keys are cli.*. tools/repo/i18nlint.luau checks that every key the CLI names exists here, and that no user-facing string is written at a call site (rule R3).",
-
   "cli.usage": "Usage: luaug <command> [options]\n\n  dev [path]       run the project with a watcher attached; a saved file rebuilds the world\n  edit [path]      run the project with the editor UI in place of the debug overlay\n  test [path]      run the conformance suite on the headless engine\n  check [path]     luau-analyze, StyLua and the i18n lint\n  fmt [path]       format every Luau file with StyLua\n  build-assets     compile the content directory into a pack and a manifest\n  build [path]     the distributable folder: the player, the engine content and the game\n  new <name>       scaffold a project from the starter template\n\n  --help           this text\n  --version        the CLI and engine versions",
   "cli.err.unknown_command": "Unknown command \"{command}\". Run luaug --help for the list.",
   "cli.err.no_command": "No command given. Run luaug --help for the list.",
@@ -16,7 +15,6 @@
   "cli.err.no_version": "Could not read the LuauG version from {path}. luaug runs from the engine source tree; this one has no project() declaration to read.",
   "cli.err.no_lute_version": "{path} did not report a version, so the Lute half of --version has nothing to show.",
   "cli.version": "luaug {version} (Lute {lute})",
-
   "cli.dev.watching": "Watching {count} director(ies) under {path}. Save a file to reload.",
   "cli.dev.listening": "Dev server on ws://127.0.0.1:{port}. Waiting for the engine to attach.",
   "cli.dev.attached": "Engine attached ({engine}).",
@@ -28,26 +26,22 @@
   "cli.dev.stopped": "Dev server stopped.",
   "cli.dev.err.no_scripts": "{path} mounts no entry scripts, so there would be nothing to reload. A project mounts src/scripts/**/*.luau.",
   "cli.dev.err.port_in_use": "Port {port} is already in use. Set [dev] port in luaug.toml, or stop whatever is holding it.",
-
   "cli.edit.opening": "Opening {path} in the editor.",
-  "cli.edit.closed": "The editor exited with code {code}.",
-
+  "cli.edit.closed": "Editor closed.",
+  "cli.edit.failed": "The editor stopped with code {code}.",
   "cli.test.running": "Running the suite from {path}.",
   "cli.test.summary": "{total} case(s), {passed} passed, {failed} failed.",
   "cli.test.err.no_report": "The engine wrote no report at {path}, so nothing was measured. An empty suite passes forever.",
   "cli.test.err.no_cases": "The suite at {path} contains no cases. An empty suite passes forever.",
   "cli.test.err.failed": "{failed} of {total} case(s) failed.",
   "cli.test.wrote_junit": "Wrote the JUnit report to {path}.",
-
   "cli.check.running": "Checking {count} Luau file(s).",
   "cli.check.ok": "check: ok — {count} file(s), no diagnostics.",
   "cli.check.err.analyze": "luau-analyze reported errors.",
   "cli.check.err.stylua": "StyLua reported unformatted files. Run luaug fmt.",
   "cli.check.err.i18n": "The i18n lint failed.",
   "cli.check.err.missing_tool": "{tool} is not on PATH. Run rokit install.",
-
   "cli.fmt.formatted": "Formatted {count} file(s).",
-
   "cli.build.done": "Built {path}. Run {executable} inside it; the whole folder is the product.",
   "cli.build.icon": "The artifact carries the icon from {path}, read back out of it to be sure.",
   "cli.build.err.unknown_target": "No target named \"{target}\". v1 builds {supported} and says so rather than producing a folder that cannot run.",

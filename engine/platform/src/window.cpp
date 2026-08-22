@@ -52,6 +52,11 @@ bool setPointerLocked(Window& window, bool locked)
     return SDL_SetWindowRelativeMouseMode(window.handle(), locked);
 }
 
+void setPointerPosition(Window& window, f32 x, f32 y)
+{
+    SDL_WarpMouseInWindow(window.handle(), x, y);
+}
+
 void setPointerVisible(bool visible)
 {
     // Not per window: SDL's cursor is the process's. Failure is ignored because

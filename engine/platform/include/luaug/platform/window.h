@@ -74,6 +74,18 @@ using WindowPtr = std::unique_ptr<Window, WindowDeleter>;
 // without locking it (api-design.md §2.4).
 void setPointerVisible(bool visible);
 
+// Puts the pointer at a position in the window, in the same pixels an event
+// reports.
+//
+// **It exists because SDL's relative mode moves the cursor and this engine does
+// not want it to** (D063). While the pointer is held, SDL accumulates a logical
+// position from the relative motion and warps the real cursor there on the way
+// out -- so a look that turned the camera a full circle leaves the cursor
+// against a window edge. Anchoring means remembering where it was when the hold
+// began and putting it back, which is what every editor does and what a person
+// expects: the cursor reappears under their hand, not where the camera took it.
+void setPointerPosition(Window& window, f32 x, f32 y);
+
 // Dresses a window in an already-decoded RGBA image, top row first.
 //
 // Decoded rather than encoded because the decoder lives in `asset` (L2) and

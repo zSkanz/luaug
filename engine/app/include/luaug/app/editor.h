@@ -125,6 +125,32 @@ enum class RunState
     return state == RunState::Editing;
 }
 
+// Which panels are shown.
+//
+// **Every engine's Window menu is this**, and it exists for a reason a layout
+// alone does not cover: a panel somebody closed has to stay closed, and a panel
+// they cannot find again has to be findable. ImGui writes the open flags into
+// the layout file beside the docking, so both survive a restart together.
+// Which dialog is being asked for. Flags rather than direct calls, because a
+// modal belongs to the shell and the things that open it -- a menu item, a
+// toolbar button -- do not live there.
+struct EditorDialogs
+{
+    bool saveAs = false;
+    bool preferences = false;
+    bool about = false;
+};
+
+struct EditorPanels
+{
+    bool explorer = true;
+    bool properties = true;
+    bool viewport = true;
+    bool content = true;
+    bool console = true;
+    bool stats = true;
+};
+
 // What the shell asked for this frame, drained by the frame loop at the safe
 // point.
 //
@@ -153,12 +179,25 @@ struct EditorCommands
     std::string openScene;
     // A folder the browser asked to make, in its current directory.
     std::string createFolder;
+    // Ask for the Save As dialog. A flag rather than the dialog opening itself,
+    // because the toolbar button and File > Save Scene As have to reach the
+    // same one.
+    bool wantSaveAs = false;
+    // Close the editor. The menu's File > Exit, which is the one every
+    // application has and the one people reach for before the window button.
+    bool quit = false;
+    // Let go of whatever is selected. Escape, from anywhere in the shell.
+    bool clearSelection = false;
+    // Put the panels back where they started. Not "close everything" -- a
+    // person who has lost a panel behind another wants the arrangement back,
+    // not an empty window.
+    bool resetLayout = false;
 
     void clear() noexcept { *this = EditorCommands{}; }
     [[nodiscard]] bool any() const noexcept
     {
-        return play.has_value() || pause.has_value() || save || !saveAs.empty() || !openScene.empty() ||
-               !createFolder.empty();
+        return play.has_value() || pause.has_value() || save || newScene || quit || resetLayout || clearSelection ||
+               !saveAs.empty() || !openScene.empty() || !createFolder.empty();
     }
 };
 
@@ -351,6 +390,28 @@ public:
     void adoptCamera(const core::CFrameD& cframe) noexcept;
     [[nodiscard]] bool cameraAdopted() const noexcept { return m_cameraAdopted; }
 
+    // What the shell saw the mouse and keyboard doing this frame.
+    //
+    // **The shell decides WHETHER to look and the frame loop decides HOW**, and
+    // the split is forced by the mechanism rather than chosen: turning the
+    // camera puts the pointer into SDL's relative mode, and in relative mode
+    // ImGui stops receiving an absolute position -- so the delta it reports
+    // becomes zero exactly when the camera starts needing one. The motion has to
+    // come from the platform's own events, which the frame loop has and a UI
+    // callback does not.
+    struct LookInput
+    {
+        // Right button held, and the drag STARTED over the viewport image. A
+        // drag that began in another panel and crossed this one must not fling
+        // the camera.
+        bool active = false;
+        // WASD/QE, already scaled by the sprint modifier.
+        core::Vec3 move;
+    };
+
+    void setLookInput(const LookInput& input) noexcept { m_look = input; }
+    [[nodiscard]] const LookInput& lookInput() const noexcept { return m_look; }
+
     // One frame of fly-camera input. `lookDelta` is in pixels of mouse
     // movement, `move` is the WASD/QE axes in [-1, 1], `dt` is the render
     // clock's -- the editor camera is not simulation and must not be on the
@@ -397,6 +458,7 @@ private:
     f32 m_yaw = 0.0f;
     f32 m_pitch = 0.0f;
     f32 m_cameraSpeed = 12.0f;
+    LookInput m_look;
 };
 
 } // namespace luaug::app
