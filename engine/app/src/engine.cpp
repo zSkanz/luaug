@@ -420,6 +420,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // than by the world, because it is not world state: a reload replaces the
     // host and this simply starts again, which is right -- a reloaded world has
     // no previous frame to have come from.
+    // What the window has been TOLD, so a change is applied once. The engine
+    // state carries what the game wants; these carry what SDL was last asked
+    // for, and the two are different questions.
+    bool pointerLocked = false;
+    bool pointerVisible = true;
+
     render::TransformHistory transformHistory;
 
     render::MeshLibrary meshLibrary;
@@ -857,6 +863,30 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // now -- the two ends `render::extract` interpolates between (D047).
             transformHistory.capture(host->world());
             host->tick();
+        }
+
+        // **The pointer's state, applied to the window it belongs to.** Both
+        // properties were stored and read by nothing until M8 (D049): a script
+        // could set `InputService.PointerLocked` and the cursor kept wandering
+        // across the desktop, which is a look control that stops at the edge of
+        // the screen.
+        //
+        // Applied on CHANGE rather than every frame, because SDL's relative mode
+        // warps the cursor when it is entered and re-entering it every frame
+        // would fight anything else on the machine that moves a pointer.
+        // Windowed only: a headless run has no window to lock a pointer to, and
+        // the property still round-trips there, which is what makes a replay of
+        // a game that locks its pointer legal.
+        if (window != nullptr) {
+            const scene::EngineState& engineState = host->world().engineState();
+            if (engineState.pointerLocked != pointerLocked) {
+                pointerLocked = engineState.pointerLocked;
+                (void)platform::setPointerLocked(*window, pointerLocked);
+            }
+            if (engineState.pointerVisible != pointerVisible) {
+                pointerVisible = engineState.pointerVisible;
+                platform::setPointerVisible(pointerVisible);
+            }
         }
 
         // Where this frame sits between those two ticks.

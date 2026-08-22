@@ -5,6 +5,7 @@
 #include "luaug/platform/platform.h"
 #include "luaug/platform/sdl_interop.h"
 
+#include <SDL3/SDL_mouse.h>
 #include <SDL3/SDL_surface.h>
 #include <span>
 #include <string>
@@ -43,6 +44,22 @@ WindowPtr createWindow(const WindowDesc& desc, core::EngineError* outError)
     }
 
     return WindowPtr(new Window(handle));
+}
+
+bool setPointerLocked(Window& window, bool locked)
+{
+    return SDL_SetWindowRelativeMouseMode(window.handle(), locked);
+}
+
+void setPointerVisible(bool visible)
+{
+    // Not per window: SDL's cursor is the process's. Failure is ignored because
+    // there is nothing a game could do about it and nothing a player would see
+    // beyond the cursor they already have.
+    if (visible)
+        (void)SDL_ShowCursor();
+    else
+        (void)SDL_HideCursor();
 }
 
 bool setWindowIcon(Window& window, std::span<const std::byte> rgba, i32 width, i32 height)

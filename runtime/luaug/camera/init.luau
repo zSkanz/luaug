@@ -88,13 +88,20 @@ export type Options = {
 local RigImpl = {}
 RigImpl.__index = RigImpl
 
+-- **Yaw DECREASES to turn right, and the minus signs below are why.** The rig's
+-- forward is `(-sin y, 0, -cos y)`: at a yaw of zero it looks down -Z, and
+-- increasing the yaw rotates it towards -X, which is to the viewer's LEFT. So a
+-- positive input -- the right arrow, the stick pushed right, the mouse moved
+-- right -- has to subtract. Getting this backwards produces a camera that turns
+-- away from the way you pushed, which is what the first version of this module
+-- did and what a human noticed within a minute.
 function RigImpl.Turn(self: any, delta: Vector2, dt: number)
-    self.Yaw += self.TurnRate * delta.X * dt
+    self.Yaw -= self.TurnRate * delta.X * dt
     self.Height = math.clamp(self.Height + self.TurnRate * 3 * delta.Y * dt, self.MinHeight, self.MaxHeight)
 end
 
 function RigImpl.Look(self: any, delta: Vector2)
-    self.Yaw += self.LookSensitivity * delta.X
+    self.Yaw -= self.LookSensitivity * delta.X
     self.Height = math.clamp(self.Height - self.LookSensitivity * 12 * delta.Y, self.MinHeight, self.MaxHeight)
 end
 

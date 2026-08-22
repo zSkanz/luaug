@@ -55,6 +55,24 @@ struct WindowDeleter
 
 using WindowPtr = std::unique_ptr<Window, WindowDeleter>;
 
+// Locks the pointer to this window, or lets it go.
+//
+// **Locked means CENTRED and hidden, not merely confined.** SDL's relative mode
+// warps the cursor back to the middle of the window after every motion event and
+// reports the motion instead of a position, which is the only arrangement that
+// lets a look control keep turning past the edge of the screen. Confining a
+// visible cursor to the window would stop at the edge and the camera would stop
+// with it.
+//
+// False on a platform or a driver that will not do it. `InputService`'s own
+// property records the WISH; whether it was granted is this call's answer.
+[[nodiscard]] bool setPointerLocked(Window& window, bool locked);
+
+// Whether the system cursor is drawn. Independent of the lock, because the two
+// are separate wishes -- a strategy game hides the cursor during a cutscene
+// without locking it (api-design.md §2.4).
+void setPointerVisible(bool visible);
+
 // Dresses a window in an already-decoded RGBA image, top row first.
 //
 // Decoded rather than encoded because the decoder lives in `asset` (L2) and
