@@ -3,6 +3,7 @@
 #include <luaug/core/error.h>
 #include <luaug/core/id.h>
 
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -77,7 +78,22 @@ struct SceneIoReport
     // the value. Counted rather than fatal: a scene written by a newer build
     // should still open in an older one, minus what it cannot express.
     core::u32 refusedProperties = 0;
+    // Stamped instances placed, and stamps the file names that could not be
+    // read (ADR 0049). The second is counted rather than fatal for the same
+    // reason as an unknown class: a scene that names a stamp somebody deleted
+    // should still open, minus what is gone.
+    core::u32 stamped = 0;
+    core::u32 missingStamps = 0;
 };
+
+// How a scene gets the TEXT of a stamp it names (ADR 0049).
+//
+// `scene` is L3 and has no filesystem -- it cannot open `content/stamps/`, and
+// giving it one would be the layering mistake `architecture.md` §2 exists to
+// prevent. The caller knows where stamps live; this is the one question the
+// format has to ask it, and a caller that supplies nothing gets a scene whose
+// stamped instances are skipped with a count rather than a crash.
+using StampSource = std::function<std::optional<std::string>(std::string_view stamp)>;
 
 // Serialises the world's authored contents to JSON text.
 //
@@ -103,7 +119,31 @@ void clearScene(World& world);
 // Replacing rather than merging, because a scene IS the world's contents: a
 // load that merged would double every instance the second time it ran, and
 // "load a scene" would stop being idempotent.
-[[nodiscard]] std::optional<core::EngineError> readScene(World& world, std::string_view json,
-                                                         SceneIoReport* report = nullptr);
+[[nodiscard]] std::optional<core::EngineError>
+readScene(World& world, std::string_view json, SceneIoReport* report = nullptr, const StampSource& stamps = {});
+
+// --- Stamps (ADR 0049) -------------------------------------------------------
+//
+// **A stamp file is a scene of one subtree, and it is the same format.** Same
+// writer, same reader, same four correctness rules; the only difference is that
+// `root` is one instance instead of `Workspace`. Writing a second format would
+// mean two definitions of "everything about a subtree" and they would disagree
+// the first time somebody added a property -- which is the argument this file
+// already makes about the world hash, one level down.
+
+// Serialises `root` and its subtree as a stamp.
+//
+// `root`'s own stamp mark is ignored, because this is the file that mark points
+// at: a stamp made from an instance of itself would otherwise write a one-line
+// file that refers to the file being written.
+[[nodiscard]] std::string writeStamp(const World& world, core::InstanceId root, SceneIoReport* report = nullptr);
+
+// Instantiates a stamp under `parent` and marks the new root with `stamp`.
+//
+// Returns the new instance, or an invalid id when the text is not a stamp this
+// build can read. Nothing is left half-built on failure: a subtree that could
+// not be completed is destroyed rather than parented.
+[[nodiscard]] core::InstanceId readStamp(World& world, std::string_view json, core::InstanceId parent,
+                                         std::string_view stamp, SceneIoReport* report = nullptr);
 
 } // namespace luaug::scene

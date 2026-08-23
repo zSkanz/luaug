@@ -78,6 +78,19 @@ struct InstanceRecord
     // with a different answer.
     bool generated = false;
 
+    // **The STAMP this instance was made from**, or an empty atom (ADR 0049).
+    //
+    // The same kind of fact as `generated` above and stored beside it for the
+    // same reasons: it is what a PERSON wrote down rather than what the
+    // simulation is, it travels in a snapshot so undo and stop keep it, and it
+    // is deliberately not in the world hash -- a stamped part ticks like any
+    // other, and two worlds that differ only in where their parts came from are
+    // the same world to a solver.
+    //
+    // An atom rather than a string because it is a path repeated across every
+    // instance of one stamp: forty lamp posts intern one name.
+    core::NameAtom stamp;
+
     // Which of the class's first 64 properties have a listener. A write to an
     // unsubscribed property enqueues nothing, which is what lets 10k parts move
     // every tick for free while nobody is watching (architecture.md §4). Past
@@ -296,6 +309,24 @@ public:
     // same statement a thousand times.
     void setGenerated(core::InstanceId id, bool generated) noexcept;
     [[nodiscard]] bool generated(core::InstanceId id) const noexcept;
+
+    // The stamp this instance was made from, or an empty atom (ADR 0049).
+    //
+    // **Only the root of a stamped subtree carries it.** Its children are the
+    // stamp's contents, not instances of it, and marking each of them would be
+    // the same statement a hundred times -- the economy `generated` already
+    // uses for a streamed chunk. `stampRootOf` is how a caller asks "am I
+    // inside one", because that is the question the break rule actually needs.
+    void setStamp(core::InstanceId id, core::NameAtom stamp) noexcept;
+    [[nodiscard]] core::NameAtom stampOf(core::InstanceId id) const noexcept;
+
+    // The nearest ancestor-or-self that carries a stamp, or an invalid id.
+    //
+    // The break rule is "everything inside a stamped subtree except the root's
+    // own transform and name", so every caller that asks about an edit has to
+    // walk up. Answering it here rather than in the editor keeps one definition
+    // of "inside a stamp" for the editor, the serializer and the panel.
+    [[nodiscard]] core::InstanceId stampRootOf(core::InstanceId id) const noexcept;
 
     // Relinks the parent's name chains, so a rename can satisfy a
     // `WaitForChild` that was parked on the new name (api-design.md §2.2).

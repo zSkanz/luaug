@@ -197,6 +197,30 @@ bool World::generated(core::InstanceId id) const noexcept
     return record != nullptr && record->generated;
 }
 
+void World::setStamp(core::InstanceId id, core::NameAtom stamp) noexcept
+{
+    if (InstanceRecord* record = m_instances.find(id); record != nullptr)
+        record->stamp = stamp;
+}
+
+core::NameAtom World::stampOf(core::InstanceId id) const noexcept
+{
+    const InstanceRecord* record = m_instances.find(id);
+    return record != nullptr ? record->stamp : core::NameAtom{};
+}
+
+core::InstanceId World::stampRootOf(core::InstanceId id) const noexcept
+{
+    for (core::InstanceId walk = id; walk.valid(); walk = parentOf(walk)) {
+        const InstanceRecord* record = m_instances.find(walk);
+        if (record == nullptr)
+            break;
+        if (record->stamp.valid())
+            return walk;
+    }
+    return core::InstanceId{};
+}
+
 void World::setName(core::InstanceId id, core::NameAtom newName)
 {
     InstanceRecord* record = m_instances.find(id);

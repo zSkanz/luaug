@@ -180,8 +180,18 @@ void collectPaths(const World& world, core::InstanceId id, const std::string& pr
     }
 }
 
+// The one property a stamped instance keeps as its own (ADR 0049): where it is.
+// A class with no `CFrame` simply has no placement to preserve, which is not a
+// case that needs handling.
+constexpr std::string_view kTransformProperty = "CFrame";
+
+// `expandStamped` is the instance whose own stamp mark is IGNORED, and there is
+// exactly one situation with one: writing the stamp FILE, whose root is an
+// instance of the stamp it is being written from. Every other stamped instance
+// collapses to its mark.
 void writeInstance(JsonWriter& out, const World& world, core::InstanceId id,
-                   const std::unordered_map<core::u32, std::string>& paths, SceneIoReport& report)
+                   const std::unordered_map<core::u32, std::string>& paths, SceneIoReport& report,
+                   core::InstanceId expandStamped = core::InstanceId{})
 {
     out.beginObject();
 
@@ -189,6 +199,33 @@ void writeInstance(JsonWriter& out, const World& world, core::InstanceId id,
     out.field("class", descriptor != nullptr ? world.atoms().text(descriptor->name) : std::string_view{});
     out.field("name", world.atoms().text(world.name(id)));
     ++report.instances;
+
+    // **A stamped instance is written as its MARK, its name and where it is, and
+    // nothing else** (ADR 0049). Its children belong to the stamp file; writing
+    // them again would be the full copy that makes the whole idea worthless, and
+    // it would go stale the moment the stamp changed.
+    //
+    // There is nothing else to write, and that falls out of the break rule
+    // rather than being a second decision: if every other edit breaks the mark,
+    // a marked instance cannot have any other override.
+    const core::NameAtom stamp = world.stampOf(id);
+    if (stamp.valid() && id != expandStamped) {
+        out.field("stamp", world.atoms().text(stamp));
+        const PropertyDesc* transform =
+            world.classes().findProperty(world.classOf(id), world.atoms().lookup(kTransformProperty));
+        if (transform != nullptr && transform->get != nullptr) {
+            if (const std::optional<Value> value = transform->get(world, id); value.has_value()) {
+                out.key("properties");
+                out.beginObject();
+                out.key(kTransformProperty);
+                writeValue(out, world, *value, paths, report);
+                out.endObject();
+                ++report.properties;
+            }
+        }
+        out.endObject();
+        return;
+    }
 
     // The same ancestry walk the world hash makes, and in the same order, so a
     // property redeclared by a subclass is written once and by the subclass.
@@ -346,8 +383,24 @@ struct PendingReference
     return std::nullopt;
 }
 
-void readInstance(World& world, core::InstanceId parent, const JsonValue& json, std::vector<PendingReference>& pending,
-                  SceneIoReport& report);
+core::InstanceId readInstance(World& world, core::InstanceId parent, const JsonValue& json,
+                              std::vector<PendingReference>& pending, SceneIoReport& report,
+                              const StampSource* stamps = nullptr, int depth = 0);
+
+// How deep a stamp may name another stamp before this stops asking.
+//
+// A stamp of a stamp is refused at authoring time (ADR 0049), so the only way
+// to reach this is a hand-edited file -- including one that names ITSELF, which
+// without a limit is an infinite tree and a dead process. Four rather than one,
+// because refusing a legal-looking file outright is a worse answer than
+// refusing an absurd one.
+constexpr int kMaxStampDepth = 4;
+
+// Reads the stamp `name` through the caller's source and builds it under
+// `parent`, marked. An invalid id means the source had nothing, the text was
+// not a stamp, or the class it names is one this build does not have.
+[[nodiscard]] core::InstanceId placeStamp(World& world, core::InstanceId parent, std::string_view name,
+                                          SceneIoReport& report, const StampSource* stamps, int depth);
 
 // Everything an instance carries that is not its identity or its children.
 //
@@ -441,9 +494,35 @@ void applyNode(World& world, core::InstanceId id, const JsonValue& json, std::ve
     }
 }
 
-void readInstance(World& world, core::InstanceId parent, const JsonValue& json, std::vector<PendingReference>& pending,
-                  SceneIoReport& report)
+core::InstanceId readInstance(World& world, core::InstanceId parent, const JsonValue& json,
+                              std::vector<PendingReference>& pending, SceneIoReport& report, const StampSource* stamps,
+                              int depth)
 {
+    // **A node that names a stamp is not built; it is STAMPED** (ADR 0049).
+    // What the scene holds for it is a mark, a name and where it is, and
+    // everything else comes from the stamp file -- which is the whole reason
+    // the mark is worth having, and the reason changing a stamp changes every
+    // unbroken instance of it.
+    if (const std::string_view stampName = json["stamp"].asString(); !stampName.empty()) {
+        const core::InstanceId placed = stamps != nullptr && *stamps && depth < kMaxStampDepth
+                                            ? placeStamp(world, parent, stampName, report, stamps, depth)
+                                            : core::InstanceId{};
+        if (!placed.valid()) {
+            // Counted rather than fatal, for the same reason an unknown class
+            // is: a scene that names a stamp somebody deleted should still
+            // open, minus what is gone.
+            ++report.missingStamps;
+            return {};
+        }
+        world.setName(placed, world.atoms().intern(json["name"].asString()));
+        // The instance's own overrides, which the break rule limits to where it
+        // is. `applyNode` rather than a hand-written `CFrame` case, so a rule
+        // that ever widens widens in one place.
+        applyNode(world, placed, json, pending, report);
+        ++report.stamped;
+        return placed;
+    }
+
     const std::string_view className = json["class"].asString();
     const ClassId classId = world.classes().findId(world.atoms().intern(className));
     if (classId == InvalidClass) {
@@ -452,7 +531,7 @@ void readInstance(World& world, core::InstanceId parent, const JsonValue& json, 
         // children under it would be parented to something that is not what
         // they were authored against.
         ++report.unknownClasses;
-        return;
+        return {};
     }
 
     const core::InstanceId id = world.create(classId);
@@ -464,8 +543,9 @@ void readInstance(World& world, core::InstanceId parent, const JsonValue& json, 
 
     if (const JsonValue children = json["children"]; children.type() == core::JsonType::Array) {
         for (core::usize index = 0; index < children.size(); ++index)
-            readInstance(world, id, children.at(index), pending, report);
+            readInstance(world, id, children.at(index), pending, report, stamps, depth);
     }
+    return id;
 }
 
 [[nodiscard]] core::InstanceId resolvePath(const World& world, core::InstanceId root, std::string_view path)
@@ -492,6 +572,49 @@ void readInstance(World& world, core::InstanceId parent, const JsonValue& json, 
         path.remove_prefix(cursor + 1);
     }
     return at;
+}
+// **A stamp's internal references resolve against the STAMP's own root**, not
+// against the scene's. A path inside a stamp names something inside that stamp
+// -- `Post.Lantern` is the lantern on this post -- and resolving it against the
+// scene would find some other instance with that path, or nothing.
+core::InstanceId placeStamp(World& world, core::InstanceId parent, std::string_view name, SceneIoReport& report,
+                            const StampSource* stamps, int depth)
+{
+    const std::optional<std::string> text = (*stamps)(name);
+    if (!text.has_value())
+        return {};
+
+    core::JsonDocument document;
+    if (const core::JsonDocument::ParseResult parsed = document.parse(*text); !parsed.ok)
+        return {};
+
+    const JsonValue root = document.root();
+    if (root["format"].asString() != kFormat || root["version"].asInteger() != kVersion)
+        return {};
+
+    const JsonValue rootNode = root["root"];
+    if (rootNode.type() != core::JsonType::Object)
+        return {};
+
+    std::vector<PendingReference> pending;
+    const core::InstanceId placed = readInstance(world, parent, rootNode, pending, report, stamps, depth + 1);
+    if (!placed.valid())
+        return {};
+
+    for (const PendingReference& reference : pending) {
+        const core::InstanceId target = resolvePath(world, placed, reference.path);
+        if (!target.valid()) {
+            ++report.droppedReferences;
+            continue;
+        }
+        if (reference.isAttribute)
+            (void)world.setAttribute(reference.owner, reference.property, Value{target});
+        else
+            (void)world.setProperty(reference.owner, reference.property, Value{target});
+    }
+
+    world.setStamp(placed, world.atoms().intern(name));
+    return placed;
 }
 } // namespace
 
@@ -537,7 +660,8 @@ std::string writeScene(const World& world, SceneIoReport* report)
     return writer.text();
 }
 
-std::optional<core::EngineError> readScene(World& world, std::string_view json, SceneIoReport* report)
+std::optional<core::EngineError> readScene(World& world, std::string_view json, SceneIoReport* report,
+                                           const StampSource& stamps)
 {
     SceneIoReport local;
     SceneIoReport& out = report != nullptr ? *report : local;
@@ -567,7 +691,7 @@ std::optional<core::EngineError> readScene(World& world, std::string_view json, 
         applyNode(world, workspace, rootNode, pending, out);
         if (const JsonValue children = rootNode["children"]; children.type() == core::JsonType::Array) {
             for (core::usize index = 0; index < children.size(); ++index)
-                readInstance(world, workspace, children.at(index), pending, out);
+                (void)readInstance(world, workspace, children.at(index), pending, out, &stamps, 0);
         }
     }
 
@@ -584,6 +708,45 @@ std::optional<core::EngineError> readScene(World& world, std::string_view json, 
     }
 
     return std::nullopt;
+}
+
+std::string writeStamp(const World& world, core::InstanceId root, SceneIoReport* report)
+{
+    SceneIoReport local;
+    SceneIoReport& out = report != nullptr ? *report : local;
+
+    JsonWriter writer;
+    writer.beginObject();
+    writer.field("format", kFormat);
+    writer.field("version", kVersion);
+
+    if (world.alive(root)) {
+        std::unordered_map<core::u32, std::string> paths;
+        collectPaths(world, root, {}, paths);
+        writer.key("root");
+        // `root`'s own mark is IGNORED, because this is the file that mark
+        // points at: a stamp made from an instance of itself would otherwise
+        // write a one-line file referring to the file being written.
+        writeInstance(writer, world, root, paths, out, root);
+    }
+
+    writer.endObject();
+    return writer.text();
+}
+
+core::InstanceId readStamp(World& world, std::string_view json, core::InstanceId parent, std::string_view stamp,
+                           SceneIoReport* report)
+{
+    SceneIoReport local;
+    SceneIoReport& out = report != nullptr ? *report : local;
+
+    // The one-file case: the text is in hand, so the source it is read through
+    // answers for this stamp and nothing else. A stamp naming another stamp is
+    // refused at authoring time and would be a hand-edited file here.
+    const StampSource source = [json, stamp](std::string_view wanted) -> std::optional<std::string> {
+        return wanted == stamp ? std::optional<std::string>(std::string(json)) : std::nullopt;
+    };
+    return placeStamp(world, parent, stamp, out, &source, 0);
 }
 
 } // namespace luaug::scene

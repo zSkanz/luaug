@@ -14,7 +14,9 @@
 #include "luaug/scene/world.h"
 
 #include <doctest/doctest.h>
+#include <optional>
 #include <string>
+#include <string_view>
 
 #include "scene_fixture.h"
 
@@ -318,4 +320,144 @@ TEST_CASE("a reference to something a system made is dropped rather than danglin
     // that resolves to nothing on load, which is worse than a counted null.
     CHECK(report.droppedReferences >= 1);
     CHECK(text.find("Terrain") == std::string::npos);
+}
+
+// --- Stamps (ADR 0049) -------------------------------------------------------
+//
+// A stamp file is a scene of one subtree, and these are the four claims that
+// makes: a stamp round-trips like a scene does; a scene holds a MARK rather than
+// a copy; the mark is what makes changing the stamp change every instance of it;
+// and a scene that names a stamp nobody can supply still opens.
+
+TEST_CASE("a stamp is a scene of one subtree, and it round-trips")
+{
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+    const core::InstanceId post = partUnder(fixture, workspace, "Post", core::DVec3{1.0, 2.0, 3.0});
+    (void)partUnder(fixture, post, "Lantern", core::DVec3{1.0, 5.0, 3.0});
+
+    SceneIoReport wrote;
+    const std::string text = scene::writeStamp(fixture.world, post, &wrote);
+    CHECK(wrote.instances == 2);
+
+    Fixture other;
+    const core::InstanceId otherWorkspace = makeWorkspace(other);
+    SceneIoReport read;
+    const core::InstanceId placed = scene::readStamp(other.world, text, otherWorkspace, "lantern-post", &read);
+    REQUIRE(placed.valid());
+
+    CHECK(other.world.parentOf(placed) == otherWorkspace);
+    CHECK(other.world.atoms().text(other.world.name(placed)) == "Post");
+    CHECK(other.world.childCount(placed) == 1);
+    // **The mark is on the root and nowhere else.** Its children are the
+    // stamp's contents, not instances of it.
+    CHECK(other.world.atoms().text(other.world.stampOf(placed)) == "lantern-post");
+    CHECK_FALSE(other.world.stampOf(other.world.firstChild(placed)).valid());
+    // And "am I inside one" answers for the whole subtree, which is the
+    // question the break rule actually asks.
+    CHECK(other.world.stampRootOf(other.world.firstChild(placed)) == placed);
+    CHECK_FALSE(other.world.stampRootOf(otherWorkspace).valid());
+
+    // The file is the oracle, as it is for a scene: write it again out of the
+    // world it came back into and require the same bytes.
+    SceneIoReport again;
+    CHECK(scene::writeStamp(other.world, placed, &again) == text);
+}
+
+TEST_CASE("a scene holds a stamped instance as a mark, a name and where it is")
+{
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+    const core::InstanceId post = partUnder(fixture, workspace, "Post", core::DVec3{1.0, 2.0, 3.0});
+    (void)partUnder(fixture, post, "Lantern", core::DVec3{1.0, 5.0, 3.0});
+
+    const std::string stampText = scene::writeStamp(fixture.world, post);
+    fixture.world.setStamp(post, fixture.atom("lantern-post"));
+
+    SceneIoReport wrote;
+    const std::string sceneText = scene::writeScene(fixture.world, &wrote);
+    // The workspace and the post. **Not the lantern**: it belongs to the stamp
+    // file, and writing it again would be the full copy that makes the whole
+    // idea worthless.
+    CHECK(wrote.instances == 2);
+    CHECK(sceneText.find("Lantern") == std::string::npos);
+    CHECK(sceneText.find("lantern-post") != std::string::npos);
+
+    Fixture other;
+    (void)makeWorkspace(other);
+    SceneIoReport read;
+    const auto source = [&stampText](std::string_view wanted) -> std::optional<std::string> {
+        return wanted == "lantern-post" ? std::optional<std::string>(stampText) : std::nullopt;
+    };
+    REQUIRE_FALSE(scene::readScene(other.world, sceneText, &read, source).has_value());
+    CHECK(read.stamped == 1);
+    CHECK(read.missingStamps == 0);
+
+    // Found by walking rather than by remembering an id, because a load builds
+    // a new world and the ids are not the old ones.
+    core::InstanceId placed;
+    other.world.parts().forEach([&](core::InstanceId id, const scene::PartComponent&) {
+        if (other.world.atoms().text(other.world.name(id)) == "Post")
+            placed = id;
+    });
+    REQUIRE(placed.valid());
+    // The lantern came back, and it came from the STAMP rather than from the
+    // scene -- which is the whole mechanism.
+    CHECK(other.world.childCount(placed) == 1);
+    CHECK(other.world.atoms().text(other.world.stampOf(placed)) == "lantern-post");
+}
+
+TEST_CASE("changing a stamp changes every unbroken instance of it")
+{
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+    const core::InstanceId post = partUnder(fixture, workspace, "Post", core::DVec3{});
+    (void)partUnder(fixture, post, "Lantern", core::DVec3{});
+
+    const std::string oneChild = scene::writeStamp(fixture.world, post);
+    fixture.world.setStamp(post, fixture.atom("lantern-post"));
+    const std::string sceneText = scene::writeScene(fixture.world);
+
+    // The same stamp, with a second child. Nothing about the SCENE changed.
+    (void)partUnder(fixture, post, "Bulb", core::DVec3{});
+    const std::string twoChildren = scene::writeStamp(fixture.world, post);
+    REQUIRE(oneChild != twoChildren);
+
+    Fixture other;
+    (void)makeWorkspace(other);
+    const auto source = [&twoChildren](std::string_view) -> std::optional<std::string> { return twoChildren; };
+    REQUIRE_FALSE(scene::readScene(other.world, sceneText, nullptr, source).has_value());
+
+    core::InstanceId placed;
+    other.world.parts().forEach([&](core::InstanceId id, const scene::PartComponent&) {
+        if (other.world.atoms().text(other.world.name(id)) == "Post")
+            placed = id;
+    });
+    REQUIRE(placed.valid());
+    // Two, from a scene file that never mentioned either of them.
+    CHECK(other.world.childCount(placed) == 2);
+}
+
+TEST_CASE("a scene naming a stamp nobody can supply still opens, and says how many")
+{
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+    const core::InstanceId post = partUnder(fixture, workspace, "Post", core::DVec3{});
+    (void)partUnder(fixture, workspace, "Ground", core::DVec3{});
+    fixture.world.setStamp(post, fixture.atom("lantern-post"));
+    const std::string sceneText = scene::writeScene(fixture.world);
+
+    Fixture other;
+    (void)makeWorkspace(other);
+    SceneIoReport read;
+    // No source at all, which is what an older build or a deleted file looks
+    // like. Counted rather than fatal, exactly as an unknown class is.
+    REQUIRE_FALSE(scene::readScene(other.world, sceneText, &read).has_value());
+    CHECK(read.missingStamps == 1);
+    CHECK(read.stamped == 0);
+
+    // And the rest of the scene arrived: one missing stamp is not a broken file.
+    core::u32 found = 0;
+    other.world.parts().forEach([&](core::InstanceId, const scene::PartComponent&) { ++found; });
+    CHECK(found == 1);
 }
