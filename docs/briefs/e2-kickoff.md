@@ -27,13 +27,16 @@ importers, distributing the editor) belongs to a later milestone.
 - [x] Translate, rotate and scale manipulators in the viewport, world and local space
 - [x] Snapping, with a modifier to suspend it
 - [x] Multi-select: ctrl-click and shift-range in the Explorer, ctrl-click in the viewport
-- [ ] **Properties over a multi-selection: common properties, and a mixed value
-      marked as mixed** — not started; the panel is still single-target and there
-      is no mixed-value mechanism anywhere in the tree
+- [x] **Properties over a multi-selection: common properties, and a mixed value
+      marked as mixed** — the intersection is by name AND by type, and a property
+      read-only on any member is read-only for the set
 - [x] Creating an instance from the Explorer's per-row plus and its class menu
-- [~] **Reparenting by drag in the Explorer** — `Editor::reparent` is built and
-      tested, cycle and authorable target included; the drag source, the drop
-      target and the drop-between-rows are not
+- [x] **Reparenting by drag in the Explorer** — the row is both source and
+      target, and the target lights up only where the drop would move something:
+      `planReparent` is asked by the verb and by the drop, so the highlight
+      cannot promise what the move then refuses. Dropping BETWEEN rows is not
+      built and is not this: sibling order is parenting order, and reordering is
+      a `World` verb that does not exist
 - [x] Batch delete and duplicate, one undo step each, acting on the selection
 - [x] The gesture-based undo key, extracted out of `engine.cpp` and tested
 - [x] `worldToViewport` in `picking.h`, as the exact inverse of `rayThroughPixel`
@@ -193,7 +196,7 @@ touches `engine.cpp`'s frame loop.
 ## Where E2 stands, 2026-08-23
 
 Written at the human's request, from `git log` and the register rather than from
-memory. Sixteen commits since the kickoff, every one of them behind a green
+memory. Seventeen commits since the kickoff, every one of them behind a green
 six-stage local gate.
 
 ### Built
@@ -247,14 +250,25 @@ not add a script" had an answer that was correct and useless.
 scene-first, `luaug-host --save-scene` is the migration that made it possible,
 and `@luaug/camera` adopts a camera the scene already holds.
 
+**The properties grid answers for the SELECTION.** The rows are the properties
+every member has — intersected by name AND by type, because two classes that
+declare one name for two types cannot share a widget — and an edit writes to all
+of them. A property read-only on any member is read-only for the set. Where the
+members disagree, each widget says so in the way it can (an indeterminate
+checkbox, a drag that hides its number, a text field that starts empty) and the
+label carries a `(mixed)` tag for the two that cannot.
+
+**And a row is a drag source and a drop target.** `Editor::reparent` had been
+built and tested for a week with nothing able to reach it. The rule is now
+`planReparent`, asked by the verb AND by the drop target a frame before the drag
+ends — so a row lights up only where the drop would move something, rather than
+lighting up and then refusing.
+
 ### Not built
 
-- **Properties over a multi-selection**: the common properties of a mixed-class
-  selection, and a differing value marked as mixed. Nothing exists — the panel is
-  still single-target and there is no mixed-value mechanism anywhere in the tree.
-- **Reparenting by drag in the Explorer.** `Editor::reparent` is built and tested,
-  including the cycle and the authorable target; what is missing is the drag
-  source, the drop target and the drop-between-rows.
+- **Dropping BETWEEN rows**, which is reordering rather than reparenting: sibling
+  order is parenting order, and a `World` verb that moves a child within its
+  parent does not exist. Out of this milestone rather than left undone.
 - **The scene-first migration for every other example.** Only the flagship moved.
 - **The Gate Record**, the screenshots, and the human's sign-off.
 

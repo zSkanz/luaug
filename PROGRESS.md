@@ -5,14 +5,23 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- **E2 — Moving Things — IN PROGRESS, opened 2026-08-22.** Sixteen commits in,
-  every one behind a green six-stage gate. **What is left is two things**:
-  Properties over a multi-selection (common properties, and a differing value
-  marked as mixed — not started, and there is no mixed-value mechanism anywhere
-  in the tree yet), and reparenting by DRAG in the Explorer (`Editor::reparent`
-  is built and tested; the drag source and drop target are not). Then the Gate
-  Record and a person's sign-off. The brief's "Where E2 stands" section is the
-  full account.
+- **E2 — Moving Things — IN PROGRESS, opened 2026-08-22.** Seventeen commits in,
+  every one behind a green six-stage gate. **Every item of scope is built.** What
+  is left is the Gate Record, the screenshots and a person's sign-off. The
+  brief's "Where E2 stands" section is the full account.
+
+  **The properties grid answers for the whole selection**, and the two rules that
+  shape it are both tests: the rows are intersected by name AND by type, because
+  two classes that declare one name for two types cannot share a widget; and a
+  property read-only on any member is read-only for the set, for the same reason
+  `editable` exists — a field that takes a drag the world then refuses is a claim
+  the panel cannot keep.
+
+  **A row is a drag source and a drop target**, and the rule the drop previews is
+  the rule the verb applies: `planReparent` is asked by both, so a row lights up
+  only where the drop would move something. Dropping BETWEEN rows is reordering,
+  not reparenting, and there is no `World` verb for it — out of scope rather than
+  undone.
 
   **The manipulators exist**: translate, rotate and scale, world or local axes, a
   grid with a modifier that suspends it, W E R to switch. The rule they are built
@@ -85,17 +94,14 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md) when E1
   was written up. **The repository is still private**, so that release reaches
   the account and nobody else — a decision, and it is under Blocked below.
-- **M7.5 and M7 — COMPLETE, signed off 2026-08-22 and 2026-08-21**, tagged.
-  Their entries moved to [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md)
-  when E1 was written up; the briefs carry the Gate Records. **The one to carry
-  forward is D040**: header changes had been rebuilding NOTHING on Windows since
-  the project started, which is why `chcp 65001` is in the gate.
-- **M6, M5 — COMPLETE, signed off 2026-08-21 and 2026-08-20**, tagged. Their
-  entries and their Gate Records are in the briefs and in
-  [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md). The one
-  to carry forward is the pattern rather than the content: **five of M6's nine
-  defects were found by a person playing the deliverable**, which every milestone
-  since has repeated and E2 repeated seven times.
+- **M7.5, M7, M6, M5 — COMPLETE and tagged**, signed off between 2026-08-20 and
+  2026-08-22. Their entries are in
+  [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md) and the
+  briefs carry the Gate Records. Two things carry forward. **D040**: header
+  changes had been rebuilding NOTHING on Windows since the project started, which
+  is why `chcp 65001` is in the gate. And the pattern rather than the content —
+  **five of M6's nine defects were found by a person playing the deliverable**,
+  which every milestone since has repeated and E2 repeated seven times.
 - **M4.5 — Correcting the World — COMPLETE, signed off 2026-08-20**, tagged
   `milestone/m4.5`. **M4 — Seeing the World — signed off 2026-08-20**
   (`milestone/m4`), its five gate items green against re-recorded artifacts.
@@ -103,15 +109,10 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   off.
 - **CI stopped running on 2026-08-21 and it is not the code.** Every job since
   `5a542b7a` completes in about two seconds having executed ZERO steps and
-  produced no log, which is a job that never checked the repository out — the
-  signature of an Actions quota or a billing block on this private repository,
-  and the human's to clear. The last run that really executed
-  (`5a542b7a`) was green except for `perf_budget`, which `8f80ccf1` answers.
-  **So macOS is unverified for M6**, and the `milestone/m6` tag's macOS job is
-  what will say otherwise when Actions runs again. The last all-green run across
-  all three tiers is 32429107275, at M5.
-- **The last local gate before the tag**: all five stages green, 34 ctest targets
-  on Windows and 33 in the Tier-2 container, 1,081 conformance cases.
+  produced no log — a job that never checked the repository out, which is the
+  signature of an Actions quota or a billing block on this private repository and
+  is the human's to clear. **So macOS is unverified from M6 onward**; the last
+  all-green run across all three tiers is 32429107275, at M5.
 
 ### The state before this one, and what does not exist yet
 
@@ -135,30 +136,27 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
   citations. That file exists because three human-reported defects were removed
   from this one while it was being rewritten to close M4. **A close rewrites this
   file wholesale; it can no longer take the open list with it.**
-- **E2's next action, as a sentence:** add `collectCommonProperties` and a
-  shared-value query to `inspector.h` as free functions — the panel cannot be
-  driven headlessly, so what it DECIDES has to live where a test can reach it —
-  then make `drawEditor` take a span and mark a differing value as mixed. After
-  that, `BeginDragDropSource` on the Explorer's row and `AcceptDragDropPayload`
-  on it, feeding `EditorCommands::reparentTo`, which is already drained.
+- **E2's next action, as a sentence:** open the editor on
+  `examples/10-open-world`, drag one thing onto another and type into a grid over
+  four selected parts, capture what a person sees into `docs/images/e2/`, and
+  write the Gate Record — because every item of scope is built and every claim
+  left is one only a human looking at a window can settle. **The ImGui shell
+  cannot render headlessly and SDL does not accept injected input**, so there is
+  no automated path to either.
 - **All four of E2's frozen interfaces are built and tested**, which is the point
   the plan said nothing fans out before: the selection set, the gesture and its
   extracted undo key, the manipulator arithmetic, and `Editor`'s verbs.
 - **Nine defects closed in this milestone and seven of them came from a person
   using the editor**, which is now the pattern every milestone since M4 has
-  repeated. D067 and D068 are why the editor was unusable on the flagship at all. A boot scene was applied AFTER the entry scripts had built the
-  world, so it destroyed every instance they made while the Luau VM kept the
-  references and the connections — `instance_dead` once a frame, forever, and a
-  world that never arrived. The order ADR 0047 specifies is load-then-start and
-  `WorldHost::boot` does it now. It also fixes a hot reload that used to drop the
-  scene entirely. D068 is how that project got a scene at all: Save Scene As
-  wrote into `content/content/` and said nothing.
-- **`openworld_soak` flaked once and is D066.** It failed E1's first closing gate
-  and passed twice immediately after, on the same binary. Not quarantined -- §12
-  sets that at twice -- and written down so the second time is recognised. If the
-  diagnosis holds, the check is measuring the machine as well as the engine, and
-  widening the threshold would remove the only instrument watching a streamed
-  world for a leak.
+  repeated. D067 is why the editor was unusable on the flagship at all: a boot
+  scene was applied AFTER the entry scripts had built the world, destroying every
+  instance they made while the Luau VM kept the references — `instance_dead` once
+  a frame, forever, and a world that never arrived. ADR 0047's order is
+  load-then-start and `WorldHost::boot` does it now.
+- **`openworld_soak` is QUARANTINED at its second flake** (D066), which is what
+  §12 sets. If the diagnosis holds it is measuring the machine as well as the
+  engine — and widening the threshold instead would remove the only instrument
+  watching a streamed world for a leak.
 
 - **The phase was re-cut at E1's review and ADR 0047 is why** (human decision,
   2026-08-22). The first split put manipulators, saving and play in three
@@ -170,13 +168,9 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
   at runtime stays first-class, and what moves is where the world a project
   *starts* with is written down.
 
-  **Three things E2 needs that do not exist**, each already named in a comment by
-  somebody who expected this day: `World::snapshot()`, cited five times across
-  `engine/scene` as the reason every component is trivially copyable and never
-  written; a file-writing capability, because `platform/file.h` reads and never
-  writes and the game VM must not be the one given it (R4); and the scene format
-  itself, whose strongest candidate is `world_hash.cpp:182-278` with a writer
-  where its `Hasher` is.
+  **The three things E2 was told it needed and did not have all exist now**:
+  `World::snapshot()`, a file-writing capability the game VM is not given (R4),
+  and the scene format itself.
 
 - **D057 is the one open decision, and it has a third exit nobody had named.**
   `luaug build` packages a `dev`-profile host, so the released v1.0.0 binary
@@ -307,10 +301,19 @@ there when this file passed its ~300-line cap.
   was correct in the source read as broken in the run — the same trap `CLAUDE.md`
   documents for shaders, at the same price.
 
-  **Next:** `collectCommonProperties` and a shared-value query as free functions
-  in `inspector.h`, then `drawEditor` over a span with a mixed marker; then
-  drag-and-drop on the Explorer's rows feeding `EditorCommands::reparentTo`,
-  which is already drained.
+  **Then, in the same session, E2's last two items.** The properties grid now
+  answers for the whole selection, and a row is a drag source and a drop target.
+
+  **Learned again, from the other end:** both of those turned out to be a
+  DECISION dressed as a widget. What rows a mixed selection has, and whether a
+  drop would move anything, are questions the panel cannot be asked — it needs a
+  window — so both went into free functions a test can call, and both were
+  break-verified by making them wrong and watching the right test fail. The drop
+  target then asks the SAME function the verb applies, which is the only way a
+  row that lights up cannot then refuse.
+
+  **Next:** open the editor on the flagship, capture what a person sees, and
+  write E2's Gate Record. There is nothing left to build.
 
 - **2026-08-21 (session 11, Claude Opus): M6 built and signed off.** Moved to
   the archive with the rest of M6.
