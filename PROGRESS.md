@@ -5,7 +5,34 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- **E2 — Moving Things — IN PROGRESS, opened 2026-08-22.** Seventeen commits in,
+- **E3 — Content and Prefabs — IN PROGRESS, opened 2026-08-23**, and it was
+  specified by the human in four messages rather than by a brief. Everything they
+  asked for is built and behind a green six-stage gate; what is left is a person
+  using it.
+
+  **Four ADRs carry it, and three of them REVERSE something.** 0050: a script is
+  an ordinary instance carrying its own `Source`, which reverses 0048's "a Script
+  is created as a FILE" — a script whose identity is a file cannot go in a
+  prefab, be copied with the thing it belongs to, or live in a library. 0051: a
+  prefab is INHERITED and an edit is an override, which reverses 0049's
+  break-on-edit — break-on-edit says a prefab is a starting point, and this says
+  it is a definition. 0052: `content/` gains a tree of instances beside its
+  files, global to every scene. And 0049 itself named the thing: a **Stamp**,
+  chosen by the human over prefab, blueprint and model.
+
+  **Each reversal was right when it was written and wrong when it was used**,
+  which is the pattern worth naming: 0048 and 0049 were both written from the
+  human's own words, shipped with tests, and corrected by the same person a day
+  later once they had the thing in their hands. The register keeps both halves.
+
+  **What a prefab does now**: convert any instance to one, place it linked or as
+  a copy, open it onto a stage that is a world of its own, and instance it from
+  code with `Instance.stamp`. Editing an instance overrides a property and keeps
+  the link; changing the source moves every instance that has not overridden
+  that property; a structural change is written in full and unlinked rather than
+  refused, because a save that refuses is a save that loses work.
+
+- **E2 — Moving Things — COMPLETE except for a person looking, 2026-08-23.** Seventeen commits in,
   every one behind a green six-stage gate. **Every item of scope is built.** What
   is left is the Gate Record, the screenshots and a person's sign-off. The
   brief's "Where E2 stands" section is the full account.
@@ -143,13 +170,12 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
   citations. That file exists because three human-reported defects were removed
   from this one while it was being rewritten to close M4. **A close rewrites this
   file wholesale; it can no longer take the open list with it.**
-- **E2's next action, as a sentence:** open the editor on
-  `examples/10-open-world`, drag one thing onto another and type into a grid over
-  four selected parts, capture what a person sees into `docs/images/e2/`, and
-  write the Gate Record — because every item of scope is built and every claim
-  left is one only a human looking at a window can settle. **The ImGui shell
-  cannot render headlessly and SDL does not accept injected input**, so there is
-  no automated path to either.
+- **The next action, as a sentence:** open the editor on a project, convert
+  something to a stamp, place two of them, change the source and watch both
+  move — then capture what a person sees into `docs/images/`, because every claim
+  left in E2 and E3 is one only a human looking at a window can settle. **The
+  ImGui shell cannot render headlessly and SDL does not accept injected input**,
+  so there is no automated path to either.
 - **All four of E2's frozen interfaces are built and tested**, which is the point
   the plan said nothing fans out before: the selection set, the gesture and its
   extracted undo key, the manipulator arithmetic, and `Editor`'s verbs.
@@ -321,6 +347,12 @@ there when this file passed its ~300-line cap.
   **Learned from D076, and it is the one to carry:** a `static_assert` that
   COUNTS is not a test that COVERS. The fixture asserted `variant_size_v<Value>
   == 13` and named nine of them.
+
+  **And one from E3, from the other end:** `tests/hotreload` caught a
+  use-after-free the same hour it was written. A frame held `scene::World&` for
+  its whole length and a reload REPLACES that world — it surfaced as a Jolt
+  assertion inside a physics update that had nothing to do with any of it. What
+  changes underneath is asked for at the point of use now, not cached.
 
   **D077 is the same shape as D073 and worth saying so.** "The plus does not
   appear on a Folder" was reported and then corrected by the reporter: it does
