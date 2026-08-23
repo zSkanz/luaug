@@ -696,6 +696,46 @@ public:
     // exactly the economy that makes checking the instance alone wrong.
     [[nodiscard]] static bool authorable(const scene::World& world, core::InstanceId id, core::InstanceId root);
 
+    // --- The content tree (ADR 0052) -----------------------------------------
+    //
+    // **A second tree, global to every scene in the project.** The world is what
+    // a scene holds and this is what the PROJECT holds: prefabs, shared scripts,
+    // anything somebody wants once rather than once per scene. Instance inside
+    // instance, exactly like the Workspace -- because it is made of instances,
+    // in a `scene::World` of its own.
+    //
+    // **Nothing in it runs.** A `Script` here is stored, not started: what makes
+    // a script run is being in the WORLD when the world runs, which is the whole
+    // difference between the two trees and the one sentence that explains both.
+    //
+    // It is one file, `content/content.tree.json`, in the scene format -- the
+    // same writer and reader, over a different root. A project's content is a
+    // thing two people edit, so it is written on change rather than at exit: an
+    // editor that only saved on a clean shutdown would lose it exactly once.
+    [[nodiscard]] scene::World* contentWorld() noexcept { return m_content_.world.get(); }
+    [[nodiscard]] const scene::World* contentWorld() const noexcept { return m_content_.world.get(); }
+    [[nodiscard]] core::InstanceId contentRoot() const noexcept { return m_content_.root; }
+
+    // Which of the Explorer's two trees is in front.
+    //
+    // **It decides what every editor verb acts on**, not only what is drawn: a
+    // selection is a set of `InstanceId`s, and an id from one world names an
+    // unrelated instance in the other. The properties grid, the plus, delete,
+    // rename and undo all follow it -- so it lives on the editor rather than
+    // with the panel flags, which the frame loop cannot see.
+    [[nodiscard]] bool contentTreeActive() const noexcept { return m_contentTreeActive; }
+    void setContentTreeActive(bool active) noexcept { m_contentTreeActive = active; }
+
+    // Builds the tree, reading `content/content.tree.json` when there is one.
+    // Called with the project's registries, for the reason `Stage` gives.
+    void openContentTree(scene::ClassRegistry& classes, scene::EnumRegistry& enums, core::AtomTable& atoms);
+
+    // Writes it back. A no-op when there is no tree and no content root.
+    bool saveContentTree();
+
+    // The file it lives in, relative to `content/`.
+    static constexpr std::string_view ContentTreeFile = "content.tree.json";
+
     // --- The stage a stamp is edited on --------------------------------------
     //
     // **A stamp opens into a WORLD OF ITS OWN**, and the reason is the one a
@@ -1166,6 +1206,18 @@ private:
     // state -- the property every other format in this repository has.
     std::map<std::string, core::Color3> m_contentColors;
     ScriptFile m_lastScript;
+    // The project's own tree, built once when the content root opens. A
+    // `Stage` in everything but name -- a bare world with a root and no
+    // services -- and named apart because the two never coexist by accident:
+    // a stage comes and goes, and this stays for the session.
+    struct ContentTreeWorld
+    {
+        std::unique_ptr<scene::World> world;
+        core::InstanceId root;
+    };
+    ContentTreeWorld m_content_;
+    bool m_contentTreeActive = false;
+
     StampSession m_stamp;
     // The world a stamp is edited in, or nothing. Built on open and dropped on
     // close, so an editor with no stamp open carries no stage at all.

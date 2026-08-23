@@ -312,6 +312,9 @@ struct Fixture
     // what the stage needs from these is that they exist.
     scene::ClassId workspaceClass = scene::InvalidClass;
     scene::ClassId lightingClass = scene::InvalidClass;
+    // The content tree's root is a `Folder`, because that is what it is: a
+    // place to put things (ADR 0052).
+    scene::ClassId folderClass = scene::InvalidClass;
     scene::EnumId moodEnum = scene::InvalidEnum;
 
     Fixture()
@@ -489,6 +492,10 @@ struct Fixture
         lightingClass = classes.registerClass({
             .name = atoms.intern("Lighting"),
             .defaultName = atoms.intern("Lighting"),
+        });
+        folderClass = classes.registerClass({
+            .name = atoms.intern("Folder"),
+            .defaultName = atoms.intern("Folder"),
         });
     }
 

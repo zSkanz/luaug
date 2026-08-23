@@ -2926,8 +2926,46 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
                 // same thing because opening cleared the scene out of the world.
                 const bool editingStamp = editor != nullptr && editor->stampSession().open();
                 const core::InstanceId treeRoot = editingStamp ? editor->stampSession().root : root;
-                drawExplorer(*world, treeRoot, *inspector, &commands, &dialogs, icons, panels.showGenerated,
-                             editingStamp);
+
+                // **Two trees, and the tabs are what says they are two.** The
+                // scene is what this world holds; `Content` is what the PROJECT
+                // holds, global to every scene in it (ADR 0052). Instance
+                // inside instance in both, the same verbs in both -- and
+                // nothing in `Content` runs, which is the one sentence that
+                // explains the difference.
+                scene::World* const contentTree = editor != nullptr ? editor->contentWorld() : nullptr;
+                if (contentTree == nullptr || editingStamp) {
+                    drawExplorer(*world, treeRoot, *inspector, &commands, &dialogs, icons, panels.showGenerated,
+                                 editingStamp);
+                }
+                else if (ImGui::BeginTabBar("trees")) {
+                    if (ImGui::BeginTabItem("scene")) {
+                        // **Switching drops the selection**, because an id from
+                        // one world names an unrelated instance in the other --
+                        // and a properties grid pointed at somebody else is how
+                        // an edit lands on the wrong object.
+                        if (editor->contentTreeActive()) {
+                            editor->setContentTreeActive(false);
+                            inspector->onWorldChanged();
+                        }
+                        drawExplorer(*world, treeRoot, *inspector, &commands, &dialogs, icons, panels.showGenerated,
+                                     false);
+                        ImGui::EndTabItem();
+                    }
+                    if (ImGui::BeginTabItem("content")) {
+                        if (!editor->contentTreeActive()) {
+                            editor->setContentTreeActive(true);
+                            inspector->onWorldChanged();
+                        }
+                        // The root row IS drawn here, for the reason a stamp's
+                        // is: it is the thing being edited rather than a piece
+                        // of chrome, and everything under it hangs off it.
+                        drawExplorer(*contentTree, editor->contentRoot(), *inspector, &commands, &dialogs, icons, true,
+                                     true);
+                        ImGui::EndTabItem();
+                    }
+                    ImGui::EndTabBar();
+                }
             }
         }
         ImGui::End();
@@ -2935,9 +2973,17 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
 
     if (panels.properties) {
         if (ImGui::Begin("properties", &panels.properties)) {
-            if (world != nullptr && inspector != nullptr) {
-                drawProperties(*world, *inspector);
-                drawWriteLog(*world, *inspector);
+            // **The tree that is in front**, because the selection belongs to
+            // it: an id from the content tree names an unrelated instance in
+            // the scene's world, and a grid pointed at that would edit the
+            // wrong object without ever looking wrong.
+            scene::World* const shown =
+                editor != nullptr && editor->contentTreeActive() && editor->contentWorld() != nullptr
+                    ? editor->contentWorld()
+                    : world;
+            if (shown != nullptr && inspector != nullptr) {
+                drawProperties(*shown, *inspector);
+                drawWriteLog(*shown, *inspector);
             }
         }
         ImGui::End();

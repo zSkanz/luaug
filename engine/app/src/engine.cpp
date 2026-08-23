@@ -441,6 +441,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // the boot has to know it before an `Editor` exists).
     if (options.editor && !options.scriptPath.empty())
         editor.recallState(options.scriptPath / ".luaug");
+
     ViewportTarget viewportTarget;
     // The editor's icons, built once from `content/icons` on the first frame
     // that has a command list -- uploading a texture is one, so this cannot be
@@ -775,6 +776,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     if (options.editor && host->bootSceneApplied())
         editor.adoptOpenScene(sceneRelative);
 
+    // **The project's own tree**, built once, against the world's registries so
+    // an instance can move between the two (ADR 0052). After the host, because
+    // it is the host that owns them; before the first frame, because the
+    // Explorer draws it.
+    if (options.editor)
+        editor.openContentTree(host->classes(), host->enums(), host->atoms());
+
     // `game`, which is where the tree the explorer walks starts. Re-pointed
     // after every reload, because a reload destroys this world and builds
     // another (ADR 0024).
@@ -960,12 +968,21 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // at the point of use, both answers are always the current ones.
         const auto stageOf = [&]() -> Editor::Stage* { return options.editor ? editor.stage() : nullptr; };
         const auto authored = [&]() -> scene::World& {
-            Editor::Stage* const open = stageOf();
-            return open != nullptr ? open->world() : host->world();
+            if (Editor::Stage* const open = stageOf(); open != nullptr)
+                return open->world();
+            // The project's tree when its tab is in front (ADR 0052): a
+            // selection belongs to the tree it was made in, and every verb has
+            // to act on the same world the panels are showing.
+            if (options.editor && editor.contentTreeActive() && editor.contentWorld() != nullptr)
+                return *editor.contentWorld();
+            return host->world();
         };
         const auto authoredRoot = [&]() -> core::InstanceId {
-            Editor::Stage* const open = stageOf();
-            return open != nullptr ? open->workspace() : host->runtime().dataModel();
+            if (Editor::Stage* const open = stageOf(); open != nullptr)
+                return open->workspace();
+            if (options.editor && editor.contentTreeActive() && editor.contentWorld() != nullptr)
+                return editor.contentRoot();
+            return host->runtime().dataModel();
         };
 
         if (options.editor && inspector.pendingCount() > 0)
@@ -1117,6 +1134,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // "did anything change since the last save".
                 if (editorCommands.any())
                     editor.touchStamp();
+
+                // **The project's tree is written on CHANGE**, not at exit. It
+                // is a thing two people edit and a thing nothing else writes,
+                // so an editor that only saved it on a clean shutdown would
+                // lose it exactly once -- which is the same argument the
+                // remembered scene is written on change for (ADR 0052).
+                if (editorCommands.any() && editor.contentTreeActive())
+                    (void)editor.saveContentTree();
 
                 if (editorCommands.renameInstance.valid())
                     (void)editor.renameInstance(authored(), editorCommands.renameInstance, authoredRoot(),

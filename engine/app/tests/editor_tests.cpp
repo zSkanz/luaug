@@ -1486,6 +1486,79 @@ TEST_CASE("a stamp cannot be opened while the world is playing, or twice")
     CHECK(world.alive(post));
 }
 
+TEST_CASE("the content tree is a second world, global to every scene, and it round-trips")
+{
+    // **What a scene holds is the world; what the PROJECT holds is this** (ADR
+    // 0052). Prefabs, shared scripts, anything wanted once rather than once per
+    // scene -- instance inside instance, in a `scene::World` of its own.
+    StampProject project("content-tree");
+    app::testing::Fixture fixture;
+    Editor editor;
+    editor.openContent(project.root / "content");
+
+    CHECK(editor.contentWorld() == nullptr);
+    editor.openContentTree(fixture.classes, fixture.enums, fixture.atoms);
+    REQUIRE(editor.contentWorld() != nullptr);
+    REQUIRE(editor.contentRoot().valid());
+
+    scene::World& tree = *editor.contentWorld();
+    CHECK(tree.atoms().text(tree.name(editor.contentRoot())) == "Content");
+    // A project with no tree yet is not an error: every project written before
+    // this had none.
+    CHECK(tree.childCount(editor.contentRoot()) == 0);
+
+    // Instance inside instance, exactly like the Workspace.
+    const core::InstanceId group = tree.create(fixture.widgetClass);
+    tree.setName(group, fixture.atom("Props"));
+    REQUIRE_FALSE(tree.setParent(group, editor.contentRoot()).has_value());
+    const core::InstanceId lamp = tree.create(fixture.widgetClass);
+    tree.setName(lamp, fixture.atom("Lamp"));
+    REQUIRE_FALSE(tree.setParent(lamp, group).has_value());
+
+    REQUIRE(editor.saveContentTree());
+    CHECK(std::filesystem::exists(project.root / "content" / std::string(Editor::ContentTreeFile)));
+
+    // Reopened in a second editor, which is what "global to every scene" means:
+    // the tree is the project's, not the scene's.
+    Editor reopened;
+    reopened.openContent(project.root / "content");
+    reopened.openContentTree(fixture.classes, fixture.enums, fixture.atoms);
+    REQUIRE(reopened.contentWorld() != nullptr);
+
+    scene::World& back = *reopened.contentWorld();
+    // The root is not doubled: the file's own root IS this root, rather than
+    // becoming a second `Content` inside it.
+    CHECK(back.atoms().text(back.name(reopened.contentRoot())) == "Content");
+    CHECK(back.childCount(reopened.contentRoot()) == 1);
+    const core::InstanceId restoredGroup = back.firstChild(reopened.contentRoot());
+    REQUIRE(restoredGroup.valid());
+    CHECK(back.atoms().text(back.name(restoredGroup)) == "Props");
+    CHECK(back.childCount(restoredGroup) == 1);
+    CHECK(back.atoms().text(back.name(back.firstChild(restoredGroup))) == "Lamp");
+}
+
+TEST_CASE("which tree is in front decides what a verb acts on")
+{
+    // A selection is a set of `InstanceId`s, and an id from one world names an
+    // unrelated instance in the other -- so this is not a drawing decision.
+    StampProject project("content-active");
+    app::testing::Fixture fixture;
+    Editor editor;
+    editor.openContent(project.root / "content");
+    editor.openContentTree(fixture.classes, fixture.enums, fixture.atoms);
+
+    CHECK_FALSE(editor.contentTreeActive());
+    editor.setContentTreeActive(true);
+    CHECK(editor.contentTreeActive());
+
+    // And a project with no content root at all has no tree, which is every
+    // example written before this one.
+    Editor bare;
+    bare.openContentTree(fixture.classes, fixture.enums, fixture.atoms);
+    CHECK(bare.contentWorld() == nullptr);
+    CHECK_FALSE(bare.saveContentTree());
+}
+
 // --- E2: dragging a manipulator ---------------------------------------------
 //
 // The whole loop, headless: a camera, a viewport, a press on a handle, frames
