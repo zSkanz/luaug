@@ -727,6 +727,70 @@ void Editor::adoptOpenScene(std::string_view relativePath)
     m_openScene = std::string(relativePath);
 }
 
+bool Editor::createScript(const std::filesystem::path& projectRoot, std::string_view name)
+{
+    if (projectRoot.empty()) {
+        m_status = EditorStatus{"there is no project to put a script in", true};
+        return false;
+    }
+
+    std::string stem = normalizeScenePath(name);
+    // `normalizeScenePath` adds the scene extension, which is not this one's.
+    if (stem.size() >= kSceneExtension.size() &&
+        stem.compare(stem.size() - kSceneExtension.size(), kSceneExtension.size(), kSceneExtension) == 0) {
+        stem.erase(stem.size() - kSceneExtension.size());
+    }
+    constexpr std::string_view kScriptExtension = ".luau";
+    if (stem.size() < kScriptExtension.size() ||
+        stem.compare(stem.size() - kScriptExtension.size(), kScriptExtension.size(), kScriptExtension) != 0) {
+        stem += kScriptExtension;
+    }
+    if (!sceneNameIsUsable(stem)) {
+        m_status = EditorStatus{"\"" + std::string(name) + "\" is not a name a file can have", true};
+        return false;
+    }
+
+    const std::filesystem::path path = projectRoot / "src" / "scripts" / std::filesystem::path(stem);
+    if (platform::fileExists(path)) {
+        // **Never over an existing file.** A "new script" that replaced
+        // somebody's work would be the worst button in this editor, and the
+        // failure is silent by nature: the tree looks the same either way.
+        m_status = EditorStatus{"src/scripts/" + stem + " already exists", true};
+        return false;
+    }
+
+    // A skeleton rather than an empty file, because an empty entry script is a
+    // file that mounts, runs, does nothing, and gives a person no clue what to
+    // type. `--!strict` because R2 says every Luau file in this engine is, and a
+    // template that starts a project off wrong is a template that teaches wrong.
+    static constexpr std::string_view kSkeleton = R"(--!strict
+--[[
+	A new entry script.
+
+	It is mounted from `src/scripts` at boot and started on its own coroutine.
+	The world it runs in comes from the scene (ADR 0047), so this file is what
+	the world DOES rather than what it is.
+]]
+
+local RunService = game:GetService("RunService")
+
+RunService.Heartbeat:Connect(function(dt: number)
+	local _ = dt
+end)
+)";
+    // Indented with TABS, which is what `stylua.toml` uses -- a file this editor
+    // writes has to be one the format gate would leave alone.
+    const std::string source(kSkeleton);
+
+    if (!platform::createDirectories(path.parent_path()) || !platform::writeTextFile(path, source)) {
+        m_status = EditorStatus{"could not write " + path.string(), true};
+        return false;
+    }
+
+    m_status = EditorStatus{"made src/scripts/" + stem + " -- it becomes a Script on the next reload", false};
+    return true;
+}
+
 void Editor::openContent(const std::filesystem::path& contentRoot)
 {
     // The return value is deliberately ignored. A project with no `content/`

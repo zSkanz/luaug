@@ -970,6 +970,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 }
                 if (!editorCommands.createFolder.empty())
                     (void)editor.content().createFolder(editorCommands.createFolder);
+                if (!editorCommands.createScript.empty()) {
+                    // The project root, not the content root: `src/` is a
+                    // project's code and `content/` is its data (ADR 0048).
+                    (void)editor.createScript(options.scriptPath, editorCommands.createScript);
+                }
 
                 // Before the delete and the duplicate, so a frame that somehow
                 // carried both acts on a world the create has already finished

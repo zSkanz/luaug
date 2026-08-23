@@ -81,7 +81,13 @@ echo "== legal sweep (R7) =="
 # reason and is named individually rather than by directory: it GENERATES a page
 # in `docs/`, which is allowed, and one of the links on that page points at
 # `coming-from-roblox.md`. A generator cannot emit a filename it may not spell.
-allowed='^(\./)?(README\.md|CONTRIBUTING\.md|NOTICE|MASTER_PROMPT\.md|CLAUDE\.md|PROGRESS\.md|docs/|templates/README\.md|examples/README\.md|tests/README\.md|runtime/README\.md|api/README\.md|engine/README\.md|tools/README\.md|third_party/README\.md|\.vscode/settings\.json|scripts/gates/|api/generator/gen_reference\.luau)'
+# `branding/README.md` is allowed for the first reason too, and it is the
+# clearest case of it in the repository: the sentence that trips this lint is
+# the one explaining why the wordmark does NOT split `Luau` from `G`, because
+# splitting them would point at the language. That is R7's own reasoning
+# written down, and a lint that forbids stating a rule is a lint working
+# against it.
+allowed='^(\./)?(README\.md|CONTRIBUTING\.md|NOTICE|MASTER_PROMPT\.md|CLAUDE\.md|PROGRESS\.md|docs/|templates/README\.md|examples/README\.md|tests/README\.md|runtime/README\.md|api/README\.md|engine/README\.md|tools/README\.md|third_party/README\.md|branding/README\.md|\.vscode/settings\.json|scripts/gates/|api/generator/gen_reference\.luau)'
 while IFS= read -r f; do
     if ! [[ "$f" =~ $allowed ]]; then
         err "'Roblox' referenced outside the allowed docs set (rule R7)" "$f"

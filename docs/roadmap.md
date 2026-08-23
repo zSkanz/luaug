@@ -1261,7 +1261,7 @@ size were normal.
 |----|------|------|-------------------|
 | E1 | The Editor | XXL | `luaug edit`: an application with a menu bar and dockable panels; a viewport you click, fly and select in; **play, pause, step, stop and save**; a **content browser** with folders and context menus, from which **opening a scene loads it**; **undo and redo**; and a scene format that makes a project's world data. **Built, awaiting review** |
 | E2 | Moving Things | L | Translate, rotate and scale manipulators; creating instances; reparenting by drag; multi-select — the direct manipulation the loop and the undo stack make safe. **Specified below, in progress** |
-| E3 | Assets and Prefabs | M | Prefabs as scenes, an asset importer path from the browser, and a scene that references what it uses |
+| E3 | Assets and Prefabs | M | Prefabs as scenes, an asset importer path from the browser, and a scene that references what it uses. **The model is settled: ADR 0048** -- content holds SOURCES, an instance in the world may be a LINK to one, and editing a linked instance breaks the link and makes it its own thing. Written at E2 from the human's own description rather than invented while wiring a browser |
 | E4 | The Editor Ships | M | The distribution question ADR 0046 deliberately declined, and the editor's own performance gate |
 
 **What moved into E1 and why it was right.** Undo was E2's, and E1 grew delete

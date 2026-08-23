@@ -151,6 +151,9 @@ struct EditorDialogs
     bool preferences = false;
     bool about = false;
     bool newFolder = false;
+    // The new-script box. Beside `newFolder` because it is the same shape of
+    // question: a name, and somewhere it goes.
+    bool newScript = false;
 
     // A rename in flight. The seed is what the box opens with -- the current
     // name, because renaming is usually editing a name rather than replacing
@@ -206,6 +209,16 @@ struct EditorCommands
     std::string openScene;
     // A folder the browser asked to make, in its current directory.
     std::string createFolder;
+    // **A new entry script, by NAME, written under the project's `src/scripts`.**
+    //
+    // A `Script` is `NotCreatable` and that is right: `Instance.new("Script")`
+    // inside a sandboxed game VM has no filesystem to put a file on (R4), and a
+    // `Script` instance with no file behind it is a lie the tree tells. The
+    // EDITOR is not that VM -- ADR 0046 put it in the engine binary precisely
+    // because it may touch the disk -- so it creates the FILE, and the instance
+    // appears because the mount finds it (ADR 0048). The rule is honoured rather
+    // than bypassed.
+    std::string createScript;
     // Ask for the Save As dialog. A flag rather than the dialog opening itself,
     // because the toolbar button and File > Save Scene As have to reach the
     // same one.
@@ -267,7 +280,7 @@ struct EditorCommands
         return play.has_value() || pause.has_value() || save || newScene || quit || resetLayout || clearSelection ||
                undo || redo || createClass != scene::InvalidClass || deleteSelection || duplicateSelection ||
                reparentTo.valid() || renameInstance.valid() || !saveAs.empty() || !openScene.empty() ||
-               !createFolder.empty() || !deleteContent.empty() || !renameContent.empty();
+               !createFolder.empty() || !createScript.empty() || !deleteContent.empty() || !renameContent.empty();
     }
 };
 
@@ -415,6 +428,20 @@ public:
     // a scene.
     [[nodiscard]] ContentTree& content() noexcept { return m_content; }
     [[nodiscard]] const ContentTree& content() const noexcept { return m_content; }
+
+    // Writes a new entry script under `<project>/src/scripts/<name>.luau` and
+    // returns whether it landed.
+    //
+    // **Content is a project's data and `src/` is its code**, and an editor that
+    // showed only the first could not offer to make a script -- which is what a
+    // person asked for the first day they used this one. The file is what makes
+    // the `Script`: the next reload mounts it and the tree grows a row (ADR
+    // 0048).
+    //
+    // Refuses a name that is not a name, and refuses to overwrite. A "new
+    // script" that silently replaced somebody's file would be the worst button
+    // in the editor.
+    bool createScript(const std::filesystem::path& projectRoot, std::string_view name);
 
     // Opens a project's content root. A project with no `content/` is a normal
     // state and not an error -- every example before `06-scene` is one.

@@ -8,6 +8,7 @@
 #include "luaug/app/editor.h"
 #include "luaug/app/picking.h"
 #include "luaug/core/math.h"
+#include "luaug/platform/file.h"
 #include "luaug/render/debug_draw.h"
 #include "luaug/scene/components.h"
 #include "luaug/scene/enum_registry.h"
@@ -17,6 +18,7 @@
 #include <array>
 #include <cmath>
 #include <doctest/doctest.h>
+#include <filesystem>
 #include <vector>
 
 #include "class_descriptors.gen.h"
@@ -1175,4 +1177,48 @@ TEST_CASE("a manipulator four kilometres out is submitted where it is, not where
     const core::Vec3 fromCentre{first.position.x - expected.x, first.position.y - expected.y,
                                 first.position.z - expected.z};
     CHECK(core::length(fromCentre) < frame->size * 1.5f);
+}
+
+// --- E2 / ADR 0048: a script is a file, and the editor writes it ------------
+
+TEST_CASE("a new script becomes a file under src/scripts, and never overwrites one")
+{
+    // `Script` is `NotCreatable` and that stays right: `Instance.new("Script")`
+    // inside a sandboxed game VM has no filesystem to put a file on (R4). The
+    // editor is not that VM, so it makes the FILE and the instance appears
+    // because the mount finds it -- the rule honoured rather than bypassed.
+    const std::filesystem::path root = std::filesystem::temp_directory_path() / "luaug-newscript-test";
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root);
+
+    Editor editor;
+    REQUIRE(editor.createScript(root, "patrol"));
+
+    const std::filesystem::path written = root / "src" / "scripts" / "patrol.luau";
+    REQUIRE(std::filesystem::exists(written));
+
+    std::string source;
+    REQUIRE(luaug::platform::readTextFile(written, source));
+    // `--!strict` because R2 says every Luau file in this engine is, and a
+    // template that starts a project off wrong teaches wrong.
+    CHECK(source.starts_with("--!strict"));
+    CHECK(source.find('\t') != std::string::npos);
+
+    // The extension is the editor's to add and not the person's to remember.
+    REQUIRE(editor.createScript(root, "chase.luau"));
+    CHECK(std::filesystem::exists(root / "src" / "scripts" / "chase.luau"));
+
+    // **Never over an existing file.** A "new script" that replaced somebody's
+    // work would be the worst button in this editor, and the failure is silent
+    // by nature -- the tree looks the same either way.
+    CHECK_FALSE(editor.createScript(root, "patrol"));
+    CHECK(editor.status().failed);
+
+    // And a name a file cannot carry is refused rather than written somewhere
+    // surprising.
+    CHECK_FALSE(editor.createScript(root, "../escape"));
+    CHECK_FALSE(std::filesystem::exists(root.parent_path() / "escape.luau"));
+
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
 }
