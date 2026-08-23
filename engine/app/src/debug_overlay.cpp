@@ -423,8 +423,32 @@ constexpr const char* kInstanceDragPayload = "luaug.instances";
 }
 
 void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspector, EditorCommands* commands,
-                  EditorDialogs* dialogs, const IconAtlas* icons, bool showGenerated)
+                  EditorDialogs* dialogs, const IconAtlas* icons, bool showGenerated, const Editor* editor)
 {
+    // **A stamp is open, so say so and offer the way out.** The tree below is
+    // the stamp's and not the scene's, and an editor that looked identical in
+    // both would be one where somebody edits a stamp believing they are editing
+    // their world -- and saves it.
+    if (editor != nullptr && editor->stampSession().open() && commands != nullptr) {
+        const Editor::StampSession& session = editor->stampSession();
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.72f, 0.35f, 1.0f));
+        ImGui::Text("editing %s%s", session.path.c_str(), session.dirty ? " *" : "");
+        ImGui::PopStyleColor();
+        if (ImGui::SmallButton("save"))
+            commands->saveStamp = true;
+        ImGui::SameLine();
+        if (ImGui::SmallButton("save & close")) {
+            commands->closeStamp = true;
+            commands->closeStampSaving = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("discard")) {
+            commands->closeStamp = true;
+            commands->closeStampSaving = false;
+        }
+        ImGui::Separator();
+    }
+
     collectTree(world, root, g_rows);
 
     // **A DIFFERENT world opens collapsed; a restored one does not.** Loading a
@@ -757,7 +781,7 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                     if (ImGui::MenuItem(stampLabel))
                         commands->breakStamp = stampRoot;
                 }
-                else if (ImGui::MenuItem("Create Stamp...", nullptr, false, !engineOwned)) {
+                else if (ImGui::MenuItem("Convert to Stamp...", nullptr, false, !engineOwned)) {
                     dialogs->stampSubject = row.id;
                     dialogs->newStamp = true;
                 }
@@ -2243,11 +2267,13 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                             (void)tree.enter(entry.name);
                         else if (entry.kind == ContentKind::Scene)
                             commands.openScene = entry.path;
-                        // **A scene is OPENED and a stamp is PLACED**, which is
-                        // the whole difference between the two kinds and the
-                        // reason a stamp is a kind of its own.
+                        // **Opening a stamp EDITS it**, the way opening a
+                        // scene edits a scene -- which is the pairing that
+                        // makes the browser one idea rather than two. Placing
+                        // one in the world is the right-click, because it is
+                        // the thing you do to a world rather than to a file.
                         else if (entry.kind == ContentKind::Stamp)
-                            commands.placeStamp = entry.path;
+                            commands.openStamp = entry.path;
                     }
 
                     if (ImGui::BeginPopupContextItem("entry-menu")) {
@@ -2256,8 +2282,12 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, entrySpacing);
                         if (entry.kind == ContentKind::Scene && ImGui::MenuItem("Open"))
                             commands.openScene = entry.path;
-                        if (entry.kind == ContentKind::Stamp && ImGui::MenuItem("Place in Workspace"))
-                            commands.placeStamp = entry.path;
+                        if (entry.kind == ContentKind::Stamp) {
+                            if (ImGui::MenuItem("Open"))
+                                commands.openStamp = entry.path;
+                            if (ImGui::MenuItem("Place in Workspace"))
+                                commands.placeStamp = entry.path;
+                        }
                         // **A directory cannot carry a colour**, so this one is
                         // kept in `.luaug/editor.json` keyed by path, while a
                         // folder in the WORLD carries its own as an attribute.
@@ -2827,7 +2857,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     if (panels.explorer) {
         if (ImGui::Begin("explorer", &panels.explorer)) {
             if (world != nullptr && inspector != nullptr)
-                drawExplorer(*world, root, *inspector, &commands, &dialogs, icons, panels.showGenerated);
+                drawExplorer(*world, root, *inspector, &commands, &dialogs, icons, panels.showGenerated, editor);
         }
         ImGui::End();
     }
@@ -2945,7 +2975,7 @@ void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, I
                 // Everything, including what streaming made: this is the debug
                 // overlay rather than the editor, and it exists to show the
                 // world as it IS rather than as it was authored.
-                drawExplorer(*world, root, *inspector, nullptr, nullptr, nullptr, true);
+                drawExplorer(*world, root, *inspector, nullptr, nullptr, nullptr, true, nullptr);
             ImGui::EndChild();
 
             ImGui::SeparatorText("properties");

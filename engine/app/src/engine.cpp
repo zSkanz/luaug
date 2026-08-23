@@ -1084,6 +1084,23 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 if (editorCommands.breakStamp.valid())
                     (void)editor.breakStamp(host->world(), editorCommands.breakStamp);
 
+                // **Opening and closing both replace the world**, so they are
+                // drained here beside play and stop rather than acted on where
+                // they were clicked -- a panel behind this one is still drawing
+                // from what they would replace.
+                if (!editorCommands.openStamp.empty()) {
+                    (void)editor.openStamp(host->world(), editorCommands.openStamp, host->workspace(), inspector);
+                }
+                if (editorCommands.saveStamp)
+                    (void)editor.saveStamp(host->world());
+                if (editorCommands.closeStamp)
+                    (void)editor.closeStamp(host->world(), inspector, editorCommands.closeStampSaving);
+
+                // One question about every verb rather than a flag on each:
+                // "did anything change since the last save".
+                if (editorCommands.any())
+                    editor.touchStamp();
+
                 if (editorCommands.renameInstance.valid())
                     (void)editor.renameInstance(host->world(), editorCommands.renameInstance,
                                                 host->runtime().dataModel(), editorCommands.renameInstanceTo);

@@ -1378,6 +1378,135 @@ TEST_CASE("breaking a stamp is a step of its own, and undo puts the mark back")
     CHECK_FALSE(editor.breakStamp(world, fixture.widget(world, "Loose")));
 }
 
+TEST_CASE("opening a stamp replaces the world with it, and closing puts the scene back")
+{
+    // **The isolation is `play`'s machinery, not a new one**, and this is the
+    // property that matters: a snapshot carries generations and the free list,
+    // so an instance the scene held before is the SAME instance afterwards
+    // rather than a new one wearing its id.
+    StampProject project("edit");
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(project.root / "content");
+
+    const core::InstanceId workspace = fixture.widget(world, "Workspace");
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+    const core::InstanceId scenery = fixture.widget(world, "Scenery");
+    const core::InstanceId post = fixture.widget(world, "Post");
+    const core::InstanceId lantern = fixture.widget(world, "Lantern");
+    REQUIRE_FALSE(world.setParent(scenery, workspace).has_value());
+    REQUIRE_FALSE(world.setParent(post, workspace).has_value());
+    REQUIRE_FALSE(world.setParent(lantern, post).has_value());
+    REQUIRE(editor.createStamp(world, post, workspace, "lantern-post"));
+
+    CHECK_FALSE(editor.stampSession().open());
+    REQUIRE(editor.openStamp(world, "lantern-post", workspace, inspector));
+    CHECK(editor.stampSession().open());
+    CHECK(editor.stampSession().path == "stamps/lantern-post.stamp.json");
+
+    // The scene is gone and the stamp is what is there: one child of Workspace,
+    // and it is not the one the scene had.
+    CHECK(world.childCount(workspace) == 1);
+    // Retired here rather than assumed: `destroy` takes a subtree out of the
+    // tree at once and stops the HANDLE resolving at the end of the drain,
+    // which is the world's own rule. Doing it makes the check below stronger --
+    // the restore brings back an instance that was fully retired, with the id
+    // it had.
+    world.retireDestroyed();
+    CHECK_FALSE(world.alive(scenery));
+    const core::InstanceId editing = editor.stampSession().root;
+    REQUIRE(editing.valid());
+    CHECK(world.childCount(editing) == 1);
+    CHECK(inspector.selection() == editing);
+
+    // A child added inside, which is the whole reason this mode exists: the
+    // plus, the properties grid and the manipulators all work on it because it
+    // is made of ordinary instances in the ordinary world.
+    const core::InstanceId glow = fixture.widget(world, "Glow");
+    REQUIRE_FALSE(world.setParent(glow, editing).has_value());
+    CHECK(world.childCount(editing) == 2);
+
+    REQUIRE(editor.closeStamp(world, inspector, true));
+    CHECK_FALSE(editor.stampSession().open());
+
+    // **The scene came back, and it is the same scene.** Not a copy: the ids
+    // the test held before opening still resolve to the instances they named.
+    CHECK(world.alive(scenery));
+    CHECK(world.alive(post));
+    CHECK(world.parentOf(scenery) == workspace);
+    CHECK(world.childCount(workspace) == 2);
+    // And the edit went to the FILE rather than to the world: the instance in
+    // the scene still has the one child it had.
+    CHECK(world.childCount(post) == 1);
+
+    // Reopening shows what was saved, which is the round trip that proves the
+    // write happened at all.
+    REQUIRE(editor.openStamp(world, "lantern-post", workspace, inspector));
+    CHECK(world.childCount(editor.stampSession().root) == 2);
+    REQUIRE(editor.closeStamp(world, inspector, false));
+}
+
+TEST_CASE("closing a stamp without saving drops what was done inside it")
+{
+    StampProject project("discard");
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(project.root / "content");
+
+    const core::InstanceId workspace = fixture.widget(world, "Workspace");
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+    const core::InstanceId post = fixture.widget(world, "Post");
+    REQUIRE_FALSE(world.setParent(post, workspace).has_value());
+    REQUIRE(editor.createStamp(world, post, workspace, "post"));
+
+    REQUIRE(editor.openStamp(world, "post", workspace, inspector));
+    const core::InstanceId glow = fixture.widget(world, "Glow");
+    REQUIRE_FALSE(world.setParent(glow, editor.stampSession().root).has_value());
+    REQUIRE(editor.closeStamp(world, inspector, false));
+
+    // Nothing was written, so what comes back is what was there.
+    REQUIRE(editor.openStamp(world, "post", workspace, inspector));
+    CHECK(world.childCount(editor.stampSession().root) == 0);
+    REQUIRE(editor.closeStamp(world, inspector, false));
+}
+
+TEST_CASE("a stamp cannot be opened while the world is playing, or twice")
+{
+    StampProject project("refuse");
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(project.root / "content");
+
+    const core::InstanceId workspace = fixture.widget(world, "Workspace");
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+    const core::InstanceId post = fixture.widget(world, "Post");
+    REQUIRE_FALSE(world.setParent(post, workspace).has_value());
+    REQUIRE(editor.createStamp(world, post, workspace, "post"));
+
+    // A stamp is authored, and a world that is ticking is not one somebody is
+    // authoring.
+    editor.play(world);
+    CHECK_FALSE(editor.openStamp(world, "post", workspace, inspector));
+    editor.stop(world, inspector);
+
+    REQUIRE(editor.openStamp(world, "post", workspace, inspector));
+    // A second one would need a second way back, and the world only has one.
+    CHECK_FALSE(editor.openStamp(world, "post", workspace, inspector));
+    REQUIRE(editor.closeStamp(world, inspector, false));
+
+    // A stamp that is not there leaves the world exactly as it was.
+    const core::u32 before = world.childCount(workspace);
+    CHECK_FALSE(editor.openStamp(world, "no-such-stamp", workspace, inspector));
+    CHECK(world.childCount(workspace) == before);
+    CHECK(world.alive(post));
+}
+
 // --- E2: dragging a manipulator ---------------------------------------------
 //
 // The whole loop, headless: a camera, a viewport, a press on a handle, frames

@@ -766,6 +766,106 @@ bool Editor::breakStamp(scene::World& world, core::InstanceId id)
     return true;
 }
 
+bool Editor::openStamp(scene::World& world, std::string_view path, core::InstanceId workspace, Inspector& inspector)
+{
+    if (m_run != RunState::Editing) {
+        m_status = EditorStatus{"stop the world before opening a stamp", true};
+        return false;
+    }
+    if (m_stamp.open()) {
+        m_status = EditorStatus{"a stamp is already open", true};
+        return false;
+    }
+
+    const std::string relative = normalizeStampPath(path);
+    std::string text;
+    if (!platform::readTextFile(m_content.root() / std::filesystem::path(relative), text)) {
+        m_status = EditorStatus{"that stamp is not there any more", true};
+        return false;
+    }
+
+    if (!world.alive(workspace)) {
+        m_status = EditorStatus{"this world has no Workspace to open a stamp in", true};
+        return false;
+    }
+
+    // **The way back, taken before anything is cleared.** The same pair `play`
+    // and `stop` use, and proven by them: a snapshot carries generations and the
+    // free list, so an instance the scene held before is the same instance
+    // afterwards rather than a new one wearing its id.
+    auto restore = std::make_unique<scene::WorldSnapshot>(world.snapshot());
+
+    scene::clearScene(world);
+    scene::SceneIoReport report;
+    const core::InstanceId root = scene::readStamp(world, text, workspace, relative, &report);
+    if (!root.valid()) {
+        world.restore(*restore);
+        inspector.onWorldRestored();
+        m_status = EditorStatus{"that stamp could not be read", true};
+        return false;
+    }
+
+    m_stampReturn = std::move(restore);
+    m_stamp = StampSession{relative, root, false};
+
+    // Cleared on the way in for the reason a play session clears it: a ctrl-Z
+    // that reached back past this boundary would apply a step taken in a world
+    // that is not this one.
+    m_history.clear();
+    inspector.onWorldRestored();
+    inspector.pruneDead(world);
+    inspector.select(root);
+    inspector.reveal(root);
+
+    m_status = EditorStatus{"editing " + relative, false};
+    return true;
+}
+
+bool Editor::saveStamp(const scene::World& world)
+{
+    if (!m_stamp.open() || !world.alive(m_stamp.root)) {
+        m_status = EditorStatus{"there is no stamp open to save", true};
+        return false;
+    }
+
+    scene::SceneIoReport report;
+    const std::string text = scene::writeStamp(world, m_stamp.root, &report);
+    const std::filesystem::path absolute = m_content.root() / std::filesystem::path(m_stamp.path);
+    if (!platform::createDirectories(absolute.parent_path()) || !platform::writeTextFile(absolute, text)) {
+        m_status = EditorStatus{"could not write " + m_stamp.path, true};
+        return false;
+    }
+
+    m_stamp.dirty = false;
+    m_status = EditorStatus{"saved " + m_stamp.path + " (" + std::to_string(report.instances) + " instance(s))", false};
+    return true;
+}
+
+bool Editor::closeStamp(scene::World& world, Inspector& inspector, bool save)
+{
+    if (!m_stamp.open())
+        return false;
+
+    const std::string closed = m_stamp.path;
+    const bool wrote = save && saveStamp(world);
+
+    if (m_stampReturn != nullptr) {
+        world.restore(*m_stampReturn);
+        m_stampReturn.reset();
+    }
+    m_stamp = StampSession{};
+
+    // The same three the stop path makes, and for the same reasons: the history
+    // belongs to a world this restore has replaced, and a selection made inside
+    // the stamp names instances the restore has taken away.
+    m_history.clear();
+    inspector.pruneDead(world);
+    inspector.onWorldRestored();
+
+    m_status = EditorStatus{wrote ? "saved and closed " + closed : "closed " + closed, false};
+    return true;
+}
+
 bool Editor::createStamp(scene::World& world, core::InstanceId id, core::InstanceId root, std::string_view name)
 {
     if (!world.alive(id)) {

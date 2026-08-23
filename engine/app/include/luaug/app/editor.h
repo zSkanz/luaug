@@ -319,6 +319,16 @@ struct EditorCommands
     // Take the mark off this one, so it stops following its file.
     core::InstanceId breakStamp;
 
+    // **Open a stamp for editing**, save what is open, or close it. Opening
+    // replaces the world with the stamp and closing puts the scene back, so
+    // all three are drained at the safe point like everything else that
+    // replaces a world.
+    std::string openStamp;
+    bool saveStamp = false;
+    bool closeStamp = false;
+    // Whether closing writes first. False is what "close without saving" means.
+    bool closeStampSaving = true;
+
     // Content-relative. Delete removes a folder with everything in it.
     std::string deleteContent;
     std::string renameContent;
@@ -340,9 +350,10 @@ struct EditorCommands
     {
         return play.has_value() || pause.has_value() || save || newScene || quit || resetLayout || clearSelection ||
                undo || redo || colorAsked || stampSubject.valid() || !placeStamp.empty() || breakStamp.valid() ||
-               createClass != scene::InvalidClass || deleteSelection || duplicateSelection || reparentTo.valid() ||
-               renameInstance.valid() || !saveAs.empty() || !openScene.empty() || !createFolder.empty() ||
-               !createScript.empty() || !deleteContent.empty() || !renameContent.empty();
+               !openStamp.empty() || saveStamp || closeStamp || createClass != scene::InvalidClass || deleteSelection ||
+               duplicateSelection || reparentTo.valid() || renameInstance.valid() || !saveAs.empty() ||
+               !openScene.empty() || !createFolder.empty() || !createScript.empty() || !deleteContent.empty() ||
+               !renameContent.empty();
     }
 };
 
@@ -678,6 +689,60 @@ public:
     // Ancestors count. A chunk marks its FOLDER and not its contents, which is
     // exactly the economy that makes checking the instance alone wrong.
     [[nodiscard]] static bool authorable(const scene::World& world, core::InstanceId id, core::InstanceId root);
+
+    // --- Editing a stamp (ADR 0049) ------------------------------------------
+    //
+    // **Opening a stamp replaces the world with it**, and that is the whole
+    // design: the tree, the properties grid, the manipulators, the plus, delete
+    // and rename all work on it because it is made of ordinary instances in the
+    // ordinary world. There is no second editor and no second set of verbs --
+    // which is what Unity's prefab mode and Unreal's blueprint editor both are,
+    // and why neither of them grew a parallel toolset.
+    //
+    // **The isolation is `play`'s machinery, not a new one.** Entering takes a
+    // `WorldSnapshot`, clears the scene and builds the stamp alone; leaving puts
+    // the snapshot back. That is the same pair `play` and `stop` already use and
+    // it is already proven to restore ids, generations and the free list -- so
+    // an instance the scene held before is the same instance afterwards.
+    //
+    // The price, stated rather than discovered: **the undo history is cleared on
+    // the way in and on the way out**, exactly as a play session clears it.
+    // Mixing steps taken inside a stamp with steps taken in a scene would let one
+    // ctrl-Z apply a world that never existed.
+    struct StampSession
+    {
+        // Content-relative, and empty when no stamp is open.
+        std::string path;
+        // The subtree being edited, in the world.
+        core::InstanceId root;
+        // Whether anything has changed since the last save. Advisory: it is what
+        // the close button asks about, not a lock.
+        bool dirty = false;
+
+        [[nodiscard]] bool open() const noexcept { return !path.empty(); }
+    };
+
+    [[nodiscard]] const StampSession& stampSession() const noexcept { return m_stamp; }
+
+    // Opens a stamp for editing. Refused while playing: a stamp is authored, and
+    // a world that is ticking is not one somebody is authoring.
+    bool openStamp(scene::World& world, std::string_view path, core::InstanceId workspace, Inspector& inspector);
+
+    // Writes what is open back to its file. The world is not touched.
+    bool saveStamp(const scene::World& world);
+
+    // Puts the scene back. `save` writes first; without it the edits are dropped,
+    // which is what a person choosing "close without saving" means.
+    bool closeStamp(scene::World& world, Inspector& inspector, bool save);
+
+    // Marks the open stamp as changed. Called by the frame loop whenever an
+    // editor verb touches the world, because "did anything change" is a question
+    // about EVERY verb rather than about any one of them.
+    void touchStamp() noexcept
+    {
+        if (m_stamp.open())
+            m_stamp.dirty = true;
+    }
 
     // --- Stamps (ADR 0049) ---------------------------------------------------
     //
@@ -1029,6 +1094,12 @@ private:
     // state -- the property every other format in this repository has.
     std::map<std::string, core::Color3> m_contentColors;
     ScriptFile m_lastScript;
+    StampSession m_stamp;
+    // The scene to put back when the stamp closes. A pointer for the reason
+    // `m_playSnapshot` is one: a `WorldSnapshot` is the world's component pools
+    // and holding one by value in every editor would cost that whether or not
+    // anybody ever opened a stamp.
+    std::unique_ptr<scene::WorldSnapshot> m_stampReturn;
 
     // A drag in progress. `start` is where the pointer was solved to on the
     // frame the button went down, and `before` is every selected instance's
