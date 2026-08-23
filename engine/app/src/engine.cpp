@@ -736,6 +736,25 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     if (std::optional<core::EngineError> bootError = host->boot(worldOptions); bootError.has_value())
         return bootError;
 
+    // **The migration capture** (ADR 0047). The scripts have run their file
+    // scope in the boot drain, so the world is exactly what they build; writing
+    // it here and returning is the whole of the command. Through `writeScene`
+    // and `platform::writeTextFile` because that is what the editor's Save is
+    // made of -- a second writer would be a second answer to "what is in a
+    // scene".
+    if (!options.saveScenePath.empty()) {
+        scene::SceneIoReport report;
+        const std::string text = scene::writeScene(host->world(), &report);
+        if (!platform::createDirectories(options.saveScenePath.parent_path()) ||
+            !platform::writeTextFile(options.saveScenePath, text)) {
+            return core::makeError(LUAUG_TR("scene.err.scene_unwritable"));
+        }
+        const core::I18nArg args[] = {{"count", static_cast<core::i64>(report.instances)},
+                                      {"path", options.saveScenePath.string()}};
+        core::log(core::LogLevel::Info, LUAUG_TR("scene.info.scene_written"), args);
+        return std::nullopt;
+    }
+
     // The editor is told which scene the world holds, so its save writes back
     // to that one rather than refusing for want of an open scene.
     if (options.editor && host->bootSceneApplied())

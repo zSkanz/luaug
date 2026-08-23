@@ -119,6 +119,18 @@ struct EngineOptions
     // decision; which scene an editor opens is the person's.
     std::string startupScene;
 
+    // **Write the world the scripts just built to a scene, then exit.**
+    //
+    // The one thing ADR 0047's migration needs and cannot do without: a project
+    // whose world is in its code has no way to get that world into a file, and
+    // retyping it by hand into JSON is not a migration anybody performs. This
+    // boots the project, lets the entry scripts build whatever they build, and
+    // writes it -- the same `writeScene` the editor's Save calls, so what comes
+    // out is what the editor would have written.
+    //
+    // Headless and one frame. It is a capture, not a run.
+    std::filesystem::path saveScenePath;
+
     bool frameStats = false;
 
     // M7's gate, as a flag. Empty writes no report and asserts nothing.

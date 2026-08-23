@@ -139,13 +139,25 @@ end
 --- end)
 --- ```
 function Camera.thirdPerson(options: Options): Rig
-    local instance = Instance.new("Camera")
-    instance.Name = "FollowCamera"
-    instance.FieldOfView = options.FieldOfView or 70
-    instance.NearPlane = options.NearPlane or 0.1
-    instance.FarPlane = options.FarPlane or 1200
-    instance.Parent = workspace
-    workspace.CurrentCamera = instance
+    --- **A camera the scene already holds is ADOPTED, not replaced.**
+    ---
+    --- The arrangement ADR 0047 asks projects to move to is the one Unity and
+    --- Unreal have: the camera is an object in the scene and the script is what
+    --- drives it. A rig that always made its own would put a second camera in
+    --- every scene-first project, and the second one wins `CurrentCamera` --
+    --- which is a scene whose saved camera is quietly ignored.
+    ---
+    --- A project with no scene gets exactly what it always got.
+    local existing = workspace.CurrentCamera
+    local instance = if existing ~= nil and existing:IsA("Camera") then existing else Instance.new("Camera")
+    if existing == nil then
+        instance.Name = "FollowCamera"
+        instance.FieldOfView = options.FieldOfView or 70
+        instance.NearPlane = options.NearPlane or 0.1
+        instance.FarPlane = options.FarPlane or 1200
+        instance.Parent = workspace
+        workspace.CurrentCamera = instance
+    end
 
     local rig = setmetatable({
         Camera = instance,

@@ -9,6 +9,12 @@ name = "LuauG Open World"
 id = "dev.luaug.open-world"
 version = "1.0.0"
 engine = "0.1"
+# **The world this project starts with** (ADR 0047), and the reason it is here
+# rather than in `init.luau`: while the script built the world, saving a scene of
+# it and reopening produced two of everything -- the file put a character back
+# and the code made another (D074). A world has one source. The editor writes
+# back to this same file, so what you place is what a run begins with.
+scene = "scenes/main.scene.json"
 # The game's own face, embedded in the artifact by `luaug build`. Not the
 # engine's mark: that is the fallback, and a game wearing it is a game that
 # forgot to say who it is.

@@ -202,6 +202,10 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
             options.screenshotPath = std::filesystem::path(arg.substr(13));
             continue;
         }
+        if (arg.starts_with("--save-scene=")) {
+            options.saveScenePath = std::filesystem::path(arg.substr(13));
+            continue;
+        }
         if (arg.starts_with("--capture-out=")) {
             options.capturePath = std::filesystem::path(arg.substr(14));
             continue;

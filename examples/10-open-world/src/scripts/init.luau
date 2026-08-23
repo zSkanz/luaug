@@ -61,7 +61,7 @@ local DayLength = 600
 --- the ground and low enough to throw the shadows that say where the towers
 --- are. Every screenshot in `docs/images/m8` is this hour, which is what makes
 --- them comparable.
-local StartHour = 9.5
+local StartHour = 22.5
 
 --- Where a new game starts. On the terrain rather than above it: the height
 --- field is the one in `tools/generate_world.luau`, and standing a character in
@@ -75,8 +75,10 @@ local StartHour = 9.5
 --- invisible in the position readout and it moves the CAMERA, which moves the
 --- shadow map's texel lattice, which makes every shadow edge in the frame
 --- dither. Measured: still to nine decimal places here, drifting at the corner.
-local StartX = 16
-local StartZ = 16
+--- The spawn is in the SCENE now, and this comment is the record of where it
+--- came from: `16, 16`, which is the centre of a ground tile for the reason
+--- above. Somebody who moves the character in the editor and saves moves the
+--- spawn, which is what a scene being the world means.
 
 --- Below this you have fallen out of the world, which in a streamed world means
 --- you outran the ground. Recovered rather than fatal.
@@ -93,88 +95,33 @@ local function heightAt(x: number, z: number): number
     return 8 * math.sin(x / 1200) * math.cos(z / 1000) + 3 * math.sin((x + z) / 500)
 end
 
-local character = Instance.new("CharacterBody")
-character.Name = "Walker"
-character.Size = vector.create(1.4, 3.2, 1.4)
-character.Color = Color3.fromRGB(224, 196, 132)
-character.WalkSpeed = 7
--- Gravity is 9.81 m/s^2 and this engine's units are METRES (divergence 15). At
--- 6.0 a jump rises about 1.8 m, which clears a boulder and not a tower.
-character.JumpSpeed = 6
--- **The number the terrain was generated against.** A chunk's floor is 32 m
--- tiles cut from a height field whose steepest step across one tile is about
--- 0.41 m; this is that, with room for the diagonal case. At the 0.5 m default a
--- walk across a slope catches on about one tile in ten, which reads as the
--- character sticking on nothing.
-character.AutoStepHeight = 0.6
--- Invisible, because what you see is the capsule welded to it below. A
--- `CharacterBody` is a `BasePart` and `Shape` belongs to `Part` (§2.2), so the
--- body itself can only ever draw as a box -- and the thing it SIMULATES as is a
--- capsule. Drawing the capsule is drawing the truth.
-character.Transparency = 1
-character.Parent = workspace
+--- **The world this project starts with is a FILE, and this script is what it
+--- does with it** (ADR 0047). `content/scenes/main.scene.json` holds the
+--- character, the capsule welded to it, the lantern and its post, the two welds
+--- and the input map; `luaug.toml` names it as the scene a run of this project
+--- begins with, and the editor writes back to that same file.
+---
+--- **That is the arrangement Unity and Unreal have**, and the reason it is worth
+--- the migration is not tidiness: while this script BUILT the world, saving a
+--- scene of it and reopening produced two of everything -- the file put a
+--- character back and the code made another, and no engine can merge those
+--- (D074). A world with one source has one character.
+---
+--- Nothing here is a compromise for the editor's sake. A part moved with the
+--- manipulator, a colour typed into the properties grid and a `PointLight`
+--- somebody adds are all kept by Save, and this script finds whatever the file
+--- holds by the names it agreed to.
+local function fromScene(name: string): Instance
+    local found = workspace:FindFirstChild(name)
+    assert(found ~= nil, `the scene is missing "{name}" -- content/scenes/main.scene.json is this project's world`)
+    return found :: Instance
+end
 
--- The visible character: a capsule welded to the body, and `CanCollide` off.
--- Off is load-bearing rather than tidy -- a second collider occupying exactly
--- the same space as the character's own is two bodies inside each other, and
--- the solver's answer to that is to push them apart.
-local body = Instance.new("Part")
-body.Name = "WalkerBody"
-body.Shape = Enum.PartShape.Capsule
-body.Size = character.Size
-body.Color = Color3.fromRGB(214, 176, 108)
-body.CanCollide = false
-body.Anchored = false
-body.Parent = workspace
-
--- **A lantern, and it is the flagship's caller for clustered forward shading.**
--- M7.5 stopped the light count being eight and nothing in this demo lit
--- anything, so the path shipped in the deliverable and was never exercised by
--- it. A light hangs off a `BasePart` and takes its position from it (§2.2), so
--- parenting it to the visible body is the whole of the attachment.
---
--- It also makes night PLAYABLE. A world with no artificial light at midnight is
--- honest and it is a black screen; the point of a day/night cycle is that both
--- ends are somewhere you can be.
---
--- **It hangs BESIDE the character rather than inside them**, and that is not
--- decoration. A point light takes its position from the part it is parented to,
--- so a light at the body's own centre is a light every one of that body's
--- surfaces faces away from: at midnight the character was a black silhouette
--- standing in a pool of its own light, which is the one thing a carried lantern
--- must not look like. The post is invisible because what a player should see is
--- the light and not the fixture.
---
--- **Above the head rather than beside the hip**, which is the second try: at hip
--- height the lit side of the character is whichever way the lantern hangs, and
--- the camera is behind, so the half a player actually sees stayed dark. A light
--- overhead catches the top of every surface from every angle.
-local lanternPost = Instance.new("Part")
-lanternPost.Name = "LanternPost"
-lanternPost.Size = Vector3.new(0.2, 0.2, 0.2)
-lanternPost.Transparency = 1
-lanternPost.CanCollide = false
-lanternPost.Anchored = false
-lanternPost.Parent = workspace
-
-local lanternWeld = Instance.new("Weld")
-lanternWeld.Part0 = character
-lanternWeld.Part1 = lanternPost
-lanternWeld.C0 = CFrame.new(0.6, 1.9, 0)
-lanternWeld.Parent = workspace
-
-local lantern = Instance.new("PointLight")
-lantern.Name = "Lantern"
-lantern.Color = Color3.fromRGB(255, 214, 158)
-lantern.Range = 26
-lantern.Brightness = 0
-lantern.Parent = lanternPost
-
-local bodyWeld = Instance.new("Weld")
-bodyWeld.Part0 = character
-bodyWeld.Part1 = body
-bodyWeld.C0 = CFrame.new(0, 0, 0)
-bodyWeld.Parent = workspace
+local character = fromScene("Walker") :: CharacterBody
+local lanternPost = fromScene("LanternPost")
+local lanternFound = lanternPost:FindFirstChild("Lantern")
+assert(lanternFound ~= nil, "the scene's LanternPost has no Lantern")
+local lantern = lanternFound :: PointLight
 
 -- **Hot reload keeps your place.** `SaveState` takes numbers and tables of
 -- them, not a `vector` -- the value is copied engine-side at the moment of the
@@ -183,9 +130,13 @@ bodyWeld.Parent = workspace
 local saved = HotReloadService:LoadState("walker")
 if HotReloadService:IsReload() and typeof(saved) == "table" then
     character.Position = vector.create(saved[1] :: number, saved[2] :: number, saved[3] :: number)
-else
-    character.Position = vector.create(StartX, heightAt(StartX, StartZ) + 3, StartZ)
 end
+-- **A cold boot leaves the character where the SCENE put it.** It used to be
+-- moved to `StartX, StartZ` here every time, which was right while this script
+-- built the world and is wrong now that a file does: somebody who drags the
+-- character somewhere in the editor and saves would have it teleported back on
+-- the next run, which is a save that did not save. The spawn is in the scene,
+-- and `StartX`/`StartZ` are what generated it.
 
 -- --- Streaming ---------------------------------------------------------------
 
@@ -279,70 +230,33 @@ local recoverSound = oneShot("Recover", 0.3, 0.8)
 -- Movement and jump on the SimClock, where a replay can see them; the camera on
 -- the render clock, because a camera should turn at the frame rate (ADR 0039).
 
-local Gameplay = Instance.new("InputContext")
-Gameplay.Name = "Gameplay"
-Gameplay.Parent = workspace
+--- **The input map is in the scene too**, because it is a fact about this
+--- world rather than a thing this script decides -- an `InputContext` under
+--- `Workspace` is an object like any other, and the file holds it. What stays
+--- here is what the actions MEAN, which is the half a file cannot say.
+---
+--- The two contexts are separate for the reason the comments below the lookups
+--- keep: movement and jump run on the SimClock where a replay can see them, and
+--- the camera runs on the render clock because a camera should turn at the
+--- frame rate (ADR 0039).
+local Gameplay = fromScene("Gameplay")
+local CameraControls = fromScene("CameraControls")
 
-local MoveAction = Instance.new("InputAction")
-MoveAction.Name = "Move"
-MoveAction.Type = Enum.InputActionType.Direction2D
-MoveAction.Parent = Gameplay
+local function action(context: Instance, name: string): InputAction
+    local found = context:FindFirstChild(name)
+    assert(found ~= nil, `the scene's {context.Name} has no "{name}" action`)
+    return found :: InputAction
+end
 
-local MoveKeys = Instance.new("InputBinding")
-MoveKeys.Up = Enum.KeyCode.W
-MoveKeys.Down = Enum.KeyCode.S
-MoveKeys.Left = Enum.KeyCode.A
-MoveKeys.Right = Enum.KeyCode.D
-MoveKeys.DisplayName = "WASD"
-MoveKeys.Parent = MoveAction
+local MoveAction = action(Gameplay, "Move")
+local JumpAction = action(Gameplay, "Jump")
+local SprintAction = action(Gameplay, "Sprint")
+--- Left Alt locks and unlocks the pointer. On the gameplay context rather than
+--- the camera one because it is a state change rather than a camera motion, and
+--- on the SIM clock so a replay sees it happen on a tick like everything else.
+local PointerAction = action(Gameplay, "TogglePointer")
 
-local MoveStick = Instance.new("InputBinding")
-MoveStick.KeyCode = Enum.KeyCode.LeftThumbstick
-MoveStick.Parent = MoveAction
-
-local JumpAction = Instance.new("InputAction")
-JumpAction.Name = "Jump"
-JumpAction.Parent = Gameplay
-
-local JumpKey = Instance.new("InputBinding")
-JumpKey.KeyCode = Enum.KeyCode.Space
-JumpKey.DisplayName = "Space"
-JumpKey.Parent = JumpAction
-
-local JumpPad = Instance.new("InputBinding")
-JumpPad.KeyCode = Enum.KeyCode.ButtonSouth
-JumpPad.Parent = JumpAction
-
-local SprintAction = Instance.new("InputAction")
-SprintAction.Name = "Sprint"
-SprintAction.Parent = Gameplay
-
-local SprintKey = Instance.new("InputBinding")
-SprintKey.KeyCode = Enum.KeyCode.LeftShift
-SprintKey.DisplayName = "Shift"
-SprintKey.Parent = SprintAction
-
-local CameraControls = Instance.new("InputContext")
-CameraControls.Name = "CameraControls"
-CameraControls.Rate = Enum.InputRate.Render
-CameraControls.Parent = workspace
-
-local TurnAction = Instance.new("InputAction")
-TurnAction.Name = "Turn"
-TurnAction.Type = Enum.InputActionType.Direction2D
-TurnAction.Parent = CameraControls
-
-local TurnKeys = Instance.new("InputBinding")
-TurnKeys.Up = Enum.KeyCode.Up
-TurnKeys.Down = Enum.KeyCode.Down
-TurnKeys.Left = Enum.KeyCode.Left
-TurnKeys.Right = Enum.KeyCode.Right
-TurnKeys.Parent = TurnAction
-
-local TurnStick = Instance.new("InputBinding")
-TurnStick.KeyCode = Enum.KeyCode.RightThumbstick
-TurnStick.Parent = TurnAction
-
+local TurnAction = action(CameraControls, "Turn")
 --- The mouse, and it is a SEPARATE action from `Turn` on purpose.
 ---
 --- A stick is a rate and a mouse is a displacement: `MouseMovement` reports the
@@ -351,29 +265,7 @@ TurnStick.Parent = TurnAction
 --- wrongly -- and a mouse multiplied by a frame time turns twice as far on a
 --- slow machine, which is the most common way a look control feels broken.
 --- `rig:Turn` takes the rate and `rig:Look` takes the displacement.
-local LookAction = Instance.new("InputAction")
-LookAction.Name = "Look"
-LookAction.Type = Enum.InputActionType.Direction2D
-LookAction.Parent = CameraControls
-
-local LookMouse = Instance.new("InputBinding")
-LookMouse.KeyCode = Enum.KeyCode.MouseMovement
-LookMouse.DisplayName = "Mouse"
-LookMouse.Parent = LookAction
-
---- Left Alt locks and unlocks the pointer.
----
---- On the gameplay context rather than the camera one, because it is a state
---- change rather than a camera motion -- and on the SIM clock, so a replay sees
---- it happen on a tick like everything else.
-local PointerAction = Instance.new("InputAction")
-PointerAction.Name = "TogglePointer"
-PointerAction.Parent = Gameplay
-
-local PointerKey = Instance.new("InputBinding")
-PointerKey.KeyCode = Enum.KeyCode.LeftAlt
-PointerKey.DisplayName = "Left Alt"
-PointerKey.Parent = PointerAction
+local LookAction = action(CameraControls, "Look")
 
 -- **Locked at boot**, because a third-person camera that needs a click before
 -- it responds is a camera that feels broken for the first second of every
