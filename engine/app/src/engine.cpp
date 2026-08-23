@@ -1606,9 +1606,22 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // rather than a tool's idea of it.
             const render::ViewOverride editorView{editor.cameraCFrame(), 70.0f, 0.1f, 5000.0f};
             const bool useEditorView = options.editor && editing(editor.runState()) && editor.cameraAdopted();
+            // **The selection, drawn as a silhouette rather than as a box.** The
+            // wire box E1 shipped says where a thing's BOUNDS are, which for
+            // anything that is not a cube is a shape the object does not have --
+            // and around a tree or a character it is a box floating in the air
+            // near the thing you clicked. What the renderer gets is a flag per
+            // draw; what it makes of it is a mask and an outline of its edge.
+            //
+            // Only while EDITING. In play mode the world belongs to the game and
+            // a tool's mark on it would be in every screenshot somebody takes of
+            // their own game.
+            const std::span<const core::InstanceId> outlined = options.editor && editing(editor.runState())
+                                                                   ? inspector.selectionSet()
+                                                                   : std::span<const core::InstanceId>{};
             render::extract(host->world(), host->workspace(), host->lighting(), meshLibrary, aspect, shadowRadius,
                             host->animation(), renderAlpha, &transformHistory, snapshot,
-                            useEditorView ? &editorView : nullptr);
+                            useEditorView ? &editorView : nullptr, outlined);
             // The UI is laid out against the TARGET's size rather than the
             // window's: an offscreen render at 640x360 has to produce the
             // layout that resolution would, which is the whole of what the

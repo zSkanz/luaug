@@ -223,6 +223,21 @@ cbuffer GpuBlurUniforms : register(b0, space3)
 };
 #endif
 
+#if defined(LUAUG_UNIFORMS_OUTLINE)
+// `render::GpuOutlineUniforms`, 48 bytes.
+cbuffer GpuOutlineUniforms : register(b0, space3)
+{
+    // x and y one mask texel, z the outline's half-width in texels, w unused.
+    float4 OutlineTexelWidth;
+    // The line itself. Alpha is how opaque it is over the frame.
+    float4 OutlineColor;
+    // The tint over the selected shape. Alpha is how much of it there is, and
+    // it is deliberately small: a strong fill hides the colour somebody
+    // selected the part in order to change.
+    float4 OutlineFillColor;
+};
+#endif
+
 #if defined(LUAUG_UNIFORMS_BLOOM)
 // `render::GpuBloomUniforms`, 32 bytes.
 cbuffer GpuBloomUniforms : register(b0, space3)

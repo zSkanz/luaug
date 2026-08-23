@@ -180,11 +180,24 @@ const MeshLibrary::Entry* MeshLibrary::find(core::NameAtom content) const noexce
 
 void extract(const scene::World& world, core::InstanceId root, core::InstanceId lightingHost, const MeshLibrary& meshes,
              f32 viewportAspect, f32 shadowRadius, const AnimationSystem* animation, f32 alpha,
-             const TransformHistory* history, RenderWorld& out, const ViewOverride* view)
+             const TransformHistory* history, RenderWorld& out, const ViewOverride* view,
+             std::span<const core::InstanceId> outlined)
 {
     out.clear();
     if (!root.valid())
         return;
+
+    // Linear, and it is the cheap answer rather than the lazy one: an editor
+    // selection is a handful of instances, the common case is none at all, and
+    // a hash lookup per draw would cost more on a list of ten thousand than
+    // this costs on a list of four.
+    const auto isOutlined = [outlined](core::InstanceId id) {
+        for (const core::InstanceId selected : outlined) {
+            if (selected == id)
+                return true;
+        }
+        return false;
+    };
 
     // Where a thing is at the fractional time this frame is being drawn at
     // (`transform_history.h`, D047). Every transform below goes through it, so
@@ -511,6 +524,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
                 .inCameraFrustum = visible,
                 .firstBone = firstBone,
                 .boneCount = boneCount,
+                .outlined = isOutlined(id),
             });
         }
     });
@@ -606,6 +620,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             .boundsCenter = core::center(worldBounds),
             .boundsRadius = 0.5f * core::length(core::size(worldBounds)),
             .inCameraFrustum = visible,
+            .outlined = isOutlined(id),
         });
     });
 

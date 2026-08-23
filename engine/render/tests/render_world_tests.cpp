@@ -6,6 +6,7 @@
 #include "luaug/scene/enum_registry.h"
 #include "luaug/scene/world.h"
 
+#include <array>
 #include <doctest/doctest.h>
 #include <ostream>
 
@@ -718,4 +719,61 @@ TEST_CASE("clearing the history is what makes a restored world stop interpolatin
     render::extract(fixture.world, root, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, 0.5f, &history, settled);
     REQUIRE(settled.parts.size() == 1);
     CHECK(settled.parts[0].cframe.position.x == 0.0);
+}
+
+// --- E2: the selection reaches the renderer as a flag on the draw -----------
+//
+// The silhouette pass walks the same draw list every other pass walks and draws
+// the ones marked here. That the mark ARRIVES is the half of it a headless test
+// can hold; what the mask and the dilate then make of it needs a device and, in
+// the end, a person looking at it.
+//
+// The differential is the point (MASTER_PROMPT.md §8): extracting the same world
+// twice, once with a selection and once without, must not produce the same draw
+// list.
+TEST_CASE("a selected instance comes out marked, and nothing else does")
+{
+    Fixture fixture;
+    fixture.registerRenderClasses();
+    const core::InstanceId workspace = fixture.world.create(fixture.workspaceClass);
+    (void)fixture.cameraLookingDownNegativeZ(workspace);
+
+    const core::NameAtom content = fixture.atoms.intern("asset://models/box.glb");
+    render::MeshLibrary meshes;
+    render::MeshLibrary::Entry entry;
+    entry.mesh = render::MeshHandle{0, 1};
+    entry.bounds = core::AABB::fromCenterSize(core::Vec3{}, core::Vec3{1.0f, 1.0f, 1.0f});
+    entry.sectionCount = 1;
+    meshes.set(content, entry);
+
+    const core::InstanceId first = fixture.meshPartAt(workspace, core::DVec3{-3.0, 0.0, -10.0}, content);
+    const core::InstanceId second = fixture.meshPartAt(workspace, core::DVec3{3.0, 0.0, -10.0}, content);
+    (void)first;
+
+    render::RenderWorld plain;
+    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, plain);
+    REQUIRE(plain.draws.size() == 2);
+    for (const render::DrawItem& draw : plain.draws)
+        CHECK_FALSE(draw.outlined);
+
+    const std::array<core::InstanceId, 1> selection{second};
+    render::RenderWorld selected;
+    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, selected,
+                    nullptr, selection);
+    REQUIRE(selected.draws.size() == 2);
+
+    core::usize marked = 0;
+    for (const render::DrawItem& draw : selected.draws) {
+        if (draw.outlined)
+            ++marked;
+    }
+    CHECK(marked == 1);
+
+    // And the two extractions differ, which is the whole assertion: a flag that
+    // never reached the snapshot would leave these identical and every visual
+    // check downstream would be looking at an image that could not have changed.
+    bool differs = false;
+    for (core::usize index = 0; index < plain.draws.size(); ++index)
+        differs = differs || plain.draws[index].outlined != selected.draws[index].outlined;
+    CHECK(differs);
 }

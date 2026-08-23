@@ -262,6 +262,22 @@ struct GpuBlurUniforms
 
 static_assert(sizeof(GpuBlurUniforms) == 16, "GpuBlurUniforms is a cbuffer layout");
 
+// Fragment stage, `b0 space3`, for the editor's selection outline.
+struct GpuOutlineUniforms
+{
+    // x and y are one mask texel, z the outline's half-width in texels, w
+    // unused. The width scales the tap step rather than the tap count, so a
+    // thicker line costs nothing more.
+    f32 texelWidth[4]{};
+    // The line. Alpha is how opaque it is over the frame.
+    f32 color[4]{};
+    // The tint over the selected shape, and its alpha is how much of it there
+    // is. Small on purpose -- see the shader.
+    f32 fillColor[4]{};
+};
+
+static_assert(sizeof(GpuOutlineUniforms) == 48, "GpuOutlineUniforms is a cbuffer layout");
+
 // Fragment stage, `b0 space3`, shared by the bloom chain's two pipelines.
 struct GpuBloomUniforms
 {

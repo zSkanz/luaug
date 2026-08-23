@@ -313,6 +313,10 @@ private:
     enum class Selection
     {
         Shadow,
+        // Every draw a tool has selected, into a single-channel mask. Depth-only
+        // in the sense that matters here -- it wants a position and nothing else
+        // -- which is why it shares the shadow pass's vertex shaders.
+        Outline,
         // Depth only, but filtered like the forward pass: a caster outside the
         // view still casts into it, and a caster outside the view still must not
         // fill the depth buffer the camera reads.
@@ -384,8 +388,19 @@ private:
     rhi::PipelineHandle luminanceAdaptPipeline_{};
     rhi::PipelineHandle tonemapPipeline_{};
     rhi::PipelineHandle fxaaPipeline_{};
+    // The editor's selection silhouette. Four pipelines because the mask draws
+    // the same three geometry variants everything else does, plus the fullscreen
+    // pass that turns the mask into a line.
+    rhi::PipelineHandle outlinePipeline_{};
+    rhi::PipelineHandle outlineSkinnedPipeline_{};
+    rhi::PipelineHandle outlineInstancedPipeline_{};
+    rhi::PipelineHandle outlineCompositePipeline_{};
 
-    rhi::ShaderHandle shaders_[32]{};
+    // Every shader handle this renderer created, so `destroy` can release them
+    // without a second list. Sized with room: `create` silently stops recording
+    // once it is full and the overflow leaks at shutdown, which is a bug that
+    // announces itself nowhere.
+    rhi::ShaderHandle shaders_[40]{};
     core::usize shaderCount_ = 0;
 
     rhi::TextureHandle hdr_{};
@@ -398,6 +413,9 @@ private:
     // taps at full resolution is four times the cost for a term the blur is
     // about to spread anyway (R16).
     rhi::TextureHandle occlusion_{};
+    // One channel: which pixels belong to something a tool has selected. Only
+    // ever written when a draw carries `outlined`, which no game does.
+    rhi::TextureHandle outlineMask_{};
     rhi::TextureHandle occlusionBlur_{};
     // The bloom chain, each level its own texture because a `ColorAttachment`
     // names a texture and not a mip level.
@@ -531,6 +549,14 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
     const rhi::ShaderHandle luminanceAdaptFragment = load("luminance_adapt", rhi::ShaderStage::Fragment);
     const rhi::ShaderHandle fxaaVertex = load("fxaa", rhi::ShaderStage::Vertex);
     const rhi::ShaderHandle fxaaFragment = load("fxaa", rhi::ShaderStage::Fragment);
+    // The editor's selection silhouette. The mask's own vertex stage makes the
+    // static pipeline; the skinned and instanced ones pair this fragment with
+    // the shadow pass's vertex stages, because "position through a matrix" is
+    // the same shader whether it writes depth or a one.
+    const rhi::ShaderHandle outlineVertex = load("outline_mask", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle outlineFragment = load("outline_mask", rhi::ShaderStage::Fragment);
+    const rhi::ShaderHandle outlineCompositeVertex = load("outline_composite", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle outlineCompositeFragment = load("outline_composite", rhi::ShaderStage::Fragment);
 
     for (const rhi::ShaderHandle handle : {shadowInstancedVertex,
                                            shadowInstancedFragment,
@@ -551,7 +577,11 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
                                            luminanceAdaptVertex,
                                            luminanceAdaptFragment,
                                            fxaaVertex,
-                                           fxaaFragment}) {
+                                           fxaaFragment,
+                                           outlineVertex,
+                                           outlineFragment,
+                                           outlineCompositeVertex,
+                                           outlineCompositeFragment}) {
         if (!handle.valid()) {
             destroy(device);
             return error.key.hash != 0 ? error : core::makeError(LUAUG_TR("render.err.shader_format_unknown"));
@@ -846,6 +876,70 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
     tonemapPipeline_ = fullscreen(tonemapVertex, tonemapFragment, ldrTarget, "tonemap");
     fxaaPipeline_ = fullscreen(fxaaVertex, fxaaFragment, swapTarget, "fxaa");
 
+    // --- The editor's selection silhouette -----------------------------------
+    //
+    // The mask draws the same three geometry variants as everything else, with
+    // the shadow pass's vertex stages: what a mask needs from a vertex is a
+    // position through a matrix, which is what a depth-only pass needs too.
+    //
+    // **Front faces only and no depth at all.** The mask asks whether a pixel is
+    // covered by the selected object, not by which part of it, so back-face
+    // culling halves the fill for free -- and testing depth would be asking a
+    // buffer this pass does not have. The consequence is deliberate and it is
+    // the one an editor wants: the outline shows through what is in front of it,
+    // so selecting something you cannot see still tells you where it is.
+    const std::array<rhi::ColorTargetDesc, 1> maskTarget{rhi::ColorTargetDesc{.format = kOcclusionFormat}};
+    outlinePipeline_ = device.createGraphicsPipeline({
+        .vertexShader = outlineVertex,
+        .fragmentShader = outlineFragment,
+        .vertexBuffers = buffers,
+        .vertexAttributes = attributes,
+        .rasterizer = {.cullMode = rhi::CullMode::Back},
+        .depthStencil = {.depthTest = false, .depthWrite = false},
+        .colorTargets = maskTarget,
+        .debugName = "outline_mask",
+    });
+    outlineSkinnedPipeline_ = device.createGraphicsPipeline({
+        .vertexShader = shadowSkinnedVertex,
+        .fragmentShader = outlineFragment,
+        .vertexBuffers = skinnedBuffers,
+        .vertexAttributes = shadowSkinnedAttributes,
+        .rasterizer = {.cullMode = rhi::CullMode::Back},
+        .depthStencil = {.depthTest = false, .depthWrite = false},
+        .colorTargets = maskTarget,
+        .debugName = "outline_mask_skinned",
+    });
+    outlineInstancedPipeline_ = device.createGraphicsPipeline({
+        .vertexShader = shadowInstancedVertex,
+        .fragmentShader = outlineFragment,
+        .vertexBuffers = instancedBuffers,
+        .vertexAttributes = shadowInstancedAttributes,
+        .rasterizer = {.cullMode = rhi::CullMode::Back},
+        .depthStencil = {.depthTest = false, .depthWrite = false},
+        .colorTargets = maskTarget,
+        .debugName = "outline_mask_instanced",
+    });
+
+    // Straight alpha over whatever the frame already holds. The shader hands
+    // back a premultiplied colour with its own coverage in alpha, so the source
+    // factor is One.
+    const std::array<rhi::ColorTargetDesc, 1> outlineTarget{rhi::ColorTargetDesc{
+        .format = colorFormat,
+        .blend = {.enabled = true,
+                  .srcColor = rhi::BlendFactor::One,
+                  .dstColor = rhi::BlendFactor::OneMinusSrcAlpha,
+                  .srcAlpha = rhi::BlendFactor::One,
+                  .dstAlpha = rhi::BlendFactor::OneMinusSrcAlpha},
+    }};
+    outlineCompositePipeline_ =
+        fullscreen(outlineCompositeVertex, outlineCompositeFragment, outlineTarget, "outline_composite");
+
+    if (!outlinePipeline_.valid() || !outlineSkinnedPipeline_.valid() || !outlineInstancedPipeline_.valid() ||
+        !outlineCompositePipeline_.valid()) {
+        destroy(device);
+        return core::makeError(LUAUG_TR("render.err.pipeline_create_failed"));
+    }
+
     if (!shadowPipeline_.valid() || !pbrPipeline_.valid() || !pbrBlendPipeline_.valid() || !skyPipeline_.valid() ||
         !tonemapPipeline_.valid() || !shadowSkinnedPipeline_.valid() || !pbrSkinnedPipeline_.valid() ||
         !pbrSkinnedBlendPipeline_.valid() || !depthPrepassPipeline_.valid() || !depthPrepassSkinnedPipeline_.valid() ||
@@ -1024,8 +1118,8 @@ std::optional<core::EngineError> DefaultRenderer::ensureTargets(rhi::IDevice& de
     // place the settings' render scale is applied, so that nothing downstream
     // has to remember to.
 
-    for (rhi::TextureHandle* texture : {&hdr_, &depth_, &ldr_, &occlusion_, &occlusionBlur_, &luminance64_,
-                                        &luminance8_, &exposure_[0], &exposure_[1]}) {
+    for (rhi::TextureHandle* texture : {&hdr_, &depth_, &ldr_, &occlusion_, &occlusionBlur_, &outlineMask_,
+                                        &luminance64_, &luminance8_, &exposure_[0], &exposure_[1]}) {
         if (texture->valid())
             device.destroy(*texture);
         *texture = {};
@@ -1070,6 +1164,16 @@ std::optional<core::EngineError> DefaultRenderer::ensureTargets(rhi::IDevice& de
         .width = half(width),
         .height = half(height),
         .debugName = "occlusion",
+    });
+    // Full resolution, unlike the occlusion term beside it: what this carries is
+    // an EDGE, and half a pixel of it is the difference between an outline and a
+    // suggestion.
+    outlineMask_ = device.createTexture({
+        .format = kOcclusionFormat,
+        .usage = rhi::TextureUsage::ColorTarget | rhi::TextureUsage::Sampled,
+        .width = width,
+        .height = height,
+        .debugName = "outline-mask",
     });
     occlusionBlur_ = device.createTexture({
         .format = kOcclusionFormat,
@@ -1119,7 +1223,8 @@ std::optional<core::EngineError> DefaultRenderer::ensureTargets(rhi::IDevice& de
     exposureInitialised_ = false;
 
     if (!hdr_.valid() || !depth_.valid() || !ldr_.valid() || !occlusion_.valid() || !occlusionBlur_.valid() ||
-        !luminance64_.valid() || !luminance8_.valid() || !exposure_[0].valid() || !exposure_[1].valid())
+        !outlineMask_.valid() || !luminance64_.valid() || !luminance8_.valid() || !exposure_[0].valid() ||
+        !exposure_[1].valid())
         return core::makeError(LUAUG_TR("render.err.target_create_failed"));
     for (const rhi::TextureHandle& level : bloom_) {
         if (!level.valid())
@@ -1157,15 +1262,19 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
                                           &fxaaPipeline_,
                                           &shadowInstancedPipeline_,
                                           &depthPrepassInstancedPipeline_,
-                                          &pbrInstancedPipeline_}) {
+                                          &pbrInstancedPipeline_,
+                                          &outlinePipeline_,
+                                          &outlineSkinnedPipeline_,
+                                          &outlineInstancedPipeline_,
+                                          &outlineCompositePipeline_}) {
         if (pipeline->valid())
             device.destroy(*pipeline);
         *pipeline = {};
     }
     for (rhi::TextureHandle* texture :
-         {&hdr_, &depth_, &ldr_, &occlusion_, &occlusionBlur_, &luminance64_, &luminance8_, &exposure_[0],
-          &exposure_[1], &shadowMap_, &whitePixel_, &flatNormalPixel_, &blackPixel_, &environmentMap_, &brdfLut_,
-          &clusterGrid_, &lightIndices_, &lightData_}) {
+         {&hdr_, &depth_, &ldr_, &occlusion_, &occlusionBlur_, &outlineMask_, &luminance64_, &luminance8_,
+          &exposure_[0], &exposure_[1], &shadowMap_, &whitePixel_, &flatNormalPixel_, &blackPixel_, &environmentMap_,
+          &brdfLut_, &clusterGrid_, &lightIndices_, &lightData_}) {
         if (texture->valid())
             device.destroy(*texture);
         *texture = {};
@@ -1213,7 +1322,13 @@ void DefaultRenderer::buildInstanceBatches(const RenderWorld& world, const MeshC
         // correctness, and `drawSortKey` zeroes their mesh field for exactly
         // that reason. Skinned draws are not batched either -- a joint palette
         // is per draw and there is no room for one in a vertex stream.
-        return !draw.transparent && draw.boneCount == 0;
+        //
+        // Nor is an outlined one. A batch is drawn or skipped as a whole, and
+        // selecting one of five identical crates does not select the other
+        // four -- so a batch containing one would outline all five. One draw
+        // leaving a run is the whole cost, and it is paid only while a tool is
+        // looking at the world.
+        return !draw.transparent && draw.boneCount == 0 && !draw.outlined;
     };
 
     for (core::usize index = 0; index < world.draws.size();) {
@@ -1383,13 +1498,15 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
                                    const Mat4& viewProjection, rhi::PipelineHandle staticPipeline,
                                    rhi::PipelineHandle skinnedPipeline, Selection selection, const CullSphere* cull)
 {
-    const bool depthOnly = selection == Selection::Shadow || selection == Selection::Prepass;
+    const bool depthOnly =
+        selection == Selection::Shadow || selection == Selection::Prepass || selection == Selection::Outline;
     // Which pipeline is currently set. Three variants now rather than two, so a
     // handle is clearer than a bool -- and `extract`'s sort keeps runs of each
     // together, so this switches a handful of times per pass whatever the scene.
     rhi::PipelineHandle currentPipeline = staticPipeline;
     const rhi::PipelineHandle instancedPipeline = selection == Selection::Shadow    ? shadowInstancedPipeline_
                                                   : selection == Selection::Prepass ? depthPrepassInstancedPipeline_
+                                                  : selection == Selection::Outline ? outlineInstancedPipeline_
                                                                                     : pbrInstancedPipeline_;
 
     // Pixels per world unit at one metre, from the projection itself rather
@@ -1429,6 +1546,15 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
         if (selection != Selection::Shadow && !visible)
             continue;
         if ((selection == Selection::Opaque || selection == Selection::Prepass) && draw.transparent)
+            continue;
+        // **An outlined draw is never in a batch** -- `instanceable` refuses
+        // one, because a batch is drawn or skipped whole and selecting one of
+        // five identical crates does not select the other four. So this is a
+        // plain test on the draw.
+        //
+        // A transparent selected part still gets an outline: what is selected
+        // is a fact about the tool, not about the material.
+        if (selection == Selection::Outline && !draw.outlined)
             continue;
         if (selection == Selection::Transparent && !draw.transparent)
             continue;
@@ -2058,6 +2184,72 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
                        asBytes(&fxaa, sizeof(fxaa)));
         cmd.popDebugGroup();
     }
+
+    // --- The editor's selection silhouette -----------------------------------
+    //
+    // **Last, over the finished image, and only when something is selected.**
+    // A game's draw list never carries `outlined`, so a packaged build walks
+    // this loop once and does nothing -- which is what keeps the pass out of
+    // every golden in the repository without the renderer knowing what an
+    // editor is.
+    //
+    // After tonemapping rather than before it: the outline is a tool's mark on
+    // a picture, not a thing in the world, and running it through exposure and
+    // a tone curve would make its colour depend on how bright the scene is.
+    bool anyOutlined = false;
+    for (const DrawItem& draw : world.draws) {
+        if (draw.outlined) {
+            anyOutlined = true;
+            break;
+        }
+    }
+    if (!anyOutlined)
+        return;
+
+    cmd.pushDebugGroup("outline");
+    cmd.beginRenderPass({
+        .colorAttachments = std::array<rhi::ColorAttachment, 1>{rhi::ColorAttachment{
+            .texture = outlineMask_,
+            .loadOp = rhi::LoadOp::Clear,
+            .storeOp = rhi::StoreOp::Store,
+        }},
+        .debugName = "outline-mask",
+    });
+    cmd.setViewport({.width = static_cast<f32>(renderWidth_), .height = static_cast<f32>(renderHeight_)});
+    cmd.setScissor({.width = static_cast<core::i32>(renderWidth_), .height = static_cast<core::i32>(renderHeight_)});
+    if (world.camera.valid) {
+        cmd.setPipeline(outlinePipeline_);
+        drawGeometry(cmd, world, meshes, world.camera.viewProjection, outlinePipeline_, outlineSkinnedPipeline_,
+                     Selection::Outline);
+    }
+    cmd.endRenderPass();
+
+    GpuOutlineUniforms outline;
+    outline.texelWidth[0] = 1.0f / static_cast<f32>(renderWidth_);
+    outline.texelWidth[1] = 1.0f / static_cast<f32>(renderHeight_);
+    // In mask texels rather than in output pixels, because that is what the
+    // taps step in. At a reduced render scale the line thins with everything
+    // else, which is what a person who asked for a smaller image meant.
+    outline.texelWidth[2] = 2.0f;
+    // Orange, because nothing in a PBR scene is and it stays legible against
+    // both the lit and the shadowed halves of a frame -- the same colour and the
+    // same reason the wire box had.
+    outline.color[0] = 1.0f;
+    outline.color[1] = 0.45f;
+    outline.color[2] = 0.05f;
+    outline.color[3] = 1.0f;
+    // Faint on purpose. This is what separates a selected object from an
+    // unselected one standing in front of it, and it must not hide the colour
+    // somebody selected the part in order to change.
+    outline.fillColor[0] = 1.0f;
+    outline.fillColor[1] = 0.45f;
+    outline.fillColor[2] = 0.05f;
+    outline.fillColor[3] = 0.12f;
+
+    const std::array<rhi::TextureBinding, 1> maskBinding{rhi::TextureBinding{outlineMask_, linearSampler_}};
+    fullscreenPass(cmd, outlineCompositePipeline_, target.color, target.width, target.height, "outline-composite",
+                   maskBinding, asBytes(&outline, sizeof(outline)), rhi::LoadOp::Load);
+    cmd.popDebugGroup();
 }
 
 std::unique_ptr<IRenderer> createDefaultRenderer()

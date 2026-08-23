@@ -27,6 +27,7 @@
 #include "luaug/render/transform_history.h"
 #include "luaug/rhi/types.h"
 
+#include <span>
 #include <vector>
 
 namespace luaug::scene {
@@ -206,6 +207,16 @@ struct DrawItem
     // buffer, exactly as it did before skinning existed.
     u32 firstBone = 0;
     u32 boneCount = 0;
+    // Whether the tool that is looking at this world has this draw SELECTED.
+    //
+    // The one thing in this struct that is not a property of the world, and it
+    // is here rather than as a second list for the reason the sort key is here:
+    // the outline pass walks the same draws in the same order as every other
+    // pass, and a parallel list of instance ids would have to be searched per
+    // draw by a renderer that deliberately does not know what an instance is.
+    // False on every frame a game renders, so a packaged build's draw list is
+    // the one it always was.
+    bool outlined = false;
 };
 
 struct RenderWorld
@@ -428,6 +439,16 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
              f32 alpha, const TransformHistory* history, RenderWorld& out,
              // The view to draw from, or null for the world's own camera. See
              // `ViewOverride`.
-             const ViewOverride* view = nullptr);
+             const ViewOverride* view = nullptr,
+             // The instances a TOOL has selected, if any. Every draw belonging
+             // to one of them comes out with `outlined` set, and the renderer
+             // draws a silhouette around the union of them.
+             //
+             // A span rather than a set, and searched linearly, because an
+             // editor selection is a handful of instances and the alternative
+             // is a hash lookup per draw in a list that can be tens of
+             // thousands long. Empty -- which is every frame a game renders --
+             // costs one compare per draw.
+             std::span<const core::InstanceId> outlined = {});
 
 } // namespace luaug::render
