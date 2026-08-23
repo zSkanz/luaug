@@ -326,6 +326,20 @@ SharedValue sharedValue(const scene::World& world, std::span<const core::Instanc
     return shared;
 }
 
+void collectAncestors(const scene::World& world, core::InstanceId id, core::InstanceId root,
+                      std::vector<core::InstanceId>& out)
+{
+    out.clear();
+    if (!world.alive(id))
+        return;
+
+    for (core::InstanceId walk = world.parentOf(id); walk.valid() && world.alive(walk); walk = world.parentOf(walk)) {
+        out.push_back(walk);
+        if (walk == root)
+            break;
+    }
+}
+
 void orderByTree(const scene::World& world, core::InstanceId root, std::span<const core::InstanceId> ids,
                  std::vector<core::InstanceId>& out)
 {
@@ -551,6 +565,10 @@ void Inspector::onWorldChanged() noexcept
     ++worldGeneration_;
     ++worldIdentity_;
     selection_.clear();
+    // A different world recycles slot indices from zero, so an id minted by the
+    // old one names an unrelated instance in the new one -- and revealing that
+    // would open a branch nobody asked about.
+    reveal_ = core::InstanceId{};
     // A gesture is a drag over instances this world no longer has. Leaving it
     // open would coalesce the next unrelated edit into whatever came before the
     // reload.

@@ -32,6 +32,7 @@
 #include "inspector_fixture.h"
 
 using luaug::app::coalesceKeyFor;
+using luaug::app::collectAncestors;
 using luaug::app::collectCommonProperties;
 using luaug::app::collectProperties;
 using luaug::app::collectTree;
@@ -80,7 +81,8 @@ TEST_CASE("the sweep visits every property of a class it has never seen")
     // `propertySlot`'s numbering. Written out rather than counted, because
     // "there are ten of them" would still pass with the wrong ten.
     const std::vector<std::string> expected{
-        "Owner", "Flag", "Locked", "Sealed", "Count", "Label", "Offset", "Frame", "Tint", "Link", "Mood", "Nothing",
+        "Owner", "Flag", "Locked", "Sealed", "Count", "Label",  "Offset", "Frame",
+        "Tint",  "Link", "Mood",   "Anchor", "Pad",   "Extent", "Slice",  "Nothing",
     };
     CHECK(propertyNames(fixture, fixture.widgetClass) == expected);
 
@@ -845,4 +847,58 @@ TEST_CASE("two NaNs are not a disagreement")
     // a bitwise comparison would have got wrong.
     CHECK(sameValue(scene::Value{core::f64{0.0}}, scene::Value{core::f64{-0.0}}));
     CHECK_FALSE(sameValue(scene::Value{core::f64{1.0}}, scene::Value{std::string("1")}));
+}
+
+TEST_CASE("the way down to something is its ancestors, nearest first, stopping at the root")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId folder = fixture.widget(world, "Folder");
+    const core::InstanceId inner = fixture.widget(world, "Inner");
+    const core::InstanceId leaf = fixture.widget(world, "Leaf");
+    REQUIRE_FALSE(world.setParent(folder, root).has_value());
+    REQUIRE_FALSE(world.setParent(inner, folder).has_value());
+    REQUIRE_FALSE(world.setParent(leaf, inner).has_value());
+
+    std::vector<core::InstanceId> ancestors;
+    collectAncestors(world, leaf, root, ancestors);
+    // Nearest first, and the leaf itself is not in it: what a caller opens is
+    // everything ABOVE the thing, and opening a leaf means nothing.
+    CHECK(ancestors == std::vector<core::InstanceId>{inner, folder, root});
+
+    collectAncestors(world, root, root, ancestors);
+    CHECK(ancestors.empty());
+
+    // An instance the world does not have has no way down to it.
+    collectAncestors(world, core::InstanceId{}, root, ancestors);
+    CHECK(ancestors.empty());
+
+    // Detached from the tree: the walk ends where the parents do rather than
+    // inventing a root it never passed.
+    const core::InstanceId loose = fixture.widget(world, "Loose");
+    collectAncestors(world, loose, root, ancestors);
+    CHECK(ancestors.empty());
+}
+
+TEST_CASE("a reveal is a one-shot, and a different world drops it")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId a = fixture.widget(world, "A");
+
+    Inspector inspector;
+    CHECK_FALSE(inspector.takeReveal().valid());
+
+    inspector.reveal(a);
+    CHECK(inspector.takeReveal() == a);
+    // **Read once.** A reveal that stayed set would re-open, every frame, a row
+    // somebody had deliberately closed afterwards.
+    CHECK_FALSE(inspector.takeReveal().valid());
+
+    // A different world recycles slot indices from zero, so the id would name
+    // an unrelated instance and open a branch nobody asked about.
+    inspector.reveal(a);
+    inspector.onWorldChanged();
+    CHECK_FALSE(inspector.takeReveal().valid());
 }

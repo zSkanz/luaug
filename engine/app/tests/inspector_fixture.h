@@ -50,6 +50,17 @@ struct Bag
     core::InstanceId link;
     scene::EnumValue mood;
     core::f64 sealed = 13.0;
+    // **M6's screen-space four, which this fixture claimed to have and did
+    // not.** The header above has said "one property of every `ValueType`"
+    // since M4 and the `static_assert` below counts the alternatives, but
+    // counting is not covering: `Vector2`, `UDim`, `UDim2` and `Rect` were
+    // appended to the variant by M6 and no property here ever named them, so
+    // four editor branches were executed by no test at all. Found while
+    // rewriting the `UDim` widget, which is exactly the moment risk 6 predicted.
+    core::Vec2 anchor;
+    core::UDim pad;
+    core::UDim2 extent;
+    core::Rect slice;
 };
 
 inline std::unordered_map<core::u32, Bag> g_bags;
@@ -213,6 +224,62 @@ inline bool setMood(scene::World&, core::InstanceId id, const scene::Value& valu
     return true;
 }
 
+inline scene::Value getAnchor(const scene::World&, core::InstanceId id)
+{
+    return scene::Value{bagOf(id).anchor};
+}
+
+inline bool setAnchor(scene::World&, core::InstanceId id, const scene::Value& value)
+{
+    const core::Vec2* anchor = std::get_if<core::Vec2>(&value);
+    if (anchor == nullptr)
+        return false;
+    bagOf(id).anchor = *anchor;
+    return true;
+}
+
+inline scene::Value getPad(const scene::World&, core::InstanceId id)
+{
+    return scene::Value{bagOf(id).pad};
+}
+
+inline bool setPad(scene::World&, core::InstanceId id, const scene::Value& value)
+{
+    const core::UDim* pad = std::get_if<core::UDim>(&value);
+    if (pad == nullptr)
+        return false;
+    bagOf(id).pad = *pad;
+    return true;
+}
+
+inline scene::Value getExtent(const scene::World&, core::InstanceId id)
+{
+    return scene::Value{bagOf(id).extent};
+}
+
+inline bool setExtent(scene::World&, core::InstanceId id, const scene::Value& value)
+{
+    const core::UDim2* extent = std::get_if<core::UDim2>(&value);
+    if (extent == nullptr)
+        return false;
+    bagOf(id).extent = *extent;
+    return true;
+}
+
+inline scene::Value getSlice(const scene::World&, core::InstanceId id)
+{
+    return scene::Value{bagOf(id).slice};
+}
+
+inline bool setSlice(scene::World&, core::InstanceId id, const scene::Value& value)
+{
+    const core::Rect* slice = std::get_if<core::Rect>(&value);
+    if (slice == nullptr)
+        return false;
+    bagOf(id).slice = *slice;
+    return true;
+}
+
 // `ValueType::Nil`. Nothing in the v1 surface declares one, which is exactly
 // why the fixture does: the type the panel is likeliest to forget is the one no
 // shipped class exercises.
@@ -338,6 +405,31 @@ struct Fixture
                 .doc = "How the widget feels about being inspected.",
                 .get = &getMood,
                 .set = &setMood,
+            },
+            scene::PropertyDesc{
+                .name = atoms.intern("Anchor"),
+                .type = scene::ValueType::Vector2,
+                .get = &getAnchor,
+                .set = &setAnchor,
+            },
+            scene::PropertyDesc{
+                .name = atoms.intern("Pad"),
+                .type = scene::ValueType::UDim,
+                .doc = "A scale and an offset, which is the pairing the panel has to LABEL rather than merely draw.",
+                .get = &getPad,
+                .set = &setPad,
+            },
+            scene::PropertyDesc{
+                .name = atoms.intern("Extent"),
+                .type = scene::ValueType::UDim2,
+                .get = &getExtent,
+                .set = &setExtent,
+            },
+            scene::PropertyDesc{
+                .name = atoms.intern("Slice"),
+                .type = scene::ValueType::Rect,
+                .get = &getSlice,
+                .set = &setSlice,
             },
             // Deliberately carries neither, because a hand-built descriptor is
             // allowed to: `doc` has to read as an empty string rather than as a

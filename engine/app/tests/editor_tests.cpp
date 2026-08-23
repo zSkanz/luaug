@@ -970,6 +970,40 @@ TEST_CASE("a drop target lights up for exactly the drops that would move somethi
     CHECK(world.parentOf(folder) == root);
 }
 
+TEST_CASE("making something inside an empty folder asks the tree to open it")
+{
+    // **The reported defect, and it was deterministic.** An empty row has no
+    // chevron, so a fresh `Folder` could not have been opened -- which means a
+    // `Part` created inside one was invisible EVERY time: created, selected,
+    // showing in the properties grid, and nowhere in the Explorer. That reads
+    // exactly like "I cannot add a child to a folder".
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId folder = fixture.widget(world, "Folder");
+    REQUIRE_FALSE(world.setParent(folder, root).has_value());
+    REQUIRE(world.childCount(folder) == 0);
+
+    REQUIRE(editor.createInstance(world, fixture.widgetClass, folder, root, inspector));
+    const core::InstanceId made = inspector.selection();
+    REQUIRE(made.valid());
+    CHECK(world.parentOf(made) == folder);
+    // The panel opens the way DOWN to this, which is the folder and everything
+    // above it.
+    CHECK(inspector.takeReveal() == made);
+
+    // A move asks the same thing, because dropping something into a collapsed
+    // folder and watching it vanish is the same defect through the other verb.
+    const core::InstanceId elsewhere = fixture.widget(world, "Elsewhere");
+    REQUIRE_FALSE(world.setParent(elsewhere, root).has_value());
+    const std::array<core::InstanceId, 1> one{elsewhere};
+    REQUIRE(editor.reparent(world, one, folder, root, inspector));
+    CHECK(inspector.takeReveal() == elsewhere);
+}
+
 // --- E2: dragging a manipulator ---------------------------------------------
 //
 // The whole loop, headless: a camera, a viewport, a press on a handle, frames

@@ -84,6 +84,18 @@ struct InspectedWorld
             world.setProperty(zulu, schema.atom("Tint"), luaug::scene::Value{luaug::core::Color3{1.0f, 0.0f, 0.0f}}));
         static_cast<void>(world.setProperty(zulu, schema.atom("Mood"),
                                             luaug::scene::Value{luaug::scene::EnumValue{schema.moodEnum, 7}}));
+        // M6's screen-space four, which nothing in this suite drew until the
+        // `UDim` widget was rewritten and the gap turned up.
+        static_cast<void>(
+            world.setProperty(zulu, schema.atom("Anchor"), luaug::scene::Value{luaug::core::Vec2{0.5f, 0.5f}}));
+        static_cast<void>(
+            world.setProperty(zulu, schema.atom("Pad"), luaug::scene::Value{luaug::core::UDim{0.25f, 12.0f}}));
+        static_cast<void>(world.setProperty(
+            zulu, schema.atom("Extent"),
+            luaug::scene::Value{luaug::core::UDim2{luaug::core::UDim{1.0f, -8.0f}, luaug::core::UDim{0.0f, 40.0f}}}));
+        static_cast<void>(world.setProperty(
+            zulu, schema.atom("Slice"),
+            luaug::scene::Value{luaug::core::Rect{luaug::core::Vec2{1.0f, 2.0f}, luaug::core::Vec2{3.0f, 4.0f}}}));
     }
 };
 

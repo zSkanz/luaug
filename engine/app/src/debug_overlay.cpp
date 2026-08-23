@@ -16,6 +16,7 @@
 #include "luaug/scene/value.h"
 #include "luaug/scene/world.h"
 
+#include <algorithm>
 #include <array>
 #include <cfloat>
 #include <cmath>
@@ -303,6 +304,8 @@ std::vector<TreeRow> g_rows;
 // subtree under a closed ancestor. Computed before anything is drawn, because a
 // clipper needs to know how many rows exist before it decides which to draw.
 std::vector<TreeRow> g_visible;
+// The way down to something just created, moved or copied. See the reveal below.
+std::vector<core::InstanceId> g_ancestors;
 // Which instances are expanded, and which have been seen at all. Held here
 // rather than in ImGui's own tree state, because a clipped row's widget never
 // runs and therefore has no state to hold.
@@ -374,6 +377,24 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
         g_explorerWorld = inspector.worldIdentity();
         g_open.clear();
         g_openKnown.clear();
+    }
+
+    // **Something was just made, moved or copied: open the way to it.** Before
+    // visibility is decided rather than after, or the row would appear one
+    // frame late -- and a person who has just pressed a plus is looking at the
+    // tree on this frame.
+    //
+    // A parent that has never been opened is not opened by gaining a child, and
+    // an EMPTY one has no chevron to open it with -- so a `Part` created inside
+    // a fresh `Folder` was invisible every time, which reads as "I cannot add a
+    // child to a folder". The request is one-shot, so a row deliberately closed
+    // afterwards stays closed.
+    if (const core::InstanceId wanted = inspector.takeReveal(); wanted.valid()) {
+        collectAncestors(world, wanted, root, g_ancestors);
+        for (const core::InstanceId ancestor : g_ancestors) {
+            g_open.insert(ancestor.index);
+            g_openKnown.insert(ancestor.index);
+        }
     }
 
     // Preorder, so an ancestor is always decided before its descendants. A row
@@ -703,7 +724,14 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 // thousand-row tree shows no plus signs at all.
                 ImGui::SetCursorPos(ImVec2(penX, centred(iconSize)));
 
-                const bool lit = rowHovered || inspector.isSelected(row.id) || addOpen;
+                // **Under the pointer, and nowhere else.** It was drawn on the
+                // selected rows too, which meant four selected rows carried
+                // four plus signs while somebody was reading them -- and the
+                // one they can press is the one their pointer is already on.
+                // The popup keeps it drawn while it is open, or the button
+                // vanishes the moment the pointer leaves the row to reach the
+                // list and takes its own popup with it.
+                const bool lit = rowHovered || addOpen;
                 if (!lit)
                     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.0f);
                 const bool add =
@@ -847,6 +875,79 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
 // Nothing here writes. Every branch that accepts an edit enqueues it, and the
 // queue drains at the next FrameStart (Decision 15) through
 // `World::setProperty` and nothing else (Decision 14).
+// A property whose value is SEVERAL numbers that have names of their own.
+//
+// **These get a row each, and that is the whole fix.** A `UDim` is a scale and
+// an offset, a `UDim2` is two of those, and the panel drew them as two or four
+// unlabelled boxes in one cell: nothing on the screen said which number was
+// which, and there is no convention to fall back on the way `x y z` has one.
+// Putting the word inside the box was worse -- a box is for a value, and
+// `scale 0.000` is a box with a caption in it.
+//
+// So the name goes in the name column, where every other name in this panel
+// already is, and the box holds a number and nothing else. That is what every
+// properties grid does with a composite value, and it costs no width: the rows
+// were always there, they were just all crammed into one.
+[[nodiscard]] bool compositeKind(EditorKind kind) noexcept
+{
+    return kind == EditorKind::UDim || kind == EditorKind::UDim2;
+}
+
+// One sub-row: an indented name on the left, one number on the right.
+[[nodiscard]] bool numberRow(const char* label, float& value, float step, bool mixed, const char* format)
+{
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    ImGui::Indent();
+    ImGui::TextUnformatted(label);
+    ImGui::Unindent();
+
+    ImGui::TableSetColumnIndex(1);
+    ImGui::PushID(label);
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    const bool changed = ImGui::DragFloat("##value", &value, step, 0.0f, 0.0f, mixed ? "--" : format);
+    ImGui::PopID();
+    return changed;
+}
+
+// The sub-rows of one composite, and the value they add up to.
+//
+// The offset is drawn whole because it IS whole: it is a count of pixels, and
+// `formatValue` has printed it with no decimals since M6 -- the two agree on
+// purpose, so a value read in the summary row and the same value read in its
+// own row are the same string.
+[[nodiscard]] bool drawCompositeRows(EditorKind kind, const SharedValue& shared, scene::Value& out)
+{
+    const bool mixed = shared.state == SharedState::Mixed;
+
+    if (kind == EditorKind::UDim) {
+        // The same guard `drawEditor` makes one function up: the declared type
+        // says which rows exist and the variant says what is in it, and those
+        // disagree whenever a value is absent. `std::get` would throw.
+        const core::UDim* held = std::get_if<core::UDim>(&shared.value);
+        if (held == nullptr)
+            return false;
+        core::UDim value = *held;
+        bool changed = numberRow("Scale", value.scale, 0.01f, mixed, "%.3f");
+        changed = numberRow("Offset", value.offset, 1.0f, mixed, "%.0f") || changed;
+        if (changed)
+            out = scene::Value{value};
+        return changed;
+    }
+
+    const core::UDim2* held = std::get_if<core::UDim2>(&shared.value);
+    if (held == nullptr)
+        return false;
+    core::UDim2 value = *held;
+    bool changed = numberRow("X Scale", value.x.scale, 0.01f, mixed, "%.3f");
+    changed = numberRow("X Offset", value.x.offset, 1.0f, mixed, "%.0f") || changed;
+    changed = numberRow("Y Scale", value.y.scale, 0.01f, mixed, "%.3f") || changed;
+    changed = numberRow("Y Offset", value.y.offset, 1.0f, mixed, "%.0f") || changed;
+    if (changed)
+        out = scene::Value{value};
+    return changed;
+}
+
 void drawEditor(scene::World& world, Inspector& inspector, std::span<const core::InstanceId> targets,
                 const scene::PropertyDesc& descriptor, const SharedValue& shared)
 {
@@ -1031,30 +1132,6 @@ void drawEditor(scene::World& world, Inspector& inspector, std::span<const core:
             commit(scene::Value{core::Vec2{components[0], components[1]}});
         break;
     }
-    case EditorKind::UDim: {
-        const core::UDim value = std::get<core::UDim>(shared.value);
-        float scale = value.scale;
-        float offset = value.offset;
-        // Two widgets rather than a DragFloat2, because the two halves are not
-        // the same quantity: a scale moves in hundredths of a parent and an
-        // offset moves in pixels, and one shared step makes one of them useless.
-        bool changed = ImGui::DragFloat("##scale", &scale, 0.01f, 0.0f, 0.0f, mixed ? "--" : "%.3f");
-        changed = ImGui::DragFloat("##offset", &offset, 1.0f, 0.0f, 0.0f, mixed ? "--" : "%.3f") || changed;
-        if (changed)
-            commit(scene::Value{core::UDim{scale, offset}});
-        break;
-    }
-    case EditorKind::UDim2: {
-        const core::UDim2 value = std::get<core::UDim2>(shared.value);
-        float scales[2]{value.x.scale, value.y.scale};
-        float offsets[2]{value.x.offset, value.y.offset};
-        bool changed = ImGui::DragFloat2("##scale", scales, 0.01f, 0.0f, 0.0f, mixed ? "--" : "%.3f");
-        changed = ImGui::DragFloat2("##offset", offsets, 1.0f, 0.0f, 0.0f, mixed ? "--" : "%.3f") || changed;
-        if (changed) {
-            commit(scene::Value{core::UDim2{core::UDim{scales[0], offsets[0]}, core::UDim{scales[1], offsets[1]}}});
-        }
-        break;
-    }
     case EditorKind::Rect: {
         const core::Rect value = std::get<core::Rect>(shared.value);
         float components[4]{value.min.x, value.min.y, value.max.x, value.max.y};
@@ -1102,6 +1179,13 @@ void drawEditor(scene::World& world, Inspector& inspector, std::span<const core:
         }
         break;
     }
+    // **The two composites are SUMMARISED here and edited in their own rows**
+    // (`drawCompositeRows`). This is the collapsed line -- `{1.000, -24}, {0.000,
+    // 20}`, the same string `formatValue` has printed since M6 -- and the rows
+    // underneath are where the numbers are. A box is for a value; the name of
+    // the value belongs in the column that holds every other name in this panel.
+    case EditorKind::UDim:
+    case EditorKind::UDim2:
     case EditorKind::InstanceRef:
     case EditorKind::ReadOnlyText: {
         // The floor every `ValueType` falls back to, so that one with no editor
@@ -1162,11 +1246,30 @@ void drawProperties(scene::World& world, Inspector& inspector)
         ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.55f);
 
         for (const scene::PropertyDesc* descriptor : g_properties) {
+            ImGui::PushID(static_cast<int>(descriptor->name.id));
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
 
             const std::string_view propertyName = world.atoms().text(descriptor->name);
-            ImGui::Text("%.*s", static_cast<int>(propertyName.size()), propertyName.data());
+            const EditorKind kind = editorFor(descriptor->type);
+
+            // **A composite's name is a disclosure**, open by default: the rows
+            // under it are where its numbers are edited, and starting closed
+            // would put an extra click between a person and the one property
+            // they opened the panel for. Collapsing it is theirs to do, and
+            // ImGui remembers it per row.
+            char nameLabel[128];
+            (void)std::snprintf(nameLabel, sizeof(nameLabel), "%.*s", static_cast<int>(propertyName.size()),
+                                propertyName.data());
+            bool expanded = false;
+            if (compositeKind(kind)) {
+                expanded =
+                    ImGui::TreeNodeEx(nameLabel, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_NoTreePushOnOpen |
+                                                     ImGuiTreeNodeFlags_SpanAvailWidth);
+            }
+            else {
+                ImGui::TextUnformatted(nameLabel);
+            }
 
             // The IDL's own prose for this property, which now rides on the
             // descriptor rather than staying in a file nothing at runtime reads
@@ -1205,6 +1308,25 @@ void drawProperties(scene::World& world, Inspector& inspector)
 
             ImGui::TableSetColumnIndex(1);
             drawEditor(world, inspector, targets, *descriptor, shared);
+
+            // The rows a composite is actually edited in. Disabled with the
+            // same rule the widget above uses, because they are the same
+            // property: a read-only `UDim` must not offer four live drags.
+            if (expanded && shared.state != SharedState::Unreadable) {
+                const bool locked = !editable(*descriptor);
+                if (locked)
+                    ImGui::BeginDisabled();
+                scene::Value edited;
+                if (drawCompositeRows(kind, shared, edited)) {
+                    for (const core::InstanceId target : targets) {
+                        if (world.alive(target))
+                            inspector.enqueue(target, descriptor->name, edited);
+                    }
+                }
+                if (locked)
+                    ImGui::EndDisabled();
+            }
+            ImGui::PopID();
         }
         ImGui::EndTable();
     }

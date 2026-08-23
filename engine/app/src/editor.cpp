@@ -382,6 +382,7 @@ bool Editor::duplicateInstance(scene::World& world, core::InstanceId id, core::I
     // Selected, because the reason to duplicate a thing is to change the copy
     // and not to admire it.
     inspector.select(copy);
+    inspector.reveal(copy);
 
     m_status = EditorStatus{"duplicated " + std::string(world.atoms().text(world.name(id))), false};
     return true;
@@ -440,8 +441,12 @@ bool Editor::createInstance(scene::World& world, scene::ClassId classId, core::I
     }
 
     // Selected, for the reason a duplicate is: the point of making a thing is
-    // to change it.
+    // to change it. **And revealed**, because a parent that has never been
+    // opened is not opened by gaining a child -- and an empty one had no
+    // chevron to open it with, so a `Part` made inside a fresh `Folder` was
+    // invisible every single time.
     inspector.select(made);
+    inspector.reveal(made);
 
     m_status = EditorStatus{"added a " + std::string(world.atoms().text(descriptor->name)), false};
     (void)root;
@@ -541,6 +546,10 @@ bool Editor::reparent(scene::World& world, std::span<const core::InstanceId> ids
 
     inspector.pruneDead(world);
     inspector.onWorldRestored();
+    // **Where it went, opened.** Dropping something into a collapsed folder and
+    // watching it disappear is the same defect creating one inside an empty one
+    // was, arriving through the other verb.
+    inspector.reveal(plan.movable.front());
 
     std::string message = "moved " + std::to_string(plan.movable.size());
     if (refused > 0)
@@ -632,6 +641,8 @@ bool Editor::duplicateInstances(scene::World& world, std::span<const core::Insta
     // came out, and a selection left on the source is a second click before
     // anything can be done to it.
     inspector.select(copies);
+    if (!copies.empty())
+        inspector.reveal(copies.front());
     m_status = EditorStatus{"duplicated " + std::to_string(copies.size()) + " instance(s)", false};
     return true;
 }

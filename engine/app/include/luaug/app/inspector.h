@@ -336,6 +336,34 @@ public:
     // about the subtree. A sweep cannot get that wrong.
     void pruneDead(const scene::World& world);
 
+    // --- Revealing ------------------------------------------------------------
+    //
+    // **A tree row that has never been opened cannot be opened, and an empty one
+    // has no chevron to open it with.** So making a child inside an empty
+    // `Folder` put the new instance somewhere with no way to look at it: it was
+    // created, it was selected, the properties grid was showing it, and the
+    // Explorer showed a closed folder. That reads exactly like "I cannot add a
+    // child to a folder", which is what a person reported -- and it was
+    // deterministic rather than intermittent, because an empty row has no
+    // chevron and therefore could not have been open.
+    //
+    // Every editor with a tree does this: making a thing reveals it. The
+    // request lives here rather than in the panel for the reason everything
+    // else in this file does -- the expanded set is a file-static inside a draw
+    // callback that no test can reach, and the verb that creates is not the
+    // thing that draws.
+
+    void reveal(core::InstanceId id) noexcept { reveal_ = id; }
+
+    // Reads it and clears it. A reveal is a one-shot: one that stayed set would
+    // re-open, every frame, a row somebody had deliberately closed.
+    [[nodiscard]] core::InstanceId takeReveal() noexcept
+    {
+        const core::InstanceId wanted = reveal_;
+        reveal_ = core::InstanceId{};
+        return wanted;
+    }
+
     // Queues an edit. Never writes: see Decision 15 and `applyPending`.
     void enqueue(core::InstanceId target, core::NameAtom property, scene::Value value);
 
@@ -438,6 +466,7 @@ private:
     void recordOutcome(const WriteOutcome& outcome);
 
     std::vector<core::InstanceId> selection_;
+    core::InstanceId reveal_;
     core::u64 gesture_ = 0;
     core::u64 nextGesture_ = 0;
     core::u64 worldGeneration_ = 0;
@@ -445,6 +474,13 @@ private:
     std::vector<PendingWrite> pending_;
     std::vector<WriteOutcome> outcomes_;
 };
+
+// `id`'s ancestors, nearest first, ending at `root` when `id` is under it.
+//
+// The instance itself is not in it: what a caller wants opened is everything
+// ABOVE the thing, and opening a leaf means nothing. `out` is cleared first.
+void collectAncestors(const scene::World& world, core::InstanceId id, core::InstanceId root,
+                      std::vector<core::InstanceId>& out);
 
 // The rows between two ids, inclusive, in the order `rows` holds them.
 //
