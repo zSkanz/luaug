@@ -179,6 +179,21 @@ struct EditorPanels
     bool content = true;
     bool console = true;
     bool stats = true;
+
+    // **Whether the Explorer shows what STREAMING made**, and it is off.
+    //
+    // Streaming pumps in edit mode as well as in play -- it is not gated on the
+    // world advancing, and it must not be: you cannot edit a world you cannot
+    // see, which is what Unreal's World Partition does in its editor too. But a
+    // chunk is not part of the authored scene. The serializer skips a generated
+    // subtree whole, nothing may be authored inside one, and sixty `Chunk_x_y_z`
+    // folders between a person and the four things they wrote is the same
+    // complaint the root's own row answered -- scrolling past a world to find
+    // the thing you came for.
+    //
+    // A switch rather than a rule, because "what did streaming actually
+    // materialise" is a real question with no other way to ask it.
+    bool showGenerated = false;
 };
 
 // What the shell asked for this frame, drained by the frame loop at the safe
@@ -518,6 +533,21 @@ public:
     // special case here.
     bool createInstance(scene::World& world, scene::ClassId classId, core::InstanceId parent, core::InstanceId root,
                         Inspector& inspector);
+
+    // **Whether anything a person authors may be PARENTED here.**
+    //
+    // Wider than `authorable` at one end and narrower at the other, and both
+    // differences are the point. A SERVICE is a legal parent -- `Workspace`
+    // holding a `Part` is what the service is FOR, and `Lighting` holding a
+    // `PointLight` is too -- so being engine-owned does not disqualify one.
+    //
+    // And `generated` is asked of the whole ANCESTRY rather than of the
+    // instance, because streaming marks a chunk's FOLDER and not its contents.
+    // An instance-only test offered a plus on `Chunk_-3_0_0/Ground`, accepted
+    // the create, and the next eviction destroyed what somebody made without a
+    // word -- while the chunk's own row, which is the one that LOOKS like the
+    // dangerous place, was correctly refused.
+    [[nodiscard]] static bool canParentInto(const scene::World& world, core::InstanceId id, core::InstanceId root);
 
     // **Whether a person may author here at all**, which is a different and
     // wider question than `isEngineOwned`.

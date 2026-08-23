@@ -359,7 +359,7 @@ constexpr const char* kInstanceDragPayload = "luaug.instances";
 // edits.** Offering Delete over a running game would be offering an edit whose
 // only result is a world nobody can put back.
 void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspector, EditorCommands* commands,
-                  EditorDialogs* dialogs, const IconAtlas* icons)
+                  EditorDialogs* dialogs, const IconAtlas* icons, bool showGenerated)
 {
     collectTree(world, root, g_rows);
 
@@ -402,7 +402,27 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
     // the shallowest closed depth rather than re-walking upwards per row.
     g_visible.clear();
     u32 hiddenBelow = std::numeric_limits<u32>::max();
+    u32 generatedBelow = std::numeric_limits<u32>::max();
     for (const TreeRow& row : g_rows) {
+        // **What streaming made is not the scene.** It pumps in edit mode as
+        // well as in play -- deliberately, because a world you cannot see is a
+        // world you cannot edit -- but the serializer skips a generated subtree
+        // whole and nothing authored may live in one, so sixty `Chunk_x_y_z`
+        // folders standing between a person and the four things they wrote is
+        // the root's own complaint again: scrolling past a world to find the
+        // thing you came for. Window > Streamed Content brings them back.
+        //
+        // A depth watermark rather than an ancestry walk per row, exactly like
+        // `hiddenBelow` below it: the tree is preorder, so a generated folder's
+        // whole subtree is the run of rows deeper than it.
+        if (row.depth > generatedBelow)
+            continue;
+        generatedBelow = std::numeric_limits<u32>::max();
+        if (!showGenerated && world.generated(row.id)) {
+            generatedBelow = row.depth;
+            continue;
+        }
+
         if (row.depth > hiddenBelow)
             continue;
         hiddenBelow = std::numeric_limits<u32>::max();
@@ -703,7 +723,13 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             // Only where an instance can actually go: nothing authored lives
             // inside something streaming materialised, and offering a plus that
             // refuses is worse than not offering one.
-            if (commands != nullptr && !world.generated(row.id)) {
+            //
+            // **Asked of the ANCESTRY**, through the same function the verb
+            // uses. Asking `generated` of the row alone got the chunk right and
+            // everything inside the chunk wrong -- `Chunk_-3_0_0/Ground` is not
+            // itself generated, so it wore a plus, took the create, and lost it
+            // at the next eviction.
+            if (commands != nullptr && Editor::canParentInto(world, row.id, root)) {
                 // **Shown on the row under the pointer and on the selected
                 // ones -- and EXISTING on all of them.** The two are different
                 // questions and conflating them is what broke the first click.
@@ -2022,6 +2048,14 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
         ImGui::MenuItem("Console", nullptr, &panels.console);
         ImGui::MenuItem("Stats", nullptr, &panels.stats);
         ImGui::Separator();
+        // Not a panel, but it is a question about what the panels SHOW, and
+        // this is the menu a person opens to ask one.
+        ImGui::MenuItem("Streamed Content", nullptr, &panels.showGenerated);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("show what streaming materialised. It is not part of the scene: the save skips it and "
+                              "nothing authored can live in it");
+        }
+        ImGui::Separator();
         // Not "close everything": somebody who has lost a panel behind another
         // wants the arrangement back, not an empty window.
         if (ImGui::MenuItem("Reset Layout"))
@@ -2367,7 +2401,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     if (panels.explorer) {
         if (ImGui::Begin("explorer", &panels.explorer)) {
             if (world != nullptr && inspector != nullptr)
-                drawExplorer(*world, root, *inspector, &commands, &dialogs, icons);
+                drawExplorer(*world, root, *inspector, &commands, &dialogs, icons, panels.showGenerated);
         }
         ImGui::End();
     }
@@ -2482,7 +2516,10 @@ void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, I
         if (world != nullptr && inspector != nullptr) {
             ImGui::SeparatorText("explorer");
             if (ImGui::BeginChild("explorer", ImVec2(0.0f, 200.0f), ImGuiChildFlags_Borders))
-                drawExplorer(*world, root, *inspector, nullptr, nullptr, nullptr);
+                // Everything, including what streaming made: this is the debug
+                // overlay rather than the editor, and it exists to show the
+                // world as it IS rather than as it was authored.
+                drawExplorer(*world, root, *inspector, nullptr, nullptr, nullptr, true);
             ImGui::EndChild();
 
             ImGui::SeparatorText("properties");

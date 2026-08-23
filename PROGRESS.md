@@ -153,7 +153,7 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
 - **All four of E2's frozen interfaces are built and tested**, which is the point
   the plan said nothing fans out before: the selection set, the gesture and its
   extracted undo key, the manipulator arithmetic, and `Editor`'s verbs.
-- **Eleven defects closed in this milestone and nine of them came from a person
+- **Twelve defects closed in this milestone and ten of them came from a person
   using the editor**, which is now the pattern every milestone since M4 has
   repeated. D067 is why the editor was unusable on the flagship at all: a boot
   scene was applied AFTER the entry scripts had built the world, destroying every
@@ -327,6 +327,14 @@ there when this file passed its ~300-line cap.
   **Learned from D076, and it is the one to carry:** a `static_assert` that
   COUNTS is not a test that COVERS. The fixture asserted `variant_size_v<Value>
   == 13` and named nine of them.
+
+  **D077 is the same shape as D073 and worth saying so.** "The plus does not
+  appear on a Folder" was reported and then corrected by the reporter: it does
+  not appear on the `Chunk_*` rows, which is RIGHT, and it did appear on
+  everything inside them, which is not. Streaming marks a chunk's folder and not
+  its contents -- `authorable` says so in its own comment -- and both the plus
+  and `createInstance` asked the question of the instance instead of the
+  ancestry. One rule, `canParentInto`, is now the only place it is answered.
 
   **Next:** open the editor on the flagship, capture what a person sees, and
   write E2's Gate Record. There is nothing left to build.

@@ -1004,6 +1004,40 @@ TEST_CASE("making something inside an empty folder asks the tree to open it")
     CHECK(inspector.takeReveal() == elsewhere);
 }
 
+TEST_CASE("nothing can be created inside a chunk, including inside what the chunk holds")
+{
+    // **The chunk's own row was right and everything under it was wrong.**
+    // Streaming marks a chunk's FOLDER and not its contents, so
+    // `Chunk_-3_0_0/Ground` is not itself generated -- an instance-only test
+    // therefore offered a plus on it, accepted the create, and the next
+    // eviction destroyed what somebody made without a word.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId chunk = fixture.widget(world, "Chunk_-3_0_0");
+    const core::InstanceId ground = fixture.widget(world, "Ground");
+    const core::InstanceId folder = fixture.widget(world, "Folder");
+    REQUIRE_FALSE(world.setParent(chunk, root).has_value());
+    REQUIRE_FALSE(world.setParent(ground, chunk).has_value());
+    REQUIRE_FALSE(world.setParent(folder, root).has_value());
+    world.setGenerated(chunk, true);
+
+    // The plus is drawn from this, and so is the refusal, which is the whole
+    // point of it being one function.
+    CHECK(Editor::canParentInto(world, root, root));
+    CHECK(Editor::canParentInto(world, folder, root));
+    CHECK_FALSE(Editor::canParentInto(world, chunk, root));
+    CHECK_FALSE(Editor::canParentInto(world, ground, root));
+
+    CHECK_FALSE(editor.createInstance(world, fixture.widgetClass, ground, root, inspector));
+    CHECK(world.childCount(ground) == 0);
+    REQUIRE(editor.createInstance(world, fixture.widgetClass, folder, root, inspector));
+    CHECK(world.childCount(folder) == 1);
+}
+
 // --- E2: dragging a manipulator ---------------------------------------------
 //
 // The whole loop, headless: a camera, a viewport, a press on a handle, frames

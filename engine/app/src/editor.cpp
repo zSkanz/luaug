@@ -405,8 +405,10 @@ bool Editor::createInstance(scene::World& world, scene::ClassId classId, core::I
     // `Lighting` holding a `PointLight` and `Workspace` holding a `Part` is
     // what those services are FOR, so the guard the other three verbs share
     // does not belong here. What does belong is the one it never covered:
-    // something a system made is not somewhere a person authors into.
-    if (world.generated(parent)) {
+    // something a system made is not somewhere a person authors into -- and
+    // that has to be asked of the ANCESTRY, because a chunk marks its folder
+    // and not the ground inside it.
+    if (!canParentInto(world, parent, root)) {
         m_status = EditorStatus{"that was made by the engine, so nothing authored can live in it", true};
         return false;
     }
@@ -449,11 +451,10 @@ bool Editor::createInstance(scene::World& world, scene::ClassId classId, core::I
     inspector.reveal(made);
 
     m_status = EditorStatus{"added a " + std::string(world.atoms().text(descriptor->name)), false};
-    (void)root;
     return true;
 }
 
-bool Editor::authorable(const scene::World& world, core::InstanceId id, core::InstanceId root)
+bool Editor::canParentInto(const scene::World& world, core::InstanceId id, core::InstanceId root)
 {
     if (!world.alive(id))
         return false;
@@ -468,8 +469,14 @@ bool Editor::authorable(const scene::World& world, core::InstanceId id, core::In
         if (walk == root)
             break;
     }
+    return true;
+}
 
-    return !isEngineOwned(world, id, root);
+bool Editor::authorable(const scene::World& world, core::InstanceId id, core::InstanceId root)
+{
+    // The same walk, plus the one thing a PARENT is allowed to be and a moved
+    // or deleted instance is not: one of the engine's own.
+    return canParentInto(world, id, root) && !isEngineOwned(world, id, root);
 }
 
 Editor::ReparentPlan Editor::planReparent(const scene::World& world, std::span<const core::InstanceId> ids,
