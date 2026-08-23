@@ -14,6 +14,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 // The editor's model: what it has selected, where its 3D view is, and what the
 // mouse has asked it to find. No ImGui in this header, for the same reason
@@ -25,6 +26,10 @@
 // and the properties panel already read it, and a second copy would be two
 // answers to one question the first time a hot reload cleared one of them. The
 // editor asks the inspector to select what a click found.
+
+namespace luaug::render {
+class DebugDraw;
+}
 
 namespace luaug::rhi {
 class IDevice;
@@ -334,6 +339,12 @@ public:
     // from anywhere else is how a pick drifts by one frame's camera motion,
     // which is invisible standing still and wrong while walking.
     void setCamera(const core::Mat4& projection, const core::Mat4& view, core::DVec3 origin) noexcept;
+    // What the image was drawn with, read back. The manipulator needs the same
+    // three the picker does, and a test driving a drag needs them to know which
+    // pixel a world point falls at.
+    [[nodiscard]] const core::Mat4& projection() const noexcept { return m_projection; }
+    [[nodiscard]] const core::Mat4& view() const noexcept { return m_view; }
+    [[nodiscard]] core::DVec3 cameraOrigin() const noexcept { return m_cameraOrigin; }
     [[nodiscard]] bool hasCamera() const noexcept { return m_hasCamera; }
 
     void requestPick(core::Vec2 pixelInViewport) noexcept { m_pending = PickRequest{pixelInViewport}; }
@@ -601,6 +612,68 @@ public:
     // renderer is told which view to draw through `render::ViewOverride`, and
     // while the world plays it is told nothing and draws the game's.
 
+    // --- The manipulators ----------------------------------------------------
+    //
+    // **The arithmetic is `picking.h`'s and the STATE is here**: which mode, in
+    // which space, and what a drag in progress started from. The split is the
+    // one the whole editor is built on -- what can be tested without a window
+    // lives where a test can reach it, and what a person is doing with a mouse
+    // right now is a thing an object remembers between frames.
+    //
+    // **A drag is solved against where it STARTED, never against last frame.**
+    // Every selected instance's transform is recorded when the button goes down
+    // and the delta is applied to that, so a drag is exact however long it lasts
+    // and however slowly it is made -- and so dragging three parts moves each by
+    // the same delta rather than stacking them on the one the gizmo sits on.
+
+    [[nodiscard]] GizmoMode gizmoMode() const noexcept { return m_gizmoMode; }
+    // Refused mid-drag: changing what a drag means half way through it is not
+    // something a person can have meant.
+    void setGizmoMode(GizmoMode mode) noexcept;
+
+    // **World axes or the selection's own.** Which one is right depends on the
+    // part, which is why it is a person's choice and not this file's: a rotated
+    // crate is unusable in world space and a wall is unusable in local.
+    [[nodiscard]] bool gizmoLocal() const noexcept { return m_gizmoLocal; }
+    void setGizmoLocal(bool local) noexcept;
+
+    // Snapping is ON, and a modifier suspends it. That way round because the
+    // number somebody wants is far more often a round one, and because a
+    // manipulator with no snap is the one that feels like a toy.
+    [[nodiscard]] bool snapping() const noexcept { return m_snap && !m_snapSuspended; }
+    void setSnapSuspended(bool suspended) noexcept { m_snapSuspended = suspended; }
+    void setSnap(bool on) noexcept { m_snap = on; }
+    // Metres for translate and scale, degrees for rotate.
+    [[nodiscard]] f32 snapStep(GizmoMode mode) const noexcept;
+    void setSnapStep(GizmoMode mode, f32 step) noexcept;
+
+    // Where the manipulator is and how big, or nothing when there is nothing to
+    // manipulate.
+    //
+    // The PRIMARY selection's transform, because a gizmo has to be somewhere and
+    // the last thing clicked is the thing somebody is looking at. An instance
+    // with no transform -- a `Folder`, a service -- has no manipulator, which is
+    // honest rather than a limitation to work around: there is nothing to drag.
+    [[nodiscard]] std::optional<GizmoFrame> gizmoFrame(const scene::World& world, const Inspector& inspector) const;
+
+    // The handle under the pointer, or the one being dragged. For drawing.
+    [[nodiscard]] std::optional<GizmoHandle> gizmoHandle() const noexcept;
+    [[nodiscard]] bool gizmoDragging() const noexcept { return m_drag.has_value(); }
+
+    // What the viewport saw the pointer doing. `pressed` is the frame the button
+    // went down and only while the pointer was over the image; `down` is every
+    // frame it is held, over the image or not -- a drag that leaves the panel is
+    // still a drag, and one that ends outside it still ends.
+    void setPointer(core::Vec2 pixelInViewport, bool pressed, bool down) noexcept;
+
+    // Runs the manipulator for this frame, at the frame's safe point like every
+    // other world mutation.
+    //
+    // Returns true when the pointer belongs to the gizmo, which is what stops a
+    // click on a handle ALSO selecting whatever is behind it -- the commonest
+    // way a first manipulator loses the thing it was about to move.
+    bool driveGizmo(scene::World& world, Inspector& inspector);
+
     // Seeds the editor camera from wherever the world's camera currently is, so
     // pressing pause does not teleport the view. Called once, when the editor
     // first has a camera to copy.
@@ -652,6 +725,21 @@ public:
     [[nodiscard]] PickRay rayThrough(core::Vec2 pixelInViewport) const noexcept;
 
 private:
+    // A drag in progress. `start` is where the pointer was solved to on the
+    // frame the button went down, and `before` is every selected instance's
+    // transform at that moment -- the two things a delta is measured from.
+    struct GizmoDrag
+    {
+        GizmoHandle handle;
+        GizmoFrame frame;
+        core::DVec3 startPoint;
+        f32 startAngle = 0.0f;
+        std::vector<core::InstanceId> targets;
+        std::vector<core::CFrameD> before;
+        std::vector<core::Vec3> sizes;
+        core::u64 gesture = 0;
+    };
+
     ViewportRect m_viewport;
     core::Mat4 m_projection;
     core::Mat4 m_view;
@@ -659,6 +747,19 @@ private:
     bool m_hasCamera = false;
     std::optional<PickRequest> m_pending;
     RunState m_run = RunState::Editing;
+    GizmoMode m_gizmoMode = GizmoMode::Translate;
+    bool m_gizmoLocal = false;
+    bool m_snap = true;
+    bool m_snapSuspended = false;
+    // Metres, metres, degrees -- indexed by `GizmoMode`. A quarter of a metre
+    // and fifteen degrees are the steps every editor lands on because they are
+    // the ones a room and a corner are built from.
+    f32 m_snapStep[3] = {0.25f, 15.0f, 0.25f};
+    core::Vec2 m_pointer;
+    bool m_pointerPressed = false;
+    bool m_pointerDown = false;
+    std::optional<GizmoHandle> m_hover;
+    std::optional<GizmoDrag> m_drag;
     bool m_stepRequested = false;
     // Held by pointer because a `WorldSnapshot` is thirty component pools and
     // an editor that is not playing should not be carrying an empty one.
@@ -678,5 +779,15 @@ private:
     f32 m_cameraSpeed = 12.0f;
     LookInput m_look;
 };
+
+// The manipulator, drawn where the selection is.
+//
+// A free function rather than a method, for the reason `submitSelection` is one:
+// what it needs is a frame, a mode and a buffer, and giving it the whole editor
+// would be giving it three things it does not read. It also makes the one thing
+// a headless test CAN check about the drawing reachable -- that the vertices
+// come out camera-relative and therefore exact four kilometres from the origin.
+void submitGizmo(const GizmoFrame& frame, GizmoMode mode, std::optional<GizmoHandle> active, core::DVec3 cameraOrigin,
+                 render::DebugDraw& draw);
 
 } // namespace luaug::app

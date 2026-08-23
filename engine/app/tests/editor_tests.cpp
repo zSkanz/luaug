@@ -6,8 +6,11 @@
 // selection. It is the behaviour a person notices only by editing the object
 // they thought they had let go of, which is to say only after doing damage.
 #include "luaug/app/editor.h"
+#include "luaug/app/picking.h"
 #include "luaug/core/math.h"
+#include "luaug/render/debug_draw.h"
 #include "luaug/scene/components.h"
+#include "luaug/scene/enum_registry.h"
 #include "luaug/scene/world.h"
 
 #include <algorithm>
@@ -16,10 +19,14 @@
 #include <doctest/doctest.h>
 #include <vector>
 
+#include "class_descriptors.gen.h"
 #include "inspector_fixture.h"
 
 using namespace luaug;
 using luaug::app::Editor;
+using luaug::app::GizmoFrame;
+using luaug::app::GizmoHandle;
+using luaug::app::GizmoMode;
 using luaug::app::Inspector;
 using luaug::app::ViewportRect;
 
@@ -892,4 +899,260 @@ TEST_CASE("nothing authored may live inside what a system made")
     const std::array<core::InstanceId, 1> one{authored};
     CHECK_FALSE(editor.reparent(world, one, chunk, root, inspector));
     CHECK(world.parentOf(authored) == root);
+}
+
+// --- E2: dragging a manipulator ---------------------------------------------
+//
+// The whole loop, headless: a camera, a viewport, a press on a handle, frames
+// of movement, a release. What no test can reach is the picture; what every one
+// of these reaches is what the picture is drawn FROM.
+
+namespace {
+
+// **The REAL classes, because a manipulator moves a `Part` and nothing else.**
+// The inspector fixture's synthetic hierarchy has no `PartComponent`, so a gizmo
+// over it would have nothing to sit on -- and a test that invented one would be
+// testing a world nobody ships.
+struct DragRig
+{
+    core::AtomTable atoms;
+    scene::ClassRegistry classes;
+    scene::EnumRegistry enums;
+    scene::World world;
+    Editor editor;
+    Inspector inspector;
+    core::InstanceId root;
+    scene::ClassId partClass = scene::InvalidClass;
+    ViewportRect rect{0.0f, 0.0f, 1920.0f, 1080.0f};
+
+    DragRig() : world(classes, enums, atoms, 1234u)
+    {
+        scene::generated::registerClasses(classes, atoms);
+        scene::generated::registerEnums(enums, atoms);
+        partClass = classes.findId(atoms.intern("Part"));
+        REQUIRE(partClass != scene::InvalidClass);
+
+        root = world.create(classes.findId(atoms.intern("Folder")));
+        REQUIRE(root.valid());
+    }
+
+    // A camera at `eye` looking down -Z, in the camera-relative space the
+    // renderer works in -- which is why the origin travels separately.
+    void look(core::DVec3 eye)
+    {
+        editor.setViewport(rect);
+        editor.setCamera(core::perspective(60.0f * 3.14159265f / 180.0f, rect.width / rect.height, 0.1f, 5000.0f),
+                         core::lookAt(core::Vec3{}, core::Vec3{0.0f, 0.0f, -1.0f}, core::Vec3{0.0f, 1.0f, 0.0f}), eye);
+    }
+
+    [[nodiscard]] core::InstanceId part(core::DVec3 at)
+    {
+        const core::InstanceId id = world.create(partClass);
+        REQUIRE(id.valid());
+        (void)world.setParent(id, root);
+        scene::PartComponent* component = world.parts().find(id);
+        REQUIRE(component != nullptr);
+        component->cframe.position = at;
+        return id;
+    }
+
+    // The pixel a world point falls at, which is how a test aims at a handle it
+    // can only describe in world space.
+    [[nodiscard]] core::Vec2 pixelOf(core::DVec3 point) const
+    {
+        const std::optional<core::Vec2> pixel =
+            app::worldToViewport(editor.projection(), editor.view(), editor.cameraOrigin(), rect, point);
+        REQUIRE(pixel.has_value());
+        return *pixel;
+    }
+
+    // One frame of the loop: report the pointer, then run the manipulator and
+    // the drain exactly as the frame does.
+    void frame(core::Vec2 pixel, bool pressed, bool down)
+    {
+        editor.setPointer(pixel, pressed, down);
+        const bool took = editor.driveGizmo(world, inspector);
+        if (inspector.pendingCount() > 0) {
+            editor.history().record(world, "Edit", app::coalesceKeyFor(inspector.gesture(), inspector.pending()));
+        }
+        inspector.applyPending(world);
+        (void)took;
+    }
+};
+
+} // namespace
+
+TEST_CASE("one drag is one undo step, however many frames it lasts")
+{
+    DragRig rig;
+    rig.look({0.0, 0.0, 0.0});
+    const core::InstanceId subject = rig.part({0.0, 0.0, -30.0});
+    rig.inspector.select(subject);
+    rig.editor.setSnap(false);
+
+    const std::optional<GizmoFrame> frame = rig.editor.gizmoFrame(rig.world, rig.inspector);
+    REQUIRE(frame.has_value());
+
+    const core::DVec3 grab =
+        frame->transform.position + core::DVec3{static_cast<core::f64>(frame->size) * 0.7, 0.0, 0.0};
+    rig.frame(rig.pixelOf(grab), true, true);
+    REQUIRE(rig.editor.gizmoDragging());
+
+    // Sixty frames of movement, which at sixty hertz is a second of dragging.
+    for (int step = 1; step <= 60; ++step) {
+        const core::DVec3 to = grab + core::DVec3{static_cast<core::f64>(step) * 0.05, 0.0, 0.0};
+        rig.frame(rig.pixelOf(to), false, true);
+    }
+    rig.frame(rig.pixelOf(grab), false, false);
+    CHECK_FALSE(rig.editor.gizmoDragging());
+
+    // **One.** Without the gesture this is sixty world snapshots and sixty
+    // presses of ctrl-Z to get back to where the drag began.
+    CHECK(rig.editor.history().canUndo());
+    REQUIRE(rig.editor.undo(rig.world, rig.inspector));
+    CHECK_FALSE(rig.editor.history().canUndo());
+
+    const scene::PartComponent* part = rig.world.parts().find(subject);
+    REQUIRE(part != nullptr);
+    CHECK(part->cframe.position.x == doctest::Approx(0.0).epsilon(0.001));
+}
+
+TEST_CASE("a drag over a multi-selection moves each instance by the same delta")
+{
+    DragRig rig;
+    rig.look({0.0, 0.0, 0.0});
+    const core::InstanceId first = rig.part({-1.0, 0.0, -30.0});
+    const core::InstanceId second = rig.part({0.0, 0.0, -30.0});
+    const core::InstanceId third = rig.part({1.0, 0.0, -30.0});
+    rig.inspector.select(first);
+    rig.inspector.add(second);
+    rig.inspector.add(third);
+    rig.editor.setSnap(false);
+
+    // The gizmo sits on the primary, which is the last one added.
+    const std::optional<GizmoFrame> frame = rig.editor.gizmoFrame(rig.world, rig.inspector);
+    REQUIRE(frame.has_value());
+    CHECK(frame->transform.position.x == doctest::Approx(1.0));
+
+    const core::DVec3 grab =
+        frame->transform.position + core::DVec3{static_cast<core::f64>(frame->size) * 0.7, 0.0, 0.0};
+    rig.frame(rig.pixelOf(grab), true, true);
+    rig.frame(rig.pixelOf(grab + core::DVec3{4.0, 0.0, 0.0}), false, true);
+    rig.frame(rig.pixelOf(grab + core::DVec3{4.0, 0.0, 0.0}), false, false);
+
+    // **A metre apart before, a metre apart after.** Broadcasting one absolute
+    // value instead of a delta stacks all three on the one the gizmo sat on,
+    // which is the failure this exists to prevent.
+    const scene::PartComponent* a = rig.world.parts().find(first);
+    const scene::PartComponent* b = rig.world.parts().find(second);
+    const scene::PartComponent* c = rig.world.parts().find(third);
+    REQUIRE(a != nullptr);
+    REQUIRE(b != nullptr);
+    REQUIRE(c != nullptr);
+    CHECK(a->cframe.position.x == doctest::Approx(3.0).epsilon(0.01));
+    CHECK(b->cframe.position.x == doctest::Approx(4.0).epsilon(0.01));
+    CHECK(c->cframe.position.x == doctest::Approx(5.0).epsilon(0.01));
+    // And nothing moved in the other two axes.
+    CHECK(a->cframe.position.y == doctest::Approx(0.0).epsilon(0.001));
+    CHECK(a->cframe.position.z == doctest::Approx(-30.0).epsilon(0.001));
+}
+
+TEST_CASE("the grid is what a drag lands on, and Alt suspends it")
+{
+    DragRig rig;
+    rig.look({0.0, 0.0, 0.0});
+    const core::InstanceId subject = rig.part({0.0, 0.0, -30.0});
+    rig.inspector.select(subject);
+    rig.editor.setSnap(true);
+    rig.editor.setSnapStep(GizmoMode::Translate, 1.0f);
+
+    const std::optional<GizmoFrame> frame = rig.editor.gizmoFrame(rig.world, rig.inspector);
+    REQUIRE(frame.has_value());
+    const core::DVec3 grab =
+        frame->transform.position + core::DVec3{static_cast<core::f64>(frame->size) * 0.7, 0.0, 0.0};
+
+    rig.frame(rig.pixelOf(grab), true, true);
+    rig.frame(rig.pixelOf(grab + core::DVec3{3.4, 0.0, 0.0}), false, true);
+    rig.frame(rig.pixelOf(grab + core::DVec3{3.4, 0.0, 0.0}), false, false);
+
+    const scene::PartComponent* part = rig.world.parts().find(subject);
+    REQUIRE(part != nullptr);
+    CHECK(part->cframe.position.x == doctest::Approx(3.0).epsilon(0.001));
+
+    // Held down, the same drag lands where the pointer is. The handle is grabbed
+    // from where the gizmo is NOW -- it moved with the part, which is the whole
+    // point of the first drag having worked.
+    rig.editor.setSnapSuspended(true);
+    const std::optional<GizmoFrame> moved = rig.editor.gizmoFrame(rig.world, rig.inspector);
+    REQUIRE(moved.has_value());
+    const core::DVec3 again =
+        moved->transform.position + core::DVec3{static_cast<core::f64>(moved->size) * 0.7, 0.0, 0.0};
+    rig.frame(rig.pixelOf(again), true, true);
+    rig.frame(rig.pixelOf(again + core::DVec3{3.4, 0.0, 0.0}), false, true);
+    rig.frame(rig.pixelOf(again + core::DVec3{3.4, 0.0, 0.0}), false, false);
+    CHECK(part->cframe.position.x == doctest::Approx(6.4).epsilon(0.01));
+}
+
+TEST_CASE("a press on a handle does not also select what is behind it")
+{
+    DragRig rig;
+    rig.look({0.0, 0.0, 0.0});
+    const core::InstanceId subject = rig.part({0.0, 0.0, -30.0});
+    // Something big behind it, which a stray pick would land on.
+    const core::InstanceId behind = rig.part({0.0, 0.0, -60.0});
+    rig.inspector.select(subject);
+
+    const std::optional<GizmoFrame> frame = rig.editor.gizmoFrame(rig.world, rig.inspector);
+    REQUIRE(frame.has_value());
+    const core::DVec3 grab =
+        frame->transform.position + core::DVec3{static_cast<core::f64>(frame->size) * 0.7, 0.0, 0.0};
+
+    // The panel queues a pick for the same click, because it cannot know the
+    // gizmo took it. The manipulator runs first and consumes it.
+    rig.editor.requestPick(rig.pixelOf(grab));
+    rig.editor.setPointer(rig.pixelOf(grab), true, true);
+    CHECK(rig.editor.driveGizmo(rig.world, rig.inspector));
+    CHECK_FALSE(rig.editor.pickPending());
+    CHECK(rig.inspector.selection() == subject);
+    (void)behind;
+}
+
+TEST_CASE("a manipulator four kilometres out is submitted where it is, not where a float can reach")
+{
+    // The gate item, and it is the same defect the selection outline had:
+    // `DebugDraw::rebaseTo` subtracts in f32, so a submission in world
+    // coordinates quantises the absolute metre value BEFORE the camera comes off
+    // it. At four kilometres that is about half a millimetre, on the one thing
+    // in the frame somebody is trying to place precisely.
+    DragRig rig;
+    const core::DVec3 eye{4000.0, 12.0, -4000.0};
+    rig.look(eye);
+    const core::DVec3 at{4000.0, 12.0, -4030.0};
+    const core::InstanceId subject = rig.part(at);
+    rig.inspector.select(subject);
+
+    const std::optional<GizmoFrame> frame = rig.editor.gizmoFrame(rig.world, rig.inspector);
+    REQUIRE(frame.has_value());
+
+    render::DebugDraw draw;
+    app::submitGizmo(*frame, GizmoMode::Translate, std::nullopt, eye, draw);
+    REQUIRE_FALSE(draw.empty());
+
+    // Every vertex is already camera-relative, so the whole gizmo is within its
+    // own size of the origin of that space -- which is what makes a float exact
+    // enough for it. Submitted in world coordinates these would be four
+    // thousand, and the tenth of a millimetre below is what f32 cannot hold
+    // there.
+    const core::Vec3 expected = core::toVec3(at - eye);
+    for (const render::DebugVertex& vertex : draw.vertices()) {
+        CHECK(std::abs(vertex.position.x - expected.x) < frame->size * 2.0f);
+        CHECK(std::abs(vertex.position.y - expected.y) < frame->size * 2.0f);
+        CHECK(std::abs(vertex.position.z - expected.z) < frame->size * 2.0f);
+    }
+
+    // And the centre is exactly where the part is, to a tenth of a millimetre.
+    const render::DebugVertex& first = draw.vertices()[0];
+    const core::Vec3 fromCentre{first.position.x - expected.x, first.position.y - expected.y,
+                                first.position.z - expected.z};
+    CHECK(core::length(fromCentre) < frame->size * 1.5f);
 }

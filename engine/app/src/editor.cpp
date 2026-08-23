@@ -2,14 +2,17 @@
 #include <luaug/core/json.h>
 #include <luaug/core/json_writer.h>
 #include <luaug/platform/file.h>
+#include <luaug/render/debug_draw.h>
 #include <luaug/rhi/device.h>
 #include <luaug/scene/class_registry.h>
 #include <luaug/scene/scene_file.h>
 #include <luaug/scene/world.h>
 
+#include <cmath>
 #include <string>
 
 namespace luaug::app {
+using core::Vec3;
 namespace {
 // The same format the headless path renders into. An editor's viewport is the
 // headless render with somebody watching, so a second format here would be a
@@ -814,6 +817,399 @@ core::CFrameD Editor::driveCamera(core::Vec2 lookDelta, core::Vec3 move, f32 dt)
     // prevent.
     m_cameraCFrame.position = m_cameraCFrame.position + core::toDVec3(step);
     return m_cameraCFrame;
+}
+
+// --- The manipulators -------------------------------------------------------
+
+namespace {
+
+// How many pixels long an arm is drawn, and therefore how big the whole gizmo
+// is. Constant on screen: a handle that shrank into nothing as you flew away
+// would be a handle you could not grab.
+constexpr f32 kGizmoPixels = 90.0f;
+
+[[nodiscard]] f32 snapTo(f32 value, f32 step) noexcept
+{
+    if (step <= 0.0f)
+        return value;
+    return std::round(value / step) * step;
+}
+
+[[nodiscard]] core::DVec3 snapTo(core::DVec3 value, f32 step) noexcept
+{
+    if (step <= 0.0f)
+        return value;
+    const auto quantum = static_cast<core::f64>(step);
+    return core::DVec3{std::round(value.x / quantum) * quantum, std::round(value.y / quantum) * quantum,
+                       std::round(value.z / quantum) * quantum};
+}
+
+} // namespace
+
+void Editor::setGizmoMode(GizmoMode mode) noexcept
+{
+    // Not mid-drag. Changing what a drag MEANS half way through it is not
+    // something a person can have meant, and the drag's recorded start would be
+    // a start for the wrong operation.
+    if (m_drag.has_value())
+        return;
+    m_gizmoMode = mode;
+}
+
+void Editor::setGizmoLocal(bool local) noexcept
+{
+    if (m_drag.has_value())
+        return;
+    m_gizmoLocal = local;
+}
+
+f32 Editor::snapStep(GizmoMode mode) const noexcept
+{
+    return m_snapStep[static_cast<core::usize>(mode)];
+}
+
+void Editor::setSnapStep(GizmoMode mode, f32 step) noexcept
+{
+    m_snapStep[static_cast<core::usize>(mode)] = step > 0.0f ? step : 0.0f;
+}
+
+std::optional<GizmoFrame> Editor::gizmoFrame(const scene::World& world, const Inspector& inspector) const
+{
+    if (!editing(m_run) || !m_hasCamera)
+        return std::nullopt;
+
+    const core::InstanceId primary = inspector.selection();
+    if (!primary.valid() || !world.alive(primary))
+        return std::nullopt;
+
+    const scene::PartComponent* part = world.parts().find(primary);
+    if (part == nullptr)
+        return std::nullopt;
+
+    GizmoFrame frame;
+    frame.transform.position = part->cframe.position;
+    // World axes unless somebody asked for the part's own. A rotated crate is
+    // unusable in world space and a wall is unusable in local, which is why this
+    // is a choice rather than a decision made here.
+    frame.transform.rotation = m_gizmoLocal ? part->cframe.rotation : core::Mat3{};
+    frame.size = metresPerPixel(m_projection, m_viewport, m_cameraOrigin, frame.transform.position) * kGizmoPixels;
+
+    if (!(frame.size > 0.0f))
+        return std::nullopt;
+    return frame;
+}
+
+std::optional<GizmoHandle> Editor::gizmoHandle() const noexcept
+{
+    if (m_drag.has_value())
+        return m_drag->handle;
+    return m_hover;
+}
+
+void Editor::setPointer(core::Vec2 pixelInViewport, bool pressed, bool down) noexcept
+{
+    m_pointer = pixelInViewport;
+    m_pointerPressed = pressed;
+    m_pointerDown = down;
+}
+
+bool Editor::driveGizmo(scene::World& world, Inspector& inspector)
+{
+    const std::optional<GizmoFrame> frame = gizmoFrame(world, inspector);
+
+    // The button came up, or the world stopped being editable under a drag.
+    if (m_drag.has_value() && (!m_pointerDown || !frame.has_value())) {
+        if (inspector.gesture() == m_drag->gesture)
+            inspector.endGesture();
+        m_drag.reset();
+        // The release belongs to the gizmo too: without this the same click
+        // that finished a drag would fall through and select whatever the
+        // pointer ended up over.
+        m_pending.reset();
+        return true;
+    }
+
+    if (!frame.has_value()) {
+        m_hover.reset();
+        return false;
+    }
+
+    const PickRay ray = rayThrough(m_pointer);
+
+    if (!m_drag.has_value()) {
+        m_hover = pickGizmo(ray, *frame, m_gizmoMode);
+        if (!m_pointerPressed || !m_hover.has_value())
+            return false;
+
+        GizmoDrag drag;
+        drag.handle = *m_hover;
+        drag.frame = *frame;
+
+        if (m_gizmoMode == GizmoMode::Rotate) {
+            const std::optional<f32> angle = gizmoDragAngle(ray, *frame, drag.handle);
+            if (!angle.has_value())
+                return false;
+            drag.startAngle = *angle;
+        }
+        else {
+            const std::optional<core::DVec3> point = gizmoDragPoint(ray, *frame, drag.handle);
+            if (!point.has_value())
+                return false;
+            drag.startPoint = *point;
+        }
+
+        // Every selected instance that HAS a transform, and what it was. The
+        // ones that do not are simply not moved rather than being an error: a
+        // selection may hold a folder and a part, and dragging the part is a
+        // thing somebody meant.
+        for (const core::InstanceId id : inspector.selectionSet()) {
+            const scene::PartComponent* part = world.parts().find(id);
+            if (part == nullptr)
+                continue;
+            drag.targets.push_back(id);
+            drag.before.push_back(part->cframe);
+            drag.sizes.push_back(part->size);
+        }
+        if (drag.targets.empty())
+            return false;
+
+        // One gesture for the whole drag, so it is one undo step however many
+        // frames and however many instances it writes.
+        drag.gesture = inspector.beginGesture();
+        m_drag = std::move(drag);
+
+        // The press was the gizmo's. Whatever pick the panel queued for the same
+        // click is not somebody asking to select something else.
+        m_pending.reset();
+        return true;
+    }
+
+    // --- A drag in progress --------------------------------------------------
+    GizmoDrag& drag = *m_drag;
+    m_hover = drag.handle;
+
+    const core::NameAtom cframeName = world.atoms().intern("CFrame");
+    const core::NameAtom sizeName = world.atoms().intern("Size");
+
+    if (m_gizmoMode == GizmoMode::Rotate) {
+        const std::optional<f32> angle = gizmoDragAngle(ray, drag.frame, drag.handle);
+        if (!angle.has_value())
+            return true;
+
+        f32 turned = *angle - drag.startAngle;
+        // The short way round, so a ring crossing its own seam does not spin the
+        // selection by a whole turn in one frame.
+        while (turned > 3.14159265f)
+            turned -= 6.28318531f;
+        while (turned < -3.14159265f)
+            turned += 6.28318531f;
+        if (snapping())
+            turned = snapTo(turned, snapStep(GizmoMode::Rotate) * 3.14159265f / 180.0f);
+
+        Vec3 axes[3];
+        {
+            const core::Mat3& basis = drag.frame.transform.rotation;
+            for (int index = 0; index < 3; ++index)
+                axes[index] = core::normalize(Vec3{basis.m[index][0], basis.m[index][1], basis.m[index][2]});
+        }
+        const core::Mat3 turn = core::fromAxisAngle(axes[drag.handle.axis], turned);
+        const core::DVec3 pivot = drag.frame.transform.position;
+
+        for (core::usize index = 0; index < drag.targets.size(); ++index) {
+            const core::CFrameD& before = drag.before[index];
+            core::CFrameD after;
+            after.rotation = turn * before.rotation;
+            // Around the gizmo's pivot rather than each part's own, so a
+            // selection turns as one body -- which is what "rotate these" means
+            // and what turning each in place would not be.
+            const Vec3 offset = core::toVec3(before.position - pivot);
+            after.position = pivot + core::toDVec3(turn * offset);
+            inspector.enqueue(drag.targets[index], cframeName, scene::Value{after});
+        }
+        return true;
+    }
+
+    const std::optional<core::DVec3> point = gizmoDragPoint(ray, drag.frame, drag.handle);
+    if (!point.has_value())
+        return true;
+
+    core::DVec3 delta = *point - drag.startPoint;
+
+    if (m_gizmoMode == GizmoMode::Translate) {
+        if (snapping()) {
+            // Snapped in the GIZMO's frame rather than the world's, so a local
+            // drag lands on the part's own grid. In world space the two are the
+            // same thing.
+            delta = snapTo(delta, snapStep(GizmoMode::Translate));
+        }
+        for (core::usize index = 0; index < drag.targets.size(); ++index) {
+            core::CFrameD after = drag.before[index];
+            after.position = after.position + delta;
+            inspector.enqueue(drag.targets[index], cframeName, scene::Value{after});
+        }
+        return true;
+    }
+
+    // Scale. The axis handle grows one dimension, the middle grows all three,
+    // and the amount is the drag measured along the axis in gizmo sizes -- so a
+    // drag of one arm's length doubles it whatever the part started at.
+    Vec3 factor{1.0f, 1.0f, 1.0f};
+    const f32 reach = drag.frame.size > 0.0f ? drag.frame.size : 1.0f;
+    if (drag.handle.uniform) {
+        const auto along = static_cast<f32>(delta.x + delta.y + delta.z) / reach;
+        const f32 scale = 1.0f + along;
+        factor = Vec3{scale, scale, scale};
+    }
+    else {
+        Vec3 axes[3];
+        const core::Mat3& basis = drag.frame.transform.rotation;
+        for (int index = 0; index < 3; ++index)
+            axes[index] = core::normalize(Vec3{basis.m[index][0], basis.m[index][1], basis.m[index][2]});
+        const f32 along = core::dot(core::toVec3(delta), axes[drag.handle.axis]) / reach;
+        const f32 scale = 1.0f + along;
+        if (drag.handle.axis == 0)
+            factor.x = scale;
+        else if (drag.handle.axis == 1)
+            factor.y = scale;
+        else
+            factor.z = scale;
+    }
+
+    for (core::usize index = 0; index < drag.targets.size(); ++index) {
+        const Vec3 was = drag.sizes[index];
+        Vec3 now{was.x * factor.x, was.y * factor.y, was.z * factor.z};
+        if (snapping()) {
+            const f32 step = snapStep(GizmoMode::Scale);
+            now = Vec3{snapTo(now.x, step), snapTo(now.y, step), snapTo(now.z, step)};
+        }
+        // A part with no thickness has no faces and cannot be picked back, so a
+        // drag through zero stops at the smallest thing that is still a thing
+        // rather than turning the part inside out.
+        constexpr f32 kMinimum = 0.01f;
+        now = Vec3{now.x < kMinimum ? kMinimum : now.x, now.y < kMinimum ? kMinimum : now.y,
+                   now.z < kMinimum ? kMinimum : now.z};
+        inspector.enqueue(drag.targets[index], sizeName, scene::Value{now});
+    }
+    return true;
+}
+
+// The manipulator, drawn where the selection is.
+//
+// **Lines, because `DebugDraw` is a line list and stays one.** Its own header
+// says solid shapes arrive with the milestone that needs them, and a manipulator
+// does not: an arrow made of an arm and four barbs reads as an arrow, and a ring
+// of segments reads as a ring. What a filled cone would buy is not worth a second
+// pipeline in the debug path.
+//
+// **Camera-relative, like the selection outline beside it and for the same
+// reason**: `DebugDraw::rebaseTo` subtracts in f32, so a submission in world
+// coordinates quantises the absolute metre value before the camera comes off it
+// -- about half a millimetre four kilometres out, on the one thing in the frame
+// somebody is trying to place precisely.
+void submitGizmo(const GizmoFrame& frame, GizmoMode mode, std::optional<GizmoHandle> active, core::DVec3 cameraOrigin,
+                 render::DebugDraw& draw)
+{
+    using core::Vec3;
+
+    const core::Mat3& basis = frame.transform.rotation;
+    Vec3 axes[3];
+    for (int index = 0; index < 3; ++index)
+        axes[index] = core::normalize(Vec3{basis.m[index][0], basis.m[index][1], basis.m[index][2]});
+
+    // The gizmo's centre in the space the debug pass draws in. Every point below
+    // is this plus a metre offset, so the f64 subtraction happens once.
+    const Vec3 centre = core::toVec3(frame.transform.position - cameraOrigin);
+    const f32 size = frame.size;
+
+    // X red, Y green, Z blue -- the convention `DebugDraw::axes` already uses
+    // and the one every editor shares. The one under the pointer goes yellow,
+    // which is the only feedback a manipulator needs and the one it cannot do
+    // without.
+    const render::DebugColor axisColor[3] = {
+        render::DebugColor::fromLinear(0.90f, 0.25f, 0.25f),
+        render::DebugColor::fromLinear(0.30f, 0.85f, 0.30f),
+        render::DebugColor::fromLinear(0.30f, 0.50f, 0.95f),
+    };
+    const render::DebugColor hot = render::DebugColor::fromLinear(1.0f, 0.85f, 0.15f);
+    const render::DebugColor white = render::DebugColor::fromLinear(0.95f, 0.95f, 0.95f);
+
+    const auto lit = [active](core::u8 axis, bool plane, bool uniform) {
+        return active.has_value() && active->axis == axis && active->plane == plane && active->uniform == uniform;
+    };
+
+    if (mode == GizmoMode::Rotate) {
+        constexpr int kSegments = 48;
+        for (core::u8 axis = 0; axis < 3; ++axis) {
+            const Vec3 u = axes[(axis + 1) % 3] * size;
+            const Vec3 v = axes[(axis + 2) % 3] * size;
+            const render::DebugColor colour = lit(axis, false, false) ? hot : axisColor[axis];
+            Vec3 previous = centre + u;
+            for (int step = 1; step <= kSegments; ++step) {
+                const f32 angle = 6.28318531f * static_cast<f32>(step) / static_cast<f32>(kSegments);
+                const Vec3 point = centre + u * std::cos(angle) + v * std::sin(angle);
+                draw.line(previous, point, colour);
+                previous = point;
+            }
+        }
+        return;
+    }
+
+    for (core::u8 axis = 0; axis < 3; ++axis) {
+        const Vec3 direction = axes[axis];
+        const Vec3 tip = centre + direction * size;
+        const render::DebugColor colour = lit(axis, false, false) ? hot : axisColor[axis];
+
+        // The arm starts clear of the centre handle, so the two do not draw over
+        // each other and the gap says where one ends.
+        draw.line(centre + direction * (size * 0.12f), tip, colour);
+
+        const Vec3 side = axes[(axis + 1) % 3];
+        const Vec3 other = axes[(axis + 2) % 3];
+        if (mode == GizmoMode::Translate) {
+            // Four barbs back from the tip: an arrowhead, in lines.
+            const Vec3 back = tip - direction * (size * 0.16f);
+            const f32 spread = size * 0.06f;
+            draw.line(tip, back + side * spread, colour);
+            draw.line(tip, back - side * spread, colour);
+            draw.line(tip, back + other * spread, colour);
+            draw.line(tip, back - other * spread, colour);
+
+            // The plane square, at the corner between the OTHER two axes -- so
+            // the one drawn in the XY corner moves in X and Y, and its handle is
+            // named by the axis it does not move along.
+            const core::u8 normal = (axis + 2) % 3;
+            const Vec3 a = axes[(normal + 1) % 3];
+            const Vec3 b = axes[(normal + 2) % 3];
+            const f32 inner = size * 0.25f;
+            const f32 outer = size * 0.55f;
+            const render::DebugColor planeColour = lit(normal, true, false) ? hot : axisColor[normal];
+            const Vec3 corner[4] = {
+                centre + a * inner + b * inner,
+                centre + a * outer + b * inner,
+                centre + a * outer + b * outer,
+                centre + a * inner + b * outer,
+            };
+            for (int edge = 0; edge < 4; ++edge)
+                draw.line(corner[edge], corner[(edge + 1) % 4], planeColour);
+        }
+        else {
+            // A small open box at the tip, which is what a scale handle looks
+            // like everywhere and what tells it apart from an arrow at a glance.
+            const f32 box = size * 0.05f;
+            const Vec3 a = side * box;
+            const Vec3 b = other * box;
+            const Vec3 face[4] = {tip + a + b, tip + a - b, tip - a - b, tip - a + b};
+            for (int edge = 0; edge < 4; ++edge)
+                draw.line(face[edge], face[(edge + 1) % 4], colour);
+        }
+    }
+
+    // The centre: uniform scale, or a screen-space drag for translate. Drawn as
+    // a small box so it reads as a handle rather than as the place the arms
+    // happen to meet.
+    const f32 middle = size * 0.09f;
+    const render::DebugColor centreColour = active.has_value() && active->uniform ? hot : white;
+    draw.wireBox(centre, Vec3{middle, middle, middle}, centreColour);
 }
 
 std::optional<PickHit> Editor::resolvePick(const scene::World& world, Inspector& inspector) noexcept

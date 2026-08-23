@@ -1017,8 +1017,15 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 }
             }
 
+            // **The manipulator gets the pointer first.** A press that lands on
+            // a handle is not a press asking to select whatever is behind it,
+            // and losing the selection on the frame you grab its gizmo is the
+            // commonest way a first manipulator is unusable.
+            const bool gizmoTook = editor.driveGizmo(host->world(), inspector);
+
             const core::InstanceId wasSelected = inspector.selection();
-            editor.resolvePick(host->world(), inspector);
+            if (!gizmoTook)
+                editor.resolvePick(host->world(), inspector);
 
             // An editor says what you picked. It is the cheapest confirmation
             // that a click landed on the thing under the cursor rather than on
@@ -1736,8 +1743,16 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // After the rebase and not before it, because these are already in
             // the space it converts to -- see `submitSelection`. Everything the
             // editor draws over the world goes here for the same reason.
-            if (options.editor)
+            if (options.editor) {
                 submitSelection(host->world(), inspector.selectionSet(), snapshot.camera.origin, debugDraw);
+                // The manipulator over the outline, because the outline says
+                // WHAT is selected and the manipulator is the thing being
+                // aimed at.
+                if (const std::optional<GizmoFrame> gizmo = editor.gizmoFrame(host->world(), inspector);
+                    gizmo.has_value()) {
+                    submitGizmo(*gizmo, editor.gizmoMode(), editor.gizmoHandle(), snapshot.camera.origin, debugDraw);
+                }
+            }
 
             // Uploaded before the render pass opens, because a copy cannot run
             // inside one -- the seam says so and the backend enforces it. The

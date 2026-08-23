@@ -1222,6 +1222,48 @@ void drawTransport(Editor& editor, EditorCommands& commands, const IconAtlas* ic
         editor.requestStep();
     ImGui::EndDisabled();
 
+    // --- The manipulators -----------------------------------------------
+    //
+    // Three modes, the space they work in, and the grid. Grouped after the
+    // transport and before the file actions, because that is the order somebody
+    // reaches for them in: run it, then change it, then keep it.
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+
+    const auto modeButton = [&](GizmoMode mode, std::string_view id, const char* word, const char* tip) {
+        ImGui::SameLine();
+        const bool on = editor.gizmoMode() == mode;
+        if (on)
+            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        if (toolButton(id, word, tip))
+            editor.setGizmoMode(mode);
+        if (on)
+            ImGui::PopStyleColor();
+    };
+    modeButton(GizmoMode::Translate, icons::ActionMove, "move", "move the selection  (W)");
+    modeButton(GizmoMode::Rotate, icons::ActionRotate, "turn", "turn the selection  (E)");
+    modeButton(GizmoMode::Scale, icons::ActionScale, "size", "resize the selection  (R)");
+
+    ImGui::SameLine();
+    if (ImGui::Button(editor.gizmoLocal() ? "local" : "world"))
+        editor.setGizmoLocal(!editor.gizmoLocal());
+    ImGui::SetItemTooltip(editor.gizmoLocal() ? "the selection's own axes -- click for the world's"
+                                              : "the world's axes -- click for the selection's own");
+
+    ImGui::SameLine();
+    {
+        const bool snapping = editor.snapping();
+        if (snapping)
+            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        if (toolButton(icons::ActionGrid, "snap", "snap to the grid  (hold Alt to suspend)"))
+            editor.setSnap(!editor.snapping());
+        if (snapping)
+            ImGui::PopStyleColor();
+    }
+
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+
     // A world to start in. Beside save rather than in the content browser,
     // because "give me somewhere to begin" is a thing you do to the WORLD and
     // the browser is about files.
@@ -1346,10 +1388,20 @@ void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& co
             // the world, and treating it as one deselects whatever the person
             // was working on.
             const bool overImage = ImGui::IsItemHovered();
-            if (overImage && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-                const ImVec2 mouse = ImGui::GetMousePos();
-                editor.requestPick(core::Vec2{mouse.x - origin.x, mouse.y - origin.y});
-            }
+            const ImVec2 mouse = ImGui::GetMousePos();
+            const core::Vec2 inViewport{mouse.x - origin.x, mouse.y - origin.y};
+
+            // **The pointer, every frame, not just on a click.** A manipulator
+            // needs where it is and whether the button is held; a click alone
+            // cannot say either. `pressed` is gated on the image because a drag
+            // that began in another panel is not this one's, and `down` is NOT,
+            // because a drag that leaves the viewport is still a drag and one
+            // that ends outside it still ends.
+            editor.setPointer(inViewport, overImage && ImGui::IsMouseClicked(ImGuiMouseButton_Left),
+                              ImGui::IsMouseDown(ImGuiMouseButton_Left));
+
+            if (overImage && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                editor.requestPick(inViewport);
 
             reportLookInput(editor, overImage);
         }
@@ -1976,6 +2028,25 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         else
             commands.clearSelection = true;
     }
+
+    // **W, E, R for the three manipulators**, which is what every editor in this
+    // shape uses and therefore what somebody's hands already know. They do not
+    // collide with the fly camera: that reads WASD only while the right button
+    // is held, and these are refused while it is.
+    //
+    // Alt suspends the grid for as long as it is held. That way round because
+    // the number somebody wants is far more often a round one, so the modifier
+    // is for the exception rather than for the rule.
+    if (editor != nullptr && !ImGui::IsAnyItemActive() && !popupOpen && !editor->lookInput().active) {
+        if (ImGui::IsKeyPressed(ImGuiKey_W, false))
+            editor->setGizmoMode(GizmoMode::Translate);
+        if (ImGui::IsKeyPressed(ImGuiKey_E, false))
+            editor->setGizmoMode(GizmoMode::Rotate);
+        if (ImGui::IsKeyPressed(ImGuiKey_R, false))
+            editor->setGizmoMode(GizmoMode::Scale);
+    }
+    if (editor != nullptr)
+        editor->setSnapSuspended(ImGui::GetIO().KeyAlt);
 
     // Ctrl+Z and Ctrl+Y, under the same rule Escape is: not while a field has
     // the keyboard, because Ctrl+Z inside a text box is the box's own undo and
