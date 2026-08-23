@@ -117,13 +117,19 @@ makes the class list and the icon list unable to drift apart silently.
 
 ## What is not here yet
 
-Six `action.` ids have no file: **`Delete`, `Save`, `Open`, `New`, `Rename`,
-`Refresh`**. They are drawn tomorrow. They are absent from `theme.json` rather
-than present and broken, so a loader that honours `fallback` behaves correctly
-today.
+**Nothing is missing.** All 78 ids resolve to a master, and no two ids that are
+meant to be different icons share a file by hash. The six that were absent while
+this file was first written — `Delete`, `Save`, `Open`, `New`, `Rename`,
+`Refresh` — are in.
 
-`class.UICorner` is present but is being redrawn — it collided with
-`action.Stop` at 2.0%, the closest pair this set has produced.
+No redraw is outstanding. `action.Rotate` was the last one and it landed
+centred, so every id in the theme is the drawing it is meant to be.
+
+**The smallest size any of these is drawn at is the toolbar's**, which is
+`GetFrameHeight() - FramePadding.y * 2` in `debug_overlay.cpp` — the font size,
+13 px at ImGui's default. That is the number to check a new icon against, not
+16: below about 20 px an arrowhead stops being a head on every circular icon in
+the set, and what has to survive is the silhouette underneath it.
 
 ## Re-baking
 

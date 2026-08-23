@@ -231,7 +231,11 @@ TEST_CASE("playing does not become a second scheduler")
 
 TEST_CASE("a step is one tick, once")
 {
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
     Editor editor;
+    editor.play(world);
+    editor.setPaused(true);
     editor.requestStep();
 
     CHECK(editor.allowedTicks(4) == 1);
@@ -242,12 +246,28 @@ TEST_CASE("a step is one tick, once")
 
 TEST_CASE("a step asked for on a frame that owes nothing is not swallowed")
 {
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
     Editor editor;
+    editor.play(world);
+    editor.setPaused(true);
     editor.requestStep();
 
     CHECK(editor.allowedTicks(0) == 0);
     CHECK(editor.allowedTicks(1) == 1);
     CHECK(editor.allowedTicks(1) == 0);
+}
+
+TEST_CASE("a step outside play mode is refused, not merely hidden")
+{
+    // A step is one tick of the SIMULATION, and an edited world is one whose
+    // simulation is deliberately stopped -- so a step there would advance
+    // physics under somebody's hands for a reason they did not ask for. The
+    // panel hides the button; this is the rule living where the rule belongs,
+    // which is E1's five wrong-owner defects in one line.
+    Editor editor;
+    editor.requestStep();
+    CHECK(editor.allowedTicks(4) == 0);
 }
 
 TEST_CASE("pausing mid-play stops the world at the next frame")

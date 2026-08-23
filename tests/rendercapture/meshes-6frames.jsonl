@@ -69,8 +69,7 @@
 {"op":"createGraphicsPipeline","pipeline":23,"vertexShader":35,"fragmentShader":36,"instancedStreams":0,"primitive":"TriangleList","fill":"Solid","cull":"None","depthTest":false,"depthWrite":false,"colorTargets":1,"depthFormat":"Undefined","name":"fxaa"}
 {"op":"createGraphicsPipeline","pipeline":24,"vertexShader":37,"fragmentShader":38,"instancedStreams":0,"primitive":"TriangleList","fill":"Solid","cull":"Back","depthTest":false,"depthWrite":false,"colorTargets":1,"depthFormat":"Undefined","name":"outline_mask"}
 {"op":"createGraphicsPipeline","pipeline":25,"vertexShader":11,"fragmentShader":38,"instancedStreams":0,"primitive":"TriangleList","fill":"Solid","cull":"Back","depthTest":false,"depthWrite":false,"colorTargets":1,"depthFormat":"Undefined","name":"outline_mask_skinned"}
-{"op":"createGraphicsPipeline","pipeline":26,"vertexShader":17,"fragmentShader":38,"instancedStreams":1,"primitive":"TriangleList","fill":"Solid","cull":"Back","depthTest":false,"depthWrite":false,"colorTargets":1,"depthFormat":"Undefined","name":"outline_mask_instanced"}
-{"op":"createGraphicsPipeline","pipeline":27,"vertexShader":39,"fragmentShader":40,"instancedStreams":0,"primitive":"TriangleList","fill":"Solid","cull":"None","depthTest":false,"depthWrite":false,"colorTargets":1,"depthFormat":"Undefined","name":"outline_composite"}
+{"op":"createGraphicsPipeline","pipeline":26,"vertexShader":39,"fragmentShader":40,"instancedStreams":0,"primitive":"TriangleList","fill":"Solid","cull":"None","depthTest":false,"depthWrite":false,"colorTargets":1,"depthFormat":"Undefined","name":"outline_composite"}
 {"op":"createSampler","sampler":2,"name":"material"}
 {"op":"createSampler","sampler":3,"name":"environment"}
 {"op":"createSampler","sampler":4,"name":"cluster"}

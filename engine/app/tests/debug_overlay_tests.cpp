@@ -230,9 +230,12 @@ TEST_CASE("on a real device, F3 flips the panel")
             CHECK(atlas.find("class.NoSuchClassExists", 16u).valid);
             CHECK_FALSE(atlas.has("class.NoSuchClassExists"));
             CHECK(atlas.has(luaug::app::icons::ClassPart));
-            // Six action ids are drawn tomorrow and are absent from the theme
-            // rather than present and broken.
-            CHECK_FALSE(atlas.has("action.Delete"));
+            // The six that were drawn a day later than the rest. They were
+            // ABSENT from the theme rather than present and broken, which is
+            // what let the loader ship before them and what makes this a
+            // one-line change now they exist.
+            CHECK(atlas.has(luaug::app::icons::ActionDelete));
+            CHECK(atlas.has(luaug::app::icons::ActionSave));
             MESSAGE(atlas.status());
         }
         else {

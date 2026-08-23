@@ -512,11 +512,22 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 // Greyed rather than refused afterwards. The rule lives in
                 // `Editor` because it is a rule about the world; the menu
                 // reflects it so nobody presses a thing that cannot happen.
-                if (ImGui::MenuItem("Duplicate", nullptr, false, !engineOwned))
-                    commands->duplicateInstance = row.id;
+                // **On the SELECTION**, which the right-click above has just
+                // made sure this row is part of. Labelled with the count when
+                // there is more than one, because "Delete" over four things
+                // should say four.
+                const core::usize count = inspector.selectionCount();
+                char duplicateLabel[48];
+                char deleteLabel[48];
+                (void)std::snprintf(duplicateLabel, sizeof(duplicateLabel), count > 1 ? "Duplicate %d" : "Duplicate",
+                                    static_cast<int>(count));
+                (void)std::snprintf(deleteLabel, sizeof(deleteLabel), count > 1 ? "Delete %d" : "Delete",
+                                    static_cast<int>(count));
+                if (ImGui::MenuItem(duplicateLabel, nullptr, false, !engineOwned))
+                    commands->duplicateSelection = true;
                 ImGui::Separator();
-                if (ImGui::MenuItem("Delete", nullptr, false, !engineOwned))
-                    commands->deleteInstance = row.id;
+                if (ImGui::MenuItem(deleteLabel, nullptr, false, !engineOwned))
+                    commands->deleteSelection = true;
                 ImGui::PopStyleVar();
                 ImGui::EndPopup();
             }
@@ -1216,11 +1227,19 @@ void drawTransport(Editor& editor, EditorCommands& commands, const IconAtlas* ic
     }
     ImGui::EndDisabled();
 
-    ImGui::SameLine();
-    ImGui::BeginDisabled(run == RunState::Playing);
-    if (toolButton(icons::ActionForward, "step", "advance exactly one simulation tick"))
-        editor.requestStep();
-    ImGui::EndDisabled();
+    // **Hidden while editing, and only usable while paused.** A step is one
+    // tick of the simulation; an edited world is one whose simulation is
+    // deliberately stopped, so the control has nothing to mean there. Inside
+    // play mode it stays PRESENT and greys while running, because a control
+    // that appears and disappears moves the ones beside it -- which is the same
+    // rule pause is drawn by, applied one state further in.
+    if (inPlay) {
+        ImGui::SameLine();
+        ImGui::BeginDisabled(run != RunState::Paused);
+        if (toolButton(icons::ActionForward, "step", "advance exactly one simulation tick"))
+            editor.requestStep();
+        ImGui::EndDisabled();
+    }
 
     // --- The manipulators -----------------------------------------------
     //
@@ -1268,9 +1287,8 @@ void drawTransport(Editor& editor, EditorCommands& commands, const IconAtlas* ic
     // because "give me somewhere to begin" is a thing you do to the WORLD and
     // the browser is about files.
     ImGui::SameLine();
-    if (ImGui::Button("new"))
+    if (toolButton(icons::ActionNew, "new", "empty the scene and start over -- anything unsaved is gone"))
         commands.newScene = true;
-    ImGui::SetItemTooltip("empty the scene and start over -- anything unsaved is gone");
 
     ImGui::SameLine();
     // **Save asks for a name when there is nothing to overwrite.** An editor
@@ -1279,14 +1297,13 @@ void drawTransport(Editor& editor, EditorCommands& commands, const IconAtlas* ic
     // has this dialog. The dialog itself lives at the shell's level, because
     // File > Save Scene As has to reach the same one.
     const bool untitled = editor.openScenePath().empty();
-    if (ImGui::Button(untitled ? "save as..." : "save")) {
+    if (toolButton(icons::ActionSave, untitled ? "save as..." : "save",
+                   untitled ? "this scene has no name yet -- choose one" : editor.openScenePath().c_str())) {
         if (untitled)
             commands.wantSaveAs = true;
         else
             commands.save = true;
     }
-    if (!untitled)
-        ImGui::SetItemTooltip("%s", editor.openScenePath().c_str());
 
     ImGui::SameLine();
     switch (run) {
@@ -1401,7 +1418,7 @@ void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& co
                               ImGui::IsMouseDown(ImGuiMouseButton_Left));
 
             if (overImage && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-                editor.requestPick(inViewport);
+                editor.requestPick(inViewport, ImGui::GetIO().KeyCtrl);
 
             reportLookInput(editor, overImage);
         }

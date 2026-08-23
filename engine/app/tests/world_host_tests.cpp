@@ -882,3 +882,51 @@ TEST_CASE("a boot scene that will not read is reported and the world still boots
     CHECK_FALSE(host.bootSceneApplied());
     CHECK(bootChildNamed(host, "BuiltByScript").valid());
 }
+
+TEST_CASE("a project with a scene AND world-building scripts is told it has two of everything")
+{
+    // D074, and the honest cost of D067's fix rather than a regression from it:
+    // once the scene loads BEFORE the scripts, a project whose code also builds
+    // a world has two sources for one world and the engine cannot merge them.
+    // What it can do is say so with both numbers, the first time, instead of
+    // leaving somebody to find two characters in their own scene.
+    Captured log;
+    Project project;
+    project.write("src/scripts/init.luau", R"(
+        local part = Instance.new("Part")
+        part.Name = "BuiltByScript"
+        part.Parent = workspace
+    )");
+    project.write("content/scenes/main.scene.json", kOnePartScene);
+
+    app::WorldHost host;
+    app::WorldHostOptions options = app::testing::bootOptions(project.root);
+    options.bootScene = project.root / "content" / "scenes" / "main.scene.json";
+    REQUIRE_FALSE(host.boot(options).has_value());
+
+    CHECK(bootChildNamed(host, "FromTheScene").valid());
+    CHECK(bootChildNamed(host, "BuiltByScript").valid());
+    CHECK(log.contains("two sources"));
+}
+
+TEST_CASE("a scene with no world-building scripts says nothing at all")
+{
+    // The arrangement ADR 0047 asks projects to become, and `examples/06-scene`
+    // is one: the world is the file and the script is only what it does. A
+    // warning here would be noise on the shape that is correct.
+    Captured log;
+    Project project;
+    project.write("src/scripts/init.luau", R"(
+        local RunService = game:GetService("RunService")
+        RunService.Heartbeat:Connect(function() end)
+    )");
+    project.write("content/scenes/main.scene.json", kOnePartScene);
+
+    app::WorldHost host;
+    app::WorldHostOptions options = app::testing::bootOptions(project.root);
+    options.bootScene = project.root / "content" / "scenes" / "main.scene.json";
+    REQUIRE_FALSE(host.boot(options).has_value());
+
+    CHECK(bootChildNamed(host, "FromTheScene").valid());
+    CHECK_FALSE(log.contains("two sources"));
+}

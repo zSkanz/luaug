@@ -1228,6 +1228,19 @@ std::optional<PickHit> Editor::resolvePick(const scene::World& world, Inspector&
 
     const std::optional<PickHit> hit = pickNearest(world, rayThrough(request.pixel));
 
+    // **Ctrl adds and removes; a plain click replaces.** The same gesture the
+    // Explorer's rows use, because it is the same question asked of a different
+    // surface -- and somebody who has ctrl-clicked four parts in the tree will
+    // try it in the viewport within the minute.
+    if (request.additive) {
+        // Ctrl on empty space keeps what is selected. Deselecting everything is
+        // what a plain click means, and a modifier that means "add" cannot also
+        // mean "clear".
+        if (hit.has_value())
+            inspector.toggle(hit->instance);
+        return hit;
+    }
+
     // Clicking empty space deselects. See the header: leaving the last thing
     // selected is how somebody edits the object they believed they had let go
     // of.

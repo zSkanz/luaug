@@ -959,12 +959,25 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     (void)editor.createInstance(host->world(), editorCommands.createClass, editorCommands.createParent,
                                                 host->runtime().dataModel(), inspector);
                 }
-                if (editorCommands.deleteInstance.valid())
-                    (void)editor.deleteInstance(host->world(), editorCommands.deleteInstance,
-                                                host->runtime().dataModel(), inspector);
-                if (editorCommands.duplicateInstance.valid())
-                    (void)editor.duplicateInstance(host->world(), editorCommands.duplicateInstance,
-                                                   host->runtime().dataModel(), inspector);
+                // **Copied before either verb runs**, because both of them
+                // change the selection -- a duplicate selects the copies -- and
+                // a span into the inspector would be a span into a vector that
+                // has been rewritten underneath it.
+                if (editorCommands.deleteSelection || editorCommands.duplicateSelection ||
+                    editorCommands.reparentTo.valid()) {
+                    const std::vector<core::InstanceId> acting(inspector.selectionSet().begin(),
+                                                               inspector.selectionSet().end());
+                    if (editorCommands.reparentTo.valid()) {
+                        (void)editor.reparent(host->world(), acting, editorCommands.reparentTo,
+                                              host->runtime().dataModel(), inspector);
+                    }
+                    if (editorCommands.deleteSelection) {
+                        (void)editor.deleteInstances(host->world(), acting, host->runtime().dataModel(), inspector);
+                    }
+                    if (editorCommands.duplicateSelection) {
+                        (void)editor.duplicateInstances(host->world(), acting, host->runtime().dataModel(), inspector);
+                    }
+                }
                 if (editorCommands.renameInstance.valid())
                     (void)editor.renameInstance(host->world(), editorCommands.renameInstance,
                                                 host->runtime().dataModel(), editorCommands.renameInstanceTo);

@@ -94,6 +94,10 @@ struct PickRequest
 {
     // In the viewport panel's own pixels, origin at its top-left.
     core::Vec2 pixel;
+    // Ctrl was held: add to the selection rather than replace it, and take out
+    // what was already in it. The same gesture the Explorer's rows use, because
+    // it is the same question asked of a different surface.
+    bool additive = false;
 };
 
 // What the editor is doing with the world.
@@ -223,13 +227,23 @@ struct EditorCommands
     scene::ClassId createClass = scene::InvalidClass;
     core::InstanceId createParent;
 
-    // Delete an instance and everything under it.
-    core::InstanceId deleteInstance;
-    // A copy of an instance, beside it.
-    core::InstanceId duplicateInstance;
-    // Rename an instance. Both halves or neither.
+    // **Delete or duplicate THE SELECTION**, not one named instance.
+    //
+    // A flag rather than an id because that is what actually happens: a
+    // right-click puts the row into the selection before the menu opens, and
+    // ctrl-A or a shift-range put four rows there. Naming one of them in the
+    // command would have the menu act on a different set from the one the
+    // person is looking at, which is the whole failure mode `isSelected` was
+    // added to the right-click to avoid.
+    bool deleteSelection = false;
+    bool duplicateSelection = false;
+    // Rename an instance. Both halves or neither -- and singular, because
+    // renaming four things to one name is not a thing anybody means.
     core::InstanceId renameInstance;
     std::string renameInstanceTo;
+
+    // Move the selection under this. Set by a drop in the Explorer.
+    core::InstanceId reparentTo;
 
     // Content-relative. Delete removes a folder with everything in it.
     std::string deleteContent;
@@ -251,8 +265,8 @@ struct EditorCommands
     [[nodiscard]] bool any() const noexcept
     {
         return play.has_value() || pause.has_value() || save || newScene || quit || resetLayout || clearSelection ||
-               undo || redo || createClass != scene::InvalidClass || deleteInstance.valid() ||
-               duplicateInstance.valid() || renameInstance.valid() || !saveAs.empty() || !openScene.empty() ||
+               undo || redo || createClass != scene::InvalidClass || deleteSelection || duplicateSelection ||
+               reparentTo.valid() || renameInstance.valid() || !saveAs.empty() || !openScene.empty() ||
                !createFolder.empty() || !deleteContent.empty() || !renameContent.empty();
     }
 };
@@ -347,7 +361,10 @@ public:
     [[nodiscard]] core::DVec3 cameraOrigin() const noexcept { return m_cameraOrigin; }
     [[nodiscard]] bool hasCamera() const noexcept { return m_hasCamera; }
 
-    void requestPick(core::Vec2 pixelInViewport) noexcept { m_pending = PickRequest{pixelInViewport}; }
+    void requestPick(core::Vec2 pixelInViewport, bool additive = false) noexcept
+    {
+        m_pending = PickRequest{pixelInViewport, additive};
+    }
     [[nodiscard]] bool pickPending() const noexcept { return m_pending.has_value(); }
 
     [[nodiscard]] RunState runState() const noexcept { return m_run; }
@@ -566,7 +583,21 @@ public:
     // Ask for exactly one tick while paused. A step is how somebody watches a
     // thing happen instead of inferring it from before and after, and it is the
     // one control a paused editor cannot do without.
-    void requestStep() noexcept { m_stepRequested = true; }
+    // **Only inside play mode.** A step is one tick of the simulation, and a
+    // world that is being edited is a world whose simulation is deliberately
+    // not running -- so a step there advances physics under somebody's hands
+    // for no reason they asked for. Every engine of this shape offers frame
+    // advance while PAUSED and nowhere else.
+    //
+    // Refused here rather than only hidden in the panel, which is the lesson
+    // five defects of E1 taught: a rule about the world belongs to the world's
+    // model, and a panel that is the only thing enforcing it is a rule with one
+    // caller.
+    void requestStep() noexcept
+    {
+        if (inPlayMode())
+            m_stepRequested = true;
+    }
 
     // How many of the frame's owed ticks the world may actually take.
     //

@@ -340,6 +340,17 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
         }
     }
 
+    // What the scene put under `Workspace`, counted before a line of script has
+    // run -- see the warning after the drain.
+    core::u32 authoredByScene = 0;
+    if (m_bootSceneApplied) {
+        for (core::InstanceId child = m_world->firstChild(m_workspace); child.valid();
+             child = m_world->nextSibling(child)) {
+            if (!m_world->generated(child))
+                ++authoredByScene;
+        }
+    }
+
     script::startScripts(m_runtime->state());
 
     // The boot drain. api-design.md §3's lifecycle reads "start each Script on
@@ -354,6 +365,38 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
     // an empty one.
     m_runtime->drain(core::Phase::FrameStart);
     m_world->retireDestroyed();
+
+    // **Two sources for one world, said out loud** (D074).
+    //
+    // A scene is what a project STARTS with and a script is what it then does
+    // (ADR 0047). A project that has both a scene and entry scripts which build
+    // a world has two answers to the same question, and the engine cannot merge
+    // them -- so a character saved into the scene and a character the script
+    // makes are two characters, which is exactly what a person sees the first
+    // time they save a scene of a world their code built.
+    //
+    // Counted rather than guessed, and reported with both numbers, because the
+    // useful form of this is "the file gave you 6 and the scripts added 5" and
+    // not "something may be duplicated". The resolution is the project's and
+    // there are only two: stop building that world in code -- which is what
+    // ADR 0047 asks projects to become and what `examples/06-scene` shows -- or
+    // do not give this project a scene.
+    if (m_bootSceneApplied) {
+        core::u32 authoredNow = 0;
+        for (core::InstanceId child = m_world->firstChild(m_workspace); child.valid();
+             child = m_world->nextSibling(child)) {
+            if (!m_world->generated(child))
+                ++authoredNow;
+        }
+        if (authoredNow > authoredByScene) {
+            const std::array<I18nArg, 2> args{
+                I18nArg{"scene", static_cast<core::i64>(authoredByScene)},
+                I18nArg{"scripts", static_cast<core::i64>(authoredNow - authoredByScene)},
+            };
+            core::log(LogLevel::Warn, LUAUG_TR("scene.warn.two_sources"), args);
+        }
+    }
+
     return std::nullopt;
 }
 

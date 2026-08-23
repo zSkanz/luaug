@@ -393,7 +393,6 @@ private:
     // pass that turns the mask into a line.
     rhi::PipelineHandle outlinePipeline_{};
     rhi::PipelineHandle outlineSkinnedPipeline_{};
-    rhi::PipelineHandle outlineInstancedPipeline_{};
     rhi::PipelineHandle outlineCompositePipeline_{};
 
     // Every shader handle this renderer created, so `destroy` can release them
@@ -909,17 +908,6 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
         .colorTargets = maskTarget,
         .debugName = "outline_mask_skinned",
     });
-    outlineInstancedPipeline_ = device.createGraphicsPipeline({
-        .vertexShader = shadowInstancedVertex,
-        .fragmentShader = outlineFragment,
-        .vertexBuffers = instancedBuffers,
-        .vertexAttributes = shadowInstancedAttributes,
-        .rasterizer = {.cullMode = rhi::CullMode::Back},
-        .depthStencil = {.depthTest = false, .depthWrite = false},
-        .colorTargets = maskTarget,
-        .debugName = "outline_mask_instanced",
-    });
-
     // Straight alpha over whatever the frame already holds. The shader hands
     // back a premultiplied colour with its own coverage in alpha, so the source
     // factor is One.
@@ -934,8 +922,7 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
     outlineCompositePipeline_ =
         fullscreen(outlineCompositeVertex, outlineCompositeFragment, outlineTarget, "outline_composite");
 
-    if (!outlinePipeline_.valid() || !outlineSkinnedPipeline_.valid() || !outlineInstancedPipeline_.valid() ||
-        !outlineCompositePipeline_.valid()) {
+    if (!outlinePipeline_.valid() || !outlineSkinnedPipeline_.valid() || !outlineCompositePipeline_.valid()) {
         destroy(device);
         return core::makeError(LUAUG_TR("render.err.pipeline_create_failed"));
     }
@@ -1265,7 +1252,6 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
                                           &pbrInstancedPipeline_,
                                           &outlinePipeline_,
                                           &outlineSkinnedPipeline_,
-                                          &outlineInstancedPipeline_,
                                           &outlineCompositePipeline_}) {
         if (pipeline->valid())
             device.destroy(*pipeline);
@@ -1323,12 +1309,16 @@ void DefaultRenderer::buildInstanceBatches(const RenderWorld& world, const MeshC
         // that reason. Skinned draws are not batched either -- a joint palette
         // is per draw and there is no room for one in a vertex stream.
         //
-        // Nor is an outlined one. A batch is drawn or skipped as a whole, and
-        // selecting one of five identical crates does not select the other
-        // four -- so a batch containing one would outline all five. One draw
-        // leaving a run is the whole cost, and it is paid only while a tool is
-        // looking at the world.
-        return !draw.transparent && draw.boneCount == 0 && !draw.outlined;
+        // **Selection is NOT a reason to leave a batch** (D073). The first cut
+        // of the outline pass excluded an outlined draw here, which split the
+        // run it was in -- and a run of identical meshes is how a whole forest
+        // is drawn. Whatever that split disturbed downstream, it took every
+        // boulder and every tree canopy in the flagship out of the frame the
+        // moment one of them was selected. The batching the entire frame
+        // depends on is not the place to solve a tool's problem: the outline
+        // pass ignores batching instead, which is where the cost belongs and
+        // where it is a handful of draws.
+        return !draw.transparent && draw.boneCount == 0;
     };
 
     for (core::usize index = 0; index < world.draws.size();) {
@@ -1506,7 +1496,6 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
     rhi::PipelineHandle currentPipeline = staticPipeline;
     const rhi::PipelineHandle instancedPipeline = selection == Selection::Shadow    ? shadowInstancedPipeline_
                                                   : selection == Selection::Prepass ? depthPrepassInstancedPipeline_
-                                                  : selection == Selection::Outline ? outlineInstancedPipeline_
                                                                                     : pbrInstancedPipeline_;
 
     // Pixels per world unit at one metre, from the projection itself rather
@@ -1533,7 +1522,14 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
         // member is skipped -- one call cannot be issued in pieces, which is
         // also why a batch is culled as a whole.
         const u32 batchIndex = drawIndex < batchOf_.size() ? batchOf_[drawIndex] : kNoBatch;
-        const InstanceBatch* batch = batchIndex == kNoBatch ? nullptr : &batches_[batchIndex];
+        // **The outline pass ignores batching.** A batch is drawn or skipped as
+        // a whole, and selecting one of five identical crates does not select
+        // the other four -- so an outlined draw inside a batch would outline
+        // all five or none. Treating every draw as its own here costs a handful
+        // of calls, because only what is selected is drawn at all, and it
+        // leaves the batching the rest of the frame is built on untouched.
+        const InstanceBatch* batch =
+            selection == Selection::Outline || batchIndex == kNoBatch ? nullptr : &batches_[batchIndex];
         if (batch != nullptr && batch->firstDraw != drawIndex)
             continue;
 
@@ -1547,11 +1543,6 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
             continue;
         if ((selection == Selection::Opaque || selection == Selection::Prepass) && draw.transparent)
             continue;
-        // **An outlined draw is never in a batch** -- `instanceable` refuses
-        // one, because a batch is drawn or skipped whole and selecting one of
-        // five identical crates does not select the other four. So this is a
-        // plain test on the draw.
-        //
         // A transparent selected part still gets an outline: what is selected
         // is a fact about the tool, not about the material.
         if (selection == Selection::Outline && !draw.outlined)
