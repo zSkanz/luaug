@@ -182,6 +182,25 @@ bool drawIcon(const IconAtlas* icons, std::string_view id, float size)
 // `strId` rather than the label, because the label changes with state (play
 // becomes stop) and an ImGui id that changes with state is a button that loses
 // its press half way through.
+// The height an `iconButton` with this face occupies, which is the face PLUS the
+// frame the button draws around it.
+//
+// Callers centre by this and never by the face. Centring a framed button by its
+// picture puts the picture in the middle of the row and the frame half a padding
+// outside it, at the top and the bottom -- which is a chevron and a plus
+// hanging out of their own row, and is exactly what happened the first time.
+[[nodiscard]] float iconButtonHeight(float size) noexcept
+{
+    return size + ImGui::GetStyle().FramePadding.y * 2.0f;
+}
+
+// The same for the other axis, and it is NOT the same number: a theme's frame
+// padding is two values and the height is the one everybody reaches for.
+[[nodiscard]] float iconButtonWidth(float size) noexcept
+{
+    return size + ImGui::GetStyle().FramePadding.x * 2.0f;
+}
+
 bool iconButton(const IconAtlas* icons, std::string_view id, float size, const char* strId, const char* word,
                 const char* tip)
 {
@@ -385,7 +404,20 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
 
             const ImVec2 rowOrigin = ImGui::GetCursorPos();
             const float iconSize = ImGui::GetTextLineHeight();
-            const auto centred = [&](float height) { return rowOrigin.y + (rowHeight - height) * 0.5f; };
+            // **The face a FRAMED button may wear on this row, derived from the
+            // row rather than from the font.** A button is its face plus the
+            // theme's padding, so sizing the face off the text and hoping the
+            // sum lands inside the row is how a chevron and a plus ended up
+            // hanging out of it. Taking the row and subtracting the frame
+            // cannot: whatever the row height is, the button is exactly it.
+            const float buttonFace = rowHeight - ImGui::GetStyle().FramePadding.y * 2.0f;
+            // Never above the row's top, whatever it is handed. An element
+            // taller than the row is a mistake, and starting it half a
+            // padding above the row is that mistake spread over two rows.
+            const auto centred = [&](float height) {
+                const float slack = rowHeight - height;
+                return rowOrigin.y + (slack > 0.0f ? slack * 0.5f : 0.0f);
+            };
 
             const std::string_view instanceName = world.atoms().text(world.name(row.id));
             const scene::ClassDescriptor* classDescriptor = world.classes().find(world.classOf(row.id));
@@ -447,6 +479,12 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             // selection would throw away the four things they had just picked
             // in order to act on one of them.
             if (commands != nullptr && dialogs != nullptr && ImGui::BeginPopupContextItem("row-menu")) {
+                // **The row's spacing is the ROW's, not this menu's.** Style
+                // vars are a global stack, so the zero the rows are drawn with
+                // reaches every window opened while they are -- and a menu whose
+                // items have no space between them is the row fix leaking into
+                // something that never asked for it.
+                ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, spacing);
                 if (!inspector.isSelected(row.id))
                     inspector.select(row.id);
 
@@ -465,6 +503,7 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 ImGui::Separator();
                 if (ImGui::MenuItem("Delete", nullptr, false, !engineOwned))
                     commands->deleteInstance = row.id;
+                ImGui::PopStyleVar();
                 ImGui::EndPopup();
             }
 
@@ -487,9 +526,9 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             // collapse, a closed one offers to expand.
             if (hasChildren) {
                 const bool open = g_open.contains(row.id.index);
-                ImGui::SetCursorPos(ImVec2(penX, centred(iconSize)));
+                ImGui::SetCursorPos(ImVec2(penX, centred(iconButtonHeight(buttonFace))));
                 const bool toggled = haveIcon ? iconButton(icons, open ? icons::ActionCollapse : icons::ActionExpand,
-                                                           iconSize, "toggle", open ? "-" : "+", nullptr)
+                                                           buttonFace, "toggle", open ? "-" : "+", nullptr)
                                               : ImGui::ArrowButton("toggle", open ? ImGuiDir_Down : ImGuiDir_Right);
                 if (toggled) {
                     if (!g_open.insert(row.id.index).second)
@@ -497,8 +536,10 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 }
             }
             // The space is reserved either way, so a leaf's icon lines up with
-            // its siblings' rather than sliding left to where their arrow is.
-            penX += ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x;
+            // its siblings' rather than sliding left to where their arrow is --
+            // and it is reserved at the button's WIDTH, which is the face plus
+            // the horizontal padding and is not the row height.
+            penX += iconButtonWidth(buttonFace) + ImGui::GetStyle().ItemInnerSpacing.x;
 
             // **The plus, at the end of the row's text.** Making a child of the
             // thing you are looking at is the commonest authoring act there is,
@@ -542,14 +583,14 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 // only rows where it is invisible are rows the pointer is not
                 // on, which are the rows nobody can click it on anyway. A
                 // thousand-row tree shows no plus signs at all.
-                ImGui::SetCursorPos(ImVec2(penX, centred(iconSize)));
+                ImGui::SetCursorPos(ImVec2(penX, centred(iconButtonHeight(buttonFace))));
 
                 const bool lit = rowHovered || inspector.isSelected(row.id) || addOpen;
                 if (!lit)
                     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.0f);
-                const bool add = haveIcon
-                                     ? iconButton(icons, icons::ActionAdd, iconSize, "add", "+", "add a child instance")
-                                     : ImGui::SmallButton("+");
+                const bool add =
+                    haveIcon ? iconButton(icons, icons::ActionAdd, buttonFace, "add", "+", "add a child instance")
+                             : ImGui::SmallButton("+");
                 if (!lit)
                     ImGui::PopStyleVar();
                 if (add)
@@ -565,6 +606,8 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             ImGui::SetCursorPos(ImVec2(rowOrigin.x, rowOrigin.y + rowHeight));
 
             if (commands != nullptr && ImGui::BeginPopup("add-child")) {
+                // Same as the row menu above: this window is not a row.
+                ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, spacing);
                 g_addOpenRow = row.id.index;
                 if (g_creatableWorld != inspector.worldGeneration() || g_creatable.empty()) {
                     g_creatableWorld = inspector.worldGeneration();
@@ -612,6 +655,7 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                     }
                 }
                 ImGui::EndChild();
+                ImGui::PopStyleVar();
                 ImGui::EndPopup();
             }
             else if (g_addOpenRow == row.id.index) {
@@ -1401,6 +1445,9 @@ void drawContent(Editor& editor, EditorCommands& commands, bool& open, EditorDia
                     ImGui::PopStyleColor();
 
                 if (ImGui::BeginPopupContextItem("entry-menu")) {
+                    // The rows are drawn with no vertical spacing; a menu is not
+                    // a row.
+                    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, entrySpacing);
                     if (entry.kind == ContentKind::Scene && ImGui::MenuItem("Open"))
                         commands.openScene = entry.path;
                     if (ImGui::MenuItem("Rename...")) {
@@ -1412,6 +1459,7 @@ void drawContent(Editor& editor, EditorCommands& commands, bool& open, EditorDia
                     ImGui::Separator();
                     if (ImGui::MenuItem("Delete"))
                         dialogs.deleteContentPath = entry.path;
+                    ImGui::PopStyleVar();
                     ImGui::EndPopup();
                 }
 
