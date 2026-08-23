@@ -18,6 +18,7 @@
 #include "luaug/script/modules.h"
 #include "luaug/script/services.h"
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -48,6 +49,14 @@ public:
     // merely yielded, which is the normal outcome for anything that calls
     // `task.wait`.
     [[nodiscard]] std::optional<core::EngineError> runSource(std::string_view source, std::string_view chunkName);
+
+    // Where `Instance.stamp` reads a prefab from (ADR 0051).
+    //
+    // Set by the host, which knows where `content/` is. `script` is L5 and has
+    // no filesystem, exactly as `scene` has none -- so this is the one question
+    // the binding asks upward, and a VM nobody gave one raises rather than
+    // handing back an empty prefab.
+    void setStampSource(std::function<std::optional<std::string>(std::string_view)> source);
 
 private:
     // The same thing with the memory category chosen rather than derived. The

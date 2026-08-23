@@ -154,10 +154,16 @@ void Editor::stop(scene::World& world, Inspector& inspector)
     m_status = EditorStatus{"stopped -- the world is back where you pressed play", false};
 }
 
-bool Editor::save(const scene::World& world, const std::filesystem::path& path)
+bool Editor::save(scene::World& world, const std::filesystem::path& path)
 {
     scene::SceneIoReport report;
-    const std::string text = scene::writeScene(world, &report);
+    // **The stamps this scene names, read once each**, so a stamped instance
+    // is written as a mark plus what differs rather than as a copy of the
+    // subtree (ADR 0051). Without this every one of them would be written in
+    // full and unlinked -- which loses nothing and is exactly what a save with
+    // no content root does.
+    scene::StampLibrary stamps(world, stampSource());
+    const std::string text = scene::writeScene(world, &report, &stamps);
 
     if (!platform::createDirectories(path.parent_path()) || !platform::writeTextFile(path, text)) {
         m_status = EditorStatus{"could not write " + path.string(), true};
@@ -718,45 +724,6 @@ scene::StampSource Editor::stampSource() const
     };
 }
 
-core::InstanceId Editor::stampBrokenBy(const scene::World& world, core::InstanceId id, core::NameAtom property)
-{
-    const core::InstanceId stampRoot = world.stampRootOf(id);
-    if (!stampRoot.valid())
-        return {};
-
-    // **The root's own transform and name are its own** (ADR 0049). Placing a
-    // thing is not changing the thing; a model that stopped being a model when
-    // you moved it would be useless for the case it exists for.
-    if (id == stampRoot) {
-        const std::string_view name = world.atoms().text(property);
-        if (name == "CFrame" || name == "Position" || name == "Name")
-            return {};
-    }
-    return stampRoot;
-}
-
-core::usize Editor::breakStampsFor(scene::World& world, std::span<const PendingWrite> writes)
-{
-    core::usize broken = 0;
-    for (const PendingWrite& write : writes) {
-        const core::InstanceId stampRoot = stampBrokenBy(world, write.target, write.property);
-        if (!stampRoot.valid())
-            continue;
-        // Already taken off by an earlier write in the same frame: a drag over
-        // four properties of one stamped instance is one break, not four.
-        if (!world.stampOf(stampRoot).valid())
-            continue;
-        world.setStamp(stampRoot, core::NameAtom{});
-        ++broken;
-    }
-    if (broken > 0) {
-        m_status = EditorStatus{broken == 1 ? "the stamp was broken by that edit"
-                                            : std::to_string(broken) + " stamps were broken by that edit",
-                                false};
-    }
-    return broken;
-}
-
 bool Editor::breakStamp(scene::World& world, core::InstanceId id)
 {
     const core::InstanceId stampRoot = world.stampRootOf(id);
@@ -951,7 +918,7 @@ bool Editor::createStamp(scene::World& world, core::InstanceId id, core::Instanc
 }
 
 bool Editor::instantiateStamp(scene::World& world, std::string_view name, core::InstanceId parent,
-                              core::InstanceId root, Inspector& inspector)
+                              core::InstanceId root, Inspector& inspector, bool linked)
 {
     if (!canParentInto(world, parent, root)) {
         m_status = EditorStatus{"nothing authored can live in that", true};
@@ -994,9 +961,15 @@ bool Editor::instantiateStamp(scene::World& world, std::string_view name, core::
         (void)world.setProperty(placed, world.atoms().intern("CFrame"), scene::Value{placed_at});
     }
 
+    // **A copy is a placement that forgets where it came from.** Same subtree,
+    // no mark -- so it is written in full, and nothing that happens to the
+    // stamp reaches it again.
+    if (!linked)
+        world.setStamp(placed, core::NameAtom{});
+
     inspector.select(placed);
     inspector.reveal(placed);
-    m_status = EditorStatus{"stamped " + relative, false};
+    m_status = EditorStatus{(linked ? "stamped " : "copied ") + relative, false};
     return true;
 }
 
@@ -1212,7 +1185,7 @@ bool Editor::sceneNameIsUsable(std::string_view typed) noexcept
     return true;
 }
 
-bool Editor::saveSceneAs(const scene::World& world, std::string_view relativePath)
+bool Editor::saveSceneAs(scene::World& world, std::string_view relativePath)
 {
     const std::string path = normalizeScenePath(relativePath);
     if (!sceneNameIsUsable(path)) {
@@ -1331,7 +1304,7 @@ bool Editor::openScene(scene::World& world, std::string_view relativePath, Inspe
     return true;
 }
 
-bool Editor::saveOpenScene(const scene::World& world)
+bool Editor::saveOpenScene(scene::World& world)
 {
     if (m_openScene.empty()) {
         m_status = EditorStatus{"no scene is open -- open one from the content browser first", true};

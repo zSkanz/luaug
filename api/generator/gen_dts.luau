@@ -456,6 +456,11 @@ if #Creatable > 0 then
     end
     table.insert(Lines, "declare Instance: {")
     table.insert(Lines, `    new: {table.concat(overloads, "\n        & ")},`)
+    -- `Instance.stamp` places a prefab by name (ADR 0051). Typed by hand rather
+    -- than from a class list, because what it returns depends on the FILE and
+    -- not on anything the schema knows -- so `Instance` is the honest answer,
+    -- and a caller narrows it with `:IsA` the way it narrows `FindFirstChild`.
+    table.insert(Lines, "    stamp: (name: string, linked: boolean?) -> Instance,")
     table.insert(Lines, "}")
     table.insert(Lines, "")
 end

@@ -159,6 +159,11 @@ ScriptRuntime::ScriptRuntime(scene::World& world) : m_world(world), m_impl(std::
     m_impl->services.reload = &m_impl->ownReload;
 }
 
+void ScriptRuntime::setStampSource(std::function<std::optional<std::string>(std::string_view)> source)
+{
+    m_impl->context.stamps = std::move(source);
+}
+
 ScriptRuntime::~ScriptRuntime()
 {
     if (m_impl->state != nullptr) {

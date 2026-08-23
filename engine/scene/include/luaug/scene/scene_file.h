@@ -4,9 +4,11 @@
 #include <luaug/core/id.h>
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
 // A world, written down.
 //
@@ -84,6 +86,13 @@ struct SceneIoReport
     // should still open, minus what is gone.
     core::u32 stamped = 0;
     core::u32 missingStamps = 0;
+    // Property overrides written or applied: what an instance has of its own
+    // (ADR 0051).
+    core::u32 overrides = 0;
+    // Stamped instances written IN FULL because they no longer have the shape
+    // of their stamp -- somebody added or removed something inside one. Counted
+    // rather than refused: a save must never lose what is in the world.
+    core::u32 unlinkedStamps = 0;
 };
 
 // How a scene gets the TEXT of a stamp it names (ADR 0049).
@@ -95,11 +104,45 @@ struct SceneIoReport
 // stamped instances are skipped with a count rather than a crash.
 using StampSource = std::function<std::optional<std::string>(std::string_view stamp)>;
 
+// The stamps a SAVE needs to read, built once each and kept for the write.
+//
+// **A stamped instance is written as its mark plus what differs from the stamp**
+// (ADR 0051), and "what differs" is a question about two trees -- so the stamp
+// has to be built, once, into a world of its own. A world with forty lamp posts
+// reads one file, not forty.
+//
+// Constructed from any world that shares the registries the save is about: a
+// `ClassId` is an index into a registry, so the reference tree has to be built
+// against the same ones or nothing in it could be compared with anything.
+class StampLibrary
+{
+public:
+    StampLibrary(World& registriesFrom, StampSource source);
+    ~StampLibrary();
+
+    StampLibrary(const StampLibrary&) = delete;
+    StampLibrary& operator=(const StampLibrary&) = delete;
+
+    // Opaque to callers: what a save needs from this is that it exists.
+    struct Entry;
+    [[nodiscard]] const Entry* reference(const std::string& stamp);
+
+private:
+    World& m_registries;
+    StampSource m_source;
+    std::unordered_map<std::string, std::unique_ptr<Entry>> m_built;
+};
+
 // Serialises the world's authored contents to JSON text.
 //
 // Deterministic: the same world produces the same bytes, which is what makes a
 // scene file diffable and what makes a round-trip test possible at all.
-[[nodiscard]] std::string writeScene(const World& world, SceneIoReport* report = nullptr);
+// `stamps` is what lets a stamped instance be written as a mark plus its
+// overrides. Without one, every stamped instance is written IN FULL and its
+// mark dropped -- which loses nothing and is counted, and is what a caller with
+// no content root can honestly do.
+[[nodiscard]] std::string writeScene(const World& world, SceneIoReport* report = nullptr,
+                                     StampLibrary* stamps = nullptr);
 
 // Removes everything a scene describes, leaving the world otherwise intact.
 //
@@ -136,7 +179,8 @@ readScene(World& world, std::string_view json, SceneIoReport* report = nullptr, 
 // `root`'s own stamp mark is ignored, because this is the file that mark points
 // at: a stamp made from an instance of itself would otherwise write a one-line
 // file that refers to the file being written.
-[[nodiscard]] std::string writeStamp(const World& world, core::InstanceId root, SceneIoReport* report = nullptr);
+[[nodiscard]] std::string writeStamp(const World& world, core::InstanceId root, SceneIoReport* report = nullptr,
+                                     StampLibrary* stamps = nullptr);
 
 // Instantiates a stamp under `parent` and marks the new root with `stamp`.
 //

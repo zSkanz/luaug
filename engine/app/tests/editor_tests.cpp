@@ -1309,49 +1309,36 @@ TEST_CASE("placing a stamp builds its subtree, selects it, and one undo takes al
     CHECK(editor.history().canUndo() == couldUndo);
 }
 
-TEST_CASE("moving a stamped instance keeps its mark, and changing anything else breaks it")
+TEST_CASE("editing a stamped instance keeps its mark")
 {
-    // **The rule ADR 0048 left open and 0049 answered.** Placing a thing is not
-    // changing the thing: four lamp posts in four places are four lamp posts,
-    // and a model that stopped being one when you moved it would be useless for
-    // the case it exists for.
+    // **This test asserted the opposite one commit ago**, and the reversal is
+    // the human's (ADR 0051). An instance INHERITS from its stamp: a change to
+    // one instance is an override that stays local, and a change to the stamp
+    // reaches every instance that has not overridden that property. There is
+    // nothing left to break on an edit, and nothing that has to be watched for.
     app::testing::Fixture fixture;
     scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
     Editor editor;
+    Inspector inspector;
 
     const core::InstanceId post = fixture.widget(world, "Post");
     const core::InstanceId lantern = fixture.widget(world, "Lantern");
     REQUIRE_FALSE(world.setParent(lantern, post).has_value());
     world.setStamp(post, fixture.atom("stamps/lantern-post.stamp.json"));
 
-    const core::NameAtom cframe = fixture.atom("CFrame");
-    const core::NameAtom name = fixture.atom("Name");
-    const core::NameAtom count = fixture.atom("Count");
-
-    // The root's own transform and name: its own.
-    CHECK_FALSE(Editor::stampBrokenBy(world, post, cframe).valid());
-    CHECK_FALSE(Editor::stampBrokenBy(world, post, name).valid());
-    // Anything else about the root, and ANYTHING at all about a descendant --
-    // including where the descendant is, because moving a part inside a stamp
-    // is changing what the stamp is.
-    CHECK(Editor::stampBrokenBy(world, post, count) == post);
-    CHECK(Editor::stampBrokenBy(world, lantern, cframe) == post);
-    CHECK(Editor::stampBrokenBy(world, lantern, count) == post);
-    // And nothing outside one is broken by anything.
-    CHECK_FALSE(Editor::stampBrokenBy(world, fixture.widget(world, "Loose"), count).valid());
-
-    // The sweep the frame loop makes before the writes land.
-    Inspector inspector;
-    inspector.enqueue(post, cframe, scene::Value{core::CFrameD{}});
-    CHECK(editor.breakStampsFor(world, inspector.pending()) == 0);
+    // A write to the root, and a write to something inside it. Both used to
+    // take the mark off; neither does.
+    REQUIRE(world.setProperty(post, fixture.atom("Count"), scene::Value{core::f64{3.0}}) ==
+            scene::World::SetResult::Changed);
+    REQUIRE(world.setProperty(lantern, fixture.atom("Count"), scene::Value{core::f64{4.0}}) ==
+            scene::World::SetResult::Changed);
     CHECK(world.stampOf(post).valid());
+    CHECK(world.stampRootOf(lantern) == post);
 
-    inspector.enqueue(lantern, count, scene::Value{core::f64{1.0}});
-    // One break, not two: a drag over four properties of one stamped instance
-    // is one break.
-    inspector.enqueue(lantern, cframe, scene::Value{core::CFrameD{}});
-    CHECK(editor.breakStampsFor(world, inspector.pending()) == 1);
-    CHECK_FALSE(world.stampOf(post).valid());
+    // What the serializer then writes is a mark plus what differs, which is
+    // `scene_file_tests`' subject rather than this one's.
+    (void)editor;
+    (void)inspector;
 }
 
 TEST_CASE("breaking a stamp is a step of its own, and undo puts the mark back")

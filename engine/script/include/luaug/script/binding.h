@@ -39,7 +39,11 @@
 #include "luaug/core/types.h"
 #include "luaug/scene/class_registry.h"
 
+#include <functional>
+#include <optional>
 #include <span>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -201,6 +205,15 @@ struct VmContext
     TaskScheduler* tasks = nullptr;
     ServiceState* services = nullptr;
     ModuleRegistry* modules = nullptr;
+
+    // Where `Instance.stamp` reads a prefab from (ADR 0051). Supplied by the
+    // host, which knows where `content/` is; `script` is L5 and has no
+    // filesystem, exactly as `scene` has none.
+    //
+    // Empty in a VM nobody gave one -- a conformance run, a fixture -- and
+    // `Instance.stamp` raises there rather than pretending: a prefab that
+    // silently arrived empty would be a bug shaped like content.
+    std::function<std::optional<std::string>(std::string_view)> stamps;
 
     // Indexed by Luau atom; holds the engine `NameAtom` id for the same text.
     // Grown by `useratom` as the VM interns each name, and never shrunk: an

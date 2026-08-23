@@ -1876,6 +1876,7 @@ declare Instance: {
         & (("AudioGroup") -> AudioGroup)
         & (("Sound") -> Sound)
         & (("AnimationPlayer") -> AnimationPlayer),
+    stamp: (name: string, linked: boolean?) -> Instance,
 }
 
 declare game: DataModel

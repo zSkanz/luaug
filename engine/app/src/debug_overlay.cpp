@@ -2336,8 +2336,19 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                         if (entry.kind == ContentKind::Stamp) {
                             if (ImGui::MenuItem("Open"))
                                 commands.openStamp = entry.path;
-                            if (ImGui::MenuItem("Place in Workspace"))
+                            // **Two ways to place one, and both are real.** A
+                            // linked instance follows the file; a copy is its
+                            // own from the first frame. A lamp post you will
+                            // place forty of wants the first; a starting point
+                            // you are about to rebuild wants the second.
+                            if (ImGui::MenuItem("Place (linked)")) {
                                 commands.placeStamp = entry.path;
+                                commands.placeStampLinked = true;
+                            }
+                            if (ImGui::MenuItem("Place a copy")) {
+                                commands.placeStamp = entry.path;
+                                commands.placeStampLinked = false;
+                            }
                         }
                         // **A directory cannot carry a colour**, so this one is
                         // kept in `.luaug/editor.json` keyed by path, while a

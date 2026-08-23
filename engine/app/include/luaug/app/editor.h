@@ -316,6 +316,9 @@ struct EditorCommands
     // Place one, under the selection if there is one and under `Workspace`
     // otherwise. The path is content-relative, which is what the browser has.
     std::string placeStamp;
+    // Whether that placement INHERITS from the stamp or is a copy that does not
+    // (ADR 0051). Both are things a person means by "instance this".
+    bool placeStampLinked = true;
     // Take the mark off this one, so it stops following its file.
     core::InstanceId breakStamp;
 
@@ -489,7 +492,7 @@ public:
     // Writes the world to `path`. Returns false and sets the status on failure;
     // the caller does not need to know which of the two steps failed, but a
     // person does, so the status says.
-    bool save(const scene::World& world, const std::filesystem::path& path);
+    bool save(scene::World& world, const std::filesystem::path& path);
     bool load(scene::World& world, const std::filesystem::path& path, Inspector& inspector);
 
     // --- The content browser -------------------------------------------------
@@ -548,7 +551,10 @@ public:
     // Writes the open scene back to where it came from. False when no scene is
     // open, which is a question rather than a failure: a project that has never
     // saved one has nothing for this to overwrite.
-    bool saveOpenScene(const scene::World& world);
+    // Non-const because a save READS the stamps a scene names, to write each
+    // stamped instance as a mark plus what differs (ADR 0051) -- and building
+    // those reference trees needs the world's registries.
+    bool saveOpenScene(scene::World& world);
 
     // --- Remembering, across a restart ---------------------------------------
     //
@@ -821,8 +827,20 @@ public:
 
     // **Places a stamp under `parent`**, selects it and asks the tree to reveal
     // it, as one undo step. `name` is what `createStamp` took.
+    //
+    // `linked` is the difference between the two things a person means by
+    // "instance this" (ADR 0051):
+    //
+    //   * **linked** -- it INHERITS. Change the stamp and this changes with it,
+    //     except where somebody has overridden a property here.
+    //   * **a copy** -- it is its own from the first frame. The stamp made it
+    //     and has nothing more to do with it.
+    //
+    // Both are real things to want, which is why both are here rather than one
+    // being the "right" one: a lamp post you will place forty of wants the
+    // link, and a starting point you are about to rebuild does not.
     bool instantiateStamp(scene::World& world, std::string_view name, core::InstanceId parent, core::InstanceId root,
-                          Inspector& inspector);
+                          Inspector& inspector, bool linked = true);
 
     // **Takes the mark off**, so the instance becomes an ordinary subtree that
     // serialises in full and no longer follows the file.
@@ -833,21 +851,21 @@ public:
     // mean deliberately.
     bool breakStamp(scene::World& world, core::InstanceId id);
 
-    // Whether an edit to `id` would break a mark, and which instance's.
+    // **Editing a stamped instance does NOT break its mark** (ADR 0051), and
+    // this is where a function used to sit that made it.
     //
-    // **The rule in one place**: everything inside a stamped subtree breaks it
-    // except the ROOT's own transform and name. Placing a thing is not changing
-    // the thing -- four lamp posts in four places are four lamp posts -- and a
-    // model that broke when you moved one would be useless for the case it
-    // exists for.
-    [[nodiscard]] static core::InstanceId stampBrokenBy(const scene::World& world, core::InstanceId id,
-                                                        core::NameAtom property);
-
-    // Applies that rule to what the properties panel and the manipulators are
-    // about to write, before `applyPending` writes it. Returns how many marks
-    // it took off, which the status line says out loud -- a link that
-    // dissolved silently is a link nobody can rely on.
-    core::usize breakStampsFor(scene::World& world, std::span<const PendingWrite> writes);
+    // ADR 0049 chose break-on-edit, from the human's own words at the time. They
+    // used it and reversed it: an instance INHERITS from its stamp, a change to
+    // one instance is an OVERRIDE that stays local, and a change to the stamp
+    // reaches every instance that has not overridden that property. So there is
+    // nothing to break and nothing to warn about -- the serializer writes what
+    // differs, and `breakStamp` below stays for the one case that is still
+    // deliberate.
+    //
+    // What is not an override is a STRUCTURAL change -- a child added or
+    // removed inside an instance -- and that is not refused either: the save
+    // writes such an instance in full and drops its mark, which loses nothing
+    // and is counted.
 
     // How a scene reads the stamps it names. Bound to this editor's content
     // root, and the one place that knows `content/` is where they live --
@@ -935,7 +953,7 @@ public:
     // Writes the world to a scene that does not exist yet, and adopts it as the
     // open one. `relativePath` is content-relative and gains the extension if it
     // does not carry it — a person typing a name should not have to know it.
-    bool saveSceneAs(const scene::World& world, std::string_view relativePath);
+    bool saveSceneAs(scene::World& world, std::string_view relativePath);
 
     // What `saveSceneAs` will actually write, given what somebody typed. Public
     // and pure so the dialog can show the resolved path while it is being typed

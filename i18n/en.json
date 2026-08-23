@@ -269,6 +269,8 @@
   "script.err.runtime": "Error while running {source}: {message}",
   "script.err.unknown_member": "{typeName} has no member named \"{member}\".",
   "script.err.instance_dead": "This Instance has been destroyed and can no longer be used.",
+  "script.err.no_stamp_source": "This world was not given anywhere to read stamps from, so Instance.stamp(\"{name}\") has nothing to read. A host supplies it; a conformance run and a bare fixture do not.",
+  "script.err.stamp_not_found": "No stamp named \"{name}\". The name is content-relative, the way the editor writes it -- \"lantern-post\" means content/stamps/lantern-post.stamp.json.",
   "script.err.module_not_found": "No module named \"{specifier}\", required from {source}.",
   "script.err.module_not_module": "Only a ModuleScript can be required; that is a {specifier}, required from {source}. A Script RUNS when the world does, so requiring one would run it a second time somewhere else.",
   "script.err.require_cycle": "Cyclic require: \"{specifier}\" is already being evaluated, and was required again from {source}. Split the shared part into a third module.",

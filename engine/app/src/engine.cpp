@@ -971,13 +971,6 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         if (options.editor && inspector.pendingCount() > 0)
             editor.history().record(authored(), "Edit", coalesceKeyFor(inspector.gesture(), inspector.pending()));
 
-        // **An edit inside a stamped subtree breaks its mark, before the edit
-        // lands** (ADR 0049). Here rather than inside `applyPending`, because
-        // the rule is the editor's: a script that moves a stamped instance at
-        // run time is playing, not authoring, and a link that dissolved
-        // because a game ran would be a link nobody could rely on.
-        if (options.editor)
-            (void)editor.breakStampsFor(authored(), inspector.pending());
         inspector.applyPending(authored());
 
         // A click resolves here too, and AFTER the drain rather than before:
@@ -1102,7 +1095,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                             ? primary
                             : (stageOf() != nullptr ? stageOf()->workspace() : host->workspace());
                     (void)editor.instantiateStamp(authored(), editorCommands.placeStamp, parent, authoredRoot(),
-                                                  inspector);
+                                                  inspector, editorCommands.placeStampLinked);
                 }
                 if (editorCommands.breakStamp.valid())
                     (void)editor.breakStamp(authored(), editorCommands.breakStamp);

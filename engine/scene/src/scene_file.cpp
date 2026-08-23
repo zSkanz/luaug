@@ -12,6 +12,15 @@
 #include <vector>
 
 namespace luaug::scene {
+
+// One stamp, built once and reused for every instance of it in a save. Its own
+// world, so building it cannot touch the world being written.
+struct StampLibrary::Entry
+{
+    std::unique_ptr<World> world;
+    core::InstanceId root;
+};
+
 namespace {
 using core::JsonValue;
 using core::JsonWriter;
@@ -180,10 +189,138 @@ void collectPaths(const World& world, core::InstanceId id, const std::string& pr
     }
 }
 
-// The one property a stamped instance keeps as its own (ADR 0049): where it is.
-// A class with no `CFrame` simply has no placement to preserve, which is not a
-// case that needs handling.
-constexpr std::string_view kTransformProperty = "CFrame";
+// --- Stamped instances, written as a mark plus what differs (ADR 0051) -------
+//
+// **The model the human asked for is INHERITANCE, not a copy.** An instance of
+// a stamp follows its file: change the file and every instance changes with it.
+// What an instance may have of its own is a set of property OVERRIDES -- "muda
+// alguns parâmetros do novo sem influenciar o anterior" -- and those are the
+// only thing about it this file records.
+//
+// So a stamped instance serialises as its mark, its name, its placement, and a
+// map of overrides keyed by the path INSIDE the stamp. Nothing else, and none
+// of its children: the children are the stamp's.
+//
+// **The diff is done against the stamp itself**, built into a scratch world
+// once per stamp per save. There is no cheaper honest way: "what differs from
+// the source" is a question about two trees, and comparing serialised text
+// would compare formatting as well as values.
+
+// The path of `id` inside the stamped subtree rooted at `stampRoot`: names
+// joined by '.', and empty for the root itself.
+//
+// By NAME rather than by index, because a name is what a person reading the
+// file can find, and the structural rule below means two children of one parent
+// cannot both be overridden under one name without the link already being gone.
+[[nodiscard]] std::string overridePath(const World& world, core::InstanceId stampRoot, core::InstanceId id)
+{
+    std::string path;
+    for (core::InstanceId walk = id; walk.valid() && walk != stampRoot; walk = world.parentOf(walk)) {
+        const std::string_view name = world.atoms().text(world.name(walk));
+        path = path.empty() ? std::string(name) : std::string(name) + "." + path;
+    }
+    return path;
+}
+
+// Whether two subtrees have the same SHAPE: the same classes, in the same
+// order, all the way down.
+//
+// **A structural change is not an override.** Adding a child to one lamp post,
+// or deleting one, is not "a parameter of this instance" -- it is a different
+// thing -- and a format that tried to record it would be inventing Unity's
+// added-and-removed-component machinery in a corner nobody designed. When the
+// shapes disagree the instance is written IN FULL and its mark dropped, which
+// loses nothing and says what it did.
+[[nodiscard]] bool sameShape(const World& live, core::InstanceId a, const World& reference, core::InstanceId b)
+{
+    const ClassDescriptor* liveClass = live.classes().find(live.classOf(a));
+    const ClassDescriptor* referenceClass = reference.classes().find(reference.classOf(b));
+    if (liveClass == nullptr || referenceClass == nullptr)
+        return false;
+    if (live.atoms().text(liveClass->name) != reference.atoms().text(referenceClass->name))
+        return false;
+    if (live.childCount(a) != reference.childCount(b))
+        return false;
+
+    core::InstanceId liveChild = live.firstChild(a);
+    core::InstanceId referenceChild = reference.firstChild(b);
+    while (liveChild.valid() && referenceChild.valid()) {
+        if (!sameShape(live, liveChild, reference, referenceChild))
+            return false;
+        liveChild = live.nextSibling(liveChild);
+        referenceChild = reference.nextSibling(referenceChild);
+    }
+    return !liveChild.valid() && !referenceChild.valid();
+}
+
+// Emits the properties of `liveId` that differ from `refId`, under
+// `overridePath`. Recurses into children by position.
+//
+// **Instance-valued properties are never overrides**, and that is a rule rather
+// than an omission: the live one names an instance in the live world and the
+// reference names one in the stamp's own, so the two ids are not comparable at
+// all. A reference inside a stamp resolves inside that stamp, which is what
+// `placeStamp` already guarantees.
+void collectOverrides(JsonWriter& out, bool& anyOverride, const World& live, core::InstanceId liveId,
+                      const World& reference, core::InstanceId refId, core::InstanceId stampRoot,
+                      const std::unordered_map<core::u32, std::string>& paths, SceneIoReport& report)
+{
+    const ClassDescriptor* descriptor = live.classes().find(live.classOf(liveId));
+    bool anyHere = false;
+
+    for (const ClassDescriptor* current = descriptor; current != nullptr;
+         current = live.classes().find(current->super)) {
+        for (const PropertyDesc& property : current->properties) {
+            if (property.get == nullptr || property.set == nullptr || property.readOnly)
+                continue;
+            if (property.type == ValueType::Instance)
+                continue;
+            const std::string_view name = live.atoms().text(property.name);
+            if (isStructuralProperty(name))
+                continue;
+
+            const std::optional<Value> mine = property.get(live, liveId);
+            if (!mine.has_value())
+                continue;
+
+            // The same property on the reference, found by NAME because the two
+            // worlds share their registries but not their ids.
+            const core::NameAtom referenceAtom = reference.atoms().lookup(name);
+            const PropertyDesc* referenceProperty =
+                referenceAtom.valid() ? reference.classes().findProperty(reference.classOf(refId), referenceAtom)
+                                      : nullptr;
+            std::optional<Value> theirs;
+            if (referenceProperty != nullptr && referenceProperty->get != nullptr)
+                theirs = referenceProperty->get(reference, refId);
+            if (theirs.has_value() && *theirs == *mine)
+                continue;
+
+            if (!anyHere) {
+                if (!anyOverride) {
+                    out.key("overrides");
+                    out.beginObject();
+                    anyOverride = true;
+                }
+                out.key(overridePath(live, stampRoot, liveId));
+                out.beginObject();
+                anyHere = true;
+            }
+            out.key(name);
+            writeValue(out, live, *mine, paths, report);
+            ++report.overrides;
+        }
+    }
+    if (anyHere)
+        out.endObject();
+
+    core::InstanceId liveChild = live.firstChild(liveId);
+    core::InstanceId referenceChild = reference.firstChild(refId);
+    while (liveChild.valid() && referenceChild.valid()) {
+        collectOverrides(out, anyOverride, live, liveChild, reference, referenceChild, stampRoot, paths, report);
+        liveChild = live.nextSibling(liveChild);
+        referenceChild = reference.nextSibling(referenceChild);
+    }
+}
 
 // `expandStamped` is the instance whose own stamp mark is IGNORED, and there is
 // exactly one situation with one: writing the stamp FILE, whose root is an
@@ -191,7 +328,7 @@ constexpr std::string_view kTransformProperty = "CFrame";
 // collapses to its mark.
 void writeInstance(JsonWriter& out, const World& world, core::InstanceId id,
                    const std::unordered_map<core::u32, std::string>& paths, SceneIoReport& report,
-                   core::InstanceId expandStamped = core::InstanceId{})
+                   core::InstanceId expandStamped = core::InstanceId{}, StampLibrary* stamps = nullptr)
 {
     out.beginObject();
 
@@ -210,21 +347,26 @@ void writeInstance(JsonWriter& out, const World& world, core::InstanceId id,
     // a marked instance cannot have any other override.
     const core::NameAtom stamp = world.stampOf(id);
     if (stamp.valid() && id != expandStamped) {
-        out.field("stamp", world.atoms().text(stamp));
-        const PropertyDesc* transform =
-            world.classes().findProperty(world.classOf(id), world.atoms().lookup(kTransformProperty));
-        if (transform != nullptr && transform->get != nullptr) {
-            if (const std::optional<Value> value = transform->get(world, id); value.has_value()) {
-                out.key("properties");
-                out.beginObject();
-                out.key(kTransformProperty);
-                writeValue(out, world, *value, paths, report);
+        const std::string stampName(world.atoms().text(stamp));
+        const StampLibrary::Entry* reference = stamps != nullptr ? stamps->reference(stampName) : nullptr;
+
+        // **The shape has to match, or this is not an instance of that stamp
+        // any more.** Somebody added a child, or deleted one, or the file moved
+        // on structurally -- and a format that tried to record THAT would be
+        // inventing an added-and-removed-object machinery nobody designed. The
+        // instance is written in full instead, which loses nothing, and the
+        // count says it happened.
+        if (reference != nullptr && sameShape(world, id, *reference->world, reference->root)) {
+            out.field("stamp", stampName);
+            bool anyOverride = false;
+            collectOverrides(out, anyOverride, world, id, *reference->world, reference->root, id, paths, report);
+            if (anyOverride)
                 out.endObject();
-                ++report.properties;
-            }
+            out.endObject();
+            ++report.stamped;
+            return;
         }
-        out.endObject();
-        return;
+        ++report.unlinkedStamps;
     }
 
     // The same ancestry walk the world hash makes, and in the same order, so a
@@ -294,7 +436,7 @@ void writeInstance(JsonWriter& out, const World& world, core::InstanceId id,
             // inside a streamed chunk were not separately authored either.
             if (world.generated(child))
                 continue;
-            writeInstance(out, world, child, paths, report);
+            writeInstance(out, world, child, paths, report, expandStamped, stamps);
         }
         out.endArray();
     }
@@ -396,24 +538,31 @@ core::InstanceId readInstance(World& world, core::InstanceId parent, const JsonV
 // refusing an absurd one.
 constexpr int kMaxStampDepth = 4;
 
+// The seed a reference world is built with. A constant: nothing in one is
+// simulated and nothing reads the generator, and a seed from anywhere else
+// would make a save's bytes depend on when it ran.
+constexpr core::u64 kReferenceSeed = 0x5245'4645u;
+
 // Reads the stamp `name` through the caller's source and builds it under
 // `parent`, marked. An invalid id means the source had nothing, the text was
 // not a stamp, or the class it names is one this build does not have.
 [[nodiscard]] core::InstanceId placeStamp(World& world, core::InstanceId parent, std::string_view name,
                                           SceneIoReport& report, const StampSource* stamps, int depth);
 
-// Everything an instance carries that is not its identity or its children.
+// A dotted path BELOW `root`. Defined beside `resolvePath`, declared here
+// because a stamped node applies its overrides through it.
+[[nodiscard]] core::InstanceId resolveInside(const World& world, core::InstanceId root, std::string_view path);
+
+// The properties in one JSON object, applied to one instance.
 //
-// Split out because the scene's ROOT is applied to the `Workspace` that already
-// exists rather than created -- and its own properties are as much a part of the
-// world as its children's are. `CurrentCamera` is the one that proves it: a
-// scene that restored every part and not the camera would load into a world
-// nothing can see.
-void applyNode(World& world, core::InstanceId id, const JsonValue& json, std::vector<PendingReference>& pending,
-               SceneIoReport& report)
+// Split out of `applyNode` because a stamped instance's OVERRIDES are exactly
+// this shape at a path inside it (ADR 0051) -- and two copies of "how a
+// property is read back" would disagree the first time either moved.
+void applyProperties(World& world, core::InstanceId id, const JsonValue& properties,
+                     std::vector<PendingReference>& pending, SceneIoReport& report)
 {
     const ClassId classId = world.classOf(id);
-    if (const JsonValue properties = json["properties"]; properties.type() == core::JsonType::Object) {
+    if (properties.type() == core::JsonType::Object) {
         for (core::usize index = 0; index < properties.size(); ++index) {
             const std::string_view name = properties.keyAt(index);
             const core::NameAtom atom = world.atoms().intern(name);
@@ -453,6 +602,19 @@ void applyNode(World& world, core::InstanceId id, const JsonValue& json, std::ve
                 ++report.properties;
         }
     }
+}
+
+// Everything an instance carries that is not its identity or its children.
+//
+// Split out because the scene's ROOT is applied to the `Workspace` that already
+// exists rather than created -- and its own properties are as much a part of the
+// world as its children's are. `CurrentCamera` is the one that proves it: a
+// scene that restored every part and not the camera would load into a world
+// nothing can see.
+void applyNode(World& world, core::InstanceId id, const JsonValue& json, std::vector<PendingReference>& pending,
+               SceneIoReport& report)
+{
+    applyProperties(world, id, json["properties"], pending, report);
 
     if (const JsonValue attributes = json["attributes"]; attributes.type() == core::JsonType::Object) {
         for (core::usize index = 0; index < attributes.size(); ++index) {
@@ -515,10 +677,27 @@ core::InstanceId readInstance(World& world, core::InstanceId parent, const JsonV
             return {};
         }
         world.setName(placed, world.atoms().intern(json["name"].asString()));
-        // The instance's own overrides, which the break rule limits to where it
-        // is. `applyNode` rather than a hand-written `CFrame` case, so a rule
-        // that ever widens widens in one place.
-        applyNode(world, placed, json, pending, report);
+
+        // **What this instance has of its own** (ADR 0051), keyed by the path
+        // inside the stamp: `""` is the instance itself and `Lantern.Bulb` is
+        // something under it. Applied AFTER the stamp has been built, which is
+        // what makes an override an override -- the stamp says what a thing is
+        // and these say what this one of them is like.
+        if (const JsonValue overrides = json["overrides"]; overrides.type() == core::JsonType::Object) {
+            for (core::usize index = 0; index < overrides.size(); ++index) {
+                const std::string_view path = overrides.keyAt(index);
+                const core::InstanceId target = path.empty() ? placed : resolveInside(world, placed, path);
+                if (!target.valid()) {
+                    // The stamp moved on and no longer has what this override
+                    // names. Counted rather than fatal, exactly as an unknown
+                    // class is: a scene should still open, minus what is gone.
+                    ++report.refusedProperties;
+                    continue;
+                }
+                applyProperties(world, target, overrides[path], pending, report);
+                ++report.overrides;
+            }
+        }
         ++report.stamped;
         return placed;
     }
@@ -546,6 +725,27 @@ core::InstanceId readInstance(World& world, core::InstanceId parent, const JsonV
             readInstance(world, id, children.at(index), pending, report, stamps, depth);
     }
     return id;
+}
+
+// A dotted path BELOW `root`, where `resolvePath` takes one whose first segment
+// names the root itself. Two functions rather than a flag, because the two
+// shapes come from two formats and conflating them is how a path resolves to
+// the wrong instance in exactly one of them.
+[[nodiscard]] core::InstanceId resolveInside(const World& world, core::InstanceId root, std::string_view path)
+{
+    core::InstanceId at = root;
+    while (!path.empty() && at.valid()) {
+        const core::usize cursor = path.find('.');
+        const std::string_view segment = cursor == std::string_view::npos ? path : path.substr(0, cursor);
+        const core::NameAtom atom = world.atoms().lookup(segment);
+        if (!atom.valid())
+            return {};
+        at = world.findFirstChild(at, atom);
+        if (cursor == std::string_view::npos)
+            break;
+        path.remove_prefix(cursor + 1);
+    }
+    return at;
 }
 
 [[nodiscard]] core::InstanceId resolvePath(const World& world, core::InstanceId root, std::string_view path)
@@ -638,7 +838,47 @@ void clearScene(World& world)
         (void)world.destroy(child);
 }
 
-std::string writeScene(const World& world, SceneIoReport* report)
+StampLibrary::StampLibrary(World& registriesFrom, StampSource source)
+    : m_registries(registriesFrom), m_source(std::move(source))
+{}
+
+StampLibrary::~StampLibrary() = default;
+
+const StampLibrary::Entry* StampLibrary::reference(const std::string& stamp)
+{
+    if (const auto found = m_built.find(stamp); found != m_built.end())
+        return found->second == nullptr ? nullptr : found->second.get();
+
+    // **A stamp that cannot be read is remembered as unreadable**, so a world
+    // with forty instances of a deleted stamp asks the filesystem once.
+    if (!m_source) {
+        m_built.emplace(stamp, nullptr);
+        return nullptr;
+    }
+    const std::optional<std::string> text = m_source(stamp);
+    if (!text.has_value()) {
+        m_built.emplace(stamp, nullptr);
+        return nullptr;
+    }
+
+    auto entry = std::make_unique<Entry>();
+    entry->world =
+        std::make_unique<World>(m_registries.classes(), m_registries.enums(), m_registries.atoms(), kReferenceSeed);
+    SceneIoReport ignored;
+    // Unparented, because a reference tree is never looked at through a
+    // hierarchy -- only walked from its root.
+    entry->root = readStamp(*entry->world, *text, core::InstanceId{}, stamp, &ignored);
+    if (!entry->root.valid()) {
+        m_built.emplace(stamp, nullptr);
+        return nullptr;
+    }
+
+    const Entry* raw = entry.get();
+    m_built.emplace(stamp, std::move(entry));
+    return raw;
+}
+
+std::string writeScene(const World& world, SceneIoReport* report, StampLibrary* stamps)
 {
     SceneIoReport local;
     SceneIoReport& out = report != nullptr ? *report : local;
@@ -653,7 +893,7 @@ std::string writeScene(const World& world, SceneIoReport* report)
         std::unordered_map<core::u32, std::string> paths;
         collectPaths(world, workspace, {}, paths);
         writer.key("root");
-        writeInstance(writer, world, workspace, paths, out);
+        writeInstance(writer, world, workspace, paths, out, core::InstanceId{}, stamps);
     }
 
     writer.endObject();
@@ -710,7 +950,7 @@ std::optional<core::EngineError> readScene(World& world, std::string_view json, 
     return std::nullopt;
 }
 
-std::string writeStamp(const World& world, core::InstanceId root, SceneIoReport* report)
+std::string writeStamp(const World& world, core::InstanceId root, SceneIoReport* report, StampLibrary* stamps)
 {
     SceneIoReport local;
     SceneIoReport& out = report != nullptr ? *report : local;
@@ -727,7 +967,7 @@ std::string writeStamp(const World& world, core::InstanceId root, SceneIoReport*
         // `root`'s own mark is IGNORED, because this is the file that mark
         // points at: a stamp made from an instance of itself would otherwise
         // write a one-line file referring to the file being written.
-        writeInstance(writer, world, root, paths, out, root);
+        writeInstance(writer, world, root, paths, out, root, stamps);
     }
 
     writer.endObject();

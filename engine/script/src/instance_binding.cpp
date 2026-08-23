@@ -1,5 +1,6 @@
 #include "luaug/script/instance_binding.h"
 
+#include "luaug/scene/scene_file.h"
 #include "luaug/scene/world.h"
 #include "luaug/script/datatypes.h"
 #include "luaug/script/signals.h"
@@ -9,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -770,6 +772,58 @@ int methodGetExtentsSize(lua_State* L)
 
 // --- Instance.new ------------------------------------------------------------
 
+// `Instance.stamp(name[, linked])` -- a prefab, placed by code (ADR 0051).
+//
+// **The same two things the editor's menu offers**, because they are the same
+// two things: a LINKED instance inherits from its file and changes with it, and
+// a copy is its own from the first frame. A game that spawns forty lamp posts
+// wants the first; one that spawns a starting point it is about to rebuild
+// wants the second.
+//
+// Returns the placed instance, unparented, exactly as `Instance.new` does. The
+// caller parents it, which is what makes `Instance.stamp("lantern").Parent =
+// workspace` read like every other line of this API.
+//
+// **The stamps come from the host**, through the same source a scene load uses.
+// A VM with none -- a conformance run, a test fixture -- raises rather than
+// pretending: a prefab that silently arrived empty would be a bug shaped like
+// content.
+int instanceStamp(lua_State* L)
+{
+    size_t length = 0;
+    const char* text = luaL_checklstring(L, 1, &length);
+    const std::string name(text, length);
+    const bool linked = lua_isnoneornil(L, 2) || lua_toboolean(L, 2) != 0;
+
+    VmContext& ctx = context(L);
+    if (!ctx.stamps) {
+        const core::I18nArg args[] = {{"name", std::string_view{name}}};
+        raise(L, LUAUG_TR("script.err.no_stamp_source"), args);
+    }
+
+    const std::optional<std::string> source = ctx.stamps(name);
+    if (!source.has_value()) {
+        const core::I18nArg args[] = {{"name", std::string_view{name}}};
+        raise(L, LUAUG_TR("script.err.stamp_not_found"), args);
+    }
+
+    World& w = world(L);
+    scene::SceneIoReport report;
+    // Unparented, like `Instance.new`. A stamp's own internal references still
+    // resolve, because `readStamp` resolves them against the placed root.
+    const core::InstanceId placed = scene::readStamp(w, *source, core::InstanceId{}, name, &report);
+    if (!placed.valid()) {
+        const core::I18nArg args[] = {{"name", std::string_view{name}}};
+        raise(L, LUAUG_TR("script.err.stamp_not_found"), args);
+    }
+
+    if (!linked)
+        w.setStamp(placed, core::NameAtom{});
+
+    pushInstance(L, placed);
+    return 1;
+}
+
 int instanceNew(lua_State* L)
 {
     World& w = world(L);
@@ -1007,7 +1061,7 @@ void registerInstanceBinding(lua_State* L)
 
     bindInstanceMethods(L, InstanceMethods);
 
-    const luaL_Reg constructors[] = {{"new", instanceNew}, {nullptr, nullptr}};
+    const luaL_Reg constructors[] = {{"new", instanceNew}, {"stamp", instanceStamp}, {nullptr, nullptr}};
     luaL_register(L, "Instance", constructors);
     lua_setreadonly(L, -1, true);
     lua_pop(L, 1);

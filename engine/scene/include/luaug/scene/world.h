@@ -507,10 +507,17 @@ private:
 
 public:
     [[nodiscard]] const ClassRegistry& classes() const noexcept { return m_classes; }
+    // Non-const, so a caller holding one world can build a SECOND against the
+    // same registries -- which the prefab stage does, and which the serializer
+    // does to diff a stamped instance against the stamp it came from. A
+    // registry is a build-time fact shared by every world in a process; two
+    // copies of one would be two answers to "what is a Part".
+    [[nodiscard]] ClassRegistry& classes() noexcept { return m_classes; }
     // Held here rather than reached separately because every consumer that has
     // one reflection table wants the other: a property write validates an enum
     // value, and the binding that pushes one back out has to name its item.
     [[nodiscard]] const EnumRegistry& enums() const noexcept { return m_enums; }
+    [[nodiscard]] EnumRegistry& enums() noexcept { return m_enums; }
 
     // Component storage the generated property accessors read and write. Public
     // because those accessors are free functions in generated code rather than

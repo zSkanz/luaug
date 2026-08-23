@@ -351,6 +351,12 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
         }
     }
 
+    // **`Instance.stamp` reads from the same place a scene load does**, so a
+    // prefab named in code and one named in a file mean the same file (ADR
+    // 0051). A project with no source gets none, and the binding says so
+    // rather than handing back an empty prefab.
+    m_runtime->setStampSource(options.bootStamps);
+
     script::startScripts(m_runtime->state());
 
     // The boot drain. api-design.md §3's lifecycle reads "start each Script on
