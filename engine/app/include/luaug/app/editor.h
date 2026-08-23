@@ -153,9 +153,6 @@ struct EditorDialogs
     bool preferences = false;
     bool about = false;
     bool newFolder = false;
-    // The new-script box. Beside `newFolder` because it is the same shape of
-    // question: a name, and somewhere it goes.
-    bool newScript = false;
     // The make-a-stamp box, which is the same shape again -- and it carries the
     // instance the question is ABOUT, because "a stamp of what" is decided by
     // the row somebody right-clicked and not by whatever is selected when they
@@ -257,7 +254,6 @@ struct EditorCommands
     // because it may touch the disk -- so it creates the FILE, and the instance
     // appears because the mount finds it (ADR 0048). The rule is honoured rather
     // than bypassed.
-    std::string createScript;
     // Ask for the Save As dialog. A flag rather than the dialog opening itself,
     // because the toolbar button and File > Save Scene As have to reach the
     // same one.
@@ -355,8 +351,7 @@ struct EditorCommands
                undo || redo || colorAsked || stampSubject.valid() || !placeStamp.empty() || breakStamp.valid() ||
                !openStamp.empty() || saveStamp || closeStamp || createClass != scene::InvalidClass || deleteSelection ||
                duplicateSelection || reparentTo.valid() || renameInstance.valid() || !saveAs.empty() ||
-               !openScene.empty() || !createFolder.empty() || !createScript.empty() || !deleteContent.empty() ||
-               !renameContent.empty();
+               !openScene.empty() || !createFolder.empty() || !deleteContent.empty() || !renameContent.empty();
     }
 };
 
@@ -517,26 +512,6 @@ public:
     // Refuses a name that is not a name, and refuses to overwrite. A "new
     // script" that silently replaced somebody's file would be the worst button
     // in the editor.
-    bool createScript(const std::filesystem::path& projectRoot, std::string_view name);
-
-    // What the last `createScript` wrote, so the caller can MOUNT it.
-    //
-    // **Writing the file was never the whole job.** A `Script` appears in the
-    // tree because the mount finds it, and nothing mounts between boot and a
-    // reload -- so "New Script" wrote a file, said "on the next reload", and
-    // showed the person nothing. The frame loop mounts this one entry and
-    // selects what comes out, which is what makes the act visible.
-    //
-    // `mountPath` is empty when the last attempt wrote nothing.
-    struct ScriptFile
-    {
-        // Relative to the project, which is what a module registers under.
-        std::string projectPath;
-        // Relative to `src/scripts`, which is what the tree is built from.
-        std::string mountPath;
-        std::string source;
-    };
-    [[nodiscard]] const ScriptFile& lastScript() const noexcept { return m_lastScript; }
 
     // Opens a project's content root. A project with no `content/` is a normal
     // state and not an error -- every example before `06-scene` is one.
@@ -1205,7 +1180,6 @@ private:
     // than hashed so the file it is written to is the same bytes for the same
     // state -- the property every other format in this repository has.
     std::map<std::string, core::Color3> m_contentColors;
-    ScriptFile m_lastScript;
     // The project's own tree, built once when the content root opens. A
     // `Stage` in everything but name -- a bare world with a root and no
     // services -- and named apart because the two never coexist by accident:

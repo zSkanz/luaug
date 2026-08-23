@@ -934,23 +934,6 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 ImGui::SetNextItemWidth(210.0f);
                 ImGui::InputTextWithHint("##add-filter", "filter", g_addFilter.data(), g_addFilter.size());
 
-                // **`Script` is where somebody looks for it, and it explains
-                // itself** (ADR 0048). It is not in the list below because
-                // `Instance.new("Script")` is refused -- a script exists
-                // because a FILE does -- and a person who comes here looking
-                // for one and finds nothing concludes the engine cannot make
-                // them. So it is here, above the classes, and it opens the box
-                // that writes the file.
-                if (dialogs != nullptr && ImGui::Selectable("Script...")) {
-                    dialogs->newScript = true;
-                    ImGui::CloseCurrentPopup();
-                }
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("a script is a FILE: this writes src/scripts/<name>.luau and the tree grows a "
-                                      "Script for it under ScriptService");
-                }
-                ImGui::Separator();
-
                 const std::string_view filter(g_addFilter.data());
                 if (ImGui::BeginChild("add-list", ImVec2(210.0f, 260.0f))) {
                     for (const scene::ClassId classId : g_creatable) {
@@ -2436,12 +2419,6 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                                            ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
             if (ImGui::MenuItem("New Folder..."))
                 dialogs.newFolder = true;
-            // Under the browser rather than under the Explorer's plus, because
-            // what it makes is a FILE. The Explorer's plus offers what
-            // `Instance.new` accepts and `Script` is deliberately not one of
-            // them (ADR 0048).
-            if (ImGui::MenuItem("New Script..."))
-                dialogs.newScript = true;
             if (ImGui::MenuItem("Refresh"))
                 (void)tree.refresh();
             ImGui::EndPopup();
@@ -2469,10 +2446,6 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
     if (ImGui::BeginMenu("File")) {
         if (ImGui::MenuItem("New Scene"))
             commands.newScene = true;
-        // Beside New Scene because they are the two things a project is made of:
-        // a world and the code that runs on it (ADR 0047).
-        if (ImGui::MenuItem("New Script..."))
-            dialogs.newScript = true;
         ImGui::Separator();
         // Greyed rather than hidden when there is nothing to save to: the item
         // has to be where somebody expects it even when it cannot act, or they
@@ -2657,10 +2630,6 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         dialogs.newFolder = false;
         ImGui::OpenPopup("New Folder");
     }
-    if (dialogs.newScript) {
-        dialogs.newScript = false;
-        ImGui::OpenPopup("New Script");
-    }
     if (dialogs.newStamp) {
         dialogs.newStamp = false;
         ImGui::OpenPopup("New Stamp");
@@ -2737,49 +2706,6 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         if ((submitted || accepted) && ContentTree::isUsableName(typed)) {
             commands.createFolder = typed;
             folder.fill(0);
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
-    }
-
-    ImGui::SetNextWindowSize(ImVec2(440.0f, 0.0f), ImGuiCond_Appearing);
-    if (ImGui::BeginPopupModal("New Script", nullptr, ImGuiWindowFlags_NoResize)) {
-        static std::array<char, 128> script{};
-        // **A script is a FILE**, and saying so here is the whole explanation
-        // somebody needs for why this is not the plus in the Explorer: the
-        // instance appears because the mount finds the file, which is the rule
-        // the IDL states and ADR 0048 honours rather than bypasses.
-        ImGui::TextDisabled("A script is a file. This writes one under src/scripts and the tree grows a row for it.");
-        ImGui::Spacing();
-        ImGui::TextUnformatted("src/scripts/");
-        ImGui::SameLine(0.0f, 0.0f);
-        ImGui::SetNextItemWidth(-1.0f);
-        const bool submitted =
-            ImGui::InputText("##script", script.data(), script.size(), ImGuiInputTextFlags_EnterReturnsTrue);
-        const std::string typed(script.data());
-        const bool usable = !typed.empty() && Editor::sceneNameIsUsable(typed);
-
-        ImGui::Spacing();
-        if (usable)
-            ImGui::TextDisabled("writes src/scripts/%s%s", typed.c_str(), typed.ends_with(".luau") ? "" : ".luau");
-        else if (typed.empty())
-            ImGui::TextDisabled("writes src/scripts/…");
-        else
-            ImGui::TextDisabled("not a name a file can have");
-
-        ImGui::Spacing();
-        ImGui::BeginDisabled(!usable);
-        const bool accepted = ImGui::Button("Create", ImVec2(120.0f, 0.0f));
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))) {
-            script.fill(0);
-            ImGui::CloseCurrentPopup();
-        }
-
-        if ((submitted || accepted) && usable) {
-            commands.createScript = typed;
-            script.fill(0);
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();

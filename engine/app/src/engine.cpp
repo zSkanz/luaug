@@ -1026,35 +1026,6 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 }
                 if (!editorCommands.createFolder.empty())
                     (void)editor.content().createFolder(editorCommands.createFolder);
-                if (!editorCommands.createScript.empty()) {
-                    // The project root, not the content root: `src/` is a
-                    // project's code and `content/` is its data (ADR 0048).
-                    if (editor.createScript(options.scriptPath, editorCommands.createScript)) {
-                        // **And mounted at once**, because writing the file was
-                        // never the whole job: a `Script` appears in the tree
-                        // because the mount finds it, and nothing mounts
-                        // between boot and a reload -- so this used to write a
-                        // file, say "on the next reload", and show the person
-                        // nothing at all.
-                        //
-                        // Mounted rather than reloaded. A reload rebuilds the
-                        // world from the scene and would throw away edits
-                        // nobody saved, which is a steep price for making a
-                        // file. The script does not START here either: it runs
-                        // on the next play, which is what an editor should do
-                        // with code somebody has not read yet.
-                        const Editor::ScriptFile& made = editor.lastScript();
-                        const std::array<script::MountedScript, 1> entry{
-                            script::MountedScript{made.projectPath, made.mountPath, made.source}};
-                        const std::vector<core::InstanceId> instances =
-                            script::mountScripts(host->runtime().state(), entry);
-                        if (!instances.empty()) {
-                            inspector.select(instances.front());
-                            inspector.reveal(instances.front());
-                        }
-                    }
-                }
-
                 // Before the delete and the duplicate, so a frame that somehow
                 // carried both acts on a world the create has already finished
                 // with rather than on one halfway through it.
