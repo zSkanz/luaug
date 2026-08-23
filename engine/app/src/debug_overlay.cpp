@@ -2121,7 +2121,18 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
     ImGui::TextDisabled("|");
 
     ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
-    if (iconButton(icons, icons::ContentFolder, toolbarIcon, "crumb-root", "content", "content/", true)) {
+    // **The icon AND the word, on every step including this one.** An icon
+    // button's word is only its fallback for a missing atlas, so the first
+    // step wore a picture and no name -- which reads as a button nobody named
+    // rather than as the root of the chain.
+    (void)drawIcon(icons, icons::ContentFolder, toolbarIcon);
+    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+    if (tree.atRoot()) {
+        // Where you already are is a label, not a control: the step that goes
+        // nowhere is drawn the same way at the end of the chain.
+        ImGui::TextUnformatted("content");
+    }
+    else if (ImGui::SmallButton("content")) {
         while (!tree.atRoot())
             (void)tree.leave();
     }
