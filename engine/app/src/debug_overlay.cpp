@@ -447,20 +447,36 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
     // their world -- and saves it.
     if (editor != nullptr && editor->stampSession().open() && commands != nullptr) {
         const Editor::StampSession& session = editor->stampSession();
+        const float barIcon = ImGui::GetTextLineHeight();
+
+        // The stamp's own icon, so the bar says what KIND of thing is open
+        // before it says which one.
+        (void)drawIcon(icons, icons::ClassModel, barIcon);
+        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.72f, 0.35f, 1.0f));
         ImGui::Text("editing %s%s", session.path.c_str(), session.dirty ? " *" : "");
         ImGui::PopStyleColor();
-        if (ImGui::SmallButton("save"))
+
+        // **Two buttons, and a third only while it means something.** `close`
+        // saves on the way out, which is the safe default and what somebody
+        // pressing it means nine times in ten; `discard` is the deliberate act
+        // and is drawn only when there is something to discard -- a control
+        // that would do nothing is worse than no control.
+        if (iconButton(icons, icons::ActionSave, barIcon, "stamp-save", "save", "save this stamp", true))
             commands->saveStamp = true;
         ImGui::SameLine();
-        if (ImGui::SmallButton("save & close")) {
+        if (iconButton(icons, icons::ActionClose, barIcon, "stamp-close", "close", "save and go back to the scene",
+                       true)) {
             commands->closeStamp = true;
             commands->closeStampSaving = true;
         }
-        ImGui::SameLine();
-        if (ImGui::SmallButton("discard")) {
-            commands->closeStamp = true;
-            commands->closeStampSaving = false;
+        if (session.dirty) {
+            ImGui::SameLine();
+            if (iconButton(icons, icons::ActionDelete, barIcon, "stamp-discard", "discard",
+                           "go back WITHOUT saving -- the edits since the last save are dropped", true)) {
+                commands->closeStamp = true;
+                commands->closeStampSaving = false;
+            }
         }
         ImGui::Separator();
     }
