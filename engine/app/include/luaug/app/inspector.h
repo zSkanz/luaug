@@ -317,12 +317,42 @@ public:
     // them.
     void onWorldChanged() noexcept;
 
-    // How many worlds this inspector has seen. A panel holding state keyed by
-    // `InstanceId` -- which the explorer's expanded set is -- has to throw it
-    // away when the world does, because slot indices are RECYCLED: a new
-    // instance landing in a dead one's slot would inherit whether it was
-    // expanded, and on a big scene that reads as rows opening by themselves.
+    // The world was RESTORED to an earlier state of ITSELF -- a stop, an undo,
+    // a redo.
+    //
+    // **This is not the same event and treating it as one costs work.** A
+    // `WorldSnapshot` carries generations and the free list precisely so that an
+    // `InstanceId` means the same thing after a restore as before it, so
+    // everything a panel keyed BY AN ID is still valid: which rows were
+    // expanded, what was selected, where a tree was scrolled. An undo that
+    // collapsed the whole explorer and dropped the selection takes back more
+    // than the edit it was asked to take back.
+    //
+    // What is invalid is anything keyed by a VALUE. A queued write is an edit
+    // this restore has just undone, and replaying it would undo the undo.
+    //
+    // The caller prunes the selection: what a restore can remove is instances,
+    // and `pruneDead` is the sweep that finds them.
+    void onWorldRestored() noexcept;
+
+    // How many times the world's contents have been replaced wholesale, by
+    // anything at all -- a reload, a scene load, a stop, an undo. What it
+    // answers is "is what I cached about the world's VALUES still true", and
+    // the frame loop's `render::TransformHistory` is its caller: a restore
+    // leaves that history describing where things were in a world that has been
+    // put back, which is a part interpolated between two places it is not.
     [[nodiscard]] core::u64 worldGeneration() const noexcept { return worldGeneration_; }
+
+    // How many DIFFERENT worlds this inspector has seen.
+    //
+    // The other question, and the one a panel holding state keyed by
+    // `InstanceId` has to ask -- the explorer's expanded set is one. A new world
+    // recycles slot indices from zero, so a new instance landing in a dead one's
+    // slot would inherit whether it was expanded, which on a big scene reads as
+    // rows opening by themselves. A RESTORED world does not: the snapshot
+    // carries generations so that an id keeps its meaning, which is what lets an
+    // undo leave the tree exactly as it found it.
+    [[nodiscard]] core::u64 worldIdentity() const noexcept { return worldIdentity_; }
 
     static constexpr usize OutcomeHistory = 8;
 
@@ -333,6 +363,7 @@ private:
     core::u64 gesture_ = 0;
     core::u64 nextGesture_ = 0;
     core::u64 worldGeneration_ = 0;
+    core::u64 worldIdentity_ = 0;
     std::vector<PendingWrite> pending_;
     std::vector<WriteOutcome> outcomes_;
 };

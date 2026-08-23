@@ -137,7 +137,7 @@ void Editor::stop(scene::World& world, Inspector& inspector)
     // or somebody else -- and a properties grid pointed at somebody else is how
     // an edit lands on the wrong object.
     inspector.pruneDead(world);
-    inspector.onWorldChanged();
+    inspector.onWorldRestored();
 
     m_status = EditorStatus{"stopped -- the world is back where you pressed play", false};
 }
@@ -284,7 +284,7 @@ bool Editor::undo(scene::World& world, Inspector& inspector)
         return false;
 
     inspector.pruneDead(world);
-    inspector.onWorldChanged();
+    inspector.onWorldRestored();
 
     m_status = EditorStatus{"undid " + label, false};
     return true;
@@ -297,7 +297,7 @@ bool Editor::redo(scene::World& world, Inspector& inspector)
         return false;
 
     inspector.pruneDead(world);
-    inspector.onWorldChanged();
+    inspector.onWorldRestored();
 
     m_status = EditorStatus{"redid " + label, false};
     return true;

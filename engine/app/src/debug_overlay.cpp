@@ -312,12 +312,18 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
 {
     collectTree(world, root, g_rows);
 
-    // **A new world opens collapsed.** Loading a scene, starting a new one or
-    // stopping a play session all arrive here as a world nobody has expanded
-    // anything in yet -- and a tree that remembered would be showing somebody
-    // the shape of the scene they just closed.
-    if (g_explorerWorld != inspector.worldGeneration()) {
-        g_explorerWorld = inspector.worldGeneration();
+    // **A DIFFERENT world opens collapsed; a restored one does not.** Loading a
+    // scene or starting a new one arrives here as a world nobody has expanded
+    // anything in, and a tree that remembered would be showing somebody the
+    // shape of the scene they just closed -- worse, slot indices restart, so a
+    // new instance would inherit whether a dead one was expanded.
+    //
+    // A stop, an undo or a redo is not that (D071). `World::restore` carries
+    // generations precisely so an id keeps its meaning, so every row this set
+    // names is still the row it named -- and an undo that collapsed the whole
+    // tree took back more than the edit it was asked to.
+    if (g_explorerWorld != inspector.worldIdentity()) {
+        g_explorerWorld = inspector.worldIdentity();
         g_open.clear();
         g_openKnown.clear();
     }
@@ -609,8 +615,8 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 // Same as the row menu above: this window is not a row.
                 ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, spacing);
                 g_addOpenRow = row.id.index;
-                if (g_creatableWorld != inspector.worldGeneration() || g_creatable.empty()) {
-                    g_creatableWorld = inspector.worldGeneration();
+                if (g_creatableWorld != inspector.worldIdentity() || g_creatable.empty()) {
+                    g_creatableWorld = inspector.worldIdentity();
                     collectCreatableClasses(world, g_creatable);
                 }
 
@@ -1441,9 +1447,12 @@ void drawContent(Editor& editor, EditorCommands& commands, bool& open, EditorDia
                         commands.openScene = entry.path;
                 }
 
-                if (isOpenScene)
-                    ImGui::PopStyleColor();
-
+                // **The colour is popped after the NAME is drawn, not after the
+                // selectable.** It is the text's colour, and the text is now
+                // placed on the row rather than carried by the selectable's
+                // label -- so popping here would have coloured nothing and left
+                // the pop for the real one to trip over, which is exactly what
+                // it did.
                 if (ImGui::BeginPopupContextItem("entry-menu")) {
                     // The rows are drawn with no vertical spacing; a menu is not
                     // a row.

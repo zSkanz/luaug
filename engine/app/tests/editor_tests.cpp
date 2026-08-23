@@ -651,3 +651,56 @@ TEST_CASE("a stop, an undo, a redo and a new scene each announce that the world 
     editor.newScene(world, inspector);
     CHECK(inspector.worldGeneration() != afterRedo);
 }
+
+// --- D071: a restore is not a replacement -----------------------------------
+//
+// `World::restore` carries generations and the free list precisely so that an
+// `InstanceId` means the same thing after one as before it. Everything a panel
+// keyed by an id therefore survives -- which rows are expanded, what is
+// selected -- and an undo that threw those away took back more than the edit it
+// was asked to. Reported as the explorer collapsing on every ctrl-Z.
+//
+// The two counters are the contract, and this holds it: a path added later that
+// restores through `onWorldChanged` would collapse the tree again, and nothing
+// else in the tree would notice.
+TEST_CASE("undo, redo and stop leave id-keyed panel state alone; a scene load does not")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId subject = fixture.widget(world, "Subject");
+    REQUIRE_FALSE(world.setParent(subject, root).has_value());
+    inspector.select(subject);
+
+    const core::u64 identity = inspector.worldIdentity();
+    const core::u64 generation = inspector.worldGeneration();
+
+    editor.play(world);
+    editor.stop(world, inspector);
+    // The world's VALUES were replaced, so anything cached about them goes --
+    // the frame loop's transform history reads this and a stale one is the
+    // flicker D070 was.
+    CHECK(inspector.worldGeneration() != generation);
+    // Its IDENTITY did not, so the expanded set and the selection stay.
+    CHECK(inspector.worldIdentity() == identity);
+    CHECK(inspector.selection() == subject);
+
+    editor.history().record(world, "Edit", 0);
+    REQUIRE(editor.undo(world, inspector));
+    CHECK(inspector.worldIdentity() == identity);
+    CHECK(inspector.selection() == subject);
+
+    REQUIRE(editor.redo(world, inspector));
+    CHECK(inspector.worldIdentity() == identity);
+    CHECK(inspector.selection() == subject);
+
+    // A new scene IS a different world: slot indices restart, so a row that
+    // remembered being expanded would hand that to whatever moved into the
+    // slot.
+    editor.newScene(world, inspector);
+    CHECK(inspector.worldIdentity() != identity);
+    CHECK_FALSE(inspector.selection().valid());
+}

@@ -435,9 +435,20 @@ void Inspector::applyPending(scene::World& world)
     pending_.clear();
 }
 
+void Inspector::onWorldRestored() noexcept
+{
+    // The values moved; the ids did not. So the value-keyed half goes and the
+    // id-keyed half stays -- see the header, and D071 for what conflating the
+    // two cost.
+    ++worldGeneration_;
+    gesture_ = 0;
+    pending_.clear();
+}
+
 void Inspector::onWorldChanged() noexcept
 {
     ++worldGeneration_;
+    ++worldIdentity_;
     selection_.clear();
     // A gesture is a drag over instances this world no longer has. Leaving it
     // open would coalesce the next unrelated edit into whatever came before the
