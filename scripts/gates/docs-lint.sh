@@ -160,10 +160,10 @@ else
     while IFS= read -r line; do
         state=$(echo "$line" | awk -F'|' '{gsub(/^ +| +$/, "", $5); print $5}')
         case "$state" in
-            open|fixed|not-a-defect|scheduled) ;;
+            open|fixed|not-a-defect|scheduled|quarantined) ;;
             *)
                 id=$(echo "$line" | awk -F'|' '{gsub(/^ +| +$/, "", $2); print $2}')
-                err "$id has state '$state'; expected open|fixed|not-a-defect|scheduled" "docs/defects.md"
+                err "$id has state '$state'; expected open|fixed|not-a-defect|scheduled|quarantined" "docs/defects.md"
                 status=1
                 ;;
         esac

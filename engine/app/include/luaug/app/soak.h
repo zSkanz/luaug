@@ -117,6 +117,13 @@ struct SoakVerdict
     // it is exactly the kind that gets written in English because "it is only
     // a diagnostic" -- which is the sentence R3 exists to refuse.
     std::vector<core::EngineError> failures;
+    // **Quarantined checks: measured, reported, and not gating** (§12).
+    // A check lands here rather than in `failures` when it has flaked twice and
+    // the cause is understood but the instrument is wrong -- widening its
+    // threshold until it stops complaining would remove the only thing watching
+    // for the failure it exists to catch, so it keeps running and keeps saying
+    // what it saw. D066 is the one that put this here.
+    std::vector<core::EngineError> quarantined;
 };
 
 class SoakRecorder

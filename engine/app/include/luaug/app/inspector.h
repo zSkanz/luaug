@@ -158,6 +158,26 @@ enum class EditorKind : core::u8
 void collectProperties(const scene::ClassRegistry& classes, scene::ClassId classId,
                        std::vector<const scene::PropertyDesc*>& out);
 
+// Whether `Instance.new` would accept this class, and therefore whether the
+// editor may offer it.
+//
+// **Three flags, read where the script binding reads them.** `World::create`
+// refuses only an unknown or abstract class and says in its own comment that
+// `Service` and `NotCreatable` are "a rule about the script-facing constructor,
+// applied in `script`". An editor is a second script-facing constructor, so it
+// answers with the same three rather than with a list it would have to keep in
+// step -- a class tagged `NotCreatable` tomorrow disappears from the menu with
+// no edit here.
+[[nodiscard]] bool creatable(const scene::ClassDescriptor& descriptor) noexcept;
+
+// Every class a person may create, in name order.
+//
+// Name order rather than registration order, because registration order is the
+// module layering and nobody browsing a menu is thinking about that. `out` is
+// cleared first, and the walk starts at 1: slot zero is the registry's
+// placeholder.
+void collectCreatableClasses(const scene::World& world, std::vector<scene::ClassId>& out);
+
 // The subtree under `root` in depth-first preorder, which is document order
 // (api-design.md §2.2). Sibling order is parenting order and the panel does not
 // sort: the tree's order is observable and reproducible, and a sorted view

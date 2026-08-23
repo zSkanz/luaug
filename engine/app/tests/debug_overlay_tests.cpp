@@ -6,6 +6,7 @@
 #include "luaug/app/backends.h"
 #include "luaug/app/debug_overlay.h"
 #include "luaug/app/frame_scheduler.h"
+#include "luaug/app/icons.h"
 #include "luaug/app/inspector.h"
 #include "luaug/core/i18n.h"
 #include "luaug/core/text_key.h"
@@ -17,9 +18,11 @@
 
 #include <array>
 #include <doctest/doctest.h>
+#include <filesystem>
 #include <string>
 #include <vector>
 
+#include "icon_ids.gen.h"
 #include "inspector_fixture.h"
 
 using luaug::app::DebugOverlay;
@@ -203,7 +206,39 @@ TEST_CASE("on a real device, F3 flips the panel")
         // what ImGui recorded fails here rather than in someone's screenshot.
         luaug::rhi::ICmdList* cmd = device->beginFrame();
         REQUIRE(cmd != nullptr);
+
         const luaug::rhi::Swapchain swapchain = device->acquireSwapchain(*window);
+
+        // **The icon atlas, on a real device.** After the swapchain is acquired
+        // and before any render pass opens, which is the one window an upload
+        // has: `uploadTexture` opens a copy pass, and SDL asserts outright if
+        // a swapchain is acquired while one is open. That is the frame loop's
+        // order too.
+        //
+        // It decodes sixty-seven PNGs, box-filters each to three sizes and
+        // packs them, and none of that has a headless path: a decode that
+        // returned nothing, a packer that overflowed its atlas or a format the
+        // driver refuses all land here.
+        luaug::app::IconAtlas atlas;
+        const std::filesystem::path iconRoot = luaug::platform::paths().contentDir;
+        if (std::filesystem::exists(iconRoot / "icons" / "default" / "theme.json")) {
+            CHECK(atlas.load(*device, *cmd, iconRoot, {}));
+            CHECK(atlas.ready());
+            // The fallback resolves for an id no theme has, which is what makes
+            // a class this build has never seen draw as something rather than
+            // as a hole.
+            CHECK(atlas.find("class.NoSuchClassExists", 16u).valid);
+            CHECK_FALSE(atlas.has("class.NoSuchClassExists"));
+            CHECK(atlas.has(luaug::app::icons::ClassPart));
+            // Six action ids are drawn tomorrow and are absent from the theme
+            // rather than present and broken.
+            CHECK_FALSE(atlas.has("action.Delete"));
+            MESSAGE(atlas.status());
+        }
+        else {
+            MESSAGE("no staged icon theme beside this test binary; the atlas was not exercised");
+        }
+
         if (swapchain.texture.valid()) {
             const std::array<luaug::rhi::ColorAttachment, 1> colors{luaug::rhi::ColorAttachment{
                 .texture = swapchain.texture,
@@ -232,6 +267,7 @@ TEST_CASE("on a real device, F3 flips the panel")
             // run, and a silent skip would read as coverage it does not have.
             MESSAGE("no swapchain for a hidden window on this machine; the overlay draw was not exercised");
         }
+        atlas.destroy(*device);
         device->submitAndPresent();
         device->waitIdle();
 

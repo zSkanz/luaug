@@ -210,6 +210,13 @@ struct EditorCommands
     // property writes and the pick, for the reason that has not changed -- a
     // panel behind this one is still drawing from what they would change.
 
+    // **Make one, under the instance the plus was pressed on.** Both halves or
+    // neither: a class with no parent has nowhere to go, and a parent with no
+    // class is not a request. `InvalidClass` is "nothing was asked for", which
+    // is what makes this drainable beside everything else here.
+    scene::ClassId createClass = scene::InvalidClass;
+    core::InstanceId createParent;
+
     // Delete an instance and everything under it.
     core::InstanceId deleteInstance;
     // A copy of an instance, beside it.
@@ -238,9 +245,9 @@ struct EditorCommands
     [[nodiscard]] bool any() const noexcept
     {
         return play.has_value() || pause.has_value() || save || newScene || quit || resetLayout || clearSelection ||
-               undo || redo || deleteInstance.valid() || duplicateInstance.valid() || renameInstance.valid() ||
-               !saveAs.empty() || !openScene.empty() || !createFolder.empty() || !deleteContent.empty() ||
-               !renameContent.empty();
+               undo || redo || createClass != scene::InvalidClass || deleteInstance.valid() ||
+               duplicateInstance.valid() || renameInstance.valid() || !saveAs.empty() || !openScene.empty() ||
+               !createFolder.empty() || !deleteContent.empty() || !renameContent.empty();
     }
 };
 
@@ -438,6 +445,23 @@ public:
     // A copy beside the original, selected, because the reason to duplicate
     // something is to change the copy.
     bool duplicateInstance(scene::World& world, core::InstanceId id, core::InstanceId root, Inspector& inspector);
+
+    // **Makes an instance under `parent` and selects it**, which is what the
+    // plus beside a row in the explorer does.
+    //
+    // The class must be one `Instance.new` would accept -- not abstract, not a
+    // service, not `NotCreatable`. The editor does not get a second answer to
+    // that question: `collectCreatableClasses` reads the same three flags off
+    // the same descriptors, so a menu cannot offer what this refuses.
+    //
+    // **A part lands in front of the editor camera, not at the origin.** An
+    // instance created four kilometres from the view is one nobody finds, and
+    // in a streamed world the origin is not where anybody is standing. The
+    // placement goes through `setProperty` like every other editor write, so a
+    // class with no `CFrame` simply does not get one rather than needing a
+    // special case here.
+    bool createInstance(scene::World& world, scene::ClassId classId, core::InstanceId parent, core::InstanceId root,
+                        Inspector& inspector);
 
     bool renameInstance(scene::World& world, core::InstanceId id, core::InstanceId root, std::string_view name);
 

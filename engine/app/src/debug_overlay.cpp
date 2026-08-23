@@ -3,6 +3,7 @@
 #if LUAUG_DEBUG_UI
 
 #include "luaug/app/backends.h"
+#include "luaug/app/icons.h"
 #include "luaug/core/log.h"
 #include "luaug/core/math.h"
 #include "luaug/core/text_key.h"
@@ -34,6 +35,8 @@
 #include <unordered_set>
 #include <variant>
 #include <vector>
+
+#include "icon_ids.gen.h"
 
 #endif
 
@@ -142,6 +145,62 @@ void drawStats(const Frame& frame)
     ImGui::Text("drawable %d x %d", size.width, size.height);
 }
 
+// One icon, inline, at the current cursor. Returns false when there is no atlas
+// or no cell, so a caller can fall back to text rather than leaving a hole.
+//
+// **Tinted with the current text colour**, which is the whole reason the source
+// images are white masks: one drawing serves a light panel and a dark one, and
+// a disabled row's icon dims with its label for free. `ImageWithBg` rather than
+// `Image` because the tint parameter moved there in ImGui 1.91.9.
+bool drawIcon(const IconAtlas* icons, std::string_view id, float size)
+{
+    if (icons == nullptr || !icons->ready())
+        return false;
+
+    const IconSprite sprite = icons->find(id, static_cast<core::u32>(size + 0.5f));
+    if (!sprite.valid)
+        return false;
+
+    SDL_GPUTexture* native = g_device != nullptr ? rhi::nativeTexture(*g_device, icons->texture()) : nullptr;
+    if (native == nullptr)
+        return false;
+
+    ImGui::ImageWithBg(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)), ImVec2(size, size),
+                       ImVec2(sprite.u0, sprite.v0), ImVec2(sprite.u1, sprite.v1), ImVec4(0.0f, 0.0f, 0.0f, 0.0f),
+                       ImGui::GetStyleColorVec4(ImGuiCol_Text));
+    return true;
+}
+
+// The icon for an instance, which is mechanical: the class's own name with a
+// prefix. A class this build's theme has never heard of falls back, which is
+// what makes a project's own class draw as a generic instance rather than as a
+// hole.
+[[nodiscard]] std::string classIconId(const scene::World& world, core::InstanceId id)
+{
+    const scene::ClassDescriptor* descriptor = world.classes().find(world.classOf(id));
+    if (descriptor == nullptr)
+        return std::string(icons::ClassInstance);
+    return "class." + std::string(world.atoms().text(descriptor->name));
+}
+
+// Case-insensitive substring, for the add menu's filter box. ASCII, because
+// every class name in this engine is (R1) and a full Unicode fold would be a
+// dependency for a filter over thirty identifiers.
+[[nodiscard]] bool containsFold(std::string_view haystack, std::string_view needle) noexcept
+{
+    if (needle.size() > haystack.size())
+        return false;
+    const auto lower = [](char c) noexcept { return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c; };
+    for (std::size_t start = 0; start + needle.size() <= haystack.size(); ++start) {
+        std::size_t index = 0;
+        while (index < needle.size() && lower(haystack[start + index]) == lower(needle[index]))
+            ++index;
+        if (index == needle.size())
+            return true;
+    }
+    return false;
+}
+
 // Reused across frames rather than rebuilt: the panel fills these once per
 // frame for as long as it is open, and a debug overlay that allocates a whole
 // tree every frame is a profile artefact somebody eventually has to explain.
@@ -159,6 +218,19 @@ std::unordered_set<core::u32> g_openKnown;
 // indices are recycled, so carrying them across a world would let a new instance
 // inherit whether a dead one was expanded.
 core::u64 g_explorerWorld = 0;
+// The classes the add menu offers, and the world generation they were collected
+// for. The registry does not change inside a world, so this is filled once and
+// re-read; a fresh world refills it because a reload can register a different
+// set (a project's own classes, a shipping build with no `DevOnly`).
+std::vector<scene::ClassId> g_creatable;
+core::u64 g_creatableWorld = 0;
+// What the add menu is filtering by, and which row opened it. The filter is
+// per-popup rather than global: it is a way through a list of thirty, not a
+// setting anybody wants remembered.
+std::array<char, 64> g_addFilter{};
+// The instance index whose add popup is open, or zero. Slot zero is never an
+// instance, which is what makes it usable as "none".
+core::u32 g_addOpenRow = 0;
 // Whether the right-drag in progress BEGAN over the viewport image. Latched on
 // the press, because that is the only moment the question can be answered: once
 // the pointer is held it stops reporting a position, and asking afterwards lets
@@ -184,7 +256,7 @@ std::vector<const scene::PropertyDesc*> g_properties;
 // edits.** Offering Delete over a running game would be offering an edit whose
 // only result is a world nobody can put back.
 void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspector, EditorCommands* commands,
-                  EditorDialogs* dialogs)
+                  EditorDialogs* dialogs, const IconAtlas* icons)
 {
     collectTree(world, root, g_rows);
 
@@ -208,7 +280,19 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             continue;
         hiddenBelow = std::numeric_limits<u32>::max();
 
-        g_visible.push_back(row);
+        // **The root is not drawn.** `game` has no properties worth a row, it
+        // cannot be renamed, deleted, duplicated or reparented, and every
+        // useful thing in a world is under it -- so a row for it is a line of
+        // chrome and an indent level charged to every row beneath it. The
+        // services are the top of this tree, which is what a person opening the
+        // panel is looking for.
+        //
+        // Filtered here rather than by walking from somewhere else, because
+        // `root` is what `isEngineOwned` compares against and what the pick
+        // path resolves into: the tree is still the tree, this is the view of
+        // it. Depth is shifted at the draw so the services sit flush left.
+        if (row.depth > 0)
+            g_visible.push_back(row);
 
         const bool hasChildren = world.childCount(row.id) > 0;
         // The services under `game` are what anyone opening this wants to see;
@@ -217,10 +301,10 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
         // collapsed.
         if (hasChildren && !g_openKnown.contains(row.id.index)) {
             g_openKnown.insert(row.id.index);
-            // **The root only.** Its children are the services, which is the
-            // list somebody wants on opening; what is INSIDE them is the scene,
-            // and showing all of it means scrolling past a world to find the
-            // thing you came for.
+            // **The root only**, and it is not drawn -- opening it is what
+            // puts the services on screen at all. What is INSIDE them is the
+            // scene, and showing all of that means scrolling past a world to
+            // find the thing you came for.
             if (row.depth == 0)
                 g_open.insert(row.id.index);
         }
@@ -237,7 +321,9 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             const TreeRow& row = g_visible[static_cast<std::size_t>(index)];
             const bool hasChildren = world.childCount(row.id) > 0;
 
-            const float indent = static_cast<float>(row.depth) * indentSpacing;
+            // Minus one, because the root's row is not drawn and its children
+            // are therefore this tree's top level.
+            const float indent = static_cast<float>(row.depth - 1) * indentSpacing;
             if (indent > 0.0f)
                 ImGui::Indent(indent);
 
@@ -262,11 +348,38 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             const std::string_view className =
                 classDescriptor != nullptr ? world.atoms().text(classDescriptor->name) : std::string_view("?");
 
-            char label[192];
-            (void)std::snprintf(label, sizeof(label), "%.*s  (%.*s)", static_cast<int>(instanceName.size()),
-                                instanceName.data(), static_cast<int>(className.size()), className.data());
+            // **Icon, then name, and no class in the text.** The icon IS the
+            // class -- that is what a `class.<ClassName>` id means -- so
+            // spelling it out beside the picture is the same fact twice, and
+            // the width it costs is width a name needs. Without an atlas the
+            // class comes back into the label, because a row that says only
+            // "Part" and shows nothing has lost the answer rather than moved
+            // it.
+            const float iconSize = ImGui::GetTextLineHeight();
+            const bool drewIcon = drawIcon(icons, classIconId(world, row.id), iconSize);
+            if (drewIcon) {
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%.*s", static_cast<int>(className.size()), className.data());
+                ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+            }
 
-            if (ImGui::Selectable(label, inspector.isSelected(row.id))) {
+            char label[192];
+            if (drewIcon) {
+                (void)std::snprintf(label, sizeof(label), "%.*s", static_cast<int>(instanceName.size()),
+                                    instanceName.data());
+            }
+            else {
+                (void)std::snprintf(label, sizeof(label), "%.*s  (%.*s)", static_cast<int>(instanceName.size()),
+                                    instanceName.data(), static_cast<int>(className.size()), className.data());
+            }
+
+            // **The row is clickable across its whole width and the plus sits
+            // on top of it**, which is what `AllowOverlap` is for: without it
+            // the selectable underneath swallows the press and the button never
+            // fires.
+            const float rowLeft = ImGui::GetCursorPosX();
+            const float labelWidth = ImGui::CalcTextSize(label).x;
+            if (ImGui::Selectable(label, inspector.isSelected(row.id), ImGuiSelectableFlags_AllowOverlap)) {
                 // Ctrl adds and removes, shift takes the run from the primary
                 // to here, a plain click replaces. The range is taken over
                 // `g_visible` rather than over the whole tree, because a range
@@ -283,6 +396,14 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                     inspector.select(row.id);
                 }
             }
+            // Asked while the selectable is still the last item, which is the
+            // only moment it answers about the ROW rather than about the button
+            // drawn on top of it.
+            const bool rowHovered = ImGui::IsItemHovered();
+            // The popup keeps the plus drawn while it is open, or the button
+            // vanishes the moment the pointer leaves the row to reach the list
+            // and takes its own popup with it.
+            const bool addOpen = g_addOpenRow == row.id.index;
 
             // **Right-clicking selects first, unless this row is already part
             // of the selection.** A menu that acted on whatever was selected
@@ -310,6 +431,86 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 if (ImGui::MenuItem("Delete", nullptr, false, !engineOwned))
                     commands->deleteInstance = row.id;
                 ImGui::EndPopup();
+            }
+
+            // **The plus, at the end of the row's text.** Making a child of
+            // the thing you are looking at is the commonest authoring act there
+            // is, and until this the only way to add an instance to this engine
+            // at all was to write `Instance.new` in a script. It sits on the ROW
+            // rather than in the toolbar because which parent is the whole of
+            // the question, and after the name rather than before it because
+            // before it is where the name goes.
+            //
+            // Shown on the row under the pointer and on the selected rows. A
+            // plus on every row of a thousand-row tree is a column of plus
+            // signs, not an affordance.
+            //
+            // Only where an instance can actually go: nothing authored lives
+            // inside something streaming materialised, and offering a plus that
+            // refuses is worse than not offering one.
+            const bool canParent = commands != nullptr && !world.generated(row.id);
+            const bool showPlus = canParent && (rowHovered || inspector.isSelected(row.id) || addOpen);
+            if (showPlus) {
+                ImGui::SameLine();
+                ImGui::SetCursorPosX(rowLeft + labelWidth + ImGui::GetStyle().ItemSpacing.x);
+                if (ImGui::SmallButton("+"))
+                    ImGui::OpenPopup("add-child");
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("add a child instance");
+            }
+
+            if (canParent && ImGui::BeginPopup("add-child")) {
+                g_addOpenRow = row.id.index;
+                if (g_creatableWorld != inspector.worldGeneration() || g_creatable.empty()) {
+                    g_creatableWorld = inspector.worldGeneration();
+                    collectCreatableClasses(world, g_creatable);
+                }
+
+                // Focused on open, because a list of thirty is a list you type
+                // at rather than scroll -- and the first keystroke landing in
+                // the box is what makes that true.
+                if (ImGui::IsWindowAppearing()) {
+                    g_addFilter.fill(0);
+                    ImGui::SetKeyboardFocusHere();
+                }
+                ImGui::SetNextItemWidth(210.0f);
+                ImGui::InputTextWithHint("##add-filter", "filter", g_addFilter.data(), g_addFilter.size());
+
+                const std::string_view filter(g_addFilter.data());
+                if (ImGui::BeginChild("add-list", ImVec2(210.0f, 260.0f))) {
+                    for (const scene::ClassId classId : g_creatable) {
+                        const scene::ClassDescriptor* candidate = world.classes().find(classId);
+                        if (candidate == nullptr)
+                            continue;
+                        const std::string_view candidateName = world.atoms().text(candidate->name);
+                        if (!filter.empty() && !containsFold(candidateName, filter))
+                            continue;
+
+                        char item[96];
+                        (void)std::snprintf(item, sizeof(item), "%.*s", static_cast<int>(candidateName.size()),
+                                            candidateName.data());
+                        if (ImGui::Selectable(item)) {
+                            commands->createClass = classId;
+                            commands->createParent = row.id;
+                            ImGui::CloseCurrentPopup();
+                        }
+                        // The IDL's own prose, which the properties grid already
+                        // shows for a property and which is the only description
+                        // of a class anywhere at runtime.
+                        if (candidate->doc[0] != 0 && ImGui::IsItemHovered()) {
+                            ImGui::BeginTooltip();
+                            ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+                            ImGui::TextUnformatted(candidate->doc);
+                            ImGui::PopTextWrapPos();
+                            ImGui::EndTooltip();
+                        }
+                    }
+                }
+                ImGui::EndChild();
+                ImGui::EndPopup();
+            }
+            else if (g_addOpenRow == row.id.index) {
+                g_addOpenRow = 0;
             }
 
             ImGui::PopID();
@@ -765,31 +966,57 @@ void drawConsole(script::ScriptRuntime* runtime)
 // pressing play asks "run my game", pressing stop asks "give me my world back",
 // and a button that means one of them while showing the other is the first
 // thing a person notices.
-void drawTransport(Editor& editor, EditorCommands& commands)
+void drawTransport(Editor& editor, EditorCommands& commands, const IconAtlas* icons)
 {
     const RunState run = editor.runState();
     const bool inPlay = editor.inPlayMode();
 
-    if (ImGui::Button(inPlay ? "stop" : "play"))
+    // **A toolbar button is its icon, and its label is the tooltip.** Six drawn
+    // words in a row is a sentence somebody reads; six pictures is a control
+    // panel they aim at. Falls back to the word when there is no atlas, because
+    // a button with nothing on it is not a smaller button.
+    const float glyph = ImGui::GetFrameHeight() - ImGui::GetStyle().FramePadding.y * 2.0f;
+    const auto toolButton = [&](std::string_view id, const char* word, const char* tip) {
+        bool pressed = false;
+        if (icons != nullptr && icons->ready() && icons->has(id)) {
+            const IconSprite sprite = icons->find(id, static_cast<core::u32>(glyph + 0.5f));
+            SDL_GPUTexture* native = g_device != nullptr ? rhi::nativeTexture(*g_device, icons->texture()) : nullptr;
+            if (sprite.valid && native != nullptr) {
+                pressed =
+                    ImGui::ImageButton(word, static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)),
+                                       ImVec2(glyph, glyph), ImVec2(sprite.u0, sprite.v0), ImVec2(sprite.u1, sprite.v1),
+                                       ImVec4(0.0f, 0.0f, 0.0f, 0.0f), ImGui::GetStyleColorVec4(ImGuiCol_Text));
+                ImGui::SetItemTooltip("%s", tip);
+                return pressed;
+            }
+        }
+        pressed = ImGui::Button(word);
+        ImGui::SetItemTooltip("%s", tip);
+        return pressed;
+    };
+
+    if (toolButton(inPlay ? icons::ActionStop : icons::ActionPlay, inPlay ? "stop" : "play",
+                   inPlay ? "leave play mode and put the world back where you pressed play"
+                          : "run the game, remembering the world first")) {
         commands.play = !inPlay;
-    ImGui::SetItemTooltip(inPlay ? "leave play mode and put the world back where you pressed play"
-                                 : "run the game, remembering the world first");
+    }
 
     // Only inside play mode, because pausing is a thing that happens to a
     // running game. Disabled rather than hidden: a control that appears and
     // disappears moves the ones beside it.
     ImGui::SameLine();
     ImGui::BeginDisabled(!inPlay);
-    if (ImGui::Button(run == RunState::Paused ? "resume" : "pause"))
+    if (toolButton(run == RunState::Paused ? icons::ActionPlay : icons::ActionPause,
+                   run == RunState::Paused ? "resume" : "pause", "hold the running world still")) {
         commands.pause = run != RunState::Paused;
+    }
     ImGui::EndDisabled();
 
     ImGui::SameLine();
     ImGui::BeginDisabled(run == RunState::Playing);
-    if (ImGui::Button("step"))
+    if (toolButton(icons::ActionForward, "step", "advance exactly one simulation tick"))
         editor.requestStep();
     ImGui::EndDisabled();
-    ImGui::SetItemTooltip("advance exactly one simulation tick");
 
     // A world to start in. Beside save rather than in the content browser,
     // because "give me somewhere to begin" is a thing you do to the WORLD and
@@ -892,14 +1119,15 @@ void reportLookInput(Editor& editor, bool overViewport)
 // around a rendered world reads as a bug rather than as a frame. Its rectangle
 // is handed to the editor every frame because that rectangle is the only thing
 // that maps a mouse position onto a ray.
-void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& commands, bool& open)
+void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& commands, bool& open,
+                  const IconAtlas* icons)
 {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     const bool visible = ImGui::Begin("viewport", &open);
     ImGui::PopStyleVar();
 
     if (visible) {
-        drawTransport(editor, commands);
+        drawTransport(editor, commands, icons);
 
         const ImVec2 size = ImGui::GetContentRegionAvail();
         const ImVec2 origin = ImGui::GetCursorScreenPos();
@@ -964,6 +1192,28 @@ void buildDefaultLayout(ImGuiID dockspace)
 }
 
 // A short label for a kind, so a row says what it is without an icon set.
+// The icon id for a content kind, straight off the enum -- the same mechanical
+// mapping `class.` uses, which is what `icons/README.md` means by "content.
+// maps straight off the `ContentKind` enum".
+[[nodiscard]] std::string_view contentKindIcon(ContentKind kind) noexcept
+{
+    switch (kind) {
+    case ContentKind::Folder:
+        return icons::ContentFolder;
+    case ContentKind::Scene:
+        return icons::ContentScene;
+    case ContentKind::Mesh:
+        return icons::ContentMesh;
+    case ContentKind::Texture:
+        return icons::ContentTexture;
+    case ContentKind::Chunk:
+        return icons::ContentChunk;
+    case ContentKind::Other:
+        break;
+    }
+    return icons::ContentOther;
+}
+
 [[nodiscard]] const char* contentKindLabel(ContentKind kind) noexcept
 {
     switch (kind) {
@@ -991,7 +1241,7 @@ void buildDefaultLayout(ImGuiID dockspace)
 // so a folder of ten thousand meshes costs the same as a folder of ten.
 // `drawExplorer` beside this one does NOT do that yet, which is a thing to fix
 // rather than a precedent to follow.
-void drawContent(Editor& editor, EditorCommands& commands, bool& open, EditorDialogs& dialogs)
+void drawContent(Editor& editor, EditorCommands& commands, bool& open, EditorDialogs& dialogs, const IconAtlas* icons)
 {
     if (!ImGui::Begin("content", &open)) {
         ImGui::End();
@@ -1032,6 +1282,9 @@ void drawContent(Editor& editor, EditorCommands& commands, bool& open, EditorDia
                 const bool isOpenScene = entry.kind == ContentKind::Scene && entry.path == editor.openScenePath();
                 if (isOpenScene)
                     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.85f, 0.55f, 1.0f));
+
+                if (drawIcon(icons, contentKindIcon(entry.kind), ImGui::GetTextLineHeight()))
+                    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
 
                 // Double-click, because a single click is how somebody browses
                 // and opening a scene throws away what is in the world.
@@ -1381,7 +1634,7 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
 // had.
 void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,
                      script::ScriptRuntime* runtime, Editor* editor, rhi::TextureHandle viewport, bool& laidOut,
-                     EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs)
+                     EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs, const IconAtlas* icons)
 {
     // Before the dockspace. `DockSpaceOverViewport` measures the work area, and
     // a menu bar declared after it would sit on top of the panels by its own
@@ -1417,15 +1670,15 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
 
     if (editor != nullptr) {
         if (panels.viewport)
-            drawViewport(*editor, viewport, commands, panels.viewport);
+            drawViewport(*editor, viewport, commands, panels.viewport, icons);
         if (panels.content)
-            drawContent(*editor, commands, panels.content, dialogs);
+            drawContent(*editor, commands, panels.content, dialogs, icons);
     }
 
     if (panels.explorer) {
         if (ImGui::Begin("explorer", &panels.explorer)) {
             if (world != nullptr && inspector != nullptr)
-                drawExplorer(*world, root, *inspector, &commands, &dialogs);
+                drawExplorer(*world, root, *inspector, &commands, &dialogs, icons);
         }
         ImGui::End();
     }
@@ -1521,7 +1774,7 @@ void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, I
         if (world != nullptr && inspector != nullptr) {
             ImGui::SeparatorText("explorer");
             if (ImGui::BeginChild("explorer", ImVec2(0.0f, 200.0f), ImGuiChildFlags_Borders))
-                drawExplorer(*world, root, *inspector, nullptr, nullptr);
+                drawExplorer(*world, root, *inspector, nullptr, nullptr, nullptr);
             ImGui::EndChild();
 
             ImGui::SeparatorText("properties");
@@ -1710,7 +1963,7 @@ void DebugOverlay::render(rhi::ICmdList& cmd, rhi::TextureHandle target, const F
     ImGui::NewFrame();
     if (shell_ == Shell::Editor)
         drawEditorShell(frame, world_, root_, inspector_, runtime_, editor_, viewportTexture_, layoutBuilt_, commands_,
-                        panels_, dialogs_);
+                        panels_, dialogs_, icons_);
     else
         drawShell(frame, world_, root_, inspector_, runtime_);
     ImGui::Render();

@@ -12,6 +12,7 @@
 #include "luaug/app/dev_control.h"
 #include "luaug/app/editor.h"
 #include "luaug/app/frame_scheduler.h"
+#include "luaug/app/icons.h"
 #include "luaug/app/inspector.h"
 #include "luaug/app/reload.h"
 #include "luaug/app/screenshot.h"
@@ -435,6 +436,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // a panel has said how big it is.
     Editor editor;
     ViewportTarget viewportTarget;
+    // The editor's icons, built once from `content/icons` on the first frame
+    // that has a command list -- uploading a texture is one, so this cannot be
+    // done before the loop.
+    IconAtlas iconAtlas;
     // What was last written to `.luaug/editor.json`, so the write happens on a
     // change rather than every frame.
     std::string rememberedScene;
@@ -947,6 +952,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 if (!editorCommands.createFolder.empty())
                     (void)editor.content().createFolder(editorCommands.createFolder);
 
+                // Before the delete and the duplicate, so a frame that somehow
+                // carried both acts on a world the create has already finished
+                // with rather than on one halfway through it.
+                if (editorCommands.createClass != scene::InvalidClass && editorCommands.createParent.valid()) {
+                    (void)editor.createInstance(host->world(), editorCommands.createClass, editorCommands.createParent,
+                                                host->runtime().dataModel(), inspector);
+                }
                 if (editorCommands.deleteInstance.valid())
                     (void)editor.deleteInstance(host->world(), editorCommands.deleteInstance,
                                                 host->runtime().dataModel(), inspector);
@@ -1720,6 +1732,15 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // FrameStart safe point, so a file read cannot land mid-tick.
             if (debugRenderer.valid())
                 debugRenderer.upload(*device, *cmd, debugDraw);
+            // Beside the other uploads and for the same reason: this is the
+            // only place in the frame where a copy is legal. Idempotent after
+            // the first success, so the cost is one branch a frame.
+            if (options.editor && !iconAtlas.ready()) {
+                if (iconAtlas.load(*device, *cmd, platform::paths().contentDir, options.scriptPath))
+                    core::logText(core::LogLevel::Info, iconAtlas.status());
+                else
+                    core::logText(core::LogLevel::Warn, iconAtlas.status());
+            }
             if (uiRenderer.valid())
                 // The atlas first: `buildUiGeometry` has already written UVs
                 // into it, and uploading after the draw would show this frame's
@@ -1823,8 +1844,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             }
 
             if (overlay.has_value()) {
-                if (options.editor)
+                if (options.editor) {
                     overlay->setEditorTarget(&editor, viewportTarget.texture());
+                    overlay->setIcons(&iconAtlas);
+                }
                 overlay->render(*cmd, options.editor && present.valid() ? present : target, frame);
             }
         }
@@ -1972,6 +1995,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         for (const core::EngineError& failure : verdict.failures) {
             core::logText(LogLevel::Error, failure.message);
         }
+        // Loud, and not fatal. A quarantined check that stopped saying anything
+        // would be a deleted check with extra steps (D066, §12).
+        for (const core::EngineError& quarantined : verdict.quarantined) {
+            core::logText(LogLevel::Warn, quarantined.message);
+        }
         if (!verdict.ok && !soakFailure.has_value()) {
             const std::array<I18nArg, 2> failArgs{I18nArg{"failures", static_cast<core::i64>(verdict.failures.size())},
                                                   I18nArg{"path", options.soakReportPath.string()}};
@@ -1982,6 +2010,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     uiText.destroy(*device);
     uiRenderer.destroy(*device);
     debugRenderer.destroy(*device);
+    iconAtlas.destroy(*device);
     if (offscreen.valid())
         device->destroy(offscreen);
     if (window != nullptr)

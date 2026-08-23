@@ -384,6 +384,67 @@ bool Editor::duplicateInstance(scene::World& world, core::InstanceId id, core::I
     return true;
 }
 
+bool Editor::createInstance(scene::World& world, scene::ClassId classId, core::InstanceId parent, core::InstanceId root,
+                            Inspector& inspector)
+{
+    if (!world.alive(parent))
+        return false;
+
+    const scene::ClassDescriptor* descriptor = world.classes().find(classId);
+    if (descriptor == nullptr || !creatable(*descriptor)) {
+        m_status = EditorStatus{"that class cannot be created", true};
+        return false;
+    }
+
+    // **A service is a legal parent and the world itself is too.** What
+    // `isEngineOwned` refuses is deleting, duplicating or renaming one -- but
+    // `Lighting` holding a `PointLight` and `Workspace` holding a `Part` is
+    // what those services are FOR, so the guard the other three verbs share
+    // does not belong here. What does belong is the one it never covered:
+    // something a system made is not somewhere a person authors into.
+    if (world.generated(parent)) {
+        m_status = EditorStatus{"that was made by the engine, so nothing authored can live in it", true};
+        return false;
+    }
+
+    m_history.record(world, "Create " + std::string(world.atoms().text(descriptor->name)));
+
+    const core::InstanceId made = world.create(classId);
+    if (!made.valid()) {
+        m_status = EditorStatus{"could not create that class", true};
+        return false;
+    }
+    if (world.setParent(made, parent).has_value()) {
+        (void)world.destroy(made);
+        world.retireDestroyed();
+        m_status = EditorStatus{"that cannot be parented there", true};
+        return false;
+    }
+
+    // **In front of the camera rather than at the origin.** In a streamed world
+    // the origin is not where anybody is standing, and a part created four
+    // kilometres from the view is one nobody finds. Through `setProperty`
+    // rather than into the component, so a class with no `CFrame` needs no
+    // special case here -- it simply refuses and nothing is placed.
+    if (m_cameraAdopted) {
+        const core::Mat3& basis = m_cameraCFrame.rotation;
+        const core::Vec3 forward{-basis.m[2][0], -basis.m[2][1], -basis.m[2][2]};
+        // Far enough to be whole in the view and near enough to be reachable.
+        constexpr f32 kSpawnDistance = 8.0f;
+        core::CFrameD placed;
+        placed.position = m_cameraCFrame.position + core::toDVec3(forward * kSpawnDistance);
+        (void)world.setProperty(made, world.atoms().intern("CFrame"), scene::Value{placed});
+    }
+
+    // Selected, for the reason a duplicate is: the point of making a thing is
+    // to change it.
+    inspector.select(made);
+
+    m_status = EditorStatus{"added a " + std::string(world.atoms().text(descriptor->name)), false};
+    (void)root;
+    return true;
+}
+
 bool Editor::renameInstance(scene::World& world, core::InstanceId id, core::InstanceId root, std::string_view name)
 {
     if (!world.alive(id) || name.empty())

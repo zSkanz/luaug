@@ -67,6 +67,22 @@ if ! diff -q "$defs_before" runtime/types/engine.d.luau >/dev/null; then
     exit 1
 fi
 
+# The editor's icon ids, same shape and same reason: `icons/default/theme.json`
+# is the list of ids that exist, and a call site naming one by hand is a typo
+# that becomes a blank square in a panel nobody happened to open.
+echo "== generated icon ids are fresh =="
+icons_before="$(mktemp)"
+trap 'rm -f "$defs_before" "$icons_before"' EXIT
+cp engine/app/generated/icon_ids.gen.h "$icons_before"
+lute tools/repo/genicons.luau >/dev/null
+if ! diff -q "$icons_before" engine/app/generated/icon_ids.gen.h >/dev/null; then
+    echo "luau-check: engine/app/generated/icon_ids.gen.h does not match the theme." >&2
+    echo "  Either it was hand-edited, or icons/default/theme.json changed without" >&2
+    echo "  regenerating. Both are the same fix: commit the regenerated file." >&2
+    diff -u "$icons_before" engine/app/generated/icon_ids.gen.h | head -40 >&2
+    exit 1
+fi
+
 # The C++ reflection tables are checked in for the same reason, and compared the
 # same way round: against copies taken BEFORE the generator runs.
 #
@@ -77,7 +93,7 @@ fi
 # manifest is the same on every platform.
 echo "== generated class descriptors are fresh =="
 descriptors_before="$(mktemp -d)"
-trap 'rm -f "$defs_before"; rm -rf "$descriptors_before"' EXIT
+trap 'rm -f "$defs_before" "$icons_before"; rm -rf "$descriptors_before"' EXIT
 
 descriptor_files() {
     find engine -type f -path 'engine/*/generated/class_descriptors.gen.*' | LC_ALL=C sort
@@ -119,7 +135,7 @@ done <"$descriptors_before/manifest"
 # same way round, for the same reason.
 echo "== the api dump matches the IDL =="
 dump_before="$(mktemp)"
-trap 'rm -f "$defs_before" "$dump_before"; rm -rf "$descriptors_before"' EXIT
+trap 'rm -f "$defs_before" "$icons_before" "$dump_before"; rm -rf "$descriptors_before"' EXIT
 cp api/api-dump.json "$dump_before"
 lute api/generator/gen_dump.luau >/dev/null
 if ! diff -q "$dump_before" api/api-dump.json >/dev/null; then
@@ -162,7 +178,7 @@ lute tools/repo/inertcheck.luau
 # and a stale page is exactly the documentation that outlives what it describes.
 echo "== generated API reference is fresh =="
 reference_before="$(mktemp -d)"
-trap 'rm -f "$defs_before" "$dump_before"; rm -rf "$reference_before" "$descriptors_before"' EXIT
+trap 'rm -f "$defs_before" "$icons_before" "$dump_before"; rm -rf "$reference_before" "$descriptors_before"' EXIT
 cp -r docs/api/. "$reference_before"/
 lute api/generator/gen_reference.luau >/dev/null
 if ! diff -r -q "$reference_before" docs/api >/dev/null; then

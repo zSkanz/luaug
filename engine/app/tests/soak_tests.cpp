@@ -41,6 +41,16 @@ void steady(SoakRecorder& recorder, int frames, f64 ms = 8.0, u64 instances = 40
     return false;
 }
 
+[[nodiscard]] bool mentionsQuarantined(const SoakVerdict& verdict, std::string_view fragment)
+{
+    for (const core::EngineError& note : verdict.quarantined) {
+        if (note.message.find(fragment) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 TEST_CASE("a flat world passes")
@@ -170,10 +180,25 @@ TEST_CASE("a world that grows and never shrinks fails, with no hitch anywhere")
     }
 
     const SoakVerdict verdict = recorder.evaluate({});
-    CHECK_FALSE(verdict.ok);
     CHECK(verdict.hitches == 0);
     CHECK(verdict.earlyInstances < verdict.lateInstances);
-    CHECK(mentions(verdict, "engine.soak.err.growing"));
+
+    // **The check still fires; it no longer gates** (D066, MASTER_PROMPT.md
+    // §12: two flakes). It flaked twice on the flagship -- the same binary over
+    // the same 5,939 frames reporting resident sets a quarter apart, failing
+    // and then passing on the next run with the machine to itself -- and the
+    // cause is understood: streaming's materialisation budget is denominated in
+    // milliseconds, so under load the resident set lags the focus and the
+    // balance this reads across quarters shifts with the machine.
+    //
+    // Widening the tolerance until it stopped complaining would have removed
+    // the only instrument watching a streamed world for a leak, which is what
+    // D032 cost to find. So it keeps measuring and keeps saying what it saw,
+    // and this case holds the distinction: the complaint is present, and the
+    // run is a pass.
+    CHECK(verdict.ok);
+    CHECK_FALSE(mentions(verdict, "engine.soak.err.growing"));
+    CHECK(mentionsQuarantined(verdict, "engine.soak.err.growing"));
 }
 
 TEST_CASE("a world that breathes is not a world that leaks")

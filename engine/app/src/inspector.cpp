@@ -245,6 +245,29 @@ void collectProperties(const scene::ClassRegistry& classes, scene::ClassId class
     }
 }
 
+bool creatable(const scene::ClassDescriptor& descriptor) noexcept
+{
+    return !scene::hasFlag(descriptor.flags, scene::ClassFlags::Abstract) &&
+           !scene::hasFlag(descriptor.flags, scene::ClassFlags::Service) &&
+           !scene::hasFlag(descriptor.flags, scene::ClassFlags::NotCreatable);
+}
+
+void collectCreatableClasses(const scene::World& world, std::vector<scene::ClassId>& out)
+{
+    out.clear();
+    const scene::ClassRegistry& classes = world.classes();
+    // From 1: slot zero is the registry's placeholder and never a class.
+    for (scene::ClassId id = 1; id < static_cast<scene::ClassId>(classes.classCount()); ++id) {
+        const scene::ClassDescriptor* descriptor = classes.find(id);
+        if (descriptor != nullptr && creatable(*descriptor))
+            out.push_back(id);
+    }
+
+    std::sort(out.begin(), out.end(), [&world, &classes](scene::ClassId a, scene::ClassId b) {
+        return world.atoms().text(classes.find(a)->name) < world.atoms().text(classes.find(b)->name);
+    });
+}
+
 void collectTree(const scene::World& world, core::InstanceId root, std::vector<TreeRow>& out)
 {
     out.clear();

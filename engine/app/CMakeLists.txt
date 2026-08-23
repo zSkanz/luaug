@@ -25,6 +25,7 @@ luaug_add_module(app
         src/picking.cpp
         src/editor.cpp
         src/content_tree.cpp
+        src/icons.cpp
         src/dev_control.cpp
     DEPS
         asset
@@ -44,6 +45,11 @@ luaug_add_module(app
         luaug::luau
         luaug::build_info
 )
+
+# The icon ids, generated from `icons/default/theme.json`. Beside its source
+# rather than under include/luaug/app/, for the reason `luaug_scene` gives about
+# its own: "do not edit" is easier to obey when it applies to a whole folder.
+target_include_directories(luaug_app PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/generated>)
 
 # The backends themselves are linked ONLY here (ADR 0023): every other module
 # sees the seam. Which ones exist is a build decision, so the link list is
@@ -130,7 +136,16 @@ add_custom_command(TARGET luaug_host POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/third_party/inter/docs/font-files/InterVariable.ttf"
         "$<TARGET_FILE_DIR:luaug_host>/content/fonts/Inter.ttf"
-    COMMENT "Staging the engine message catalog, the @luaug modules and the conformance runner")
+    # The editor's icon themes. A plain recursive copy and deliberately NOT
+    # through `assetc`: that path sends every image to basisu for KTX2/UASTC
+    # with generated mips, which is right for a world texture and wrong for a
+    # sixteen-pixel glyph -- block compression smears small alpha shapes, and a
+    # small alpha shape is all an icon is. `icons/README.md` says so and says
+    # why.
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/icons"
+        "$<TARGET_FILE_DIR:luaug_host>/content/icons"
+    COMMENT "Staging the engine message catalog, the @luaug modules, the conformance runner and the editor icons")
 
 luaug_add_module_tests(app
     SOURCES

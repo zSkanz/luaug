@@ -147,7 +147,21 @@ SoakVerdict SoakRecorder::evaluate(const SoakThresholds& thresholds) const
     if (overFloor && verdict.earlyInstances > 0 && verdict.lateInstances > ceiling) {
         const core::I18nArg args[] = {{"early", static_cast<core::i64>(verdict.earlyInstances)},
                                       {"late", static_cast<core::i64>(verdict.lateInstances)}};
-        verdict.failures.push_back(core::makeError(LUAUG_TR("engine.soak.err.growing"), args));
+        // **Quarantined, not gating** (D066, §12: two flakes). The same binary
+        // over the same 5,939 frames reports a resident set that differs by a
+        // quarter between runs, and it passes alone as often as it fails -- so
+        // what this compares is partly the machine. Streaming's materialisation
+        // budget is denominated in MILLISECONDS: under load fewer chunks
+        // materialise per frame, the resident set lags the focus, and the
+        // balance between materialising and evicting shifts across exactly the
+        // quarters this reads.
+        //
+        // It keeps running and keeps saying what it saw, because a leak in a
+        // streamed world has no other instrument. The replacement has to be
+        // denominated in something load cannot move -- the honest one is a
+        // focus path that RETURNS to where it started, since a resident set
+        // that does not come back with it is a leak whatever the budget did.
+        verdict.quarantined.push_back(core::makeError(LUAUG_TR("engine.soak.err.growing"), args));
     }
 
     verdict.ok = verdict.failures.empty();
@@ -209,7 +223,15 @@ std::string SoakRecorder::report(const SoakThresholds& thresholds) const
         // the stable identifier AND readable without the catalog.
         out << (i == 0 ? "\n" : ",\n") << "    \"" << escaped(verdict.failures[i].message) << "\"";
     }
-    out << (verdict.failures.empty() ? "" : "\n  ") << "]\n";
+    out << (verdict.failures.empty() ? "" : "\n  ") << "],\n";
+
+    // Reported beside the failures and never mixed into them: a run whose only
+    // complaint is quarantined is a PASSING run, and the numbers are still here
+    // for whoever comes to replace the instrument (D066).
+    out << "  \"quarantined\": [";
+    for (usize i = 0; i < verdict.quarantined.size(); ++i)
+        out << (i == 0 ? "\n" : ",\n") << "    \"" << escaped(verdict.quarantined[i].message) << "\"";
+    out << (verdict.quarantined.empty() ? "" : "\n  ") << "]\n";
     out << "}\n";
     return out.str();
 }
