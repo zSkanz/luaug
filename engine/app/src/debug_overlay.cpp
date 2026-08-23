@@ -171,6 +171,39 @@ bool drawIcon(const IconAtlas* icons, std::string_view id, float size)
     return true;
 }
 
+// A button whose face is an icon, with the word as its fallback and its tooltip.
+//
+// Six drawn words in a row is a sentence somebody reads; six pictures is a
+// control panel they aim at. Falls back to the word when there is no atlas or no
+// cell for the id, because a button with nothing on it is not a smaller button
+// -- and six `action.` ids are drawn tomorrow, so that path is live rather than
+// theoretical.
+//
+// `strId` rather than the label, because the label changes with state (play
+// becomes stop) and an ImGui id that changes with state is a button that loses
+// its press half way through.
+bool iconButton(const IconAtlas* icons, std::string_view id, float size, const char* strId, const char* word,
+                const char* tip)
+{
+    bool pressed = false;
+    if (icons != nullptr && icons->ready() && icons->has(id)) {
+        const IconSprite sprite = icons->find(id, static_cast<core::u32>(size + 0.5f));
+        SDL_GPUTexture* native = g_device != nullptr ? rhi::nativeTexture(*g_device, icons->texture()) : nullptr;
+        if (sprite.valid && native != nullptr) {
+            pressed = ImGui::ImageButton(strId, static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)),
+                                         ImVec2(size, size), ImVec2(sprite.u0, sprite.v0), ImVec2(sprite.u1, sprite.v1),
+                                         ImVec4(0.0f, 0.0f, 0.0f, 0.0f), ImGui::GetStyleColorVec4(ImGuiCol_Text));
+            if (tip != nullptr)
+                ImGui::SetItemTooltip("%s", tip);
+            return pressed;
+        }
+    }
+    pressed = ImGui::Button(word);
+    if (tip != nullptr)
+        ImGui::SetItemTooltip("%s", tip);
+    return pressed;
+}
+
 // The icon for an instance, which is mechanical: the class's own name with a
 // prefix. A class this build's theme has never heard of falls back, which is
 // what makes a project's own class draw as a generic instance rather than as a
@@ -331,6 +364,16 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
     const float indentSpacing = ImGui::GetStyle().IndentSpacing;
     const float rowHeight = ImGui::GetFrameHeight();
 
+    // **And no vertical item spacing while the rows are drawn.** A `Selectable`
+    // pads its highlight with HALF of `ItemSpacing.y` above and below -- which
+    // is what makes a column of them read as one continuous list, and which is
+    // exactly wrong once the rows are laid out at an exact pitch: the padding
+    // has nowhere to go but into the row above and the row below. Zero here
+    // makes the highlight the row, and every position on the row is explicit
+    // anyway, so nothing else in this loop notices.
+    const ImVec2 spacing = ImGui::GetStyle().ItemSpacing;
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(spacing.x, 0.0f));
+
     ImGuiListClipper clipper;
     clipper.Begin(static_cast<int>(g_visible.size()), rowHeight);
     while (clipper.Step()) {
@@ -438,9 +481,17 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             // The arrow is its own control rather than part of the row, because
             // opening a thing and selecting it are different intentions and a
             // tree that conflates them makes browsing destructive.
+            //
+            // **The set's own chevrons rather than ImGui's**, and the pairing is
+            // what the row can DO rather than what it is: an open row offers to
+            // collapse, a closed one offers to expand.
             if (hasChildren) {
-                ImGui::SetCursorPos(ImVec2(penX, centred(ImGui::GetFrameHeight())));
-                if (ImGui::ArrowButton("toggle", g_open.contains(row.id.index) ? ImGuiDir_Down : ImGuiDir_Right)) {
+                const bool open = g_open.contains(row.id.index);
+                ImGui::SetCursorPos(ImVec2(penX, centred(iconSize)));
+                const bool toggled = haveIcon ? iconButton(icons, open ? icons::ActionCollapse : icons::ActionExpand,
+                                                           iconSize, "toggle", open ? "-" : "+", nullptr)
+                                              : ImGui::ArrowButton("toggle", open ? ImGuiDir_Down : ImGuiDir_Right);
+                if (toggled) {
                     if (!g_open.insert(row.id.index).second)
                         g_open.erase(row.id.index);
                 }
@@ -473,33 +524,36 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             // inside something streaming materialised, and offering a plus that
             // refuses is worse than not offering one.
             if (commands != nullptr && !world.generated(row.id)) {
-                // **Drawn every frame, and dimmed rather than hidden.** The
-                // first version appeared only on the row under the pointer, and
-                // that cost it its first click: ImGui resolves an overlap in
-                // favour of the LATER item, but it can only do that if the later
-                // item was there when the overlap happened. A button that comes
-                // into existence on the same frame the row becomes hovered is a
-                // button the selectable underneath has already taken the press
-                // for -- so the first click selected the row and only the second
-                // one opened the menu, which is exactly what somebody trying to
+                // **Shown on the row under the pointer and on the selected
+                // ones -- and EXISTING on all of them.** The two are different
+                // questions and conflating them is what broke the first click.
+                //
+                // ImGui resolves an overlap in favour of the LATER item, but
+                // only if the later item was there when the overlap happened. A
+                // button that comes into being on the same frame the row becomes
+                // hovered is a button whose press the selectable underneath has
+                // already taken -- so the first click selected the row and only
+                // the second opened the menu, which is what somebody trying to
                 // add a child to `Workspace` runs into.
                 //
-                // Existing every frame makes the hit test stable from the first
-                // one. The alpha is what keeps a thousand-row tree from reading
-                // as a column of plus signs, and it costs nothing a click can
-                // feel.
-                const float buttonHeight = ImGui::GetTextLineHeight() + ImGui::GetStyle().FramePadding.y;
-                ImGui::SetCursorPos(ImVec2(penX, centred(buttonHeight)));
+                // So the item is emitted every frame and drawn at zero alpha
+                // when it is not wanted. Alpha is a rendering property and not
+                // a hit-testing one, so the press lands the first time; and the
+                // only rows where it is invisible are rows the pointer is not
+                // on, which are the rows nobody can click it on anyway. A
+                // thousand-row tree shows no plus signs at all.
+                ImGui::SetCursorPos(ImVec2(penX, centred(iconSize)));
 
                 const bool lit = rowHovered || inspector.isSelected(row.id) || addOpen;
                 if (!lit)
-                    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.35f);
-                if (ImGui::SmallButton("+"))
-                    ImGui::OpenPopup("add-child");
+                    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.0f);
+                const bool add = haveIcon
+                                     ? iconButton(icons, icons::ActionAdd, iconSize, "add", "+", "add a child instance")
+                                     : ImGui::SmallButton("+");
                 if (!lit)
                     ImGui::PopStyleVar();
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("add a child instance");
+                if (add)
+                    ImGui::OpenPopup("add-child");
             }
 
             // **The next row starts exactly one row height down**, whatever the
@@ -567,6 +621,8 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             ImGui::PopID();
         }
     }
+
+    ImGui::PopStyleVar();
 }
 
 // One widget per `ValueType` and no code per class (Decision 16): everything
@@ -1025,22 +1081,7 @@ void drawTransport(Editor& editor, EditorCommands& commands, const IconAtlas* ic
     // a button with nothing on it is not a smaller button.
     const float glyph = ImGui::GetFrameHeight() - ImGui::GetStyle().FramePadding.y * 2.0f;
     const auto toolButton = [&](std::string_view id, const char* word, const char* tip) {
-        bool pressed = false;
-        if (icons != nullptr && icons->ready() && icons->has(id)) {
-            const IconSprite sprite = icons->find(id, static_cast<core::u32>(glyph + 0.5f));
-            SDL_GPUTexture* native = g_device != nullptr ? rhi::nativeTexture(*g_device, icons->texture()) : nullptr;
-            if (sprite.valid && native != nullptr) {
-                pressed =
-                    ImGui::ImageButton(word, static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)),
-                                       ImVec2(glyph, glyph), ImVec2(sprite.u0, sprite.v0), ImVec2(sprite.u1, sprite.v1),
-                                       ImVec4(0.0f, 0.0f, 0.0f, 0.0f), ImGui::GetStyleColorVec4(ImGuiCol_Text));
-                ImGui::SetItemTooltip("%s", tip);
-                return pressed;
-            }
-        }
-        pressed = ImGui::Button(word);
-        ImGui::SetItemTooltip("%s", tip);
-        return pressed;
+        return iconButton(icons, id, glyph, word, word, tip);
     };
 
     if (toolButton(inPlay ? icons::ActionStop : icons::ActionPlay, inPlay ? "stop" : "play",
@@ -1324,6 +1365,12 @@ void drawContent(Editor& editor, EditorCommands& commands, bool& open, EditorDia
         // and the same reason: an icon and a line of text are two heights, and
         // a highlight sized to neither covers its neighbours.
         const float entryHeight = ImGui::GetFrameHeight();
+        // No vertical item spacing while the rows are drawn: a `Selectable`
+        // pads its highlight with half of it on each side, which at an exact
+        // pitch has nowhere to go but into the neighbours. Same rule as the
+        // explorer's, same reason.
+        const ImVec2 entrySpacing = ImGui::GetStyle().ItemSpacing;
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(entrySpacing.x, 0.0f));
         ImGuiListClipper clipper;
         clipper.Begin(static_cast<int>(entries.size()), entryHeight);
         while (clipper.Step()) {
@@ -1393,6 +1440,7 @@ void drawContent(Editor& editor, EditorCommands& commands, bool& open, EditorDia
                 ImGui::PopID();
             }
         }
+        ImGui::PopStyleVar();
 
         // The space below the rows. Right-clicking nothing is how somebody asks
         // about the FOLDER rather than about a thing in it.
