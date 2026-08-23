@@ -4,6 +4,14 @@ A world with mass, and a capsule you steer through it. Everything that moves
 here is moved by the simulation, not by a script writing `CFrame` every frame —
 that is the whole difference between this example and `01-instances`.
 
+**Its world is a file** (ADR 0047): `content/scenes/main.scene.json` holds the
+ground, the towers, the ramps, the kerb, the seesaw, the character, the welded
+banner, the camera and the input map, and `luaug.toml` names it. `init.luau` is
+the behaviour — the camera, the walking, the jump — and nothing else. Open it in
+the editor, drag a crate, save, and the run starts there; none of the physics
+moved, because a scene stores a starting state and everything this example shows
+is what the solver then does with it.
+
 Run it:
 
 ```

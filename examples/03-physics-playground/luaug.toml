@@ -1,0 +1,21 @@
+# **This example's world is a FILE now** (ADR 0047), and `scene` is the line
+# that makes it one: it names what a RUN of this project starts with.
+#
+# Nothing about the physics moved. What a scene stores is a starting state --
+# where a crate is, how heavy the plank is, what is anchored -- and everything
+# this example exists to show is what the SOLVER then does with it. The stack
+# still comes down because it was never scripted to.
+#
+# What moved is why: a project whose code builds its world cannot be saved from
+# the editor. Save a scene of it and reopen, and the file puts a world back
+# while the code makes another (D074). A world has one source.
+
+[project]
+name = "LuauG Physics Playground"
+id = "dev.luaug.physics-playground"
+version = "1.0.0"
+engine = "0.1"
+scene = "scenes/main.scene.json"
+
+[window]
+title = "LuauG — Physics Playground"
