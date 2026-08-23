@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 
 // The editor's model: what it has selected, where its 3D view is, and what the
@@ -462,6 +463,47 @@ public:
     // special case here.
     bool createInstance(scene::World& world, scene::ClassId classId, core::InstanceId parent, core::InstanceId root,
                         Inspector& inspector);
+
+    // **Whether a person may author here at all**, which is a different and
+    // wider question than `isEngineOwned`.
+    //
+    // That one knows about the world's root and about services. It says nothing
+    // about `generated`, which is the flag streaming puts on a chunk's folder
+    // and which the scene format reads three times -- so nothing stopped a drag
+    // from dropping an authored part inside `Chunk_12_-4`, where the save skips
+    // it (the serializer skips a generated subtree whole) and the next eviction
+    // destroys it without a word.
+    //
+    // Ancestors count. A chunk marks its FOLDER and not its contents, which is
+    // exactly the economy that makes checking the instance alone wrong.
+    [[nodiscard]] static bool authorable(const scene::World& world, core::InstanceId id, core::InstanceId root);
+
+    // Moves instances under a new parent, as ONE undo step.
+    //
+    // What it refuses, and each for its own reason: a target that is not
+    // authorable, because the save would drop what lands there; a source that
+    // is engine-owned, because a service is one per world and moving it is not
+    // a thing a world can mean; and a cycle, which `World::setParent` already
+    // refuses and which this does not duplicate -- it reads the error back.
+    //
+    // A refusal is per instance and not for the batch: dragging four things
+    // onto a folder, one of which cannot go, moves the three that can and says
+    // so. The alternative is a drag that silently does nothing because of a
+    // member somebody did not notice selecting.
+    bool reparent(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId newParent,
+                  core::InstanceId root, Inspector& inspector);
+
+    // Delete and duplicate over a whole selection, as ONE undo step each --
+    // because somebody who deleted four things did one thing, and four steps is
+    // four presses of ctrl-Z to get back to where they were.
+    //
+    // Ordered by the tree before acting, so the result does not depend on the
+    // order somebody happened to click in (R10's discipline applied to an
+    // editor: an operation over a set has to be a function of the set).
+    bool deleteInstances(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId root,
+                         Inspector& inspector);
+    bool duplicateInstances(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId root,
+                            Inspector& inspector);
 
     bool renameInstance(scene::World& world, core::InstanceId id, core::InstanceId root, std::string_view name);
 

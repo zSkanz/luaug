@@ -186,6 +186,20 @@ void collectCreatableClasses(const scene::World& world, std::vector<scene::Class
 // `out` is cleared first, for the same reason as above.
 void collectTree(const scene::World& world, core::InstanceId root, std::vector<TreeRow>& out);
 
+// The given instances, in the order the tree holds them, with duplicates and
+// anything not under `root` dropped.
+//
+// **An operation over a set has to be a function of the set.** A batch delete or
+// a batch reparent walked in the order somebody happened to ctrl-click would
+// produce a different world for the same selection, which is R10's discipline
+// applied to an editor. Document order also puts a parent ahead of its own
+// child, which is what stops an operation on both from depending on which was
+// reached first.
+//
+// `out` is cleared first.
+void orderByTree(const scene::World& world, core::InstanceId root, std::span<const core::InstanceId> ids,
+                 std::vector<core::InstanceId>& out);
+
 // A one-line rendering of any `Value`, for the read-only fields and for the
 // outcome log. Needs the world because an Instance reference and an enum item
 // are both names the value itself does not carry.

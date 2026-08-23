@@ -445,6 +445,177 @@ bool Editor::createInstance(scene::World& world, scene::ClassId classId, core::I
     return true;
 }
 
+bool Editor::authorable(const scene::World& world, core::InstanceId id, core::InstanceId root)
+{
+    if (!world.alive(id))
+        return false;
+
+    // Up the whole chain. Streaming marks a chunk's FOLDER and not the parts
+    // inside it -- `streaming_glue.cpp` says so where it sets the flag, and the
+    // scene serializer relies on exactly that economy -- so an instance that is
+    // not itself generated may still be sitting inside something that is.
+    for (core::InstanceId walk = id; walk.valid(); walk = world.parentOf(walk)) {
+        if (world.generated(walk))
+            return false;
+        if (walk == root)
+            break;
+    }
+
+    return !isEngineOwned(world, id, root);
+}
+
+bool Editor::reparent(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId newParent,
+                      core::InstanceId root, Inspector& inspector)
+{
+    if (ids.empty() || !world.alive(newParent))
+        return false;
+
+    if (newParent != root && !authorable(world, newParent, root)) {
+        m_status = EditorStatus{"nothing authored can live in that", true};
+        return false;
+    }
+
+    // **Decided before anything is recorded**, so a drag that cannot move
+    // anything leaves no undo step behind. A step that undoes nothing is worse
+    // than no step: it eats a press of ctrl-Z and the second press takes back
+    // something the person had stopped thinking about.
+    //
+    // Document order rather than click order, so the result is a function of
+    // the SET. It is also the order that keeps a parent ahead of its own child,
+    // which stops a move of both depending on which was reached first.
+    std::vector<core::InstanceId> ordered;
+    orderByTree(world, root, ids, ordered);
+
+    std::vector<core::InstanceId> movable;
+    core::usize refused = 0;
+    for (const core::InstanceId id : ordered) {
+        if (isEngineOwned(world, id, root)) {
+            ++refused;
+            continue;
+        }
+        // A cycle: onto itself, or into its own subtree. `World::setParent`
+        // refuses both and this asks the SAME function rather than carrying a
+        // second copy of the rule.
+        if (id == newParent || world.isAncestorOf(id, newParent)) {
+            ++refused;
+            continue;
+        }
+        // Already there. Not a refusal -- a parent earlier in the walk has
+        // taken its children with it, and re-parenting a child to where it
+        // already is would only move it to the end of the sibling list.
+        if (world.parentOf(id) == newParent)
+            continue;
+        movable.push_back(id);
+    }
+
+    if (movable.empty()) {
+        m_status = EditorStatus{refused > 0 ? "nothing there can be moved into that" : "already there", refused > 0};
+        return false;
+    }
+
+    m_history.record(world, movable.size() == 1 ? "Reparent" : "Reparent " + std::to_string(movable.size()));
+    for (const core::InstanceId id : movable) {
+        if (world.setParent(id, newParent).has_value())
+            ++refused;
+    }
+
+    inspector.pruneDead(world);
+    inspector.onWorldRestored();
+
+    std::string message = "moved " + std::to_string(movable.size());
+    if (refused > 0)
+        message += ", refused " + std::to_string(refused);
+    m_status = EditorStatus{message, false};
+    return true;
+}
+
+bool Editor::deleteInstances(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId root,
+                             Inspector& inspector)
+{
+    if (ids.empty())
+        return false;
+    if (ids.size() == 1)
+        return deleteInstance(world, ids[0], root, inspector);
+
+    std::vector<core::InstanceId> ordered;
+    orderByTree(world, root, ids, ordered);
+
+    std::vector<core::InstanceId> removable;
+    for (const core::InstanceId id : ordered) {
+        if (!isEngineOwned(world, id, root))
+            removable.push_back(id);
+    }
+
+    if (removable.empty()) {
+        m_status =
+            EditorStatus{"that one belongs to the engine -- services and the world itself cannot be deleted", true};
+        return false;
+    }
+
+    m_history.record(world, "Delete " + std::to_string(removable.size()) + " instances");
+
+    core::usize removed = 0;
+    for (const core::InstanceId id : removable) {
+        // A parent destroyed earlier in the walk took its children with it, so
+        // a child named separately is already gone -- and that is not an error.
+        // Selecting a parent and its child and pressing delete means both, and
+        // both is what happened.
+        if (world.alive(id) && world.destroy(id))
+            ++removed;
+    }
+
+    // A paused world runs no signal drain, so nothing else retires these and
+    // they would go on answering `alive` -- the same reason `deleteInstance`
+    // calls it.
+    world.retireDestroyed();
+
+    inspector.pruneDead(world);
+    inspector.onWorldRestored();
+    m_status = EditorStatus{"deleted " + std::to_string(removed) + " instance(s)", false};
+    return true;
+}
+
+bool Editor::duplicateInstances(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId root,
+                                Inspector& inspector)
+{
+    if (ids.empty())
+        return false;
+    if (ids.size() == 1)
+        return duplicateInstance(world, ids[0], root, inspector);
+
+    std::vector<core::InstanceId> ordered;
+    orderByTree(world, root, ids, ordered);
+
+    std::vector<core::InstanceId> copyable;
+    for (const core::InstanceId id : ordered) {
+        if (!isEngineOwned(world, id, root) && world.parentOf(id).valid())
+            copyable.push_back(id);
+    }
+
+    if (copyable.empty()) {
+        m_status = EditorStatus{"nothing there can be duplicated", true};
+        return false;
+    }
+
+    m_history.record(world, "Duplicate " + std::to_string(copyable.size()) + " instances");
+
+    std::vector<core::InstanceId> copies;
+    for (const core::InstanceId id : copyable) {
+        const core::InstanceId copy = world.clone(id);
+        if (!copy.valid())
+            continue;
+        (void)world.setParent(copy, world.parentOf(id));
+        copies.push_back(copy);
+    }
+
+    // The copies, not the originals: the point of duplicating is to change what
+    // came out, and a selection left on the source is a second click before
+    // anything can be done to it.
+    inspector.select(copies);
+    m_status = EditorStatus{"duplicated " + std::to_string(copies.size()) + " instance(s)", false};
+    return true;
+}
+
 bool Editor::renameInstance(scene::World& world, core::InstanceId id, core::InstanceId root, std::string_view name)
 {
     if (!world.alive(id) || name.empty())

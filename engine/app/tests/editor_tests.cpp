@@ -10,8 +10,11 @@
 #include "luaug/scene/components.h"
 #include "luaug/scene/world.h"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <doctest/doctest.h>
+#include <vector>
 
 #include "inspector_fixture.h"
 
@@ -703,4 +706,190 @@ TEST_CASE("undo, redo and stop leave id-keyed panel state alone; a scene load do
     editor.newScene(world, inspector);
     CHECK(inspector.worldIdentity() != identity);
     CHECK_FALSE(inspector.selection().valid());
+}
+
+// --- E2: reparenting, and doing things to four instances at once ------------
+
+TEST_CASE("a batch delete is one undo step, and undoing it brings back the same ids")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    std::vector<core::InstanceId> made;
+    for (int index = 0; index < 4; ++index) {
+        const core::InstanceId id = fixture.widget(world, "Doomed");
+        REQUIRE_FALSE(world.setParent(id, root).has_value());
+        made.push_back(id);
+    }
+
+    REQUIRE(editor.deleteInstances(world, made, root, inspector));
+    for (const core::InstanceId id : made)
+        CHECK_FALSE(world.alive(id));
+    CHECK(editor.history().canUndo());
+
+    // **One press**, because somebody who deleted four things did one thing.
+    REQUIRE(editor.undo(world, inspector));
+    for (const core::InstanceId id : made)
+        CHECK(world.alive(id));
+    CHECK_FALSE(editor.history().canUndo());
+}
+
+TEST_CASE("a batch is ordered by the tree, so the same selection is the same result")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId first = fixture.widget(world, "First");
+    const core::InstanceId second = fixture.widget(world, "Second");
+    const core::InstanceId nested = fixture.widget(world, "Nested");
+    REQUIRE_FALSE(world.setParent(first, root).has_value());
+    REQUIRE_FALSE(world.setParent(second, root).has_value());
+    REQUIRE_FALSE(world.setParent(nested, first).has_value());
+
+    // Clicked in the reverse of the tree's order, which is what ctrl-clicking
+    // down a list and then back up produces.
+    const std::array<core::InstanceId, 3> clicked{nested, second, first};
+    std::vector<core::InstanceId> ordered;
+    app::orderByTree(world, root, clicked, ordered);
+
+    REQUIRE(ordered.size() == 3);
+    // Document order: the parent ahead of its own child, whatever order the
+    // clicks arrived in.
+    CHECK(ordered[0] == first);
+    CHECK(ordered[1] == nested);
+    CHECK(ordered[2] == second);
+
+    // And it is idempotent over duplicates, because a selection can hold one.
+    const std::array<core::InstanceId, 4> twice{second, first, second, first};
+    app::orderByTree(world, root, twice, ordered);
+    REQUIRE(ordered.size() == 2);
+    CHECK(ordered[0] == first);
+    CHECK(ordered[1] == second);
+}
+
+TEST_CASE("deleting a parent and its child together is not an error")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId parent = fixture.widget(world, "Parent");
+    const core::InstanceId child = fixture.widget(world, "Child");
+    REQUIRE_FALSE(world.setParent(parent, root).has_value());
+    REQUIRE_FALSE(world.setParent(child, parent).has_value());
+
+    // The parent goes first and takes the child with it, so the child is
+    // already gone by the time the walk reaches it. Selecting both and pressing
+    // delete means both, and both is what happened.
+    const std::array<core::InstanceId, 2> both{child, parent};
+    REQUIRE(editor.deleteInstances(world, both, root, inspector));
+    CHECK_FALSE(world.alive(parent));
+    CHECK_FALSE(world.alive(child));
+    CHECK(inspector.selectionCount() == 0);
+}
+
+TEST_CASE("a batch duplicate is one step and selects the copies")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    std::vector<core::InstanceId> made;
+    for (int index = 0; index < 3; ++index) {
+        const core::InstanceId id = fixture.widget(world, "Original");
+        REQUIRE_FALSE(world.setParent(id, root).has_value());
+        made.push_back(id);
+    }
+
+    REQUIRE(editor.duplicateInstances(world, made, root, inspector));
+    CHECK(world.childCount(root) == 6);
+    // The copies, because the point of duplicating is to change what came out.
+    CHECK(inspector.selectionCount() == 3);
+    for (const core::InstanceId id : inspector.selectionSet())
+        CHECK(std::find(made.begin(), made.end(), id) == made.end());
+
+    REQUIRE(editor.undo(world, inspector));
+    CHECK(world.childCount(root) == 3);
+}
+
+TEST_CASE("reparenting moves a subtree, refuses a cycle, and never records a step that does nothing")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId from = fixture.widget(world, "From");
+    const core::InstanceId to = fixture.widget(world, "To");
+    const core::InstanceId moved = fixture.widget(world, "Moved");
+    const core::InstanceId child = fixture.widget(world, "Child");
+    REQUIRE_FALSE(world.setParent(from, root).has_value());
+    REQUIRE_FALSE(world.setParent(to, root).has_value());
+    REQUIRE_FALSE(world.setParent(moved, from).has_value());
+    REQUIRE_FALSE(world.setParent(child, moved).has_value());
+
+    const std::array<core::InstanceId, 1> one{moved};
+    REQUIRE(editor.reparent(world, one, to, root, inspector));
+    CHECK(world.parentOf(moved) == to);
+    // The subtree came with it, which is what moving a thing means.
+    CHECK(world.parentOf(child) == moved);
+
+    // Onto its own child: a cycle, refused by `World::setParent` and asked of it
+    // rather than re-implemented.
+    const std::array<core::InstanceId, 1> cycle{moved};
+    const bool undoBefore = editor.history().canUndo();
+    CHECK_FALSE(editor.reparent(world, cycle, child, root, inspector));
+    CHECK(world.parentOf(moved) == to);
+    // **And no step was recorded**, which is the part that matters: a step that
+    // undoes nothing eats a press of ctrl-Z, and the second press takes back
+    // something the person had stopped thinking about.
+    CHECK(editor.history().canUndo() == undoBefore);
+
+    // Onto itself is the same refusal.
+    const std::array<core::InstanceId, 1> self{moved};
+    CHECK_FALSE(editor.reparent(world, self, moved, root, inspector));
+
+    // And undo puts it back where it was.
+    REQUIRE(editor.undo(world, inspector));
+    CHECK(world.parentOf(moved) == from);
+}
+
+TEST_CASE("nothing authored may live inside what a system made")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId chunk = fixture.widget(world, "Chunk_12_-4");
+    const core::InstanceId insideChunk = fixture.widget(world, "Ground");
+    const core::InstanceId authored = fixture.widget(world, "Authored");
+    REQUIRE_FALSE(world.setParent(chunk, root).has_value());
+    REQUIRE_FALSE(world.setParent(insideChunk, chunk).has_value());
+    REQUIRE_FALSE(world.setParent(authored, root).has_value());
+
+    // Streaming marks the chunk's FOLDER and not its contents, which is the
+    // economy that makes checking the instance alone wrong.
+    world.setGenerated(chunk, true);
+
+    CHECK(Editor::authorable(world, authored, root));
+    CHECK_FALSE(Editor::authorable(world, chunk, root));
+    CHECK_FALSE(Editor::authorable(world, insideChunk, root));
+
+    // The save would skip anything dropped in there -- the serializer skips a
+    // generated subtree whole -- and the next eviction would destroy it without
+    // a word.
+    const std::array<core::InstanceId, 1> one{authored};
+    CHECK_FALSE(editor.reparent(world, one, chunk, root, inspector));
+    CHECK(world.parentOf(authored) == root);
 }

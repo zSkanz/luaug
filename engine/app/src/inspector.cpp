@@ -245,6 +245,26 @@ void collectProperties(const scene::ClassRegistry& classes, scene::ClassId class
     }
 }
 
+void orderByTree(const scene::World& world, core::InstanceId root, std::span<const core::InstanceId> ids,
+                 std::vector<core::InstanceId>& out)
+{
+    out.clear();
+    if (ids.empty())
+        return;
+
+    // One walk of the tree rather than a sort with a comparator that would have
+    // to answer "which of these two comes first" by walking it anyway.
+    static thread_local std::vector<TreeRow> rows;
+    collectTree(world, root, rows);
+    out.reserve(ids.size());
+    for (const TreeRow& row : rows) {
+        if (std::find(ids.begin(), ids.end(), row.id) != ids.end() &&
+            std::find(out.begin(), out.end(), row.id) == out.end()) {
+            out.push_back(row.id);
+        }
+    }
+}
+
 bool creatable(const scene::ClassDescriptor& descriptor) noexcept
 {
     return !scene::hasFlag(descriptor.flags, scene::ClassFlags::Abstract) &&
