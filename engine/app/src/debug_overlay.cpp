@@ -422,9 +422,25 @@ constexpr const char* kInstanceDragPayload = "luaug.instances";
     return changed;
 }
 
+// The tree, from `root` down.
+//
+// **`root` is not drawn when it is the world's**, and IS drawn when it is a
+// stamp's. Those are two different questions with the same shape. `game` has no
+// properties worth a row, cannot be renamed, deleted, duplicated or reparented,
+// and every useful thing is under it -- so a row for it is a line of chrome and
+// an indent charged to every row beneath. A STAMP's root is the opposite: it is
+// the thing being edited, it is the one instance whose name and transform are
+// its own, and hiding it would leave somebody editing a set of children with
+// nothing saying what they are children OF.
 void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspector, EditorCommands* commands,
-                  EditorDialogs* dialogs, const IconAtlas* icons, bool showGenerated, const Editor* editor)
+                  EditorDialogs* dialogs, const IconAtlas* icons, bool showGenerated, const Editor* editor,
+                  bool drawRoot = false)
 {
+    // How much of the depth is above the first row that gets drawn. One when
+    // the root is hidden, zero when it is not -- and every position on a row is
+    // measured from it.
+    const u32 depthBase = drawRoot ? 0u : 1u;
+
     // **A stamp is open, so say so and offer the way out.** The tree below is
     // the stamp's and not the scene's, and an editor that looked identical in
     // both would be one where somebody edits a stamp believing they are editing
@@ -526,7 +542,7 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
         // `root` is what `isEngineOwned` compares against and what the pick
         // path resolves into: the tree is still the tree, this is the view of
         // it. Depth is shifted at the draw so the services sit flush left.
-        if (row.depth > 0)
+        if (row.depth > 0 || drawRoot)
             g_visible.push_back(row);
 
         const bool hasChildren = world.childCount(row.id) > 0;
@@ -536,10 +552,13 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
         // collapsed.
         if (hasChildren && !g_openKnown.contains(row.id.index)) {
             g_openKnown.insert(row.id.index);
-            // **The root only**, and it is not drawn -- opening it is what
-            // puts the services on screen at all. What is INSIDE them is the
-            // scene, and showing all of that means scrolling past a world to
-            // find the thing you came for.
+            // **The root only**, and when it is the world's it is not drawn --
+            // opening it is what puts the services on screen at all. What is
+            // INSIDE them is the scene, and showing all of that means scrolling
+            // past a world to find the thing you came for.
+            //
+            // A stamp's root opens for the opposite reason: it IS what somebody
+            // opened, and a stage that starts collapsed shows one row.
             if (row.depth == 0)
                 g_open.insert(row.id.index);
         }
@@ -798,9 +817,10 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             // after the last: they are four different heights, and stacking
             // would put them at four different places on a row that has one.
 
-            // Depth minus one, because the root's row is not drawn and its
-            // children are therefore this tree's top level.
-            float penX = rowOrigin.x + static_cast<float>(row.depth - 1) * indentSpacing;
+            // Less whatever is above the first drawn row: with the world's
+            // root hidden its children are this tree's top level, and with a
+            // stamp's root drawn the root itself is.
+            float penX = rowOrigin.x + static_cast<float>(row.depth - depthBase) * indentSpacing;
 
             // The arrow is its own control rather than part of the row, because
             // opening a thing and selecting it are different intentions and a
@@ -1035,7 +1055,8 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
 
             // The column: the middle of this row's own chevron, which is where
             // a child's line should hang from.
-            const float x = std::floor(listTop.x + static_cast<float>(depth - 1) * indentSpacing + chevron * 0.5f);
+            const float x =
+                std::floor(listTop.x + static_cast<float>(depth - depthBase) * indentSpacing + chevron * 0.5f);
             const float top = listTop.y + static_cast<float>(i) * rowHeight + rowHeight;
             const float bottom = listTop.y + static_cast<float>(last) * rowHeight + half;
             draw->AddLine(ImVec2(x, top), ImVec2(x, bottom), guide);
@@ -2150,6 +2171,10 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
             const std::size_t slash = relative.find('/', begin);
             const std::string segment =
                 relative.substr(begin, slash == std::string::npos ? std::string::npos : slash - begin);
+            // The path AS FAR AS THIS STEP, which is what a folder's colour is
+            // keyed by -- a step is a folder, and the same folder wears the
+            // same colour wherever it is drawn.
+            const std::string here = slash == std::string::npos ? relative : relative.substr(0, slash);
             begin = slash == std::string::npos ? relative.size() : slash + 1;
 
             ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
@@ -2160,8 +2185,9 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
             const bool last = step == depth - 1;
             // **A folder icon per step, not one at the front.** Every step in
             // the chain IS a folder, and a row that pictures only the first of
-            // them says the rest are something else.
-            (void)drawIcon(icons, icons::ContentFolder, toolbarIcon);
+            // them says the rest are something else -- coloured, because a
+            // folder somebody coloured is the same folder here.
+            (void)drawIcon(icons, icons::ContentFolder, toolbarIcon, editor.contentColor(here));
             ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
             // The one you are IN is not a button: it goes nowhere, and a
             // control that does nothing is worse than a label.
@@ -2867,8 +2893,17 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
 
     if (panels.explorer) {
         if (ImGui::Begin("explorer", &panels.explorer)) {
-            if (world != nullptr && inspector != nullptr)
-                drawExplorer(*world, root, *inspector, &commands, &dialogs, icons, panels.showGenerated, editor);
+            if (world != nullptr && inspector != nullptr) {
+                // **While a stamp is open the tree is the STAMP's**, root row
+                // and all: no services, no scene, nothing but what is in the
+                // file. That is the whole of "a separate environment" as far as
+                // the Explorer is concerned, and the viewport already shows the
+                // same thing because opening cleared the scene out of the world.
+                const bool editingStamp = editor != nullptr && editor->stampSession().open();
+                const core::InstanceId treeRoot = editingStamp ? editor->stampSession().root : root;
+                drawExplorer(*world, treeRoot, *inspector, &commands, &dialogs, icons, panels.showGenerated, editor,
+                             editingStamp);
+            }
         }
         ImGui::End();
     }

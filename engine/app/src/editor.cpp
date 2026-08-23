@@ -812,8 +812,14 @@ bool Editor::openStamp(scene::World& world, std::string_view path, core::Instanc
     // that reached back past this boundary would apply a step taken in a world
     // that is not this one.
     m_history.clear();
-    inspector.onWorldRestored();
-    inspector.pruneDead(world);
+
+    // **A DIFFERENT world, not a restored one**, and the distinction is D071's.
+    // What is in the world now was built just now in slots the scene's
+    // instances used to hold, so anything a panel keyed by id -- which rows are
+    // expanded, above all -- would be pointing at unrelated instances. The cost
+    // is that the scene's tree comes back collapsed after a stamp is closed,
+    // which is a smaller price than rows opening by themselves inside the stamp.
+    inspector.onWorldChanged();
     inspector.select(root);
     inspector.reveal(root);
 
@@ -858,6 +864,11 @@ bool Editor::closeStamp(scene::World& world, Inspector& inspector, bool save)
     // The same three the stop path makes, and for the same reasons: the history
     // belongs to a world this restore has replaced, and a selection made inside
     // the stamp names instances the restore has taken away.
+    //
+    // `onWorldRestored` rather than `onWorldChanged` here, and that is not
+    // symmetry for its own sake: a snapshot carries generations and the free
+    // list, so every instance the scene had is the instance it was. Opening is
+    // a different world; closing is the same one, put back.
     m_history.clear();
     inspector.pruneDead(world);
     inspector.onWorldRestored();
