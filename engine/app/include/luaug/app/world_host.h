@@ -98,6 +98,17 @@ struct WorldHostOptions
     // frame, forever. Loading first cannot do that: there is nothing alive yet
     // to invalidate, and a script that builds its world builds it on top of
     // the file rather than under it.
+    // How the scene below reads the stamps it names (ADR 0049). Empty is legal
+    // and means a project with no stamps -- or a scene whose stamped instances
+    // are counted as missing rather than silently dropped.
+    //
+    // **Before `bootScene` and not after it**, which is not tidiness: every
+    // caller writes this struct with designated initialisers ending at
+    // `bootScene`, and a field added after that one is a field none of them
+    // names -- which Clang reports as `-Wmissing-field-initializers` and
+    // `-Werror` turns into six broken builds. MSVC says nothing, which is what
+    // the Tier-2 stage exists to catch.
+    scene::StampSource bootStamps;
     std::filesystem::path bootScene;
 };
 

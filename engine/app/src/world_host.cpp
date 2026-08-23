@@ -329,7 +329,7 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
             core::log(LogLevel::Warn, LUAUG_TR("scene.err.scene_unreadable"));
         }
         else if (const std::optional<core::EngineError> sceneError =
-                     scene::readScene(*m_world, sceneText, &m_bootSceneReport);
+                     scene::readScene(*m_world, sceneText, &m_bootSceneReport, options.bootStamps);
                  sceneError.has_value()) {
             core::logText(LogLevel::Error, sceneError->message);
         }

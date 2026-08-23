@@ -336,8 +336,9 @@ void registerNativeModule(lua_State* L, std::string_view name, int (*opener)(lua
     modules.registered.push_back(ModuleRegistry::Registered{.name = std::string(name), .source = {}, .opener = opener});
 }
 
-void mountScripts(lua_State* L, std::span<const MountedScript> scripts)
+std::vector<core::InstanceId> mountScripts(lua_State* L, std::span<const MountedScript> scripts)
 {
+    std::vector<core::InstanceId> made;
     ModuleRegistry& modules = registry(L);
     scene::World& w = world(L);
 
@@ -351,7 +352,7 @@ void mountScripts(lua_State* L, std::span<const MountedScript> scripts)
     const core::InstanceId scriptService =
         w.findFirstChildOfClass(context(L).services->dataModel, w.classes().findId(w.atoms().lookup("ScriptService")));
     if (!scriptService.valid())
-        return;
+        return made;
 
     const scene::ClassId folderClass = w.classes().findId(w.atoms().lookup("Folder"));
     const scene::ClassId scriptClass = w.classes().findId(w.atoms().lookup("Script"));
@@ -379,11 +380,13 @@ void mountScripts(lua_State* L, std::span<const MountedScript> scripts)
         (void)w.setParent(instance, parent);
 
         modules.entries.push_back(ModuleRegistry::Entry{entry.path, entry.source, instance});
+        made.push_back(instance);
     }
 
     // Consumed rather than queued: the tree was built before any script could
     // have connected to anything, so these are facts with no observer.
     (void)w.changes().take();
+    return made;
 }
 
 void startScripts(lua_State* L)

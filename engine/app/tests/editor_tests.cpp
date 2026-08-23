@@ -1163,6 +1163,221 @@ TEST_CASE("a content folder's colour survives the editor closing")
     std::filesystem::remove_all(state.parent_path(), cleanup);
 }
 
+// --- E3: stamps (ADR 0049) ---------------------------------------------------
+
+namespace {
+// A project with a `content/` the editor can write stamps into. Owned by the
+// test rather than by a fixture, because what is under test is a verb that
+// touches the DISK and a suite that shared one directory would have two cases
+// reading each other's files.
+struct StampProject
+{
+    std::filesystem::path root;
+
+    explicit StampProject(std::string_view name)
+        : root(std::filesystem::temp_directory_path() / "luaug-stamp-tests" / std::string(name))
+    {
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+        std::filesystem::create_directories(root / "content", ec);
+    }
+
+    ~StampProject()
+    {
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+    }
+
+    StampProject(const StampProject&) = delete;
+    StampProject& operator=(const StampProject&) = delete;
+};
+} // namespace
+
+TEST_CASE("a stamp name lands in content/stamps and cannot leave content/")
+{
+    // The same rule a scene path follows, and the same reason it is pure and
+    // public: the dialog previews the RESOLVED path while somebody types, which
+    // is what makes a rule visible rather than surprising (D068).
+    CHECK(Editor::normalizeStampPath("lantern-post") == "stamps/lantern-post.stamp.json");
+    // Already carrying a folder: taken at its word, because the default is a
+    // convention rather than a rule.
+    CHECK(Editor::normalizeStampPath("props/lantern") == "props/lantern.stamp.json");
+    // The prefix the box already shows, typed anyway -- which is the natural
+    // thing to do and the wrong thing to keep.
+    CHECK(Editor::normalizeStampPath("content/props/lantern") == "props/lantern.stamp.json");
+    CHECK(Editor::normalizeStampPath("props\\lantern.stamp.json") == "props/lantern.stamp.json");
+
+    CHECK(Editor::stampNameIsUsable("lantern-post"));
+    CHECK_FALSE(Editor::stampNameIsUsable(""));
+    CHECK_FALSE(Editor::stampNameIsUsable("../escape"));
+    CHECK_FALSE(Editor::stampNameIsUsable("C:/somewhere"));
+}
+
+TEST_CASE("making a stamp writes a file and turns the subject into an instance of it")
+{
+    StampProject project("create");
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(project.root / "content");
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId post = fixture.widget(world, "Post");
+    const core::InstanceId lantern = fixture.widget(world, "Lantern");
+    REQUIRE_FALSE(world.setParent(post, root).has_value());
+    REQUIRE_FALSE(world.setParent(lantern, post).has_value());
+
+    REQUIRE(editor.createStamp(world, post, root, "lantern-post"));
+    CHECK(std::filesystem::exists(project.root / "content" / "stamps" / "lantern-post.stamp.json"));
+
+    // **And the subject became one of its instances**, which is the half that
+    // surprises people and the half that matters: a source plus a copy of it
+    // that nothing connects is two things that drift apart by tomorrow.
+    CHECK(world.atoms().text(world.stampOf(post)) == "stamps/lantern-post.stamp.json");
+    CHECK(world.stampRootOf(lantern) == post);
+    // One undo step, and it takes the mark off rather than the file: a file is
+    // not something an undo stack owns.
+    REQUIRE(editor.undo(world, inspector));
+    CHECK_FALSE(world.stampOf(post).valid());
+    CHECK(std::filesystem::exists(project.root / "content" / "stamps" / "lantern-post.stamp.json"));
+}
+
+TEST_CASE("a stamp of a subtree that already contains one is refused rather than half-answered")
+{
+    StampProject project("nested");
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    editor.openContent(project.root / "content");
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId group = fixture.widget(world, "Group");
+    const core::InstanceId post = fixture.widget(world, "Post");
+    const core::InstanceId lantern = fixture.widget(world, "Lantern");
+    REQUIRE_FALSE(world.setParent(group, root).has_value());
+    REQUIRE_FALSE(world.setParent(post, group).has_value());
+    REQUIRE_FALSE(world.setParent(lantern, post).has_value());
+
+    REQUIRE(editor.createStamp(world, post, root, "lantern-post"));
+    // Does the outer file record the inner link? Does breaking the outer break
+    // the inner? ADR 0049 declines to answer, so this declines to write one.
+    CHECK_FALSE(editor.createStamp(world, group, root, "street"));
+    CHECK_FALSE(std::filesystem::exists(project.root / "content" / "stamps" / "street.stamp.json"));
+}
+
+TEST_CASE("placing a stamp builds its subtree, selects it, and one undo takes all of it back")
+{
+    StampProject project("place");
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(project.root / "content");
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId post = fixture.widget(world, "Post");
+    const core::InstanceId lantern = fixture.widget(world, "Lantern");
+    REQUIRE_FALSE(world.setParent(post, root).has_value());
+    REQUIRE_FALSE(world.setParent(lantern, post).has_value());
+    REQUIRE(editor.createStamp(world, post, root, "lantern-post"));
+
+    const core::u32 before = world.childCount(root);
+    REQUIRE(editor.instantiateStamp(world, "lantern-post", root, root, inspector));
+    CHECK(world.childCount(root) == before + 1);
+
+    const core::InstanceId placed = inspector.selection();
+    REQUIRE(placed.valid());
+    CHECK(placed != post);
+    // The subtree came with it, from the file rather than from a copy.
+    CHECK(world.childCount(placed) == 1);
+    CHECK(world.atoms().text(world.stampOf(placed)) == "stamps/lantern-post.stamp.json");
+    // Revealed, because a stamp dropped into a collapsed folder that nobody can
+    // see is the defect D075 was.
+    CHECK(inspector.takeReveal() == placed);
+
+    // **One step for the whole subtree**, which is what snapshots make cheap
+    // and what a reversible-command design would have made hard.
+    REQUIRE(editor.undo(world, inspector));
+    CHECK(world.childCount(root) == before);
+    CHECK_FALSE(world.alive(placed));
+
+    // A stamp that is not there is refused and records nothing, so the refusal
+    // does not eat a press of ctrl-Z either.
+    const bool couldUndo = editor.history().canUndo();
+    CHECK_FALSE(editor.instantiateStamp(world, "no-such-stamp", root, root, inspector));
+    CHECK(editor.history().canUndo() == couldUndo);
+}
+
+TEST_CASE("moving a stamped instance keeps its mark, and changing anything else breaks it")
+{
+    // **The rule ADR 0048 left open and 0049 answered.** Placing a thing is not
+    // changing the thing: four lamp posts in four places are four lamp posts,
+    // and a model that stopped being one when you moved it would be useless for
+    // the case it exists for.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+
+    const core::InstanceId post = fixture.widget(world, "Post");
+    const core::InstanceId lantern = fixture.widget(world, "Lantern");
+    REQUIRE_FALSE(world.setParent(lantern, post).has_value());
+    world.setStamp(post, fixture.atom("stamps/lantern-post.stamp.json"));
+
+    const core::NameAtom cframe = fixture.atom("CFrame");
+    const core::NameAtom name = fixture.atom("Name");
+    const core::NameAtom count = fixture.atom("Count");
+
+    // The root's own transform and name: its own.
+    CHECK_FALSE(Editor::stampBrokenBy(world, post, cframe).valid());
+    CHECK_FALSE(Editor::stampBrokenBy(world, post, name).valid());
+    // Anything else about the root, and ANYTHING at all about a descendant --
+    // including where the descendant is, because moving a part inside a stamp
+    // is changing what the stamp is.
+    CHECK(Editor::stampBrokenBy(world, post, count) == post);
+    CHECK(Editor::stampBrokenBy(world, lantern, cframe) == post);
+    CHECK(Editor::stampBrokenBy(world, lantern, count) == post);
+    // And nothing outside one is broken by anything.
+    CHECK_FALSE(Editor::stampBrokenBy(world, fixture.widget(world, "Loose"), count).valid());
+
+    // The sweep the frame loop makes before the writes land.
+    Inspector inspector;
+    inspector.enqueue(post, cframe, scene::Value{core::CFrameD{}});
+    CHECK(editor.breakStampsFor(world, inspector.pending()) == 0);
+    CHECK(world.stampOf(post).valid());
+
+    inspector.enqueue(lantern, count, scene::Value{core::f64{1.0}});
+    // One break, not two: a drag over four properties of one stamped instance
+    // is one break.
+    inspector.enqueue(lantern, cframe, scene::Value{core::CFrameD{}});
+    CHECK(editor.breakStampsFor(world, inspector.pending()) == 1);
+    CHECK_FALSE(world.stampOf(post).valid());
+}
+
+TEST_CASE("breaking a stamp is a step of its own, and undo puts the mark back")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId post = fixture.widget(world, "Post");
+    const core::InstanceId lantern = fixture.widget(world, "Lantern");
+    REQUIRE_FALSE(world.setParent(lantern, post).has_value());
+    world.setStamp(post, fixture.atom("stamps/lantern-post.stamp.json"));
+
+    // Asked about a CHILD, because that is where somebody right-clicks: the
+    // question is "stop following the file", and the file is the subtree's.
+    REQUIRE(editor.breakStamp(world, lantern));
+    CHECK_FALSE(world.stampOf(post).valid());
+
+    REQUIRE(editor.undo(world, inspector));
+    CHECK(world.stampOf(post).valid());
+
+    // Nothing to break is refused rather than silently doing nothing.
+    CHECK_FALSE(editor.breakStamp(world, fixture.widget(world, "Loose")));
+}
+
 // --- E2: dragging a manipulator ---------------------------------------------
 //
 // The whole loop, headless: a camera, a viewport, a press on a handle, frames

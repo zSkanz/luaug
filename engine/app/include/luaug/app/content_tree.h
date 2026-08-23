@@ -35,6 +35,11 @@ enum class ContentKind
 {
     Folder,
     Scene,
+    // A subtree somebody can stamp into the world (ADR 0049). The same format
+    // as a scene over a different root, and a kind of its own here because the
+    // browser does a different thing with it: a scene is OPENED and a stamp is
+    // PLACED.
+    Stamp,
     Mesh,
     Texture,
     Chunk,
@@ -62,6 +67,16 @@ struct ContentEntry
 // a loader checks it and a save appends it — and three copies of a string is how
 // two of them end up disagreeing.
 inline constexpr std::string_view kSceneExtension = ".scene.json";
+
+// The same, for a stamp (ADR 0049). It pairs with the scene's on purpose: they
+// are one format over a different root, and the two names say so.
+inline constexpr std::string_view kStampExtension = ".stamp.json";
+
+// Where `Create Stamp...` puts one unless somebody says otherwise. A convention
+// rather than a rule -- the file's KIND is in its name, so a project may
+// organise them however it likes -- and a default is what stops the first one
+// from landing wherever the browser happened to be.
+inline constexpr std::string_view kStampFolder = "stamps";
 
 class ContentTree
 {

@@ -98,6 +98,9 @@ struct Session
         .isReload = false,
         .preserved = nullptr,
         .conformanceRoot = {},
+        // No scene, so no stamps to read: this path boots a project's scripts
+        // and nothing else (ADR 0049).
+        .bootStamps = {},
         .bootScene = {},
     };
     return session.host.boot(worldOptions);

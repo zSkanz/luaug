@@ -38,6 +38,8 @@ ContentKind contentKindOf(std::string_view fileName) noexcept
 
     // The specific suffix first. `.scene.json` also ends in `.json`, and asking
     // the short question first would call every scene a plain file.
+    if (endsWith(name, kStampExtension))
+        return ContentKind::Stamp;
     if (endsWith(name, kSceneExtension))
         return ContentKind::Scene;
     if (endsWith(name, ".chunk.json"))
@@ -166,6 +168,8 @@ namespace {
     switch (kind) {
     case ContentKind::Scene:
         return kSceneExtension;
+    case ContentKind::Stamp:
+        return kStampExtension;
     case ContentKind::Chunk:
         return ".chunk.json";
     case ContentKind::Folder:

@@ -742,6 +742,25 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                                     static_cast<int>(count));
                 if (ImGui::MenuItem(duplicateLabel, nullptr, false, !engineOwned))
                     commands->duplicateSelection = true;
+
+                // --- Stamps (ADR 0049) --------------------------------------
+                //
+                // On the row rather than in a menu bar, because "a stamp of
+                // WHAT" is the whole question and the row is the answer.
+                ImGui::Separator();
+                const core::InstanceId stampRoot = world.stampRootOf(row.id);
+                if (stampRoot.valid()) {
+                    const std::string_view stampName = world.atoms().text(world.stampOf(stampRoot));
+                    char stampLabel[160];
+                    (void)std::snprintf(stampLabel, sizeof(stampLabel), "Break Stamp (%.*s)",
+                                        static_cast<int>(stampName.size()), stampName.data());
+                    if (ImGui::MenuItem(stampLabel))
+                        commands->breakStamp = stampRoot;
+                }
+                else if (ImGui::MenuItem("Create Stamp...", nullptr, false, !engineOwned)) {
+                    dialogs->stampSubject = row.id;
+                    dialogs->newStamp = true;
+                }
                 ImGui::Separator();
                 if (ImGui::MenuItem(deleteLabel, nullptr, false, !engineOwned))
                     commands->deleteSelection = true;
@@ -805,6 +824,20 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             ImGui::SetCursorPos(ImVec2(penX, centred(ImGui::GetTextLineHeight())));
             ImGui::TextUnformatted(label);
             penX += ImGui::CalcTextSize(label).x + ImGui::GetStyle().ItemSpacing.x;
+
+            // **A stamped row says so.** Changing the file changes this
+            // instance, which is the whole point of the mark and exactly the
+            // kind of thing somebody should not have to remember.
+            if (const core::NameAtom stamp = world.stampOf(row.id); stamp.valid()) {
+                ImGui::SetCursorPos(ImVec2(penX, centred(ImGui::GetTextLineHeight())));
+                ImGui::TextDisabled("(stamp)");
+                if (ImGui::IsItemHovered()) {
+                    const std::string_view text = world.atoms().text(stamp);
+                    ImGui::SetTooltip("follows content/%.*s -- editing anything inside breaks the link",
+                                      static_cast<int>(text.size()), text.data());
+                }
+                penX += ImGui::CalcTextSize("(stamp)").x + ImGui::GetStyle().ItemSpacing.x;
+            }
 
             // Only where an instance can actually go: nothing authored lives
             // inside something streaming materialised, and offering a plus that
@@ -881,6 +914,23 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 }
                 ImGui::SetNextItemWidth(210.0f);
                 ImGui::InputTextWithHint("##add-filter", "filter", g_addFilter.data(), g_addFilter.size());
+
+                // **`Script` is where somebody looks for it, and it explains
+                // itself** (ADR 0048). It is not in the list below because
+                // `Instance.new("Script")` is refused -- a script exists
+                // because a FILE does -- and a person who comes here looking
+                // for one and finds nothing concludes the engine cannot make
+                // them. So it is here, above the classes, and it opens the box
+                // that writes the file.
+                if (dialogs != nullptr && ImGui::Selectable("Script...")) {
+                    dialogs->newScript = true;
+                    ImGui::CloseCurrentPopup();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("a script is a FILE: this writes src/scripts/<name>.luau and the tree grows a "
+                                      "Script for it under ScriptService");
+                }
+                ImGui::Separator();
 
                 const std::string_view filter(g_addFilter.data());
                 if (ImGui::BeginChild("add-list", ImVec2(210.0f, 260.0f))) {
@@ -1893,6 +1943,12 @@ void buildDefaultLayout(ImGuiID dockspace)
         return icons::ContentFolder;
     case ContentKind::Scene:
         return icons::ContentScene;
+    case ContentKind::Stamp:
+        // **The set owes a `content.Stamp` drawing** and this is the honest
+        // stand-in until it exists: a `Model` is a group of instances handled
+        // as one thing, which is what a stamp is a file of. Falling back to the
+        // generic content icon would say less than that.
+        return icons::ClassModel;
     case ContentKind::Mesh:
         return icons::ContentMesh;
     case ContentKind::Texture:
@@ -1912,6 +1968,8 @@ void buildDefaultLayout(ImGuiID dockspace)
         return "dir";
     case ContentKind::Scene:
         return "scene";
+    case ContentKind::Stamp:
+        return "stamp";
     case ContentKind::Mesh:
         return "mesh";
     case ContentKind::Texture:
@@ -2065,6 +2123,11 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
 
             ImGui::PushID(step);
             const bool last = step == depth - 1;
+            // **A folder icon per step, not one at the front.** Every step in
+            // the chain IS a folder, and a row that pictures only the first of
+            // them says the rest are something else.
+            (void)drawIcon(icons, icons::ContentFolder, toolbarIcon);
+            ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
             // The one you are IN is not a button: it goes nowhere, and a
             // control that does nothing is worse than a label.
             if (last) {
@@ -2180,6 +2243,11 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                             (void)tree.enter(entry.name);
                         else if (entry.kind == ContentKind::Scene)
                             commands.openScene = entry.path;
+                        // **A scene is OPENED and a stamp is PLACED**, which is
+                        // the whole difference between the two kinds and the
+                        // reason a stamp is a kind of its own.
+                        else if (entry.kind == ContentKind::Stamp)
+                            commands.placeStamp = entry.path;
                     }
 
                     if (ImGui::BeginPopupContextItem("entry-menu")) {
@@ -2188,6 +2256,8 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, entrySpacing);
                         if (entry.kind == ContentKind::Scene && ImGui::MenuItem("Open"))
                             commands.openScene = entry.path;
+                        if (entry.kind == ContentKind::Stamp && ImGui::MenuItem("Place in Workspace"))
+                            commands.placeStamp = entry.path;
                         // **A directory cannot carry a colour**, so this one is
                         // kept in `.luaug/editor.json` keyed by path, while a
                         // folder in the WORLD carries its own as an attribute.
@@ -2499,6 +2569,10 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         dialogs.newScript = false;
         ImGui::OpenPopup("New Script");
     }
+    if (dialogs.newStamp) {
+        dialogs.newStamp = false;
+        ImGui::OpenPopup("New Stamp");
+    }
     if (!dialogs.deleteContentPath.empty())
         ImGui::OpenPopup("Delete");
 
@@ -2614,6 +2688,55 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         if ((submitted || accepted) && usable) {
             commands.createScript = typed;
             script.fill(0);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(440.0f, 0.0f), ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("New Stamp", nullptr, ImGuiWindowFlags_NoResize)) {
+        static std::array<char, 128> stamp{};
+        // **What this does, in one sentence, because the second half surprises
+        // people**: it writes a file AND turns the thing you made it from into
+        // an instance of that file. A source plus a copy of it that nothing
+        // connects is two things that drift apart by tomorrow.
+        ImGui::TextDisabled("Writes the selected subtree to a file, and this instance becomes one of its stamps.");
+        ImGui::Spacing();
+        ImGui::TextUnformatted("content/");
+        ImGui::SameLine(0.0f, 0.0f);
+        ImGui::SetNextItemWidth(-1.0f);
+        const bool submitted =
+            ImGui::InputText("##stamp", stamp.data(), stamp.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+        const std::string typed(stamp.data());
+        const bool usable = !typed.empty() && Editor::stampNameIsUsable(typed);
+
+        ImGui::Spacing();
+        // The RESOLVED path while it is being typed, which is the half that
+        // makes a rule visible rather than surprising -- D068 is what happens
+        // without it.
+        if (usable)
+            ImGui::TextDisabled("writes content/%s", Editor::normalizeStampPath(typed).c_str());
+        else if (typed.empty())
+            ImGui::TextDisabled("a bare name lands in content/stamps/");
+        else
+            ImGui::TextDisabled("not a name a file can have");
+
+        ImGui::Spacing();
+        ImGui::BeginDisabled(!usable || !dialogs.stampSubject.valid());
+        const bool accepted = ImGui::Button("Create", ImVec2(120.0f, 0.0f));
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))) {
+            stamp.fill(0);
+            dialogs.stampSubject = {};
+            ImGui::CloseCurrentPopup();
+        }
+
+        if ((submitted || accepted) && usable && dialogs.stampSubject.valid()) {
+            commands.stampSubject = dialogs.stampSubject;
+            commands.stampName = typed;
+            stamp.fill(0);
+            dialogs.stampSubject = {};
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();

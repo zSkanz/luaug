@@ -178,7 +178,11 @@ bool Editor::load(scene::World& world, const std::filesystem::path& path, Inspec
     }
 
     scene::SceneIoReport report;
-    if (const std::optional<core::EngineError> error = scene::readScene(world, text, &report); error.has_value()) {
+    // **The stamps the scene names, read through this editor's content root.**
+    // `scene` is L3 and has no filesystem; a scene loaded without this opens
+    // with its stamped instances missing and a count saying so.
+    if (const std::optional<core::EngineError> error = scene::readScene(world, text, &report, stampSource());
+        error.has_value()) {
         m_status = EditorStatus{error->message, true};
         return false;
     }
@@ -657,6 +661,223 @@ bool Editor::canReparent(const scene::World& world, std::span<const core::Instan
     return !ids.empty() && !planReparent(world, ids, newParent, root).movable.empty();
 }
 
+std::string Editor::normalizeStampPath(std::string_view typed)
+{
+    std::string path(typed);
+
+    // The same normalisation a scene path gets, for the same reason: the box is
+    // labelled `content/`, so typing the prefix is the natural thing to do and
+    // the wrong thing to keep (D068).
+    for (char& c : path) {
+        if (c == '\\')
+            c = '/';
+    }
+    while (!path.empty() && path.front() == '/')
+        path.erase(path.begin());
+    constexpr std::string_view kContentPrefix = "content/";
+    while (path.compare(0, kContentPrefix.size(), kContentPrefix) == 0)
+        path.erase(0, kContentPrefix.size());
+
+    if (path.empty())
+        return path;
+
+    // **A bare name lands in `content/stamps/`**, and a name with a folder in it
+    // is taken at its word. A default that a person can step outside of, which
+    // is what makes it a convention rather than a rule.
+    if (path.find('/') == std::string::npos)
+        path = std::string(kStampFolder) + "/" + path;
+
+    if (path.size() < kStampExtension.size() ||
+        path.compare(path.size() - kStampExtension.size(), kStampExtension.size(), kStampExtension) != 0) {
+        path += kStampExtension;
+    }
+    return path;
+}
+
+bool Editor::stampNameIsUsable(std::string_view typed)
+{
+    return sceneNameIsUsable(normalizeStampPath(typed));
+}
+
+scene::StampSource Editor::stampSource() const
+{
+    // Captured by value: the source outlives the call that made it, and a
+    // reference into an editor that has been destroyed is the kind of thing
+    // that works until somebody loads a scene during shutdown.
+    const std::filesystem::path root = m_content.root();
+    return [root](std::string_view stamp) -> std::optional<std::string> {
+        std::string text;
+        if (!platform::readTextFile(root / std::filesystem::path(stamp), text))
+            return std::nullopt;
+        return text;
+    };
+}
+
+core::InstanceId Editor::stampBrokenBy(const scene::World& world, core::InstanceId id, core::NameAtom property)
+{
+    const core::InstanceId stampRoot = world.stampRootOf(id);
+    if (!stampRoot.valid())
+        return {};
+
+    // **The root's own transform and name are its own** (ADR 0049). Placing a
+    // thing is not changing the thing; a model that stopped being a model when
+    // you moved it would be useless for the case it exists for.
+    if (id == stampRoot) {
+        const std::string_view name = world.atoms().text(property);
+        if (name == "CFrame" || name == "Position" || name == "Name")
+            return {};
+    }
+    return stampRoot;
+}
+
+core::usize Editor::breakStampsFor(scene::World& world, std::span<const PendingWrite> writes)
+{
+    core::usize broken = 0;
+    for (const PendingWrite& write : writes) {
+        const core::InstanceId stampRoot = stampBrokenBy(world, write.target, write.property);
+        if (!stampRoot.valid())
+            continue;
+        // Already taken off by an earlier write in the same frame: a drag over
+        // four properties of one stamped instance is one break, not four.
+        if (!world.stampOf(stampRoot).valid())
+            continue;
+        world.setStamp(stampRoot, core::NameAtom{});
+        ++broken;
+    }
+    if (broken > 0) {
+        m_status = EditorStatus{broken == 1 ? "the stamp was broken by that edit"
+                                            : std::to_string(broken) + " stamps were broken by that edit",
+                                false};
+    }
+    return broken;
+}
+
+bool Editor::breakStamp(scene::World& world, core::InstanceId id)
+{
+    const core::InstanceId stampRoot = world.stampRootOf(id);
+    if (!stampRoot.valid()) {
+        m_status = EditorStatus{"that is not a stamped instance", true};
+        return false;
+    }
+
+    m_history.record(world, "Break Stamp");
+    world.setStamp(stampRoot, core::NameAtom{});
+    m_status = EditorStatus{"broken; it is its own now", false};
+    return true;
+}
+
+bool Editor::createStamp(scene::World& world, core::InstanceId id, core::InstanceId root, std::string_view name)
+{
+    if (!world.alive(id)) {
+        m_status = EditorStatus{"nothing to make a stamp of", true};
+        return false;
+    }
+    if (!stampNameIsUsable(name)) {
+        m_status = EditorStatus{"that is not a usable stamp name", true};
+        return false;
+    }
+    // Engine-owned, or inside something a system made: neither is somebody's
+    // authored work, and a stamp of a streamed chunk is a recording of where
+    // streaming happened to be.
+    if (isEngineOwned(world, id, root) || !canParentInto(world, id, root)) {
+        m_status = EditorStatus{"that is not something a person authored", true};
+        return false;
+    }
+
+    // **A stamp of a stamp is refused rather than half-answered** (ADR 0049).
+    // Does the outer file record the inner link? Does breaking the outer break
+    // the inner? Those are real questions with no answer yet, and a format that
+    // silently picked one would be a format somebody depends on before anybody
+    // decides.
+    for (core::InstanceId child = world.firstChild(id); child.valid();) {
+        if (world.stampOf(child).valid()) {
+            m_status = EditorStatus{"that already contains a stamped instance", true};
+            return false;
+        }
+        if (const core::InstanceId inner = world.firstChild(child); inner.valid()) {
+            child = inner;
+            continue;
+        }
+        while (child.valid() && child != id && !world.nextSibling(child).valid())
+            child = world.parentOf(child);
+        child = child == id ? core::InstanceId{} : world.nextSibling(child);
+    }
+
+    const std::string relative = normalizeStampPath(name);
+    const std::filesystem::path absolute = m_content.root() / std::filesystem::path(relative);
+    if (!platform::createDirectories(absolute.parent_path())) {
+        m_status = EditorStatus{"could not make the folder for that stamp", true};
+        return false;
+    }
+
+    scene::SceneIoReport report;
+    const std::string text = scene::writeStamp(world, id, &report);
+    if (!platform::writeTextFile(absolute, text)) {
+        m_status = EditorStatus{"could not write that stamp", true};
+        return false;
+    }
+
+    // **And the thing it was made from becomes an instance of it.** A file plus
+    // a copy of it that nothing connects is two things that drift apart by
+    // tomorrow, which is the state this whole model exists to avoid.
+    m_history.record(world, "Create Stamp");
+    world.setStamp(id, world.atoms().intern(relative));
+
+    (void)m_content.refresh();
+    m_status = EditorStatus{"stamped " + std::to_string(report.instances) + " instance(s) into " + relative, false};
+    return true;
+}
+
+bool Editor::instantiateStamp(scene::World& world, std::string_view name, core::InstanceId parent,
+                              core::InstanceId root, Inspector& inspector)
+{
+    if (!canParentInto(world, parent, root)) {
+        m_status = EditorStatus{"nothing authored can live in that", true};
+        return false;
+    }
+
+    const std::string relative = normalizeStampPath(name);
+    std::string text;
+    if (!platform::readTextFile(m_content.root() / std::filesystem::path(relative), text)) {
+        m_status = EditorStatus{"that stamp is not there any more", true};
+        return false;
+    }
+
+    // Recorded BEFORE the instance exists, so one undo takes the whole subtree
+    // back -- which is what `WorldSnapshot` makes cheap and what a
+    // reversible-command design would have made hard (`editor.h` says why).
+    m_history.record(world, "Stamp");
+
+    scene::SceneIoReport report;
+    const core::InstanceId placed = scene::readStamp(world, text, parent, relative, &report);
+    if (!placed.valid()) {
+        // Nothing usable was built, so the step is taken back rather than
+        // left: a step that undoes nothing eats a press of ctrl-Z, and undoing
+        // it also removes whatever partial subtree the read managed before it
+        // gave up.
+        (void)m_history.undo(world);
+        m_status = EditorStatus{"that stamp could not be read", true};
+        return false;
+    }
+
+    // In front of the camera rather than at the origin, for the reason
+    // `createInstance` places a new part there: something four kilometres from
+    // the view is something nobody finds.
+    if (m_cameraAdopted) {
+        const core::Mat3& basis = m_cameraCFrame.rotation;
+        const Vec3 forward{-basis.m[2][0], -basis.m[2][1], -basis.m[2][2]};
+        constexpr f32 kSpawnDistance = 8.0f;
+        core::CFrameD placed_at;
+        placed_at.position = m_cameraCFrame.position + core::toDVec3(forward * kSpawnDistance);
+        (void)world.setProperty(placed, world.atoms().intern("CFrame"), scene::Value{placed_at});
+    }
+
+    inspector.select(placed);
+    inspector.reveal(placed);
+    m_status = EditorStatus{"stamped " + relative, false};
+    return true;
+}
+
 bool Editor::reparent(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId newParent,
                       core::InstanceId root, Inspector& inspector)
 {
@@ -921,6 +1142,7 @@ bool Editor::createScript(const std::filesystem::path& projectRoot, std::string_
     }
 
     const std::filesystem::path path = projectRoot / "src" / "scripts" / std::filesystem::path(stem);
+    m_lastScript = ScriptFile{};
     if (platform::fileExists(path)) {
         // **Never over an existing file.** A "new script" that replaced
         // somebody's work would be the worst button in this editor, and the
@@ -957,7 +1179,11 @@ end)
         return false;
     }
 
-    m_status = EditorStatus{"made src/scripts/" + stem + " -- it becomes a Script on the next reload", false};
+    // Remembered so the caller can mount it. A file nothing mounts is a file
+    // that appears after a restart, which is what this used to say out loud.
+    m_lastScript = ScriptFile{"src/scripts/" + stem, stem, source};
+
+    m_status = EditorStatus{"made src/scripts/" + stem, false};
     return true;
 }
 

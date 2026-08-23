@@ -41,6 +41,7 @@
 #include "luaug/render/ui_renderer.h"
 #include "luaug/rhi/device.h"
 #include "luaug/scene/scene_file.h"
+#include "luaug/script/modules.h"
 #include "luaug/ui/ui.h"
 
 #include <algorithm>
@@ -734,6 +735,15 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         .headless = options.headless,
         .preserved = nullptr,
         .conformanceRoot = options.conformanceRoot,
+        // Where a stamp's text comes from. `contentRoot` is what the editor's
+        // browser is rooted at too, so a scene names the same file whichever of
+        // the two loads it.
+        .bootStamps = [contentRoot](std::string_view stamp) -> std::optional<std::string> {
+            std::string text;
+            if (!platform::readTextFile(contentRoot / std::filesystem::path(stamp), text))
+                return std::nullopt;
+            return text;
+        },
         .bootScene = bootScene,
     };
 
@@ -937,6 +947,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         if (options.editor && inspector.pendingCount() > 0)
             editor.history().record(host->world(), "Edit", coalesceKeyFor(inspector.gesture(), inspector.pending()));
 
+        // **An edit inside a stamped subtree breaks its mark, before the edit
+        // lands** (ADR 0049). Here rather than inside `applyPending`, because
+        // the rule is the editor's: a script that moves a stamped instance at
+        // run time is playing, not authoring, and a link that dissolved
+        // because a game ran would be a link nobody could rely on.
+        if (options.editor)
+            (void)editor.breakStampsFor(host->world(), inspector.pending());
         inspector.applyPending(host->world());
 
         // A click resolves here too, and AFTER the drain rather than before:
@@ -978,7 +995,30 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 if (!editorCommands.createScript.empty()) {
                     // The project root, not the content root: `src/` is a
                     // project's code and `content/` is its data (ADR 0048).
-                    (void)editor.createScript(options.scriptPath, editorCommands.createScript);
+                    if (editor.createScript(options.scriptPath, editorCommands.createScript)) {
+                        // **And mounted at once**, because writing the file was
+                        // never the whole job: a `Script` appears in the tree
+                        // because the mount finds it, and nothing mounts
+                        // between boot and a reload -- so this used to write a
+                        // file, say "on the next reload", and show the person
+                        // nothing at all.
+                        //
+                        // Mounted rather than reloaded. A reload rebuilds the
+                        // world from the scene and would throw away edits
+                        // nobody saved, which is a steep price for making a
+                        // file. The script does not START here either: it runs
+                        // on the next play, which is what an editor should do
+                        // with code somebody has not read yet.
+                        const Editor::ScriptFile& made = editor.lastScript();
+                        const std::array<script::MountedScript, 1> entry{
+                            script::MountedScript{made.projectPath, made.mountPath, made.source}};
+                        const std::vector<core::InstanceId> instances =
+                            script::mountScripts(host->runtime().state(), entry);
+                        if (!instances.empty()) {
+                            inspector.select(instances.front());
+                            inspector.reveal(instances.front());
+                        }
+                    }
                 }
 
                 // Before the delete and the duplicate, so a frame that somehow
@@ -1024,6 +1064,26 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                         editor.rememberState(options.scriptPath / ".luaug");
                     }
                 }
+                // --- Stamps (ADR 0049) ---------------------------------
+                if (editorCommands.stampSubject.valid() && !editorCommands.stampName.empty()) {
+                    (void)editor.createStamp(host->world(), editorCommands.stampSubject, host->runtime().dataModel(),
+                                             editorCommands.stampName);
+                }
+                if (!editorCommands.placeStamp.empty()) {
+                    // **Under the selection when there is one**, which is what
+                    // a person means by placing something while looking at a
+                    // folder -- and under `Workspace` otherwise.
+                    const core::InstanceId primary = inspector.selection();
+                    const core::InstanceId parent =
+                        primary.valid() && Editor::canParentInto(host->world(), primary, host->runtime().dataModel())
+                            ? primary
+                            : host->workspace();
+                    (void)editor.instantiateStamp(host->world(), editorCommands.placeStamp, parent,
+                                                  host->runtime().dataModel(), inspector);
+                }
+                if (editorCommands.breakStamp.valid())
+                    (void)editor.breakStamp(host->world(), editorCommands.breakStamp);
+
                 if (editorCommands.renameInstance.valid())
                     (void)editor.renameInstance(host->world(), editorCommands.renameInstance,
                                                 host->runtime().dataModel(), editorCommands.renameInstanceTo);

@@ -145,7 +145,14 @@ void registerNativeModule(lua_State* L, std::string_view name, int (*opener)(lua
 // Mounts each entry as a `Script` under `ScriptService`, with subdirectories as
 // `Folder`s (api-design.md §3). Sorted by path first, so the tree is the same
 // whatever order the host found the files in.
-void mountScripts(lua_State* L, std::span<const MountedScript> scripts);
+// Returns the `Script` instances it created, in the order it mounted them.
+//
+// **The return value exists because mounting ONE script is now a thing that
+// happens** (the editor's New Script writes a file and mounts it at once, so
+// the row appears where the person is looking rather than after a restart), and
+// a caller that has just made one instance needs to be able to select it. Boot
+// ignores it, as it always did.
+std::vector<core::InstanceId> mountScripts(lua_State* L, std::span<const MountedScript> scripts);
 
 // Starts every mounted `Script` whose `Enabled` is true, each on its own
 // coroutine, deferred and in path-sorted order -- then defers one more callback

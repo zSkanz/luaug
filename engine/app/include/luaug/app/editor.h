@@ -6,6 +6,7 @@
 #include <luaug/core/id.h>
 #include <luaug/core/math.h>
 #include <luaug/rhi/types.h>
+#include <luaug/scene/scene_file.h>
 #include <luaug/scene/world.h>
 
 #include <deque>
@@ -155,6 +156,12 @@ struct EditorDialogs
     // The new-script box. Beside `newFolder` because it is the same shape of
     // question: a name, and somewhere it goes.
     bool newScript = false;
+    // The make-a-stamp box, which is the same shape again -- and it carries the
+    // instance the question is ABOUT, because "a stamp of what" is decided by
+    // the row somebody right-clicked and not by whatever is selected when they
+    // finish typing.
+    bool newStamp = false;
+    core::InstanceId stampSubject;
 
     // A rename in flight. The seed is what the box opens with -- the current
     // name, because renaming is usually editing a name rather than replacing
@@ -302,6 +309,16 @@ struct EditorCommands
     std::string colorContentPath;
     std::optional<core::Color3> color;
 
+    // **Make a stamp of `stampSubject`, named `stampName`** (ADR 0049). Both
+    // halves or neither, like every other pair here.
+    core::InstanceId stampSubject;
+    std::string stampName;
+    // Place one, under the selection if there is one and under `Workspace`
+    // otherwise. The path is content-relative, which is what the browser has.
+    std::string placeStamp;
+    // Take the mark off this one, so it stops following its file.
+    core::InstanceId breakStamp;
+
     // Content-relative. Delete removes a folder with everything in it.
     std::string deleteContent;
     std::string renameContent;
@@ -322,10 +339,10 @@ struct EditorCommands
     [[nodiscard]] bool any() const noexcept
     {
         return play.has_value() || pause.has_value() || save || newScene || quit || resetLayout || clearSelection ||
-               undo || redo || colorAsked || createClass != scene::InvalidClass || deleteSelection ||
-               duplicateSelection || reparentTo.valid() || renameInstance.valid() || !saveAs.empty() ||
-               !openScene.empty() || !createFolder.empty() || !createScript.empty() || !deleteContent.empty() ||
-               !renameContent.empty();
+               undo || redo || colorAsked || stampSubject.valid() || !placeStamp.empty() || breakStamp.valid() ||
+               createClass != scene::InvalidClass || deleteSelection || duplicateSelection || reparentTo.valid() ||
+               renameInstance.valid() || !saveAs.empty() || !openScene.empty() || !createFolder.empty() ||
+               !createScript.empty() || !deleteContent.empty() || !renameContent.empty();
     }
 };
 
@@ -488,6 +505,25 @@ public:
     // in the editor.
     bool createScript(const std::filesystem::path& projectRoot, std::string_view name);
 
+    // What the last `createScript` wrote, so the caller can MOUNT it.
+    //
+    // **Writing the file was never the whole job.** A `Script` appears in the
+    // tree because the mount finds it, and nothing mounts between boot and a
+    // reload -- so "New Script" wrote a file, said "on the next reload", and
+    // showed the person nothing. The frame loop mounts this one entry and
+    // selects what comes out, which is what makes the act visible.
+    //
+    // `mountPath` is empty when the last attempt wrote nothing.
+    struct ScriptFile
+    {
+        // Relative to the project, which is what a module registers under.
+        std::string projectPath;
+        // Relative to `src/scripts`, which is what the tree is built from.
+        std::string mountPath;
+        std::string source;
+    };
+    [[nodiscard]] const ScriptFile& lastScript() const noexcept { return m_lastScript; }
+
     // Opens a project's content root. A project with no `content/` is a normal
     // state and not an error -- every example before `06-scene` is one.
     void openContent(const std::filesystem::path& contentRoot);
@@ -642,6 +678,69 @@ public:
     // Ancestors count. A chunk marks its FOLDER and not its contents, which is
     // exactly the economy that makes checking the instance alone wrong.
     [[nodiscard]] static bool authorable(const scene::World& world, core::InstanceId id, core::InstanceId root);
+
+    // --- Stamps (ADR 0049) ---------------------------------------------------
+    //
+    // Content holds SOURCES and the world holds a world; an instance in the
+    // world may be a link to a source, and it stops being one the moment
+    // somebody changes it. These four verbs are the whole of that, and the rule
+    // each of them applies is ADR 0049's, not one invented here.
+
+    // **Makes a stamp out of `id` and turns `id` into an instance of it.**
+    //
+    // That second half is what every engine does and it is the useful part: the
+    // thing you just made a source out of should BE one of its instances, or
+    // you have a file and a copy of it that will drift apart by tomorrow.
+    //
+    // `name` is a stamp name without an extension -- `lantern-post`, not
+    // `stamps/lantern-post.stamp.json` -- and lands in `content/stamps/` unless
+    // it carries a folder of its own. Refuses: something the engine owns,
+    // something inside what a system made, and **a subtree that already
+    // contains a stamped instance**, which ADR 0049 declines to answer for
+    // rather than half-answering.
+    bool createStamp(scene::World& world, core::InstanceId id, core::InstanceId root, std::string_view name);
+
+    // **Places a stamp under `parent`**, selects it and asks the tree to reveal
+    // it, as one undo step. `name` is what `createStamp` took.
+    bool instantiateStamp(scene::World& world, std::string_view name, core::InstanceId parent, core::InstanceId root,
+                          Inspector& inspector);
+
+    // **Takes the mark off**, so the instance becomes an ordinary subtree that
+    // serialises in full and no longer follows the file.
+    //
+    // Breaking is not a failure and nothing is lost: a broken instance can be
+    // stamped again. It is a separate verb as well as an automatic consequence
+    // because "I want this one to stop following the source" is a thing people
+    // mean deliberately.
+    bool breakStamp(scene::World& world, core::InstanceId id);
+
+    // Whether an edit to `id` would break a mark, and which instance's.
+    //
+    // **The rule in one place**: everything inside a stamped subtree breaks it
+    // except the ROOT's own transform and name. Placing a thing is not changing
+    // the thing -- four lamp posts in four places are four lamp posts -- and a
+    // model that broke when you moved one would be useless for the case it
+    // exists for.
+    [[nodiscard]] static core::InstanceId stampBrokenBy(const scene::World& world, core::InstanceId id,
+                                                        core::NameAtom property);
+
+    // Applies that rule to what the properties panel and the manipulators are
+    // about to write, before `applyPending` writes it. Returns how many marks
+    // it took off, which the status line says out loud -- a link that
+    // dissolved silently is a link nobody can rely on.
+    core::usize breakStampsFor(scene::World& world, std::span<const PendingWrite> writes);
+
+    // How a scene reads the stamps it names. Bound to this editor's content
+    // root, and the one place that knows `content/` is where they live --
+    // `scene` is L3 and has no filesystem.
+    [[nodiscard]] scene::StampSource stampSource() const;
+
+    // What `createStamp` will actually write, given what somebody typed.
+    // Public and pure so a dialog can preview the resolved path while it is
+    // being typed, which is the half that makes the rule visible rather than
+    // surprising (D068's lesson, applied before it can happen again).
+    [[nodiscard]] static std::string normalizeStampPath(std::string_view typed);
+    [[nodiscard]] static bool stampNameIsUsable(std::string_view typed);
 
     // Moves instances under a new parent, as ONE undo step.
     //
@@ -929,6 +1028,7 @@ private:
     // than hashed so the file it is written to is the same bytes for the same
     // state -- the property every other format in this repository has.
     std::map<std::string, core::Color3> m_contentColors;
+    ScriptFile m_lastScript;
 
     // A drag in progress. `start` is where the pointer was solved to on the
     // frame the button went down, and `before` is every selected instance's
