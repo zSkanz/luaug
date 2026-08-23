@@ -45,6 +45,15 @@ export type Options = {
     -- deletes what it is pointed at, and being pointed at the wrong thing must
     -- not be silent.
     force: boolean,
+    -- Package a host that is not the `player` profile: the debug overlay, the
+    -- inspector and a Luau REPL travel with it (D057).
+    --
+    -- **It exists so that refusing can be the default.** Somebody genuinely
+    -- wants a debuggable package now and then -- handing a tester a build they
+    -- can open the inspector in is a real thing to want -- and a rule with no
+    -- door in it gets worked around by setting `LUAUG_HOST`, which is worse
+    -- because nothing then says what happened. This says it, every time.
+    devHost: boolean?,
 }
 
 -- The only target v1 builds. Named rather than derived from the host platform
@@ -130,10 +139,28 @@ local function run(options: Options): number
         return 1
     end
 
-    local engine = projectlib.findEngine()
+    -- **The `player` host, and not just any host** (D057). `shipping` links no
+    -- Luau compiler (ADR 0002) and this ships a game's Luau as SOURCE (ADR
+    -- 0045), so before `player` existed the only binary that could do the job
+    -- was `dev` -- and every released game therefore carried the debug overlay,
+    -- the inspector and a REPL against its own VM. Nothing said so, which is
+    -- what made it a defect rather than a trade-off.
+    local engine = projectlib.findPlayerEngine()
     if engine == nil then
-        print(tr("cli.err.no_engine"))
-        return 1
+        local fallback = projectlib.findEngine()
+        if fallback == nil then
+            print(tr("cli.err.no_engine"))
+            return 1
+        end
+        if not options.devHost then
+            -- Refused rather than warned. A warning in a build log is a warning
+            -- somebody scrolls past, and what it would be warning about is an
+            -- artifact already written to disk and about to be sent to people.
+            print(tr("cli.build.err.no_player_host", { path = fallback }))
+            return 1
+        end
+        print(tr("cli.build.warn.dev_host", { path = fallback }))
+        engine = fallback
     end
     local engineContent = projectlib.joined(path.dirname(engine), "content")
     if not fs.exists(engineContent) then

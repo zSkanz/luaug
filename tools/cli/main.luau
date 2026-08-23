@@ -174,7 +174,7 @@ local function main(): number
     end
 
     if parsed.command == "build" then
-        if not rejectUnknownFlags(parsed, { "output", "target", "force" }) then
+        if not rejectUnknownFlags(parsed, { "output", "target", "force", "dev-host" }) then
             return 2
         end
         return build.run({
@@ -182,6 +182,7 @@ local function main(): number
             output = parsed.flags.output,
             target = parsed.flags.target or build.SupportedTarget,
             force = parsed.flags.force ~= nil,
+            devHost = parsed.flags["dev-host"] ~= nil,
         })
     end
 

@@ -16,13 +16,26 @@ include(CMakeDependentOption)
 # reason LUAUG_DEBUG_UI is: the profile is not something a `-D` should be able to
 # contradict by accident. It is also what keeps the shipping gate cheap -- that
 # profile builds the shipping binary and nothing else.
+#
+# Off for `player` as well, and for a different reason: that profile IS a
+# shipped artifact -- `luaug build` packages it -- so compiling doctest and a
+# hundred test translation units into the same tree is work nobody asked for.
+# It is not a claim that the profile is untested; the gate builds and links it
+# on every run, which is exactly what `shipping` gets and for the same argument.
 cmake_dependent_option(LUAUG_BUILD_TESTS
     "Build C++ unit and integration tests" ON
-    "NOT LUAUG_PROFILE STREQUAL \"shipping\"" OFF)
+    "NOT LUAUG_PROFILE MATCHES \"^(shipping|player)$\"" OFF)
 
 # The Luau compiler is present in every profile except shipping, which loads
 # precompiled bytecode only (ADR 0002). Expressed as a dependent option so the
 # shipping profile cannot accidentally carry it.
+#
+# **`player` keeps it, and that is the whole reason `player` exists** (D057).
+# `luaug build` ships a game's Luau as SOURCE (ADR 0045), so the binary it
+# packages has to be able to compile source -- which ruled `shipping` out and
+# left it packaging `dev`, overlay and REPL and all. The two options were only
+# ever tied together by sharing a profile string, so the fix is a profile that
+# takes one and not the other.
 cmake_dependent_option(LUAUG_LUAU_COMPILER
     "Link the Luau compiler (source -> bytecode at runtime)" ON
     "NOT LUAUG_PROFILE STREQUAL \"shipping\"" OFF)
@@ -84,9 +97,14 @@ option(LUAUG_SHADER_TOOLCHAIN
 # repository compiles is the SDL_GPU one, so a build without that RHI backend
 # has nothing for the overlay to draw with -- and an overlay target that cannot
 # render is a link error waiting for whoever switches the option on.
+#
+# **Off for `player` too** (D057), which is the option this profile exists to
+# turn off: a released game carried the overlay, the inspector and a Luau REPL
+# against its own VM, because the only profile without them could not compile
+# the Luau the game ships as source.
 cmake_dependent_option(LUAUG_DEBUG_UI
     "Build the Dear ImGui debug overlay (ADR 0011: dev builds only)" ON
-    "NOT LUAUG_PROFILE STREQUAL \"shipping\";LUAUG_RHI_SDLGPU" OFF)
+    "NOT LUAUG_PROFILE MATCHES \"^(shipping|player)$\";LUAUG_RHI_SDLGPU" OFF)
 
 # --- Physics backend selection (ADR 0007, ADR 0023) --------------------------
 # The same shape as the RHI options above: `physics_api` is the seam every
@@ -104,14 +122,14 @@ option(LUAUG_PHYSICS_JOLT "Build the Jolt physics backend (the v1 default)" ON)
 # rather than its call sites, applied to the same kind of debt.
 cmake_dependent_option(LUAUG_PHYSICS_DEBUG_DRAW
     "Bridge Jolt's debug renderer to the engine debug draw (dev builds only)" ON
-    "NOT LUAUG_PROFILE STREQUAL \"shipping\";LUAUG_PHYSICS_JOLT" OFF)
+    "NOT LUAUG_PROFILE MATCHES \"^(shipping|player)$\";LUAUG_PHYSICS_JOLT" OFF)
 
 set(LUAUG_SANITIZE "" CACHE STRING
     "Comma-separated sanitizer list passed to -fsanitize (e.g. address,undefined)")
 
-if(NOT LUAUG_PROFILE MATCHES "^(debug|dev|profile|shipping)$")
+if(NOT LUAUG_PROFILE MATCHES "^(debug|dev|profile|player|shipping)$")
     message(FATAL_ERROR
-        "LUAUG_PROFILE must be one of: debug, dev, profile, shipping (got '${LUAUG_PROFILE}')")
+        "LUAUG_PROFILE must be one of: debug, dev, profile, player, shipping (got '${LUAUG_PROFILE}')")
 endif()
 
-message(STATUS "LuauG: profile=${LUAUG_PROFILE} luau_compiler=${LUAUG_LUAU_COMPILER} tests=${LUAUG_BUILD_TESTS}")
+message(STATUS "LuauG: profile=${LUAUG_PROFILE} luau_compiler=${LUAUG_LUAU_COMPILER} debug_ui=${LUAUG_DEBUG_UI} tests=${LUAUG_BUILD_TESTS}")

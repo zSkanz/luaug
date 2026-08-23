@@ -781,8 +781,17 @@ self-registration.**
   (arm64), later `android-clang` (nightly compile job first), `ios-clang`.
   Build presets cross with configs: `debug`, `dev` (optimized + asserts +
   profiler + ImGui + Luau compiler + hot reload), `profile` (dev minus
-  asserts), `shipping` (LTO, no ImGui/REPL/compiler, bytecode-only, single
+  asserts), `player` (Release, Luau compiler, **no ImGui and no REPL**),
+  `shipping` (LTO, no ImGui/REPL/compiler, bytecode-only, single
   RHI backend). `binaryDir = $env{LUAUG_BUILD_ROOT}/${presetName}` (R14).
+  **`player` is what `luaug build` packages, and it exists because the two
+  options only ever shared a profile string by accident** (D057): a game ships
+  its Luau as SOURCE (ADR 0045), so the binary it ships with must be able to
+  compile source, which `shipping` cannot — and the packager was therefore
+  handing out `dev` binaries carrying the debug overlay, the inspector and a
+  REPL against the game's own VM. The gate builds and links it beside
+  `shipping` on every run, because a profile nothing builds is a profile nobody
+  knows is broken.
 - **Baselines:** C++20 engine code; MSVC 19.40+ (VS2022 17.10), Clang 17+,
   GCC 13+. Vendored deps build with their own standards (Luau: C++11 VM /
   C++17 compiler — its own CMake, wrapped by `cmake/luaug_luau.cmake`).
@@ -795,7 +804,7 @@ self-registration.**
 - **Luau configuration:** vendored pin (0.734; upgraded only via
   `tools/repo/vendor.luau` + ADR), `LUA_VECTOR_SIZE=3`, `LUA_VECTOR_DOUBLE=0`
   (ADR 0013); targets VM+CodeGen always; Compiler+Ast gated by
-  `LUAUG_LUAU_COMPILER` (ON in debug/dev/profile, OFF shipping); **Analysis is
+  `LUAUG_LUAU_COMPILER` (ON in debug/dev/profile/player, OFF shipping); **Analysis is
   never built** — type checking is `luau-analyze` at the pinned toolchain
   version (ADR 0018), a tool rather than a runtime dependency. This line said
   "Compiler+Analysis gated" until M4; Analysis was in fact linked under no

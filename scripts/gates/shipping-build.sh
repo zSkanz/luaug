@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
-# The shipping profile, compiled and linked. Nothing else in this repository
-# built it, which is how it came to be broken for an unknown length of time
-# (D056): `LUAUG_LUAU_COMPILER=OFF` and `LUAUG_DEBUG_UI=OFF` are set for that
-# profile alone, so every `#if` around them is code no other gate ever reads.
+# The two profiles nothing else in this repository builds, compiled and linked.
+#
+# `shipping` is here because that is how it came to be broken for an unknown
+# length of time (D056): `LUAUG_LUAU_COMPILER=OFF` and `LUAUG_DEBUG_UI=OFF` are
+# set for it alone, so every `#if` around them is code no other gate ever reads.
+#
+# **`player` is here for the same reason and it is newer** (D057). It is the
+# profile `luaug build` packages -- the Luau compiler ON, the debug overlay OFF,
+# a combination no other profile has -- so it is a SHIPPED artifact that,
+# without this, no gate would ever compile. That was precisely the objection
+# that ruled out "just ship the shipping profile": a profile nothing builds is a
+# profile nobody knows is broken.
 #
 # WHAT THIS BUILDS, AND WHY IT IS NOT THE WHOLE TREE.
 #
@@ -31,6 +39,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
 preset="${LUAUG_SHIPPING_PRESET:-linux-clang-shipping}"
+playerPreset="${LUAUG_PLAYER_PRESET:-linux-clang-player}"
 
 if [[ -z "${LUAUG_BUILD_ROOT:-}" ]]; then
     echo "shipping-build: LUAUG_BUILD_ROOT is not set (rule R14: builds are out-of-tree)" >&2
@@ -49,3 +58,9 @@ cmake --preset "$preset"
 
 echo "== build (luaug_host) =="
 cmake --build --preset "$preset" --target luaug_host
+
+echo "== configure ($playerPreset) =="
+cmake --preset "$playerPreset"
+
+echo "== build (luaug_host) =="
+cmake --build --preset "$playerPreset" --target luaug_host

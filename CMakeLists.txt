@@ -33,7 +33,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # scanner becomes a real requirement rather than a tax.
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
-# Profiles: debug | dev | profile | shipping (docs/architecture.md §8)
+# Profiles: debug | dev | profile | player | shipping (docs/architecture.md §8)
 set(LUAUG_PROFILE "dev" CACHE STRING "LuauG build profile")
 
 set(LUAUG_CMAKE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cmake")

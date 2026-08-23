@@ -268,11 +268,18 @@ Invoke-Stage 'linux' {
 # warnings-as-errors is the stricter reader of the `#if`s that only this profile
 # takes.
 #
-# Cost: it builds `luaug_host` alone -- the shipping binary, compiled and linked
-# -- and not the tree around it. The reasoning is in the script, and the short
-# version is that only what LUAUG_LUAU_COMPILER and LUAUG_DEBUG_UI gate can rot
-# differently here, and all of it is reachable from that one executable. A few
-# seconds warm, one full Release build of the vendored tree cold.
+# **It builds two profiles, not one** (D057): `shipping` and `player`, which are
+# the two nothing else here compiles. `player` is what `luaug build` packages --
+# the Luau compiler ON and the debug overlay OFF, a combination no other profile
+# has -- so without this it would be a shipped artifact no gate ever built,
+# which is the objection that ruled out shipping the `shipping` profile in the
+# first place.
+#
+# Cost: `luaug_host` alone from each, compiled and linked, and not the tree
+# around them. The reasoning is in the script, and the short version is that
+# only what LUAUG_LUAU_COMPILER and LUAUG_DEBUG_UI gate can rot differently
+# here, and all of it is reachable from those executables. A few seconds warm,
+# one full Release build of the vendored tree cold.
 #
 # Last, because it is the stage most likely to be cold, and a run that fails
 # should say so before spending that.
@@ -291,7 +298,7 @@ Invoke-Stage 'shipping' {
         -v "${repo}:/repo" `
         -v "luaug-tier2-build:/build" `
         luaug-tier2:latest bash scripts/gates/shipping-build.sh
-    if ($LASTEXITCODE -ne 0) { throw "the shipping profile failed to build" }
+    if ($LASTEXITCODE -ne 0) { throw "the shipping or player profile failed to build" }
 }
 
 Pop-Location

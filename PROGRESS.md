@@ -179,22 +179,16 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
   `World::snapshot()`, a file-writing capability the game VM is not given (R4),
   and the scene format itself.
 
-- **D057 is the one open decision, and it has a third exit nobody had named.**
-  `luaug build` packages a `dev`-profile host, so the released v1.0.0 binary
-  carries the debug overlay and a Luau REPL — verified in the shipped bytes, and
-  the release notes now say so. The two obvious fixes are both bad: shipping a
-  profile that has never run a test, or reversing ADR 0045 to package bytecode.
-  The third is that `LUAUG_DEBUG_UI` and `LUAUG_LUAU_COMPILER` are **independent
-  options that only happen to be tied to the same profile string**, so a fourth
-  profile — no ImGui, keeps the compiler — costs one `cmake_dependent_option`
-  condition. That is a human's call and it is asked here rather than taken.
-- **D004 — the inspector crash while dragging `Size`/`CFrame` — is still open and
-  still not reproduced**, and it is the only open row in the register. Two halves
-  are ruled out: the write path driven through zero, negative, 1e30 and infinity
-  with a render extraction every frame, and 25 minimize/restore cycles over 900
-  windowed frames. What remains is the ImGui half, and the crash handler is in
-  place for the next occurrence — the next report should carry
-  `luaug-crash-<pid>.dmp` and `luaug.log` from beside whatever was being run.
+- **D057 is closed and the fourth profile exists.** `player` is Release, links
+  the Luau compiler — which a packaged game needs, because `luaug build` ships
+  its Luau as source (ADR 0045) — and declares no ImGui target at all, so "the
+  artifact contains no overlay" is a link-time fact. `luaug build` REFUSES
+  anything else rather than warning, with the two commands that fix it in the
+  message; `--dev-host` is the door, and `LUAUG_HOST` is deliberately not
+  consulted, because "I pointed the dev server somewhere" must not decide what a
+  release contains. The gate builds it beside `shipping`, in the stage that
+  exists because a profile nothing builds is a profile nobody knows is broken —
+  which was this defect's own objection to shipping the `shipping` profile.
 - **`inertcheck` sweeps `EngineState` too** (D055), and widening it found three
   properties that were stored and read by nothing -- the blind spot was the size
   of a service, because a knob belonging to a service with one instance per world

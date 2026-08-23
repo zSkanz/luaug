@@ -88,7 +88,31 @@ test.suite("packaging", function(suite)
         local root = repositoryRoot()
         local parent, project = scaffold("packagetest")
 
-        local result = build.run({ path = project, output = nil, target = "win64", force = false })
+        -- **`--dev-host`, deliberately, and it is not a workaround.** What this
+        -- suite tests is the packaging CHAIN -- scaffold, build, run, read the
+        -- icon back -- on whatever host the gate just built, which is the dev
+        -- one. That the packaged binary must be the `player` profile is a
+        -- different claim with a different owner: the gate builds and links
+        -- that profile on every run, and `luaug build` refuses it by default,
+        -- which is the assertion below.
+        -- **The refusal, first, because it is the one that protects a release**
+        -- (D057). Without a player host and without the flag, `luaug build` has
+        -- to fail rather than quietly package a binary carrying the debug
+        -- overlay, the inspector and a REPL against its own VM.
+        --
+        -- Conditional on there being no player host, and it says which: on a
+        -- machine where somebody has built `win-msvc-player` the command is
+        -- SUPPOSED to succeed, and a test that failed there would be testing
+        -- the machine. A silent skip would read as coverage this does not have.
+        if projectlib.findPlayerEngine() == nil then
+            local refused =
+                build.run({ path = project, output = nil, target = "win64", force = false, devHost = false })
+            assert.eq(refused, 1)
+        else
+            print("a player host exists on this machine, so the refusal path was not exercised")
+        end
+
+        local result = build.run({ path = project, output = nil, target = "win64", force = false, devHost = true })
         assert.eq(result, 0)
 
         local output = projectlib.joined(project, "dist", "win64")

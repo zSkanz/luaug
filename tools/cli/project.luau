@@ -84,13 +84,27 @@ local function executableName(base: string): string
     return if platform.win32 then `{base}.exe` else base
 end
 
+--- The presets that produce a host somebody can RUN a project with, in the
+--- order worth trying.
+---
+--- **`player` first, and it is not a preference** (D057). That profile carries
+--- the Luau compiler and no ImGui, which is exactly what a shipped game needs
+--- and exactly what no other profile offered: `shipping` links no compiler
+--- (ADR 0002) and `luaug build` ships a game's Luau as SOURCE (ADR 0045), so
+--- the packager had `dev` as its only option and every released binary carried
+--- the debug overlay, the inspector and a REPL against its own VM.
+---
+--- `luaug dev` is happy with any of them; `luaug build` asks which one it got.
+local PlayerPresets = { "win-msvc-player", "linux-clang-player" }
+local DevPresets = { "win-msvc-dev", "linux-clang-dev", "macos-clang-dev", "win-msvc-debug" }
+
 --- Every directory `luaug-host` could reasonably be, in the order worth trying.
 ---
 --- `LUAUG_HOST` first, because a developer who set it means it. Then the build
 --- tree, since inside this repository that is where it always is (R14 puts it
 --- outside the source tree, so the path comes from `LUAUG_BUILD_ROOT`). Then
 --- beside this CLI, which is the shape an installed release has.
-local function engineCandidates(): { string }
+local function engineCandidates(presets: { string }): { string }
     local name = executableName("luaug-host")
     local candidates: { string } = {}
 
@@ -101,7 +115,7 @@ local function engineCandidates(): { string }
 
     local buildRoot = process.env.LUAUG_BUILD_ROOT
     if buildRoot ~= nil and buildRoot ~= "" then
-        for _, preset in { "win-msvc-dev", "linux-clang-dev", "macos-clang-dev", "win-msvc-debug" } do
+        for _, preset in presets do
             table.insert(candidates, joined(buildRoot, preset, "engine", "app", name))
         end
     end
@@ -111,10 +125,57 @@ local function engineCandidates(): { string }
 end
 
 local function findEngine(): string?
-    for _, candidate in engineCandidates() do
+    local presets: { string } = {}
+    for _, preset in PlayerPresets do
+        table.insert(presets, preset)
+    end
+    for _, preset in DevPresets do
+        table.insert(presets, preset)
+    end
+    for _, candidate in engineCandidates(presets) do
         if fs.exists(candidate) then
             return candidate
         end
+    end
+    return nil
+end
+
+--- A host built from the `player` profile, or nothing.
+---
+--- Separate from `findEngine` because the two questions are different and only
+--- one of them has a fallback: `luaug dev` runs whatever host exists, and
+--- `luaug build` PACKAGES one -- so it has to be able to tell "the right binary"
+--- from "a binary", and refuse rather than ship the wrong one quietly.
+---
+--- **`LUAUG_HOST` is NOT honoured here**, and that is the point rather than an
+--- oversight. It is the variable `luaug dev` uses, so honouring it would make
+--- "I pointed the dev server at a build" silently decide what a release
+--- contains -- the exact shape of the defect this is fixing. `LUAUG_PLAYER_HOST`
+--- is the door for somebody who has a player binary somewhere this does not
+--- look, and a dev binary reached that way is a choice with a name on it.
+local function findPlayerEngine(): string?
+    local name = executableName("luaug-host")
+
+    local explicit = process.env.LUAUG_PLAYER_HOST
+    if explicit ~= nil and explicit ~= "" and fs.exists(explicit) then
+        return explicit
+    end
+
+    local buildRoot = process.env.LUAUG_BUILD_ROOT
+    if buildRoot ~= nil and buildRoot ~= "" then
+        for _, preset in PlayerPresets do
+            local candidate = joined(buildRoot, preset, "engine", "app", name)
+            if fs.exists(candidate) then
+                return candidate
+            end
+        end
+    end
+
+    -- Beside this CLI, which is the shape an installed release has: what ships
+    -- in one is a player binary, because that is what `luaug build` packages.
+    local beside = joined(path.format(process.cwd()), name)
+    if fs.exists(beside) then
+        return beside
     end
     return nil
 end
@@ -217,6 +278,7 @@ return {
     isProject = isProject,
     devPort = devPort,
     findEngine = findEngine,
+    findPlayerEngine = findPlayerEngine,
     findTool = findTool,
     executableName = executableName,
     sourceDirectories = sourceDirectories,
