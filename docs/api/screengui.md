@@ -7,7 +7,7 @@
 
 The root of one screen-space UI tree, parented to `UIService` (§2.2). Everything under it is laid out against the window and drawn over the world.
 
-It is the unit of layout: a write that changes a layout marks the nearest ScreenGui dirty, and a screen nothing changed does not run the solver at all. That is a design constraint rather than an optimisation -- the milestone's benchmark asserts ZERO solver invocations on an idle frame, because "about zero microseconds" is a measurement of the clock.
+It is the unit of layout: a write that changes a layout marks the nearest ScreenGui dirty, and a screen nothing changed does not run the solver at all. That is a design constraint rather than an optimisation -- the benchmark asserts ZERO solver invocations on an idle frame, because "about zero microseconds" is a measurement of the clock.
 
 **Members below are the ones this class DECLARES.** Everything its base
 offers is on the base's page, which is what keeps one added member on

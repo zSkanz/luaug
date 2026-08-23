@@ -35,7 +35,7 @@ How closely a `MeshPart`'s collision shape follows the geometry it renders (§2.
 | `Default` | 0 | The engine chooses. In this release that is `Hull`, and the property reports `Default` rather than what it resolved to, because the point of the item is that the choice is the engine's to change. |
 | `Hull` | 1 | One convex hull around the whole mesh. |
 | `Box` | 2 | The mesh's bounding box, which is the cheapest shape there is and the least faithful. |
-| `Precise` | 3 | The triangles themselves. Accepted and not yet implemented: this release collides against a hull and says so through this property reading back `Precise` while behaving as `Hull`. A triangle-mesh collider is asset-pipeline work (M7). |
+| `Precise` | 3 | The triangles themselves. Accepted and not yet implemented: this release collides against a hull and says so through this property reading back `Precise` while behaving as `Hull`. A triangle-mesh collider is work the asset pipeline has yet to do. |
 
 ## Enum.EasingDirection
 
@@ -93,7 +93,7 @@ What an `InputAction` produces, and therefore what `GetState` returns (§2.4, AD
 | `Bool` | 0 | Pressed or not. `GetState` returns a boolean, and this is the only type that fires `Pressed` and `Released`. |
 | `Direction1D` | 1 | One signed axis. `GetState` returns a number, -1 to 1 from a pair of keys and the analogue value from a trigger or a wheel. |
 | `Direction2D` | 2 | Two signed axes. `GetState` returns a `Vector2`, from a stick, from pointer motion, or from the four composite keys on a binding. |
-| `Direction3D` | 3 | Three signed axes, returning a `vector`. **Declared and not driveable in v1**: no binding in §2.4's list names three axes, and inventing one would be designing the binding surface backwards from an enum item. `GetState` returns the zero vector. The item exists because the enum is designed once and an item added later is the harder break -- the same reasoning `Enum.RunContext` carries in §2.1. |
+| `Direction3D` | 3 | Three signed axes, returning a `vector`. **Declared and not driveable in v1**: no binding names three axes, and inventing one would be designing the binding surface backwards from an enum item. `GetState` returns the zero vector. The item exists because the enum is designed once and an item added later is the harder break -- the same reasoning `Enum.RunContext` carries. |
 | `ViewportPosition` | 4 | Where the pointer IS, rather than how it moved. `GetState` returns a `Vector2` in window pixels with the origin at the top left. |
 
 ## Enum.InputDeviceType
@@ -104,7 +104,7 @@ A family of input hardware. Used for two things and neither of them is dispatch:
 |---|---|---|
 | `KeyboardMouse` | 0 |  |
 | `Gamepad` | 1 |  |
-| `Touch` | 2 | What a VIRTUAL binding reports -- one keyed to `Enum.KeyCode.Virtual1` and its siblings, which is how a HUD button or an on-screen thumbstick drives an action (§2.4). There is still no touch HARDWARE and no mobile port (R15); the item is here because an on-screen control is the same thing a touch control will be, and the roadmap asked that when something eventually produces this family it produce it through this seam rather than growing a new one. |
+| `Touch` | 2 | What a VIRTUAL binding reports -- one keyed to `Enum.KeyCode.Virtual1` and its siblings, which is how a HUD button or an on-screen thumbstick drives an action (§2.4). There is still no touch HARDWARE and no mobile port (R15); the item is here because an on-screen control is the same thing a touch control will be, and when something eventually produces this family it is to produce it through this seam rather than grow a new one. |
 
 ## Enum.InputRate
 
@@ -112,7 +112,7 @@ Which clock an `InputContext` is dispatched on (ADR 0039). It is a property of t
 
 | Item | Value | Description |
 |---|---|---|
-| `Simulation` | 0 | The sim tick, with the fixed timestep. The default, because it is the safe one: an action nobody thought about fires where R10 holds and where the replay gate can see it. Everything a game DECIDES with should be here. |
+| `Simulation` | 0 | The sim tick, with the fixed timestep. The default, because it is the safe one: an action nobody thought about fires where determinism holds and where a replay can see it. Everything a game DECIDES with should be here. |
 | `Render` | 1 | The render frame, with a variable dt. For camera look and for UI, where a tick of latency is visible. A gameplay decision taken from a render-rate action is frame-rate-dependent by construction, and it is not recorded by the input replay -- a render frame is not a unit the replay has. |
 
 ## Enum.KeyCode
@@ -217,7 +217,7 @@ Items are analogue or digital, and mixing them is the one mistake this enum make
 | `RightTrigger` | 91 | The right trigger, 0 released to 1 fully pulled. |
 | `LeftThumbstick` | 92 | The left stick as a Vector2, both axes at once -- the source a Direction2D action binds for movement. The individual axes are LeftStickX and LeftStickY. |
 | `RightThumbstick` | 93 | The right stick as a Vector2. |
-| `Virtual1` | 94 | A source that is not hardware, written by `InputService:SetVirtualState` (§2.4). It is a KeyCode like any other, so it binds, sinks, resolves and REPLAYS like any other -- which is the whole point: a HUD button that fed an action through a side door would be a second input model, and the recorded stream would not contain it.<br><br>**It carries a VALUE and not a press.** A button writes 1 and 0; a slider writes anything between. Bound to a `Bool` action it counts as pressed past half deflection, which is the rule every analogue source here follows.<br><br>Four of them, because a touch scheme is a thumbstick and two or three buttons and four is one more than that. They are numbered rather than named for a purpose, because the purpose is the game''s. |
+| `Virtual1` | 94 | A source that is not hardware, written by `InputService:SetVirtualState` (§2.4). It is a KeyCode like any other, so it binds, sinks, resolves and REPLAYS like any other -- which is the whole point: a HUD button that fed an action through a side door would be a second input model, and the recorded stream would not contain it.<br><br>**It carries a VALUE and not a press.** A button writes 1 and 0; a slider writes anything between. Bound to a `Bool` action it counts as pressed past half deflection, which is the rule every analogue source here follows.<br><br>Four of them, because a touch scheme is a thumbstick and two or three buttons and four is one more than that. They are numbered rather than named for a purpose, because the purpose is the game's. |
 | `Virtual2` | 95 |  |
 | `Virtual3` | 96 |  |
 | `Virtual4` | 97 |  |

@@ -8,7 +8,7 @@
 
 Anything that occupies a rectangle on screen (§2.2). Every property here is one the layout solver or the 2D pass reads, which is what makes it the base rather than a convenience.
 
-Coordinates are `UDim2`: a fraction of the parent plus a pixel offset, on each axis. That pair is what lets one layout be correct at every resolution, and it is why the goldens this milestone records are taken at two.
+Coordinates are `UDim2`: a fraction of the parent plus a pixel offset, on each axis. That pair is what lets one layout be correct at every resolution, and it is why the reference images are recorded at two of them.
 
 **Members below are the ones this class DECLARES.** Everything its base
 offers is on the base's page, which is what keeps one added member on

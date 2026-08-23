@@ -28,7 +28,7 @@ The binding a prompt should draw for this action -- "Press [E]". With a device t
 
 ### `GetState(): boolean | number | Vector2 | vector`
 
-This action's value as of the current tick -- a boolean for `Bool`, a number for `Direction1D`, a `Vector2` for `Direction2D` and `ViewportPosition`, and a `vector` for `Direction3D`. It is a SNAPSHOT: two calls inside one tick agree, and a recorded input stream hands the same answers back with no hardware attached, which is what makes the replay gate a replay of input rather than of a bot.
+This action's value as of the current tick -- a boolean for `Bool`, a number for `Direction1D`, a `Vector2` for `Direction2D` and `ViewportPosition`, and a `vector` for `Direction3D`. It is a SNAPSHOT: two calls inside one tick agree, and a recorded input stream hands the same answers back with no hardware attached, which is what makes the replay a replay of input rather than of a bot.
 
 ## Events
 

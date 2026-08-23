@@ -5,7 +5,7 @@
 - Inherits [`BasePart`](basepart.md)
 - Created with `Instance.new("MeshPart")`
 
-A part whose geometry is an imported mesh rather than a primitive solid. One file is one mesh: a model made of several pieces is several MeshParts, which is the shape §2.6's prefab example already assumes.
+A part whose geometry is an imported mesh rather than a primitive solid. One file is one mesh: a model made of several pieces is several MeshParts, which is the shape a prefab assumes.
 
 **Members below are the ones this class DECLARES.** Everything its base
 offers is on the base's page, which is what keeps one added member on

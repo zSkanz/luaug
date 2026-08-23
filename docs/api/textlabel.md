@@ -5,7 +5,7 @@
 - Inherits [`UIObject`](uiobject.md)
 - Created with `Instance.new("TextLabel")`
 
-Text in a box (§2.2). No RichText in v1, and no complex-script shaping -- codepoints are laid out left to right with kerning, which ADR 0011 records as a flagged i18n gap with a HarfBuzz seam behind it.
+Text in a box (§2.2). No RichText in v1, and no complex-script shaping -- codepoints are laid out left to right with kerning. That is a known gap for Arabic, Devanagari and Thai, and the seam a text shaper would sit behind is deliberately left open.
 
 **Members below are the ones this class DECLARES.** Everything its base
 offers is on the base's page, which is what keeps one added member on

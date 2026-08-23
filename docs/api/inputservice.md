@@ -30,7 +30,7 @@ The pointer in window pixels, origin at the top left, as of the current tick. A 
 
 Whether that key, button or trigger is held as of the current tick. The shortest thing this API can be asked, and the reason there is no separate sugar module for it.
 
-It reads the device SNAPSHOT and ignores what the UI consumed, which is the opposite of the events'' second argument -- a poll asks what the hardware is doing and an event asks what happened to the game. A caller who wants the UI-aware answer wants an `InputAction`, which is also the one that can be rebound.
+It reads the device SNAPSHOT and ignores what the UI consumed, which is the opposite of the events' second argument -- a poll asks what the hardware is doing and an event asks what happened to the game. A caller who wants the UI-aware answer wants an `InputAction`, which is also the one that can be rebound.
 
 An analogue source counts as down past half deflection, which is the same rule a `Bool` action applies to one.
 
@@ -38,7 +38,7 @@ An analogue source counts as down past half deflection, which is the same rule a
 
 Drives one of the `Virtual` key codes from something that is not hardware -- a HUD button, an on-screen thumbstick, an accessibility control for a player who cannot hold a key (§2.4).
 
-**It writes into the same device snapshot a keyboard writes into**, which is what makes it one input model rather than two: the value binds through an ordinary `InputBinding`, resolves in the ordinary order, is eaten by an ordinary sinking context, and is carried by the recorded stream a replay hands back. A seam that reached past the snapshot would be a HUD button M6''s own gate could not see.
+**It writes into the same device snapshot a keyboard writes into**, which is what makes it one input model rather than two: the value binds through an ordinary `InputBinding`, resolves in the ordinary order, is eaten by an ordinary sinking context, and is carried by the recorded stream a replay hands back. A seam that reached past the snapshot would be a HUD button a recorded stream could not see.
 
 **It carries a value, not a press.** Write 1 and 0 for a button; write anything between for a slider or the axis of a thumbstick. Bound to a `Bool` action the value counts as pressed past half deflection, which is the rule every analogue source follows.
 
@@ -57,7 +57,7 @@ Fired on the tick an input STARTS -- a key pressed, a button pushed, a trigger c
 
 **What this costs, stated where it is read: a key handled here cannot be rebound.** It does not appear in a remapping screen, because nothing in the tree says it exists. An `InputAction` does appear, binds a keyboard key and a gamepad button to one name, and is what a shipped game should use -- this is the direct, familiar option beside it, and it is the right one for a prototype, a debug key, or anything a player will never remap.
 
-It fires on the SIMULATION clock, from the Input Action System''s own dispatch, so a handler that writes to the world replays exactly. Camera look at render rate is an `InputContext` with `Rate = Enum.InputRate.Render`.
+It fires on the SIMULATION clock, from the Input Action System's own dispatch, so a handler that writes to the world replays exactly. Camera look at render rate is an `InputContext` with `Rate = Enum.InputRate.Render`.
 
 ### `InputChanged(input: InputObject, uiConsumed: boolean)`
 

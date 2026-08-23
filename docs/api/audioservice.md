@@ -22,4 +22,6 @@ offers is on the base's page, which is what keeps one added member on
 
 ### `PlayLocal(content: Content): Sound`
 
-Creates a 2D `Sound`, plays it, and destroys it when it ends. For the fire-and-forget case -- a click, a pickup -- where holding an instance to clean up later is all ceremony. The `Sound` is returned so that the volume can still be set on the tick it starts; keeping it past `Ended` is holding a destroyed instance.
+Creates a 2D `Sound` parented to this service and plays it. For the fire-and-forget case -- a click, a pickup -- where naming an instance is all ceremony.
+
+**It does not clean up after itself in this release**: the `Sound` stays a child of the service once it has ended, so a caller firing one per frame accumulates them. Keep the returned handle and `Destroy` it on `Ended` where that matters. The handle is also what a caller sets the volume through, since this takes only the content.

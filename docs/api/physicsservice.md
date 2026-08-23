@@ -16,7 +16,7 @@ offers is on the base's page, which is what keeps one added member on
 
 | Name | Type | Default | Access | Description |
 |---|---|---|---|---|
-| `FixedTimestep` | `number` | `1/60` | read/write | The duration of one simulation tick, in seconds, and therefore the grid every timing guarantee is expressed against: `task.wait(1)` is exactly 60 ticks at the default 1/60, on every machine and every run. Express durations as multiples of it and the same code stays correct at 30 Hz or at 240 Hz. Writable from M5, and a write takes effect at the next frame start rather than mid-tick: the accumulator, the timer wheel and the solver all read it, and changing it between two of those reads inside one frame is a class of bug worth designing out. Values outside 1/240 to 1/30 are refused. |
+| `FixedTimestep` | `number` | `1/60` | read/write | The duration of one simulation tick, in seconds, and therefore the grid every timing guarantee is expressed against: `task.wait(1)` is exactly 60 ticks at the default 1/60, on every machine and every run. Express durations as multiples of it and the same code stays correct at 30 Hz or at 240 Hz. Writable, and a write takes effect at the next frame start rather than mid-tick: the accumulator, the timer wheel and the solver all read it, and changing it between two of those reads inside one frame is a class of bug worth designing out. Values outside 1/240 to 1/30 are refused. |
 
 ## Methods
 

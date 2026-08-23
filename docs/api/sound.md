@@ -7,7 +7,7 @@
 
 One sound, playing or not (§2.2). **Parent it to a `BasePart` and it is positional**; parent it anywhere else and it is 2D. That is the whole of the 3D switch, and it is a property of where the instance sits rather than a flag that could disagree with it.
 
-**Its timeline is the SimClock's, not the mixer's** (M6 brief, Decision 9). `TimePosition` advances by `FixedTimestep * PlaybackSpeed` per tick and `Ended` fires from that timeline, so a replay reproduces both exactly and a headless run with no audio device produces the same `Ended` on the same tick as a run with speakers. What the speakers do is downstream of the simulation and never an input to it -- otherwise a script reading `TimePosition` would be reading the wall clock through a side door (R10).
+**Its timeline is the SimClock's, not the mixer's.** `TimePosition` advances by `FixedTimestep * PlaybackSpeed` per tick and `Ended` fires from that timeline, so a replay reproduces both exactly and a headless run with no audio device produces the same `Ended` on the same tick as a run with speakers. What the speakers do is downstream of the simulation and never an input to it -- otherwise a script reading `TimePosition` would be reading the wall clock through a side door (R10).
 
 **Members below are the ones this class DECLARES.** Everything its base
 offers is on the base's page, which is what keeps one added member on
@@ -17,7 +17,7 @@ offers is on the base's page, which is what keeps one added member on
 
 | Name | Type | Default | Access | Description |
 |---|---|---|---|---|
-| `Content` | `Content` | `""` | read/write | The audio, as an `asset://` URI. WAV, MP3, FLAC and Ogg Vorbis, decoded once and cached: a sound does not re-read its file sixty times a second.<br><br>A URI that names nothing still PLAYS, as a generated tone whose pitch comes from a hash of the id. A sound that went silent because a file was missing is a bug report about the sound; a placeholder that is audibly a placeholder is one about the file. `DebugService:GetStat("AudioClipsMissing")` is how a script asks which it got.<br><br>Where in the file the sound is comes from `TimePosition` every frame rather than from a cursor the mixer keeps, so the audio is a function of the simulation and a replay reproduces it (M6 brief, Decision 9). |
+| `Content` | `Content` | `""` | read/write | The audio, as an `asset://` URI. WAV, MP3, FLAC and Ogg Vorbis, decoded once and cached: a sound does not re-read its file sixty times a second.<br><br>A URI that names nothing still PLAYS, as a generated tone whose pitch comes from a hash of the id. A sound that went silent because a file was missing is a bug report about the sound; a placeholder that is audibly a placeholder is one about the file. `DebugService:GetStat("AudioClipsMissing")` is how a script asks which it got.<br><br>Where in the file the sound is comes from `TimePosition` every frame rather than from a cursor the mixer keeps, so the audio is a function of the simulation and a replay reproduces it. |
 | `Group` | `AudioGroup?` | `nil` | read/write | The bus this sound's volume is multiplied by, or nil for none. |
 | `Looped` | `boolean` | `false` | read/write | Whether reaching the end wraps to the start instead of stopping. A looped sound never fires `Ended`, because it never does. |
 | `PlaybackSpeed` | `number` | `1` | read/write | How fast the timeline runs, and therefore the pitch. 2 is an octave up and half the duration. Zero is refused rather than treated as a pause -- `Playing` is what pauses, and a speed of zero would be a sound that never ends. |
@@ -52,4 +52,4 @@ Fired on the tick the timeline reaches the end of a sound that is not `Looped`. 
 
 ### `Loaded()`
 
-Fired when this sound's `Content` has been decoded and is ready to play. **Fires immediately in v1**, because a sound has nothing to load until M7's asset pipeline -- declared now so that code written today does not have to change when it does.
+Fired when this sound's `Content` has been decoded and is ready to play. **Fires immediately in v1**, because a sound has nothing to wait for yet -- declared now so that code written today does not have to change when it does.

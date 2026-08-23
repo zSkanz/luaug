@@ -5,24 +5,41 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- **E2 — Moving Things — IN PROGRESS, opened 2026-08-22.** Post-v1 phase 1,
-  milestone 2 of 4. The manipulators and the direct manipulation around them:
-  translate, rotate and scale in the viewport; multi-select; creating an
-  instance; reparenting by drag. Specified in
-  [`docs/roadmap.md`](docs/roadmap.md#e2--moving-things-l) and
-  [`docs/briefs/e2-kickoff.md`](docs/briefs/e2-kickoff.md), both written at
-  kickoff from four read-only reconnaissance passes — the method ADR 0046 used
-  to size E1.
+- **E2 — Moving Things — IN PROGRESS, opened 2026-08-22.** Sixteen commits in,
+  every one behind a green six-stage gate. **What is left is two things**:
+  Properties over a multi-selection (common properties, and a differing value
+  marked as mixed — not started, and there is no mixed-value mechanism anywhere
+  in the tree yet), and reparenting by DRAG in the Explorer (`Editor::reparent`
+  is built and tested; the drag source and drop target are not). Then the Gate
+  Record and a person's sign-off. The brief's "Where E2 stands" section is the
+  full account.
 
-  **Three things the passes found broken, and only building on them would
-  have.** The undo coalescing key is computed in `engine.cpp` from *how many*
-  writes are pending this frame, so a gizmo writing `CFrame` and `Size` together
-  records a full world snapshot every frame — and nothing tests the calculation.
-  The selection outline shakes four kilometres out, because it submits in world
-  coordinates and `DebugDraw::rebaseTo` subtracts in f32. And `isEngineOwned`
-  does not know about `generated`, so a drag could drop an authored part inside a
-  streamed chunk, where the save skips it and the next eviction destroys it
-  without a word. All three are in the roadmap section's six decisions.
+  **The manipulators exist**: translate, rotate and scale, world or local axes, a
+  grid with a modifier that suspends it, W E R to switch. The rule they are built
+  on is one sentence — *a drag is solved against where it STARTED, never against
+  last frame* — and two properties fall out of it that are both tests: a drag is
+  exact however slowly it is made, and three parts a metre apart are still a metre
+  apart afterwards.
+
+  **Nine defects, seven found by a person using the thing**, and three of them
+  are the same shape: D070, D071 and D073 are each a piece of arithmetic that is
+  right for ONE and wrong for many — one instance, one world, one draw. A
+  milestone whose whole subject is "many" was always going to find them.
+
+  **Specified at kickoff from four read-only reconnaissance passes** — the
+  method ADR 0046 used to size E1 — in
+  [`docs/roadmap.md`](docs/roadmap.md#e2--moving-things-l) and
+  [`docs/briefs/e2-kickoff.md`](docs/briefs/e2-kickoff.md). All three things
+  those passes found broken are fixed: the undo key that only computed when one
+  write was pending, the selection outline that shook four kilometres out, and
+  `isEngineOwned` not knowing about `generated`.
+
+  **And a great deal arrived that this brief never mentioned**, which is the
+  pattern E1 recorded and this milestone repeated: the icon set was wired end to
+  end and then tinted by role, a scene became creatable from the editor as a FILE
+  (ADR 0048), and the flagship's world moved into one (D074). Each was asked for
+  by the person using the editor, and each is written up where it belongs rather
+  than folded into the milestone's own scope.
 
 - **E1 — The Editor — COMPLETE, signed off 2026-08-22**, tagged `milestone/e1`. Post-v1 phase 1,
   opened by human decision the same day v1.0.0 shipped. `luaug edit` is an
@@ -45,12 +62,12 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   demonstrate. Code-first is not deprecated by either — `Instance.new` at runtime
   stays first-class the way it is in Unity.
 
-  **Seven defects, six of them found by a person opening the thing**, and **five
-  of those are one architectural mistake appearing five times**: the editor
-  inheriting the game's decisions instead of taking them. The rule that resolves
-  them is one sentence and it now governs the tick, the cursor, the audio, the
-  camera and the keyboard — *while the editor is editing, the tool owns the
-  machine, and pressing play hands it back.*
+  **Seven defects, six of them found by a person opening the thing**, and five
+  of those were one architectural mistake appearing five times: the editor
+  inheriting the game's decisions instead of taking them. One sentence resolves
+  them and it governs the tick, the cursor, the audio, the camera and the
+  keyboard — *while the editor is editing, the tool owns the machine, and
+  pressing play hands it back.*
 
   **What it does not have** is in full at the end of the brief; E2 owns the
   manipulators, creating an instance and multi-select, and what remains after
@@ -73,17 +90,12 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   when E1 was written up; the briefs carry the Gate Records. **The one to carry
   forward is D040**: header changes had been rebuilding NOTHING on Windows since
   the project started, which is why `chcp 65001` is in the gate.
-- **M6 — Playing the World — COMPLETE, signed off 2026-08-21**, tagged
-  `milestone/m6`. Input, UI, tweens, audio and skeletal animation, with
-  `examples/04-obby` playable end to end; three ADRs (0039, 0040, 0041), fifteen
-  decisions and a filled Gate Record in
-  [`docs/briefs/m6-kickoff.md`](docs/briefs/m6-kickoff.md). **Five of its nine
-  defects were found by a person playing the deliverable**, which is the pattern
-  every milestone since has repeated.
-- **M5 — Feeling the World: Jolt Physics + Character — COMPLETE, signed off
-  2026-08-20**, tagged `milestone/m5`. Its Gate Record, its seventeen Findings
-  and the review round that found D025 are in
-  [`docs/briefs/m5-kickoff.md`](docs/briefs/m5-kickoff.md).
+- **M6, M5 — COMPLETE, signed off 2026-08-21 and 2026-08-20**, tagged. Their
+  entries and their Gate Records are in the briefs and in
+  [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md). The one
+  to carry forward is the pattern rather than the content: **five of M6's nine
+  defects were found by a person playing the deliverable**, which every milestone
+  since has repeated and E2 repeated seven times.
 - **M4.5 — Correcting the World — COMPLETE, signed off 2026-08-20**, tagged
   `milestone/m4.5`. **M4 — Seeing the World — signed off 2026-08-20**
   (`milestone/m4`), its five gate items green against re-recorded artifacts.
@@ -123,14 +135,18 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
   citations. That file exists because three human-reported defects were removed
   from this one while it was being rewritten to close M4. **A close rewrites this
   file wholesale; it can no longer take the open list with it.**
-- **E2 is open and specified; the next action is the interfaces.** In order,
-  because everything else reads them: `Inspector`'s selection set and
-  `pruneDead`; the gesture and the extracted coalescing key; `picking.h`'s
-  `worldToViewport`, gizmo frame, axis hit test and drag solve; then `Editor`'s
-  `createInstance`, `reparent`, the batch forms and `authorable`. Nothing fans
-  out until those headers compile (§7).
-- **D067 and D068 are fixed and they are why the editor was unusable on the
-  flagship.** A boot scene was applied AFTER the entry scripts had built the
+- **E2's next action, as a sentence:** add `collectCommonProperties` and a
+  shared-value query to `inspector.h` as free functions — the panel cannot be
+  driven headlessly, so what it DECIDES has to live where a test can reach it —
+  then make `drawEditor` take a span and mark a differing value as mixed. After
+  that, `BeginDragDropSource` on the Explorer's row and `AcceptDragDropPayload`
+  on it, feeding `EditorCommands::reparentTo`, which is already drained.
+- **All four of E2's frozen interfaces are built and tested**, which is the point
+  the plan said nothing fans out before: the selection set, the gesture and its
+  extracted undo key, the manipulator arithmetic, and `Editor`'s verbs.
+- **Nine defects closed in this milestone and seven of them came from a person
+  using the editor**, which is now the pattern every milestone since M4 has
+  repeated. D067 and D068 are why the editor was unusable on the flagship at all. A boot scene was applied AFTER the entry scripts had built the
   world, so it destroyed every instance they made while the Luau VM kept the
   references and the connections — `instance_dead` once a frame, forever, and a
   world that never arrived. The order ADR 0047 specifies is load-then-start and
@@ -178,25 +194,10 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
   windowed frames. What remains is the ImGui half, and the crash handler is in
   place for the next occurrence — the next report should carry
   `luaug-crash-<pid>.dmp` and `luaug.log` from beside whatever was being run.
-- **`inertcheck` sweeps `EngineState` now, and widening it found three more**
-  (D055). The blind spot was real and it was the size of a service: a knob that
-  belongs to a service with one instance per world lives in the world's own
-  struct rather than in a component pool, so half the properties in the API were
-  never swept — which is how `PointerLocked` sat stored and unread from M6 to
-  M8 (D049). The three it caught the first time it ran: `DebugService.OverlayVisible`
-  was stored and the overlay was toggled only by F3; `UIService.DisplayScale`
-  said in its own comment that the host wrote it every frame and the host never
-  did, so it was 1 on a doubled display; and `StreamingService.PauseOutsideLoadedArea`
-  had a reader waiting for it — `minimumRingResident()`, whose comment says it
-  "is what `PauseOutsideLoadedArea` reads" — that nothing ever called. All three
-  are wired, and the pause is break-verified: with a minimum ring nothing can
-  satisfy, 240 frames produce zero ticks with the property on and ticks with it
-  off.
-- **A sequence of GPU runs is not a sequence of measurements** (M8 Finding 5).
-  The same baseline run measured 6.25 ms first in a sweep and 4.83 ms last, and
-  an earlier sweep taken without a warm-up reported `--quality=low` as slower
-  than `high`. `docs/perf-baselines.md` records the protocol; anybody comparing
-  render features should read it before trusting a table.
+- **`inertcheck` sweeps `EngineState` too** (D055), and widening it found three
+  properties that were stored and read by nothing -- the blind spot was the size
+  of a service, because a knob belonging to a service with one instance per world
+  lives in `EngineState` rather than in a component pool.
 - **The build agreeing is not evidence that the build read your file, and on
   Windows it was not evidence that it read your HEADER either.** D040: ninja
   recorded no header dependencies at all, so `--clean-first` was load-bearing
@@ -281,35 +282,35 @@ Entries for the planning session and for M0 through M4 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
 
-- **2026-08-22 (session 18, Claude Opus): D067 fixed, and E2 opened.**
+- **2026-08-23 (session 19, Claude Opus): E2's manipulators, and eight defects a
+  person found.** Sixteen commits, each behind a green six-stage gate.
 
-  **Did:** the §2 boot sequence; reproduced the human's report byte for byte
-  before touching anything — 120 headless frames of the flagship with its scene
-  named produce 89 copies of `init.luau:566: [script.err.instance_dead]`, and
-  zero after the fix; moved the boot scene inside `WorldHost::boot`, ahead of
-  `startScripts`; normalised and validated the Save Scene As path (D068); four
-  regression cases in `world_host_tests` and two in `editor_tests`; the full
-  local gate green on all six stages; then the E2 roadmap section and kickoff
-  brief, from four reconnaissance passes.
+  **Did:** the four frozen interfaces — the selection as a set, the edit as a
+  gesture, the manipulator arithmetic, and `Editor`'s verbs — then the
+  manipulators themselves: translate, rotate and scale, world or local, a grid
+  and a modifier that suspends it. The selection outline became a silhouette. The
+  icon set was wired end to end and then tinted by role. `Script` became creatable
+  as a FILE (ADR 0048), and the flagship's world moved into a scene (D074), which
+  is the arrangement the human asked for in four words: like Unity and Unreal.
 
-  **Learned, and it is the same shape three times.** Every one of the three
-  defects the passes found is a piece of arithmetic that is right for one and
-  wrong for many: an undo key that only computes when exactly one write is
-  pending, a rebase that subtracts in f32 because one debug line never needed
-  more, an ownership test that knows about services and not about what streaming
-  made. None of them is a bug in what E1 shipped — each is a correct answer to
-  the question that was being asked at the time, and a manipulator asks a bigger
-  one.
+  **Learned, and it is one shape said three times.** D070, D071 and D073 are each
+  a piece of arithmetic or a rule that is right for ONE and wrong for many — one
+  world's transform history, one selection, one draw in a batch. Nothing was
+  wrong with any of them when it was written; a milestone whose whole subject is
+  "many" is what asks the bigger question. D073 is the one to carry: I solved a
+  tool's problem inside `buildInstanceBatches`, which every pass of the frame
+  depends on, and it took every boulder and every tree canopy out of the flagship.
+  The cost of a tool belongs in the tool's pass.
 
-  **Also learned:** a milestone can ship a documented gap and be right, and the
-  bill still comes. E1 wrote down that ADR 0047's boot order was inverted and
-  said in the code comment that letting the file win was "the honest behaviour to
-  ship until the lifecycle moves". It was — right up until a project whose script
-  builds its world met a scene, which is the one case where the two orders
-  disagree, and the failure is not a subtly wrong world but an unusable editor.
+  **Also learned, twice in one day:** a POST_BUILD stage only runs when the target
+  relinks. An edit to `@luaug/camera` did not reach the STAGED copy, so a fix that
+  was correct in the source read as broken in the run — the same trap `CLAUDE.md`
+  documents for shaders, at the same price.
 
-  **Next:** freeze `Inspector`'s selection set and `Inspector::pruneDead`, then
-  the gesture and the extracted coalescing key, per the E2 brief's subagent plan.
+  **Next:** `collectCommonProperties` and a shared-value query as free functions
+  in `inspector.h`, then `drawEditor` over a span with a mixed marker; then
+  drag-and-drop on the Explorer's rows feeding `EditorCommands::reparentTo`,
+  which is already drained.
 
 - **2026-08-21 (session 11, Claude Opus): M6 built and signed off.** Moved to
   the archive with the rest of M6.

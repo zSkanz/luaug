@@ -24,24 +24,22 @@ importers, distributing the editor) belongs to a later milestone.
 
 ## Scope checklist (from roadmap)
 
-- [ ] Translate, rotate and scale manipulators in the viewport, world and local space
-      — **the arithmetic is done and tested; nothing draws one or drags one yet**
-- [ ] Snapping, with a modifier to suspend it
-- [~] Multi-select: ctrl-click and shift-range in the Explorer **done**; ctrl-click
-      in the viewport not
-- [ ] Properties over a multi-selection: common properties, and a mixed value marked as mixed
-- [~] Creating an instance: the Explorer's per-row plus and its class menu **done**;
-      the menu bar not
-- [~] Reparenting by drag in the Explorer: `Editor::reparent` **done and tested**,
-      including the cycle and the authorable target; no drag source or drop target
-      in the panel yet
-- [x] Batch delete and duplicate, one undo step each — the verbs exist and are
-      tested; `EditorCommands` still carries a single id, so nothing calls them
+- [x] Translate, rotate and scale manipulators in the viewport, world and local space
+- [x] Snapping, with a modifier to suspend it
+- [x] Multi-select: ctrl-click and shift-range in the Explorer, ctrl-click in the viewport
+- [ ] **Properties over a multi-selection: common properties, and a mixed value
+      marked as mixed** — not started; the panel is still single-target and there
+      is no mixed-value mechanism anywhere in the tree
+- [x] Creating an instance from the Explorer's per-row plus and its class menu
+- [~] **Reparenting by drag in the Explorer** — `Editor::reparent` is built and
+      tested, cycle and authorable target included; the drag source, the drop
+      target and the drop-between-rows are not
+- [x] Batch delete and duplicate, one undo step each, acting on the selection
 - [x] The gesture-based undo key, extracted out of `engine.cpp` and tested
 - [x] `worldToViewport` in `picking.h`, as the exact inverse of `rayThroughPixel`
-- [~] The selection outline is camera-relative **and became a silhouette rather
-      than a box** (asked for at review, beyond the scope this milestone opened
-      with); the gizmo is not drawn yet, so its half of this is not done
+- [x] The gizmo and the selection outline submitted camera-relative — and the
+      outline became a SILHOUETTE rather than a box, which was asked for at review
+      and is beyond the scope this milestone opened with
 - [x] An `authorable` predicate covering engine-owned, `generated`, and the ancestors of both
 
 ### The four interfaces, frozen (subagent plan)
@@ -191,6 +189,88 @@ touches `engine.cpp`'s frame loop.
       it moves the way a manipulator should** — deliberately not automatable, and the
       gate item every milestone since M4 has proven is where the real defects come
       from.
+
+## Where E2 stands, 2026-08-23
+
+Written at the human's request, from `git log` and the register rather than from
+memory. Sixteen commits since the kickoff, every one of them behind a green
+six-stage local gate.
+
+### Built
+
+**The four interfaces the subagent plan said nothing fans out before**, all
+tested:
+
+1. **The selection is a SET**, owned by the `Inspector`, primary = last clicked,
+   with `pruneDead` replacing four hand-written liveness checks — and closing a
+   latent defect none of them could see: select a child, delete its parent, and
+   the selection pointed at a retired instance.
+2. **An edit is a GESTURE.** The undo key left `engine.cpp` for `coalesceKeyFor`,
+   which no test could reach before. One drag is one step however many writes it
+   made; without a gesture the old rule still applies, so nothing that has not
+   opted in changed.
+3. **The manipulator arithmetic**: `worldToViewport` (the inverse this repository
+   never had), `metresPerPixel`, `pickGizmo`, `gizmoDragPoint`, `gizmoDragAngle`
+   — nine cases, including the near-parallel axis, the off-axis grab, a non-square
+   viewport and four kilometres from the origin.
+4. **`Editor`**: `createInstance`, `reparent`, `deleteInstances`,
+   `duplicateInstances`, `authorable`.
+
+**The manipulators themselves.** Translate, rotate and scale; world axes or the
+selection's own; a grid with a modifier that suspends it; W E R to switch. Drawn
+in lines through `DebugDraw` and camera-relative, so they do not shake four
+kilometres out — which is a test. The manipulator takes the pointer before the
+picker does, so grabbing a handle does not select what is behind it.
+
+**Multi-select**, in the Explorer (ctrl-click, shift-range) and in the viewport
+(ctrl-click). Delete and duplicate act on the selection, one undo step each,
+ordered by the tree so the same selection is the same result.
+
+**Creating an instance**, from a plus at the end of every Explorer row, over the
+twenty-seven classes `Instance.new` accepts — read from the same three flags, so
+a class tagged `NotCreatable` tomorrow leaves the menu with no edit here. New
+parts land in front of the editor camera rather than at the origin.
+
+**The selection outline became a SILHOUETTE** rather than a box: a mask and a
+dilate, which is how the effect it was compared to works. Asked for at review and
+beyond the scope this milestone opened with.
+
+**The icon set is wired** — staging, `IconAtlas`, a generated id header with a
+freshness gate, the Explorer, the content browser and the toolbar drawing from
+it, and tinting by role with a switch that turns it off. Not in this brief at
+all; it arrived because the icons did.
+
+**A script is a file, and the editor writes it** (ADR 0048), because "why can I
+not add a script" had an answer that was correct and useless.
+
+**The flagship's world is a file** (D074): `examples/10-open-world` is
+scene-first, `luaug-host --save-scene` is the migration that made it possible,
+and `@luaug/camera` adopts a camera the scene already holds.
+
+### Not built
+
+- **Properties over a multi-selection**: the common properties of a mixed-class
+  selection, and a differing value marked as mixed. Nothing exists — the panel is
+  still single-target and there is no mixed-value mechanism anywhere in the tree.
+- **Reparenting by drag in the Explorer.** `Editor::reparent` is built and tested,
+  including the cycle and the authorable target; what is missing is the drag
+  source, the drop target and the drop-between-rows.
+- **The scene-first migration for every other example.** Only the flagship moved.
+- **The Gate Record**, the screenshots, and the human's sign-off.
+
+### Nine defects, seven of them found by a person using the thing
+
+D067 (a boot scene destroying the world the scripts built), D068 (Save Scene As
+writing into `content/content/`), D069 (the game's pointer lock leaking the mouse
+into the panels), D070 (the capsule flickering after a stop), D071 (ctrl-Z
+collapsing the explorer), D072 (an unbalanced `PopStyleColor`), D073 (selection
+emptying the frame — mine, one commit old), D074 (two of everything after a
+save). D066 was quarantined at its second flake.
+
+**Three of those are the same shape and it is worth naming**: D070, D071 and D073
+are each a piece of arithmetic or a rule that is right for one and wrong for many
+— one instance, one world, one draw. This milestone's whole subject is "many", so
+it found them.
 
 ## Attempted / abandoned
 

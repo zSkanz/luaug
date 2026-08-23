@@ -7,7 +7,7 @@
 
 A mixing bus (§2.1, §2.2). A `Sound` whose `Group` names one has its volume multiplied by the group's, which is how "turn the music down" is one property rather than a loop over every music track.
 
-Named `AudioGroup` rather than `SoundGroup` for the reason §2.5's divergence 19 gives: the service is `AudioService`, and one prefix across a family beats two.
+Named `AudioGroup` rather than `SoundGroup` because the service is `AudioService`, and one prefix across a family beats two.
 
 **Members below are the ones this class DECLARES.** Everything its base
 offers is on the base's page, which is what keeps one added member on

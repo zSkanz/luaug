@@ -217,7 +217,7 @@ Ends the connection. **Idempotent**: a second call is a no-op and `Connected` st
 
 One raw input, as `InputService.InputBegan`, `InputChanged` and `InputEnded` carry it (§2.4, ADR 0041). A read-only SNAPSHOT and not a live object: it describes what happened on one tick, and a handler that stashes one is holding a fact rather than a handle.
 
-**These events come from the Input Action System''s own dispatch, not from the operating system.** Same source, same tick, after the UI has consumed what it consumed -- and in a replay they come from the recorded stream, so a recorded run reproduces every input a game reads.
+**These events come from the Input Action System's own dispatch, not from the operating system.** Same source, same tick, after the UI has consumed what it consumed -- and in a replay they come from the recorded stream, so a recorded run reproduces every input a game reads.
 
 ## InputObject — properties
 
@@ -225,18 +225,18 @@ One raw input, as `InputService.InputBegan`, `InputChanged` and `InputEnded` car
 |---|---|---|---|---|
 | `Delta` | `vector` | — | read-only | How much it moved since the last tick, in the same units as `Position`. `z` is the wheel movement, which is where a `MouseWheel` event puts its one number. Zero for anything that is not motion. |
 | `KeyCode` | `Enum.KeyCode` | — | read-only | Which key, button or axis. `Unknown` for pointer motion and the wheel, which are not keys -- and `Unknown` is a real item rather than nil precisely so this property never has to be checked before it is compared. |
-| `Position` | `vector` | — | read-only | Where the pointer is, in window pixels with the origin at the top left, with `z` carrying the accumulated wheel. For a gamepad axis it is the deflection instead: `x` and `y` for a stick, `x` alone for a trigger.<br><br>A three-wide vector rather than a `Vector2` because `vector` is this engine''s native primitive (ADR 0013) -- it costs no userdata and no allocation, which matters on a value produced several times a tick. |
+| `Position` | `vector` | — | read-only | Where the pointer is, in window pixels with the origin at the top left, with `z` carrying the accumulated wheel. For a gamepad axis it is the deflection instead: `x` and `y` for a stick, `x` alone for a trigger.<br><br>A three-wide vector rather than a `Vector2` because `vector` is this engine's native primitive (ADR 0013) -- it costs no userdata and no allocation, which matters on a value produced several times a tick. |
 | `UserInputType` | `Enum.UserInputType` | — | read-only | What kind of input this is. The coarse question, for a handler that does not care which key. |
 
 ## Random
 
-A seeded pseudorandom generator, and the only sanctioned source of randomness in simulation code (R10). A seeded stream is reproducible: the same seed yields the same sequence for the same engine build on the same platform, which is the level-B guarantee recorded replays rest on -- replays store seeds, not draws (ADR 0025).
+A seeded pseudorandom generator, and the only sanctioned source of randomness in simulation code. A seeded stream is reproducible: the same seed yields the same sequence for the same engine build on the same platform, which is the level-B guarantee recorded replays rest on -- replays store seeds, not draws (ADR 0025).
 
 ## Random — constructors
 
 ### `new(seed: number? = nil): Random`
 
-A generator seeded with `seed`, truncated toward zero. **Omitting the seed draws one from the host and is not legal in simulation code**: it is exactly the unseeded RNG R10 forbids, and `luaug check` flags it. Use it for cosmetics that never reach the world hash, or seed it from something the simulation already knows.
+A generator seeded with `seed`, truncated toward zero. **Omitting the seed draws one from the host and is not legal in simulation code**: it is exactly the unseeded RNG determinism forbids, and `luaug check` flags it. Use it for cosmetics that never reach the world hash, or seed it from something the simulation already knows.
 
 ## Random — methods
 
@@ -314,7 +314,7 @@ A rectangle from its two corners.
 
 ## Signal
 
-THE signal type, spelled `Signal<T...>` where the pack is what handlers receive and `Wait` returns -- never `RBXScriptSignal` (divergence #4). Delivery is **deferred only** (ADR 0015): a fire enqueues, and handlers run at the next drain in the order described in §3.1, with connection order guaranteed within one fire. Script-created signals replace BindableEvent and BindableFunction outright (divergence #5). Handler errors are contained: each runs on its own coroutine, and an error stops neither the other handlers, nor the drain, nor the firing script.
+THE signal type, spelled `Signal<T...>` where the pack is what handlers receive and `Wait` returns -- never `RBXScriptSignal` (divergence #4). Delivery is **deferred only** (ADR 0015): a fire enqueues, and handlers run at the next drain in the order they were raised, with connection order guaranteed within one fire. Script-created signals replace BindableEvent and BindableFunction outright (divergence #5). Handler errors are contained: each runs on its own coroutine, and an error stops neither the other handlers, nor the drain, nor the firing script.
 
 ## Signal — constructors
 
