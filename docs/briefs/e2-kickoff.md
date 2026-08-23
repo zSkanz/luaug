@@ -157,36 +157,36 @@ touches `engine.cpp`'s frame loop.
 - [ ] `luaug edit examples/06-scene` opens, a part is selected, and each of the three
       manipulators moves it in the viewport. A screenshot per mode is attached to the
       gate record.
-- [ ] **The manipulator arithmetic has unit tests over a camera and a viewport
+- [x] **The manipulator arithmetic has unit tests over a camera and a viewport
       rectangle**, covering: an axis handle hit at the centre of the screen and at a
       corner; an axis nearly parallel to the view direction; a drag that begins off
       the axis; a non-square viewport; and a round trip — `worldToViewport` of a
       point, back through `rayThroughPixel`, aiming at that point — checked at the
       four corners, because that is the aspect-ratio error the file already exists to
       catch.
-- [ ] **One drag is one undo step**, proven headlessly: sixty frames of writes inside
+- [x] **One drag is one undo step**, proven headlessly: sixty frames of writes inside
       one gesture produce one history entry, and two gestures over the same property
       produce two. The extracted key has its own test; the inline calculation it
       replaces had none.
-- [ ] **A transform over a multi-selection moves each instance by the same delta**,
+- [x] **A transform over a multi-selection moves each instance by the same delta**,
       proven on a selection whose members start at different transforms: three parts
       a metre apart are still a metre apart after the drag.
-- [ ] **The gizmo does not shake four kilometres from the origin.** The vertices
+- [x] **The gizmo does not shake four kilometres from the origin.** The vertices
       `DebugDraw` holds for a gizmo submitted at 4 km agree with the exact
       camera-relative value to within a tenth of a millimetre. The same check covers
       the selection outline, which is the defect it finds.
-- [ ] Multi-select in the Explorer and in the viewport; the Properties panel shows
+- [x] Multi-select in the Explorer and in the viewport; the Properties panel shows
       the common properties of a mixed-class selection and marks a differing value as
       mixed. Proven by tests over the free functions that compute both, since the
       panel itself cannot be driven headlessly.
-- [ ] Creating an instance from the UI lands under the parent the menu was opened on,
+- [x] Creating an instance from the UI lands under the parent the menu was opened on,
       is selected, and is taken back by one undo. Reparenting by drag moves a
       subtree, refuses a cycle, and refuses a target inside a streamed chunk — all of
       it driven through `Editor` directly by a test rather than by a mouse.
-- [ ] Deleting a selection of four is one undo step, and undoing it brings all four
+- [x] Deleting a selection of four is one undo step, and undoing it brings all four
       back with the same instance ids, which is the property E1's delete test already
       asserts for one.
-- [ ] `scripts/localgate.ps1` green on every stage; `luaug check` clean; docs-lint
+- [x] `scripts/localgate.ps1` green on every stage; `luaug check` clean; docs-lint
       clean.
 - [ ] **A human opens the editor on the flagship, moves something, and says whether
       it moves the way a manipulator should** — deliberately not automatable, and the
@@ -292,4 +292,60 @@ _(appended during the milestone; MASTER_PROMPT.md §12)_
 
 ## Gate Record
 
-_(filled at milestone end, before human review)_
+**Every item below is answered except the two that need a person at a window,
+and those are marked PENDING rather than argued around.** The limit is stated in
+`PROGRESS.md` and in E1's brief and has not changed: the ImGui shell cannot
+render headlessly and SDL does not accept injected input, so there is no
+automated path to a picture of this editor or to a click inside it.
+
+Closing run, 2026-08-23, on the reference machine.
+
+```
+  ok    docs (16.5 s)
+  ok    luau (12.5 s)
+  ok    format (17.8 s)
+  ok    windows (70.3 s)
+  ok    linux (99.1 s)
+  ok    shipping (59.3 s)
+green (macOS is Tier-3 and only CI can build it)
+```
+
+44 ctest targets on Windows and 41 in the Tier-2 container, 1,109 conformance
+cases on each. The shipping stage builds two profiles now, not one: `shipping`
+and the `player` profile D057 added.
+
+### Item by item
+
+| Gate item | Answer |
+|---|---|
+| `luaug edit examples/06-scene` opens, a part is selected, each manipulator moves it, a screenshot per mode | **PENDING — a human at a window.** Everything the picture would show is asserted below; what the picture adds is whether it *feels* right, which is the next row. |
+| The manipulator arithmetic has unit tests over a camera and a viewport rectangle | **Pass.** `picking_tests.cpp`, seven cases for the manipulator on top of the ray ones: `worldToViewport is the exact inverse of rayThroughPixel, at the corners too`, `a point behind the camera has no place on the screen`, `a manipulator is the same size on screen however far away it is`, `a click on an arm picks that arm, and one on the middle picks the middle`, `an arm pointing at the camera is refused rather than divided by`, `a drag along an arm reports a point on that arm, and the delta is the drag`, `a plane handle drags in its own plane and never out of it`, `a rotate ring is picked at its radius and reports the angle round it`, `a manipulator four kilometres out is picked exactly as one at arm's length`. The round trip is checked at the four corners, which is the aspect-ratio error the file exists to catch. |
+| One drag is one undo step, proven headlessly | **Pass.** `editor_tests.cpp: one drag is one undo step, however many frames it lasts` drives sixty frames of writes inside one gesture; `a drag on one property is one step, and two properties are two` covers the ungestured fallback. The key itself is tested in `inspector_tests.cpp` through `coalesceKeyFor`, which nothing could reach while it was inline in `engine.cpp`. |
+| A transform over a multi-selection moves each instance by the same delta | **Pass.** `editor_tests.cpp: a drag over a multi-selection moves each instance by the same delta` — three parts a metre apart, still a metre apart after the drag. |
+| The gizmo does not shake four kilometres from the origin | **Pass.** `editor_tests.cpp: a manipulator four kilometres out is submitted where it is, not where a float can reach`, against the vertices `DebugDraw` actually holds. The same defect in the selection outline is what the check was written for, and it is fixed. |
+| Multi-select in the Explorer and the viewport; the Properties panel shows the common properties of a mixed-class selection and marks a differing value as mixed | **Pass**, through the free functions, since the panel cannot be driven headlessly. `inspector_tests.cpp`: seven cases over `collectCommonProperties` and `sharedValue` — one class however many are in it, a base and a derived, a name declared with two TYPES dropped, a property read-only on any member read-only for the set, a dead member skipped, `Same`/`Mixed`/`Unreadable`, and two NaNs not counting as a disagreement. The drawing half runs for real on a device: `debug_overlay_tests.cpp` renders the panel over a selection of two that disagree about every property, and over one spanning two unrelated classes. |
+| Creating an instance from the UI lands under the parent the menu was opened on, is selected, and is taken back by one undo | **Pass.** `editor_tests.cpp: creating lands under the parent that was asked, is selected, and one undo takes it back` — with something else selected first, because the claim is only worth testing when the selection disagrees with the parent. It also asserts the create is ONE history step rather than two, and that a refused class records none. |
+| Reparenting by drag moves a subtree, refuses a cycle, and refuses a target inside a streamed chunk | **Pass.** `reparenting moves a subtree, refuses a cycle, and never records a step that does nothing`, `nothing authored may live inside what a system made`, `nothing can be created inside a chunk, including inside what the chunk holds` (D077 — the chunk's own row was refused and everything under it was not), and `a drop target lights up for exactly the drops that would move something`, which is the rule the Explorer's drop target previews through the same function the verb applies. |
+| Deleting a selection of four is one undo step, and undoing it brings all four back with the same ids | **Pass.** `a batch delete is one undo step, and undoing it brings back the same ids`, plus `a batch is ordered by the tree, so the same selection is the same result` and `deleting a parent and its child together is not an error`. |
+| `scripts/localgate.ps1` green on every stage; `luaug check` clean; docs-lint clean | **Pass**, above. |
+| A human opens the editor on the flagship, moves something, and says whether it moves the way a manipulator should | **PENDING — and it is the item this milestone was most shaped by.** Nine of E2's twelve defects arrived this way while the milestone was still open. |
+
+### What the record should not be read as saying
+
+**Twelve defects closed, ten of them found by a person using the editor**, and
+the two the tests found were both mine, one commit old. That ratio is not a
+complaint about the tests: everything above is a claim about what the editor
+DECIDES, and nine of the twelve were about what it does — a pointer that leaked
+into a panel, a capsule that flickered, a tree that collapsed on ctrl-Z, a plus
+on a row nothing could be created under.
+
+**Three of them are one shape and it is the finding worth carrying**: D070, D071
+and D073 are each a piece of arithmetic or a rule that is right for ONE and wrong
+for many — one world's transform history, one selection, one draw inside a batch.
+None was wrong when it was written. A milestone whose whole subject is "many" is
+what asks the larger question, and this one asked it three times.
+
+**And D073 is the one to carry furthest.** I solved a TOOL's problem inside
+`buildInstanceBatches`, which every pass of the frame depends on, and it took
+every boulder and every tree canopy out of the flagship the instant anything was
+selected. The cost of a tool belongs in the tool's pass.

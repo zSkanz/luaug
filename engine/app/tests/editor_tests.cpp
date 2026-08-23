@@ -970,6 +970,50 @@ TEST_CASE("a drop target lights up for exactly the drops that would move somethi
     CHECK(world.parentOf(folder) == root);
 }
 
+TEST_CASE("creating lands under the parent that was asked, is selected, and one undo takes it back")
+{
+    // The gate item, driven through `Editor` rather than through a mouse: the
+    // menu that calls this cannot be opened by a test, and what it decides can.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId here = fixture.widget(world, "Here");
+    const core::InstanceId elsewhere = fixture.widget(world, "Elsewhere");
+    REQUIRE_FALSE(world.setParent(here, root).has_value());
+    REQUIRE_FALSE(world.setParent(elsewhere, root).has_value());
+
+    // Something else selected first, because "it lands under the parent the
+    // menu was opened on" is only a claim worth testing when the selection
+    // disagrees with it.
+    inspector.select(elsewhere);
+
+    REQUIRE(editor.createInstance(world, fixture.widgetClass, here, root, inspector));
+    const core::InstanceId made = inspector.selection();
+    REQUIRE(made.valid());
+    CHECK(world.parentOf(made) == here);
+    // Selected, and ALONE: the point of making a thing is to change it, and a
+    // selection that still held what was there before would send the next edit
+    // somewhere nobody is looking.
+    CHECK(inspector.selectionCount() == 1);
+    CHECK(world.childCount(here) == 1);
+
+    REQUIRE(editor.undo(world, inspector));
+    CHECK(world.childCount(here) == 0);
+    CHECK_FALSE(world.alive(made));
+    // One step, not two. A create that recorded the world twice -- once for the
+    // instance and once for the placement `setProperty` -- would need two
+    // presses of ctrl-Z to take back one thing anybody did.
+    CHECK_FALSE(editor.history().canUndo());
+
+    // A class nothing may create is refused before anything is recorded, so the
+    // refusal does not eat a press of ctrl-Z either.
+    CHECK_FALSE(editor.createInstance(world, scene::InvalidClass, here, root, inspector));
+    CHECK_FALSE(editor.history().canUndo());
+}
+
 TEST_CASE("making something inside an empty folder asks the tree to open it")
 {
     // **The reported defect, and it was deterministic.** An empty row has no
