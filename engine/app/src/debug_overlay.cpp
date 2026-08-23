@@ -18,6 +18,7 @@
 
 #include <array>
 #include <cfloat>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <deque>
@@ -182,28 +183,33 @@ bool drawIcon(const IconAtlas* icons, std::string_view id, float size)
 // `strId` rather than the label, because the label changes with state (play
 // becomes stop) and an ImGui id that changes with state is a button that loses
 // its press half way through.
-// The height an `iconButton` with this face occupies, which is the face PLUS the
-// frame the button draws around it.
+// `frameless` drops the button's background and its padding, leaving the
+// picture and its hit box.
 //
-// Callers centre by this and never by the face. Centring a framed button by its
-// picture puts the picture in the middle of the row and the frame half a padding
-// outside it, at the top and the bottom -- which is a chevron and a plus
-// hanging out of their own row, and is exactly what happened the first time.
-[[nodiscard]] float iconButtonHeight(float size) noexcept
-{
-    return size + ImGui::GetStyle().FramePadding.y * 2.0f;
-}
-
-// The same for the other axis, and it is NOT the same number: a theme's frame
-// padding is two values and the height is the one everybody reaches for.
-[[nodiscard]] float iconButtonWidth(float size) noexcept
-{
-    return size + ImGui::GetStyle().FramePadding.x * 2.0f;
-}
-
+// It also removes a trap worth naming, because this file fell into it: a FRAMED
+// button occupies its face plus the theme's padding, so a caller centring one by
+// the size of the picture puts the picture in the middle of its row and the
+// frame half a padding outside it, top and bottom. Frameless, the button IS the
+// picture, and centring by the face is the same number as centring by the box. That is what a tree's chevron and its
+// plus want: a filled rounded rectangle behind a sixteen-pixel glyph is a button drawn around a control that did not
+// need one, and a column of them is a column of boxes. The affordance is the icon and the tooltip; the toolbar keeps
+// its frames, because a toolbar button IS a button.
 bool iconButton(const IconAtlas* icons, std::string_view id, float size, const char* strId, const char* word,
-                const char* tip)
+                const char* tip, bool frameless = false)
 {
+    if (frameless) {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
+    }
+    const auto unstyle = [frameless]() {
+        if (frameless) {
+            ImGui::PopStyleVar();
+            ImGui::PopStyleColor(3);
+        }
+    };
+
     bool pressed = false;
     if (icons != nullptr && icons->ready() && icons->has(id)) {
         const IconSprite sprite = icons->find(id, static_cast<core::u32>(size + 0.5f));
@@ -212,12 +218,14 @@ bool iconButton(const IconAtlas* icons, std::string_view id, float size, const c
             pressed = ImGui::ImageButton(strId, static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)),
                                          ImVec2(size, size), ImVec2(sprite.u0, sprite.v0), ImVec2(sprite.u1, sprite.v1),
                                          ImVec4(0.0f, 0.0f, 0.0f, 0.0f), ImGui::GetStyleColorVec4(ImGuiCol_Text));
+            unstyle();
             if (tip != nullptr)
                 ImGui::SetItemTooltip("%s", tip);
             return pressed;
         }
     }
     pressed = ImGui::Button(word);
+    unstyle();
     if (tip != nullptr)
         ImGui::SetItemTooltip("%s", tip);
     return pressed;
@@ -399,6 +407,13 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
     const ImVec2 spacing = ImGui::GetStyle().ItemSpacing;
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(spacing.x, 0.0f));
 
+    // Where row zero starts, in screen space. **The exact pitch pays for itself
+    // here**: with it, row `i` is at `listTop + i * rowHeight` and the guide
+    // lines below can be drawn for rows the clipper never visited -- which is
+    // what makes a line reaching a child scrolled half off the bottom still
+    // reach it.
+    const ImVec2 listTop = ImGui::GetCursorScreenPos();
+
     ImGuiListClipper clipper;
     clipper.Begin(static_cast<int>(g_visible.size()), rowHeight);
     while (clipper.Step()) {
@@ -410,13 +425,6 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
 
             const ImVec2 rowOrigin = ImGui::GetCursorPos();
             const float iconSize = ImGui::GetTextLineHeight();
-            // **The face a FRAMED button may wear on this row, derived from the
-            // row rather than from the font.** A button is its face plus the
-            // theme's padding, so sizing the face off the text and hoping the
-            // sum lands inside the row is how a chevron and a plus ended up
-            // hanging out of it. Taking the row and subtracting the frame
-            // cannot: whatever the row height is, the button is exactly it.
-            const float buttonFace = rowHeight - ImGui::GetStyle().FramePadding.y * 2.0f;
             // Never above the row's top, whatever it is handed. An element
             // taller than the row is a mistake, and starting it half a
             // padding above the row is that mistake spread over two rows.
@@ -532,9 +540,12 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             // collapse, a closed one offers to expand.
             if (hasChildren) {
                 const bool open = g_open.contains(row.id.index);
-                ImGui::SetCursorPos(ImVec2(penX, centred(iconButtonHeight(buttonFace))));
+                // Frameless, so the button IS the picture and centring by the
+                // face cannot be wrong -- `buttonFace` exists for the framed
+                // case and this one no longer has a frame.
+                ImGui::SetCursorPos(ImVec2(penX, centred(iconSize)));
                 const bool toggled = haveIcon ? iconButton(icons, open ? icons::ActionCollapse : icons::ActionExpand,
-                                                           buttonFace, "toggle", open ? "-" : "+", nullptr)
+                                                           iconSize, "toggle", open ? "-" : "+", nullptr, true)
                                               : ImGui::ArrowButton("toggle", open ? ImGuiDir_Down : ImGuiDir_Right);
                 if (toggled) {
                     if (!g_open.insert(row.id.index).second)
@@ -545,7 +556,7 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             // its siblings' rather than sliding left to where their arrow is --
             // and it is reserved at the button's WIDTH, which is the face plus
             // the horizontal padding and is not the row height.
-            penX += iconButtonWidth(buttonFace) + ImGui::GetStyle().ItemInnerSpacing.x;
+            penX += iconSize + ImGui::GetStyle().ItemInnerSpacing.x;
 
             // **The plus, at the end of the row's text.** Making a child of the
             // thing you are looking at is the commonest authoring act there is,
@@ -589,13 +600,13 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 // only rows where it is invisible are rows the pointer is not
                 // on, which are the rows nobody can click it on anyway. A
                 // thousand-row tree shows no plus signs at all.
-                ImGui::SetCursorPos(ImVec2(penX, centred(iconButtonHeight(buttonFace))));
+                ImGui::SetCursorPos(ImVec2(penX, centred(iconSize)));
 
                 const bool lit = rowHovered || inspector.isSelected(row.id) || addOpen;
                 if (!lit)
                     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.0f);
                 const bool add =
-                    haveIcon ? iconButton(icons, icons::ActionAdd, buttonFace, "add", "+", "add a child instance")
+                    haveIcon ? iconButton(icons, icons::ActionAdd, iconSize, "add", "+", "add a child instance", true)
                              : ImGui::SmallButton("+");
                 if (!lit)
                     ImGui::PopStyleVar();
@@ -669,6 +680,60 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             }
 
             ImGui::PopID();
+        }
+    }
+
+    // --- The guide lines --------------------------------------------------
+    //
+    // A vertical line under every open parent, running down past its children,
+    // with a stub reaching each of them. Depth alone tells you a row is nested;
+    // it does not tell you WHICH row it is nested under, and on a tree four
+    // levels deep with twenty siblings that is the question somebody actually
+    // has.
+    //
+    // Drawn after the rows so the lines sit over the selection highlight rather
+    // than under it -- a highlighted row is exactly the row whose parentage is
+    // being read. Drawn from `g_visible` rather than from what the clipper
+    // showed, because a parent above the fold still owns the children below it.
+    //
+    // The last child ends the line at its own middle instead of its bottom,
+    // which is what turns a bar into an elbow and says "and no more after this".
+    {
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        const ImU32 guide = ImGui::GetColorU32(ImGuiCol_Text, 0.28f);
+        const float half = rowHeight * 0.5f;
+        // The same face the rows' chevrons are drawn at, so the line hangs from
+        // the middle of the arrow rather than near it.
+        const float chevron = ImGui::GetTextLineHeight();
+
+        for (std::size_t i = 0; i < g_visible.size(); ++i) {
+            const core::u32 depth = g_visible[i].depth;
+
+            // The last visible row still under this one. A run rather than a
+            // search: `g_visible` is preorder, so the descendants of a row are
+            // exactly the rows after it until the depth stops being greater.
+            std::size_t last = i;
+            for (std::size_t j = i + 1; j < g_visible.size() && g_visible[j].depth > depth; ++j)
+                last = j;
+            if (last == i)
+                continue;
+
+            // The column: the middle of this row's own chevron, which is where
+            // a child's line should hang from.
+            const float x = std::floor(listTop.x + static_cast<float>(depth - 1) * indentSpacing + chevron * 0.5f);
+            const float top = listTop.y + static_cast<float>(i) * rowHeight + rowHeight;
+            const float bottom = listTop.y + static_cast<float>(last) * rowHeight + half;
+            draw->AddLine(ImVec2(x, top), ImVec2(x, bottom), guide);
+
+            // A stub to each DIRECT child, at the child's own middle. Only the
+            // direct ones: a line to a grandchild would cross the rows between
+            // them and say something that is not true.
+            for (std::size_t j = i + 1; j <= last; ++j) {
+                if (g_visible[j].depth != depth + 1)
+                    continue;
+                const float y = std::floor(listTop.y + static_cast<float>(j) * rowHeight + half);
+                draw->AddLine(ImVec2(x, y), ImVec2(x + indentSpacing * 0.5f, y), guide);
+            }
         }
     }
 
