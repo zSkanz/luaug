@@ -188,7 +188,8 @@ void drawStats(const Frame& frame)
 // images are white masks: one drawing serves a light panel and a dark one, and
 // a disabled row's icon dims with its label for free. `ImageWithBg` rather than
 // `Image` because the tint parameter moved there in ImGui 1.91.9.
-bool drawIcon(const IconAtlas* icons, std::string_view id, float size)
+bool drawIcon(const IconAtlas* icons, std::string_view id, float size,
+              std::optional<core::Color3> override = std::nullopt)
 {
     if (icons == nullptr || !icons->ready())
         return false;
@@ -201,9 +202,17 @@ bool drawIcon(const IconAtlas* icons, std::string_view id, float size)
     if (native == nullptr)
         return false;
 
+    // **A colour a PERSON put on this folder beats the role's**, and it takes
+    // the panel's own alpha the way a role does, so a disabled row's coloured
+    // icon still dims with its label. The role says what KIND of thing an icon
+    // is; this says which one, and only a person can say that.
+    ImVec4 tint = iconTint(icons, id);
+    if (override.has_value())
+        tint = ImVec4(override->r, override->g, override->b, tint.w);
+
     ImGui::ImageWithBg(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)), ImVec2(size, size),
                        ImVec2(sprite.u0, sprite.v0), ImVec2(sprite.u1, sprite.v1), ImVec4(0.0f, 0.0f, 0.0f, 0.0f),
-                       iconTint(icons, id));
+                       tint);
     return true;
 }
 
@@ -358,6 +367,61 @@ constexpr const char* kInstanceDragPayload = "luaug.instances";
 // distinction rather than a convenience: **the overlay inspects and the editor
 // edits.** Offering Delete over a running game would be offering an edit whose
 // only result is a world nobody can put back.
+// The colour menu both panels open on a folder.
+//
+// **Presets first and a picker underneath**, which is the order of how often
+// each is used: ten swatches cover almost every case in one click, and the
+// picker is there so the palette is a shortcut rather than a limit. "None"
+// comes last because taking a colour off is the rarest of the three and
+// putting it where a preset would be is how somebody clears one by accident.
+//
+// Returns true when `color` changed, so the caller can record one undo step for
+// it rather than one per frame the picker is open.
+[[nodiscard]] bool colorMenu(std::optional<core::Color3>& color)
+{
+    bool changed = false;
+
+    const std::span<const core::Color3> palette = Editor::folderPalette();
+    const float swatch = ImGui::GetFrameHeight();
+    for (std::size_t index = 0; index < palette.size(); ++index) {
+        ImGui::PushID(static_cast<int>(index));
+        const core::Color3 candidate = palette[index];
+        const ImVec4 rgba(candidate.r, candidate.g, candidate.b, 1.0f);
+        if (ImGui::ColorButton("##swatch", rgba, ImGuiColorEditFlags_NoTooltip, ImVec2(swatch, swatch))) {
+            color = candidate;
+            changed = true;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::PopID();
+        // Five and five rather than one row of ten, because a menu as wide as
+        // ten swatches is wider than every other item in it.
+        if (index % 5 != 4)
+            ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+    }
+
+    ImGui::Separator();
+
+    // Seeded with what is already there, so opening the picker on a coloured
+    // folder starts from its colour rather than from black.
+    float components[3]{0.6f, 0.62f, 0.66f};
+    if (color.has_value()) {
+        components[0] = color->r;
+        components[1] = color->g;
+        components[2] = color->b;
+    }
+    ImGui::SetNextItemWidth(swatch * 5.0f + ImGui::GetStyle().ItemInnerSpacing.x * 4.0f);
+    if (ImGui::ColorEdit3("##pick", components, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel)) {
+        color = core::Color3{components[0], components[1], components[2]};
+        changed = true;
+    }
+
+    if (color.has_value() && ImGui::MenuItem("None")) {
+        color.reset();
+        changed = true;
+    }
+    return changed;
+}
+
 void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspector, EditorCommands* commands,
                   EditorDialogs* dialogs, const IconAtlas* icons, bool showGenerated)
 {
@@ -634,6 +698,28 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                     inspector.select(row.id);
 
                 const bool engineOwned = Editor::isEngineOwned(world, row.id, root);
+
+                // **Offered on anything that has children**, rather than on the
+                // `Folder` class alone. A `Model` full of parts is a folder in
+                // every way that matters to somebody scanning a tree, and a
+                // rule that asked the class would colour one and not the other
+                // for no reason a person could see.
+                if (world.childCount(row.id) > 0 || Editor::folderColor(world, row.id).has_value()) {
+                    if (ImGui::BeginMenu("Colour")) {
+                        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, spacing);
+                        std::optional<core::Color3> chosen = Editor::folderColor(world, row.id);
+                        if (colorMenu(chosen)) {
+                            commands->colorAsked = true;
+                            commands->colorTarget = row.id;
+                            commands->colorContentPath.clear();
+                            commands->color = chosen;
+                        }
+                        ImGui::PopStyleVar();
+                        ImGui::EndMenu();
+                    }
+                    ImGui::Separator();
+                }
+
                 if (ImGui::MenuItem("Rename...", nullptr, false, !engineOwned)) {
                     dialogs->renameTarget = row.id;
                     dialogs->renameContentPath.clear();
@@ -709,7 +795,7 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             // before it is where the name goes.
             if (haveIcon) {
                 ImGui::SetCursorPos(ImVec2(penX, centred(iconSize)));
-                if (drawIcon(icons, classIconId(world, row.id), iconSize)) {
+                if (drawIcon(icons, classIconId(world, row.id), iconSize, Editor::folderColor(world, row.id))) {
                     if (ImGui::IsItemHovered())
                         ImGui::SetTooltip("%.*s", static_cast<int>(className.size()), className.data());
                     penX += iconSize + ImGui::GetStyle().ItemInnerSpacing.x;
@@ -1846,121 +1932,338 @@ void buildDefaultLayout(ImGuiID dockspace)
 // so a folder of ten thousand meshes costs the same as a folder of ten.
 // `drawExplorer` beside this one does NOT do that yet, which is a thing to fix
 // rather than a precedent to follow.
-void drawContent(Editor& editor, EditorCommands& commands, bool& open, EditorDialogs& dialogs, const IconAtlas* icons)
+// One entry of the browser, in whichever layout is on.
+//
+// **The three layouts share every decision except where things are put**, which
+// is why this is one function with a switch inside rather than three: the double
+// click that opens a scene, the menu that colours a folder, the green that marks
+// the scene already open and the colour a person chose all belong to an ENTRY
+// and not to a way of drawing one. Three copies of that would drift the first
+// time any of it changed, which is exactly what happened to the Explorer's row
+// before it was rebuilt around one height.
+struct ContentLayout
 {
-    if (!ImGui::Begin("content", &open)) {
+    // The box one entry occupies. For a list that is the full width by a row's
+    // height; for the other two it is a square somebody can aim at.
+    ImVec2 cell;
+    float icon = 0.0f;
+    // Whether the name goes under the icon rather than beside it.
+    bool nameBelow = false;
+    // How many fit across. One for a list.
+    int columns = 1;
+};
+
+[[nodiscard]] ContentLayout contentLayoutFor(EditorPanels::ContentView view, float available)
+{
+    ContentLayout layout;
+    switch (view) {
+    case EditorPanels::ContentView::List:
+        layout.cell = ImVec2(0.0f, ImGui::GetFrameHeight());
+        layout.icon = ImGui::GetTextLineHeight();
+        layout.nameBelow = false;
+        layout.columns = 1;
+        return layout;
+    case EditorPanels::ContentView::Tiles:
+        layout.icon = ImGui::GetFrameHeight() * 1.6f;
+        break;
+    case EditorPanels::ContentView::Icons:
+        layout.icon = ImGui::GetFrameHeight() * 3.0f;
+        break;
+    }
+
+    const float padding = ImGui::GetStyle().ItemInnerSpacing.x * 2.0f;
+    const float side = layout.icon + padding;
+    layout.cell = ImVec2(side, layout.icon + ImGui::GetTextLineHeight() + padding);
+    layout.nameBelow = true;
+    // At least one, whatever the panel has been dragged down to: a column count
+    // of zero is a division by it two lines later.
+    layout.columns = std::max(1, static_cast<int>(available / (side + ImGui::GetStyle().ItemSpacing.x)));
+    return layout;
+}
+
+// A name that does not fit, cut where it stops fitting and marked. Only the
+// grids need it -- a list row has the whole panel width and simply runs on.
+[[nodiscard]] std::string elideToWidth(const std::string& text, float width)
+{
+    if (ImGui::CalcTextSize(text.c_str()).x <= width)
+        return text;
+
+    const float ellipsis = ImGui::CalcTextSize("...").x;
+    std::string cut;
+    cut.reserve(text.size());
+    for (const char c : text) {
+        cut.push_back(c);
+        if (ImGui::CalcTextSize(cut.c_str()).x + ellipsis > width) {
+            cut.pop_back();
+            break;
+        }
+    }
+    cut += "...";
+    return cut;
+}
+
+void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs,
+                 const IconAtlas* icons)
+{
+    if (!ImGui::Begin("content", &panels.content)) {
         ImGui::End();
         return;
     }
 
     ContentTree& tree = editor.content();
+    const float toolbarIcon = ImGui::GetTextLineHeight();
 
     ImGui::BeginDisabled(tree.atRoot());
-    if (ImGui::Button("up"))
+    if (iconButton(icons, icons::ActionUp, toolbarIcon, "up", "up", "up one folder", true))
         (void)tree.leave();
     ImGui::EndDisabled();
 
     ImGui::SameLine();
-    if (ImGui::Button("refresh"))
+    if (iconButton(icons, icons::ActionRefresh, toolbarIcon, "refresh", "refresh", "re-read this folder", true))
         (void)tree.refresh();
 
     ImGui::SameLine();
     // The shell's dialog, so the toolbar button and the folder's own
-    // right-click menu reach the same one.
-    if (ImGui::Button("new folder"))
+    // right-click menu reach the same one. A FOLDER rather than a generic
+    // "new", because what it makes is a folder and the picture can say so.
+    if (iconButton(icons, icons::ContentFolder, toolbarIcon, "new-folder", "new folder", "new folder", true))
         dialogs.newFolder = true;
 
+    // --- Where you are, as a row of steps you can click back through ---------
+    //
+    // **A path is a chain and the chain is the navigation.** Printing it as
+    // text says where you are and offers nothing; every browser worth using
+    // makes each step a way back to it, and the only thing that costs is
+    // splitting a string somebody is already reading.
     ImGui::SameLine();
-    ImGui::TextDisabled("content/%s", tree.currentFolder().c_str());
+    ImGui::TextDisabled("|");
+
+    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+    if (iconButton(icons, icons::ContentFolder, toolbarIcon, "crumb-root", "content", "content/", true)) {
+        while (!tree.atRoot())
+            (void)tree.leave();
+    }
+
+    {
+        const std::string& relative = tree.currentFolder();
+        // Counted first, because a step's job is "go up (depth - me - 1)
+        // times" and it has to know how deep the chain is to say that.
+        int depth = relative.empty() ? 0 : 1;
+        for (const char c : relative)
+            depth += c == '/' ? 1 : 0;
+
+        std::size_t begin = 0;
+        for (int step = 0; step < depth; ++step) {
+            const std::size_t slash = relative.find('/', begin);
+            const std::string segment =
+                relative.substr(begin, slash == std::string::npos ? std::string::npos : slash - begin);
+            begin = slash == std::string::npos ? relative.size() : slash + 1;
+
+            ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+            ImGui::TextDisabled("/");
+            ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+
+            ImGui::PushID(step);
+            const bool last = step == depth - 1;
+            // The one you are IN is not a button: it goes nowhere, and a
+            // control that does nothing is worse than a label.
+            if (last) {
+                ImGui::TextUnformatted(segment.c_str());
+            }
+            else if (ImGui::SmallButton(segment.c_str())) {
+                for (int up = 0; up < depth - step - 1; ++up)
+                    (void)tree.leave();
+            }
+            ImGui::PopID();
+        }
+    }
+
+    // **The view, as one button that opens the three.**
+    //
+    // Three buttons in a row was what this was and it read as a control panel
+    // for a choice somebody makes twice a day. One button wearing the current
+    // view's own icon says what is on without being asked, and the list behind
+    // it says what else there is -- which is what Unreal's browser does with
+    // the same question.
+    {
+        const char* names[] = {"List", "Tiles", "Icons"};
+        const std::string_view viewIcon =
+            panels.contentView == EditorPanels::ContentView::List ? icons::ActionList : icons::ActionGrid;
+
+        const float room = ImGui::GetContentRegionAvail().x;
+        const float wanted = toolbarIcon + ImGui::GetStyle().FramePadding.x * 2.0f;
+        if (room > wanted) {
+            ImGui::SameLine(ImGui::GetCursorPosX() + room - wanted);
+            if (iconButton(icons, viewIcon, toolbarIcon, "view", names[static_cast<int>(panels.contentView)],
+                           "how entries are laid out", true)) {
+                ImGui::OpenPopup("view-menu");
+            }
+        }
+        if (ImGui::BeginPopup("view-menu")) {
+            for (int index = 0; index < 3; ++index) {
+                const auto view = static_cast<EditorPanels::ContentView>(index);
+                if (ImGui::MenuItem(names[index], nullptr, panels.contentView == view))
+                    panels.contentView = view;
+            }
+            ImGui::EndPopup();
+        }
+    }
 
     ImGui::Separator();
 
     if (ImGui::BeginChild("entries")) {
         const std::vector<ContentEntry>& entries = tree.entries();
-        // One height, told to the clipper and built to -- the explorer's rule
-        // and the same reason: an icon and a line of text are two heights, and
-        // a highlight sized to neither covers its neighbours.
-        const float entryHeight = ImGui::GetFrameHeight();
+        const ContentLayout layout = contentLayoutFor(panels.contentView, ImGui::GetContentRegionAvail().x);
+        const float entryHeight = layout.cell.y;
+
         // No vertical item spacing while the rows are drawn: a `Selectable`
         // pads its highlight with half of it on each side, which at an exact
         // pitch has nowhere to go but into the neighbours. Same rule as the
         // explorer's, same reason.
         const ImVec2 entrySpacing = ImGui::GetStyle().ItemSpacing;
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(entrySpacing.x, 0.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
+                            ImVec2(entrySpacing.x, layout.nameBelow ? entrySpacing.y : 0.0f));
+
+        const int columns = layout.columns;
+        const int rows = (static_cast<int>(entries.size()) + columns - 1) / columns;
+        const float pitch = entryHeight + (layout.nameBelow ? entrySpacing.y : 0.0f);
+        const float strideX = layout.cell.x + entrySpacing.x;
+
+        // **Every cell is placed outright, and `SameLine` is not used at all.**
+        //
+        // It was, and it produced a staircase: `SameLine` returns the cursor to
+        // the previous ITEM's line, and each cell ends by putting the cursor a
+        // row lower, so every cell after the first started one row down and one
+        // column right of where it belonged. The Explorer learned the same
+        // lesson one panel over -- a layout at an exact pitch has to compute the
+        // position rather than accumulate it.
+        const ImVec2 gridOrigin = ImGui::GetCursorPos();
+
+        // **The whole grid's extent, claimed before a single cell is drawn.**
+        // `SetCursorPos` moves the cursor without submitting anything, so
+        // without this the child never learns how tall its contents are: it
+        // cannot scroll, and ImGui says so once per row per frame. A `Dummy`
+        // has no id, so it takes neither a click nor a hover from the cells
+        // drawn over it.
+        ImGui::Dummy(ImVec2(layout.cell.x > 0.0f ? strideX * static_cast<float>(columns) : 0.0f,
+                            pitch * static_cast<float>(rows)));
+        ImGui::SetCursorPos(gridOrigin);
+
         ImGuiListClipper clipper;
-        clipper.Begin(static_cast<int>(entries.size()), entryHeight);
+        clipper.Begin(rows, pitch);
         while (clipper.Step()) {
             for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
-                const ContentEntry& entry = entries[static_cast<std::size_t>(row)];
-                ImGui::PushID(row);
+                for (int column = 0; column < columns; ++column) {
+                    const int index = row * columns + column;
+                    if (index >= static_cast<int>(entries.size()))
+                        break;
+                    const ContentEntry& entry = entries[static_cast<std::size_t>(index)];
+                    ImGui::PushID(index);
 
-                const ImVec2 entryOrigin = ImGui::GetCursorPos();
-                const float entryIcon = ImGui::GetTextLineHeight();
+                    const ImVec2 entryOrigin(gridOrigin.x + static_cast<float>(column) * strideX,
+                                             gridOrigin.y + static_cast<float>(row) * pitch);
+                    ImGui::SetCursorPos(entryOrigin);
+                    const float entryIcon = layout.icon;
 
-                const bool isOpenScene = entry.kind == ContentKind::Scene && entry.path == editor.openScenePath();
-                if (isOpenScene)
-                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.85f, 0.55f, 1.0f));
+                    const bool isOpenScene = entry.kind == ContentKind::Scene && entry.path == editor.openScenePath();
+                    if (isOpenScene)
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.85f, 0.55f, 1.0f));
 
-                // Double-click, because a single click is how somebody browses
-                // and opening a scene throws away what is in the world.
-                if (ImGui::Selectable("##entry", isOpenScene,
-                                      ImGuiSelectableFlags_AllowDoubleClick | ImGuiSelectableFlags_AllowOverlap,
-                                      ImVec2(0.0f, entryHeight)) &&
-                    ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                    if (entry.kind == ContentKind::Folder)
-                        (void)tree.enter(entry.name);
-                    else if (entry.kind == ContentKind::Scene)
-                        commands.openScene = entry.path;
-                }
-
-                // **The colour is popped after the NAME is drawn, not after the
-                // selectable.** It is the text's colour, and the text is now
-                // placed on the row rather than carried by the selectable's
-                // label -- so popping here would have coloured nothing and left
-                // the pop for the real one to trip over, which is exactly what
-                // it did.
-                if (ImGui::BeginPopupContextItem("entry-menu")) {
-                    // The rows are drawn with no vertical spacing; a menu is not
-                    // a row.
-                    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, entrySpacing);
-                    if (entry.kind == ContentKind::Scene && ImGui::MenuItem("Open"))
-                        commands.openScene = entry.path;
-                    if (ImGui::MenuItem("Rename...")) {
-                        dialogs.renameTarget = {};
-                        dialogs.renameContentPath = entry.path;
-                        dialogs.renameSeed = ContentTree::stemOf(entry);
-                        dialogs.renameContent = true;
+                    // Double-click, because a single click is how somebody
+                    // browses and opening a scene throws away what is in the
+                    // world.
+                    if (ImGui::Selectable("##entry", isOpenScene,
+                                          ImGuiSelectableFlags_AllowDoubleClick | ImGuiSelectableFlags_AllowOverlap,
+                                          layout.cell) &&
+                        ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                        if (entry.kind == ContentKind::Folder)
+                            (void)tree.enter(entry.name);
+                        else if (entry.kind == ContentKind::Scene)
+                            commands.openScene = entry.path;
                     }
-                    ImGui::Separator();
-                    if (ImGui::MenuItem("Delete"))
-                        dialogs.deleteContentPath = entry.path;
-                    ImGui::PopStyleVar();
-                    ImGui::EndPopup();
+
+                    if (ImGui::BeginPopupContextItem("entry-menu")) {
+                        // The rows are drawn with no vertical spacing; a menu is
+                        // not a row.
+                        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, entrySpacing);
+                        if (entry.kind == ContentKind::Scene && ImGui::MenuItem("Open"))
+                            commands.openScene = entry.path;
+                        // **A directory cannot carry a colour**, so this one is
+                        // kept in `.luaug/editor.json` keyed by path, while a
+                        // folder in the WORLD carries its own as an attribute.
+                        // Two stores, because the two things are different --
+                        // see `Editor::setFolderColor`.
+                        if (entry.kind == ContentKind::Folder && ImGui::BeginMenu("Colour")) {
+                            std::optional<core::Color3> chosen = editor.contentColor(entry.path);
+                            if (colorMenu(chosen)) {
+                                commands.colorAsked = true;
+                                commands.colorTarget = {};
+                                commands.colorContentPath = entry.path;
+                                commands.color = chosen;
+                            }
+                            ImGui::EndMenu();
+                        }
+                        if (ImGui::MenuItem("Rename...")) {
+                            dialogs.renameTarget = {};
+                            dialogs.renameContentPath = entry.path;
+                            dialogs.renameSeed = ContentTree::stemOf(entry);
+                            dialogs.renameContent = true;
+                        }
+                        ImGui::Separator();
+                        if (ImGui::MenuItem("Delete"))
+                            dialogs.deleteContentPath = entry.path;
+                        ImGui::PopStyleVar();
+                        ImGui::EndPopup();
+                    }
+
+                    const std::optional<core::Color3> tint =
+                        entry.kind == ContentKind::Folder ? editor.contentColor(entry.path) : std::nullopt;
+
+                    // Placed on the cell rather than stacked after it, for the
+                    // reason the explorer's are: the icon and the text are two
+                    // heights and the cell has one shape.
+                    if (layout.nameBelow) {
+                        const float centreX = entryOrigin.x + (layout.cell.x - entryIcon) * 0.5f;
+                        ImGui::SetCursorPos(ImVec2(centreX, entryOrigin.y + ImGui::GetStyle().ItemInnerSpacing.y));
+                        (void)drawIcon(icons, contentKindIcon(entry.kind), entryIcon, tint);
+
+                        const std::string label = elideToWidth(entry.name, layout.cell.x);
+                        const float textX =
+                            entryOrigin.x + (layout.cell.x - ImGui::CalcTextSize(label.c_str()).x) * 0.5f;
+                        ImGui::SetCursorPos(
+                            ImVec2(textX, entryOrigin.y + entryIcon + ImGui::GetStyle().ItemInnerSpacing.y));
+                        ImGui::TextUnformatted(label.c_str());
+                        // The kind is what the icon already says, and a grid
+                        // cell has no room to say it twice.
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("%s", entry.name.c_str());
+                    }
+                    else {
+                        float entryX = entryOrigin.x;
+                        ImGui::SetCursorPos(ImVec2(entryX, entryOrigin.y + (entryHeight - entryIcon) * 0.5f));
+                        if (drawIcon(icons, contentKindIcon(entry.kind), entryIcon, tint))
+                            entryX += entryIcon + ImGui::GetStyle().ItemInnerSpacing.x;
+
+                        const float textY = entryOrigin.y + (entryHeight - ImGui::GetTextLineHeight()) * 0.5f;
+                        ImGui::SetCursorPos(ImVec2(entryX, textY));
+                        ImGui::TextUnformatted(entry.name.c_str());
+                        entryX += ImGui::CalcTextSize(entry.name.c_str()).x + 12.0f;
+
+                        if (const char* label = contentKindLabel(entry.kind); label[0] != '\0') {
+                            ImGui::SetCursorPos(ImVec2(entryX, textY));
+                            ImGui::TextDisabled("%s", label);
+                        }
+                    }
+
+                    // **The colour is popped after the NAME is drawn, not after
+                    // the selectable.** It is the text's colour, and the text is
+                    // placed on the cell rather than carried by the selectable's
+                    // label -- so popping earlier would have coloured nothing.
+                    if (isOpenScene)
+                        ImGui::PopStyleColor();
+
+                    ImGui::PopID();
                 }
-
-                // Placed on the row rather than stacked after it, for the
-                // reason the explorer's are: the icon and the text are two
-                // heights and the row has one.
-                float entryX = entryOrigin.x;
-                ImGui::SetCursorPos(ImVec2(entryX, entryOrigin.y + (entryHeight - entryIcon) * 0.5f));
-                if (drawIcon(icons, contentKindIcon(entry.kind), entryIcon))
-                    entryX += entryIcon + ImGui::GetStyle().ItemInnerSpacing.x;
-
-                const float textY = entryOrigin.y + (entryHeight - ImGui::GetTextLineHeight()) * 0.5f;
-                ImGui::SetCursorPos(ImVec2(entryX, textY));
-                ImGui::TextUnformatted(entry.name.c_str());
-                entryX += ImGui::CalcTextSize(entry.name.c_str()).x + 12.0f;
-
-                if (isOpenScene)
-                    ImGui::PopStyleColor();
-
-                if (const char* label = contentKindLabel(entry.kind); label[0] != '\0') {
-                    ImGui::SetCursorPos(ImVec2(entryX, textY));
-                    ImGui::TextDisabled("%s", label);
-                }
-
-                ImGui::SetCursorPos(ImVec2(entryOrigin.x, entryOrigin.y + entryHeight));
-                ImGui::PopID();
             }
         }
         ImGui::PopStyleVar();
@@ -2395,7 +2698,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         if (panels.viewport)
             drawViewport(*editor, viewport, commands, panels.viewport, icons);
         if (panels.content)
-            drawContent(*editor, commands, panels.content, dialogs, icons);
+            drawContent(*editor, commands, panels, dialogs, icons);
     }
 
     if (panels.explorer) {

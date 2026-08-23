@@ -8,8 +8,12 @@
 #include <luaug/scene/scene_file.h>
 #include <luaug/scene/world.h>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <optional>
 #include <string>
+#include <string_view>
 
 namespace luaug::app {
 using core::Vec3;
@@ -191,18 +195,149 @@ bool Editor::load(scene::World& world, const std::filesystem::path& path, Inspec
     return true;
 }
 
-void Editor::rememberOpenScene(const std::filesystem::path& stateDirectory) const
+namespace {
+// Ten, spread round the hue circle rather than picked by eye, so that two
+// folders coloured a minute apart are actually distinguishable -- which is the
+// entire job. Values rather than a generator, because a palette is a decision
+// and a decision should be readable.
+constexpr core::Color3 kFolderPalette[] = {
+    core::Color3{0.85f, 0.33f, 0.31f}, // red
+    core::Color3{0.88f, 0.55f, 0.24f}, // orange
+    core::Color3{0.87f, 0.76f, 0.28f}, // yellow
+    core::Color3{0.53f, 0.76f, 0.35f}, // green
+    core::Color3{0.29f, 0.71f, 0.60f}, // teal
+    core::Color3{0.30f, 0.62f, 0.85f}, // blue
+    core::Color3{0.44f, 0.47f, 0.83f}, // indigo
+    core::Color3{0.65f, 0.44f, 0.82f}, // violet
+    core::Color3{0.85f, 0.45f, 0.66f}, // pink
+    core::Color3{0.60f, 0.62f, 0.66f}, // slate
+};
+
+// `#rrggbb`, which is what a person editing `editor.json` by hand expects to
+// see. Written from the same 8-bit rounding both panels draw with, so a colour
+// that survives the file is the colour that was chosen.
+[[nodiscard]] std::string writeHexColor(core::Color3 color)
+{
+    const auto channel = [](core::f32 value) {
+        return static_cast<int>(std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f));
+    };
+    char buffer[8]{};
+    (void)std::snprintf(buffer, sizeof(buffer), "#%02x%02x%02x", channel(color.r), channel(color.g), channel(color.b));
+    return std::string(buffer);
+}
+
+[[nodiscard]] std::optional<core::Color3> parseHexColor(std::string_view text)
+{
+    if (text.size() != 7 || text[0] != '#')
+        return std::nullopt;
+    core::u32 packed = 0;
+    for (std::size_t index = 1; index < text.size(); ++index) {
+        const char c = text[index];
+        const core::u32 digit = c >= '0' && c <= '9'   ? static_cast<core::u32>(c - '0')
+                                : c >= 'a' && c <= 'f' ? static_cast<core::u32>(c - 'a' + 10)
+                                : c >= 'A' && c <= 'F' ? static_cast<core::u32>(c - 'A' + 10)
+                                                       : 16u;
+        if (digit > 15u)
+            return std::nullopt;
+        packed = (packed << 4) | digit;
+    }
+    return core::Color3{static_cast<core::f32>((packed >> 16) & 0xFFu) / 255.0f,
+                        static_cast<core::f32>((packed >> 8) & 0xFFu) / 255.0f,
+                        static_cast<core::f32>(packed & 0xFFu) / 255.0f};
+}
+} // namespace
+
+std::span<const core::Color3> Editor::folderPalette() noexcept
+{
+    return std::span<const core::Color3>(kFolderPalette, std::size(kFolderPalette));
+}
+
+std::optional<core::Color3> Editor::folderColor(const scene::World& world, core::InstanceId id)
+{
+    if (!world.alive(id))
+        return std::nullopt;
+    const core::NameAtom atom = world.atoms().lookup(FolderColorAttribute);
+    if (!atom.valid())
+        return std::nullopt;
+    // `getAttribute` answers with a value rather than an optional: an absent
+    // attribute is `monostate`, which `get_if` reports as "not a colour".
+    const scene::Value value = world.getAttribute(id, atom);
+    if (const core::Color3* color = std::get_if<core::Color3>(&value); color != nullptr)
+        return *color;
+    return std::nullopt;
+}
+
+void Editor::setFolderColor(scene::World& world, core::InstanceId id, std::optional<core::Color3> color)
+{
+    if (!world.alive(id))
+        return;
+
+    m_history.record(world, color.has_value() ? "Colour" : "Clear Colour");
+    const core::NameAtom atom = world.atoms().intern(FolderColorAttribute);
+    // A `Nil` value removes it, which the world's own setter documents -- so
+    // clearing a colour is the same call as setting one and there is no second
+    // path to keep in step.
+    (void)world.setAttribute(id, atom, color.has_value() ? scene::Value{*color} : scene::Value{});
+}
+
+std::optional<core::Color3> Editor::contentColor(std::string_view path) const
+{
+    const auto found = m_contentColors.find(std::string(path));
+    return found != m_contentColors.end() ? std::optional<core::Color3>(found->second) : std::nullopt;
+}
+
+void Editor::setContentColor(std::string_view path, std::optional<core::Color3> color)
+{
+    if (color.has_value())
+        m_contentColors[std::string(path)] = *color;
+    else
+        m_contentColors.erase(std::string(path));
+}
+
+void Editor::rememberState(const std::filesystem::path& stateDirectory) const
 {
     // JSON of one field rather than the bare path, because the second thing an
     // editor wants to remember arrives sooner than anybody expects and a file
-    // that is only a string has nowhere to put it.
+    // that is only a string has nowhere to put it. It arrived: folder colours.
     core::JsonWriter writer;
     writer.beginObject();
     writer.field("openScene", m_openScene);
+    if (!m_contentColors.empty()) {
+        writer.key("folderColors");
+        writer.beginObject();
+        // `std::map`, so this is the same bytes for the same state without
+        // sorting here -- the property every other format in this repository
+        // has and the reason the container is ordered.
+        for (const auto& entry : m_contentColors)
+            writer.field(entry.first, writeHexColor(entry.second));
+        writer.endObject();
+    }
     writer.endObject();
 
     (void)platform::createDirectories(stateDirectory);
     (void)platform::writeTextFile(stateDirectory / "editor.json", writer.text());
+}
+
+void Editor::recallState(const std::filesystem::path& stateDirectory)
+{
+    m_contentColors.clear();
+
+    std::string text;
+    if (!platform::readTextFile(stateDirectory / "editor.json", text))
+        return;
+
+    core::JsonDocument document;
+    if (const core::JsonDocument::ParseResult parsed = document.parse(text); !parsed.ok)
+        return;
+
+    const core::JsonValue colors = document.root()["folderColors"];
+    if (colors.type() != core::JsonType::Object)
+        return;
+    for (core::usize index = 0; index < colors.size(); ++index) {
+        const std::string_view path = colors.keyAt(index);
+        if (const std::optional<core::Color3> color = parseHexColor(colors[path].asString()); color.has_value())
+            m_contentColors.emplace(std::string(path), *color);
+    }
 }
 
 std::string Editor::recallOpenScene(const std::filesystem::path& stateDirectory)

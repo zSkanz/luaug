@@ -111,8 +111,15 @@ public:
 
     // The sizes baked into the atlas, in pixels. Small enough a set that the
     // whole thing is one 1024-square texture, and chosen for what the editor
-    // actually draws: a tree row, a browser row and a toolbar button.
-    static constexpr u32 Sizes[] = {16u, 24u, 32u};
+    // actually draws: a tree row, a browser row, a toolbar button -- and the
+    // content browser's large-icon view, which is what 64 is for.
+    //
+    // **A size the atlas does not bake is a size the panel draws badly.** The
+    // browser's icon view asks for roughly three times a frame's height, and
+    // before 64 existed `find` handed back the 32 and ImGui scaled it up: a
+    // smudge, in the one view whose entire purpose is that you can see what the
+    // thing is.
+    static constexpr u32 Sizes[] = {16u, 24u, 32u, 64u};
 
     // Reads the theme chain and builds the atlas. Idempotent: a second call
     // with the same roots does nothing.

@@ -19,6 +19,9 @@
 #include <cmath>
 #include <doctest/doctest.h>
 #include <filesystem>
+#include <optional>
+#include <string>
+#include <system_error>
 #include <vector>
 
 #include "class_descriptors.gen.h"
@@ -1080,6 +1083,84 @@ TEST_CASE("nothing can be created inside a chunk, including inside what the chun
     CHECK(world.childCount(ground) == 0);
     REQUIRE(editor.createInstance(world, fixture.widgetClass, folder, root, inspector));
     CHECK(world.childCount(folder) == 1);
+}
+
+TEST_CASE("a folder in the world carries its own colour, and undo takes it back")
+{
+    // **An instance can carry it, so it does.** That is what makes it travel:
+    // the scene file records it with no format change, and a rename or a
+    // reparent cannot lose it because it was never keyed by where the folder
+    // was.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId folder = fixture.widget(world, "Props");
+    CHECK_FALSE(Editor::folderColor(world, folder).has_value());
+
+    const core::Color3 wanted{0.30f, 0.62f, 0.85f};
+    editor.setFolderColor(world, folder, wanted);
+    const std::optional<core::Color3> read = Editor::folderColor(world, folder);
+    REQUIRE(read.has_value());
+    CHECK(static_cast<double>(read->r) == doctest::Approx(static_cast<double>(wanted.r)));
+    CHECK(static_cast<double>(read->b) == doctest::Approx(static_cast<double>(wanted.b)));
+
+    // Taking it off is the same call with nothing in it, because the world's
+    // own setter removes an attribute set to nil -- one path rather than two.
+    editor.setFolderColor(world, folder, std::nullopt);
+    CHECK_FALSE(Editor::folderColor(world, folder).has_value());
+
+    // And both are ordinary edits, so both are ordinary undo steps.
+    REQUIRE(editor.undo(world, inspector));
+    CHECK(Editor::folderColor(world, folder).has_value());
+    REQUIRE(editor.undo(world, inspector));
+    CHECK_FALSE(Editor::folderColor(world, folder).has_value());
+}
+
+TEST_CASE("a content folder's colour survives the editor closing")
+{
+    // A directory cannot carry anything, so this one lives in the editor's own
+    // state file -- and the round trip through it is the whole claim.
+    const std::filesystem::path state = std::filesystem::temp_directory_path() / "luaug-editor-state-test" / ".luaug";
+    std::error_code cleanup;
+    std::filesystem::remove_all(state.parent_path(), cleanup);
+
+    const core::Color3 teal{0.29f, 0.71f, 0.60f};
+    {
+        Editor editor;
+        CHECK_FALSE(editor.contentColor("props").has_value());
+        editor.setContentColor("props", teal);
+        editor.setContentColor("props/trees", core::Color3{0.85f, 0.33f, 0.31f});
+        editor.setContentColor("gone", teal);
+        editor.setContentColor("gone", std::nullopt);
+        editor.rememberState(state);
+    }
+
+    Editor reopened;
+    reopened.recallState(state);
+    const std::optional<core::Color3> read = reopened.contentColor("props");
+    REQUIRE(read.has_value());
+    // Through `#rrggbb`, so the check is that eight bits per channel is enough
+    // -- which it is for a colour somebody picked out of a swatch.
+    CHECK(static_cast<double>(read->r) == doctest::Approx(static_cast<double>(teal.r)).epsilon(0.01));
+    CHECK(static_cast<double>(read->g) == doctest::Approx(static_cast<double>(teal.g)).epsilon(0.01));
+    CHECK(static_cast<double>(read->b) == doctest::Approx(static_cast<double>(teal.b)).epsilon(0.01));
+    CHECK(reopened.contentColor("props/trees").has_value());
+    // Cleared before the write, so it is not in the file at all.
+    CHECK_FALSE(reopened.contentColor("gone").has_value());
+
+    // The same state written twice is the same bytes, which is what the ordered
+    // container is for and what makes the file worth putting in a diff.
+    reopened.rememberState(state);
+    std::string first;
+    REQUIRE(luaug::platform::readTextFile(state / "editor.json", first));
+    reopened.rememberState(state);
+    std::string second;
+    REQUIRE(luaug::platform::readTextFile(state / "editor.json", second));
+    CHECK(first == second);
+
+    std::filesystem::remove_all(state.parent_path(), cleanup);
 }
 
 // --- E2: dragging a manipulator ---------------------------------------------

@@ -435,6 +435,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // inert unless `--edit` asked for them, and the target is not created until
     // a panel has said how big it is.
     Editor editor;
+    // What this person had last time: their content-folder colours, and the
+    // scene they were looking at (the scene is read separately below, because
+    // the boot has to know it before an `Editor` exists).
+    if (options.editor && !options.scriptPath.empty())
+        editor.recallState(options.scriptPath / ".luaug");
     ViewportTarget viewportTarget;
     // The editor's icons, built once from `content/icons` on the first frame
     // that has a command list -- uploading a texture is one, so this cannot be
@@ -1002,6 +1007,23 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                         (void)editor.duplicateInstances(host->world(), acting, host->runtime().dataModel(), inspector);
                     }
                 }
+                // **Colouring a folder**, from either panel. Which store it
+                // lands in is decided by which of the two targets is set --
+                // an instance carries its own colour and a directory cannot,
+                // and `Editor::setFolderColor` says why.
+                if (editorCommands.colorAsked) {
+                    if (editorCommands.colorTarget.valid()) {
+                        editor.setFolderColor(host->world(), editorCommands.colorTarget, editorCommands.color);
+                    }
+                    else if (!editorCommands.colorContentPath.empty()) {
+                        editor.setContentColor(editorCommands.colorContentPath, editorCommands.color);
+                        // Written now rather than at exit, for the reason the
+                        // open scene is: an editor that only wrote this on a
+                        // clean shutdown would forget it the one time somebody
+                        // most wants it.
+                        editor.rememberState(options.scriptPath / ".luaug");
+                    }
+                }
                 if (editorCommands.renameInstance.valid())
                     (void)editor.renameInstance(host->world(), editorCommands.renameInstance,
                                                 host->runtime().dataModel(), editorCommands.renameInstanceTo);
@@ -1050,7 +1072,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // time somebody most wants it -- after a crash.
                 if (editor.openScenePath() != rememberedScene) {
                     rememberedScene = editor.openScenePath();
-                    editor.rememberOpenScene(options.scriptPath / ".luaug");
+                    editor.rememberState(options.scriptPath / ".luaug");
                 }
             }
 

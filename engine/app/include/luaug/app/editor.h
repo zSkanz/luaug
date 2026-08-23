@@ -10,6 +10,7 @@
 
 #include <deque>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -180,6 +181,22 @@ struct EditorPanels
     bool console = true;
     bool stats = true;
 
+    // How the content browser lays its entries out.
+    //
+    // Three, because the three answer three different questions and every
+    // engine that has a browser has all of them: a LIST is what you read when
+    // you are looking for a name, TILES are what you scan when you half
+    // remember what a thing looked like, and ICONS are what you use when the
+    // thing IS a picture. Unity and Unreal both ship the middle one as the
+    // default and both keep the other two.
+    enum class ContentView : core::u8
+    {
+        List,
+        Tiles,
+        Icons,
+    };
+    ContentView contentView = ContentView::List;
+
     // **Whether the Explorer shows what STREAMING made**, and it is off.
     //
     // Streaming pumps in edit mode as well as in play -- it is not gated on the
@@ -273,6 +290,18 @@ struct EditorCommands
     // Move the selection under this. Set by a drop in the Explorer.
     core::InstanceId reparentTo;
 
+    // **Colour a folder**, from either panel. `colorTarget` names one in the
+    // world and `colorContentPath` names one on disk -- one or the other, never
+    // both, because they are stored in different places for the reason
+    // `setFolderColor` gives.
+    //
+    // `colorAsked` is what makes "take the colour off" different from "no
+    // command", which an empty optional alone cannot say.
+    bool colorAsked = false;
+    core::InstanceId colorTarget;
+    std::string colorContentPath;
+    std::optional<core::Color3> color;
+
     // Content-relative. Delete removes a folder with everything in it.
     std::string deleteContent;
     std::string renameContent;
@@ -293,9 +322,10 @@ struct EditorCommands
     [[nodiscard]] bool any() const noexcept
     {
         return play.has_value() || pause.has_value() || save || newScene || quit || resetLayout || clearSelection ||
-               undo || redo || createClass != scene::InvalidClass || deleteSelection || duplicateSelection ||
-               reparentTo.valid() || renameInstance.valid() || !saveAs.empty() || !openScene.empty() ||
-               !createFolder.empty() || !createScript.empty() || !deleteContent.empty() || !renameContent.empty();
+               undo || redo || colorAsked || createClass != scene::InvalidClass || deleteSelection ||
+               duplicateSelection || reparentTo.valid() || renameInstance.valid() || !saveAs.empty() ||
+               !openScene.empty() || !createFolder.empty() || !createScript.empty() || !deleteContent.empty() ||
+               !renameContent.empty();
     }
 };
 
@@ -486,8 +516,58 @@ public:
     // The fallback chain when the editor opens: the remembered scene if it still
     // exists, then the project's declared one, then nothing — and nothing is an
     // untitled world somebody can build in and give a name to when they save.
-    void rememberOpenScene(const std::filesystem::path& stateDirectory) const;
+    // Writes everything the editor remembers per person: the open scene, and
+    // the colours somebody has put on their content folders. One file, because
+    // the comment this replaced predicted the second thing correctly -- "the
+    // second thing an editor wants to remember arrives sooner than anybody
+    // expects, and a file that is only a string has nowhere to put it".
+    void rememberState(const std::filesystem::path& stateDirectory) const;
+    // Reads it back into this editor. The static `recallOpenScene` stays beside
+    // it because the frame loop has to know which scene to BOOT before an
+    // `Editor` exists at all.
+    void recallState(const std::filesystem::path& stateDirectory);
     [[nodiscard]] static std::string recallOpenScene(const std::filesystem::path& stateDirectory);
+
+    // --- Folder colour -------------------------------------------------------
+    //
+    // **A coloured folder is the cheapest navigation there is**, and both panels
+    // that show folders offer it. Unity and Unreal both have it and both keep it
+    // in editor state; this keeps it in two different places, and the split is
+    // not an inconsistency but the only honest answer to what each folder IS.
+    //
+    // **A folder in the world is an INSTANCE, so it carries the colour itself**,
+    // as an attribute. That is what makes it travel: the scene file records it
+    // with no format change, undo takes it back like any other edit, and a
+    // rename or a reparent cannot lose it because it was never keyed by where
+    // the folder was.
+    //
+    // **A folder in `content/` is a DIRECTORY, and a directory cannot carry
+    // anything.** So that one lives in `.luaug/editor.json` beside the
+    // remembered scene, keyed by its content-relative path -- which does mean a
+    // renamed folder comes back uncoloured, and that is a consequence worth
+    // stating rather than a bug worth hiding.
+
+    // The attribute an instance's colour is stored in. Named rather than
+    // spelled out at four call sites, and prefixed so that a project reading its
+    // own attributes can tell whose it is.
+    static constexpr std::string_view FolderColorAttribute = "EditorColor";
+
+    [[nodiscard]] static std::optional<core::Color3> folderColor(const scene::World& world, core::InstanceId id);
+
+    // Sets or clears it, as one undo step. Through `setAttribute` rather than
+    // into a component, for the same reason every other editor write goes
+    // through the world's own setter.
+    void setFolderColor(scene::World& world, core::InstanceId id, std::optional<core::Color3> color);
+
+    [[nodiscard]] std::optional<core::Color3> contentColor(std::string_view path) const;
+    void setContentColor(std::string_view path, std::optional<core::Color3> color);
+
+    // The colours a person is offered before they reach for the picker.
+    //
+    // Ten, because a palette somebody has to scroll is a palette nobody uses,
+    // and they are spread round the hue circle rather than picked by eye so that
+    // two folders coloured a minute apart are actually distinguishable.
+    static std::span<const core::Color3> folderPalette() noexcept;
 
     // Whether an instance is one of the engine's own -- a service, or the root.
     //
@@ -845,6 +925,11 @@ public:
     [[nodiscard]] PickRay rayThrough(core::Vec2 pixelInViewport) const noexcept;
 
 private:
+    // Content-folder colours, keyed by content-relative path. Ordered rather
+    // than hashed so the file it is written to is the same bytes for the same
+    // state -- the property every other format in this repository has.
+    std::map<std::string, core::Color3> m_contentColors;
+
     // A drag in progress. `start` is where the pointer was solved to on the
     // frame the button went down, and `before` is every selected instance's
     // transform at that moment -- the two things a delta is measured from.
