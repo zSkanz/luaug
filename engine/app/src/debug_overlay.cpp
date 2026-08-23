@@ -312,59 +312,51 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             hiddenBelow = row.depth;
     }
 
+    // **One height for a row, decided once and told to everybody.**
+    //
+    // A tree row held three things of three different heights -- a framed
+    // arrow, a square icon and a line of text -- and each of the three decided
+    // where it sat. Worse, `ImGuiListClipper` was left to assume a row pitch of
+    // its own, which is `GetTextLineHeightWithSpacing()` and is not what a
+    // framed arrow makes a row: the selection highlight came out taller than
+    // the pitch the clipper had reserved, so it covered the row above and the
+    // row below, and nothing on the row lined up with anything else on it.
+    //
+    // So the height is a number: the frame height, which is the font's line
+    // plus the theme's padding and therefore scales with both -- responsive
+    // without being a magic constant. The clipper is told it, the selectable is
+    // built to it, everything drawn on the row is centred against it, and the
+    // cursor is placed at exactly the next multiple of it. Four agreements
+    // instead of four guesses.
     const float indentSpacing = ImGui::GetStyle().IndentSpacing;
+    const float rowHeight = ImGui::GetFrameHeight();
 
     ImGuiListClipper clipper;
-    clipper.Begin(static_cast<int>(g_visible.size()));
+    clipper.Begin(static_cast<int>(g_visible.size()), rowHeight);
     while (clipper.Step()) {
         for (int index = clipper.DisplayStart; index < clipper.DisplayEnd; ++index) {
             const TreeRow& row = g_visible[static_cast<std::size_t>(index)];
             const bool hasChildren = world.childCount(row.id) > 0;
 
-            // Minus one, because the root's row is not drawn and its children
-            // are therefore this tree's top level.
-            const float indent = static_cast<float>(row.depth - 1) * indentSpacing;
-            if (indent > 0.0f)
-                ImGui::Indent(indent);
-
             ImGui::PushID(static_cast<int>(row.id.index));
 
-            // The arrow is its own control rather than part of the row, because
-            // opening a thing and selecting it are different intentions and a
-            // tree that conflates them makes browsing destructive.
-            if (hasChildren) {
-                if (ImGui::ArrowButton("toggle", g_open.contains(row.id.index) ? ImGuiDir_Down : ImGuiDir_Right)) {
-                    if (!g_open.insert(row.id.index).second)
-                        g_open.erase(row.id.index);
-                }
-            }
-            else {
-                ImGui::Dummy(ImVec2(ImGui::GetFrameHeight(), ImGui::GetFrameHeight()));
-            }
-            ImGui::SameLine();
+            const ImVec2 rowOrigin = ImGui::GetCursorPos();
+            const float iconSize = ImGui::GetTextLineHeight();
+            const auto centred = [&](float height) { return rowOrigin.y + (rowHeight - height) * 0.5f; };
 
             const std::string_view instanceName = world.atoms().text(world.name(row.id));
             const scene::ClassDescriptor* classDescriptor = world.classes().find(world.classOf(row.id));
             const std::string_view className =
                 classDescriptor != nullptr ? world.atoms().text(classDescriptor->name) : std::string_view("?");
 
-            // **Icon, then name, and no class in the text.** The icon IS the
-            // class -- that is what a `class.<ClassName>` id means -- so
-            // spelling it out beside the picture is the same fact twice, and
-            // the width it costs is width a name needs. Without an atlas the
-            // class comes back into the label, because a row that says only
-            // "Part" and shows nothing has lost the answer rather than moved
-            // it.
-            const float iconSize = ImGui::GetTextLineHeight();
-            const bool drewIcon = drawIcon(icons, classIconId(world, row.id), iconSize);
-            if (drewIcon) {
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%.*s", static_cast<int>(className.size()), className.data());
-                ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
-            }
-
             char label[192];
-            if (drewIcon) {
+            const bool haveIcon = icons != nullptr && icons->ready();
+            if (haveIcon) {
+                // **The class is not in the text, because the icon IS the
+                // class** -- that is what a `class.<ClassName>` id means, and
+                // saying it twice costs width the name needs. Without an atlas
+                // it comes back, because a row showing neither has lost the
+                // answer rather than moved it.
                 (void)std::snprintf(label, sizeof(label), "%.*s", static_cast<int>(instanceName.size()),
                                     instanceName.data());
             }
@@ -373,13 +365,13 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                                     instanceName.data(), static_cast<int>(className.size()), className.data());
             }
 
-            // **The row is clickable across its whole width and the plus sits
-            // on top of it**, which is what `AllowOverlap` is for: without it
-            // the selectable underneath swallows the press and the button never
-            // fires.
-            const float rowLeft = ImGui::GetCursorPosX();
-            const float labelWidth = ImGui::CalcTextSize(label).x;
-            if (ImGui::Selectable(label, inspector.isSelected(row.id), ImGuiSelectableFlags_AllowOverlap)) {
+            // **The row itself is drawn first and spans the full width**,
+            // arrow included and indent ignored. It owns the hit test, the
+            // highlight and the height; the arrow, the icon, the name and the
+            // plus are placed on top of it afterwards, which is also what puts
+            // them OVER the highlight rather than under it.
+            if (ImGui::Selectable("##row", inspector.isSelected(row.id), ImGuiSelectableFlags_AllowOverlap,
+                                  ImVec2(0.0f, rowHeight))) {
                 // Ctrl adds and removes, shift takes the run from the primary
                 // to here, a plain click replaces. The range is taken over
                 // `g_visible` rather than over the whole tree, because a range
@@ -433,33 +425,92 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 ImGui::EndPopup();
             }
 
-            // **The plus, at the end of the row's text.** Making a child of
-            // the thing you are looking at is the commonest authoring act there
-            // is, and until this the only way to add an instance to this engine
-            // at all was to write `Instance.new` in a script. It sits on the ROW
+            // --- What the row shows, placed on it and centred against it ----
+            //
+            // Every one of these is positioned outright rather than stacked
+            // after the last: they are four different heights, and stacking
+            // would put them at four different places on a row that has one.
+
+            // Depth minus one, because the root's row is not drawn and its
+            // children are therefore this tree's top level.
+            float penX = rowOrigin.x + static_cast<float>(row.depth - 1) * indentSpacing;
+
+            // The arrow is its own control rather than part of the row, because
+            // opening a thing and selecting it are different intentions and a
+            // tree that conflates them makes browsing destructive.
+            if (hasChildren) {
+                ImGui::SetCursorPos(ImVec2(penX, centred(ImGui::GetFrameHeight())));
+                if (ImGui::ArrowButton("toggle", g_open.contains(row.id.index) ? ImGuiDir_Down : ImGuiDir_Right)) {
+                    if (!g_open.insert(row.id.index).second)
+                        g_open.erase(row.id.index);
+                }
+            }
+            // The space is reserved either way, so a leaf's icon lines up with
+            // its siblings' rather than sliding left to where their arrow is.
+            penX += ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x;
+
+            // **The plus, at the end of the row's text.** Making a child of the
+            // thing you are looking at is the commonest authoring act there is,
+            // and until this the only way to add an instance to this engine at
+            // all was to write `Instance.new` in a script. It sits on the ROW
             // rather than in the toolbar because which parent is the whole of
             // the question, and after the name rather than before it because
             // before it is where the name goes.
-            //
-            // Shown on the row under the pointer and on the selected rows. A
-            // plus on every row of a thousand-row tree is a column of plus
-            // signs, not an affordance.
-            //
+            if (haveIcon) {
+                ImGui::SetCursorPos(ImVec2(penX, centred(iconSize)));
+                if (drawIcon(icons, classIconId(world, row.id), iconSize)) {
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("%.*s", static_cast<int>(className.size()), className.data());
+                    penX += iconSize + ImGui::GetStyle().ItemInnerSpacing.x;
+                }
+            }
+
+            ImGui::SetCursorPos(ImVec2(penX, centred(ImGui::GetTextLineHeight())));
+            ImGui::TextUnformatted(label);
+            penX += ImGui::CalcTextSize(label).x + ImGui::GetStyle().ItemSpacing.x;
+
             // Only where an instance can actually go: nothing authored lives
             // inside something streaming materialised, and offering a plus that
             // refuses is worse than not offering one.
-            const bool canParent = commands != nullptr && !world.generated(row.id);
-            const bool showPlus = canParent && (rowHovered || inspector.isSelected(row.id) || addOpen);
-            if (showPlus) {
-                ImGui::SameLine();
-                ImGui::SetCursorPosX(rowLeft + labelWidth + ImGui::GetStyle().ItemSpacing.x);
+            if (commands != nullptr && !world.generated(row.id)) {
+                // **Drawn every frame, and dimmed rather than hidden.** The
+                // first version appeared only on the row under the pointer, and
+                // that cost it its first click: ImGui resolves an overlap in
+                // favour of the LATER item, but it can only do that if the later
+                // item was there when the overlap happened. A button that comes
+                // into existence on the same frame the row becomes hovered is a
+                // button the selectable underneath has already taken the press
+                // for -- so the first click selected the row and only the second
+                // one opened the menu, which is exactly what somebody trying to
+                // add a child to `Workspace` runs into.
+                //
+                // Existing every frame makes the hit test stable from the first
+                // one. The alpha is what keeps a thousand-row tree from reading
+                // as a column of plus signs, and it costs nothing a click can
+                // feel.
+                const float buttonHeight = ImGui::GetTextLineHeight() + ImGui::GetStyle().FramePadding.y;
+                ImGui::SetCursorPos(ImVec2(penX, centred(buttonHeight)));
+
+                const bool lit = rowHovered || inspector.isSelected(row.id) || addOpen;
+                if (!lit)
+                    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.35f);
                 if (ImGui::SmallButton("+"))
                     ImGui::OpenPopup("add-child");
+                if (!lit)
+                    ImGui::PopStyleVar();
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip("add a child instance");
             }
 
-            if (canParent && ImGui::BeginPopup("add-child")) {
+            // **The next row starts exactly one row height down**, whatever the
+            // last thing drawn on this one happened to be. Without this the
+            // pitch is whatever ImGui's line tracking made of four items placed
+            // by hand, which is neither `rowHeight` nor what the clipper was
+            // told -- and a pitch that disagrees with the clipper is a tree
+            // that scrolls to the wrong place.
+            ImGui::SetCursorPos(ImVec2(rowOrigin.x, rowOrigin.y + rowHeight));
+
+            if (commands != nullptr && ImGui::BeginPopup("add-child")) {
                 g_addOpenRow = row.id.index;
                 if (g_creatableWorld != inspector.worldGeneration() || g_creatable.empty()) {
                     g_creatableWorld = inspector.worldGeneration();
@@ -514,9 +565,6 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             }
 
             ImGui::PopID();
-
-            if (indent > 0.0f)
-                ImGui::Unindent(indent);
         }
     }
 }
@@ -1272,23 +1320,29 @@ void drawContent(Editor& editor, EditorCommands& commands, bool& open, EditorDia
 
     if (ImGui::BeginChild("entries")) {
         const std::vector<ContentEntry>& entries = tree.entries();
+        // One height, told to the clipper and built to -- the explorer's rule
+        // and the same reason: an icon and a line of text are two heights, and
+        // a highlight sized to neither covers its neighbours.
+        const float entryHeight = ImGui::GetFrameHeight();
         ImGuiListClipper clipper;
-        clipper.Begin(static_cast<int>(entries.size()));
+        clipper.Begin(static_cast<int>(entries.size()), entryHeight);
         while (clipper.Step()) {
             for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
                 const ContentEntry& entry = entries[static_cast<std::size_t>(row)];
                 ImGui::PushID(row);
 
+                const ImVec2 entryOrigin = ImGui::GetCursorPos();
+                const float entryIcon = ImGui::GetTextLineHeight();
+
                 const bool isOpenScene = entry.kind == ContentKind::Scene && entry.path == editor.openScenePath();
                 if (isOpenScene)
                     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.85f, 0.55f, 1.0f));
 
-                if (drawIcon(icons, contentKindIcon(entry.kind), ImGui::GetTextLineHeight()))
-                    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
-
                 // Double-click, because a single click is how somebody browses
                 // and opening a scene throws away what is in the world.
-                if (ImGui::Selectable(entry.name.c_str(), isOpenScene, ImGuiSelectableFlags_AllowDoubleClick) &&
+                if (ImGui::Selectable("##entry", isOpenScene,
+                                      ImGuiSelectableFlags_AllowDoubleClick | ImGuiSelectableFlags_AllowOverlap,
+                                      ImVec2(0.0f, entryHeight)) &&
                     ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
                     if (entry.kind == ContentKind::Folder)
                         (void)tree.enter(entry.name);
@@ -1314,10 +1368,28 @@ void drawContent(Editor& editor, EditorCommands& commands, bool& open, EditorDia
                     ImGui::EndPopup();
                 }
 
+                // Placed on the row rather than stacked after it, for the
+                // reason the explorer's are: the icon and the text are two
+                // heights and the row has one.
+                float entryX = entryOrigin.x;
+                ImGui::SetCursorPos(ImVec2(entryX, entryOrigin.y + (entryHeight - entryIcon) * 0.5f));
+                if (drawIcon(icons, contentKindIcon(entry.kind), entryIcon))
+                    entryX += entryIcon + ImGui::GetStyle().ItemInnerSpacing.x;
+
+                const float textY = entryOrigin.y + (entryHeight - ImGui::GetTextLineHeight()) * 0.5f;
+                ImGui::SetCursorPos(ImVec2(entryX, textY));
+                ImGui::TextUnformatted(entry.name.c_str());
+                entryX += ImGui::CalcTextSize(entry.name.c_str()).x + 12.0f;
+
+                if (isOpenScene)
+                    ImGui::PopStyleColor();
+
                 if (const char* label = contentKindLabel(entry.kind); label[0] != '\0') {
-                    ImGui::SameLine(0.0f, 12.0f);
+                    ImGui::SetCursorPos(ImVec2(entryX, textY));
                     ImGui::TextDisabled("%s", label);
                 }
+
+                ImGui::SetCursorPos(ImVec2(entryOrigin.x, entryOrigin.y + entryHeight));
                 ImGui::PopID();
             }
         }
