@@ -139,7 +139,7 @@ public:
     // The icon atlas the panels draw from, or null. Null is a legal state and
     // not a broken one: the atlas is built on the first frame that has a
     // command list, and every panel falls back to text until it is.
-    void setIcons(const IconAtlas* icons) noexcept { icons_ = icons; }
+    void setIcons(IconAtlas* icons) noexcept { icons_ = icons; }
 
     // What the shell asked for while it drew, taken by the frame loop and reset.
     // Draining rather than reading, so a command cannot be acted on twice
@@ -232,7 +232,7 @@ private:
     [[maybe_unused]] EditorDialogs dialogs_;
     [[maybe_unused]] Editor* editor_ = nullptr;
     [[maybe_unused]] bool gameHoldsPointer_ = false;
-    [[maybe_unused]] const IconAtlas* icons_ = nullptr;
+    [[maybe_unused]] IconAtlas* icons_ = nullptr;
     [[maybe_unused]] rhi::TextureHandle viewportTexture_;
 };
 

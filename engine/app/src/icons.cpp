@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <optional>
 
 namespace luaug::app {
 namespace {
@@ -72,6 +73,39 @@ void blit(std::vector<u8>& atlas, u32 atlasSize, const std::vector<u8>& cell, u3
     }
 }
 
+// `#RRGGBB`, and it is NOT linearised.
+//
+// The value is compared against ImGui's own style colours, which are in the same
+// space it draws them in -- so converting to linear here would make a palette
+// whose contrast was solved in sRGB come out wrong against the panel it was
+// solved against. The floor in the shipped set is 3.88:1 and that number is only
+// true in the space it was measured in.
+[[nodiscard]] std::optional<core::Color3> parseHexColor(std::string_view text) noexcept
+{
+    if (text.size() != 7 || text[0] != '#')
+        return std::nullopt;
+
+    const auto nibble = [](char c) -> int {
+        if (c >= '0' && c <= '9')
+            return c - '0';
+        if (c >= 'a' && c <= 'f')
+            return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F')
+            return c - 'A' + 10;
+        return -1;
+    };
+
+    f32 channel[3]{};
+    for (usize index = 0; index < 3; ++index) {
+        const int high = nibble(text[1 + index * 2]);
+        const int low = nibble(text[2 + index * 2]);
+        if (high < 0 || low < 0)
+            return std::nullopt;
+        channel[index] = static_cast<f32>(high * 16 + low) / 255.0f;
+    }
+    return core::Color3{channel[0], channel[1], channel[2]};
+}
+
 } // namespace
 
 bool IconAtlas::readTheme(const std::filesystem::path& themeDir, Source& out, std::string& fallbackId)
@@ -93,13 +127,44 @@ bool IconAtlas::readTheme(const std::filesystem::path& themeDir, Source& out, st
             out.icons.emplace(std::string(key), std::string(relative));
     }
 
+    // **The colour, and it is three sparse overlays rather than one block.** A
+    // plugin that wants one class in its own colour ships a palette key and an
+    // id pointing at it and no PNG at all, which is why each of these layers on
+    // its own.
+    const core::JsonValue palette = root["palette"];
+    for (usize i = 0; i < palette.size(); ++i) {
+        const std::string_view key = palette.keyAt(i);
+        const core::JsonValue entry = palette[key];
+        std::optional<core::Color3> light = parseHexColor(entry["light"].asString());
+        std::optional<core::Color3> dark = parseHexColor(entry["dark"].asString());
+        // Both or neither. A role with one value would be a role that is
+        // unreadable on one of the two panels, which is the whole thing the
+        // pair exists to prevent.
+        if (!key.empty() && light.has_value() && dark.has_value())
+            out.palette.emplace(std::string(key), RoleColor{*light, *dark});
+    }
+
+    const core::JsonValue roles = root["roles"];
+    for (usize i = 0; i < roles.size(); ++i) {
+        const std::string_view key = roles.keyAt(i);
+        const std::string_view role = roles[key].asString();
+        if (!key.empty() && !role.empty())
+            out.roles.emplace(std::string(key), std::string(role));
+    }
+
+    if (const std::string_view declared = root["defaultRole"].asString(); !declared.empty())
+        out.defaultRole = std::string(declared);
+
     // The last theme consulted supplies the fallback, which for a chain that
     // always ends at `default` means `default`'s.
     if (const std::string_view declared = root["fallback"].asString(); !declared.empty())
         fallbackId = std::string(declared);
 
     out.root = themeDir;
-    return !out.icons.empty();
+    // **A theme with no `icons` at all is legal**, and it is the case the whole
+    // overlay design exists for: a plugin recolouring somebody else's set ships
+    // a palette and a roles map and nothing to draw.
+    return !out.icons.empty() || !out.palette.empty() || !out.roles.empty();
 }
 
 bool IconAtlas::load(rhi::IDevice& device, rhi::ICmdList& cmd, const std::filesystem::path& contentDir,
@@ -287,6 +352,53 @@ void IconAtlas::destroy(rhi::IDevice& device)
 bool IconAtlas::has(std::string_view id) const
 {
     return m_cells.find(std::string(id)) != m_cells.end();
+}
+
+std::optional<core::Color3> IconAtlas::tintFor(std::string_view id, Panel panel) const
+{
+    if (!m_tinting)
+        return std::nullopt;
+
+    const std::string key(id);
+
+    // The role: the first source in the chain that names this id. A plugin that
+    // recolours one class is one entry ahead of `default`'s.
+    std::string role;
+    for (const Source& source : m_sources) {
+        if (const auto it = source.roles.find(key); it != source.roles.end()) {
+            role = it->second;
+            break;
+        }
+    }
+
+    // The colour for that role, resolved through the chain separately -- so a
+    // plugin may point an id at a role `default` already defines, or define a
+    // role of its own, without having to supply both halves.
+    const auto colourOf = [this, panel](const std::string& name) -> std::optional<core::Color3> {
+        if (name.empty())
+            return std::nullopt;
+        for (const Source& source : m_sources) {
+            if (const auto it = source.palette.find(name); it != source.palette.end())
+                return panel == Panel::Dark ? it->second.dark : it->second.light;
+        }
+        return std::nullopt;
+    };
+
+    if (const std::optional<core::Color3> named = colourOf(role); named.has_value())
+        return named;
+
+    // **An id nobody names, and a role nobody defines, both land here.** Thirty
+    // of the shipped seventy-eight are the first case deliberately -- they are
+    // the toolbar's verbs, and a toolbar of ten colours is a fruit salad. The
+    // second is a typo in somebody's manifest, and a typo must not make an icon
+    // vanish.
+    for (const Source& source : m_sources) {
+        if (!source.defaultRole.empty()) {
+            if (const std::optional<core::Color3> byDefault = colourOf(source.defaultRole); byDefault.has_value())
+                return byDefault;
+        }
+    }
+    return std::nullopt;
 }
 
 IconSprite IconAtlas::find(std::string_view id, u32 size) const

@@ -146,6 +146,40 @@ void drawStats(const Frame& frame)
     ImGui::Text("drawable %d x %d", size.width, size.height);
 }
 
+// Which panel the editor is drawing on, from the panel's own background.
+//
+// **Decided rather than configured**, which is what makes it follow an ImGui
+// style change for free and leaves nothing to keep in sync. Relative luminance
+// with the usual coefficients, and the threshold is the middle: a background
+// under it is a dark panel and the palette's `dark` value is the one that clears
+// 3:1 against it.
+[[nodiscard]] IconAtlas::Panel currentPanel() noexcept
+{
+    const ImVec4 background = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
+    const float luminance = 0.2126f * background.x + 0.7152f * background.y + 0.0722f * background.z;
+    return luminance < 0.5f ? IconAtlas::Panel::Dark : IconAtlas::Panel::Light;
+}
+
+// The colour an icon is drawn in: its ROLE's, or the panel's own foreground.
+//
+// The fallback is not a degraded path -- it is what every icon did before there
+// was a palette, and it is what all of them do when tinting is off. The set was
+// drawn and collision-checked in a single ink, so an uncoloured editor is not a
+// worse one.
+[[nodiscard]] ImVec4 iconTint(const IconAtlas* icons, std::string_view id) noexcept
+{
+    if (icons != nullptr) {
+        if (const std::optional<core::Color3> role = icons->tintFor(id, currentPanel()); role.has_value()) {
+            // Alpha from the panel's own text colour, so a disabled row's icon
+            // still dims with its label -- the role says WHICH colour and the
+            // style says how present it is.
+            const ImVec4 text = ImGui::GetStyleColorVec4(ImGuiCol_Text);
+            return ImVec4(role->r, role->g, role->b, text.w);
+        }
+    }
+    return ImGui::GetStyleColorVec4(ImGuiCol_Text);
+}
+
 // One icon, inline, at the current cursor. Returns false when there is no atlas
 // or no cell, so a caller can fall back to text rather than leaving a hole.
 //
@@ -168,7 +202,7 @@ bool drawIcon(const IconAtlas* icons, std::string_view id, float size)
 
     ImGui::ImageWithBg(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)), ImVec2(size, size),
                        ImVec2(sprite.u0, sprite.v0), ImVec2(sprite.u1, sprite.v1), ImVec4(0.0f, 0.0f, 0.0f, 0.0f),
-                       ImGui::GetStyleColorVec4(ImGuiCol_Text));
+                       iconTint(icons, id));
     return true;
 }
 
@@ -217,7 +251,7 @@ bool iconButton(const IconAtlas* icons, std::string_view id, float size, const c
         if (sprite.valid && native != nullptr) {
             pressed = ImGui::ImageButton(strId, static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)),
                                          ImVec2(size, size), ImVec2(sprite.u0, sprite.v0), ImVec2(sprite.u1, sprite.v1),
-                                         ImVec4(0.0f, 0.0f, 0.0f, 0.0f), ImGui::GetStyleColorVec4(ImGuiCol_Text));
+                                         ImVec4(0.0f, 0.0f, 0.0f, 0.0f), iconTint(icons, id));
             unstyle();
             if (tip != nullptr)
                 ImGui::SetItemTooltip("%s", tip);
@@ -1746,7 +1780,7 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
 // viewport could not be opened from the menu -- which is exactly what a Save As
 // has to be. Modal, because each of these is a question with an answer, and one
 // left half-answered behind a panel is one somebody loses track of.
-void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& dialogs)
+void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& dialogs, IconAtlas* icons)
 {
     if (dialogs.saveAs) {
         dialogs.saveAs = false;
@@ -1817,6 +1851,21 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         if (ImGui::DragFloat("Camera speed (m/s)", &speed, 0.5f, 0.1f, 2000.0f, "%.1f"))
             editor.setCameraSpeed(speed);
         ImGui::TextDisabled("The scroll wheel changes this while flying, too.");
+
+        ImGui::Spacing();
+        ImGui::SeparatorText("Icons");
+        if (icons != nullptr) {
+            bool tinting = icons->tinting();
+            if (ImGui::Checkbox("Colour icons by role", &tinting))
+                icons->setTinting(tinting);
+            // **Not a degraded mode, and it says so.** The set was drawn and
+            // collision-checked in a single ink before any colour existed, so
+            // somebody who cannot use the colours is not being handed a worse
+            // tool -- which is the reason this switch exists at all.
+            ImGui::TextWrapped("The colour says what KIND of thing an icon is, never which thing -- the shape carries "
+                               "that. Off, every icon takes the panel's own foreground, and no two of them are closer "
+                               "than the set was drawn to be.");
+        }
 
         ImGui::Spacing();
         ImGui::SeparatorText("Where these live");
@@ -2002,7 +2051,7 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
 // had.
 void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,
                      script::ScriptRuntime* runtime, Editor* editor, rhi::TextureHandle viewport, bool& laidOut,
-                     EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs, const IconAtlas* icons)
+                     EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs, IconAtlas* icons)
 {
     // Before the dockspace. `DockSpaceOverViewport` measures the work area, and
     // a menu bar declared after it would sit on top of the panels by its own
@@ -2137,7 +2186,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         dialogs.saveAs = true;
     }
     if (editor != nullptr)
-        drawEditorDialogs(*editor, commands, dialogs);
+        drawEditorDialogs(*editor, commands, dialogs, icons);
 
     // After every panel has been declared, because focusing a window ImGui has
     // not seen this frame does nothing. Only on the frame the default layout

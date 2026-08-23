@@ -1,9 +1,11 @@
 #pragma once
 
+#include "luaug/core/math.h"
 #include "luaug/core/types.h"
 #include "luaug/rhi/types.h"
 
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -58,6 +60,23 @@
 // file therefore serves a light panel and a dark one, multiplied by a colour at
 // draw time. There is no second set for dark mode and there must not be -- two
 // drawings of one icon drift the first time somebody touches one of them.
+//
+// **And the colour says what KIND of thing it is, never which thing.** The shape
+// carries the identity; the tint only makes a long tree scannable. A theme
+// declares a `palette` of a dozen ROLES and a sparse `roles` map from id to
+// role, and an id nobody names takes `defaultRole` -- which is why a toolbar is
+// one colour with four exceptions rather than a fruit salad.
+//
+// Two values per role, `light` and `dark`, and they are not two decisions: a
+// single colour cannot clear 3:1 against both a near-white panel and a dark one,
+// and everything in the band that does is muddy. They are solved from one hue so
+// nobody picks the second by eye.
+//
+// **Tinting is switchable off**, and with it off every icon takes the panel's
+// own foreground -- which is where this started. The set was drawn and
+// collision-checked in a single ink before any colour existed, so the uncoloured
+// editor is not a degraded one, and somebody who cannot use the colours must not
+// get a worse tool.
 
 namespace luaug::rhi {
 class ICmdList;
@@ -118,6 +137,27 @@ public:
     // something for every id as long as a theme loaded.
     [[nodiscard]] IconSprite find(std::string_view id, u32 size) const;
 
+    // Which panel an icon is being drawn on. Decided from the panel's own
+    // background rather than configured, so it follows a style change for free
+    // and there is no second setting to keep in sync.
+    enum class Panel : core::u8
+    {
+        Light,
+        Dark,
+    };
+
+    // The role colour for `id`, or nothing when the theme declares no palette or
+    // tinting is off. A caller that gets nothing uses its own text colour, which
+    // is what every caller did before there was a palette.
+    //
+    // An id absent from `roles` takes `defaultRole`; a role naming a palette key
+    // no theme in the chain has takes `defaultRole` too, rather than drawing
+    // nothing -- a typo in a plugin's manifest must not make an icon vanish.
+    [[nodiscard]] std::optional<core::Color3> tintFor(std::string_view id, Panel panel) const;
+
+    [[nodiscard]] bool tinting() const noexcept { return m_tinting; }
+    void setTinting(bool on) noexcept { m_tinting = on; }
+
     // Whether `id` resolved to a drawing of its own rather than to the
     // fallback. The Explorer uses it to tell "this class has an icon" from
     // "this class is wearing the generic one", which is the difference between
@@ -138,12 +178,25 @@ private:
     // Resolution order, first hit wins, and the whole of what makes a plugin
     // theme work: a project override, then plugin themes in load order, then
     // the active theme, then `default`. Adding a source is adding to this list.
+    struct RoleColor
+    {
+        core::Color3 light;
+        core::Color3 dark;
+    };
+
     struct Source
     {
         std::filesystem::path root;
         // Empty for a project's loose-file override directory, which has no
         // manifest by design -- one file replaces one icon.
         std::unordered_map<std::string, std::string> icons;
+        // **Sparse overlays, exactly like `icons`.** A plugin that wants one
+        // class in its own colour ships a palette key and an id pointing at it,
+        // and no PNG at all -- which is the whole reason these are layered
+        // rather than read from `default` alone.
+        std::unordered_map<std::string, RoleColor> palette;
+        std::unordered_map<std::string, std::string> roles;
+        std::string defaultRole;
         bool loose = false;
     };
 
@@ -152,6 +205,7 @@ private:
     std::vector<Source> m_sources;
     std::unordered_map<std::string, Cell> m_cells;
     std::string m_fallbackId;
+    bool m_tinting = true;
     std::string m_status;
     rhi::TextureHandle m_texture;
     u32 m_atlasSize = 0;
