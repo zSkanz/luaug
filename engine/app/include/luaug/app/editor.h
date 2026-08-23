@@ -545,6 +545,38 @@ public:
     // onto a folder, one of which cannot go, moves the three that can and says
     // so. The alternative is a drag that silently does nothing because of a
     // member somebody did not notice selecting.
+    // What a move under `newParent` would actually do, decided before anything
+    // is recorded.
+    //
+    // **It exists because a drop target has to ask a frame before the drag
+    // ends.** A row that lights up under the pointer and then refuses the drop
+    // is a UI making a claim it cannot keep -- the same failure `editable`
+    // exists to prevent in the properties grid -- and the only way to light it
+    // up honestly is to ask the question early. Asking it any other way would
+    // be a second copy of the rule, and the copy is always the one that goes
+    // stale.
+    struct ReparentPlan
+    {
+        // In document order, and only what would MOVE: an instance already
+        // under `newParent` is not in it, and neither is one a rule turned
+        // away.
+        std::vector<core::InstanceId> movable;
+        // How many a rule turned away, which is what tells "already there" from
+        // "cannot go there" in the status line.
+        core::usize refused = 0;
+        // Nothing authored may live under `newParent` at all -- it is dead, or
+        // it is inside something streaming materialised. Separate from
+        // `refused` because it is a fact about the TARGET, and a drag of four
+        // things onto it fails for one reason rather than four.
+        bool targetRefuses = false;
+    };
+    [[nodiscard]] static ReparentPlan planReparent(const scene::World& world, std::span<const core::InstanceId> ids,
+                                                   core::InstanceId newParent, core::InstanceId root);
+
+    // Whether a drop of `ids` onto `newParent` would move anything at all.
+    [[nodiscard]] static bool canReparent(const scene::World& world, std::span<const core::InstanceId> ids,
+                                          core::InstanceId newParent, core::InstanceId root);
+
     bool reparent(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId newParent,
                   core::InstanceId root, Inspector& inspector);
 

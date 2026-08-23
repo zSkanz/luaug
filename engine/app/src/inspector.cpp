@@ -1,10 +1,12 @@
-#include "luaug/app/inspector.h"
+﻿#include "luaug/app/inspector.h"
 
 #include "luaug/core/math.h"
 #include "luaug/scene/enum_registry.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
+#include <optional>
 #include <string_view>
 #include <variant>
 
@@ -243,6 +245,85 @@ void collectProperties(const scene::ClassRegistry& classes, scene::ClassId class
                 out.push_back(&property);
         }
     }
+}
+
+bool sameValue(const scene::Value& a, const scene::Value& b) noexcept
+{
+    const f64* left = std::get_if<f64>(&a);
+    const f64* right = std::get_if<f64>(&b);
+    if (left != nullptr && right != nullptr && std::isnan(*left) && std::isnan(*right))
+        return true;
+    return a == b;
+}
+
+void collectCommonProperties(const scene::World& world, std::span<const core::InstanceId> targets,
+                             std::vector<const scene::PropertyDesc*>& out)
+{
+    out.clear();
+
+    usize first = 0;
+    while (first < targets.size() && !world.alive(targets[first]))
+        ++first;
+    if (first >= targets.size())
+        return;
+
+    collectProperties(world.classes(), world.classOf(targets[first]), out);
+
+    // A shift-range over five hundred parts is one class five hundred times,
+    // and intersecting a set with itself is the whole of the work. The memo is
+    // the immediately preceding class rather than a set of every class seen,
+    // because a run of one class is what a real selection is and the answer is
+    // correct either way -- intersection is idempotent, so skipping a repeat
+    // cannot change the result, only the time it takes to reach it.
+    scene::ClassId previous = world.classOf(targets[first]);
+
+    std::vector<const scene::PropertyDesc*> other;
+    for (usize i = first + 1; i < targets.size() && !out.empty(); ++i) {
+        if (!world.alive(targets[i]))
+            continue;
+        const scene::ClassId classId = world.classOf(targets[i]);
+        if (classId == previous)
+            continue;
+        previous = classId;
+
+        collectProperties(world.classes(), classId, other);
+
+        usize write = 0;
+        for (const scene::PropertyDesc* mine : out) {
+            const auto match = std::find_if(other.begin(), other.end(), [mine](const scene::PropertyDesc* candidate) {
+                return candidate->name == mine->name && candidate->type == mine->type &&
+                       candidate->enumName == mine->enumName;
+            });
+            if (match == other.end())
+                continue;
+            out[write++] = (*match)->readOnly && !mine->readOnly ? *match : mine;
+        }
+        out.resize(write);
+    }
+}
+
+SharedValue sharedValue(const scene::World& world, std::span<const core::InstanceId> targets, core::NameAtom property)
+{
+    SharedValue shared;
+    bool seen = false;
+    for (const core::InstanceId id : targets) {
+        if (!world.alive(id))
+            continue;
+
+        const std::optional<scene::Value> value = world.getProperty(id, property);
+        if (!value.has_value())
+            return SharedValue{};
+
+        if (!seen) {
+            shared.state = SharedState::Same;
+            shared.value = *value;
+            seen = true;
+        }
+        else if (!sameValue(shared.value, *value)) {
+            shared.state = SharedState::Mixed;
+        }
+    }
+    return shared;
 }
 
 void orderByTree(const scene::World& world, core::InstanceId root, std::span<const core::InstanceId> ids,

@@ -923,6 +923,53 @@ TEST_CASE("nothing authored may live inside what a system made")
     CHECK(world.parentOf(authored) == root);
 }
 
+TEST_CASE("a drop target lights up for exactly the drops that would move something")
+{
+    // **The Explorer's drop target asks this a frame before the drag ends**, and
+    // it has to be the same rule the verb applies or the row lights up under
+    // the pointer and then refuses -- the broken promise `editable` exists to
+    // prevent one panel over.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId folder = fixture.widget(world, "Folder");
+    const core::InstanceId moved = fixture.widget(world, "Moved");
+    const core::InstanceId child = fixture.widget(world, "Child");
+    const core::InstanceId chunk = fixture.widget(world, "Chunk_12_-4");
+    REQUIRE_FALSE(world.setParent(folder, root).has_value());
+    REQUIRE_FALSE(world.setParent(moved, root).has_value());
+    REQUIRE_FALSE(world.setParent(child, moved).has_value());
+    REQUIRE_FALSE(world.setParent(chunk, root).has_value());
+    world.setGenerated(chunk, true);
+
+    const std::array<core::InstanceId, 1> one{moved};
+    CHECK(Editor::canReparent(world, one, folder, root));
+    // Onto itself, and into its own subtree: the two cycles.
+    CHECK_FALSE(Editor::canReparent(world, one, moved, root));
+    CHECK_FALSE(Editor::canReparent(world, one, child, root));
+    // Where it already is. Not a refusal and still not a drop: a row that lit
+    // up for it would promise a move that cannot happen.
+    CHECK_FALSE(Editor::canReparent(world, one, root, root));
+    // Into what streaming made, which the save would skip and the next eviction
+    // would destroy.
+    CHECK_FALSE(Editor::canReparent(world, one, chunk, root));
+    // Nothing selected is nothing to drop.
+    CHECK_FALSE(Editor::canReparent(world, {}, folder, root));
+
+    // **A batch lights up if ANY member can go**, because that is what the
+    // drop then does: `reparent` refuses per instance and moves the rest, so a
+    // target that refused the whole drag over one member nobody noticed
+    // selecting would be stricter than the verb behind it.
+    const std::array<core::InstanceId, 2> mixed{moved, folder};
+    CHECK(Editor::canReparent(world, mixed, folder, root));
+    REQUIRE(editor.reparent(world, mixed, folder, root, inspector));
+    CHECK(world.parentOf(moved) == folder);
+    CHECK(world.parentOf(folder) == root);
+}
+
 // --- E2: dragging a manipulator ---------------------------------------------
 //
 // The whole loop, headless: a camera, a viewport, a press on a handle, frames

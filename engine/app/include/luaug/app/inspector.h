@@ -158,6 +158,70 @@ enum class EditorKind : core::u8
 void collectProperties(const scene::ClassRegistry& classes, scene::ClassId classId,
                        std::vector<const scene::PropertyDesc*>& out);
 
+// The properties EVERY instance in `targets` has, in the order the first live
+// one carries them.
+//
+// **The intersection is by name AND by type**, and the second half is not
+// pedantry: two unrelated classes may each declare a `Value`, one holding a
+// number and the other a string, and one row cannot edit both. It would show
+// one member's number, and the write it sent to the other would be refused --
+// silently, for anybody not reading the write log. And because the row carries
+// the more restrictive of the two descriptors, the widget can be chosen for a
+// type the value does not hold, which is a `std::get` that throws. An enum
+// property additionally has to name the same enum, because a combo's items are
+// the property's legal domain and a row offering another class's items is a row
+// that writes a value the class cannot hold.
+//
+// **The row carries the most restrictive descriptor of the set.** A property
+// read-only on any member is drawn read-only for all of them, for the reason
+// `editable` exists at all: a field that takes a drag the world then refuses is
+// a claim the panel cannot keep, and it would keep it for two of the three
+// instances selected -- which is worse than refusing outright, because the two
+// that moved look like proof that the third did too.
+//
+// Order is the FIRST live target's, not the primary's. Ctrl-clicking a fourth
+// instance must not reshuffle rows somebody is reading, and the primary is by
+// definition the one that just changed.
+//
+// `out` is cleared first: the panel reuses one buffer across frames.
+void collectCommonProperties(const scene::World& world, std::span<const core::InstanceId> targets,
+                             std::vector<const scene::PropertyDesc*>& out);
+
+// Whether two values are the same value, for the question below.
+//
+// `operator==` everywhere except that two NaNs compare unequal and are
+// nonetheless not a disagreement anybody typed: a `Number` left at NaN would
+// read as mixed across a selection of instances that all hold exactly the same
+// thing, and the panel would then refuse to show it.
+[[nodiscard]] bool sameValue(const scene::Value& a, const scene::Value& b) noexcept;
+
+// What a selection holds for one property.
+enum class SharedState : core::u8
+{
+    // Nothing readable. Either the set has no live member, or one of them
+    // declares the property and the world's getter returned nothing -- and one
+    // is enough, because a row that edits three of four instances is a row
+    // whose effect nobody can predict.
+    Unreadable,
+    // The members disagree. `value` is the first live one's, so that a widget
+    // has something to step from and a drag has somewhere to start; the panel
+    // says the field is mixed rather than implying the number under the cursor
+    // is everybody's.
+    Mixed,
+    Same,
+};
+
+struct SharedValue
+{
+    SharedState state = SharedState::Unreadable;
+    scene::Value value;
+};
+
+// What `targets` hold for `property`. Dead ids are skipped, so a selection the
+// world has partly retired still answers for what is left of it.
+[[nodiscard]] SharedValue sharedValue(const scene::World& world, std::span<const core::InstanceId> targets,
+                                      core::NameAtom property);
+
 // Whether `Instance.new` would accept this class, and therefore whether the
 // editor may offer it.
 //

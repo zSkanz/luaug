@@ -467,40 +467,31 @@ bool Editor::authorable(const scene::World& world, core::InstanceId id, core::In
     return !isEngineOwned(world, id, root);
 }
 
-bool Editor::reparent(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId newParent,
-                      core::InstanceId root, Inspector& inspector)
+Editor::ReparentPlan Editor::planReparent(const scene::World& world, std::span<const core::InstanceId> ids,
+                                          core::InstanceId newParent, core::InstanceId root)
 {
-    if (ids.empty() || !world.alive(newParent))
-        return false;
-
-    if (newParent != root && !authorable(world, newParent, root)) {
-        m_status = EditorStatus{"nothing authored can live in that", true};
-        return false;
+    ReparentPlan plan;
+    if (!world.alive(newParent) || (newParent != root && !authorable(world, newParent, root))) {
+        plan.targetRefuses = true;
+        return plan;
     }
 
-    // **Decided before anything is recorded**, so a drag that cannot move
-    // anything leaves no undo step behind. A step that undoes nothing is worse
-    // than no step: it eats a press of ctrl-Z and the second press takes back
-    // something the person had stopped thinking about.
-    //
     // Document order rather than click order, so the result is a function of
     // the SET. It is also the order that keeps a parent ahead of its own child,
     // which stops a move of both depending on which was reached first.
     std::vector<core::InstanceId> ordered;
     orderByTree(world, root, ids, ordered);
 
-    std::vector<core::InstanceId> movable;
-    core::usize refused = 0;
     for (const core::InstanceId id : ordered) {
         if (isEngineOwned(world, id, root)) {
-            ++refused;
+            ++plan.refused;
             continue;
         }
         // A cycle: onto itself, or into its own subtree. `World::setParent`
         // refuses both and this asks the SAME function rather than carrying a
         // second copy of the rule.
         if (id == newParent || world.isAncestorOf(id, newParent)) {
-            ++refused;
+            ++plan.refused;
             continue;
         }
         // Already there. Not a refusal -- a parent earlier in the walk has
@@ -508,16 +499,42 @@ bool Editor::reparent(scene::World& world, std::span<const core::InstanceId> ids
         // already is would only move it to the end of the sibling list.
         if (world.parentOf(id) == newParent)
             continue;
-        movable.push_back(id);
+        plan.movable.push_back(id);
     }
+    return plan;
+}
 
-    if (movable.empty()) {
-        m_status = EditorStatus{refused > 0 ? "nothing there can be moved into that" : "already there", refused > 0};
+bool Editor::canReparent(const scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId newParent,
+                         core::InstanceId root)
+{
+    return !ids.empty() && !planReparent(world, ids, newParent, root).movable.empty();
+}
+
+bool Editor::reparent(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId newParent,
+                      core::InstanceId root, Inspector& inspector)
+{
+    if (ids.empty())
+        return false;
+
+    // **Decided before anything is recorded**, so a drag that cannot move
+    // anything leaves no undo step behind. A step that undoes nothing is worse
+    // than no step: it eats a press of ctrl-Z and the second press takes back
+    // something the person had stopped thinking about.
+    const ReparentPlan plan = planReparent(world, ids, newParent, root);
+    if (plan.targetRefuses) {
+        m_status = EditorStatus{"nothing authored can live in that", true};
         return false;
     }
 
-    m_history.record(world, movable.size() == 1 ? "Reparent" : "Reparent " + std::to_string(movable.size()));
-    for (const core::InstanceId id : movable) {
+    if (plan.movable.empty()) {
+        m_status =
+            EditorStatus{plan.refused > 0 ? "nothing there can be moved into that" : "already there", plan.refused > 0};
+        return false;
+    }
+
+    core::usize refused = plan.refused;
+    m_history.record(world, plan.movable.size() == 1 ? "Reparent" : "Reparent " + std::to_string(plan.movable.size()));
+    for (const core::InstanceId id : plan.movable) {
         if (world.setParent(id, newParent).has_value())
             ++refused;
     }
@@ -525,7 +542,7 @@ bool Editor::reparent(scene::World& world, std::span<const core::InstanceId> ids
     inspector.pruneDead(world);
     inspector.onWorldRestored();
 
-    std::string message = "moved " + std::to_string(movable.size());
+    std::string message = "moved " + std::to_string(plan.movable.size());
     if (refused > 0)
         message += ", refused " + std::to_string(refused);
     m_status = EditorStatus{message, false};

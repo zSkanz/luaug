@@ -18,8 +18,11 @@
 #include "luaug/scene/value.h"
 #include "luaug/scene/world.h"
 
+#include <algorithm>
 #include <doctest/doctest.h>
+#include <limits>
 #include <ostream>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -29,6 +32,7 @@
 #include "inspector_fixture.h"
 
 using luaug::app::coalesceKeyFor;
+using luaug::app::collectCommonProperties;
 using luaug::app::collectProperties;
 using luaug::app::collectTree;
 using luaug::app::editable;
@@ -38,8 +42,11 @@ using luaug::app::enumDomainOf;
 using luaug::app::formatValue;
 using luaug::app::Inspector;
 using luaug::app::propertyTag;
+using luaug::app::sameValue;
 using luaug::app::selectVisibleRange;
 using luaug::app::setResultLabel;
+using luaug::app::SharedState;
+using luaug::app::sharedValue;
 using luaug::app::TreeRow;
 
 namespace core = luaug::core;
@@ -657,4 +664,185 @@ TEST_CASE("a reload closes an open gesture")
     // Left open, the next unrelated edit would coalesce into whatever was being
     // dragged in a world that no longer exists.
     CHECK(inspector.gesture() == 0);
+}
+
+// --- Properties over a selection of more than one -----------------------------
+//
+// The panel is one function that cannot be called without a window, so what it
+// DECIDES lives here: which rows a mixed selection has, and what each of those
+// rows holds. Everything below is the difference between an editor that edits
+// forty parts and one that edits forty parts by accident.
+
+namespace {
+
+[[nodiscard]] std::vector<std::string> commonNames(Fixture& fixture, scene::World& world,
+                                                   std::span<const core::InstanceId> targets)
+{
+    std::vector<const scene::PropertyDesc*> properties;
+    collectCommonProperties(world, targets, properties);
+
+    std::vector<std::string> names;
+    names.reserve(properties.size());
+    for (const scene::PropertyDesc* property : properties)
+        names.emplace_back(fixture.atoms.text(property->name));
+    return names;
+}
+
+} // namespace
+
+TEST_CASE("one instance has exactly the properties of its class")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId a = fixture.widget(world, "A");
+
+    // The single-selection case is the multi-selection case with one member,
+    // and it has to stay identical -- the panel now takes only this path.
+    const core::InstanceId targets[] = {a};
+    CHECK(commonNames(fixture, world, targets) == propertyNames(fixture, fixture.widgetClass));
+}
+
+TEST_CASE("a selection of one class is that class, however many are in it")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId targets[] = {fixture.widget(world, "A"), fixture.widget(world, "B"),
+                                        fixture.widget(world, "C")};
+
+    CHECK(commonNames(fixture, world, targets) == propertyNames(fixture, fixture.widgetClass));
+}
+
+TEST_CASE("a base and a derived instance share the base's properties")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId thing = world.create(fixture.thingClass);
+    const core::InstanceId widget = fixture.widget(world, "W");
+
+    const core::InstanceId targets[] = {widget, thing};
+    const std::vector<std::string> names = commonNames(fixture, world, targets);
+
+    // The order is the FIRST target's -- the widget's -- and the widget carries
+    // the inherited four first, so this is also the assertion that the rows do
+    // not reshuffle when the set grows.
+    CHECK(names == propertyNames(fixture, fixture.thingClass));
+
+    // And the other way round is the same answer: an intersection has no
+    // preferred member.
+    const core::InstanceId reversed[] = {thing, widget};
+    CHECK(commonNames(fixture, world, reversed) == names);
+}
+
+TEST_CASE("a property two classes declare with different types is not a row")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId widget = fixture.widget(world, "W");
+    const core::InstanceId gadget = fixture.gadget(world, "G");
+
+    const core::InstanceId targets[] = {widget, gadget};
+    const std::vector<std::string> names = commonNames(fixture, world, targets);
+
+    // `Count` is a number on the widget and a string on the gadget. One row
+    // cannot edit both: the widget branch reaches for `f64` with `std::get`,
+    // which throws on the gadget's string.
+    CHECK(std::find(names.begin(), names.end(), "Count") == names.end());
+    CHECK(std::find(names.begin(), names.end(), "Flag") != names.end());
+}
+
+TEST_CASE("a property read-only on any member is read-only for the selection")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId widget = fixture.widget(world, "W");
+    const core::InstanceId gadget = fixture.gadget(world, "G");
+
+    std::vector<const scene::PropertyDesc*> properties;
+    const core::NameAtom flag = fixture.atom("Flag");
+    const auto findFlag = [&properties, flag]() -> const scene::PropertyDesc* {
+        for (const scene::PropertyDesc* property : properties) {
+            if (property->name == flag)
+                return property;
+        }
+        return nullptr;
+    };
+
+    // The widget's `Flag` is writable and the gadget's is not. Alone, the widget
+    // gets a live checkbox.
+    const core::InstanceId alone[] = {widget};
+    collectCommonProperties(world, alone, properties);
+    REQUIRE(findFlag() != nullptr);
+    CHECK(editable(*findFlag()));
+
+    // Together, it does not -- because a drag the world refuses for one of the
+    // two is a claim the panel cannot keep.
+    const core::InstanceId together[] = {widget, gadget};
+    collectCommonProperties(world, together, properties);
+    REQUIRE(findFlag() != nullptr);
+    CHECK_FALSE(editable(*findFlag()));
+}
+
+TEST_CASE("a dead member of a selection is skipped rather than answered for")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId widget = fixture.widget(world, "W");
+    const core::InstanceId gadget = fixture.gadget(world, "G");
+    world.destroy(gadget);
+    // The handle stops resolving at the end of the drain, not where destroy is
+    // called -- which is the world's own rule and not this test being careful.
+    world.retireDestroyed();
+
+    // What is left is one widget, so the rows are the widget's -- not the
+    // intersection with a class the world has retired.
+    const core::InstanceId targets[] = {widget, gadget};
+    CHECK(commonNames(fixture, world, targets) == propertyNames(fixture, fixture.widgetClass));
+
+    // And nothing alive at all is no rows, not a crash and not the first id's.
+    const core::InstanceId dead[] = {gadget};
+    CHECK(commonNames(fixture, world, dead).empty());
+    CHECK(commonNames(fixture, world, {}).empty());
+}
+
+TEST_CASE("a shared value says same, mixed or unreadable")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId a = fixture.widget(world, "A");
+    const core::InstanceId b = fixture.widget(world, "B");
+    const core::NameAtom count = fixture.atom("Count");
+
+    REQUIRE(world.setProperty(a, count, scene::Value{core::f64{4.0}}) == SetResult::Changed);
+    REQUIRE(world.setProperty(b, count, scene::Value{core::f64{4.0}}) == SetResult::Changed);
+
+    const core::InstanceId targets[] = {a, b};
+    luaug::app::SharedValue shared = sharedValue(world, targets, count);
+    CHECK(shared.state == SharedState::Same);
+    CHECK(std::get<core::f64>(shared.value) == doctest::Approx(4.0));
+
+    REQUIRE(world.setProperty(b, count, scene::Value{core::f64{9.0}}) == SetResult::Changed);
+    shared = sharedValue(world, targets, count);
+    CHECK(shared.state == SharedState::Mixed);
+    // The FIRST live target's, so a drag has somewhere to start.
+    CHECK(std::get<core::f64>(shared.value) == doctest::Approx(4.0));
+
+    // A property the class does not declare is not readable, and one member is
+    // enough: a row that edited three instances of four would have an effect
+    // nobody could predict.
+    CHECK(sharedValue(world, targets, fixture.atom("Nonesuch")).state == SharedState::Unreadable);
+    CHECK(sharedValue(world, {}, count).state == SharedState::Unreadable);
+}
+
+TEST_CASE("two NaNs are not a disagreement")
+{
+    // `operator==` says they differ, and a `Number` left at NaN would then read
+    // as mixed across a selection holding exactly the same thing.
+    const scene::Value nan{std::numeric_limits<core::f64>::quiet_NaN()};
+    CHECK(sameValue(nan, nan));
+    CHECK(sameValue(scene::Value{core::f64{1.0}}, scene::Value{core::f64{1.0}}));
+    CHECK_FALSE(sameValue(scene::Value{core::f64{1.0}}, scene::Value{core::f64{2.0}}));
+    // Zero and minus zero ARE the same value, which is what `==` says and what
+    // a bitwise comparison would have got wrong.
+    CHECK(sameValue(scene::Value{core::f64{0.0}}, scene::Value{core::f64{-0.0}}));
+    CHECK_FALSE(sameValue(scene::Value{core::f64{1.0}}, scene::Value{std::string("1")}));
 }

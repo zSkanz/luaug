@@ -48,19 +48,42 @@ struct InspectedWorld
     luaug::app::testing::Fixture schema;
     luaug::scene::World world{schema.classes, schema.enums, schema.atoms, 1234u};
     luaug::core::InstanceId root;
+    luaug::core::InstanceId zulu;
+    luaug::core::InstanceId alpha;
+    luaug::core::InstanceId leaf;
+    // A class unrelated to the other three, so that a selection spanning both
+    // has an intersection to take rather than a superset to draw.
+    luaug::core::InstanceId gadget;
 
     InspectedWorld()
     {
         root = schema.widget(world, "Root");
-        const luaug::core::InstanceId zulu = schema.widget(world, "Zulu");
-        const luaug::core::InstanceId alpha = schema.widget(world, "Alpha");
-        const luaug::core::InstanceId leaf = schema.widget(world, "Leaf");
+        zulu = schema.widget(world, "Zulu");
+        alpha = schema.widget(world, "Alpha");
+        leaf = schema.widget(world, "Leaf");
+        gadget = schema.gadget(world, "Gadget");
         static_cast<void>(world.setParent(zulu, root));
         static_cast<void>(world.setParent(alpha, root));
         static_cast<void>(world.setParent(leaf, zulu));
+        static_cast<void>(world.setParent(gadget, root));
 
         // A reference for the Instance widget to render and offer to follow.
         static_cast<void>(world.setProperty(zulu, schema.atom("Link"), luaug::scene::Value{alpha}));
+
+        // **Deliberately different from Alpha's**, so that a selection of the
+        // two takes the MIXED branch of every widget that has one -- the
+        // checkbox's indeterminate square, the drags that hide their number,
+        // the text field that starts empty. Those branches exist only for a
+        // selection of more than one and are otherwise executed by nothing.
+        static_cast<void>(world.setProperty(zulu, schema.atom("Flag"), luaug::scene::Value{true}));
+        static_cast<void>(world.setProperty(zulu, schema.atom("Count"), luaug::scene::Value{luaug::core::f64{7.0}}));
+        static_cast<void>(world.setProperty(zulu, schema.atom("Label"), luaug::scene::Value{std::string("zulu")}));
+        static_cast<void>(
+            world.setProperty(zulu, schema.atom("Offset"), luaug::scene::Value{luaug::core::Vec3{1.0f, 2.0f, 3.0f}}));
+        static_cast<void>(
+            world.setProperty(zulu, schema.atom("Tint"), luaug::scene::Value{luaug::core::Color3{1.0f, 0.0f, 0.0f}}));
+        static_cast<void>(world.setProperty(zulu, schema.atom("Mood"),
+                                            luaug::scene::Value{luaug::scene::EnumValue{schema.moodEnum, 7}}));
     }
 };
 
@@ -331,6 +354,20 @@ TEST_CASE("on a real device, F3 flips the panel")
                 inspector.select(row.id);
                 overlay.render(*cmd, swapchain.texture, Frame{.index = 2, .renderDt = 1.0 / 60.0});
             }
+
+            // **And the panel over more than one**, which is a different set of
+            // branches in every widget it draws and in the sweep above them.
+            // Two instances of one class that disagree about every property
+            // takes the mixed path; a selection spanning two unrelated classes
+            // takes the intersection, which is a shorter table with a
+            // read-only row in it. Neither is reachable by selecting one thing.
+            const std::array<luaug::core::InstanceId, 2> pair{inspected.zulu, inspected.alpha};
+            inspector.select(pair);
+            overlay.render(*cmd, swapchain.texture, Frame{.index = 3, .renderDt = 1.0 / 60.0});
+
+            const std::array<luaug::core::InstanceId, 2> across{inspected.zulu, inspected.gadget};
+            inspector.select(across);
+            overlay.render(*cmd, swapchain.texture, Frame{.index = 4, .renderDt = 1.0 / 60.0});
         }
         else {
             // Said out loud rather than passing quietly: a hidden window that

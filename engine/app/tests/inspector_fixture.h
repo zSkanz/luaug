@@ -233,6 +233,11 @@ struct Fixture
 
     scene::ClassId thingClass = scene::InvalidClass;
     scene::ClassId widgetClass = scene::InvalidClass;
+    // Unrelated to the other two by design: what a multi-selection has to
+    // survive is two classes that share a NAME and nothing else. `Flag` is the
+    // same type here and read-only, and `Count` is a string where the widget's
+    // is a number -- one row is legal and the other cannot exist.
+    scene::ClassId gadgetClass = scene::InvalidClass;
     scene::EnumId moodEnum = scene::InvalidEnum;
 
     Fixture()
@@ -346,6 +351,22 @@ struct Fixture
             },
         };
 
+        gadgetProperties = {
+            scene::PropertyDesc{
+                .name = atoms.intern("Flag"),
+                .type = scene::ValueType::Bool,
+                .readOnly = true,
+                .get = &getFlag,
+                .set = nullptr,
+            },
+            scene::PropertyDesc{
+                .name = atoms.intern("Count"),
+                .type = scene::ValueType::String,
+                .get = &getLabel,
+                .set = &setLabel,
+            },
+        };
+
         thingClass = classes.registerClass({
             .name = atoms.intern("Thing"),
             .defaultName = atoms.intern("Thing"),
@@ -356,6 +377,11 @@ struct Fixture
             .super = thingClass,
             .defaultName = atoms.intern("Widget"),
             .properties = widgetProperties,
+        });
+        gadgetClass = classes.registerClass({
+            .name = atoms.intern("Gadget"),
+            .defaultName = atoms.intern("Gadget"),
+            .properties = gadgetProperties,
         });
     }
 
@@ -371,10 +397,18 @@ struct Fixture
         return id;
     }
 
+    [[nodiscard]] core::InstanceId gadget(scene::World& world, std::string_view instanceName)
+    {
+        const core::InstanceId id = world.create(gadgetClass);
+        world.setName(id, atoms.intern(instanceName));
+        return id;
+    }
+
 private:
     std::vector<scene::EnumItemDesc> moodItems;
     std::vector<scene::PropertyDesc> thingProperties;
     std::vector<scene::PropertyDesc> widgetProperties;
+    std::vector<scene::PropertyDesc> gadgetProperties;
 };
 
 } // namespace luaug::app::testing

@@ -332,6 +332,12 @@ core::u32 g_addOpenRow = 0;
 bool g_lookLatched = false;
 std::vector<const scene::PropertyDesc*> g_properties;
 
+// The drag-and-drop type the Explorer's rows publish and accept. ImGui matches
+// payloads by this string, so it is one constant rather than a literal at two
+// call sites: a typo in either is a drop that silently never happens, with
+// nothing anywhere saying why.
+constexpr const char* kInstanceDragPayload = "luaug.instances";
+
 // The instance tree, virtualised.
 //
 // **Every row used to be drawn every frame**, which on the flagship is 4,300
@@ -519,6 +525,56 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             // vanishes the moment the pointer leaves the row to reach the list
             // and takes its own popup with it.
             const bool addOpen = g_addOpenRow == row.id.index;
+
+            // --- Moving something by dragging it ---------------------------
+            //
+            // **Both halves live on the SAME item as the selection**, and they
+            // have to: ImGui reads the last item for the source's id and for
+            // the target's rectangle, so a drag source attached to anything
+            // other than the row's own selectable drags the wrong thing.
+            //
+            // The drop target is asked first. `BeginDragDropSource` returns in
+            // three lines unless this row is the one being held, but on the row
+            // that IS held it opens a tooltip window, and a target asked
+            // afterwards would be reading that window's last item rather than
+            // the row's.
+            if (commands != nullptr && ImGui::BeginDragDropTarget()) {
+                // **Lit only where the drop would do something.** A row that
+                // highlights under the pointer and then refuses is the same
+                // broken promise a field that takes a drag the world rejects
+                // makes -- so the rule is asked here, a frame before the drag
+                // ends, through the one function the verb itself uses.
+                if (Editor::canReparent(world, inspector.selectionSet(), row.id, root)) {
+                    if (ImGui::AcceptDragDropPayload(kInstanceDragPayload) != nullptr)
+                        commands->reparentTo = row.id;
+                }
+                ImGui::EndDragDropTarget();
+            }
+
+            if (commands != nullptr && ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoHoldToOpenOthers)) {
+                // The same rule the right-click follows, and for the same
+                // reason: a drag that started on a row nobody had selected acts
+                // on that row, and one that started on a member of the
+                // selection takes all of it. Anything else throws away four
+                // things somebody had just picked in order to move one.
+                if (!inspector.isSelected(row.id))
+                    inspector.select(row.id);
+
+                // **The payload is a marker and carries no ids.** What moves is
+                // the selection, read at the drain exactly like the delete and
+                // the duplicate -- ids in the payload would be a second copy of
+                // the answer, and the copy is the one that goes stale when a
+                // panel changes the selection mid-drag.
+                const char marker = 0;
+                ImGui::SetDragDropPayload(kInstanceDragPayload, &marker, sizeof(marker));
+
+                const core::usize dragging = inspector.selectionCount();
+                if (dragging > 1)
+                    ImGui::Text("%d instances", static_cast<int>(dragging));
+                else
+                    ImGui::TextUnformatted(label);
+                ImGui::EndDragDropSource();
+            }
 
             // **Right-clicking selects first, unless this row is already part
             // of the selection.** A menu that acted on whatever was selected
@@ -791,16 +847,39 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
 // Nothing here writes. Every branch that accepts an edit enqueues it, and the
 // queue drains at the next FrameStart (Decision 15) through
 // `World::setProperty` and nothing else (Decision 14).
-void drawEditor(scene::World& world, Inspector& inspector, core::InstanceId id, const scene::PropertyDesc& descriptor)
+void drawEditor(scene::World& world, Inspector& inspector, std::span<const core::InstanceId> targets,
+                const scene::PropertyDesc& descriptor, const SharedValue& shared)
 {
-    const std::optional<scene::Value> current = world.getProperty(id, descriptor.name);
-    if (!current.has_value()) {
+    if (shared.state == SharedState::Unreadable) {
         // The class declares the property and the world cannot read it: a null
         // getter. Shown rather than skipped, because a complete view of the
         // descriptor tables is the entire claim this panel makes.
         ImGui::TextUnformatted("<unreadable>");
         return;
     }
+
+    // **Every widget below writes to the WHOLE selection**, and this is the only
+    // place that knows how many that is. One instance is the same path with one
+    // member, which is what keeps the single-selection behaviour from being a
+    // second implementation nobody exercises.
+    const auto commit = [&](const scene::Value& value) {
+        for (const core::InstanceId target : targets) {
+            if (world.alive(target))
+                inspector.enqueue(target, descriptor.name, value);
+        }
+    };
+
+    // The members disagree. The widget still shows something -- the first live
+    // one's value, so a drag has somewhere to start -- and each branch below
+    // says so in whatever way its widget can: a checkbox has ImGui's own mixed
+    // state, a drag hides its number, a text field starts empty. The row's
+    // label carries a `(mixed)` tag as well, because two of the twelve widgets
+    // (a colour and a matrix) have no honest way to express it themselves.
+    //
+    // **Editing a mixed field flattens it**, which is what every engine does and
+    // the only thing it can mean: a value typed into a field that stands for
+    // forty instances is a value for all forty.
+    const bool mixed = shared.state == SharedState::Mixed;
 
     // `editorFor` answers from the DECLARED type, and the variant holds what the
     // property actually has right now. Those disagree whenever a value is absent
@@ -813,8 +892,8 @@ void drawEditor(scene::World& world, Inspector& inspector, core::InstanceId id, 
     // Found by a human clicking `go` on `RunService.Parent`, which selects the
     // DataModel -- the one instance in the world whose own Parent is nil -- and
     // took the host down with an uncaught `std::bad_variant_access`.
-    if (std::holds_alternative<std::monostate>(*current)) {
-        ImGui::TextUnformatted("nil");
+    if (std::holds_alternative<std::monostate>(shared.value)) {
+        ImGui::TextUnformatted(mixed ? "mixed" : "nil");
         return;
     }
 
@@ -826,10 +905,13 @@ void drawEditor(scene::World& world, Inspector& inspector, core::InstanceId id, 
     // selection rather than a write -- following a reference is how you reach
     // an instance the tree has collapsed away.
     if (kind == EditorKind::InstanceRef) {
-        const core::InstanceId reference = std::get<core::InstanceId>(*current);
-        const std::string text = formatValue(world, *current);
+        const core::InstanceId reference = std::get<core::InstanceId>(shared.value);
+        const std::string text = mixed ? std::string("mixed") : formatValue(world, shared.value);
         ImGui::TextUnformatted(text.c_str());
-        if (reference.valid() && world.alive(reference)) {
+        // No `go` on a mixed reference: there is no one instance to go to, and
+        // jumping to whichever member happened to be first would replace the
+        // selection with something nobody pointed at.
+        if (!mixed && reference.valid() && world.alive(reference)) {
             ImGui::SameLine();
             if (ImGui::SmallButton("go"))
                 inspector.select(reference);
@@ -842,118 +924,148 @@ void drawEditor(scene::World& world, Inspector& inspector, core::InstanceId id, 
     // takes a drag the world then refuses is a UI making a claim it cannot
     // keep, and the refusal arrives a frame later with nothing attaching it to
     // the gesture that caused it.
+    //
+    // Over a selection, `collectCommonProperties` has already answered with the
+    // most restrictive descriptor of the set, so read-only for any member is
+    // read-only here.
     const bool locked = !editable(descriptor);
     if (locked)
         ImGui::BeginDisabled();
 
     switch (kind) {
     case EditorKind::Checkbox: {
-        bool value = std::get<bool>(*current);
+        bool value = std::get<bool>(shared.value);
+        // The one widget ImGui expresses this natively for, and it draws a
+        // filled square rather than a tick or a gap.
+        if (mixed)
+            ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, true);
         if (ImGui::Checkbox("##value", &value))
-            inspector.enqueue(id, descriptor.name, scene::Value{value});
+            commit(scene::Value{value});
+        if (mixed)
+            ImGui::PopItemFlag();
         break;
     }
     case EditorKind::Number: {
-        f64 value = std::get<f64>(*current);
-        if (ImGui::DragScalar("##value", ImGuiDataType_Double, &value, 0.01f, nullptr, nullptr, "%.4f"))
-            inspector.enqueue(id, descriptor.name, scene::Value{value});
+        f64 value = std::get<f64>(shared.value);
+        // A format with no conversion in it is ImGui's own way of saying "do
+        // not show the number": the drag still works and a ctrl-click still
+        // opens an empty field that parses. Which is exactly right for a value
+        // that is nobody's -- the alternative shows one member's number as if
+        // it were everyone's.
+        if (ImGui::DragScalar("##value", ImGuiDataType_Double, &value, 0.01f, nullptr, nullptr, mixed ? "--" : "%.4f"))
+            commit(scene::Value{value});
         break;
     }
     case EditorKind::Text: {
-        const std::string& text = std::get<std::string>(*current);
+        const std::string& text = std::get<std::string>(shared.value);
         char buffer[256]{};
-        if (text.size() + 1 > sizeof(buffer)) {
-            // Editing through a buffer that cannot hold the value would write a
-            // truncated string back on the first Enter. Shown, not offered.
-            ImGui::TextUnformatted(text.c_str());
-            break;
+        if (!mixed) {
+            if (text.size() + 1 > sizeof(buffer)) {
+                // Editing through a buffer that cannot hold the value would
+                // write a truncated string back on the first Enter. Shown, not
+                // offered.
+                ImGui::TextUnformatted(text.c_str());
+                break;
+            }
+            std::snprintf(buffer, sizeof(buffer), "%s", text.c_str());
         }
-        std::snprintf(buffer, sizeof(buffer), "%s", text.c_str());
-        if (ImGui::InputText("##value", buffer, sizeof(buffer), ImGuiInputTextFlags_EnterReturnsTrue))
-            inspector.enqueue(id, descriptor.name, scene::Value{std::string(buffer)});
+        // A mixed field starts EMPTY behind a hint rather than pre-filled with
+        // one member's string. Pre-filling would make replacing forty names
+        // with one look like a correction rather than an overwrite -- and
+        // Enter on a field nobody edited would do it.
+        const bool entered =
+            mixed ? ImGui::InputTextWithHint("##value", "mixed", buffer, sizeof(buffer),
+                                             ImGuiInputTextFlags_EnterReturnsTrue)
+                  : ImGui::InputText("##value", buffer, sizeof(buffer), ImGuiInputTextFlags_EnterReturnsTrue);
+        if (entered)
+            commit(scene::Value{std::string(buffer)});
         break;
     }
     case EditorKind::Vector3: {
-        const core::Vec3 value = std::get<core::Vec3>(*current);
+        const core::Vec3 value = std::get<core::Vec3>(shared.value);
         float components[3]{value.x, value.y, value.z};
-        if (ImGui::DragFloat3("##value", components, 0.01f))
-            inspector.enqueue(id, descriptor.name,
-                              scene::Value{core::Vec3{components[0], components[1], components[2]}});
+        if (ImGui::DragFloat3("##value", components, 0.01f, 0.0f, 0.0f, mixed ? "--" : "%.3f"))
+            commit(scene::Value{core::Vec3{components[0], components[1], components[2]}});
         break;
     }
     case EditorKind::CFrame: {
-        core::CFrameD value = std::get<core::CFrameD>(*current);
+        core::CFrameD value = std::get<core::CFrameD>(shared.value);
         f64 position[3]{value.position.x, value.position.y, value.position.z};
-        if (ImGui::DragScalarN("##value", ImGuiDataType_Double, position, 3, 0.01f, nullptr, nullptr, "%.3f")) {
+        if (ImGui::DragScalarN("##value", ImGuiDataType_Double, position, 3, 0.01f, nullptr, nullptr,
+                               mixed ? "--" : "%.3f")) {
             value.position = core::DVec3{position[0], position[1], position[2]};
-            inspector.enqueue(id, descriptor.name, scene::Value{value});
+            commit(scene::Value{value});
         }
         // The basis is shown and never edited. A 3x3 rotation has no honest
         // widget, and round-tripping it through Euler angles would rewrite the
         // matrix on every frame the panel is open -- a property-changed fire
         // per frame for a value nobody touched.
         for (int axis = 0; axis < 3; ++axis) {
+            if (mixed) {
+                ImGui::TextUnformatted("-- -- --");
+                continue;
+            }
             ImGui::Text("%.3f %.3f %.3f", static_cast<f64>(value.rotation.m[axis][0]),
                         static_cast<f64>(value.rotation.m[axis][1]), static_cast<f64>(value.rotation.m[axis][2]));
         }
         break;
     }
     case EditorKind::Color: {
-        const core::Color3 value = std::get<core::Color3>(*current);
+        const core::Color3 value = std::get<core::Color3>(shared.value);
         float components[3]{value.r, value.g, value.b};
         // Float and HDR because api-design.md 2.3 leaves the range open: a
         // picker that clamped to [0, 1] would silently rewrite a light's
         // intensity the first time anyone looked at it.
+        //
+        // A mixed colour shows the first member's swatch, which is the one
+        // widget here that cannot say otherwise -- a picker with no colour in
+        // it is not a picker. The row's `(mixed)` tag is what carries it.
         if (ImGui::ColorEdit3("##value", components, ImGuiColorEditFlags_Float | ImGuiColorEditFlags_HDR))
-            inspector.enqueue(id, descriptor.name,
-                              scene::Value{core::Color3{components[0], components[1], components[2]}});
+            commit(scene::Value{core::Color3{components[0], components[1], components[2]}});
         break;
     }
     case EditorKind::Vector2: {
-        const core::Vec2 value = std::get<core::Vec2>(*current);
+        const core::Vec2 value = std::get<core::Vec2>(shared.value);
         float components[2]{value.x, value.y};
-        if (ImGui::DragFloat2("##value", components, 0.5f))
-            inspector.enqueue(id, descriptor.name, scene::Value{core::Vec2{components[0], components[1]}});
+        if (ImGui::DragFloat2("##value", components, 0.5f, 0.0f, 0.0f, mixed ? "--" : "%.3f"))
+            commit(scene::Value{core::Vec2{components[0], components[1]}});
         break;
     }
     case EditorKind::UDim: {
-        const core::UDim value = std::get<core::UDim>(*current);
+        const core::UDim value = std::get<core::UDim>(shared.value);
         float scale = value.scale;
         float offset = value.offset;
         // Two widgets rather than a DragFloat2, because the two halves are not
         // the same quantity: a scale moves in hundredths of a parent and an
         // offset moves in pixels, and one shared step makes one of them useless.
-        bool changed = ImGui::DragFloat("##scale", &scale, 0.01f);
-        changed = ImGui::DragFloat("##offset", &offset, 1.0f) || changed;
+        bool changed = ImGui::DragFloat("##scale", &scale, 0.01f, 0.0f, 0.0f, mixed ? "--" : "%.3f");
+        changed = ImGui::DragFloat("##offset", &offset, 1.0f, 0.0f, 0.0f, mixed ? "--" : "%.3f") || changed;
         if (changed)
-            inspector.enqueue(id, descriptor.name, scene::Value{core::UDim{scale, offset}});
+            commit(scene::Value{core::UDim{scale, offset}});
         break;
     }
     case EditorKind::UDim2: {
-        const core::UDim2 value = std::get<core::UDim2>(*current);
+        const core::UDim2 value = std::get<core::UDim2>(shared.value);
         float scales[2]{value.x.scale, value.y.scale};
         float offsets[2]{value.x.offset, value.y.offset};
-        bool changed = ImGui::DragFloat2("##scale", scales, 0.01f);
-        changed = ImGui::DragFloat2("##offset", offsets, 1.0f) || changed;
+        bool changed = ImGui::DragFloat2("##scale", scales, 0.01f, 0.0f, 0.0f, mixed ? "--" : "%.3f");
+        changed = ImGui::DragFloat2("##offset", offsets, 1.0f, 0.0f, 0.0f, mixed ? "--" : "%.3f") || changed;
         if (changed) {
-            inspector.enqueue(
-                id, descriptor.name,
-                scene::Value{core::UDim2{core::UDim{scales[0], offsets[0]}, core::UDim{scales[1], offsets[1]}}});
+            commit(scene::Value{core::UDim2{core::UDim{scales[0], offsets[0]}, core::UDim{scales[1], offsets[1]}}});
         }
         break;
     }
     case EditorKind::Rect: {
-        const core::Rect value = std::get<core::Rect>(*current);
+        const core::Rect value = std::get<core::Rect>(shared.value);
         float components[4]{value.min.x, value.min.y, value.max.x, value.max.y};
-        if (ImGui::DragFloat4("##value", components, 1.0f)) {
-            inspector.enqueue(id, descriptor.name,
-                              scene::Value{core::Rect{core::Vec2{components[0], components[1]},
-                                                      core::Vec2{components[2], components[3]}}});
+        if (ImGui::DragFloat4("##value", components, 1.0f, 0.0f, 0.0f, mixed ? "--" : "%.3f")) {
+            commit(scene::Value{
+                core::Rect{core::Vec2{components[0], components[1]}, core::Vec2{components[2], components[3]}}});
         }
         break;
     }
     case EditorKind::EnumCombo: {
-        const scene::EnumValue value = std::get<scene::EnumValue>(*current);
+        const scene::EnumValue value = std::get<scene::EnumValue>(shared.value);
 
         // The domain comes from the DESCRIPTOR, not from the value in the field.
         // Reading it off the value made the combo depend on the instance being
@@ -970,7 +1082,7 @@ void drawEditor(scene::World& world, Inspector& inspector, core::InstanceId id, 
             domain = value.enumId;
 
         const scene::EnumDescriptor* enumDescriptor = world.enums().find(domain);
-        const std::string preview = formatValue(world, *current);
+        const std::string preview = mixed ? std::string("mixed") : formatValue(world, shared.value);
         if (enumDescriptor == nullptr) {
             ImGui::TextUnformatted(preview.c_str());
             break;
@@ -980,9 +1092,11 @@ void drawEditor(scene::World& world, Inspector& inspector, core::InstanceId id, 
             // therefore not something a panel gets to re-sort either.
             for (const scene::EnumItemDesc& item : enumDescriptor->items) {
                 const std::string itemName(world.atoms().text(item.name));
-                const bool selected = domain == value.enumId && item.value == value.value;
+                // Nothing is ticked while the members disagree: a tick would
+                // name one of them as the selection's answer.
+                const bool selected = !mixed && domain == value.enumId && item.value == value.value;
                 if (ImGui::Selectable(itemName.c_str(), selected))
-                    inspector.enqueue(id, descriptor.name, scene::Value{scene::EnumValue{domain, item.value}});
+                    commit(scene::Value{scene::EnumValue{domain, item.value}});
             }
             ImGui::EndCombo();
         }
@@ -993,7 +1107,7 @@ void drawEditor(scene::World& world, Inspector& inspector, core::InstanceId id, 
         // The floor every `ValueType` falls back to, so that one with no editor
         // of its own is still inspectable rather than absent (M4 brief,
         // entering risk 6).
-        const std::string text = formatValue(world, *current);
+        const std::string text = mixed ? std::string("mixed") : formatValue(world, shared.value);
         ImGui::TextUnformatted(text.c_str());
         break;
     }
@@ -1012,15 +1126,36 @@ core::u64 g_propertyGesture = 0;
 
 void drawProperties(scene::World& world, Inspector& inspector)
 {
-    const core::InstanceId selected = inspector.selection();
-    if (!selected.valid() || !world.alive(selected)) {
+    // **The whole selection, not the primary.** A grid pointed at one instance
+    // while three are highlighted is the editor disagreeing with itself, and it
+    // is how somebody ends up moving one part and believing they moved three.
+    const std::span<const core::InstanceId> targets = inspector.selectionSet();
+
+    core::usize live = 0;
+    for (const core::InstanceId id : targets)
+        live += world.alive(id) ? 1u : 0u;
+
+    if (live == 0) {
         ImGui::TextUnformatted("nothing selected");
         return;
     }
 
+    // Said out loud, because a grid that looks identical for one instance and
+    // for forty is one somebody edits forty instances with by accident.
+    if (live > 1)
+        ImGui::Text("%zu instances selected - every edit writes to all of them", live);
+
     // One loop over the descriptor tables. There is no switch on a class name
     // anywhere below this line, which is Decision 16's whole claim.
-    collectProperties(world.classes(), world.classOf(selected), g_properties);
+    collectCommonProperties(world, targets, g_properties);
+
+    if (g_properties.empty()) {
+        // Two classes with nothing in common is a legal selection and an empty
+        // grid is the honest answer -- but an empty panel with no sentence in
+        // it reads as a bug in the panel.
+        ImGui::TextUnformatted("these classes share no properties");
+        return;
+    }
 
     if (ImGui::BeginTable("properties", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp)) {
         ImGui::TableSetupColumn("property", ImGuiTableColumnFlags_WidthStretch, 0.45f);
@@ -1057,8 +1192,19 @@ void drawProperties(scene::World& world, Inspector& inspector)
                 }
             }
 
+            // Read once and handed to the editor. Asking twice would be two
+            // sweeps of the selection per row per frame, and the tag and the
+            // widget could then disagree.
+            const SharedValue shared = sharedValue(world, targets, descriptor->name);
+            if (shared.state == SharedState::Mixed) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("(mixed)");
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("the selected instances hold different values; editing this sets all of them");
+            }
+
             ImGui::TableSetColumnIndex(1);
-            drawEditor(world, inspector, selected, *descriptor);
+            drawEditor(world, inspector, targets, *descriptor, shared);
         }
         ImGui::EndTable();
     }
@@ -1069,6 +1215,10 @@ void drawProperties(scene::World& world, Inspector& inspector)
     // this is four lines here rather than a pair of calls repeated through
     // twelve widget branches, three of which draw more than one widget and
     // would each have got it subtly wrong.
+    //
+    // It matters more over a selection than it ever did over one instance: a
+    // drag that writes to forty parts enqueues forty writes a frame, and
+    // without a gesture every one of those frames is a world snapshot.
     //
     // The panel closes only the gesture it opened. The manipulators open their
     // own, and a properties panel that ended somebody else's drag because
