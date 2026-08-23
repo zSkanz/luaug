@@ -10,6 +10,13 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   is left is the Gate Record, the screenshots and a person's sign-off. The
   brief's "Where E2 stands" section is the full account.
 
+  **D076 found a hole in the test fixture that had been open since M6.**
+  `inspector_fixture.h` claims one property of every `ValueType` and asserts on
+  the variant's size — and counting is not covering: four types appended by M6
+  were named by no property, so four editor branches were executed by no test at
+  all. The M4 brief's entering risk 6, word for word, found exactly the way it
+  said it would be.
+
   **The properties grid answers for the whole selection**, and the two rules that
   shape it are both tests: the rows are intersected by name AND by type, because
   two classes that declare one name for two types cannot share a widget; and a
@@ -146,7 +153,7 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
 - **All four of E2's frozen interfaces are built and tested**, which is the point
   the plan said nothing fans out before: the selection set, the gesture and its
   extracted undo key, the manipulator arithmetic, and `Editor`'s verbs.
-- **Nine defects closed in this milestone and seven of them came from a person
+- **Eleven defects closed in this milestone and nine of them came from a person
   using the editor**, which is now the pattern every milestone since M4 has
   repeated. D067 is why the editor was unusable on the flagship at all: a boot
   scene was applied AFTER the entry scripts had built the world, destroying every
@@ -311,6 +318,15 @@ there when this file passed its ~300-line cap.
   break-verified by making them wrong and watching the right test fail. The drop
   target then asks the SAME function the verb applies, which is the only way a
   row that lights up cannot then refuse.
+
+  **Then three more the human hit in one sitting**, and the first was not the one
+  they reported: "why can I not add a child to a Folder" was the plus working and
+  the tree never opening (D075), a `UDim` was two unlabelled boxes (D076), and the
+  plus now follows the pointer instead of sitting on every selected row.
+
+  **Learned from D076, and it is the one to carry:** a `static_assert` that
+  COUNTS is not a test that COVERS. The fixture asserted `variant_size_v<Value>
+  == 13` and named nine of them.
 
   **Next:** open the editor on the flagship, capture what a person sees, and
   write E2's Gate Record. There is nothing left to build.
