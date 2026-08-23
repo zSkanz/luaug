@@ -944,8 +944,32 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // test could reach. An open gesture is one drag however many writes it
         // made; without one the old rule still applies, so a caller that never
         // learned about gestures behaves exactly as it did.
+        // **What the editor is authoring, which is not always the game's
+        // world** (ADR 0049). A stamp opens onto a stage -- a `scene::World` of
+        // its own, with a Workspace, a Lighting and nothing else -- and while
+        // one is open every panel, every verb, the picker and the renderer look
+        // at that instead. The SIMULATION never does: play is refused while a
+        // stamp is open, so the game's world simply sits still.
+        //
+        // **Functions rather than references, and that is not style.** A hot
+        // reload REPLACES `host`'s world, and a reference taken before it is a
+        // reference into freed memory afterwards -- which is what the first cut
+        // of this was, and what `tests/hotreload` caught as a Jolt assertion
+        // inside a physics update that had nothing to do with any of it. A
+        // stage appearing or going does the same thing one frame later. Asked
+        // at the point of use, both answers are always the current ones.
+        const auto stageOf = [&]() -> Editor::Stage* { return options.editor ? editor.stage() : nullptr; };
+        const auto authored = [&]() -> scene::World& {
+            Editor::Stage* const open = stageOf();
+            return open != nullptr ? open->world() : host->world();
+        };
+        const auto authoredRoot = [&]() -> core::InstanceId {
+            Editor::Stage* const open = stageOf();
+            return open != nullptr ? open->workspace() : host->runtime().dataModel();
+        };
+
         if (options.editor && inspector.pendingCount() > 0)
-            editor.history().record(host->world(), "Edit", coalesceKeyFor(inspector.gesture(), inspector.pending()));
+            editor.history().record(authored(), "Edit", coalesceKeyFor(inspector.gesture(), inspector.pending()));
 
         // **An edit inside a stamped subtree breaks its mark, before the edit
         // lands** (ADR 0049). Here rather than inside `applyPending`, because
@@ -953,8 +977,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // run time is playing, not authoring, and a link that dissolved
         // because a game ran would be a link nobody could rely on.
         if (options.editor)
-            (void)editor.breakStampsFor(host->world(), inspector.pending());
-        inspector.applyPending(host->world());
+            (void)editor.breakStampsFor(authored(), inspector.pending());
+        inspector.applyPending(authored());
 
         // A click resolves here too, and AFTER the drain rather than before:
         // whatever was typed into the old selection lands before the selection
@@ -1025,8 +1049,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // carried both acts on a world the create has already finished
                 // with rather than on one halfway through it.
                 if (editorCommands.createClass != scene::InvalidClass && editorCommands.createParent.valid()) {
-                    (void)editor.createInstance(host->world(), editorCommands.createClass, editorCommands.createParent,
-                                                host->runtime().dataModel(), inspector);
+                    (void)editor.createInstance(authored(), editorCommands.createClass, editorCommands.createParent,
+                                                authoredRoot(), inspector);
                 }
                 // **Copied before either verb runs**, because both of them
                 // change the selection -- a duplicate selects the copies -- and
@@ -1037,14 +1061,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     const std::vector<core::InstanceId> acting(inspector.selectionSet().begin(),
                                                                inspector.selectionSet().end());
                     if (editorCommands.reparentTo.valid()) {
-                        (void)editor.reparent(host->world(), acting, editorCommands.reparentTo,
-                                              host->runtime().dataModel(), inspector);
+                        (void)editor.reparent(authored(), acting, editorCommands.reparentTo, authoredRoot(), inspector);
                     }
                     if (editorCommands.deleteSelection) {
-                        (void)editor.deleteInstances(host->world(), acting, host->runtime().dataModel(), inspector);
+                        (void)editor.deleteInstances(authored(), acting, authoredRoot(), inspector);
                     }
                     if (editorCommands.duplicateSelection) {
-                        (void)editor.duplicateInstances(host->world(), acting, host->runtime().dataModel(), inspector);
+                        (void)editor.duplicateInstances(authored(), acting, authoredRoot(), inspector);
                     }
                 }
                 // **Colouring a folder**, from either panel. Which store it
@@ -1053,7 +1076,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // and `Editor::setFolderColor` says why.
                 if (editorCommands.colorAsked) {
                     if (editorCommands.colorTarget.valid()) {
-                        editor.setFolderColor(host->world(), editorCommands.colorTarget, editorCommands.color);
+                        editor.setFolderColor(authored(), editorCommands.colorTarget, editorCommands.color);
                     }
                     else if (!editorCommands.colorContentPath.empty()) {
                         editor.setContentColor(editorCommands.colorContentPath, editorCommands.color);
@@ -1066,7 +1089,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 }
                 // --- Stamps (ADR 0049) ---------------------------------
                 if (editorCommands.stampSubject.valid() && !editorCommands.stampName.empty()) {
-                    (void)editor.createStamp(host->world(), editorCommands.stampSubject, host->runtime().dataModel(),
+                    (void)editor.createStamp(authored(), editorCommands.stampSubject, authoredRoot(),
                                              editorCommands.stampName);
                 }
                 if (!editorCommands.placeStamp.empty()) {
@@ -1075,26 +1098,27 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     // folder -- and under `Workspace` otherwise.
                     const core::InstanceId primary = inspector.selection();
                     const core::InstanceId parent =
-                        primary.valid() && Editor::canParentInto(host->world(), primary, host->runtime().dataModel())
+                        primary.valid() && Editor::canParentInto(authored(), primary, authoredRoot())
                             ? primary
-                            : host->workspace();
-                    (void)editor.instantiateStamp(host->world(), editorCommands.placeStamp, parent,
-                                                  host->runtime().dataModel(), inspector);
+                            : (stageOf() != nullptr ? stageOf()->workspace() : host->workspace());
+                    (void)editor.instantiateStamp(authored(), editorCommands.placeStamp, parent, authoredRoot(),
+                                                  inspector);
                 }
                 if (editorCommands.breakStamp.valid())
-                    (void)editor.breakStamp(host->world(), editorCommands.breakStamp);
+                    (void)editor.breakStamp(authored(), editorCommands.breakStamp);
 
                 // **Opening and closing both replace the world**, so they are
                 // drained here beside play and stop rather than acted on where
                 // they were clicked -- a panel behind this one is still drawing
                 // from what they would replace.
                 if (!editorCommands.openStamp.empty()) {
-                    (void)editor.openStamp(host->world(), editorCommands.openStamp, host->workspace(), inspector);
+                    (void)editor.openStamp(editorCommands.openStamp, host->classes(), host->enums(), host->atoms(),
+                                           inspector);
                 }
                 if (editorCommands.saveStamp)
-                    (void)editor.saveStamp(host->world());
+                    (void)editor.saveStamp();
                 if (editorCommands.closeStamp)
-                    (void)editor.closeStamp(host->world(), inspector, editorCommands.closeStampSaving);
+                    (void)editor.closeStamp(inspector, editorCommands.closeStampSaving);
 
                 // One question about every verb rather than a flag on each:
                 // "did anything change since the last save".
@@ -1102,8 +1126,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     editor.touchStamp();
 
                 if (editorCommands.renameInstance.valid())
-                    (void)editor.renameInstance(host->world(), editorCommands.renameInstance,
-                                                host->runtime().dataModel(), editorCommands.renameInstanceTo);
+                    (void)editor.renameInstance(authored(), editorCommands.renameInstance, authoredRoot(),
+                                                editorCommands.renameInstanceTo);
 
                 // Content actions resolve the entry by path, because the tree
                 // may have been re-read between the click and here -- and an
@@ -1127,9 +1151,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 if (editorCommands.quit)
                     quit = true;
                 if (editorCommands.undo)
-                    (void)editor.undo(host->world(), inspector);
+                    (void)editor.undo(authored(), inspector);
                 if (editorCommands.redo)
-                    (void)editor.redo(host->world(), inspector);
+                    (void)editor.redo(authored(), inspector);
                 if (editorCommands.clearSelection)
                     inspector.select(core::InstanceId{});
                 if (editorCommands.newScene) {
@@ -1157,11 +1181,18 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // a handle is not a press asking to select whatever is behind it,
             // and losing the selection on the frame you grab its gizmo is the
             // commonest way a first manipulator is unusable.
-            const bool gizmoTook = editor.driveGizmo(host->world(), inspector);
+            // **Re-aimed every frame**, because a stamp opening or closing
+            // swaps the world underneath the panels -- and an overlay still
+            // pointing at the other one would be drawing a tree that is not
+            // the tree the verbs act on.
+            if (overlay.has_value())
+                overlay->setInspectionTarget(&authored(), authoredRoot(), &inspector);
+
+            const bool gizmoTook = editor.driveGizmo(authored(), inspector);
 
             const core::InstanceId wasSelected = inspector.selection();
             if (!gizmoTook)
-                editor.resolvePick(host->world(), inspector);
+                editor.resolvePick(authored(), inspector);
 
             // An editor says what you picked. It is the cheapest confirmation
             // that a click landed on the thing under the cursor rather than on
@@ -1172,11 +1203,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             if (inspector.selection() != wasSelected) {
                 if (inspector.selection().valid()) {
                     const scene::ClassDescriptor* descriptor =
-                        host->world().classes().find(host->world().classOf(inspector.selection()));
+                        authored().classes().find(authored().classOf(inspector.selection()));
                     const core::I18nArg args[] = {
-                        {"name", host->world().atoms().text(host->world().name(inspector.selection()))},
+                        {"name", authored().atoms().text(authored().name(inspector.selection()))},
                         {"class",
-                         descriptor != nullptr ? host->world().atoms().text(descriptor->name) : std::string_view{"?"}},
+                         descriptor != nullptr ? authored().atoms().text(descriptor->name) : std::string_view{"?"}},
                     };
                     core::log(core::LogLevel::Info, LUAUG_TR("engine.editor.info.selected"), args);
                 }
@@ -1762,8 +1793,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             const std::span<const core::InstanceId> outlined = options.editor && editing(editor.runState())
                                                                    ? inspector.selectionSet()
                                                                    : std::span<const core::InstanceId>{};
-            render::extract(host->world(), host->workspace(), host->lighting(), meshLibrary, aspect, shadowRadius,
-                            host->animation(), renderAlpha, &transformHistory, snapshot,
+            // **The stage, when one is open.** A prefab is looked at on its
+            // own; drawing it inside the game's scene is what a person saw and
+            // called wrong, and it was.
+            render::extract(authored(), stageOf() != nullptr ? stageOf()->workspace() : host->workspace(),
+                            stageOf() != nullptr ? stageOf()->lighting() : host->lighting(), meshLibrary, aspect,
+                            shadowRadius, host->animation(), renderAlpha, &transformHistory, snapshot,
                             useEditorView ? &editorView : nullptr, outlined);
             // The UI is laid out against the TARGET's size rather than the
             // window's: an offscreen render at 640x360 has to produce the

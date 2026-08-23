@@ -194,6 +194,20 @@ public:
 
     [[nodiscard]] scene::World& world() noexcept { return *m_world; }
 
+    // The registries this host's world was built against.
+    //
+    // **Exposed so a SECOND world can share them**, which the prefab stage
+    // needs (ADR 0049): a stage is a world of its own -- no services, no
+    // scripts, no scene -- and a world built against a second set of
+    // registries would mint different `ClassId`s for the same classes, so an
+    // instance could not be described by one and read by the other.
+    //
+    // Shared rather than copied: a registry is a build-time fact, and two
+    // copies of one is two answers to "what is a Part".
+    [[nodiscard]] scene::ClassRegistry& classes() noexcept { return m_classes; }
+    [[nodiscard]] scene::EnumRegistry& enums() noexcept { return m_enums; }
+    [[nodiscard]] core::AtomTable& atoms() noexcept { return m_atoms; }
+
     // `Workspace`, which is what `render::extract` treats as the world root:
     // whatever is parented under it is in the world and whatever is not, is not.
     [[nodiscard]] core::InstanceId workspace() const noexcept { return m_workspace; }

@@ -305,6 +305,13 @@ struct Fixture
     // same type here and read-only, and `Count` is a string where the widget's
     // is a number -- one row is legal and the other cannot exist.
     scene::ClassId gadgetClass = scene::InvalidClass;
+    // **The two classes a prefab STAGE needs**, and nothing more (ADR 0049).
+    // A stage builds a `Workspace` to hold what is being edited and a
+    // `Lighting` to see it by, and it finds them by name -- so a fixture
+    // without them cannot stand one up. No components and no properties:
+    // what the stage needs from these is that they exist.
+    scene::ClassId workspaceClass = scene::InvalidClass;
+    scene::ClassId lightingClass = scene::InvalidClass;
     scene::EnumId moodEnum = scene::InvalidEnum;
 
     Fixture()
@@ -474,6 +481,14 @@ struct Fixture
             .name = atoms.intern("Gadget"),
             .defaultName = atoms.intern("Gadget"),
             .properties = gadgetProperties,
+        });
+        workspaceClass = classes.registerClass({
+            .name = atoms.intern("Workspace"),
+            .defaultName = atoms.intern("Workspace"),
+        });
+        lightingClass = classes.registerClass({
+            .name = atoms.intern("Lighting"),
+            .defaultName = atoms.intern("Lighting"),
         });
     }
 

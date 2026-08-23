@@ -690,6 +690,52 @@ public:
     // exactly the economy that makes checking the instance alone wrong.
     [[nodiscard]] static bool authorable(const scene::World& world, core::InstanceId id, core::InstanceId root);
 
+    // --- The stage a stamp is edited on --------------------------------------
+    //
+    // **A stamp opens into a WORLD OF ITS OWN**, and the reason is the one a
+    // person sees immediately: editing a prefab inside the game's scene shows
+    // the prefab standing in the middle of the game, and every service the game
+    // has is in the tree beside it. Unity calls this a prefab stage and Unreal
+    // gives a blueprint its own viewport; both are the same answer to the same
+    // complaint.
+    //
+    // **It is a bare `scene::World`, not a second host.** A stage has no
+    // scripts, no physics, no streaming and no project -- it is a place to
+    // arrange instances and look at them -- so the runtime a `WorldHost` builds
+    // would be a `lua_State` per open prefab for nothing. What it does have is
+    // exactly what drawing one needs: a `Workspace` to hold the instances and a
+    // `Lighting` to see them by.
+    //
+    // **The registries are SHARED with the game's world**, not copied. A
+    // `ClassId` is an index into a registry, so two registries mint different
+    // ids for the same class and an instance described by one could not be read
+    // by the other -- which is exactly what moving a stamp between the two has
+    // to do.
+    class Stage
+    {
+    public:
+        // Builds an empty stage against the given registries. Cheap: no
+        // runtime, no physics, no scripts.
+        Stage(scene::ClassRegistry& classes, scene::EnumRegistry& enums, core::AtomTable& atoms, core::u64 seed);
+
+        [[nodiscard]] scene::World& world() noexcept { return m_world; }
+        [[nodiscard]] const scene::World& world() const noexcept { return m_world; }
+        // What `extract` is given: where the instances are, and what lights them.
+        [[nodiscard]] core::InstanceId workspace() const noexcept { return m_workspace; }
+        [[nodiscard]] core::InstanceId lighting() const noexcept { return m_lighting; }
+
+    private:
+        scene::World m_world;
+        core::InstanceId m_workspace;
+        core::InstanceId m_lighting;
+    };
+
+    // The stage, or nullptr when no stamp is open. The frame loop points the
+    // panels, the picker and the renderer at this world instead of the game's
+    // while it exists -- which is the whole of "a separate environment".
+    [[nodiscard]] Stage* stage() noexcept { return m_stage.get(); }
+    [[nodiscard]] const Stage* stage() const noexcept { return m_stage.get(); }
+
     // --- Editing a stamp (ADR 0049) ------------------------------------------
     //
     // **Opening a stamp replaces the world with it**, and that is the whole
@@ -724,16 +770,24 @@ public:
 
     [[nodiscard]] const StampSession& stampSession() const noexcept { return m_stamp; }
 
-    // Opens a stamp for editing. Refused while playing: a stamp is authored, and
-    // a world that is ticking is not one somebody is authoring.
-    bool openStamp(scene::World& world, std::string_view path, core::InstanceId workspace, Inspector& inspector);
+    // Opens a stamp onto a stage of its own. Refused while playing: a stamp is
+    // authored, and a world that is ticking is not one somebody is authoring.
+    //
+    // The registries are the game world's, shared rather than copied -- see
+    // `Stage` for why that is not optional.
+    bool openStamp(std::string_view path, scene::ClassRegistry& classes, scene::EnumRegistry& enums,
+                   core::AtomTable& atoms, Inspector& inspector);
 
-    // Writes what is open back to its file. The world is not touched.
-    bool saveStamp(const scene::World& world);
+    // Writes the open stage back to its file. Nothing is destroyed.
+    bool saveStamp();
 
-    // Puts the scene back. `save` writes first; without it the edits are dropped,
-    // which is what a person choosing "close without saving" means.
-    bool closeStamp(scene::World& world, Inspector& inspector, bool save);
+    // Drops the stage. `save` writes it out first; without it the edits go with
+    // it, which is what "close without saving" means.
+    //
+    // **The game's world was never touched, so there is nothing to put back.**
+    // That is the difference between a stage and the first cut of this, and it
+    // is why a person no longer finds their prefab standing in their game.
+    bool closeStamp(Inspector& inspector, bool save);
 
     // Marks the open stamp as changed. Called by the frame loop whenever an
     // editor verb touches the world, because "did anything change" is a question
@@ -1095,11 +1149,9 @@ private:
     std::map<std::string, core::Color3> m_contentColors;
     ScriptFile m_lastScript;
     StampSession m_stamp;
-    // The scene to put back when the stamp closes. A pointer for the reason
-    // `m_playSnapshot` is one: a `WorldSnapshot` is the world's component pools
-    // and holding one by value in every editor would cost that whether or not
-    // anybody ever opened a stamp.
-    std::unique_ptr<scene::WorldSnapshot> m_stampReturn;
+    // The world a stamp is edited in, or nothing. Built on open and dropped on
+    // close, so an editor with no stamp open carries no stage at all.
+    std::unique_ptr<Stage> m_stage;
 
     // A drag in progress. `start` is where the pointer was solved to on the
     // frame the button went down, and `before` is every selected instance's

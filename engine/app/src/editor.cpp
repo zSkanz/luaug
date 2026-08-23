@@ -18,6 +18,11 @@
 namespace luaug::app {
 using core::Vec3;
 namespace {
+// The seed a stage's world is built with. A constant, because nothing in a
+// stage is simulated and nothing in it reads the generator -- and a seed drawn
+// from anywhere else would make a stamp's bytes depend on when it was opened.
+constexpr core::u64 kStageSeed = 0x5741'4D50u;
+
 // The same format the headless path renders into. An editor's viewport is the
 // headless render with somebody watching, so a second format here would be a
 // second thing to keep in step for no gain.
@@ -766,7 +771,32 @@ bool Editor::breakStamp(scene::World& world, core::InstanceId id)
     return true;
 }
 
-bool Editor::openStamp(scene::World& world, std::string_view path, core::InstanceId workspace, Inspector& inspector)
+Editor::Stage::Stage(scene::ClassRegistry& classes, scene::EnumRegistry& enums, core::AtomTable& atoms, core::u64 seed)
+    : m_world(classes, enums, atoms, seed)
+{
+    // Exactly what drawing a subtree needs and nothing else: somewhere to put
+    // the instances, and something to see them by. No DataModel, no services, no
+    // scripts -- a stage is a place to arrange things and look at them, and
+    // every row this does not create is a row that would have appeared in an
+    // Explorer somebody opened to look at ONE prefab.
+    //
+    // `Service` and `NotCreatable` are not checked by `World::create` -- they
+    // are rules about `Instance.new`, enforced in `script` -- which is what
+    // lets the engine build its own furniture here as it does at boot.
+    const auto make = [this, &classes, &atoms](std::string_view className) {
+        const scene::ClassId id = classes.findId(atoms.intern(className));
+        const core::InstanceId instance = m_world.create(id);
+        if (instance.valid())
+            m_world.setName(instance, atoms.intern(className));
+        return instance;
+    };
+
+    m_workspace = make("Workspace");
+    m_lighting = make("Lighting");
+}
+
+bool Editor::openStamp(std::string_view path, scene::ClassRegistry& classes, scene::EnumRegistry& enums,
+                       core::AtomTable& atoms, Inspector& inspector)
 {
     if (m_run != RunState::Editing) {
         m_status = EditorStatus{"stop the world before opening a stamp", true};
@@ -784,41 +814,31 @@ bool Editor::openStamp(scene::World& world, std::string_view path, core::Instanc
         return false;
     }
 
-    if (!world.alive(workspace)) {
-        m_status = EditorStatus{"this world has no Workspace to open a stamp in", true};
+    // **Built before anything is committed to.** A stage that fails to read its
+    // stamp is a stage nobody wanted, and dropping it costs nothing -- while a
+    // game world half-cleared for a stamp that would not load is the mess the
+    // first cut of this had to unwind with a snapshot.
+    auto stage = std::make_unique<Stage>(classes, enums, atoms, kStageSeed);
+    if (!stage->workspace().valid()) {
+        m_status = EditorStatus{"could not build a stage for that stamp", true};
         return false;
     }
 
-    // **The way back, taken before anything is cleared.** The same pair `play`
-    // and `stop` use, and proven by them: a snapshot carries generations and the
-    // free list, so an instance the scene held before is the same instance
-    // afterwards rather than a new one wearing its id.
-    auto restore = std::make_unique<scene::WorldSnapshot>(world.snapshot());
-
-    scene::clearScene(world);
     scene::SceneIoReport report;
-    const core::InstanceId root = scene::readStamp(world, text, workspace, relative, &report);
+    const core::InstanceId root = scene::readStamp(stage->world(), text, stage->workspace(), relative, &report);
     if (!root.valid()) {
-        world.restore(*restore);
-        inspector.onWorldRestored();
         m_status = EditorStatus{"that stamp could not be read", true};
         return false;
     }
 
-    m_stampReturn = std::move(restore);
+    m_stage = std::move(stage);
     m_stamp = StampSession{relative, root, false};
 
-    // Cleared on the way in for the reason a play session clears it: a ctrl-Z
-    // that reached back past this boundary would apply a step taken in a world
-    // that is not this one.
+    // A different world in the plainest sense -- a different `scene::World`
+    // object -- so everything a panel keyed by id has to go. That is what
+    // `onWorldChanged` is for, and it is exactly true here rather than
+    // approximately true as it was when this cleared the game's scene instead.
     m_history.clear();
-
-    // **A DIFFERENT world, not a restored one**, and the distinction is D071's.
-    // What is in the world now was built just now in slots the scene's
-    // instances used to hold, so anything a panel keyed by id -- which rows are
-    // expanded, above all -- would be pointing at unrelated instances. The cost
-    // is that the scene's tree comes back collapsed after a stamp is closed,
-    // which is a smaller price than rows opening by themselves inside the stamp.
     inspector.onWorldChanged();
     inspector.select(root);
     inspector.reveal(root);
@@ -827,15 +847,15 @@ bool Editor::openStamp(scene::World& world, std::string_view path, core::Instanc
     return true;
 }
 
-bool Editor::saveStamp(const scene::World& world)
+bool Editor::saveStamp()
 {
-    if (!m_stamp.open() || !world.alive(m_stamp.root)) {
+    if (!m_stamp.open() || m_stage == nullptr || !m_stage->world().alive(m_stamp.root)) {
         m_status = EditorStatus{"there is no stamp open to save", true};
         return false;
     }
 
     scene::SceneIoReport report;
-    const std::string text = scene::writeStamp(world, m_stamp.root, &report);
+    const std::string text = scene::writeStamp(m_stage->world(), m_stamp.root, &report);
     const std::filesystem::path absolute = m_content.root() / std::filesystem::path(m_stamp.path);
     if (!platform::createDirectories(absolute.parent_path()) || !platform::writeTextFile(absolute, text)) {
         m_status = EditorStatus{"could not write " + m_stamp.path, true};
@@ -847,31 +867,22 @@ bool Editor::saveStamp(const scene::World& world)
     return true;
 }
 
-bool Editor::closeStamp(scene::World& world, Inspector& inspector, bool save)
+bool Editor::closeStamp(Inspector& inspector, bool save)
 {
     if (!m_stamp.open())
         return false;
 
     const std::string closed = m_stamp.path;
-    const bool wrote = save && saveStamp(world);
+    const bool wrote = save && saveStamp();
 
-    if (m_stampReturn != nullptr) {
-        world.restore(*m_stampReturn);
-        m_stampReturn.reset();
-    }
+    // The stage goes, and with it every instance in it. **The game's world was
+    // never touched**, so there is nothing to restore and no snapshot to keep --
+    // which is the whole reason a stage is a world of its own.
+    m_stage.reset();
     m_stamp = StampSession{};
 
-    // The same three the stop path makes, and for the same reasons: the history
-    // belongs to a world this restore has replaced, and a selection made inside
-    // the stamp names instances the restore has taken away.
-    //
-    // `onWorldRestored` rather than `onWorldChanged` here, and that is not
-    // symmetry for its own sake: a snapshot carries generations and the free
-    // list, so every instance the scene had is the instance it was. Opening is
-    // a different world; closing is the same one, put back.
     m_history.clear();
-    inspector.pruneDead(world);
-    inspector.onWorldRestored();
+    inspector.onWorldChanged();
 
     m_status = EditorStatus{wrote ? "saved and closed " + closed : "closed " + closed, false};
     return true;
