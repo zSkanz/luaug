@@ -25,16 +25,60 @@ importers, distributing the editor) belongs to a later milestone.
 ## Scope checklist (from roadmap)
 
 - [ ] Translate, rotate and scale manipulators in the viewport, world and local space
+      — **the arithmetic is done and tested; nothing draws one or drags one yet**
 - [ ] Snapping, with a modifier to suspend it
-- [ ] Multi-select: ctrl-click and shift-range in the Explorer, ctrl-click in the viewport
+- [~] Multi-select: ctrl-click and shift-range in the Explorer **done**; ctrl-click
+      in the viewport not
 - [ ] Properties over a multi-selection: common properties, and a mixed value marked as mixed
-- [ ] Creating an instance from the Explorer context menu and the menu bar
-- [ ] Reparenting by drag in the Explorer, with a drop-between-rows target
-- [ ] Batch delete and duplicate, one undo step each
-- [ ] The gesture-based undo key, extracted out of `engine.cpp` and tested
-- [ ] `worldToViewport` in `picking.h`, as the exact inverse of `rayThroughPixel`
-- [ ] The gizmo and the selection outline submitted camera-relative
-- [ ] An `authorable` predicate covering engine-owned, `generated`, and the ancestors of both
+- [~] Creating an instance: the Explorer's per-row plus and its class menu **done**;
+      the menu bar not
+- [~] Reparenting by drag in the Explorer: `Editor::reparent` **done and tested**,
+      including the cycle and the authorable target; no drag source or drop target
+      in the panel yet
+- [x] Batch delete and duplicate, one undo step each — the verbs exist and are
+      tested; `EditorCommands` still carries a single id, so nothing calls them
+- [x] The gesture-based undo key, extracted out of `engine.cpp` and tested
+- [x] `worldToViewport` in `picking.h`, as the exact inverse of `rayThroughPixel`
+- [~] The selection outline is camera-relative **and became a silhouette rather
+      than a box** (asked for at review, beyond the scope this milestone opened
+      with); the gizmo is not drawn yet, so its half of this is not done
+- [x] An `authorable` predicate covering engine-owned, `generated`, and the ancestors of both
+
+### The four interfaces, frozen (subagent plan)
+
+All four are built, tested and green, which is the point the plan said nothing
+fans out before:
+
+1. **The selection is a set** owned by the `Inspector`, primary = last clicked,
+   with `pruneDead` replacing four hand-written liveness checks.
+2. **An edit is a gesture**, and `coalesceKeyFor` owns the undo key that used to
+   be four untested lines in `engine.cpp`.
+3. **The manipulator arithmetic**: `worldToViewport`, `metresPerPixel`,
+   `pickGizmo`, `gizmoDragPoint`, `gizmoDragAngle` — nine cases in
+   `picking_tests.cpp`, including the near-parallel axis, the off-axis grab and
+   four kilometres from the origin.
+4. **`Editor`**: `createInstance`, `reparent`, `deleteInstances`,
+   `duplicateInstances`, `authorable`.
+
+### What arrived out of order, and it is most of a session
+
+Recorded because the roadmap's own protocol says scope that arrives after a
+kickoff is annotated rather than absorbed silently.
+
+- **Creating an instance came first**, not last: a person asked for the plus
+  before the manipulators, and it is E2 scope arriving early rather than new
+  scope.
+- **Seven defects**, six of them from somebody using the thing: D067 (a boot
+  scene destroying the world the scripts built), D068 (Save Scene As writing into
+  `content/content/`), D069 (the game's pointer lock leaking the mouse into the
+  panels), D070 (the capsule flickering after a stop), D071 (ctrl-Z collapsing
+  the explorer), D072 (an unbalanced `PopStyleColor`), and D066 quarantined at its
+  second flake.
+- **The icon set was wired**, which was not in this brief at all: staging,
+  `IconAtlas`, a generated id header with a freshness gate, and the Explorer,
+  content browser and toolbar drawing from it.
+- **The Explorer's rows were rebuilt** around one row height, after three reports
+  that were one mistake — see D071's neighbours in the register.
 
 ## NOT in scope
 
