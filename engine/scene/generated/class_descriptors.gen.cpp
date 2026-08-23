@@ -346,6 +346,32 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     modelDesc.detachComponents = native::detachModelComponents;
     classes.registerClass(modelDesc);
 
+    // --- BaseScript ---
+    static std::array<PropertyDesc, 1> baseScriptProperties;
+    baseScriptProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("Source"),
+            .type = ValueType::String,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The Luau this instance carries. It is data on the instance rather than a path to a file, which is what makes a script something you can create, copy, put inside a prefab and save in a scene like anything else.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getBaseScriptSource,
+            .set = native::setBaseScriptSource,
+        },
+    }};
+    ClassDescriptor baseScriptDesc;
+    baseScriptDesc.name = atoms.intern("BaseScript");
+    baseScriptDesc.super = instanceClass;
+    baseScriptDesc.flags = ClassFlags::Abstract;
+    baseScriptDesc.defaultName = atoms.intern("BaseScript");
+    baseScriptDesc.doc = "The abstract base of anything that carries Luau code. Its source is a PROPERTY, so a script is an ordinary instance: it is created like any other, it lives wherever you put it, and it is saved inside whatever holds it.";
+    baseScriptDesc.properties = baseScriptProperties;
+    baseScriptDesc.attachComponents = native::attachScriptComponents;
+    baseScriptDesc.detachComponents = native::detachScriptComponents;
+    const ClassId baseScriptClass = classes.registerClass(baseScriptDesc);
+
     // --- Script ---
     static std::array<PropertyDesc, 1> scriptProperties;
     scriptProperties = {{
@@ -355,7 +381,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .doc = "Whether this script starts at boot; writing it afterwards has no effect in v1, neither stopping a running script nor starting one that did not run, because what sets it acts before the boot it applies to.",
+            .doc = "Whether this script starts when the world does; writing it afterwards has no effect in v1, neither stopping a running script nor starting one that did not run, because what sets it acts before the start it applies to.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getScriptEnabled,
             .set = native::setScriptEnabled,
@@ -363,14 +389,21 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     }};
     ClassDescriptor scriptDesc;
     scriptDesc.name = atoms.intern("Script");
-    scriptDesc.super = instanceClass;
-    scriptDesc.flags = ClassFlags::NotCreatable;
+    scriptDesc.super = baseScriptClass;
+    scriptDesc.flags = ClassFlags::None;
     scriptDesc.defaultName = atoms.intern("Script");
-    scriptDesc.doc = "An entry-point Luau file, mounted from src/scripts at boot and started on its own coroutine; modules are required by string and never appear in the tree.";
+    scriptDesc.doc = "Luau that RUNS. Every enabled Script in the world is started on its own coroutine when the world does, and one that is not in the world does not run -- which is the whole difference between storing a script and using it.";
     scriptDesc.properties = scriptProperties;
-    scriptDesc.attachComponents = native::attachScriptComponents;
-    scriptDesc.detachComponents = native::detachScriptComponents;
     classes.registerClass(scriptDesc);
+
+    // --- ModuleScript ---
+    ClassDescriptor moduleScriptDesc;
+    moduleScriptDesc.name = atoms.intern("ModuleScript");
+    moduleScriptDesc.super = baseScriptClass;
+    moduleScriptDesc.flags = ClassFlags::None;
+    moduleScriptDesc.defaultName = atoms.intern("ModuleScript");
+    moduleScriptDesc.doc = "Luau that is REQUIRED rather than run. It never starts on its own; `require(module)` evaluates it once and every later require of the same instance gives back the same value, which is what makes it the place shared code goes.";
+    classes.registerClass(moduleScriptDesc);
 
     // --- BasePart ---
     static std::array<PropertyDesc, 15> basePartProperties;
@@ -1315,7 +1348,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::ReadParallel,
             .readOnly = false,
             .inert = false,
-            .doc = "The duration of one simulation tick, in seconds, and therefore the grid every timing guarantee is expressed against: `task.wait(1)` is exactly 60 ticks at the default 1/60, on every machine and every run. Express durations as multiples of it and the same code stays correct at 30 Hz or at 240 Hz. Writable from M5, and a write takes effect at the next frame start rather than mid-tick: the accumulator, the timer wheel and the solver all read it, and changing it between two of those reads inside one frame is a class of bug worth designing out. Values outside 1/240 to 1/30 are refused.",
+            .doc = "The duration of one simulation tick, in seconds, and therefore the grid every timing guarantee is expressed against: `task.wait(1)` is exactly 60 ticks at the default 1/60, on every machine and every run. Express durations as multiples of it and the same code stays correct at 30 Hz or at 240 Hz. Writable, and a write takes effect at the next frame start rather than mid-tick: the accumulator, the timer wheel and the solver all read it, and changing it between two of those reads inside one frame is a class of bug worth designing out. Values outside 1/240 to 1/30 are refused.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_fixed_timestep"),
             .get = native::getPhysicsServiceFixedTimestep,
             .set = native::setPhysicsServiceFixedTimestep,

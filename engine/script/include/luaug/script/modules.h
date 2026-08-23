@@ -108,6 +108,25 @@ public:
     };
     std::vector<Registered> registered;
 
+    // A `ModuleScript` that has been required, keyed by the instance rather
+    // than by a path -- because it has no path (ADR 0050). Same three states as
+    // a file-backed module: a value, a cached failure, and "being evaluated",
+    // which is a cycle.
+    //
+    // A vector rather than a map for the reason `modules` is one: anything
+    // walking these walks them in first-required order rather than in a hash
+    // order R10 forbids from reaching observable state. A world holds tens of
+    // modules, not thousands.
+    struct TreeModule
+    {
+        core::InstanceId instance;
+        int resultRef = -1;
+        bool loading = false;
+        bool failed = false;
+        std::string error;
+    };
+    std::vector<TreeModule> treeModules;
+
     // The mounted entry scripts, in path order, with the `Script` instance each
     // became.
     struct Entry

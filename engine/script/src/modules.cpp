@@ -191,8 +191,84 @@ int requireRegistered(lua_State* L, ModuleRegistry::Registered& module, std::str
     return 1;
 }
 
+// `require(moduleScript)` -- a module that lives in the TREE rather than on
+// disk (ADR 0050).
+//
+// **Only a `ModuleScript`.** A `Script` runs when the world does, and requiring
+// one would run it a second time in a different place; the two classes exist to
+// keep those apart, so this refuses anything else by name rather than by guess.
+//
+// Cached by instance, with the same three states a path-keyed module has: a
+// value, a failure that is re-raised rather than re-run, and "being evaluated
+// right now", which is a cycle. That is api-design.md §3's contract, and it
+// reads the same whichever kind of module you asked for.
+int requireInstance(lua_State* L, core::InstanceId id, std::string_view from)
+{
+    ModuleRegistry& modules = registry(L);
+    scene::World& w = world(L);
+
+    if (!w.alive(id))
+        raiseModuleError(L, LUAUG_TR("script.err.module_not_found"), "<destroyed>", from);
+
+    const scene::ClassDescriptor* descriptor = w.classes().find(w.classOf(id));
+    const std::string_view className = descriptor != nullptr ? w.atoms().text(descriptor->name) : std::string_view{};
+    if (className != "ModuleScript")
+        raiseModuleError(L, LUAUG_TR("script.err.module_not_module"), className, from);
+
+    // The path a cycle or a failure is REPORTED with. The tree path rather than
+    // the id, because an id means nothing to the person reading the error.
+    const std::string_view name = w.atoms().text(w.name(id));
+
+    for (ModuleRegistry::TreeModule& cached : modules.treeModules) {
+        if (cached.instance != id)
+            continue;
+        if (cached.failed) {
+            const core::I18nArg args[] = {
+                {"source", name},
+                {"message", std::string_view{cached.error}},
+            };
+            raise(L, LUAUG_TR("script.err.runtime"), args);
+        }
+        if (cached.loading)
+            raiseModuleError(L, LUAUG_TR("script.err.require_cycle"), name, from);
+        lua_getref(L, cached.resultRef);
+        return 1;
+    }
+
+    modules.treeModules.push_back(
+        ModuleRegistry::TreeModule{.instance = id, .resultRef = -1, .loading = true, .failed = false, .error = {}});
+    const usize slot = modules.treeModules.size() - 1;
+
+    const std::optional<scene::Value> source = w.getProperty(id, w.atoms().intern("Source"));
+    const std::string* text = source.has_value() ? std::get_if<std::string>(&*source) : nullptr;
+
+    std::string error;
+    const bool ok = text != nullptr && evaluateModule(L, *text, name, error);
+    modules.treeModules[slot].loading = false;
+
+    if (!ok) {
+        // **Cached as a failure rather than retried.** A module that errors
+        // propagates to its requirer and stays failed, which is what stops one
+        // broken module from being re-evaluated once per requirer -- and it is
+        // the thing the vendored implementation does not do (U-35).
+        modules.treeModules[slot].failed = true;
+        modules.treeModules[slot].error = error;
+        const core::I18nArg args[] = {{"source", name}, {"message", std::string_view{error}}};
+        raise(L, LUAUG_TR("script.err.runtime"), args);
+    }
+
+    modules.treeModules[slot].resultRef = lua_ref(L, -1);
+    return 1;
+}
+
 int scriptRequire(lua_State* L)
 {
+    // **An instance is a module now** (ADR 0050). Checked before the string,
+    // because a `ModuleScript` is not a path and asking `luaL_checklstring`
+    // first would report it as a type error rather than requiring it.
+    if (const core::InstanceId* id = toInstance(L, 1); id != nullptr)
+        return requireInstance(L, *id, requiringPath(L));
+
     size_t length = 0;
     const char* text = luaL_checklstring(L, 1, &length);
     const std::string_view specifier{text, length};

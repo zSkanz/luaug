@@ -86,7 +86,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     screenGuiDesc.super = instanceClass;
     screenGuiDesc.flags = scene::ClassFlags::None;
     screenGuiDesc.defaultName = atoms.intern("ScreenGui");
-    screenGuiDesc.doc = "The root of one screen-space UI tree, parented to `UIService` (\302\247" "2.2). Everything under it is laid out against the window and drawn over the world.\012\012It is the unit of layout: a write that changes a layout marks the nearest ScreenGui dirty, and a screen nothing changed does not run the solver at all. That is a design constraint rather than an optimisation -- the milestone's benchmark asserts ZERO solver invocations on an idle frame, because \"about zero microseconds\" is a measurement of the clock.";
+    screenGuiDesc.doc = "The root of one screen-space UI tree, parented to `UIService` (\302\247" "2.2). Everything under it is laid out against the window and drawn over the world.\012\012It is the unit of layout: a write that changes a layout marks the nearest ScreenGui dirty, and a screen nothing changed does not run the solver at all. That is a design constraint rather than an optimisation -- the benchmark asserts ZERO solver invocations on an idle frame, because \"about zero microseconds\" is a measurement of the clock.";
     screenGuiDesc.properties = screenGuiProperties;
     screenGuiDesc.attachComponents = native::attachScreenGuiComponents;
     screenGuiDesc.detachComponents = native::detachScreenGuiComponents;
@@ -263,7 +263,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     uIObjectDesc.super = instanceClass;
     uIObjectDesc.flags = scene::ClassFlags::Abstract | scene::ClassFlags::NotCreatable;
     uIObjectDesc.defaultName = atoms.intern("UIObject");
-    uIObjectDesc.doc = "Anything that occupies a rectangle on screen (\302\247" "2.2). Every property here is one the layout solver or the 2D pass reads, which is what makes it the base rather than a convenience.\012\012Coordinates are `UDim2`: a fraction of the parent plus a pixel offset, on each axis. That pair is what lets one layout be correct at every resolution, and it is why the goldens this milestone records are taken at two.";
+    uIObjectDesc.doc = "Anything that occupies a rectangle on screen (\302\247" "2.2). Every property here is one the layout solver or the 2D pass reads, which is what makes it the base rather than a convenience.\012\012Coordinates are `UDim2`: a fraction of the parent plus a pixel offset, on each axis. That pair is what lets one layout be correct at every resolution, and it is why the reference images are recorded at two of them.";
     uIObjectDesc.properties = uIObjectProperties;
     uIObjectDesc.events = uIObjectEvents;
     uIObjectDesc.attachComponents = native::attachUIObjectComponents;
@@ -378,7 +378,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     textLabelDesc.super = uIObjectClass;
     textLabelDesc.flags = scene::ClassFlags::None;
     textLabelDesc.defaultName = atoms.intern("TextLabel");
-    textLabelDesc.doc = "Text in a box (\302\247" "2.2). No RichText in v1, and no complex-script shaping -- codepoints are laid out left to right with kerning, which ADR 0011 records as a flagged i18n gap with a HarfBuzz seam behind it.";
+    textLabelDesc.doc = "Text in a box (\302\247" "2.2). No RichText in v1, and no complex-script shaping -- codepoints are laid out left to right with kerning. That is a known gap for Arabic, Devanagari and Thai, and the seam a text shaper would sit behind is deliberately left open.";
     textLabelDesc.properties = textLabelProperties;
     textLabelDesc.attachComponents = native::attachTextLabelComponents;
     textLabelDesc.detachComponents = native::detachTextLabelComponents;
@@ -418,7 +418,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::EventDesc{
             .name = atoms.intern("FocusLost"),
             .slot = 11,
-            .doc = "Fired when it stops. `submitted` is true when the field was left by pressing Return rather than by clicking away -- the difference between \"the player finished\" and \"the player went somewhere else\".",
+            .doc = "Fired when it stops. `submitted` is true when the field was left by pressing Return rather than by clicking away -- the difference between \"the player finished\" and \"the player went somewhere else\".\012\012**The argument is not delivered yet**: this release raises the event with no arguments, so a handler's `submitted` arrives as nil whichever way the field was left. Treat the event as the fact that focus ended until it carries the distinction.",
         },
     }};
     scene::ClassDescriptor textInputDesc;

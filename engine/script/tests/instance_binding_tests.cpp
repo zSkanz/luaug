@@ -45,7 +45,9 @@ TEST_CASE("Instance.new builds a real instance and refuses what it should")
     // Abstract, service and not-creatable are three reasons and one key.
     CHECK(fixture.raises(R"(Instance.new("BasePart"))", "scene.err.not_creatable"));
     CHECK(fixture.raises(R"(Instance.new("Workspace"))", "scene.err.not_creatable"));
-    CHECK(fixture.raises(R"(Instance.new("Script"))", "scene.err.not_creatable"));
+    // A `Script` is creatable since E3: its source is a property, so it is an
+    // ordinary instance rather than the shadow of a file.
+    CHECK(fixture.failure(R"(assert(Instance.new("Script").ClassName == "Script"))").empty());
 }
 
 TEST_CASE("two handles to the same instance are the same value")

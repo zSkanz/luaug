@@ -93,11 +93,15 @@ bool setModelPrimaryPart(World& world, core::InstanceId id, const Value& value);
 void attachModelComponents(World& world, core::InstanceId id);
 void detachModelComponents(World& world, core::InstanceId id);
 
+// BaseScript
+Value getBaseScriptSource(const World& world, core::InstanceId id);
+bool setBaseScriptSource(World& world, core::InstanceId id, const Value& value);
+void attachScriptComponents(World& world, core::InstanceId id);
+void detachScriptComponents(World& world, core::InstanceId id);
+
 // Script
 Value getScriptEnabled(const World& world, core::InstanceId id);
 bool setScriptEnabled(World& world, core::InstanceId id, const Value& value);
-void attachScriptComponents(World& world, core::InstanceId id);
-void detachScriptComponents(World& world, core::InstanceId id);
 
 // BasePart
 Value getBasePartCFrame(const World& world, core::InstanceId id);

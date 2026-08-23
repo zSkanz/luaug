@@ -78,7 +78,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     meshPartDesc.super = basePartClass;
     meshPartDesc.flags = scene::ClassFlags::None;
     meshPartDesc.defaultName = atoms.intern("MeshPart");
-    meshPartDesc.doc = "A part whose geometry is an imported mesh rather than a primitive solid. One file is one mesh: a model made of several pieces is several MeshParts, which is the shape \302\247" "2.6's prefab example already assumes.";
+    meshPartDesc.doc = "A part whose geometry is an imported mesh rather than a primitive solid. One file is one mesh: a model made of several pieces is several MeshParts, which is the shape a prefab assumes.";
     meshPartDesc.properties = meshPartProperties;
     meshPartDesc.attachComponents = native::attachMeshPartComponents;
     meshPartDesc.detachComponents = native::detachMeshPartComponents;
@@ -279,7 +279,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("LoadAnimation"),
             .yields = false,
             .threadSafety = scene::ThreadSafety::Unsafe,
-            .doc = "A track for one clip. Everything after a `#` is the clip's NAME inside the file, and a string with no `#` is a clip name in this player's own mesh -- so the common case is `player:LoadAnimation(\"Walk\")`.\012\012A path before the `#` must be the mesh this player is under. v1 has no asset pipeline (M7 is where a clip becomes addressable on its own), so a clip exists only inside the file its skeleton came from, and a URN naming a different file loads nothing rather than playing the wrong rig.\012\012**Load a track once and keep it.** It always returns a track, even for a clip that is not there -- a mesh that has not finished loading would otherwise make an ordinary frame a nil index -- and every call is a handle the VM holds until the world goes away.",
+            .doc = "A track for one clip. Everything after a `#` is the clip's NAME inside the file, and a string with no `#` is a clip name in this player's own mesh -- so the common case is `player:LoadAnimation(\"Walk\")`.\012\012A path before the `#` must be the mesh this player is under: a clip is not yet addressable on its own, so it exists only inside the file its skeleton came from, and a URN naming a different file loads nothing rather than playing the wrong rig.\012\012**Load a track once and keep it.** It always returns a track, even for a clip that is not there -- a mesh that has not finished loading would otherwise make an ordinary frame a nil index -- and every call is a handle the VM holds until the world goes away.",
         },
     }};
     scene::ClassDescriptor animationPlayerDesc;
@@ -287,7 +287,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     animationPlayerDesc.super = instanceClass;
     animationPlayerDesc.flags = scene::ClassFlags::None;
     animationPlayerDesc.defaultName = atoms.intern("AnimationPlayer");
-    animationPlayerDesc.doc = "Plays a skinned mesh's animation clips (\302\247" "2.2). **Parent it to the `MeshPart` whose skeleton the clips belong to** -- that is where it looks for them, and an `AnimationPlayer` parented anywhere else finds nothing rather than guessing.\012\012It stores nothing: the tracks are the state, and each one is a handle a script holds rather than a child in the tree. Sampling happens at `PreAnimation` on the SimClock, so a clip's position at a given tick is the same in a replay as it was live.\012\012v1 is clip playback and linear blending -- no state machines, no IK, no root motion (roadmap M6).";
+    animationPlayerDesc.doc = "Plays a skinned mesh's animation clips (\302\247" "2.2). **Parent it to the `MeshPart` whose skeleton the clips belong to** -- that is where it looks for them, and an `AnimationPlayer` parented anywhere else finds nothing rather than guessing.\012\012It stores nothing: the tracks are the state, and each one is a handle a script holds rather than a child in the tree. Sampling happens at `PreAnimation` on the SimClock, so a clip's position at a given tick is the same in a replay as it was live.\012\012v1 is clip playback and linear blending -- no state machines, no IK, and no root motion.";
     animationPlayerDesc.methods = animationPlayerMethods;
     classes.registerClass(animationPlayerDesc);
 

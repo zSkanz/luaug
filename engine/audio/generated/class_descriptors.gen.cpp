@@ -64,7 +64,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     audioGroupDesc.super = instanceClass;
     audioGroupDesc.flags = scene::ClassFlags::None;
     audioGroupDesc.defaultName = atoms.intern("AudioGroup");
-    audioGroupDesc.doc = "A mixing bus (\302\247" "2.1, \302\247" "2.2). A `Sound` whose `Group` names one has its volume multiplied by the group's, which is how \"turn the music down\" is one property rather than a loop over every music track.\012\012Named `AudioGroup` rather than `SoundGroup` for the reason \302\247" "2.5's divergence 19 gives: the service is `AudioService`, and one prefix across a family beats two.";
+    audioGroupDesc.doc = "A mixing bus (\302\247" "2.1, \302\247" "2.2). A `Sound` whose `Group` names one has its volume multiplied by the group's, which is how \"turn the music down\" is one property rather than a loop over every music track.\012\012Named `AudioGroup` rather than `SoundGroup` because the service is `AudioService`, and one prefix across a family beats two.";
     audioGroupDesc.properties = audioGroupProperties;
     audioGroupDesc.attachComponents = native::attachAudioGroupComponents;
     audioGroupDesc.detachComponents = native::detachAudioGroupComponents;
@@ -79,7 +79,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .doc = "The audio, as an `asset://` URI. WAV, MP3, FLAC and Ogg Vorbis, decoded once and cached: a sound does not re-read its file sixty times a second.\012\012A URI that names nothing still PLAYS, as a generated tone whose pitch comes from a hash of the id. A sound that went silent because a file was missing is a bug report about the sound; a placeholder that is audibly a placeholder is one about the file. `DebugService:GetStat(\"AudioClipsMissing\")` is how a script asks which it got.\012\012Where in the file the sound is comes from `TimePosition` every frame rather than from a cursor the mixer keeps, so the audio is a function of the simulation and a replay reproduces it (M6 brief, Decision 9).",
+            .doc = "The audio, as an `asset://` URI. WAV, MP3, FLAC and Ogg Vorbis, decoded once and cached: a sound does not re-read its file sixty times a second.\012\012A URI that names nothing still PLAYS, as a generated tone whose pitch comes from a hash of the id. A sound that went silent because a file was missing is a bug report about the sound; a placeholder that is audibly a placeholder is one about the file. `DebugService:GetStat(\"AudioClipsMissing\")` is how a script asks which it got.\012\012Where in the file the sound is comes from `TimePosition` every frame rather than from a cursor the mixer keeps, so the audio is a function of the simulation and a replay reproduces it.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
             .get = native::getSoundContent,
             .set = native::setSoundContent,
@@ -204,7 +204,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::EventDesc{
             .name = atoms.intern("Loaded"),
             .slot = 8,
-            .doc = "Fired when this sound's `Content` has been decoded and is ready to play. **Fires immediately in v1**, because a sound has nothing to load until M7's asset pipeline -- declared now so that code written today does not have to change when it does.",
+            .doc = "Fired when this sound's `Content` has been decoded and is ready to play. **Fires immediately in v1**, because a sound has nothing to wait for yet -- declared now so that code written today does not have to change when it does.",
         },
     }};
     scene::ClassDescriptor soundDesc;
@@ -212,7 +212,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     soundDesc.super = instanceClass;
     soundDesc.flags = scene::ClassFlags::None;
     soundDesc.defaultName = atoms.intern("Sound");
-    soundDesc.doc = "One sound, playing or not (\302\247" "2.2). **Parent it to a `BasePart` and it is positional**; parent it anywhere else and it is 2D. That is the whole of the 3D switch, and it is a property of where the instance sits rather than a flag that could disagree with it.\012\012**Its timeline is the SimClock's, not the mixer's** (M6 brief, Decision 9). `TimePosition` advances by `FixedTimestep * PlaybackSpeed` per tick and `Ended` fires from that timeline, so a replay reproduces both exactly and a headless run with no audio device produces the same `Ended` on the same tick as a run with speakers. What the speakers do is downstream of the simulation and never an input to it -- otherwise a script reading `TimePosition` would be reading the wall clock through a side door (R10).";
+    soundDesc.doc = "One sound, playing or not (\302\247" "2.2). **Parent it to a `BasePart` and it is positional**; parent it anywhere else and it is 2D. That is the whole of the 3D switch, and it is a property of where the instance sits rather than a flag that could disagree with it.\012\012**Its timeline is the SimClock's, not the mixer's.** `TimePosition` advances by `FixedTimestep * PlaybackSpeed` per tick and `Ended` fires from that timeline, so a replay reproduces both exactly and a headless run with no audio device produces the same `Ended` on the same tick as a run with speakers. What the speakers do is downstream of the simulation and never an input to it -- otherwise a script reading `TimePosition` would be reading the wall clock through a side door (R10).";
     soundDesc.properties = soundProperties;
     soundDesc.methods = soundMethods;
     soundDesc.events = soundEvents;
@@ -241,7 +241,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("PlayLocal"),
             .yields = false,
             .threadSafety = scene::ThreadSafety::Unsafe,
-            .doc = "Creates a 2D `Sound`, plays it, and destroys it when it ends. For the fire-and-forget case -- a click, a pickup -- where holding an instance to clean up later is all ceremony. The `Sound` is returned so that the volume can still be set on the tick it starts; keeping it past `Ended` is holding a destroyed instance.",
+            .doc = "Creates a 2D `Sound` parented to this service and plays it. For the fire-and-forget case -- a click, a pickup -- where naming an instance is all ceremony.\012\012**It does not clean up after itself in this release**: the `Sound` stays a child of the service once it has ended, so a caller firing one per frame accumulates them. Keep the returned handle and `Destroy` it on `Ended` where that matters. The handle is also what a caller sets the volume through, since this takes only the content.",
         },
     }};
     scene::ClassDescriptor audioServiceDesc;

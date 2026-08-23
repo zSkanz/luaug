@@ -283,6 +283,16 @@ struct ModelComponent
 struct ScriptComponent
 {
     bool enabled = true;
+
+    // **The Luau this instance carries.** Data on the instance rather than a
+    // path to a file, which is what makes a script an ordinary thing: created
+    // like any other instance, copied, put inside a prefab, and saved inside
+    // whatever holds it.
+    //
+    // A `std::string` in a component, like `TextLabel`'s text and `Sound`'s
+    // asset before it: a snapshot copies pools by value, so the deep copy is
+    // the correct one and there is no memcpy path to break.
+    std::string source;
 };
 
 // --- Input (M6) --------------------------------------------------------------

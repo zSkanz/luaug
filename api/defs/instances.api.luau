@@ -294,20 +294,51 @@ local Classes: { Schema.Class } = {
     {
         -- `NotCreatable` because dynamic script creation is not supported in
         -- v1 (§3): a Script exists because a file under `src/scripts` does.
-        Name = "Script",
+        Name = "BaseScript",
         Extends = "Instance",
         Module = "scene",
-        Tags = { "NotCreatable" } :: { Schema.ClassTag },
+        Tags = { "Abstract" } :: { Schema.ClassTag },
+        -- `Script` and `ModuleScript` inherit this rather than declaring their
+        -- own: `World::create` calls every hook down the ancestry, so a second
+        -- one would attach a second `ScriptComponent`.
         Storage = "Script",
-        Doc = "An entry-point Luau file, mounted from src/scripts at boot and started on its own coroutine; modules are required by string and never appear in the tree.",
+        Doc = "The abstract base of anything that carries Luau code. Its source is a PROPERTY, so a script is an "
+            .. "ordinary instance: it is created like any other, it lives wherever you put it, and it is saved "
+            .. "inside whatever holds it.",
+        Properties = {
+            {
+                Name = "Source",
+                Type = "string",
+                Default = '""',
+                Doc = "The Luau this instance carries. It is data on the instance rather than a path to a file, "
+                    .. "which is what makes a script something you can create, copy, put inside a prefab and save "
+                    .. "in a scene like anything else.",
+            },
+        },
+    },
+    {
+        Name = "Script",
+        Extends = "BaseScript",
+        Module = "scene",
+        Doc = "Luau that RUNS. Every enabled Script in the world is started on its own coroutine when the world "
+            .. "does, and one that is not in the world does not run -- which is the whole difference between "
+            .. "storing a script and using it.",
         Properties = {
             {
                 Name = "Enabled",
                 Type = "boolean",
                 Default = "true",
-                Doc = "Whether this script starts at boot; writing it afterwards has no effect in v1, neither stopping a running script nor starting one that did not run, because what sets it acts before the boot it applies to.",
+                Doc = "Whether this script starts when the world does; writing it afterwards has no effect in v1, neither stopping a running script nor starting one that did not run, because what sets it acts before the start it applies to.",
             },
         },
+    },
+    {
+        Name = "ModuleScript",
+        Extends = "BaseScript",
+        Module = "scene",
+        Doc = "Luau that is REQUIRED rather than run. It never starts on its own; `require(module)` evaluates it "
+            .. "once and every later require of the same instance gives back the same value, which is what makes "
+            .. "it the place shared code goes.",
     },
     {
         -- The structural half arrived at M2 and the physical half at M5, when
@@ -488,8 +519,7 @@ local Classes: { Schema.Class } = {
         Module = "render",
         Storage = "MeshPart",
         Doc = "A part whose geometry is an imported mesh rather than a primitive solid. One file is one mesh: a "
-            .. "model made of several pieces is several MeshParts, which is the shape §2.6's prefab example already "
-            .. "assumes.",
+            .. "model made of several pieces is several MeshParts, which is the shape a prefab assumes.",
         Properties = {
             {
                 Name = "MeshContent",
@@ -857,7 +887,8 @@ local Classes: { Schema.Class } = {
                 Type = "Enum.InputRate",
                 Default = "Enum.InputRate.Simulation",
                 Doc = "Which clock this context is dispatched on (ADR 0039). `Simulation` by default, because "
-                    .. "that is the safe one: an action nobody thought about fires where R10 holds and where the "
+                    .. "that is the safe one: an action nobody thought about fires where determinism holds and "
+                    .. "where the "
                     .. "input replay can see it. `Render` is for camera look and for UI, and an action read from "
                     .. "a Render context is frame-rate-dependent by construction.",
             },
@@ -899,7 +930,7 @@ local Classes: { Schema.Class } = {
                     .. "`Direction1D`, a `Vector2` for `Direction2D` and `ViewportPosition`, and a `vector` for "
                     .. "`Direction3D`. It is a SNAPSHOT: two calls inside one tick agree, and a recorded input "
                     .. "stream hands the same answers back with no hardware attached, which is what makes the "
-                    .. "replay gate a replay of input rather than of a bot.",
+                    .. "replay a replay of input rather than of a bot.",
             },
             {
                 Name = "GetPreferredBinding",
@@ -1002,7 +1033,7 @@ local Classes: { Schema.Class } = {
                     .. "should fall back to the key's own name.\n\n**The engine never acts on this and never "
                     .. "will**, which is what makes it different from an `Inert` property: it is data a GAME "
                     .. "reads back through `GetPreferredBinding` to draw its own prompt. There is no prompt "
-                    .. "widget in v1 and there is not meant to be one -- a rebinding screen is a game''s "
+                    .. "widget in v1 and there is not meant to be one -- a rebinding screen is a game's "
                     .. "screen.",
             },
             {
@@ -1032,7 +1063,7 @@ local Classes: { Schema.Class } = {
             .. "laid out against the window and drawn over the world.\n\nIt is the unit of layout: a write "
             .. "that changes a layout marks the nearest ScreenGui dirty, and a screen nothing changed does not "
             .. "run the solver at all. That is a design constraint rather than an optimisation -- the "
-            .. "milestone's benchmark asserts ZERO solver invocations on an idle frame, because \"about zero "
+            .. 'benchmark asserts ZERO solver invocations on an idle frame, because "about zero '
             .. 'microseconds" is a measurement of the clock.',
         Properties = {
             {
@@ -1069,8 +1100,8 @@ local Classes: { Schema.Class } = {
         Doc = "Anything that occupies a rectangle on screen (§2.2). Every property here is one the layout "
             .. "solver or the 2D pass reads, which is what makes it the base rather than a convenience.\n\n"
             .. "Coordinates are `UDim2`: a fraction of the parent plus a pixel offset, on each axis. That "
-            .. "pair is what lets one layout be correct at every resolution, and it is why the goldens this "
-            .. "milestone records are taken at two.",
+            .. "pair is what lets one layout be correct at every resolution, and it is why the reference "
+            .. "images are recorded at two of them.",
         Properties = {
             {
                 Name = "Position",
@@ -1202,8 +1233,8 @@ local Classes: { Schema.Class } = {
         Module = "ui",
         Storage = "TextLabel",
         Doc = "Text in a box (§2.2). No RichText in v1, and no complex-script shaping -- codepoints are laid "
-            .. "out left to right with kerning, which ADR 0011 records as a flagged i18n gap with a HarfBuzz "
-            .. "seam behind it.",
+            .. "out left to right with kerning. That is a known gap for Arabic, Devanagari and Thai, and the "
+            .. "seam a text shaper would sit behind is deliberately left open.",
         Properties = {
             {
                 Name = "Text",
@@ -1308,7 +1339,11 @@ local Classes: { Schema.Class } = {
                 Parameters = { { Name = "submitted", Type = "boolean" } },
                 Doc = "Fired when it stops. `submitted` is true when the field was left by pressing Return "
                     .. 'rather than by clicking away -- the difference between "the player finished" and '
-                    .. '"the player went somewhere else".',
+                    .. '"the player went somewhere else".'
+                    .. "\n\n**The argument is "
+                    .. "not delivered yet**: this release raises the event with no arguments, so a handler's "
+                    .. "`submitted` arrives as nil whichever way the field was left. Treat the event as the "
+                    .. "fact that focus ended until it carries the distinction.",
             },
         } :: { Schema.Event },
     },
@@ -1514,8 +1549,8 @@ local Classes: { Schema.Class } = {
         Storage = "AudioGroup",
         Doc = "A mixing bus (§2.1, §2.2). A `Sound` whose `Group` names one has its volume multiplied by the "
             .. 'group\'s, which is how "turn the music down" is one property rather than a loop over every '
-            .. "music track.\n\nNamed `AudioGroup` rather than `SoundGroup` for the reason §2.5's divergence 19 "
-            .. "gives: the service is `AudioService`, and one prefix across a family beats two.",
+            .. "music track.\n\nNamed `AudioGroup` rather than `SoundGroup` because "
+            .. "the service is `AudioService`, and one prefix across a family beats two.",
         Properties = {
             {
                 Name = "Volume",
@@ -1537,7 +1572,7 @@ local Classes: { Schema.Class } = {
         Doc = "One sound, playing or not (§2.2). **Parent it to a `BasePart` and it is positional**; parent it "
             .. "anywhere else and it is 2D. That is the whole of the 3D switch, and it is a property of where "
             .. "the instance sits rather than a flag that could disagree with it.\n\n**Its timeline is the "
-            .. "SimClock's, not the mixer's** (M6 brief, Decision 9). `TimePosition` advances by "
+            .. "SimClock's, not the mixer's.** `TimePosition` advances by "
             .. "`FixedTimestep * PlaybackSpeed` per tick and `Ended` fires from that timeline, so a replay "
             .. "reproduces both exactly and a headless run with no audio device produces the same `Ended` on "
             .. "the same tick as a run with speakers. What the speakers do is downstream of the simulation and "
@@ -1556,7 +1591,7 @@ local Classes: { Schema.Class } = {
                     .. '`DebugService:GetStat("AudioClipsMissing")` is how a script asks which it '
                     .. "got.\n\nWhere in the file the sound is comes from `TimePosition` every frame "
                     .. "rather than from a cursor the mixer keeps, so the audio is a function of the "
-                    .. "simulation and a replay reproduces it (M6 brief, Decision 9).",
+                    .. "simulation and a replay reproduces it.",
             },
             {
                 Name = "Playing",
@@ -1664,7 +1699,7 @@ local Classes: { Schema.Class } = {
                 Name = "Loaded",
                 Parameters = {},
                 Doc = "Fired when this sound's `Content` has been decoded and is ready to play. **Fires "
-                    .. "immediately in v1**, because a sound has nothing to load until M7's asset pipeline -- "
+                    .. "immediately in v1**, because a sound has nothing to wait for yet -- "
                     .. "declared now so that code written today does not have to change when it does.",
             },
         } :: { Schema.Event },
@@ -1679,7 +1714,7 @@ local Classes: { Schema.Class } = {
             .. "state, and each one is a handle a script holds rather than a child in the tree. Sampling "
             .. "happens at `PreAnimation` on the SimClock, so a clip's position at a given tick is the same "
             .. "in a replay as it was live.\n\nv1 is clip playback and linear blending -- no state machines, "
-            .. "no IK, no root motion (roadmap M6).",
+            .. "no IK, and no root motion.",
         Methods = {
             {
                 Name = "LoadAnimation",
@@ -1689,8 +1724,8 @@ local Classes: { Schema.Class } = {
                 Doc = "A track for one clip. Everything after a `#` is the clip's NAME inside the file, and a "
                     .. "string with no `#` is a clip name in this player's own mesh -- so the common case is "
                     .. '`player:LoadAnimation("Walk")`.\n\nA path before the `#` must be the mesh this player '
-                    .. "is under. v1 has no asset pipeline (M7 is where a clip becomes addressable on its "
-                    .. "own), so a clip exists only inside the file its skeleton came from, and a URN naming "
+                    .. "is under: a clip is not yet addressable on its own, so it exists only inside the file "
+                    .. "its skeleton came from, and a URN naming "
                     .. "a different file loads nothing rather than playing the wrong rig.\n\n**Load a track "
                     .. "once and keep it.** It always returns a track, even for a clip that is not there -- a "
                     .. "mesh that has not finished loading would otherwise make an ordinary frame a nil index "

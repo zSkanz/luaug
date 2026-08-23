@@ -270,6 +270,7 @@
   "script.err.unknown_member": "{typeName} has no member named \"{member}\".",
   "script.err.instance_dead": "This Instance has been destroyed and can no longer be used.",
   "script.err.module_not_found": "No module named \"{specifier}\", required from {source}.",
+  "script.err.module_not_module": "Only a ModuleScript can be required; that is a {specifier}, required from {source}. A Script RUNS when the world does, so requiring one would run it a second time somewhere else.",
   "script.err.require_cycle": "Cyclic require: \"{specifier}\" is already being evaluated, and was required again from {source}. Split the shared part into a third module.",
   "script.err.not_implemented": "{className}.{property} is declared by the API definition but is not implemented in this build.",
   "script.err.reentrancy_limit": "Deferred signal re-entrancy limit (10) reached; handler dropped.",

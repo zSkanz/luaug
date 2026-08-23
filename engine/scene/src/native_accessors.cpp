@@ -266,6 +266,22 @@ bool setModelPrimaryPart(World& world, core::InstanceId id, const Value& value)
 
 // --- Script -----------------------------------------------------------------
 
+Value getBaseScriptSource(const World& world, core::InstanceId id)
+{
+    const ScriptComponent* script = world.scripts().find(id);
+    return script == nullptr ? Value{} : Value{script->source};
+}
+
+bool setBaseScriptSource(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* text = std::get_if<std::string>(&value);
+    ScriptComponent* script = world.scripts().find(id);
+    if (text == nullptr || script == nullptr)
+        return false;
+    script->source = *text;
+    return true;
+}
+
 Value getScriptEnabled(const World& world, core::InstanceId id)
 {
     const ScriptComponent* script = world.scripts().find(id);

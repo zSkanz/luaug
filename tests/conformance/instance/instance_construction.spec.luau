@@ -82,12 +82,25 @@ describe("Instance construction", function()
             end):ToThrow()
         end)
 
-        it("rejects dynamic Script creation", function()
-            -- §3: scripts are mounted from `src/scripts/**`; dynamic script
-            -- creation is not supported in v1.
-            expect(function()
-                return newByName("Script")
-            end):ToThrow()
+        it("makes a Script like any other instance", function()
+            -- **This asserted the opposite until E3**, and the reversal is the
+            -- human's: a script's source is a PROPERTY now, so a script is an
+            -- ordinary instance -- created like any other, put wherever you
+            -- want it, and saved inside whatever holds it. The old rule came
+            -- from a script being a FILE, which it no longer is.
+            -- `Instance.new` rather than `newByName`, so the checker knows
+            -- what came back: the untyped helper above exists for the classes
+            -- that must be REFUSED, where the return value is never touched.
+            local made = Instance.new("Script")
+            expect(made.ClassName):ToBe("Script")
+            expect(made.Source):ToBe("")
+            made.Source = "return 1"
+            expect(made.Source):ToBe("return 1")
+
+            -- And the one that is required rather than run.
+            local module = Instance.new("ModuleScript")
+            expect(module.ClassName):ToBe("ModuleScript")
+            expect(module.Source):ToBe("")
         end)
 
         it("does not accept a parent as a second argument", function()

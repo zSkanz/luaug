@@ -1,12 +1,16 @@
 --!strict
 --- Conformance: the script environment (docs/api-design.md 2.2, 2.5, 3).
 ---
---- Section 3 makes three promises about the shape of running code: the mount
---- is a tree of `Script`s and `Folder`s under `ScriptService`, the `script`
---- global is the running one of those, and modules are files reached by
---- string -- there is no `ModuleScript` class and no `require(instance)`
---- (divergence 6). Dynamic script creation is out of scope for v1, which is
---- the same statement read from the other side.
+--- Section 3 makes two promises about the shape of running code: the mount is
+--- a tree of `Script`s and `Folder`s under `ScriptService`, and the `script`
+--- global is the running one of those.
+---
+--- **The third promise was reversed by the human at E3** and this file is where
+--- that shows. It read "modules are files reached by string -- there is no
+--- `ModuleScript` class and no `require(instance)`", which followed from a
+--- script being a FILE. A script's source is a PROPERTY now (ADR 0050): a
+--- script is an ordinary instance, a `ModuleScript` is one that is required
+--- rather than run, and `require(module)` evaluates it once.
 
 local testing = require("@luaug/testing")
 
@@ -112,24 +116,48 @@ describe("ScriptService", function()
 end)
 
 describe("the module model", function()
-    it("has no ModuleScript class", function()
-        local instanceLibrary = Instance :: any
+    -- **This block asserted the opposite of all of it until E3**, and the
+    -- reversal is the human's: a script's source is a PROPERTY, so a script is
+    -- an ordinary instance -- made like any other, put wherever you want it,
+    -- and saved inside whatever holds it. What was true before came from a
+    -- script being a FILE, which it no longer is (ADR 0050).
+
+    it("makes a ModuleScript, and requiring it gives back what it returns", function()
+        local module = Instance.new("ModuleScript")
+        module.Name = "Shared"
+        module.Source = "return { answer = 42 }"
+
+        local required = (require :: any)(module)
+        expect(typeof(required)):ToBe("table")
+        expect(required.answer):ToBe(42)
+
+        -- **One evaluation per module**, which is the whole of what a module
+        -- is: the second require is the same table rather than a second one.
+        expect((require :: any)(module)):ToBe(required)
+    end)
+
+    it("refuses require of a Script, because a Script runs", function()
+        local runner = Instance.new("Script")
+        runner.Source = "return 1"
+
+        -- Requiring one would run it a second time somewhere else, which is
+        -- exactly what the two classes exist to keep apart.
         expect(function()
-            instanceLibrary.new("ModuleScript")
+            return (require :: any)(runner)
         end):ToThrow()
     end)
 
-    it("does not support dynamic script creation", function()
-        local instanceLibrary = Instance :: any
-        expect(function()
-            instanceLibrary.new("Script")
-        end):ToThrow()
-    end)
+    it("propagates a module's error, and caches the failure", function()
+        local broken = Instance.new("ModuleScript")
+        broken.Source = "error('module said no')"
 
-    it("refuses require of an Instance", function()
-        local requireByValue = require :: any
         expect(function()
-            requireByValue(script)
+            return (require :: any)(broken)
+        end):ToThrow()
+        -- Cached rather than retried: a module that fails stays failed, which
+        -- is what stops one broken module being re-evaluated per requirer.
+        expect(function()
+            return (require :: any)(broken)
         end):ToThrow()
     end)
 

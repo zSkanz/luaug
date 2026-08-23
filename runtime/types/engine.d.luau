@@ -363,8 +363,8 @@ declare extern type InputObject with
     --- Where the pointer is, in window pixels with the origin at the top left, with `z` carrying the
     --- accumulated wheel. For a gamepad axis it is the deflection instead: `x` and `y` for a stick, `x`
     --- alone for a trigger. A three-wide vector rather than a `Vector2` because `vector` is this
-    --- engine''s native primitive (ADR 0013) -- it costs no userdata and no allocation, which matters
-    --- on a value produced several times a tick.
+    --- engine's native primitive (ADR 0013) -- it costs no userdata and no allocation, which matters on
+    --- a value produced several times a tick.
     read Position: vector
     --- How much it moved since the last tick, in the same units as `Position`. `z` is the wheel
     --- movement, which is where a `MouseWheel` event puts its one number. Zero for anything that is not
@@ -529,11 +529,21 @@ declare extern type Model extends PVInstance with
     function GetExtentsSize(self): vector
 end
 
-declare extern type Script extends Instance with
-    --- Whether this script starts at boot; writing it afterwards has no effect in v1, neither stopping
-    --- a running script nor starting one that did not run, because what sets it acts before the boot it
-    --- applies to.
+declare extern type BaseScript extends Instance with
+    --- The Luau this instance carries. It is data on the instance rather than a path to a file, which
+    --- is what makes a script something you can create, copy, put inside a prefab and save in a scene
+    --- like anything else.
+    Source: string
+end
+
+declare extern type Script extends BaseScript with
+    --- Whether this script starts when the world does; writing it afterwards has no effect in v1,
+    --- neither stopping a running script nor starting one that did not run, because what sets it acts
+    --- before the start it applies to.
     Enabled: boolean
+end
+
+declare extern type ModuleScript extends BaseScript with
 end
 
 declare extern type BasePart extends PVInstance with
@@ -760,9 +770,9 @@ declare extern type InputContext extends Instance with
     --- context: a sinking context that binds Escape hides Escape and leaves W alone.
     Sink: boolean
     --- Which clock this context is dispatched on (ADR 0039). `Simulation` by default, because that is
-    --- the safe one: an action nobody thought about fires where R10 holds and where the input replay
-    --- can see it. `Render` is for camera look and for UI, and an action read from a Render context is
-    --- frame-rate-dependent by construction.
+    --- the safe one: an action nobody thought about fires where determinism holds and where the input
+    --- replay can see it. `Render` is for camera look and for UI, and an action read from a Render
+    --- context is frame-rate-dependent by construction.
     Rate: EnumInputRate
 end
 
@@ -792,8 +802,8 @@ declare extern type InputAction extends Instance with
     --- This action's value as of the current tick -- a boolean for `Bool`, a number for `Direction1D`,
     --- a `Vector2` for `Direction2D` and `ViewportPosition`, and a `vector` for `Direction3D`. It is a
     --- SNAPSHOT: two calls inside one tick agree, and a recorded input stream hands the same answers
-    --- back with no hardware attached, which is what makes the replay gate a replay of input rather
-    --- than of a bot.
+    --- back with no hardware attached, which is what makes the replay a replay of input rather than of
+    --- a bot.
     function GetState(self): boolean | number | Vector2 | vector
     --- The binding a prompt should draw for this action -- "Press [E]". With a device type, the first
     --- child binding belonging to that family in document order; without one, the family of
@@ -826,7 +836,7 @@ declare extern type InputBinding extends Instance with
     --- own name. **The engine never acts on this and never will**, which is what makes it different
     --- from an `Inert` property: it is data a GAME reads back through `GetPreferredBinding` to draw its
     --- own prompt. There is no prompt widget in v1 and there is not meant to be one -- a rebinding
-    --- screen is a game''s screen.
+    --- screen is a game's screen.
     DisplayName: string
     --- A glyph for this binding, as an `asset://` URI. Empty means none.
     Image: Content
@@ -947,7 +957,9 @@ declare extern type TextInput extends TextLabel with
     read Focused: Signal<()>
     --- Fired when it stops. `submitted` is true when the field was left by pressing Return rather than
     --- by clicking away -- the difference between "the player finished" and "the player went somewhere
-    --- else".
+    --- else". **The argument is not delivered yet**: this release raises the event with no arguments,
+    --- so a handler's `submitted` arrives as nil whichever way the field was left. Treat the event as
+    --- the fact that focus ended until it carries the distinction.
     read FocusLost: Signal<boolean>
 end
 
@@ -1043,8 +1055,7 @@ declare extern type Sound extends Instance with
     --- was missing is a bug report about the sound; a placeholder that is audibly a placeholder is one
     --- about the file. `DebugService:GetStat("AudioClipsMissing")` is how a script asks which it got.
     --- Where in the file the sound is comes from `TimePosition` every frame rather than from a cursor
-    --- the mixer keeps, so the audio is a function of the simulation and a replay reproduces it (M6
-    --- brief, Decision 9).
+    --- the mixer keeps, so the audio is a function of the simulation and a replay reproduces it.
     Content: Content
     --- Whether the timeline is advancing. Writing it is the same as calling `Play` or `Stop`, and
     --- reading it is how a script asks without keeping its own flag.
@@ -1077,8 +1088,8 @@ declare extern type Sound extends Instance with
     --- run, and on a machine whose audio buffer is four times the size.
     read Ended: Signal<()>
     --- Fired when this sound's `Content` has been decoded and is ready to play. **Fires immediately in
-    --- v1**, because a sound has nothing to load until M7's asset pipeline -- declared now so that code
-    --- written today does not have to change when it does.
+    --- v1**, because a sound has nothing to wait for yet -- declared now so that code written today
+    --- does not have to change when it does.
     read Loaded: Signal<()>
     --- Starts it from `TimePosition`, which is 0 for a sound that has never played and wherever `Stop`
     --- left it otherwise. Playing one that is already playing is a no-op rather than a restart --
@@ -1095,12 +1106,12 @@ end
 declare extern type AnimationPlayer extends Instance with
     --- A track for one clip. Everything after a `#` is the clip's NAME inside the file, and a string
     --- with no `#` is a clip name in this player's own mesh -- so the common case is
-    --- `player:LoadAnimation("Walk")`. A path before the `#` must be the mesh this player is under. v1
-    --- has no asset pipeline (M7 is where a clip becomes addressable on its own), so a clip exists only
-    --- inside the file its skeleton came from, and a URN naming a different file loads nothing rather
-    --- than playing the wrong rig. **Load a track once and keep it.** It always returns a track, even
-    --- for a clip that is not there -- a mesh that has not finished loading would otherwise make an
-    --- ordinary frame a nil index -- and every call is a handle the VM holds until the world goes away.
+    --- `player:LoadAnimation("Walk")`. A path before the `#` must be the mesh this player is under: a
+    --- clip is not yet addressable on its own, so it exists only inside the file its skeleton came
+    --- from, and a URN naming a different file loads nothing rather than playing the wrong rig. **Load
+    --- a track once and keep it.** It always returns a track, even for a clip that is not there -- a
+    --- mesh that has not finished loading would otherwise make an ordinary frame a nil index -- and
+    --- every call is a handle the VM holds until the world goes away.
     function LoadAnimation(self, content: Content): AnimationTrack
 end
 
@@ -1371,10 +1382,10 @@ declare extern type PhysicsService extends Instance with
     --- The duration of one simulation tick, in seconds, and therefore the grid every timing guarantee
     --- is expressed against: `task.wait(1)` is exactly 60 ticks at the default 1/60, on every machine
     --- and every run. Express durations as multiples of it and the same code stays correct at 30 Hz or
-    --- at 240 Hz. Writable from M5, and a write takes effect at the next frame start rather than
-    --- mid-tick: the accumulator, the timer wheel and the solver all read it, and changing it between
-    --- two of those reads inside one frame is a class of bug worth designing out. Values outside 1/240
-    --- to 1/30 are refused.
+    --- at 240 Hz. Writable, and a write takes effect at the next frame start rather than mid-tick: the
+    --- accumulator, the timer wheel and the solver all read it, and changing it between two of those
+    --- reads inside one frame is a class of bug worth designing out. Values outside 1/240 to 1/30 are
+    --- refused.
     FixedTimestep: number
     --- Declares a collision group. Registering a name that already exists is a no-op rather than an
     --- error, which is what lets a script register its groups at file scope and survive a hot reload.
@@ -1412,7 +1423,7 @@ declare extern type InputService extends Instance with
     --- keyboard key and a gamepad button to one name, and is what a shipped game should use -- this is
     --- the direct, familiar option beside it, and it is the right one for a prototype, a debug key, or
     --- anything a player will never remap. It fires on the SIMULATION clock, from the Input Action
-    --- System''s own dispatch, so a handler that writes to the world replays exactly. Camera look at
+    --- System's own dispatch, so a handler that writes to the world replays exactly. Camera look at
     --- render rate is an `InputContext` with `Rate = Enum.InputRate.Render`.
     read InputBegan: Signal<InputObject, boolean>
     --- Fired on a tick an input MOVED without starting or ending: pointer motion, the wheel, a stick or
@@ -1437,7 +1448,7 @@ declare extern type InputService extends Instance with
     function GetPointerPosition(self): Vector2
     --- Whether that key, button or trigger is held as of the current tick. The shortest thing this API
     --- can be asked, and the reason there is no separate sugar module for it. It reads the device
-    --- SNAPSHOT and ignores what the UI consumed, which is the opposite of the events'' second argument
+    --- SNAPSHOT and ignores what the UI consumed, which is the opposite of the events' second argument
     --- -- a poll asks what the hardware is doing and an event asks what happened to the game. A caller
     --- who wants the UI-aware answer wants an `InputAction`, which is also the one that can be rebound.
     --- An analogue source counts as down past half deflection, which is the same rule a `Bool` action
@@ -1448,7 +1459,7 @@ declare extern type InputService extends Instance with
     --- writes into the same device snapshot a keyboard writes into**, which is what makes it one input
     --- model rather than two: the value binds through an ordinary `InputBinding`, resolves in the
     --- ordinary order, is eaten by an ordinary sinking context, and is carried by the recorded stream a
-    --- replay hands back. A seam that reached past the snapshot would be a HUD button M6''s own gate
+    --- replay hands back. A seam that reached past the snapshot would be a HUD button a recorded stream
     --- could not see. **It carries a value, not a press.** Write 1 and 0 for a button; write anything
     --- between for a slider or the axis of a thumbstick. Bound to a `Bool` action the value counts as
     --- pressed past half deflection, which is the rule every analogue source follows. The value STICKS
@@ -1489,10 +1500,12 @@ declare extern type AudioService extends Instance with
     --- Multiplied into every sound, after its own volume and its group's. The one a settings screen
     --- writes.
     MasterVolume: number
-    --- Creates a 2D `Sound`, plays it, and destroys it when it ends. For the fire-and-forget case -- a
-    --- click, a pickup -- where holding an instance to clean up later is all ceremony. The `Sound` is
-    --- returned so that the volume can still be set on the tick it starts; keeping it past `Ended` is
-    --- holding a destroyed instance.
+    --- Creates a 2D `Sound` parented to this service and plays it. For the fire-and-forget case -- a
+    --- click, a pickup -- where naming an instance is all ceremony. **It does not clean up after itself
+    --- in this release**: the `Sound` stays a child of the service once it has ended, so a caller
+    --- firing one per frame accumulates them. Keep the returned handle and `Destroy` it on `Ended`
+    --- where that matters. The handle is also what a caller sets the volume through, since this takes
+    --- only the content.
     function PlayLocal(self, content: Content): Sound
 end
 
@@ -1836,6 +1849,8 @@ declare function warn(...: any): ()
 declare Instance: {
     new: (("Folder") -> Folder)
         & (("Model") -> Model)
+        & (("Script") -> Script)
+        & (("ModuleScript") -> ModuleScript)
         & (("Part") -> Part)
         & (("MeshPart") -> MeshPart)
         & (("Weld") -> Weld)

@@ -433,53 +433,12 @@ constexpr const char* kInstanceDragPayload = "luaug.instances";
 // its own, and hiding it would leave somebody editing a set of children with
 // nothing saying what they are children OF.
 void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspector, EditorCommands* commands,
-                  EditorDialogs* dialogs, const IconAtlas* icons, bool showGenerated, const Editor* editor,
-                  bool drawRoot = false)
+                  EditorDialogs* dialogs, const IconAtlas* icons, bool showGenerated, bool drawRoot = false)
 {
     // How much of the depth is above the first row that gets drawn. One when
     // the root is hidden, zero when it is not -- and every position on a row is
     // measured from it.
     const u32 depthBase = drawRoot ? 0u : 1u;
-
-    // **A stamp is open, so say so and offer the way out.** The tree below is
-    // the stamp's and not the scene's, and an editor that looked identical in
-    // both would be one where somebody edits a stamp believing they are editing
-    // their world -- and saves it.
-    if (editor != nullptr && editor->stampSession().open() && commands != nullptr) {
-        const Editor::StampSession& session = editor->stampSession();
-        const float barIcon = ImGui::GetTextLineHeight();
-
-        // The stamp's own icon, so the bar says what KIND of thing is open
-        // before it says which one.
-        (void)drawIcon(icons, icons::ClassModel, barIcon);
-        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.72f, 0.35f, 1.0f));
-        ImGui::Text("editing %s%s", session.path.c_str(), session.dirty ? " *" : "");
-        ImGui::PopStyleColor();
-
-        // **Two buttons, and a third only while it means something.** `close`
-        // saves on the way out, which is the safe default and what somebody
-        // pressing it means nine times in ten; `discard` is the deliberate act
-        // and is drawn only when there is something to discard -- a control
-        // that would do nothing is worse than no control.
-        if (iconButton(icons, icons::ActionSave, barIcon, "stamp-save", "save", "save this stamp", true))
-            commands->saveStamp = true;
-        ImGui::SameLine();
-        if (iconButton(icons, icons::ActionClose, barIcon, "stamp-close", "close", "save and go back to the scene",
-                       true)) {
-            commands->closeStamp = true;
-            commands->closeStampSaving = true;
-        }
-        if (session.dirty) {
-            ImGui::SameLine();
-            if (iconButton(icons, icons::ActionDelete, barIcon, "stamp-discard", "discard",
-                           "go back WITHOUT saving -- the edits since the last save are dropped", true)) {
-                commands->closeStamp = true;
-                commands->closeStampSaving = false;
-            }
-        }
-        ImGui::Separator();
-    }
 
     collectTree(world, root, g_rows);
 
@@ -1739,6 +1698,45 @@ void drawTransport(Editor& editor, EditorCommands& commands, const IconAtlas* ic
         return iconButton(icons, id, glyph, word, word, tip);
     };
 
+    // **A stamp is open, so the transport is the STAMP's.** Play, pause and
+    // step have nothing to mean on a stage -- nothing there ticks -- and what a
+    // person wants in their place is exactly what a session offers: keep it,
+    // keep it and leave, or leave without keeping it. Same corner of the screen
+    // as the thing it replaces, because that is where a hand already goes.
+    if (editor.stampSession().open()) {
+        const Editor::StampSession& session = editor.stampSession();
+        if (toolButton(icons::ActionSave, "save", "save this stamp and keep editing"))
+            commands.saveStamp = true;
+
+        ImGui::SameLine();
+        if (toolButton(icons::ActionClose, "close", "save and go back to the scene")) {
+            commands.closeStamp = true;
+            commands.closeStampSaving = true;
+        }
+
+        // Only while there is something to discard: a control that would do
+        // nothing is worse than no control, and one that throws work away
+        // should not sit there on a session with nothing to throw.
+        if (session.dirty) {
+            ImGui::SameLine();
+            if (toolButton(icons::ActionDelete, "discard",
+                           "go back WITHOUT saving -- the edits since the last save are dropped")) {
+                commands.closeStamp = true;
+                commands.closeStampSaving = false;
+            }
+        }
+
+        ImGui::SameLine();
+        ImGui::TextDisabled("|");
+        ImGui::SameLine();
+        (void)drawIcon(icons, icons::ClassModel, glyph);
+        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.72f, 0.35f, 1.0f));
+        ImGui::Text("%s%s", session.path.c_str(), session.dirty ? " *" : "");
+        ImGui::PopStyleColor();
+        return;
+    }
+
     if (toolButton(inPlay ? icons::ActionStop : icons::ActionPlay, inPlay ? "stop" : "play",
                    inPlay ? "leave play mode and put the world back where you pressed play"
                           : "run the game, remembering the world first")) {
@@ -2917,7 +2915,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
                 // same thing because opening cleared the scene out of the world.
                 const bool editingStamp = editor != nullptr && editor->stampSession().open();
                 const core::InstanceId treeRoot = editingStamp ? editor->stampSession().root : root;
-                drawExplorer(*world, treeRoot, *inspector, &commands, &dialogs, icons, panels.showGenerated, editor,
+                drawExplorer(*world, treeRoot, *inspector, &commands, &dialogs, icons, panels.showGenerated,
                              editingStamp);
             }
         }
@@ -3037,7 +3035,7 @@ void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, I
                 // Everything, including what streaming made: this is the debug
                 // overlay rather than the editor, and it exists to show the
                 // world as it IS rather than as it was authored.
-                drawExplorer(*world, root, *inspector, nullptr, nullptr, nullptr, true, nullptr);
+                drawExplorer(*world, root, *inspector, nullptr, nullptr, nullptr, true);
             ImGui::EndChild();
 
             ImGui::SeparatorText("properties");
