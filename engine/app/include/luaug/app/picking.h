@@ -102,4 +102,107 @@ struct PickHit
 // being unable to miss it.
 [[nodiscard]] std::optional<PickHit> pickNearest(const scene::World& world, const PickRay& ray) noexcept;
 
+// --- The manipulators -------------------------------------------------------
+//
+// **All of this is arithmetic and none of it is a UI callback**, for the reason
+// the top of this file gives about picking and which is stronger here: a
+// manipulator bug reproduces by DRAGGING, and a bug that reproduces by dragging
+// is one nobody fixes twice. An axis nearly edge-on to the camera, a drag that
+// starts a few pixels off the handle, a viewport that is not square -- each is
+// invisible when you aim at what you meant to grab, and each is a case in
+// `picking_tests.cpp`.
+//
+// The split is: **where the gizmo is** (a frame and a scale), **what the ray
+// hit** (a handle), and **where the drag has got to** (a point or an angle).
+// Nothing here computes a delta, and that is deliberate: a delta taken between
+// two consecutive rays accumulates its own error and drifts over a long drag.
+// The caller records what it got on the first frame and diffs against that, so
+// a drag is exact however long it lasts and however slowly it is made.
+
+// The point on the screen a world position falls at, or nothing when it is
+// behind the camera.
+//
+// **The exact inverse of `rayThroughPixel`**, and it reads its tangents back off
+// the same projection matrix for the same reason: a second copy of the field of
+// view is a second thing to disagree with the image. `picking_tests.cpp` checks
+// the round trip at the corners, which is where an aspect-ratio error lives.
+[[nodiscard]] std::optional<core::Vec2> worldToViewport(const core::Mat4& projection, const core::Mat4& view,
+                                                        core::DVec3 cameraOrigin, const ViewportRect& rect,
+                                                        core::DVec3 world) noexcept;
+
+// How many world metres one pixel covers at `world`, given this projection and
+// this viewport.
+//
+// A manipulator is a constant size ON SCREEN -- a handle that shrank into
+// nothing as you flew away would be a handle you could not grab -- so its
+// geometry is built in metres and scaled by this. Zero when the point is behind
+// the camera or the viewport is collapsed, which the caller reads as "do not
+// draw one".
+[[nodiscard]] f32 metresPerPixel(const core::Mat4& projection, const ViewportRect& rect, core::DVec3 cameraOrigin,
+                                 core::DVec3 world) noexcept;
+
+enum class GizmoMode : core::u8
+{
+    Translate,
+    Rotate,
+    Scale,
+};
+
+// Where a manipulator is and how big it is drawn.
+//
+// `transform` is the selection's own frame in local space and the world's axes
+// in world space -- which one is a person's choice and not this file's. `size`
+// is the length of an axis in METRES, already scaled so it comes out the size it
+// should be on screen.
+struct GizmoFrame
+{
+    core::CFrameD transform;
+    f32 size = 1.0f;
+};
+
+// Which part of the manipulator a ray hit.
+struct GizmoHandle
+{
+    // 0 is X, 1 is Y, 2 is Z. For a plane handle it is the plane's NORMAL,
+    // which is the axis the drag does NOT move along.
+    core::u8 axis = 0;
+    // The square between two axes: a drag in both of them at once, which is how
+    // anything is moved across a floor.
+    bool plane = false;
+    // The middle: uniform scale, and for translate the screen-facing plane.
+    bool uniform = false;
+    // Metres along the ray. The caller does not need it; `pickGizmo` does, to
+    // choose between two handles one ray crosses.
+    f32 distance = 0.0f;
+
+    [[nodiscard]] constexpr bool operator==(const GizmoHandle&) const noexcept = default;
+};
+
+// The handle this ray hits, or nothing.
+//
+// **Nearest wins, and the middle wins ties.** A ray through the origin of a
+// translate gizmo crosses all three axes and both of the handles that meet
+// there; picking the nearest is what makes grabbing the one you are pointing at
+// possible at all, and the centre handle is deliberately tested first because it
+// is the smallest and the easiest to miss.
+[[nodiscard]] std::optional<GizmoHandle> pickGizmo(const PickRay& ray, const GizmoFrame& frame,
+                                                   GizmoMode mode) noexcept;
+
+// Where along the handle this ray is pointing, in world space.
+//
+// For an axis handle it is the point on that axis nearest the ray; for a plane
+// handle it is where the ray meets the plane. **A POINT and not a delta**: the
+// caller takes this once when the drag begins and diffs against it, which is
+// what makes a drag exact rather than an accumulation of per-frame differences.
+//
+// Nothing when the ray is parallel to what it is being solved against, which is
+// the axis edge-on to the camera and is a real thing to point at.
+[[nodiscard]] std::optional<core::DVec3> gizmoDragPoint(const PickRay& ray, const GizmoFrame& frame,
+                                                        const GizmoHandle& handle) noexcept;
+
+// The angle around the handle's axis this ray points at, in radians, measured in
+// the plane the ring lies in. A point and not a delta, for the same reason.
+[[nodiscard]] std::optional<f32> gizmoDragAngle(const PickRay& ray, const GizmoFrame& frame,
+                                                const GizmoHandle& handle) noexcept;
+
 } // namespace luaug::app
