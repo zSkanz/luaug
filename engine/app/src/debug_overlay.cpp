@@ -386,10 +386,11 @@ bool iconButton(const IconAtlas* icons, std::string_view id, float size, const c
 // Reused across frames rather than rebuilt: the panel fills these once per
 // frame for as long as it is open, and a debug overlay that allocates a whole
 // tree every frame is a profile artefact somebody eventually has to explain.
-std::vector<TreeRow> g_rows;
-// The rows a person could actually see if they scrolled: `g_rows` minus every
-// subtree under a closed ancestor. Computed before anything is drawn, because a
-// clipper needs to know how many rows exist before it decides which to draw.
+// The rows a person could actually see if they scrolled: everything not under a
+// closed ancestor. Filled before anything is drawn, because a clipper needs to
+// know how many rows exist before it decides which to draw -- and filled by a
+// walk that never enters a closed subtree at all, so this is the only list the
+// panel builds and its length is what is open rather than what exists.
 std::vector<TreeRow> g_visible;
 // The way down to something just created, moved or copied. See the reveal below.
 std::vector<core::InstanceId> g_ancestors;
@@ -541,8 +542,6 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
     // measured from it.
     const u32 depthBase = drawRoot ? 0u : 1u;
 
-    collectTree(world, root, g_rows);
-
     // **A DIFFERENT world opens collapsed; a restored one does not.** Loading a
     // scene or starting a new one arrives here as a world nobody has expanded
     // anything in, and a tree that remembered would be showing somebody the
@@ -577,70 +576,54 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
         }
     }
 
-    // Preorder, so an ancestor is always decided before its descendants. A row
-    // is visible when every ancestor above it is open; `hiddenBelow` remembers
-    // the shallowest closed depth rather than re-walking upwards per row.
-    g_visible.clear();
-    u32 hiddenBelow = std::numeric_limits<u32>::max();
-    u32 generatedBelow = std::numeric_limits<u32>::max();
-    for (const TreeRow& row : g_rows) {
-        // **What streaming made is not the scene.** It pumps in edit mode as
-        // well as in play -- deliberately, because a world you cannot see is a
-        // world you cannot edit -- but the serializer skips a generated subtree
-        // whole and nothing authored may live in one, so sixty `Chunk_x_y_z`
-        // folders standing between a person and the four things they wrote is
-        // the root's own complaint again: scrolling past a world to find the
-        // thing you came for. Window > Streamed Content brings them back.
-        //
-        // A depth watermark rather than an ancestry walk per row, exactly like
-        // `hiddenBelow` below it: the tree is preorder, so a generated folder's
-        // whole subtree is the run of rows deeper than it.
-        if (row.depth > generatedBelow)
-            continue;
-        generatedBelow = std::numeric_limits<u32>::max();
-        if (!showGenerated && world.generated(row.id)) {
-            generatedBelow = row.depth;
-            continue;
-        }
+    // **One walk, and it does not enter what nobody can see** (ADR 0054). This
+    // was a full preorder over every instance in the world followed by a second
+    // pass that dropped the ones under something closed -- so an editor on a
+    // world of thirty thousand instances paid for thirty thousand of them every
+    // frame to draw the four rows on screen. The drawing was already clipped,
+    // which is exactly why nothing ever showed it in a profile: the cost was in
+    // deciding what to draw, not in drawing it.
+    //
+    // Parent before child, so a closed or hidden ancestor is answered once and
+    // its whole subtree is never touched.
+    collectVisibleTree(
+        world, root, drawRoot,
+        [&](const TreeRow& row) {
+            // **What streaming made is not the scene.** It pumps in edit mode as
+            // well as in play -- deliberately, because a world you cannot see is
+            // a world you cannot edit -- but the serializer skips a generated
+            // subtree whole and nothing authored may live in one, so sixty
+            // `Chunk_x_y_z` folders standing between a person and the four
+            // things they wrote is the root's own complaint again: scrolling
+            // past a world to find the thing you came for. Window > Streamed
+            // Content brings them back.
+            if (!showGenerated && world.generated(row.id))
+                return TreeVisit::Skip;
 
-        if (row.depth > hiddenBelow)
-            continue;
-        hiddenBelow = std::numeric_limits<u32>::max();
+            const bool hasChildren = world.childCount(row.id) > 0;
+            if (!hasChildren)
+                return TreeVisit::Collapsed;
 
-        // **The root is not drawn.** `game` has no properties worth a row, it
-        // cannot be renamed, deleted, duplicated or reparented, and every
-        // useful thing in a world is under it -- so a row for it is a line of
-        // chrome and an indent level charged to every row beneath it. The
-        // services are the top of this tree, which is what a person opening the
-        // panel is looking for.
-        //
-        // Filtered here rather than by walking from somewhere else, because
-        // `root` is what `isEngineOwned` compares against and what the pick
-        // path resolves into: the tree is still the tree, this is the view of
-        // it. Depth is shifted at the draw so the services sit flush left.
-        if (row.depth > 0 || drawRoot)
-            g_visible.push_back(row);
-
-        const bool hasChildren = world.childCount(row.id) > 0;
-        // The services under `game` are what anyone opening this wants to see;
-        // deeper than that is a project's own tree and is its business. Seeded
-        // once per instance rather than every frame, so collapsing one stays
-        // collapsed.
-        if (hasChildren && !g_openKnown.contains(row.id.index)) {
-            g_openKnown.insert(row.id.index);
-            // **The root only**, and when it is the world's it is not drawn --
-            // opening it is what puts the services on screen at all. What is
-            // INSIDE them is the scene, and showing all of that means scrolling
-            // past a world to find the thing you came for.
-            //
-            // A stamp's root opens for the opposite reason: it IS what somebody
-            // opened, and a stage that starts collapsed shows one row.
-            if (row.depth == 0)
-                g_open.insert(row.id.index);
-        }
-        if (hasChildren && !g_open.contains(row.id.index))
-            hiddenBelow = row.depth;
-    }
+            // The services under `game` are what anyone opening this wants to
+            // see; deeper than that is a project's own tree and is its business.
+            // Seeded once per instance rather than every frame, so collapsing
+            // one stays collapsed.
+            if (!g_openKnown.contains(row.id.index)) {
+                g_openKnown.insert(row.id.index);
+                // **The root only**, and when it is the world's it is not drawn
+                // -- opening it is what puts the services on screen at all. What
+                // is INSIDE them is the scene, and showing all of that means
+                // scrolling past a world to find the thing you came for.
+                //
+                // A stamp's root opens for the opposite reason: it IS what
+                // somebody opened, and a stage that starts collapsed shows one
+                // row.
+                if (row.depth == 0)
+                    g_open.insert(row.id.index);
+            }
+            return g_open.contains(row.id.index) ? TreeVisit::Expanded : TreeVisit::Collapsed;
+        },
+        g_visible);
 
     // **One height for a row, decided once and told to everybody.**
     //
@@ -2263,8 +2246,9 @@ bool drawContentIcon(const IconAtlas* icons, const ContentEntry& entry, float si
 // bar for this was given as Unity and Unreal, and a Content Browser is judged on
 // a tree of thousands. `ImGuiListClipper` draws only the rows a person can see,
 // so a folder of ten thousand meshes costs the same as a folder of ten.
-// `drawExplorer` beside this one does NOT do that yet, which is a thing to fix
-// rather than a precedent to follow.
+// `drawExplorer` beside this one is virtualised twice over: the clipper draws
+// what is on screen, and the walk that decides what could be on screen does not
+// enter a closed subtree (ADR 0054).
 // One entry of the browser, in whichever layout is on.
 //
 // **The three layouts share every decision except where things are put**, which

@@ -26,6 +26,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -36,6 +37,7 @@ using luaug::app::collectAncestors;
 using luaug::app::collectCommonProperties;
 using luaug::app::collectProperties;
 using luaug::app::collectTree;
+using luaug::app::collectVisibleTree;
 using luaug::app::editable;
 using luaug::app::editorFor;
 using luaug::app::EditorKind;
@@ -49,6 +51,7 @@ using luaug::app::setResultLabel;
 using luaug::app::SharedState;
 using luaug::app::sharedValue;
 using luaug::app::TreeRow;
+using luaug::app::TreeVisit;
 
 namespace core = luaug::core;
 namespace scene = luaug::scene;
@@ -901,4 +904,160 @@ TEST_CASE("a reveal is a one-shot, and a different world drops it")
     inspector.reveal(a);
     inspector.onWorldChanged();
     CHECK_FALSE(inspector.takeReveal().valid());
+}
+
+// --- What the explorer's walk costs (ADR 0054) --------------------------------
+//
+// The claim these hold is a property of the algorithm rather than a number off a
+// clock: `docs/perf-baselines.md`'s own methodology says a threshold on a busy
+// machine is a threshold that fails for the wrong reason, and E5's partition
+// peak taught the sharper half of it -- a bound asserted as "small" passes while
+// the defect is still there, and one asserted as EQUAL does not.
+
+namespace {
+
+// A root with `branches` children, each holding `leaves` of its own. Shaped like
+// what an editor actually opens: a handful of services with a scene under them.
+struct Forest
+{
+    core::InstanceId root;
+    std::vector<core::InstanceId> branches;
+    luaug::core::u32 instances = 0;
+};
+
+[[nodiscard]] Forest plant(Fixture& fixture, scene::World& world, int branches, int leaves)
+{
+    Forest forest;
+    forest.root = fixture.widget(world, "Root");
+    ++forest.instances;
+    for (int branch = 0; branch < branches; ++branch) {
+        const core::InstanceId id = fixture.widget(world, "Branch");
+        REQUIRE_FALSE(world.setParent(id, forest.root).has_value());
+        forest.branches.push_back(id);
+        ++forest.instances;
+        for (int leaf = 0; leaf < leaves; ++leaf) {
+            const core::InstanceId child = fixture.widget(world, "Leaf");
+            REQUIRE_FALSE(world.setParent(child, id).has_value());
+            ++forest.instances;
+        }
+    }
+    return forest;
+}
+
+} // namespace
+
+TEST_CASE("the visible walk costs what is open, not what exists")
+{
+    // Two worlds an order of magnitude apart, with the same thing expanded in
+    // both. Equality is the assertion: a walk that visited "few" instances would
+    // still be a walk charged for the world, and the two numbers would differ.
+    const auto visitedFor = [](int leaves) {
+        Fixture fixture;
+        scene::World world(fixture.classes, fixture.enums, fixture.atoms, 4242u);
+        const Forest forest = plant(fixture, world, 4, leaves);
+
+        luaug::core::u32 visited = 0;
+        std::vector<TreeRow> rows;
+        collectVisibleTree(
+            world, forest.root, false,
+            [&](const TreeRow& row) {
+                ++visited;
+                // The root is open, which is what puts its children on screen;
+                // nothing below it is.
+                return row.depth == 0 ? TreeVisit::Expanded : TreeVisit::Collapsed;
+            },
+            rows);
+
+        CHECK(rows.size() == 4);
+        return std::pair<luaug::core::u32, luaug::core::u32>{visited, forest.instances};
+    };
+
+    const auto [smallVisited, smallInstances] = visitedFor(50);
+    const auto [largeVisited, largeInstances] = visitedFor(500);
+
+    // The worlds really are an order of magnitude apart, so the equality below
+    // is about the walk rather than about two identical scenes.
+    CHECK(largeInstances >= smallInstances * 9);
+
+    // Five: the root, and the four branches it was asked to draw.
+    CHECK(smallVisited == 5);
+    CHECK(largeVisited == smallVisited);
+}
+
+TEST_CASE("opening a branch costs that branch and nothing else")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 99u);
+    const Forest forest = plant(fixture, world, 4, 50);
+
+    const auto walk = [&](core::InstanceId opened) {
+        luaug::core::u32 visited = 0;
+        std::vector<TreeRow> rows;
+        collectVisibleTree(
+            world, forest.root, false,
+            [&](const TreeRow& row) {
+                ++visited;
+                if (row.depth == 0 || row.id == opened)
+                    return TreeVisit::Expanded;
+                return TreeVisit::Collapsed;
+            },
+            rows);
+        return std::pair<luaug::core::u32, luaug::core::usize>{visited, rows.size()};
+    };
+
+    const auto [closedVisited, closedRows] = walk(core::InstanceId{});
+    const auto [openVisited, openRows] = walk(forest.branches[1]);
+
+    CHECK(closedRows == 4);
+    CHECK(openRows == 54);
+    // Exactly the fifty the opened branch holds, and not one instance of the
+    // three branches beside it.
+    CHECK(openVisited == closedVisited + 50);
+}
+
+TEST_CASE("a skipped subtree is not a row and is not walked")
+{
+    // What a generated folder gets when streamed content is hidden: the panel
+    // must not pay for sixty chunk folders it is not drawing.
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 7u);
+    const Forest forest = plant(fixture, world, 3, 40);
+
+    luaug::core::u32 visited = 0;
+    std::vector<TreeRow> rows;
+    collectVisibleTree(
+        world, forest.root, false,
+        [&](const TreeRow& row) {
+            ++visited;
+            if (row.id == forest.branches[0])
+                return TreeVisit::Skip;
+            return row.depth <= 1 ? TreeVisit::Expanded : TreeVisit::Collapsed;
+        },
+        rows);
+
+    // Two branches drawn with their forty leaves each, and the skipped one
+    // contributing neither a row nor a visit below itself.
+    CHECK(rows.size() == 2 + 80);
+    CHECK(visited == 1 + 3 + 80);
+}
+
+TEST_CASE("the visible walk and the full walk agree when everything is open")
+{
+    // The equivalence that makes the panel's change safe: with nothing closed,
+    // this is `collectTree` -- same instances, same order, same depths.
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 11u);
+    const Forest forest = plant(fixture, world, 5, 7);
+
+    std::vector<TreeRow> all;
+    collectTree(world, forest.root, all);
+
+    std::vector<TreeRow> visible;
+    collectVisibleTree(world, forest.root, true, [](const TreeRow&) { return TreeVisit::Expanded; }, visible);
+
+    REQUIRE(visible.size() == all.size());
+    for (luaug::core::usize index = 0; index < all.size(); ++index) {
+        CHECK(visible[index].id == all[index].id);
+        CHECK(visible[index].depth == all[index].depth);
+    }
 }

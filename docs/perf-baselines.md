@@ -610,3 +610,39 @@ a judgement:
   bodies (M5 benchmark) within their recorded budgets; the
   10k-parts/1k-listeners property-churn benchmark within its CI threshold.
 - Script GC: ≤ 1 ms GC step at 60 fps under the M7 streaming scene load.
+
+### E4 — the editor's Explorer, measured as work rather than as a clock
+
+**A number the machine cannot move.** Everything above this section is
+milliseconds on the reference machine, and the methodology at the top of this
+page spends four paragraphs on how easily a millisecond lies. This one does not
+need them: what the Explorer costs per frame is the number of instances its walk
+visits, and that number is a property of the algorithm — the same on a reference
+desktop, on a busy laptop and in a container.
+
+The panel drew a preorder over **every instance in the world** every frame, and
+then walked that list a second time to drop everything under a closed node. The
+*drawing* was already virtualised — `ImGuiListClipper` over the visible rows —
+which is exactly why nothing ever showed this in a profile: the cost was in
+deciding what to draw, not in drawing it.
+
+Measured by `inspector_tests.cpp`, which is why the numbers are reproducible
+rather than recorded:
+
+| World | Rows on screen | Instances visited, before | After |
+|---|---|---|---|
+| 4 branches × 50 leaves (**205** instances) | 4 | 205 | **5** |
+| 4 branches × 500 leaves (**2,005** instances) | 4 | 2,005 | **5** |
+| Same, with one branch opened | 54 | 2,005 | 55 |
+
+**The two worlds are an order of magnitude apart and the walk costs the same**,
+which is the assertion the test makes — equality rather than a small bound, for
+the reason E5's partition peak had to: a bound that is merely small passes while
+the defect is still there. Break-verified by making the walk descend
+unconditionally, which reports 205 and 2,005 again.
+
+What this does not say is how many milliseconds it was, and that is deliberate:
+the walk allocated nothing per node and the panel was never visibly slow, so a
+frame time would have shown a regression only on a world large enough to make it
+one. The cost was linear in a world an editor is expected to open, and now it is
+not.

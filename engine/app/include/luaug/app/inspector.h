@@ -43,6 +43,7 @@
 #include "luaug/scene/value.h"
 #include "luaug/scene/world.h"
 
+#include <functional>
 #include <span>
 #include <string>
 #include <vector>
@@ -248,7 +249,41 @@ void collectCreatableClasses(const scene::World& world, std::vector<scene::Class
 // would lie about it.
 //
 // `out` is cleared first, for the same reason as above.
+//
+// **This one is charged for the whole world**, which is what it is for: an
+// operation over a set needs document order for every instance in it, and there
+// is no cheaper way to have that. A PANEL does not — see `collectVisibleTree`.
 void collectTree(const scene::World& world, core::InstanceId root, std::vector<TreeRow>& out);
+
+// What a walk should do with one candidate row.
+enum class TreeVisit : core::u8
+{
+    // Not a row and not a subtree: the walk does not enter it. What a generated
+    // folder gets when streamed content is hidden.
+    Skip,
+    // A row, and the walk stops there. A closed node.
+    Collapsed,
+    // A row, and its children are candidates in turn.
+    Expanded,
+};
+
+// The rows a person could see if they scrolled: preorder under `root`, entering
+// a subtree only when `visit` says it is expanded.
+//
+// **Cost is what is open, not what exists** (ADR 0054). The panel this replaces
+// walked every instance in the world every frame and then walked the result
+// again to drop the ones under something closed — so a scene of thirty thousand
+// instances cost thirty thousand of them per frame with four rows on screen. The
+// drawing was already virtualised, which is exactly why nothing showed it.
+//
+// `visit` is called once per candidate, parent before child, and may keep state:
+// the panel seeds a node's open flag the first time it sees it. `includeRoot`
+// decides whether `root`'s own row is emitted; whether the walk DESCENDS into it
+// is `visit`'s answer like anybody else's.
+//
+// `out` is cleared first.
+void collectVisibleTree(const scene::World& world, core::InstanceId root, bool includeRoot,
+                        const std::function<TreeVisit(const TreeRow&)>& visit, std::vector<TreeRow>& out);
 
 // The given instances, in the order the tree holds them, with duplicates and
 // anything not under `root` dropped.

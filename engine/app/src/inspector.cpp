@@ -408,6 +408,42 @@ void collectTree(const scene::World& world, core::InstanceId root, std::vector<T
     }
 }
 
+void collectVisibleTree(const scene::World& world, core::InstanceId root, bool includeRoot,
+                        const std::function<TreeVisit(const TreeRow&)>& visit, std::vector<TreeRow>& out)
+{
+    out.clear();
+    if (!root.valid() || !world.alive(root) || !visit)
+        return;
+
+    // A stack of candidates rather than of subtrees, so the answer for a node is
+    // asked once and its children are only ever pushed after an `Expanded`. That
+    // is the whole difference from `collectTree`: a closed or hidden subtree is
+    // never touched, so nothing here is a function of how big the world is.
+    std::vector<TreeRow> stack{TreeRow{root, 0}};
+    std::vector<core::InstanceId> children;
+
+    while (!stack.empty()) {
+        const TreeRow row = stack.back();
+        stack.pop_back();
+
+        const TreeVisit answer = visit(row);
+        if (answer == TreeVisit::Skip)
+            continue;
+        if (row.depth > 0 || includeRoot)
+            out.push_back(row);
+        if (answer != TreeVisit::Expanded)
+            continue;
+
+        // Reversed for the reason `collectTree` reverses: the first child has to
+        // pop first, which is what makes this preorder rather than a mirror of
+        // it. Sibling order is parenting order and the panel does not sort.
+        children.clear();
+        world.collectChildren(row.id, children);
+        for (auto child = children.rbegin(); child != children.rend(); ++child)
+            stack.push_back(TreeRow{*child, row.depth + 1});
+    }
+}
+
 std::string formatValue(const scene::World& world, const scene::Value& value)
 {
     return std::visit(ValueFormatter{world}, value);
