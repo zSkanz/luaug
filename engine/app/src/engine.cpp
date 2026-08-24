@@ -1102,6 +1102,33 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 if (editorCommands.any())
                     editor.touchStamp();
 
+                // --- The clipboard --------------------------------------
+                //
+                // **Copied before anything is deleted**, because a cut is a
+                // copy plus a delete and the delete takes the instances the
+                // copy would have read.
+                if (editorCommands.copySelection || editorCommands.cutSelection) {
+                    const std::vector<core::InstanceId> acting(inspector.selectionSet().begin(),
+                                                               inspector.selectionSet().end());
+                    editor.copySelection(authored(), acting, authoredRoot());
+                    if (editorCommands.cutSelection)
+                        (void)editor.deleteInstances(authored(), acting, authoredRoot(), inspector);
+                }
+                if (editorCommands.paste || editorCommands.pasteInto) {
+                    // **Paste puts it BESIDE what is selected and Paste Into
+                    // puts it inside**, which is the distinction every editor
+                    // with a tree draws and the only one a person has to be
+                    // told. With nothing selected both mean the Workspace.
+                    const core::InstanceId primary = inspector.selection();
+                    core::InstanceId parent = host->workspace();
+                    if (primary.valid() && authored().alive(primary)) {
+                        parent = editorCommands.pasteInto ? primary : authored().parentOf(primary);
+                        if (!parent.valid())
+                            parent = host->workspace();
+                    }
+                    (void)editor.paste(authored(), parent, authoredRoot(), inspector);
+                }
+
                 if (editorCommands.renameInstance.valid())
                     (void)editor.renameInstance(authored(), editorCommands.renameInstance, authoredRoot(),
                                                 editorCommands.renameInstanceTo);

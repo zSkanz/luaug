@@ -666,6 +666,81 @@ Editor::ReparentPlan Editor::planReparent(const scene::World& world, std::span<c
     return plan;
 }
 
+void Editor::copySelection(const scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId root)
+{
+    m_clipboard.clear();
+    if (ids.empty())
+        return;
+
+    // Document order, so pasting four things back reproduces the order they
+    // were in rather than the order somebody happened to ctrl-click. It is the
+    // same reason every batch verb sorts, and R10's discipline applied to a
+    // clipboard.
+    std::vector<core::InstanceId> ordered;
+    orderByTree(world, root, ids, ordered);
+
+    for (const core::InstanceId id : ordered) {
+        if (isEngineOwned(world, id, root))
+            continue;
+        // **Anything inside another thing already copied is skipped.** Copying
+        // a parent and its child and pasting would otherwise produce the child
+        // twice: once inside the parent, where it belongs, and once beside it.
+        bool insideAnother = false;
+        for (const core::InstanceId other : ordered) {
+            if (other != id && world.isAncestorOf(other, id)) {
+                insideAnother = true;
+                break;
+            }
+        }
+        if (insideAnother)
+            continue;
+        m_clipboard.push_back(scene::writeStamp(world, id));
+    }
+
+    m_status = EditorStatus{"copied " + std::to_string(m_clipboard.size()) + " instance(s)", false};
+}
+
+bool Editor::paste(scene::World& world, core::InstanceId parent, core::InstanceId root, Inspector& inspector)
+{
+    if (m_clipboard.empty()) {
+        m_status = EditorStatus{"there is nothing to paste", true};
+        return false;
+    }
+    if (!canParentInto(world, parent, root)) {
+        m_status = EditorStatus{"nothing authored can live in that", true};
+        return false;
+    }
+
+    // Recorded before the first one, so a paste of four is one press of ctrl-Z.
+    m_history.record(world, m_clipboard.size() == 1 ? "Paste" : "Paste " + std::to_string(m_clipboard.size()));
+
+    std::vector<core::InstanceId> pasted;
+    for (const std::string& text : m_clipboard) {
+        scene::SceneIoReport report;
+        const core::InstanceId placed = scene::readStamp(world, text, parent, "<clipboard>", &report);
+        if (!placed.valid())
+            continue;
+        // **The mark does not come with it.** What was copied is a subtree, and
+        // a mark naming `<clipboard>` would point at a file that does not
+        // exist -- the marks INSIDE it are kept, because those name real ones.
+        world.setStamp(placed, core::NameAtom{});
+        pasted.push_back(placed);
+    }
+
+    if (pasted.empty()) {
+        // Nothing was built, so the step is taken back rather than left: a step
+        // that undoes nothing eats a press of ctrl-Z.
+        (void)m_history.undo(world);
+        m_status = EditorStatus{"nothing in the clipboard could be pasted", true};
+        return false;
+    }
+
+    inspector.select(pasted);
+    inspector.reveal(pasted.front());
+    m_status = EditorStatus{"pasted " + std::to_string(pasted.size()) + " instance(s)", false};
+    return true;
+}
+
 bool Editor::canReparent(const scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId newParent,
                          core::InstanceId root)
 {
@@ -1321,15 +1396,6 @@ constexpr f32 kGizmoPixels = 90.0f;
     return std::round(value / step) * step;
 }
 
-[[nodiscard]] core::DVec3 snapTo(core::DVec3 value, f32 step) noexcept
-{
-    if (step <= 0.0f)
-        return value;
-    const auto quantum = static_cast<core::f64>(step);
-    return core::DVec3{std::round(value.x / quantum) * quantum, std::round(value.y / quantum) * quantum,
-                       std::round(value.z / quantum) * quantum};
-}
-
 } // namespace
 
 void Editor::setGizmoMode(GizmoMode mode) noexcept
@@ -1377,7 +1443,15 @@ std::optional<GizmoFrame> Editor::gizmoFrame(const scene::World& world, const In
     // World axes unless somebody asked for the part's own. A rotated crate is
     // unusable in world space and a wall is unusable in local, which is why this
     // is a choice rather than a decision made here.
-    frame.transform.rotation = m_gizmoLocal ? part->cframe.rotation : core::Mat3{};
+    //
+    // **Except for SCALE, which is always the part's own, and that is not a
+    // preference.** A `Size` is three numbers in the part's own space -- there
+    // is no world-space size to change -- so a world-axis scale arm on a turned
+    // crate would point one way and grow it another. Unity's scale tool ignores
+    // the same toggle for the same reason, and the alternative is a handle that
+    // lies about what it does.
+    const bool local = m_gizmoLocal || m_gizmoMode == GizmoMode::Scale;
+    frame.transform.rotation = local ? part->cframe.rotation : core::Mat3{};
     frame.size = metresPerPixel(m_projection, m_viewport, m_cameraOrigin, frame.transform.position) * kGizmoPixels;
 
     if (!(frame.size > 0.0f))
@@ -1523,10 +1597,29 @@ bool Editor::driveGizmo(scene::World& world, Inspector& inspector)
 
     if (m_gizmoMode == GizmoMode::Translate) {
         if (snapping()) {
-            // Snapped in the GIZMO's frame rather than the world's, so a local
-            // drag lands on the part's own grid. In world space the two are the
-            // same thing.
-            delta = snapTo(delta, snapStep(GizmoMode::Translate));
+            // **Snapped in the GIZMO's frame, and this used to say so while
+            // doing the opposite.** It quantised each WORLD component, which is
+            // right for a world-axis drag and wrong for every other one: an arm
+            // in local space points diagonally through the world, so rounding
+            // x, y and z apart takes the motion OFF the arm. A person dragging
+            // a turned crate saw it wander -- reported as "não segue exatamente
+            // a reta, vai todo estranho para o sentido da seta".
+            //
+            // Expressed in the gizmo's own basis, snapped there and turned
+            // back, an axis drag stays on its axis and a plane drag stays in
+            // its plane, because a component that was zero rounds to zero. In
+            // world mode the basis is the identity and this is exactly what it
+            // was.
+            const f32 step = snapStep(GizmoMode::Translate);
+            Vec3 axes[3];
+            const core::Mat3& basis = drag.frame.transform.rotation;
+            for (int index = 0; index < 3; ++index)
+                axes[index] = core::normalize(Vec3{basis.m[index][0], basis.m[index][1], basis.m[index][2]});
+
+            const Vec3 local = core::toVec3(delta);
+            const Vec3 snapped{snapTo(core::dot(local, axes[0]), step), snapTo(core::dot(local, axes[1]), step),
+                               snapTo(core::dot(local, axes[2]), step)};
+            delta = core::toDVec3(axes[0] * snapped.x + axes[1] * snapped.y + axes[2] * snapped.z);
         }
         for (core::usize index = 0; index < drag.targets.size(); ++index) {
             core::CFrameD after = drag.before[index];

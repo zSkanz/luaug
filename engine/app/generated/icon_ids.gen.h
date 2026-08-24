@@ -98,4 +98,8 @@ inline constexpr std::string_view ContentOther = "content.Other";
 inline constexpr std::string_view ContentScene = "content.Scene";
 inline constexpr std::string_view ContentTexture = "content.Texture";
 
+// overlay.*
+inline constexpr std::string_view OverlayStamp = "overlay.Stamp";
+inline constexpr std::string_view OverlayStampBase = "overlay.StampBase";
+
 } // namespace luaug::app::icons

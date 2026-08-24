@@ -335,6 +335,14 @@ struct EditorCommands
     // Take the mark off this one, so it stops following its file.
     core::InstanceId breakStamp;
 
+    // **Copy, cut and the two pastes.** `pasteInto` is the difference between
+    // "another one beside this" and "one inside this", which is the distinction
+    // every editor with a tree draws and the only one a person has to be told.
+    bool copySelection = false;
+    bool cutSelection = false;
+    bool paste = false;
+    bool pasteInto = false;
+
     // **Open a stamp for editing**, save what is open, or close it. Opening
     // replaces the world with the stamp and closing puts the scene back, so
     // all three are drained at the safe point like everything else that
@@ -365,11 +373,11 @@ struct EditorCommands
     [[nodiscard]] bool any() const noexcept
     {
         return play.has_value() || pause.has_value() || save || newScene || quit || resetLayout || clearSelection ||
-               undo || redo || colorAsked || stampSubject.valid() || !stampFolder.empty() || !placeStamp.empty() ||
-               breakStamp.valid() || !openStamp.empty() || saveStamp || closeStamp ||
-               createClass != scene::InvalidClass || deleteSelection || duplicateSelection || reparentTo.valid() ||
-               renameInstance.valid() || !saveAs.empty() || !openScene.empty() || !createFolder.empty() ||
-               !deleteContent.empty() || !renameContent.empty();
+               undo || redo || colorAsked || copySelection || cutSelection || paste || pasteInto ||
+               stampSubject.valid() || !stampFolder.empty() || !placeStamp.empty() || breakStamp.valid() ||
+               !openStamp.empty() || saveStamp || closeStamp || createClass != scene::InvalidClass || deleteSelection ||
+               duplicateSelection || reparentTo.valid() || renameInstance.valid() || !saveAs.empty() ||
+               !openScene.empty() || !createFolder.empty() || !deleteContent.empty() || !renameContent.empty();
     }
 };
 
@@ -912,6 +920,26 @@ public:
     [[nodiscard]] static ReparentPlan planReparent(const scene::World& world, std::span<const core::InstanceId> ids,
                                                    core::InstanceId newParent, core::InstanceId root);
 
+    // --- The clipboard -------------------------------------------------------
+    //
+    // **It holds TEXT, not ids**, and that is what makes it a clipboard rather
+    // than a note about the world: an `InstanceId` stops meaning anything the
+    // moment its instance is deleted, a scene is loaded or a stamp is opened,
+    // and every one of those is a thing somebody does between a copy and a
+    // paste. What is kept is what `writeStamp` writes -- the same description a
+    // prefab is made of and the same one a drag between worlds carries.
+    //
+    // So a copy survives everything, and a cut is a copy plus a delete rather
+    // than a third mechanism holding a subtree in limbo.
+
+    void copySelection(const scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId root);
+    [[nodiscard]] bool hasClipboard() const noexcept { return !m_clipboard.empty(); }
+    [[nodiscard]] core::usize clipboardCount() const noexcept { return m_clipboard.size(); }
+
+    // Builds what was copied under `parent`, selects it, and asks the tree to
+    // reveal it -- as ONE undo step however many subtrees it holds.
+    bool paste(scene::World& world, core::InstanceId parent, core::InstanceId root, Inspector& inspector);
+
     // Whether a drop of `ids` onto `newParent` would move anything at all.
     [[nodiscard]] static bool canReparent(const scene::World& world, std::span<const core::InstanceId> ids,
                                           core::InstanceId newParent, core::InstanceId root);
@@ -1158,6 +1186,9 @@ private:
     // than hashed so the file it is written to is the same bytes for the same
     // state -- the property every other format in this repository has.
     std::map<std::string, core::Color3> m_contentColors;
+
+    // What a copy left behind, as text. See `copySelection`.
+    std::vector<std::string> m_clipboard;
 
     StampSession m_stamp;
     // The world a stamp is edited in, or nothing. Built on open and dropped on

@@ -455,7 +455,8 @@ struct ContentDrag
 // its own, and hiding it would leave somebody editing a set of children with
 // nothing saying what they are children OF.
 void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspector, EditorCommands* commands,
-                  EditorDialogs* dialogs, const IconAtlas* icons, bool showGenerated, bool drawRoot = false)
+                  EditorDialogs* dialogs, const IconAtlas* icons, bool showGenerated, bool drawRoot = false,
+                  bool hasClipboard = false)
 {
     // How much of the depth is above the first row that gets drawn. One when
     // the root is hidden, zero when it is not -- and every position on a row is
@@ -801,6 +802,21 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                                     static_cast<int>(count));
                 if (ImGui::MenuItem(duplicateLabel, "Ctrl+D", false, !engineOwned))
                     commands->duplicateSelection = true;
+
+                // **Copy, cut and the two pastes**, greyed rather than refused
+                // afterwards -- which is the rule every other item in this menu
+                // follows, and the reason `hasClipboard` is passed in at all.
+                ImGui::Separator();
+                if (ImGui::MenuItem("Copy", "Ctrl+C", false, !engineOwned))
+                    commands->copySelection = true;
+                if (ImGui::MenuItem("Cut", "Ctrl+X", false, !engineOwned))
+                    commands->cutSelection = true;
+                // Beside this one, and inside it. That is the whole difference,
+                // and it is why they are two items rather than one.
+                if (ImGui::MenuItem("Paste", "Ctrl+V", false, hasClipboard))
+                    commands->paste = true;
+                if (ImGui::MenuItem("Paste Into", "Ctrl+Shift+V", false, hasClipboard))
+                    commands->pasteInto = true;
 
                 // --- Stamps (ADR 0049) --------------------------------------
                 //
@@ -1814,11 +1830,20 @@ void drawTransport(Editor& editor, EditorCommands& commands, const IconAtlas* ic
     modeButton(GizmoMode::Rotate, icons::ActionRotate, "turn", "turn the selection  (E)");
     modeButton(GizmoMode::Scale, icons::ActionScale, "size", "resize the selection  (R)");
 
+    // **Greyed while resizing, because a size has no world space to be in.**
+    // Three numbers in the part's own frame is what a `Size` is, so the scale
+    // handles are always the part's own -- and a toggle that stayed live while
+    // changing nothing is a control that lies twice: once by looking usable,
+    // and once by reading "world" over local handles.
     ImGui::SameLine();
-    if (ImGui::Button(editor.gizmoLocal() ? "local" : "world"))
+    const bool sizing = editor.gizmoMode() == GizmoMode::Scale;
+    ImGui::BeginDisabled(sizing);
+    if (ImGui::Button(sizing || editor.gizmoLocal() ? "local" : "world"))
         editor.setGizmoLocal(!editor.gizmoLocal());
-    ImGui::SetItemTooltip(editor.gizmoLocal() ? "the selection's own axes -- click for the world's"
-                                              : "the world's axes -- click for the selection's own");
+    ImGui::EndDisabled();
+    ImGui::SetItemTooltip(sizing                ? "a size is in the part's own axes, so resizing is always local"
+                          : editor.gizmoLocal() ? "the selection's own axes -- click for the world's"
+                                                : "the world's axes -- click for the selection's own");
 
     ImGui::SameLine();
     {
@@ -2954,7 +2979,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
                 // nothing in `Content` runs, which is the one sentence that
                 // explains the difference.
                 drawExplorer(*world, treeRoot, *inspector, &commands, &dialogs, icons, panels.showGenerated,
-                             editingStamp);
+                             editingStamp, editor != nullptr && editor->hasClipboard());
             }
         }
         ImGui::End();
@@ -3069,14 +3094,35 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // **And not while playing.** A running world is one `stop` is about to put
     // back, so an edit made in it is work about to be thrown away without a
     // word -- which is worse than a key that does nothing.
-    if (editor != nullptr && world != nullptr && inspector != nullptr && !ImGui::IsAnyItemActive() && !popupOpen &&
-        !editor->inPlayMode() && inspector->selectionCount() > 0) {
+    const bool authoring = editor != nullptr && world != nullptr && inspector != nullptr && !ImGui::IsAnyItemActive() &&
+                           !popupOpen && !editor->inPlayMode();
+
+    // **Paste needs no selection**, because pasting into an empty world is
+    // exactly what somebody does after copying out of another one. Everything
+    // else acts ON something and is guarded below.
+    if (authoring && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_V, false)) {
+        // Shift is the difference between beside and inside, which is the one
+        // thing about a paste anybody has to remember.
+        if (ImGui::GetIO().KeyShift)
+            commands.pasteInto = true;
+        else
+            commands.paste = true;
+    }
+
+    if (authoring && inspector->selectionCount() > 0) {
         const bool engineOwned = Editor::isEngineOwned(*world, inspector->selection(), root);
 
         if (ImGui::IsKeyPressed(ImGuiKey_Delete, false) && !engineOwned)
             commands.deleteSelection = true;
-        if (ImGui::IsKeyPressed(ImGuiKey_D, false) && ImGui::GetIO().KeyCtrl && !engineOwned)
-            commands.duplicateSelection = true;
+
+        if (ImGui::GetIO().KeyCtrl && !engineOwned) {
+            if (ImGui::IsKeyPressed(ImGuiKey_D, false))
+                commands.duplicateSelection = true;
+            if (ImGui::IsKeyPressed(ImGuiKey_C, false))
+                commands.copySelection = true;
+            if (ImGui::IsKeyPressed(ImGuiKey_X, false))
+                commands.cutSelection = true;
+        }
 
         // F2 opens the box on the PRIMARY, because renaming four things to one
         // name is not a thing anybody means -- which is the same reason the

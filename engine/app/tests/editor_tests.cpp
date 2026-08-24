@@ -1486,6 +1486,87 @@ TEST_CASE("a stamp cannot be opened while the world is playing, or twice")
     CHECK(world.alive(post));
 }
 
+TEST_CASE("copy and paste carry a subtree, and paste into puts it inside")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId post = fixture.widget(world, "Post");
+    const core::InstanceId lantern = fixture.widget(world, "Lantern");
+    const core::InstanceId elsewhere = fixture.widget(world, "Elsewhere");
+    REQUIRE_FALSE(world.setParent(post, root).has_value());
+    REQUIRE_FALSE(world.setParent(lantern, post).has_value());
+    REQUIRE_FALSE(world.setParent(elsewhere, root).has_value());
+
+    CHECK_FALSE(editor.hasClipboard());
+    const std::array<core::InstanceId, 1> one{post};
+    editor.copySelection(world, one, root);
+    CHECK(editor.clipboardCount() == 1);
+
+    // **Pasting somewhere else brings the subtree with it**, because what was
+    // copied is a description of the whole thing rather than a note about one
+    // instance.
+    REQUIRE(editor.paste(world, elsewhere, root, inspector));
+    REQUIRE(world.childCount(elsewhere) == 1);
+    const core::InstanceId pasted = world.firstChild(elsewhere);
+    CHECK(world.atoms().text(world.name(pasted)) == "Post");
+    CHECK(world.childCount(pasted) == 1);
+    // Selected and revealed, for the reason every verb that makes something is.
+    CHECK(inspector.selection() == pasted);
+    CHECK(inspector.takeReveal() == pasted);
+    // The source is untouched: a copy is a copy.
+    CHECK(world.alive(post));
+    CHECK(world.parentOf(post) == root);
+
+    // One step for the whole paste.
+    REQUIRE(editor.undo(world, inspector));
+    CHECK(world.childCount(elsewhere) == 0);
+
+    // **The clipboard outlives the world it was filled from**, which is the
+    // point of holding text: delete the original and the paste still works.
+    REQUIRE(editor.deleteInstances(world, one, root, inspector));
+    world.retireDestroyed();
+    CHECK_FALSE(world.alive(post));
+    REQUIRE(editor.paste(world, root, root, inspector));
+    CHECK(world.alive(inspector.selection()));
+    CHECK(world.atoms().text(world.name(inspector.selection())) == "Post");
+}
+
+TEST_CASE("copying a parent and its child does not paste the child twice")
+{
+    // A selection made with ctrl-click can hold both, and a clipboard that took
+    // it at its word would produce the child inside the parent -- where it
+    // belongs -- and again beside it, where nobody put it.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId post = fixture.widget(world, "Post");
+    const core::InstanceId lantern = fixture.widget(world, "Lantern");
+    REQUIRE_FALSE(world.setParent(post, root).has_value());
+    REQUIRE_FALSE(world.setParent(lantern, post).has_value());
+
+    const std::array<core::InstanceId, 2> both{post, lantern};
+    editor.copySelection(world, both, root);
+    CHECK(editor.clipboardCount() == 1);
+
+    const core::u32 before = world.childCount(root);
+    REQUIRE(editor.paste(world, root, root, inspector));
+    CHECK(world.childCount(root) == before + 1);
+
+    // And nothing to paste is refused rather than recording a step that undoes
+    // nothing.
+    Editor empty;
+    const bool couldUndo = empty.history().canUndo();
+    CHECK_FALSE(empty.paste(world, root, root, inspector));
+    CHECK(empty.history().canUndo() == couldUndo);
+}
+
 // --- E2: dragging a manipulator ---------------------------------------------
 //
 // The whole loop, headless: a camera, a viewport, a press on a handle, frames
@@ -1640,6 +1721,127 @@ TEST_CASE("a drag over a multi-selection moves each instance by the same delta")
     // And nothing moved in the other two axes.
     CHECK(a->cframe.position.y == doctest::Approx(0.0).epsilon(0.001));
     CHECK(a->cframe.position.z == doctest::Approx(-30.0).epsilon(0.001));
+}
+
+TEST_CASE("a drag on an arm stays on that arm, in world space and in the part's own")
+{
+    // **The reported defect**: a block dragged by an arm "não segue exatamente a
+    // reta da movimentação, vai todo estranho para o sentido da seta". An arm is
+    // a LINE, and a drag along it has to stay on it -- whatever else the drag
+    // does, however far the pointer wanders off the arm, and in either space.
+    DragRig rig;
+    rig.look(core::DVec3{0.0, 6.0, 18.0});
+
+    const auto dragAlongX = [&rig](core::InstanceId id, bool local, bool snap) {
+        rig.editor.setGizmoMode(GizmoMode::Translate);
+        rig.editor.setGizmoLocal(local);
+        rig.editor.setSnap(snap);
+        rig.inspector.select(id);
+
+        const core::CFrameD before = rig.world.parts().find(id)->cframe;
+        // The X arm's tip, which is what a person aims at.
+        const std::optional<GizmoFrame> frame = rig.editor.gizmoFrame(rig.world, rig.inspector);
+        REQUIRE(frame.has_value());
+        // The frame's three rows, normalised -- the same thing `gizmoAxes`
+        // does inside the picker, done here because that helper is private to
+        // it and this test is about what comes OUT of a drag.
+        core::Vec3 axes[3];
+        for (int index = 0; index < 3; ++index) {
+            const core::Mat3& basis = frame->transform.rotation;
+            axes[index] = core::normalize(core::Vec3{basis.m[index][0], basis.m[index][1], basis.m[index][2]});
+        }
+        const core::DVec3 tip = frame->transform.position + core::toDVec3(axes[0] * (frame->size * 0.8f));
+
+        const core::Vec2 grab = rig.pixelOf(tip);
+        rig.frame(grab, true, true);
+
+        // **Dragged DIAGONALLY on screen**, which is what a hand does: nobody
+        // moves a mouse along a projected axis exactly, and the arm is supposed
+        // to hold the motion to its line anyway.
+        for (int step = 1; step <= 8; ++step) {
+            rig.frame(
+                core::Vec2{grab.x + static_cast<core::f32>(step) * 9.0f, grab.y + static_cast<core::f32>(step) * 5.0f},
+                false, true);
+        }
+        rig.frame(core::Vec2{grab.x + 72.0f, grab.y + 40.0f}, false, false);
+
+        const core::CFrameD after = rig.world.parts().find(id)->cframe;
+        // What it actually moved by, in the arm's own direction and across it.
+        const core::Vec3 moved = core::toVec3(after.position - before.position);
+        const core::f32 along = core::dot(moved, axes[0]);
+        const core::Vec3 across = moved - axes[0] * along;
+        return std::pair<core::f32, core::f32>{along, core::length(across)};
+    };
+
+    // World axes, no snap: the plain case, and the one that already worked.
+    {
+        const core::InstanceId part = rig.part(core::DVec3{0.0, 0.0, 0.0});
+        const auto [along, across] = dragAlongX(part, false, false);
+        CHECK(std::abs(static_cast<double>(along)) > 0.05);
+        CHECK(static_cast<double>(across) == doctest::Approx(0.0).epsilon(0.001));
+    }
+
+    // World axes WITH the snap that is on by default. Quantised, still on the
+    // line: a world axis snapped per world component cannot leave it.
+    {
+        const core::InstanceId part = rig.part(core::DVec3{0.0, 0.0, 0.0});
+        const auto [along, across] = dragAlongX(part, false, true);
+        (void)along;
+        CHECK(static_cast<double>(across) == doctest::Approx(0.0).epsilon(0.001));
+    }
+
+    // **The part's own axes, on a part that is turned.** This is the one the
+    // human hit: the arm points diagonally through world space, and snapping
+    // each WORLD component of the delta independently takes the motion off the
+    // arm entirely.
+    {
+        const core::InstanceId part = rig.part(core::DVec3{0.0, 0.0, 0.0});
+        scene::PartComponent* body = rig.world.parts().find(part);
+        REQUIRE(body != nullptr);
+        body->cframe.rotation = core::fromAxisAngle(core::Vec3{0.0f, 1.0f, 0.0f}, 0.6f);
+
+        const auto [along, across] = dragAlongX(part, true, true);
+        (void)along;
+        CHECK(static_cast<double>(across) == doctest::Approx(0.0).epsilon(0.001));
+    }
+}
+
+TEST_CASE("resizing is always in the part's own axes, whatever the toggle says")
+{
+    // **A `Size` is three numbers in the part's own frame**, so there is no
+    // world-space size to change -- and a world-axis scale arm on a turned crate
+    // would point one way and grow it another. Unity's scale tool ignores the
+    // same toggle for the same reason.
+    DragRig rig;
+    rig.look(core::DVec3{0.0, 6.0, 18.0});
+
+    const core::InstanceId part = rig.part(core::DVec3{});
+    scene::PartComponent* body = rig.world.parts().find(part);
+    REQUIRE(body != nullptr);
+    body->cframe.rotation = core::fromAxisAngle(core::Vec3{0.0f, 1.0f, 0.0f}, 0.6f);
+    rig.inspector.select(part);
+
+    const auto axisOf = [&rig](GizmoMode mode, bool local) {
+        rig.editor.setGizmoMode(mode);
+        rig.editor.setGizmoLocal(local);
+        const std::optional<GizmoFrame> frame = rig.editor.gizmoFrame(rig.world, rig.inspector);
+        REQUIRE(frame.has_value());
+        const core::Mat3& basis = frame->transform.rotation;
+        return core::normalize(core::Vec3{basis.m[0][0], basis.m[0][1], basis.m[0][2]});
+    };
+
+    // Move and turn honour the toggle, which is the whole reason it exists.
+    const core::Vec3 moveWorld = axisOf(GizmoMode::Translate, false);
+    CHECK(static_cast<double>(moveWorld.x) == doctest::Approx(1.0));
+    const core::Vec3 moveLocal = axisOf(GizmoMode::Translate, true);
+    CHECK(static_cast<double>(moveLocal.x) < 0.999);
+
+    // Resize does not: both answers are the part's own.
+    const core::Vec3 sizeWorld = axisOf(GizmoMode::Scale, false);
+    const core::Vec3 sizeLocal = axisOf(GizmoMode::Scale, true);
+    CHECK(static_cast<double>(sizeWorld.x) == doctest::Approx(static_cast<double>(sizeLocal.x)));
+    CHECK(static_cast<double>(sizeWorld.z) == doctest::Approx(static_cast<double>(sizeLocal.z)));
+    CHECK(static_cast<double>(sizeWorld.x) == doctest::Approx(static_cast<double>(moveLocal.x)));
 }
 
 TEST_CASE("the grid is what a drag lands on, and Alt suspends it")
