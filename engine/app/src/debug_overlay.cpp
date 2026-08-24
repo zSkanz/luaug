@@ -12,6 +12,7 @@
 #include "luaug/core/log.h"
 #include "luaug/core/math.h"
 #include "luaug/core/text_key.h"
+#include "luaug/platform/platform.h"
 #include "luaug/platform/sdl_interop.h"
 #include "luaug/platform/window.h"
 #include "luaug/rhi/device.h"
@@ -2533,6 +2534,16 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
     // "new", because what it makes is a folder and the picture can say so.
     if (iconButton(icons, icons::ContentFolder, toolbarIcon, "new-folder", "new folder", "new folder", true))
         dialogs.newFolder = true;
+
+    // **Bringing a file in from the machine**, which is the other half of a
+    // content browser: a project's assets come from somewhere, and until now the
+    // only way in was a file manager beside the editor. Dropping files on the
+    // window does the same thing and lands in the same folder.
+    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+    ImGui::BeginDisabled(!platform::canPickFolder());
+    if (iconButton(icons, icons::ActionAdd, toolbarIcon, "import", "import", "import files into this folder", true))
+        commands.importAssets = true;
+    ImGui::EndDisabled();
 
     // --- Where you are, as a row of steps you can click back through ---------
     //

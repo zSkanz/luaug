@@ -5,6 +5,7 @@
 // folder, and two people's screens have to agree about the order.
 #include "luaug/app/content_tree.h"
 
+#include <array>
 #include <doctest/doctest.h>
 #include <filesystem>
 #include <fstream>
@@ -188,4 +189,79 @@ TEST_CASE("a dotfile is not content")
 
     REQUIRE(tree.entries().size() == 1);
     CHECK(tree.entries()[0].name == "tower.glb");
+}
+
+TEST_CASE("importing copies a file from anywhere into the folder that is open")
+{
+    // **This is the whole of what importing an asset is here.** `content/` holds
+    // files, `ContentMounts` resolves a loose one, and a mesh that is in there
+    // is one a project can name -- so there is no conversion step to test, only
+    // the copy and what it refuses.
+    Scratch scratch("import");
+    scratch.folder("content");
+    scratch.folder("elsewhere");
+    scratch.file("elsewhere/tree.gltf", "{}");
+    scratch.file("elsewhere/bark.png", "not really a png");
+
+    app::ContentTree tree;
+    REQUIRE(tree.open(scratch.root() / "content"));
+    REQUIRE(tree.createFolder("props"));
+    REQUIRE(tree.enter("props"));
+
+    const std::array<std::filesystem::path, 2> sources{scratch.root() / "elsewhere" / "tree.gltf",
+                                                       scratch.root() / "elsewhere" / "bark.png"};
+    const app::ContentTree::ImportReport report = tree.import(sources);
+
+    CHECK(report.imported.size() == 2);
+    CHECK(report.skipped.empty());
+    CHECK(report.failed.empty());
+    // In the folder that was open, not at the root.
+    CHECK(std::filesystem::exists(scratch.root() / "content" / "props" / "tree.gltf"));
+    CHECK_FALSE(std::filesystem::exists(scratch.root() / "content" / "tree.gltf"));
+    // And the browser is showing them without anybody asking it to re-read.
+    CHECK(tree.entries().size() == 2);
+}
+
+TEST_CASE("importing over something that is already there is refused, not silent")
+{
+    // The one mistake here that costs work: replacing a file somebody has
+    // already put work into. Named in the report so the browser can say which.
+    Scratch scratch("import-clash");
+    scratch.folder("content");
+    scratch.file("elsewhere/shared.png", "the new one");
+    scratch.file("content/shared.png", "the one already here");
+
+    app::ContentTree tree;
+    REQUIRE(tree.open(scratch.root() / "content"));
+
+    const std::array<std::filesystem::path, 1> sources{scratch.root() / "elsewhere" / "shared.png"};
+    const app::ContentTree::ImportReport report = tree.import(sources);
+
+    CHECK(report.imported.empty());
+    REQUIRE(report.skipped.size() == 1);
+    CHECK(report.skipped[0] == "shared.png");
+
+    std::ifstream kept(scratch.root() / "content" / "shared.png", std::ios::binary);
+    std::string text;
+    std::getline(kept, text);
+    CHECK(text == "the one already here");
+}
+
+TEST_CASE("importing a folder is skipped rather than copied recursively")
+{
+    // A different request, and doing it by accident because somebody
+    // multi-selected one is not an outcome to design for.
+    Scratch scratch("import-folder");
+    scratch.folder("content");
+    scratch.folder("elsewhere/a-whole-folder");
+
+    app::ContentTree tree;
+    REQUIRE(tree.open(scratch.root() / "content"));
+
+    const std::array<std::filesystem::path, 1> sources{scratch.root() / "elsewhere" / "a-whole-folder"};
+    const app::ContentTree::ImportReport report = tree.import(sources);
+
+    CHECK(report.imported.empty());
+    CHECK(report.skipped.size() == 1);
+    CHECK_FALSE(std::filesystem::exists(scratch.root() / "content" / "a-whole-folder"));
 }

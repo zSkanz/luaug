@@ -461,6 +461,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     if (options.editor && !options.scriptPath.empty())
         editor.recallState(options.scriptPath / ".luaug");
 
+    // What the system's file picker answered, and whether one is open. Beside
+    // the editor rather than inside it because the picker is the platform's and
+    // its callback arrives while events are pumped.
+    std::vector<std::filesystem::path> importedPaths;
+    bool importPending = false;
+
     ViewportTarget viewportTarget;
     // The editor's icons, built once from `content/icons` on the first frame
     // that has a command list -- uploading a texture is one, so this cannot be
@@ -1071,6 +1077,26 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 }
                 if (!editorCommands.createFolder.empty())
                     (void)editor.content().createFolder(editorCommands.createFolder);
+
+                // **Files from the machine, copied into the folder the browser
+                // is looking at.** The picker is shown from here rather than
+                // from the panel for the reason every dialog in this editor is:
+                // an ImGui callback is inside a frame that has not finished
+                // drawing, and a modal opened there owns the loop.
+                if (editorCommands.importAssets && !importPending && window != nullptr) {
+                    importPending = true;
+                    platform::pickFiles(*window, editor.content().root().string(), true,
+                                        [&importedPaths, &importPending](std::vector<std::filesystem::path> chosen) {
+                                            importedPaths = std::move(chosen);
+                                            importPending = false;
+                                        });
+                }
+
+                if (!importedPaths.empty()) {
+                    const ContentTree::ImportReport report = editor.content().import(importedPaths);
+                    importedPaths.clear();
+                    editor.reportImport(report);
+                }
                 // Before the delete and the duplicate, so a frame that somehow
                 // carried both acts on a world the create has already finished
                 // with rather than on one halfway through it.
@@ -1833,6 +1859,17 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // the next pump.
             if (overlay.has_value())
                 overlay->handleEvents(events);
+
+            // **What was dropped on the window goes to the content browser.**
+            // Only in the editor: a running game has no folder for a file to
+            // land in, and dropping one on it should do what it has always done,
+            // which is nothing. Read here because the list is valid until the
+            // next pump, and acted on at the safe point with everything else
+            // that writes to disk.
+            if (options.editor) {
+                for (const std::string& dropped : platform::droppedFiles())
+                    importedPaths.emplace_back(dropped);
+            }
         }
 
         rhi::ICmdList* cmd = device->beginFrame();

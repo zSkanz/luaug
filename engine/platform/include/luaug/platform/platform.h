@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -170,5 +171,28 @@ struct Paths
 // assume the callback has happened by the time this returns. `window` is the
 // parent, so the dialog is modal to it on the platforms that can do that.
 void pickFolder(Window& window, std::string_view startIn, std::function<void(std::filesystem::path)> done);
+// The same, for FILES: the system's own open dialog, with `allowMany` deciding
+// whether more than one can be chosen. `done` receives what was picked, and an
+// empty list for a cancel or a picker that could not be shown.
+//
+// Asynchronous on the same terms `pickFolder` states: the callback arrives while
+// `pumpEvents` runs, so a caller must keep pumping.
+//
+// **No filters.** The engine reads a mesh, a texture, a sound, a scene and a
+// script, and a project may carry files it merely keeps beside them; a dialog
+// that hid what somebody was pointing at would be answering a question the
+// importer is better placed to answer -- and it answers it by copying the file
+// and letting the browser say what kind it turned out to be.
+void pickFiles(Window& window, std::string_view startIn, bool allowMany,
+               std::function<void(std::vector<std::filesystem::path>)> done);
+
+// What was dropped onto a window since the last `pumpEvents`, in the order the
+// system reported it. Empty on nearly every frame.
+//
+// **A list of its own rather than a field on `Event`**, for the reason
+// `rawEvents` is a list of its own: an `Event` is a POD copied for every mouse
+// motion, and a string on it would be an allocation per frame paid for a thing
+// that happens twice a session. Valid until the next pump.
+[[nodiscard]] std::span<const std::string> droppedFiles() noexcept;
 
 } // namespace luaug::platform

@@ -3,6 +3,7 @@
 #include <luaug/core/types.h>
 
 #include <filesystem>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -139,6 +140,34 @@ public:
     // is what a person means and is why the caller is expected to have asked
     // first.
     bool remove(const ContentEntry& entry);
+
+    // What one import did.
+    struct ImportReport
+    {
+        // Written into the current folder, content-relative, in the order they
+        // were given.
+        std::vector<std::string> imported;
+        // Skipped because something of that name is already here. **Refused
+        // rather than overwritten**: an import that replaced a file somebody had
+        // already put work into is the one mistake here that costs work, and the
+        // browser can say what it skipped.
+        std::vector<std::string> skipped;
+        // Could not be read or could not be written.
+        std::vector<std::string> failed;
+    };
+
+    // **Copies files from anywhere on the machine into the current folder.**
+    //
+    // The whole of what importing an asset is in this engine: `content/` holds
+    // files, `ContentMounts` resolves a loose one, and a mesh or a texture that
+    // is in there is one a project can name. There is no conversion step and no
+    // catalogue -- `assetc` compiles the folder when a game is packaged, and
+    // what the editor needs is the file.
+    //
+    // A directory is skipped rather than copied recursively: importing a folder
+    // is a different request, and doing it by accident because somebody
+    // multi-selected one is not an outcome to design for.
+    [[nodiscard]] ImportReport import(std::span<const std::filesystem::path> sources);
 
     // The part of a name before the extension this kind carries, for a rename
     // box to start from: `main` for `main.scene.json`, not `main.scene`.

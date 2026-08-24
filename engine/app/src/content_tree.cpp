@@ -326,4 +326,56 @@ bool ContentTree::createFolder(std::string_view folderName)
     return refresh();
 }
 
+ContentTree::ImportReport ContentTree::import(std::span<const std::filesystem::path> sources)
+{
+    ImportReport report;
+    if (m_root.empty())
+        return report;
+
+    std::filesystem::path folder = m_root;
+    if (!m_relative.empty())
+        folder /= std::filesystem::path(m_relative);
+
+    std::error_code ec;
+    if (!std::filesystem::is_directory(folder, ec))
+        return report;
+
+    for (const std::filesystem::path& source : sources) {
+        const std::string name = source.filename().string();
+        if (name.empty())
+            continue;
+
+        // A directory is a different request. Doing it by accident because
+        // somebody multi-selected one is not an outcome to design for.
+        if (std::filesystem::is_directory(source, ec)) {
+            report.skipped.push_back(name);
+            continue;
+        }
+
+        const std::filesystem::path target = folder / source.filename();
+        if (std::filesystem::exists(target, ec)) {
+            // **Refused rather than overwritten.** Replacing a file somebody has
+            // already put work into is the one mistake here that costs work, and
+            // the browser can say what it skipped.
+            report.skipped.push_back(name);
+            continue;
+        }
+
+        // Bytes, through `std::filesystem`: what is being copied is a mesh, a
+        // texture or a sound as often as it is text, and a read-as-string round
+        // trip would corrupt every one of those.
+        std::filesystem::copy_file(source, target, std::filesystem::copy_options::none, ec);
+        if (ec) {
+            ec.clear();
+            report.failed.push_back(name);
+            continue;
+        }
+        report.imported.push_back(name);
+    }
+
+    if (!report.imported.empty())
+        (void)refresh();
+    return report;
+}
+
 } // namespace luaug::app

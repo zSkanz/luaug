@@ -322,6 +322,11 @@ struct EditorCommands
     // where one is picked, so File has no second copy of either.
     bool newProject = false;
     bool openProject = false;
+    // **Bring files in from the machine.** The browser asks for the system's own
+    // picker; the loop shows it, because a dialog opened from inside an ImGui
+    // callback is a frame that has not finished drawing.
+    bool importAssets = false;
+
     // --- What a right-click asked for ----------------------------------------
     //
     // Every one of these mutates a world or a directory, so none of them acts
@@ -444,7 +449,8 @@ struct EditorCommands
                stampSubject.valid() || !stampFolder.empty() || !placeStamp.empty() || breakStamp.valid() ||
                !openStamp.empty() || saveStamp || closeStamp || createClass != scene::InvalidClass || deleteSelection ||
                duplicateSelection || reparentTo.valid() || renameInstance.valid() || !saveAs.empty() ||
-               !openScene.empty() || !createFolder.empty() || !deleteContent.empty() || !renameContent.empty();
+               !openScene.empty() || !createFolder.empty() || !deleteContent.empty() || !renameContent.empty() ||
+               importAssets;
     }
 };
 
@@ -1291,6 +1297,11 @@ public:
     // a question. Held on the editor rather than in the overlay's dialog state
     // because the window's own close button arrives as a platform event, which
     // the frame loop sees and the panels do not.
+    // What an import did, as the one line the status bar shows. Here rather
+    // than in the browser because the status bar is the editor's and every other
+    // verb reports through it.
+    void reportImport(const ContentTree::ImportReport& report) noexcept;
+
     void requestClose() noexcept { m_closeRequested = true; }
     [[nodiscard]] bool closeRequested() const noexcept { return m_closeRequested; }
     void clearCloseRequest() noexcept { m_closeRequested = false; }

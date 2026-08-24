@@ -1535,6 +1535,32 @@ bool Editor::saveOpenScene(scene::World& world)
     return save(world, m_content.root() / std::filesystem::path(m_openScene));
 }
 
+void Editor::reportImport(const ContentTree::ImportReport& report) noexcept
+{
+    if (report.imported.empty() && report.skipped.empty() && report.failed.empty())
+        return;
+
+    // **Counted, and the refusals named.** "Imported 3 files" is a sentence
+    // nobody has to act on; "2 already here" is one they do, and the names are
+    // what tells them which.
+    std::string message = "imported " + std::to_string(report.imported.size()) + " file(s)";
+    const auto listOf = [](const std::vector<std::string>& names) {
+        std::string joined;
+        for (const std::string& name : names) {
+            if (!joined.empty())
+                joined += ", ";
+            joined += name;
+        }
+        return joined;
+    };
+    if (!report.skipped.empty())
+        message += "; skipped " + listOf(report.skipped) + " (already here)";
+    if (!report.failed.empty())
+        message += "; could not read " + listOf(report.failed);
+
+    m_status = EditorStatus{message, !report.failed.empty()};
+}
+
 void Editor::adoptCamera(const core::CFrameD& cframe) noexcept
 {
     m_cameraCFrame = cframe;

@@ -1,8 +1,11 @@
 #include "luaug/platform/event.h"
+#include "luaug/platform/platform.h"
 #include "luaug/platform/sdl_interop.h"
 
 #include <algorithm>
 #include <cstring>
+#include <span>
+#include <string>
 #include <vector>
 
 namespace luaug::platform {
@@ -11,6 +14,8 @@ namespace {
 // Main-thread only, like SDL's own event queue. The buffers are kept between
 // frames so a steady-state frame does no allocation.
 std::vector<SDL_Event> g_rawEvents;
+// Paths dropped onto a window this pump. See `droppedFiles`.
+std::vector<std::string> g_droppedFiles;
 std::vector<Event> g_events;
 
 // Written as an explicit table rather than arithmetic on the scancode range:
@@ -647,10 +652,18 @@ std::span<const Event> pumpEvents()
 {
     g_rawEvents.clear();
     g_events.clear();
+    g_droppedFiles.clear();
 
     SDL_Event raw;
     while (SDL_PollEvent(&raw)) {
         g_rawEvents.push_back(raw);
+        // **Dropped paths go in a list of their own**, not on an `Event`. An
+        // `Event` is a POD copied for every mouse motion and a string on it
+        // would be an allocation per frame paid for a thing that happens twice
+        // a session. SDL owns `drop.data` until the event is consumed, so the
+        // copy happens here rather than being deferred to whoever reads it.
+        if (raw.type == SDL_EVENT_DROP_FILE && raw.drop.data != nullptr)
+            g_droppedFiles.emplace_back(raw.drop.data);
         translate(raw, g_events);
     }
 
@@ -660,6 +673,11 @@ std::span<const Event> pumpEvents()
 std::span<const SDL_Event> rawEvents() noexcept
 {
     return g_rawEvents;
+}
+
+std::span<const std::string> droppedFiles() noexcept
+{
+    return g_droppedFiles;
 }
 
 } // namespace luaug::platform

@@ -13,6 +13,7 @@
 #include <SDL3/SDL_process.h>
 #include <SDL3/SDL_stdinc.h>
 #include <chrono>
+#include <filesystem>
 #include <functional>
 #include <string>
 #include <utility>
@@ -363,6 +364,43 @@ void pickFolder(Window& window, std::string_view startIn, std::function<void(std
     const std::string start(startIn);
     SDL_ShowOpenFolderDialog(&onFolderChosen, nullptr, nativeWindow(window), start.empty() ? nullptr : start.c_str(),
                              false);
+}
+
+namespace {
+
+// The C++ callback the file dialog forwards to. One at a time, like the folder
+// picker's and for the same reason.
+std::function<void(std::vector<std::filesystem::path>)>& fileCallback()
+{
+    static std::function<void(std::vector<std::filesystem::path>)> callback;
+    return callback;
+}
+
+void SDLCALL onFilesChosen([[maybe_unused]] void* userdata, const char* const* files, [[maybe_unused]] int filter)
+{
+    std::function<void(std::vector<std::filesystem::path>)> callback;
+    callback.swap(fileCallback());
+    if (!callback)
+        return;
+
+    std::vector<std::filesystem::path> chosen;
+    // Null means the dialog failed and an empty list means it was cancelled.
+    // Both are "nothing was picked", which is what the caller asked about.
+    for (const char* const* file = files; file != nullptr && *file != nullptr; ++file)
+        chosen.emplace_back(*file);
+    callback(std::move(chosen));
+}
+
+} // namespace
+
+void pickFiles(Window& window, std::string_view startIn, bool allowMany,
+               std::function<void(std::vector<std::filesystem::path>)> done)
+{
+    fileCallback() = std::move(done);
+
+    const std::string start(startIn);
+    SDL_ShowOpenFileDialog(&onFilesChosen, nullptr, nativeWindow(window), nullptr, 0,
+                           start.empty() ? nullptr : start.c_str(), allowMany);
 }
 
 } // namespace luaug::platform
