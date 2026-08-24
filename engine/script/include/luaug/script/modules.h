@@ -129,10 +129,15 @@ public:
 
     // The mounted entry scripts, in path order, with the `Script` instance each
     // became.
+    //
+    // **No copy of the text.** The mount writes the file into the instance's
+    // `Source` and the instance is what runs (ADR 0057), so what is worth
+    // remembering here is which FILE an instance came from -- which is the
+    // question `Ctrl+S` in the script editor asks, and the only one a second
+    // copy of the source could not answer.
     struct Entry
     {
         std::string path;
-        std::string source;
         core::InstanceId instance;
     };
     std::vector<Entry> entries;

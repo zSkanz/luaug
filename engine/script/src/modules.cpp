@@ -432,6 +432,7 @@ std::vector<core::InstanceId> mountScripts(lua_State* L, std::span<const Mounted
 
     const scene::ClassId folderClass = w.classes().findId(w.atoms().lookup("Folder"));
     const scene::ClassId scriptClass = w.classes().findId(w.atoms().lookup("Script"));
+    const core::NameAtom sourceProperty = w.atoms().intern("Source");
 
     for (const MountedScript& entry : ordered) {
         const std::vector<std::string_view> segments =
@@ -454,8 +455,13 @@ std::vector<core::InstanceId> mountScripts(lua_State* L, std::span<const Mounted
         const core::InstanceId instance = w.create(scriptClass);
         w.setName(instance, w.atoms().intern(withoutExtension(segments.back())));
         (void)w.setParent(instance, parent);
+        // **The file's text becomes the instance's `Source`** (ADR 0057), which
+        // is what ADR 0050 decided and what the mount never did. The registry
+        // keeps the PATH and not a second copy of the text: two places holding
+        // one script is exactly the disagreement this milestone exists to end.
+        (void)w.setProperty(instance, sourceProperty, scene::Value{entry.source});
 
-        modules.entries.push_back(ModuleRegistry::Entry{entry.path, entry.source, instance});
+        modules.entries.push_back(ModuleRegistry::Entry{entry.path, instance});
         made.push_back(instance);
     }
 
@@ -465,21 +471,82 @@ std::vector<core::InstanceId> mountScripts(lua_State* L, std::span<const Mounted
     return made;
 }
 
+namespace {
+
+// What an error message calls a script that did not come from a file: its place
+// in the tree, which is the only name it has. `Workspace.Rig.Walk` reads the way
+// somebody would say it out loud, and it is what they will look for in the
+// Explorer.
+[[nodiscard]] std::string treePath(const scene::World& w, core::InstanceId id)
+{
+    std::vector<std::string_view> parts;
+    for (core::InstanceId walk = id; walk.valid(); walk = w.parentOf(walk))
+        parts.push_back(w.atoms().text(w.name(walk)));
+
+    std::string out;
+    // Skipping the DataModel itself, which is called `game` and says nothing.
+    for (usize index = parts.size() - 1; index > 0; --index) {
+        if (!out.empty())
+            out.push_back('.');
+        out.append(parts[index - 1]);
+    }
+    return out;
+}
+
+} // namespace
+
 void startScripts(lua_State* L)
 {
     ModuleRegistry& modules = registry(L);
     scene::World& w = world(L);
     const core::NameAtom enabled = w.atoms().intern("Enabled");
+    const core::NameAtom sourceProperty = w.atoms().intern("Source");
+    const scene::ClassId scriptClass = w.classes().findId(w.atoms().lookup("Script"));
 
-    for (const ModuleRegistry::Entry& entry : modules.entries) {
+    // **Every enabled Script in the WORLD, in document order** (ADR 0057). The
+    // mounted-file list is no longer the population: a Script the scene brought,
+    // or one somebody made in the editor, is a script and runs.
+    //
+    // `collectDescendants` is depth-first preorder -- "the same document order
+    // the Find family tie-breaks on" -- which is what makes the start order a
+    // property of the tree rather than of the pool. Pool order is an allocation
+    // artefact and R10 forbids it reaching anything observable.
+    std::vector<core::InstanceId> everything;
+    w.collectDescendants(context(L).services->dataModel, everything);
+
+    for (const core::InstanceId instance : everything) {
+        // The exact class, not `IsA`: a `ModuleScript` shares `Source` with a
+        // `Script` and deliberately does not start by itself.
+        if (w.classOf(instance) != scriptClass)
+            continue;
+
         // A Script whose `Enabled` is false at boot never starts -- it is still
-        // mounted and still in the tree, but no coroutine is created for it
-        // (api-design.md §3).
-        const std::optional<scene::Value> value = w.getProperty(entry.instance, enabled);
+        // in the tree, but no coroutine is created for it (api-design.md 3).
+        const std::optional<scene::Value> value = w.getProperty(instance, enabled);
         if (value.has_value()) {
             if (const auto* flag = std::get_if<bool>(&value.value()); flag != nullptr && !*flag)
                 continue;
         }
+
+        const std::optional<scene::Value> stored = w.getProperty(instance, sourceProperty);
+        const auto* source = stored.has_value() ? std::get_if<std::string>(&stored.value()) : nullptr;
+        // Nothing to run is not a failure. An empty Script is what somebody has
+        // the moment they create one, and reporting it would put an error in the
+        // log for every script anybody starts writing.
+        if (source == nullptr || source->empty())
+            continue;
+
+        // The file it was mounted from, when there was one; its place in the
+        // tree otherwise. This is the name every error message about it carries.
+        std::string chunkName;
+        for (const ModuleRegistry::Entry& entry : modules.entries) {
+            if (entry.instance == instance) {
+                chunkName = entry.path;
+                break;
+            }
+        }
+        if (chunkName.empty())
+            chunkName = treePath(w, instance);
 
         lua_State* co = lua_newthread(L);
         const int rooted = lua_gettop(L);
@@ -489,13 +556,13 @@ void startScripts(lua_State* L)
         // safeenv, which makes the compiler's import fast path resolve globals
         // at load time -- so a `script` set afterwards would be invisible to
         // every `script.Name` the chunk contains.
-        pushInstance(co, entry.instance);
+        pushInstance(co, instance);
         lua_setglobal(co, "script");
 
         std::string error;
-        if (!loadChunk(co, entry.source, entry.path, error)) {
+        if (!loadChunk(co, *source, chunkName, error)) {
             const core::I18nArg args[] = {
-                {"source", std::string_view{entry.path}},
+                {"source", std::string_view{chunkName}},
                 {"message", std::string_view{error}},
             };
             core::logText(core::LogLevel::Error, core::formatKeyPrefixed(LUAUG_TR("script.err.syntax"), args));

@@ -930,3 +930,109 @@ TEST_CASE("a scene with no world-building scripts says nothing at all")
     CHECK(bootChildNamed(host, "FromTheScene").valid());
     CHECK_FALSE(log.contains("two sources"));
 }
+
+// --- A script is an instance, and an instance is what runs (ADR 0057) --------
+//
+// Before this, `startScripts` walked the mounted-FILE list: a Script the scene
+// brought, or one somebody made in the editor, was saved with its `Source` and
+// never ran, while a mounted one ran with its `Source` empty. Two disconnected
+// halves of one idea. These cases are the idea, joined.
+
+namespace {
+
+// A scene holding one `Script` whose source builds a part, so "did it run" is a
+// question about the world rather than about a log line.
+[[nodiscard]] std::string sceneWithScript(std::string_view name, std::string_view body, bool enabled = true)
+{
+    std::string out =
+        R"({"format":"luaug-scene","version":1,"root":{"class":"Workspace","name":"Workspace","children":[)";
+    out += R"({"class":")";
+    out += name;
+    out += R"(","name":"SceneScript","properties":{"Source":")";
+    out += body;
+    out += R"(")";
+    if (!enabled)
+        out += R"(,"Enabled":false)";
+    out += R"(}}]}})";
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("a Script the scene brought runs, because an instance is what runs")
+{
+    Captured log;
+    Project project;
+    project.write("content/scenes/main.scene.json",
+                  sceneWithScript("Script", R"(local p = Instance.new(\"Part\") p.Name = \"MadeByTheScene\" )"
+                                            R"(p.Parent = workspace)"));
+
+    app::WorldHost host;
+    app::WorldHostOptions options = app::testing::bootOptions(project.root);
+    options.bootScene = project.root / "content" / "scenes" / "main.scene.json";
+    REQUIRE_FALSE(host.boot(options).has_value());
+
+    // The whole of ADR 0057 in one assertion: nothing mounted this, no file
+    // exists for it, and it ran.
+    CHECK(bootChildNamed(host, "MadeByTheScene").valid());
+}
+
+TEST_CASE("a disabled Script in the scene does not run")
+{
+    Captured log;
+    Project project;
+    project.write("content/scenes/main.scene.json",
+                  sceneWithScript("Script", R"(local p = Instance.new(\"Part\") p.Name = \"ShouldNotExist\" )"
+                                            R"(p.Parent = workspace)",
+                                  /*enabled=*/false));
+
+    app::WorldHost host;
+    app::WorldHostOptions options = app::testing::bootOptions(project.root);
+    options.bootScene = project.root / "content" / "scenes" / "main.scene.json";
+    REQUIRE_FALSE(host.boot(options).has_value());
+
+    CHECK_FALSE(bootChildNamed(host, "ShouldNotExist").valid());
+}
+
+TEST_CASE("a ModuleScript in the scene still only runs when it is required")
+{
+    Captured log;
+    Project project;
+    // The exact class rather than `IsA`: a ModuleScript shares `Source` with a
+    // Script and deliberately does not start by itself.
+    project.write("content/scenes/main.scene.json",
+                  sceneWithScript("ModuleScript", R"(local p = Instance.new(\"Part\") p.Name = \"NotByItself\" )"
+                                                  R"(p.Parent = workspace return {})"));
+
+    app::WorldHost host;
+    app::WorldHostOptions options = app::testing::bootOptions(project.root);
+    options.bootScene = project.root / "content" / "scenes" / "main.scene.json";
+    REQUIRE_FALSE(host.boot(options).has_value());
+
+    CHECK_FALSE(bootChildNamed(host, "NotByItself").valid());
+}
+
+TEST_CASE("a mounted script carries its file in its own Source")
+{
+    Captured log;
+    Project project;
+    project.write("src/scripts/init.luau", "local x = 1\nreturn x\n");
+
+    app::WorldHost host;
+    REQUIRE_FALSE(host.boot(app::testing::bootOptions(project.root)).has_value());
+
+    const scene::World& w = host.world();
+    const core::InstanceId service =
+        w.findFirstChildOfClass(host.dataModel(), w.classes().findId(w.atoms().lookup("ScriptService")));
+    REQUIRE(service.valid());
+    const core::InstanceId script = w.findFirstChild(service, w.atoms().lookup("init"));
+    REQUIRE(script.valid());
+
+    // What ADR 0050 decided and the mount never did. Without this the script
+    // editor would open a tab on an empty string.
+    const std::optional<scene::Value> source = w.getProperty(script, w.atoms().lookup("Source"));
+    REQUIRE(source.has_value());
+    const auto* text = std::get_if<std::string>(&source.value());
+    REQUIRE(text != nullptr);
+    CHECK(*text == "local x = 1\nreturn x\n");
+}
