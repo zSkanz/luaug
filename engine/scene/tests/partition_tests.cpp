@@ -463,3 +463,67 @@ TEST_CASE("the partitioner never holds the world")
     // fails here instead of passing on a tie.
     CHECK(large <= 4);
 }
+
+TEST_CASE("a part below a folder leaves the scene it was taken out of (D084)")
+{
+    seedRealCatalog();
+    Sandbox sandbox;
+
+    // **The whole tree, not just its top row.** A world authored with its
+    // scenery in a folder -- which is what an Explorer full of loose parts drives
+    // anybody to do -- put every one of those parts in a cell AND left every one
+    // of them in the scene, so a partitioned world loaded twice. The copies are
+    // coincident, so the picture is right and only the counters disagree.
+    const std::string nested = R"({"class":"Folder","name":"Scenery","children":[)" +
+                               partNode("Tile", 10.0, 0.0, 10.0) + "," + partNode("Far", 400.0, 0.0, 10.0) + "]}";
+    const Partition partitioned = partition(sandbox, sceneText(nested));
+
+    CHECK(partitioned.result.report.records == 2);
+    CHECK(partitioned.result.scene.find("\"Tile\"") == std::string::npos);
+    CHECK(partitioned.result.scene.find("\"Far\"") == std::string::npos);
+    // The folder itself stays: a path to it still resolves, and it is where the
+    // grid parents nothing -- streaming has a folder of its own.
+    CHECK(partitioned.result.scene.find("\"Scenery\"") != std::string::npos);
+}
+
+TEST_CASE("a part three folders down leaves too")
+{
+    seedRealCatalog();
+    Sandbox sandbox;
+
+    const std::string deep = R"({"class":"Folder","name":"A","children":[)"
+                             R"({"class":"Folder","name":"B","children":[)"
+                             R"({"class":"Folder","name":"C","children":[)" +
+                             partNode("Deep", 12.0, 0.0, 12.0) + "]}]}]}";
+    const Partition partitioned = partition(sandbox, sceneText(deep));
+
+    CHECK(partitioned.result.report.records == 1);
+    CHECK(partitioned.result.scene.find("\"Deep\"") == std::string::npos);
+    CHECK(partitioned.result.scene.find("\"C\"") != std::string::npos);
+}
+
+TEST_CASE("partitioning a partitioned scene moves nothing")
+{
+    seedRealCatalog();
+
+    // The property D084 wants asserted, and the cheapest statement of "the
+    // scene it hands the boot holds only what stayed": run it again and there
+    // is nothing left to take.
+    const std::string nested = R"({"class":"Folder","name":"Scenery","children":[)" +
+                               partNode("Tile", 10.0, 0.0, 10.0) + "]}," +
+                               R"({"class":"Model","name":"Beacon","properties":{"StreamingMode":"Persistent"},)"
+                               R"("children":[)" +
+                               partNode("Mast", 4000.0, 0.0, 4000.0) + "]}";
+
+    Sandbox first;
+    const Partition once = partition(first, sceneText(nested));
+    REQUIRE(once.result.report.records == 1);
+
+    Sandbox again;
+    const Partition twice = partition(again, once.result.scene);
+    CHECK(twice.result.report.records == 0);
+    CHECK(twice.cells.empty());
+    // And it is a FIXED POINT, byte for byte: a second pass that reformatted
+    // what it did not move would make the cache key change on every run.
+    CHECK(twice.result.scene == once.result.scene);
+}

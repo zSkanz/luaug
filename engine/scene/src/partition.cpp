@@ -190,6 +190,25 @@ private:
     u32 m_peak = 0;
 };
 
+// What a node did on its way through the grid.
+//
+// **Three answers rather than two, and D084 is the cost of having had two.** A
+// node that STAYS may still have been rewritten, because something under it did
+// not stay -- and a parent that only asked "did my children stay" copied itself
+// verbatim over the top of that rewrite. Every part of the flagship's `Scenery`
+// folder therefore went into a cell AND stayed in the scene, so a partitioned
+// world was loaded twice. The copies were coincident, so the picture was right
+// and only the counters disagreed.
+enum class Outcome
+{
+    // It went into a cell, and nothing of it is written back.
+    Removed,
+    // It stays, and its text is the text it arrived as.
+    Verbatim,
+    // It stays, and something under it did not -- so it is rebuilt.
+    Rewritten,
+};
+
 // Everything one authored leaf became, read back out of the scratch world.
 struct Leaf
 {
@@ -219,9 +238,10 @@ public:
 
 private:
     void collectPins(std::string_view node, const std::string& path);
-    // Appends the node to `residual` when it stays. True when it stayed.
-    bool visit(std::string_view node, const std::string& path, std::string& residual);
-    bool visitChildren(std::string_view node, const std::string& path, std::string& residual);
+    // Appends the node to `residual` when it stays, and says which of the three
+    // things above it did.
+    Outcome visit(std::string_view node, const std::string& path, std::string& residual);
+    Outcome visitChildren(std::string_view node, const std::string& path, std::string& residual);
 
     // What a `Model` node is, once it has been built and dropped.
     struct ModelFacts
@@ -565,23 +585,29 @@ bool Partitioner::emitGroup(std::string_view node, const std::string& path, bool
 
 // --- pass two: the walk -----------------------------------------------------
 
-bool Partitioner::visitChildren(std::string_view node, const std::string& path, std::string& residual)
+Outcome Partitioner::visitChildren(std::string_view node, const std::string& path, std::string& residual)
 {
     const std::optional<std::string_view> children = jsonslice::member(node, "children");
     if (!children.has_value()) {
         residual.append(node);
-        return true;
+        return Outcome::Verbatim;
     }
 
     std::string kept = "[";
     bool anyKept = false;
-    bool allKept = true;
+    // **Two questions, not one.** A child that left changes this node; so does a
+    // child that stayed and was rebuilt, because the rebuild is in `kept` and
+    // nowhere else. Asking only the first is D084: the deeper rewrite was
+    // computed, thrown away, and papered over with the original text.
+    bool changed = false;
     jsonslice::forEachElement(*children, [&](std::string_view child) {
         std::string one;
-        if (!visit(child, path, one)) {
-            allKept = false;
+        const Outcome outcome = visit(child, path, one);
+        if (outcome == Outcome::Removed) {
+            changed = true;
             return;
         }
+        changed = changed || outcome == Outcome::Rewritten;
         if (anyKept) {
             kept.push_back(',');
         }
@@ -590,13 +616,17 @@ bool Partitioner::visitChildren(std::string_view node, const std::string& path, 
     });
     kept.push_back(']');
 
-    // Verbatim when nothing under it left, which is what makes a scene with
-    // nothing streamable in it partition to itself byte for byte.
-    residual.append(allKept ? std::string(node) : spliceChildren(node, anyKept ? kept : std::string_view{}));
-    return true;
+    // Verbatim when nothing under it moved at all, which is what makes a scene
+    // with nothing streamable in it partition to itself byte for byte.
+    if (!changed) {
+        residual.append(node);
+        return Outcome::Verbatim;
+    }
+    residual.append(spliceChildren(node, anyKept ? kept : std::string_view{}));
+    return Outcome::Rewritten;
 }
 
-bool Partitioner::visit(std::string_view node, const std::string& parentPath, std::string& residual)
+Outcome Partitioner::visit(std::string_view node, const std::string& parentPath, std::string& residual)
 {
     const std::string name = textOf(node, "name");
     const std::string path = parentPath.empty() ? name : parentPath + "." + name;
@@ -631,7 +661,7 @@ bool Partitioner::visit(std::string_view node, const std::string& parentPath, st
             ++m_out.report.missingStamps;
             ++m_out.report.kept;
             residual.append(node);
-            return true;
+            return Outcome::Verbatim;
         }
         SceneIoReport ignored;
         const std::string expanded = writeStamp(m_scratch.world(), built, &ignored);
@@ -641,13 +671,13 @@ bool Partitioner::visit(std::string_view node, const std::string& parentPath, st
         if (root.has_value() && m_classes.isA(m_classes.findId(m_atoms.lookup(textOf(*root, "class"))), m_modelClass)) {
             const ModelFacts facts = modelFactsOf(*root);
             if (facts.mode == kAtomic && emitGroup(*root, path, facts.plain)) {
-                return false;
+                return Outcome::Removed;
             }
         }
         ++m_out.report.kept;
         ++m_out.report.unstreamable;
         residual.append(node);
-        return true;
+        return Outcome::Verbatim;
     }
 
     if (classId == InvalidClass) {
@@ -657,7 +687,7 @@ bool Partitioner::visit(std::string_view node, const std::string& parentPath, st
         ++m_out.report.kept;
         ++m_out.report.unstreamable;
         residual.append(node);
-        return true;
+        return Outcome::Verbatim;
     }
 
     if (m_modelClass != InvalidClass && m_classes.isA(classId, m_modelClass)) {
@@ -670,11 +700,11 @@ bool Partitioner::visit(std::string_view node, const std::string& parentPath, st
             ++m_out.report.persistent;
             ++m_out.report.kept;
             residual.append(node);
-            return true;
+            return Outcome::Verbatim;
         }
         if (facts.mode == kAtomic) {
             if (emitGroup(node, path, facts.plain)) {
-                return false;
+                return Outcome::Removed;
             }
             // Asked for whole and cannot be given whole, so it is not quietly
             // demoted to `Nonatomic`: half a mechanism is what `Atomic` exists
@@ -683,7 +713,7 @@ bool Partitioner::visit(std::string_view node, const std::string& parentPath, st
             ++m_out.report.kept;
             ++m_out.report.unstreamable;
             residual.append(node);
-            return true;
+            return Outcome::Verbatim;
         }
         // `Nonatomic`: the model stays and its parts descend individually, so a
         // path to the model still resolves and a script that looks for it finds
@@ -696,12 +726,12 @@ bool Partitioner::visit(std::string_view node, const std::string& parentPath, st
     if (leafShaped && (classId == m_partClass || classId == m_meshPartClass)) {
         const Leaf leaf = readLeaf(node);
         if (leaf.expressible && emitLeaf(leaf)) {
-            return false;
+            return Outcome::Removed;
         }
         ++m_out.report.kept;
         ++m_out.report.unstreamable;
         residual.append(node);
-        return true;
+        return Outcome::Verbatim;
     }
 
     ++m_out.report.kept;
