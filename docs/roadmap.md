@@ -1263,6 +1263,7 @@ size were normal.
 | E2 | Moving Things | L | Translate, rotate and scale manipulators; creating instances; reparenting by drag; multi-select — the direct manipulation the loop and the undo stack make safe. **Specified below, in progress** |
 | E3 | Assets and Prefabs | M | Prefabs as scenes, an asset importer path from the browser, and a scene that references what it uses. **The model is settled: ADR 0048** -- content holds SOURCES, an instance in the world may be a LINK to one, and editing a linked instance breaks the link and makes it its own thing. Written at E2 from the human's own description rather than invented while wiring a browser |
 | E4 | The Editor Ships | M | The distribution question ADR 0046 deliberately declined, and the editor's own performance gate |
+| E5 | The World You Build | L | A world authored in `Workspace` becomes a streamed world on its own — no generator script, nothing sorted by hand. `Model.StreamingMode` makes the model the unit rather than the part; cells are chosen by size as well as position on the `layer` that has existed unused since M7. **Settled: ADR 0053.** Placed here rather than in phase 2 because it is an authoring capability and E3's stamps are its neighbour |
 
 **What moved into E1 and why it was right.** Undo was E2's, and E1 grew delete
 and duplicate — the two actions that make its absence dangerous. The content
@@ -1564,3 +1565,102 @@ changes over time.
   it moves the way a manipulator should** — deliberately not automatable, and the
   gate item every milestone since M4 has proven is where the real defects come
   from.
+
+
+### E5 — The World You Build (L)
+
+**Settled by [ADR 0053](decisions/0053-the-grid-decides-when-and-the-model-decides-what.md).**
+Read it before planning: it carries the survey of Unreal's World Partition,
+Godot's Open World Database and Roblox's `ModelStreamingMode`, and the four
+rejected alternatives. This section is the scope and the gate.
+
+**Built in one pass, not in phases.** The pieces below are one system and the
+seams between them are not natural places to stop: a partitioner with no
+`StreamingMode` writes the wrong cells, and `StreamingMode` with no partitioner
+has no caller.
+
+#### What the survey found already built
+
+Two things were assumed missing and are not, and both change the size of this
+milestone downward:
+
+- **`ChunkId::layer` has existed since M7 and nothing uses it.** It was
+  documented at the time as "how interiors, or a lower level of detail of the
+  same ground, get addressed without a second coordinate system". The size
+  classes below live there, so the on-disk `ChunkId` does not change.
+- **`ChunkIndexEntry` already carries a world-space `DAABB`**, so a building that
+  overhangs its cell is already described and already scored correctly. The
+  straddling problem was solved before anybody asked it.
+
+And four of the five properties Roblox exposes already exist here — `Enabled`,
+`MinRadius`, `LoadRadius`, `PauseOutsideLoadedArea` — with none needing a change.
+`Enabled` is the better of the pair: it **freezes** the resident set rather than
+draining it.
+
+#### Scope
+
+- **`Model.StreamingMode`**, three values, `Nonatomic` the default:
+  parts descend individually; `Atomic` materialises and evicts the model whole
+  across a cell boundary; `Persistent` never enters the grid and stays in the
+  scene. `PersistentPerPlayer` is **out** — it needs a per-connection player,
+  which is phase 4's.
+- **The partitioner.** Walks `Workspace`, computes `floor(position / chunkSize)`,
+  groups by cell honouring each model's mode, writes cell sources and the index.
+  **It buckets records as it reads and never materialises the world**, which is
+  the whole reason it may run at play.
+- **It runs on play, cached by a hash of the scene.** A shipping build pre-warms
+  the same cache and is not a second code path. Rejected in the ADR: build-only,
+  because the daily path would be the one that goes stale.
+- **A cell holds groups.** The one file-format change: an atomic model and its
+  descendants materialise together. `layer` and the index bounds are untouched.
+- **Size classes on `layer`** — 0 detail, 1 structures, 2 terrain features — with
+  a `minRadius`/`loadRadius` pair per layer on `StreamingFocus`. **This is the
+  only change to the existing streaming runtime.**
+- **Tag addressing documented as the primary path.** `TagService` already has
+  `GetTagged` and the added/removed signals, and those signals are what fire as
+  cells arrive and leave. The docs say so; nothing is built.
+- **The replica's pause.** `PauseOutsideLoadedArea` stays the authoritative
+  world's; a replica holds its camera instead. Decided now so phase 4 does not
+  rediscover it.
+
+#### NOT in scope
+
+Baked distant geometry (HLOD). Outside `LoadRadius` there is nothing, not a cheap
+version of something — and the layers push the horizon out for large objects
+without being a LOD hierarchy. Named as the next wall, with Decima's twelve
+person-years as the estimate.
+
+Arbitrary hierarchy in a cell. A scene that is a *folder* of per-cell files, with
+streaming while editing (Unreal's One File Per Actor) — that wall appears far
+later than the one this removes. Making a materialised cell savable: the
+serializer's `generated` skip stays and stays correct.
+
+#### Gate (definition of done)
+
+- **A world built by hand in the editor streams.** `examples/06-scene` grows a
+  few hundred parts spread over more than one cell, is saved, and `luaug run`
+  streams it — with no generator script anywhere in the project. A screenshot of
+  the chunk-state overlay is attached to the gate record.
+- **The default changes nothing.** `examples/10-open-world` runs byte-identically
+  through the partitioner: the cells it produces from the flagship's scene plus
+  its generated world match what `generate_world.luau` and `assetc` produce today,
+  or the difference is explained in the record. This is the regression that
+  matters, because `Nonatomic` is supposed to be what already happens.
+- **The partitioner never holds the world.** Proven by measurement, not by
+  inspection: peak resident instance count during a partition of a world with
+  N instances is bounded by a constant, not by N. A test partitions a synthetic
+  world an order of magnitude larger than the flagship's and asserts it.
+- **An atomic model crosses a boundary and arrives whole.** A model whose parts
+  straddle two cells materialises in one frame with every descendant present, and
+  evicts with none left behind. Driven headlessly.
+- **A persistent model is never in a cell.** It is in the saved scene, it exists
+  before the first tick, and no eviction touches it — including at four
+  kilometres from the origin, where its cell would long since have gone.
+- **The cache is a cache.** Editing the scene and pressing play repartitions;
+  pressing play again does not. Asserted on the hash, not on wall-clock time.
+- **Layers separate.** With three layers configured, a large object stays
+  resident at a distance that has already evicted a small one, and the overlay
+  shows both states. A unit test over the scoring covers it without a window.
+- **`luaug check` and the full local gate are green**, and the docs say what a
+  script may assume about a streamed world — the tag path written down, with the
+  `nil` a path reference may return stated rather than discovered.
