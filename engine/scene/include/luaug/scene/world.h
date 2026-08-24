@@ -149,6 +149,21 @@ struct EngineState
     f64 streamingMinRadius = 512.0;
     bool streamingPauseOutsideLoadedArea = false;
 
+    // The other two size classes' radii (ADR 0053). A cell's `layer` is its
+    // class -- 0 detail, 1 structures, 2 terrain features -- and the pair above
+    // is layer 0's, which is why a world whose cells are all layer 0 needs
+    // nothing here and behaves exactly as it did.
+    //
+    // **Zero means "follow the pair above"**, rather than "a radius of zero".
+    // The alternative is defaulting them to 512 and 1024 as well, and then a
+    // person who raises `LoadRadius` alone finds their terrain no further away
+    // than before -- a knob that silently stops applying is worse than one that
+    // has to be read about.
+    f64 streamingStructureMinRadius = 0.0;
+    f64 streamingStructureLoadRadius = 0.0;
+    f64 streamingTerrainMinRadius = 0.0;
+    f64 streamingTerrainLoadRadius = 0.0;
+
     // `InputService`'s own state (M6). The pointer position is a SNAPSHOT taken
     // once per frame, like M5's keyboard: two reads inside one tick agree, and a
     // recorded input stream can hand the same answer back with no mouse.

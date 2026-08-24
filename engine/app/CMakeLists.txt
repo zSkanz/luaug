@@ -22,6 +22,7 @@ luaug_add_module(app
         src/streaming_host.cpp
         src/debug_overlay.cpp
         src/inspector.cpp
+        src/partition_cache.cpp
         src/picking.cpp
         src/editor.cpp
         src/content_tree.cpp
@@ -158,6 +159,7 @@ luaug_add_module_tests(app
         tests/picking_tests.cpp
         tests/editor_tests.cpp
         tests/content_tree_tests.cpp
+        tests/partition_cache_tests.cpp
         tests/soak_tests.cpp
         tests/two_worlds_tests.cpp
         tests/project_config_tests.cpp

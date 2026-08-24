@@ -14,6 +14,7 @@
 #include "luaug/app/frame_scheduler.h"
 #include "luaug/app/icons.h"
 #include "luaug/app/inspector.h"
+#include "luaug/app/partition_cache.h"
 #include "luaug/app/reload.h"
 #include "luaug/app/screenshot.h"
 #include "luaug/app/soak.h"
@@ -745,6 +746,32 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         .headless = options.headless,
         .preserved = nullptr,
         .conformanceRoot = options.conformanceRoot,
+        // **The scene meets the grid here** (ADR 0053), which is the one moment
+        // that has the registries and does not yet have a world. What comes
+        // back is the scene to apply; the cells go straight into the streaming
+        // host, beside whatever a generator already built.
+        .partitionScene =
+            [&streaming, &options, contentRoot](scene::World& registries, const std::filesystem::path& scene) {
+                if (!options.editor) {
+                    // Not in the editor, and that is a decision rather than an
+                    // omission: the editor holds the whole world because holding it
+                    // is what editing it means. Streaming while editing is a scene
+                    // that is a folder of cells, and that is a wall far past this
+                    // one.
+                    const asset::ChunkIndex* built = streaming.active() ? &streaming.index() : nullptr;
+                    const PartitionOutcome outcome =
+                        partitionProject(registries, options.scriptPath, contentRoot, scene, built);
+                    if (outcome.active) {
+                        (void)streaming.addIndex(
+                            outcome.index,
+                            [&outcome](const asset::ChunkIndexEntry& entry) -> std::optional<std::filesystem::path> {
+                                return outcome.directory / std::filesystem::path(entry.urn);
+                            });
+                        return outcome.scenePath;
+                    }
+                }
+                return std::filesystem::path{};
+            },
         // Where a stamp's text comes from. `contentRoot` is what the editor's
         // browser is rooted at too, so a scene names the same file whichever of
         // the two loads it.
@@ -780,6 +807,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         return std::nullopt;
     }
 
+    // **Partitioned and nothing else** (ADR 0053). The boot above has already
+    // done the work through the hook; there is no second code path, which is
+    // the whole point of putting it there. This just declines to run a frame.
+    if (options.partitionOnly)
+        return std::nullopt;
+
     // The editor is told which scene the world holds, so its save writes back
     // to that one rather than refusing for want of an open scene.
     if (options.editor && host->bootSceneApplied())
@@ -791,6 +824,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     if (overlay.has_value()) {
         overlay->setInspectionTarget(&host->world(), host->runtime().dataModel(), &inspector);
         overlay->setScriptTarget(&host->runtime());
+        // Not re-pointed on a reload the way the world is: the streaming host
+        // outlives every world this process builds, which is the whole reason
+        // `setWorld` is idempotent.
+        overlay->setStreamingTarget(&streaming);
         // After the console sink is installed, so the shell chains to it rather
         // than replacing it (D017).
         overlay->captureLog();

@@ -48,6 +48,7 @@
   "cli.build.err.wrong_host": "Building {target} needs a Windows machine: the artifact is a Windows binary with a Windows icon resource in it.",
   "cli.build.err.no_engine_content": "The engine has no content directory at {path}; a build without it would ship a player that cannot load its own message catalog.",
   "cli.build.err.no_player_host": "No player host was built, so this would have packaged {path} -- which carries the debug overlay, the inspector and a Luau REPL against its own VM.\n\n  cmake --preset win-msvc-player\n  cmake --build --preset win-msvc-player --target luaug_host\n\nThen run this again. Pass --dev-host if a debuggable package is what you meant.",
+  "cli.build.warn.no_partition": "The scene could not be partitioned into streaming cells, so the game will partition it the first time it runs.",
   "cli.build.warn.dev_host": "--dev-host: packaging {path}, which is not the player profile. The artifact carries the debug overlay, the inspector and a Luau REPL against its own VM. Do not release it.",
   "cli.build.err.output_exists": "{path} already exists and was not written by luaug build. Pass --force to clear it, or choose another --output.",
   "cli.build.err.icon_failed": "The icon at {path} could not be put into the artifact, so the game would have shipped wearing the engine's face.",

@@ -22,7 +22,9 @@ luaug_add_module(scene
         src/world_hash.cpp
         src/world_snapshot.cpp
         src/scene_file.cpp
+        src/json_slice.cpp
         src/native_accessors.cpp
+        src/partition.cpp
         src/physics_sync.cpp
         src/streaming_glue.cpp
         generated/class_descriptors.gen.cpp
@@ -63,6 +65,14 @@ luaug_add_module_tests(scene
         tests/world_tests.cpp
         tests/world_snapshot_tests.cpp
         tests/scene_file_tests.cpp
+        tests/partition_tests.cpp
         tests/physics_sync_tests.cpp
         tests/streaming_glue_tests.cpp
 )
+
+if(LUAUG_BUILD_TESTS)
+    # The partition tests build against the SHIPPED registry rather than the
+    # fixture beside them, so they resolve real keys and need the real catalog.
+    target_compile_definitions(luaug_scene_tests PRIVATE
+        LUAUG_TEST_CATALOG="${CMAKE_SOURCE_DIR}/i18n/en.json")
+endif()

@@ -19,8 +19,10 @@
 #include "luaug/scene/streaming_glue.h"
 
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace luaug::asset {
@@ -47,6 +49,18 @@ public:
     // fits in memory does not need streaming, and a host that logged a warning
     // for its absence would warn on every example in the tree.
     [[nodiscard]] bool load(const asset::ContentMounts& mounts, const std::filesystem::path& indexPath);
+
+    // Adds the cells an index names, resolving each entry's file with
+    // `resolve`. Callable more than once before the first `pump`, because a
+    // project may have two sources of cells: a world a generator built and
+    // compiled, and one the partitioner wrote from the scene (ADR 0053).
+    //
+    // **A `ChunkId` present twice is refused and named.** It is the index's
+    // key, so a second entry under it is a chunk nothing can ever reach -- and
+    // a world quietly missing a cell is the kind of defect that reports itself
+    // as a hole in the ground three minutes into a walk.
+    using ChunkResolver = std::function<std::optional<std::filesystem::path>(const asset::ChunkIndexEntry&)>;
+    bool addIndex(const asset::ChunkIndex& index, const ChunkResolver& resolve);
 
     // Idempotent, and that is the contract rather than an optimisation. The
     // frame loop calls this every frame so that a hot reload's new world is
@@ -75,6 +89,11 @@ public:
     // because only it knows what is resident.
     [[nodiscard]] bool areaResident(core::DVec3 position, f64 radius) const;
 
+    // Every cell this host knows about, which is what a partition asks before
+    // it writes: a cell a built world already owns is one the scene may not
+    // file anything into.
+    [[nodiscard]] const asset::ChunkIndex& index() const noexcept { return m_manager.index(); }
+
     [[nodiscard]] const asset::StreamingStats& stats() const noexcept { return m_manager.stats(); }
     [[nodiscard]] std::vector<asset::StreamingManager::ChunkView> view() const { return m_manager.view(); }
     [[nodiscard]] u64 rebases() const noexcept { return m_rebases; }
@@ -91,6 +110,7 @@ public:
     [[nodiscard]] bool minimumRingResident() const noexcept { return m_manager.minimumRingResident(); }
 
 private:
+    void installCallbacks();
     void beginRead(asset::ChunkId id, const asset::ChunkIndexEntry& entry);
     [[nodiscard]] std::vector<asset::StreamingFocus> collectFoci() const;
 

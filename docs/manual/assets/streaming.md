@@ -87,9 +87,101 @@ you that a reference you are holding now points at something outside the world.
 
 ## Authoring a streamed world
 
-A chunk is a cell of a uniform grid, 256 metres on a side by default, authored
-as a `*.chunk.json` file under the content directory and compiled by
-`luaug build-assets`:
+**You build in `Workspace` and press play.** There is no generator script, no
+sorting things into folders, and nothing to configure: the engine partitions
+your scene into cells on the way to the first frame, cached by a hash of the
+scene file, and a shipping build warms the same cache so a player's first launch
+pays nothing.
+
+```luau
+--!strict
+local StreamingService = game:GetService("StreamingService")
+StreamingService:AddFocus(workspace.CurrentCamera)
+```
+
+That is the whole of it. Place four hundred parts across a kilometre, save, run.
+
+### What a `Model` decides
+
+The grid decides **when** something becomes eligible. A `Model` decides **what
+comes with it**, through `Model.StreamingMode`:
+
+| Mode | What it does |
+|---|---|
+| `Nonatomic` | The default. Its parts are placed in cells one at a time, by their own positions, and they arrive and leave independently. |
+| `Atomic` | The model is one unit. It goes in a single cell however far it spreads, and it materialises and evicts whole — a house arrives as a house rather than as forty parts in an order nobody chose. |
+| `Persistent` | It never enters the grid. It stays in the scene, it exists before the first tick, and no eviction reaches it however far you walk. |
+
+`Atomic` is what a gate, a machine or a building wants. `Persistent` is for the
+spawn, the checkpoint, and anything a script holds a long-lived reference to.
+
+### What stays authored, and why it says so
+
+The partition is deliberately conservative. An instance leaves the scene only
+when a cell can express it whole, nothing else in the scene points at it by
+path, and it carries no descendant a cell cannot say. Everything else stays in
+the scene — which costs memory and never costs correctness.
+
+So these stay: anything that is not a `Part` or a `MeshPart`; a part with
+children; a part carrying an attribute; a part something else names by path (a
+`Weld`'s `Part0`, `Workspace.CurrentCamera`); an `Atomic` model with a light or
+a script inside it; and a stamped instance whose root is not an atomic model.
+**To stream a stamp, make its root a `Model` and set it `Atomic`.**
+
+### Size classes
+
+A cell also has a **class**, chosen by how large the thing in it is:
+
+| Class | Extent | Radius |
+|---|---|---|
+| detail | under 12 m | `MinRadius` / `LoadRadius` |
+| structures | 12 m to 24 m | `StructureMinRadius` / `StructureLoadRadius` |
+| terrain features | over 24 m | `TerrainMinRadius` / `TerrainLoadRadius` |
+
+A mountain and a pebble stop sharing a distance, which is the choice a single
+grid forces and always resolves badly in one direction. The three extra pairs
+are **zero by default and mean "follow `MinRadius` and `LoadRadius`"**, so a
+world that says nothing about them behaves exactly as it always did.
+
+An `Atomic` model is classified by the whole model's extent, not by its largest
+part: a house of forty small parts is a structure and not forty details.
+
+### Address by tag, never by path
+
+**This is the one thing a streamed world changes about how you write a script.**
+
+`workspace.Bridge.Plank` is a path that is sometimes `nil`, because the thing it
+names may not have arrived. Waiting for it is not the answer either —
+`WaitForChild` on something that is not streamed in never returns.
+
+Ask [`TagService`](api:TagService) instead:
+
+```luau
+--!strict
+local TagService = game:GetService("TagService")
+
+for _, plank in TagService:GetTagged("Plank") do
+    -- everything wearing the tag that is here NOW
+end
+
+TagService:GetInstanceAddedSignal("Plank"):Connect(function(plank: Instance)
+    -- a cell arrived and brought this with it
+end)
+
+TagService:GetInstanceRemovedSignal("Plank"):Connect(function(plank: Instance)
+    -- and one left
+end)
+```
+
+A streamed instance carries the tags it was authored with, so those two signals
+are exactly what fires as cells come and go. That is the primary way to find
+things in a world that is not all present.
+
+### Compiled cells, for a world a generator makes
+
+A world that is GENERATED rather than authored still has the path M7 shipped: a
+`*.chunk.json` cell under the content directory, compiled by
+`luaug build-assets`.
 
 ```json
 {"format":"luaug-chunk-source","chunkSize":256,"x":0,"z":0,"layer":0,
@@ -105,12 +197,10 @@ as a `*.chunk.json` file under the content directory and compiled by
 - Every cell in one world must agree about `chunkSize`, or the compiler refuses.
 - A `meshpart` with no `mesh` is **refused**: an invisible part would surface
   later as "the world is missing things" rather than as an error now.
-- `layer` exists from the start, for interiors or a coarser level of detail.
 
-Both streamed examples in this repository **generate** their worlds from a
-deterministic hash of each cell's own coordinates. A hundred lines of generator
-rather than megabytes of committed JSON, and the world is identical on every
-machine.
+The two coexist. A cell a compiled world already owns is one the partitioner
+leaves alone, and whatever was going there stays in the scene rather than
+overwriting it.
 
 ## Budgets
 
@@ -124,14 +214,13 @@ hitch into a few milliseconds spread over several frames.
 
 ## Watching it
 
-The debug overlay has a **Streaming** panel:
+The debug overlay draws a **streaming map**: one grid per size class, a square
+per cell, coloured by state — green resident, blue loading, yellow decoded and
+waiting for budget, red failed, grey unloaded. Press **F3** in a running game.
 
-```luau
---!strict
-local DebugService = game:GetService("DebugService")
-DebugService:ShowPanel("Streaming")
-DebugService.OverlayVisible = true
-```
+It is the fastest way to answer the two questions streaming actually raises:
+how far the ring reaches, and whether something you cannot see is missing or
+merely far away.
 
 ## Where to look next
 

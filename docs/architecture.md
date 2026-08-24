@@ -605,8 +605,22 @@ and Tags (`AddTag/HasTag/GetTags` + `TagService:GetTagged/
 GetInstanceAddedSignal`) from day one.
 
 **Streaming semantics** (service surface in api-design): foci with
-Min/Target radii, `StreamingMode = Default|Atomic|Persistent` per Model,
-`PauseOutsideLoadedArea` integrity. Stream-out **reparents to nil, never
+Min/Target radii **per size class** -- a cell's `ChunkId::layer` is its class,
+0 detail, 1 structures, 2 terrain features, and each has a radius pair on the
+service (ADR 0053) -- `StreamingMode = Nonatomic|Atomic|Persistent` per Model,
+`PauseOutsideLoadedArea` integrity.
+
+**And the cells come from the scene** (ADR 0053). A world authored in
+`Workspace` is partitioned into cells on the way to the first frame, cached by
+a hash of the scene file under `.luaug/partition/`, with a shipping build
+pre-warming that same directory through the same code. The partitioner reads
+the scene as TEXT and builds one authored node at a time into a scratch world:
+holding every instance in order to decide which ones to hold is the exact cost
+streaming exists to avoid. What stays authored is spliced out of the original
+text, so a scene with nothing streamable in it partitions to itself byte for
+byte. A generated world compiled by `assetc` and a partitioned one coexist --
+the host merges the two indexes and a cell a built world already owns is one
+the scene may not file anything into. Stream-out **reparents to nil, never
 destroys**: instances still referenced from Luau become nil-parented husks
 (identity and generation preserved, class-specific components stripped, state
 serialized into the chunk's resident blob); unreferenced instances are

@@ -1,5 +1,7 @@
 #include "luaug/app/debug_overlay.h"
 
+#include "luaug/app/streaming_host.h"
+
 #if LUAUG_DEBUG_UI
 
 #include "luaug/app/backends.h"
@@ -3299,8 +3301,108 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     }
 }
 
+// --- the streaming map ------------------------------------------------------
+//
+// **The panel `api-design.md` has promised since M7 and nothing drew.**
+// `StreamingManager::view` was written "for the overlay the deliverable owes"
+// and had no caller in the tree until this; the manual page told people to open
+// a panel that did not exist. It exists now, and E5's gate is a picture of it.
+//
+// A MAP rather than a table, because the question a person has about streaming
+// is spatial: which cells are here, which are on their way, and how far out the
+// ring reaches. A table of chunk ids answers none of that at a glance.
+
+[[nodiscard]] ImU32 chunkStateColor(asset::ChunkState state)
+{
+    switch (state) {
+    case asset::ChunkState::Resident:
+        return IM_COL32(90, 190, 110, 230);
+    case asset::ChunkState::Decoded:
+        return IM_COL32(220, 200, 80, 230);
+    case asset::ChunkState::Loading:
+        return IM_COL32(80, 150, 220, 230);
+    case asset::ChunkState::Failed:
+        return IM_COL32(220, 90, 80, 230);
+    case asset::ChunkState::Unloaded:
+        break;
+    }
+    return IM_COL32(90, 90, 96, 160);
+}
+
+void drawStreaming(const StreamingHost& streaming)
+{
+    const asset::StreamingStats& stats = streaming.stats();
+    ImGui::Text("resident %u  loading %u  decoded %u  failed %u", stats.resident, stats.loading, stats.decoded,
+                stats.failed);
+    ImGui::Text("%.2f MiB resident, %llu loaded, %llu evicted", static_cast<double>(stats.bytesResident) / 1048576.0,
+                static_cast<unsigned long long>(stats.chunksLoaded),
+                static_cast<unsigned long long>(stats.chunksEvicted));
+    ImGui::Text("worst pump %.2f ms, last %.2f ms, %llu rebase(s)", stats.worstTickMs, streaming.lastPumpMilliseconds(),
+                static_cast<unsigned long long>(streaming.rebases()));
+
+    const std::vector<asset::StreamingManager::ChunkView> cells = streaming.view();
+    if (cells.empty())
+        return;
+
+    // One map per size class, because that is what a layer IS (ADR 0053) and
+    // because two classes drawn on one grid would put a pebble's cell on top of
+    // a hillside's. The gate's own item -- "a large object stays resident at a
+    // distance that has already evicted a small one" -- is a thing you read off
+    // these two pictures side by side.
+    for (core::i32 layer = 0; layer < asset::ChunkLayerCount; ++layer) {
+        core::i32 minX = 0;
+        core::i32 maxX = 0;
+        core::i32 minZ = 0;
+        core::i32 maxZ = 0;
+        core::u32 present = 0;
+        core::u32 resident = 0;
+        for (const asset::StreamingManager::ChunkView& cell : cells) {
+            if (cell.id.layer != layer)
+                continue;
+            if (present == 0) {
+                minX = maxX = cell.id.x;
+                minZ = maxZ = cell.id.z;
+            }
+            minX = std::min(minX, cell.id.x);
+            maxX = std::max(maxX, cell.id.x);
+            minZ = std::min(minZ, cell.id.z);
+            maxZ = std::max(maxZ, cell.id.z);
+            ++present;
+            if (cell.state == asset::ChunkState::Resident)
+                ++resident;
+        }
+        if (present == 0)
+            continue;
+
+        static constexpr const char* kLayerNames[] = {"detail", "structures", "terrain"};
+        ImGui::SeparatorText(layer < 3 ? kLayerNames[layer] : "layer");
+        ImGui::Text("%u of %u resident", resident, present);
+
+        const int columns = maxX - minX + 1;
+        const int rows = maxZ - minZ + 1;
+        // Capped so a 17x17 world and a 200x200 one both fit a panel. A cell
+        // smaller than three pixels is a colour nobody can read, and a map
+        // wider than the panel is one nobody can see the edge of.
+        const float side = std::clamp(220.0f / static_cast<float>(std::max(columns, rows)), 3.0f, 18.0f);
+
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        for (const asset::StreamingManager::ChunkView& cell : cells) {
+            if (cell.id.layer != layer)
+                continue;
+            const float x = origin.x + static_cast<float>(cell.id.x - minX) * side;
+            // Z DOWN the screen, which is the reading a map wants: north at the
+            // top is a convention, and a grid drawn with +z upward reads
+            // mirrored against every other view of the same world.
+            const float y = origin.y + static_cast<float>(cell.id.z - minZ) * side;
+            draw->AddRectFilled(ImVec2(x, y), ImVec2(x + side - 1.0f, y + side - 1.0f), chunkStateColor(cell.state));
+        }
+        ImGui::Dummy(ImVec2(static_cast<float>(columns) * side, static_cast<float>(rows) * side));
+    }
+}
+
 void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,
-               script::ScriptRuntime* runtime)
+               script::ScriptRuntime* runtime, const StreamingHost* streaming)
 {
     ImGui::SetNextWindowBgAlpha(0.85f);
     ImGui::SetNextWindowSize(ImVec2(420.0f, 520.0f), ImGuiCond_FirstUseEver);
@@ -3328,6 +3430,13 @@ void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, I
         if (runtime != nullptr) {
             ImGui::SeparatorText("memory");
             drawMemory(*runtime);
+        }
+
+        // Only for a project that streams. A panel of zeroes on every example
+        // that does not would be furniture nobody can act on.
+        if (streaming != nullptr && streaming->active()) {
+            ImGui::SeparatorText("streaming");
+            drawStreaming(*streaming);
         }
 
         // The console draws even with no VM: the LOG half is the half a person
@@ -3515,7 +3624,7 @@ void DebugOverlay::render(rhi::ICmdList& cmd, rhi::TextureHandle target, const F
         drawEditorShell(frame, world_, root_, inspector_, runtime_, editor_, viewportTexture_, layoutBuilt_, commands_,
                         panels_, dialogs_, icons_);
     else
-        drawShell(frame, world_, root_, inspector_, runtime_);
+        drawShell(frame, world_, root_, inspector_, runtime_, streaming_);
     ImGui::Render();
 
     ImDrawData* drawData = ImGui::GetDrawData();

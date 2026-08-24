@@ -90,6 +90,8 @@ void detachPVComponents(World& world, core::InstanceId id);
 // Model
 Value getModelPrimaryPart(const World& world, core::InstanceId id);
 bool setModelPrimaryPart(World& world, core::InstanceId id, const Value& value);
+Value getModelStreamingMode(const World& world, core::InstanceId id);
+bool setModelStreamingMode(World& world, core::InstanceId id, const Value& value);
 void attachModelComponents(World& world, core::InstanceId id);
 void detachModelComponents(World& world, core::InstanceId id);
 
@@ -202,6 +204,14 @@ Value getStreamingServiceMinRadius(const World& world, core::InstanceId id);
 bool setStreamingServiceMinRadius(World& world, core::InstanceId id, const Value& value);
 Value getStreamingServicePauseOutsideLoadedArea(const World& world, core::InstanceId id);
 bool setStreamingServicePauseOutsideLoadedArea(World& world, core::InstanceId id, const Value& value);
+Value getStreamingServiceStructureMinRadius(const World& world, core::InstanceId id);
+bool setStreamingServiceStructureMinRadius(World& world, core::InstanceId id, const Value& value);
+Value getStreamingServiceStructureLoadRadius(const World& world, core::InstanceId id);
+bool setStreamingServiceStructureLoadRadius(World& world, core::InstanceId id, const Value& value);
+Value getStreamingServiceTerrainMinRadius(const World& world, core::InstanceId id);
+bool setStreamingServiceTerrainMinRadius(World& world, core::InstanceId id, const Value& value);
+Value getStreamingServiceTerrainLoadRadius(const World& world, core::InstanceId id);
+bool setStreamingServiceTerrainLoadRadius(World& world, core::InstanceId id, const Value& value);
 
 // DebugService
 Value getDebugServiceOverlayVisible(const World& world, core::InstanceId id);

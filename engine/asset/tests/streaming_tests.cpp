@@ -405,3 +405,94 @@ TEST_CASE("the view reports every chunk for the overlay")
     CHECK(resident == 1);
     CHECK(std::string(chunkStateName(ChunkState::Resident)) == "resident");
 }
+
+TEST_CASE("a size class keeps its own distance")
+{
+    seedRealCatalog();
+
+    // The gate's own item (ADR 0053): with three layers configured, a large
+    // object stays resident at a distance that has already evicted a small one.
+    // A mountain and a pebble stop sharing a radius, which is the choice a
+    // single grid forces and always resolves badly in one direction.
+    ChunkIndex index;
+    index.chunkSize = 256.0f;
+    for (int layer = 0; layer < 3; ++layer) {
+        for (int x = 0; x < 6; ++x) {
+            ChunkIndexEntry entry;
+            entry.id = ChunkId{x, 0, layer};
+            entry.bounds = chunkBounds(entry.id, index.chunkSize);
+            entry.bounds.min.y = -1.0;
+            entry.bounds.max.y = 1.0;
+            entry.urn = "asset://world/c.lchunk";
+            entry.instanceCount = 1;
+            index.chunks.push_back(entry);
+        }
+    }
+    std::sort(index.chunks.begin(), index.chunks.end(),
+              [](const ChunkIndexEntry& a, const ChunkIndexEntry& b) { return a.id < b.id; });
+
+    Harness harness(index);
+    StreamingFocus focus;
+    focus.position = {128.0, 0.0, 128.0};
+    focus.minRadius = 100.0;
+    focus.loadRadius = 200.0;
+    focus.layers[1] = StreamingLayerRadii{300.0, 600.0};
+    focus.layers[2] = StreamingLayerRadii{600.0, 1200.0};
+    harness.manager.setFoci({&focus, 1});
+
+    StreamingBudget budget;
+    budget.milliseconds = 1000.0;
+    harness.settle(budget);
+
+    const auto residentAt = [&harness](int x, int layer) {
+        return harness.manager.stateOf(ChunkId{x, 0, layer}) == ChunkState::Resident;
+    };
+
+    // Cell 2 starts 384 m out and cell 4 starts 896 m out. Detail gave up on
+    // both; structures keep the first and terrain keeps the second. Three
+    // radii, three answers about the same piece of ground.
+    CHECK(residentAt(0, 0));
+    CHECK_FALSE(residentAt(2, 0));
+    CHECK(residentAt(2, 1));
+    CHECK_FALSE(residentAt(4, 1));
+    CHECK(residentAt(4, 2));
+
+    // And the must-have ring is asked per layer too, so a world whose terrain
+    // ring is not yet resident is not walkable even where its props are.
+    StreamingFocus far;
+    far.position = {1400.0, 0.0, 128.0};
+    far.minRadius = 100.0;
+    far.loadRadius = 200.0;
+    far.layers[2] = StreamingLayerRadii{2000.0, 2400.0};
+    harness.manager.setFoci({&far, 1});
+    harness.manager.tick(budget);
+    CHECK_FALSE(harness.manager.minimumRingResident());
+}
+
+TEST_CASE("a layer with no radius of its own follows the focus's own pair")
+{
+    seedRealCatalog();
+
+    // What makes a world built before layers meant anything behave exactly as
+    // it did: every cell of it is layer 0, and layer 0 IS the base pair.
+    ChunkIndex index = gridIndex(3);
+    Harness harness(index);
+
+    StreamingFocus focus;
+    focus.position = {128.0, 0.0, 128.0};
+    focus.minRadius = 200.0;
+    focus.loadRadius = 400.0;
+    CHECK(focus.loadRadiusFor(0) == doctest::Approx(400.0));
+    CHECK(focus.loadRadiusFor(2) == doctest::Approx(400.0));
+    CHECK(focus.minRadiusFor(1) == doctest::Approx(200.0));
+    // A layer the array does not have -- which a hand-written index could name
+    // -- takes the base pair rather than being refused.
+    CHECK(focus.loadRadiusFor(9) == doctest::Approx(400.0));
+    CHECK(focus.loadRadiusFor(-1) == doctest::Approx(400.0));
+
+    harness.manager.setFoci({&focus, 1});
+    StreamingBudget budget;
+    budget.milliseconds = 1000.0;
+    harness.settle(budget);
+    CHECK(harness.manager.stats().resident > 0);
+}

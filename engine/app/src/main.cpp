@@ -206,6 +206,14 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
             options.saveScenePath = std::filesystem::path(arg.substr(13));
             continue;
         }
+        if (arg == "--partition") {
+            // Partition the project's scene into the cache and stop. Headless
+            // and windowless for the same reason `--save-scene` is: it is a
+            // build step, not a session.
+            options.partitionOnly = true;
+            options.headless = true;
+            continue;
+        }
         if (arg.starts_with("--capture-out=")) {
             options.capturePath = std::filesystem::path(arg.substr(14));
             continue;
@@ -351,7 +359,12 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
     // budget and no backend, because it never opens a device at all. Validating
     // it as though it were a session would demand `--headless --frames=N` for a
     // mode in which neither means anything.
-    if (!options.replayRoot.empty() || !options.benchRoot.empty() || !options.twoWorldsRoot.empty())
+    //
+    // `--partition` is the same shape one step along: it boots, writes the
+    // cache and returns without ever reaching the loop, so a frame budget would
+    // be a ceiling on a loop that does not run.
+    if (!options.replayRoot.empty() || !options.benchRoot.empty() || !options.twoWorldsRoot.empty() ||
+        options.partitionOnly)
         return kExitOk;
 
     // A conformance run needs a ceiling for the same reason, and a generous one:

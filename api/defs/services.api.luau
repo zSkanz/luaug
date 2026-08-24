@@ -401,7 +401,52 @@ local Classes: { Schema.Class } = {
                 ThreadSafety = "ReadParallel",
                 Doc = "Whether the simulation waits when the minimum ring is not yet resident. A familiar "
                     .. "streaming pause, and the alternative is a character falling through ground that has not "
-                    .. "loaded. It is a pause and not a rollback: the tick simply does not advance.",
+                    .. "loaded. It is a pause and not a rollback: the tick simply does not advance.\n\n**In a "
+                    .. "world that is not the authority it does nothing.** A copy of a shared world cannot stop "
+                    .. "a simulation it does not own; what it does instead is hold its camera and say that it "
+                    .. "is loading.",
+            },
+            {
+                Name = "StructureMinRadius",
+                Type = "number",
+                Default = "0",
+                ThreadSafety = "ReadParallel",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "The must-have ring for cells of STRUCTURES, in metres. A mountain and a pebble stop "
+                    .. "sharing a radius, which is the choice one grid forces and always resolves badly in one "
+                    .. "direction.\n\n**Zero means follow `MinRadius`**, which is the default and is why a world "
+                    .. "authored before this existed behaves exactly as it did: everything it holds is detail, "
+                    .. "and detail is what `MinRadius` and `LoadRadius` have always meant.",
+            },
+            {
+                Name = "StructureLoadRadius",
+                Type = "number",
+                Default = "0",
+                ThreadSafety = "ReadParallel",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "How far from a focus cells of STRUCTURES are kept, in metres. Best effort and hysteretic, "
+                    .. "exactly as `LoadRadius` is. Zero means follow `LoadRadius`.",
+            },
+            {
+                Name = "TerrainMinRadius",
+                Type = "number",
+                Default = "0",
+                ThreadSafety = "ReadParallel",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "The must-have ring for cells of TERRAIN FEATURES, in metres. The longest of the three: it "
+                    .. "is what puts a horizon further out than the props standing on it. Zero means follow "
+                    .. "`MinRadius`.",
+            },
+            {
+                Name = "TerrainLoadRadius",
+                Type = "number",
+                Default = "0",
+                ThreadSafety = "ReadParallel",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "How far from a focus cells of TERRAIN FEATURES are kept, in metres. Zero means follow "
+                    .. "`LoadRadius`.\n\nRaising this is the cheapest distance there is, and it is cheap for a "
+                    .. "reason worth knowing: a cell of terrain holds few large things, so a ring twice as wide "
+                    .. "costs far less than the same ring would cost in props.",
             },
         } :: { Schema.Property },
         Methods = {
@@ -710,7 +755,7 @@ local Classes: { Schema.Class } = {
                 Doc = "The duration of one simulation tick, in seconds, and therefore the grid every timing "
                     .. "guarantee is expressed against: `task.wait(1)` is exactly 60 ticks at the default 1/60, on "
                     .. "every machine and every run. Express durations as multiples of it and the same code stays "
-                    .. "correct at 30 Hz or at 240 Hz. Writable from M5, and a write takes effect at the next "
+                    .. "correct at 30 Hz or at 240 Hz. Writable, and a write takes effect at the next "
                     .. "frame start rather than mid-tick: the accumulator, the timer wheel and the solver all "
                     .. "read it, and changing it between two of those reads inside one frame is a class of bug "
                     .. "worth designing out. Values outside 1/240 to 1/30 are refused.",
@@ -802,7 +847,7 @@ local Classes: { Schema.Class } = {
                 Doc = "Whether that key, button or trigger is held as of the current tick. The shortest thing "
                     .. "this API can be asked, and the reason there is no separate sugar module for "
                     .. "it.\n\nIt reads the device SNAPSHOT and ignores what the UI consumed, which is the "
-                    .. "opposite of the events'' second argument -- a poll asks what the hardware is doing and "
+                    .. "opposite of the events' second argument -- a poll asks what the hardware is doing and "
                     .. "an event asks what happened to the game. A caller who wants the UI-aware answer wants "
                     .. "an `InputAction`, which is also the one that can be rebound.\n\nAn analogue source "
                     .. "counts as down past half deflection, which is the same rule a `Bool` action applies to "
@@ -822,7 +867,7 @@ local Classes: { Schema.Class } = {
                     .. "which is what makes it one input model rather than two: the value binds through an "
                     .. "ordinary `InputBinding`, resolves in the ordinary order, is eaten by an ordinary "
                     .. "sinking context, and is carried by the recorded stream a replay hands back. A seam "
-                    .. "that reached past the snapshot would be a HUD button M6''s own gate could not "
+                    .. "that reached past the snapshot would be a HUD button a recorded stream could not "
                     .. "see.\n\n**It carries a value, not a press.** Write 1 and 0 for a button; write anything "
                     .. "between for a slider or the axis of a thumbstick. Bound to a `Bool` action the value "
                     .. "counts as pressed past half deflection, which is the rule every analogue source "
@@ -850,7 +895,7 @@ local Classes: { Schema.Class } = {
                     .. "and a gamepad button to one name, and is what a shipped game should use -- this is the "
                     .. "direct, familiar option beside it, and it is the right one for a prototype, a debug "
                     .. "key, or anything a player will never remap.\n\nIt fires on the SIMULATION clock, from "
-                    .. "the Input Action System''s own dispatch, so a handler that writes to the world "
+                    .. "the Input Action System's own dispatch, so a handler that writes to the world "
                     .. "replays exactly. Camera look at render rate is an `InputContext` with "
                     .. "`Rate = Enum.InputRate.Render`.",
             },
@@ -986,10 +1031,12 @@ local Classes: { Schema.Class } = {
                 Parameters = { { Name = "content", Type = "Content" } },
                 Returns = { "Sound" },
                 ThreadSafety = "Unsafe",
-                Doc = "Creates a 2D `Sound`, plays it, and destroys it when it ends. For the fire-and-forget "
-                    .. "case -- a click, a pickup -- where holding an instance to clean up later is all "
-                    .. "ceremony. The `Sound` is returned so that the volume can still be set on the tick it "
-                    .. "starts; keeping it past `Ended` is holding a destroyed instance.",
+                Doc = "Creates a 2D `Sound` parented to this service and plays it. For the fire-and-forget "
+                    .. "case -- a click, a pickup -- where naming an instance is all ceremony.\n\n**It does "
+                    .. "not clean up after itself in this release**: the `Sound` stays a child of the service "
+                    .. "once it has ended, so a caller firing one per frame accumulates them. Keep the "
+                    .. "returned handle and `Destroy` it on `Ended` where that matters. The handle is also "
+                    .. "what a caller sets the volume through, since this takes only the content.",
             },
         } :: { Schema.Method },
     },

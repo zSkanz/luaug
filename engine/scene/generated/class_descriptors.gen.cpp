@@ -311,7 +311,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(folderDesc);
 
     // --- Model ---
-    static std::array<PropertyDesc, 1> modelProperties;
+    static std::array<PropertyDesc, 2> modelProperties;
     modelProperties = {{
         PropertyDesc{
             .name = atoms.intern("PrimaryPart"),
@@ -323,6 +323,18 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
             .get = native::getModelPrimaryPart,
             .set = native::setModelPrimaryPart,
+        },
+        PropertyDesc{
+            .name = atoms.intern("StreamingMode"),
+            .type = ValueType::EnumItem,
+            .enumName = atoms.intern("StreamingMode"),
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "What this model does when the world is partitioned into a streaming grid (ADR 0053). It is the one thing a person says about a world they built by hand: the grid decides WHEN something becomes eligible, and this decides WHAT comes with it.\012\012**The default changes nothing.** `Nonatomic` places each part in the cell its own position falls in, which is how a world of loose scenery already behaves. `Atomic` makes the model one unit that lives in a single cell however far it spreads, and `Persistent` keeps it out of the grid entirely so it is always there.\012\012It is read when the world is partitioned, not every frame: changing it at run time changes nothing until the world is built again.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
+            .get = native::getModelStreamingMode,
+            .set = native::setModelStreamingMode,
         },
     }};
     static std::array<MethodDesc, 1> modelMethods;
@@ -1086,7 +1098,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(scriptServiceDesc);
 
     // --- StreamingService ---
-    static std::array<PropertyDesc, 4> streamingServiceProperties;
+    static std::array<PropertyDesc, 8> streamingServiceProperties;
     streamingServiceProperties = {{
         PropertyDesc{
             .name = atoms.intern("Enabled"),
@@ -1127,10 +1139,54 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::ReadParallel,
             .readOnly = false,
             .inert = false,
-            .doc = "Whether the simulation waits when the minimum ring is not yet resident. A familiar streaming pause, and the alternative is a character falling through ground that has not loaded. It is a pause and not a rollback: the tick simply does not advance.",
+            .doc = "Whether the simulation waits when the minimum ring is not yet resident. A familiar streaming pause, and the alternative is a character falling through ground that has not loaded. It is a pause and not a rollback: the tick simply does not advance.\012\012**In a world that is not the authority it does nothing.** A copy of a shared world cannot stop a simulation it does not own; what it does instead is hold its camera and say that it is loading.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getStreamingServicePauseOutsideLoadedArea,
             .set = native::setStreamingServicePauseOutsideLoadedArea,
+        },
+        PropertyDesc{
+            .name = atoms.intern("StructureMinRadius"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::ReadParallel,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The must-have ring for cells of STRUCTURES, in metres. A mountain and a pebble stop sharing a radius, which is the choice one grid forces and always resolves badly in one direction.\012\012**Zero means follow `MinRadius`**, which is the default and is why a world authored before this existed behaves exactly as it did: everything it holds is detail, and detail is what `MinRadius` and `LoadRadius` have always meant.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getStreamingServiceStructureMinRadius,
+            .set = native::setStreamingServiceStructureMinRadius,
+        },
+        PropertyDesc{
+            .name = atoms.intern("StructureLoadRadius"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::ReadParallel,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How far from a focus cells of STRUCTURES are kept, in metres. Best effort and hysteretic, exactly as `LoadRadius` is. Zero means follow `LoadRadius`.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getStreamingServiceStructureLoadRadius,
+            .set = native::setStreamingServiceStructureLoadRadius,
+        },
+        PropertyDesc{
+            .name = atoms.intern("TerrainMinRadius"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::ReadParallel,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The must-have ring for cells of TERRAIN FEATURES, in metres. The longest of the three: it is what puts a horizon further out than the props standing on it. Zero means follow `MinRadius`.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getStreamingServiceTerrainMinRadius,
+            .set = native::setStreamingServiceTerrainMinRadius,
+        },
+        PropertyDesc{
+            .name = atoms.intern("TerrainLoadRadius"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::ReadParallel,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How far from a focus cells of TERRAIN FEATURES are kept, in metres. Zero means follow `LoadRadius`.\012\012Raising this is the cheapest distance there is, and it is cheap for a reason worth knowing: a cell of terrain holds few large things, so a ring twice as wide costs far less than the same ring would cost in props.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getStreamingServiceTerrainLoadRadius,
+            .set = native::setStreamingServiceTerrainLoadRadius,
         },
     }};
     static std::array<MethodDesc, 3> streamingServiceMethods;
@@ -1421,7 +1477,7 @@ void registerEnums(EnumRegistry& enums, core::AtomTable& atoms)
     static std::array<EnumItemDesc, 3> streamingModeItems;
     streamingModeItems = {{
         EnumItemDesc{
-            .name = atoms.intern("Default"),
+            .name = atoms.intern("Nonatomic"),
             .value = 0,
             .docKey = {},
         },

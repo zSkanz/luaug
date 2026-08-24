@@ -43,6 +43,7 @@ core::f64 StreamingGlue::materialize(asset::ChunkId id, const asset::Chunk& chun
     // because a registry has no `MeshPart` in it. A class is a dependency of
     // the instances that need it, not of the chunk that might have had one.
     const ClassId meshPartClass = m_world.classes().findId(m_world.atoms().intern("MeshPart"));
+    const ClassId modelClass = m_world.classes().findId(m_world.atoms().intern("Model"));
     if (folderClass == InvalidClass || partClass == InvalidClass) {
         return 0.0;
     }
@@ -65,6 +66,28 @@ core::f64 StreamingGlue::materialize(asset::ChunkId id, const asset::Chunk& chun
     // down either.
     m_world.setGenerated(resident.folder, true);
 
+    // **An atomic model's `Model` first, so its parts have somewhere to be born**
+    // (ADR 0053). A group is a model and the parts under it, one level deep, and
+    // the whole of it arrives in this call or none of it does -- which is the
+    // entire difference between `Atomic` and `Nonatomic`, expressed as where a
+    // record is parented rather than as a second code path.
+    resident.groups.reserve(chunk.groups.size());
+    for (const asset::ChunkGroup& group : chunk.groups) {
+        const core::InstanceId model = modelClass != InvalidClass ? m_world.create(modelClass) : core::InstanceId{};
+        if (model.valid()) {
+            const std::string_view name = chunk.stringAt(group.name);
+            if (!name.empty()) {
+                m_world.setName(model, m_world.atoms().intern(name));
+            }
+            (void)m_world.setParent(model, resident.folder);
+        }
+        // Pushed even when it is invalid, so a record's `group` stays an index
+        // into this vector. A model that could not be created leaves its parts
+        // in the chunk folder, which is a flatter world rather than a missing
+        // one.
+        resident.groups.push_back(model);
+    }
+
     resident.instances.reserve(chunk.instances.size());
     for (const asset::ChunkInstance& source : chunk.instances) {
         const bool isMesh = source.kind == asset::ChunkInstance::Kind::MeshPart && meshPartClass != InvalidClass;
@@ -83,10 +106,22 @@ core::f64 StreamingGlue::materialize(asset::ChunkId id, const asset::Chunk& chun
         if (isMesh) {
             if (MeshPartComponent* mesh = m_world.meshParts().find(id2); mesh != nullptr) {
                 mesh->meshContent = m_world.atoms().intern(chunk.stringAt(source.meshContent));
+                mesh->collisionFidelity = static_cast<core::i32>(source.collisionFidelity);
             }
         }
         if (RigidBodyComponent* body = m_world.rigidBodies().find(id2); body != nullptr) {
             body->anchored = source.anchored;
+            body->canCollide = source.canCollide;
+            body->canQuery = source.canQuery;
+            body->friction = source.friction;
+            body->restitution = source.restitution;
+            body->density = source.density;
+            // An absent group is the world's `Default`, which is what the
+            // component was already constructed with -- naming it again would
+            // intern a string on every record of every chunk for no change.
+            if (const std::string_view group = chunk.stringAt(source.collisionGroup); !group.empty()) {
+                body->collisionGroup = m_world.atoms().intern(group);
+            }
         }
 
         const std::string_view name = chunk.stringAt(source.name);
@@ -94,7 +129,25 @@ core::f64 StreamingGlue::materialize(asset::ChunkId id, const asset::Chunk& chun
             m_world.setName(id2, m_world.atoms().intern(name));
         }
 
-        (void)m_world.setParent(id2, resident.folder);
+        // **Tags, which are how a script finds any of this** (ADR 0053). A path
+        // into `Workspace` is sometimes nil in a world that is not all present;
+        // `TagService`'s added and removed signals are the answer, and they fire
+        // from here because `World::addTag` enqueues a change like any other.
+        for (core::u32 slot = 0; slot < source.tagCount; ++slot) {
+            const usize at2 = static_cast<usize>(source.firstTag) + slot;
+            if (at2 >= chunk.tagRefs.size()) {
+                break;
+            }
+            const std::string_view tag = chunk.stringAt(chunk.tagRefs[at2]);
+            if (!tag.empty()) {
+                (void)m_world.addTag(id2, m_world.atoms().intern(tag));
+            }
+        }
+
+        const core::InstanceId parent = source.group < resident.groups.size() && resident.groups[source.group].valid()
+                                            ? resident.groups[source.group]
+                                            : resident.folder;
+        (void)m_world.setParent(id2, parent);
         resident.instances.push_back(id2);
     }
 
@@ -126,6 +179,14 @@ void StreamingGlue::evict(asset::ChunkId id)
 
     m_residentInstances -= std::min<u32>(m_residentInstances, static_cast<u32>(at->second.instances.size()));
 
+    // A group's `Model` goes the way its folder does, and for the same reason:
+    // empty means nothing is left in it that was not this chunk's.
+    for (const core::InstanceId model : at->second.groups) {
+        if (model.valid() && m_world.childCount(model) == 0) {
+            (void)m_world.destroy(model);
+        }
+    }
+
     // The folder goes only when it is EMPTY, which is a narrower condition than
     // "nothing was kept": a husk reparented to nil has already left it, but
     // something a script parented in there has not -- and destroying the folder
@@ -150,6 +211,11 @@ void StreamingGlue::clear()
     for (const auto& entry : m_chunks) {
         for (const core::InstanceId instance : entry.second.instances) {
             (void)m_world.destroy(instance);
+        }
+        for (const core::InstanceId model : entry.second.groups) {
+            if (model.valid()) {
+                (void)m_world.destroy(model);
+            }
         }
         (void)m_world.destroy(entry.second.folder);
     }

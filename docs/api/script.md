@@ -2,10 +2,10 @@
 
 # Script
 
-- Inherits [`Instance`](instance.md)
-- **Not creatable**: `Instance.new` refuses it
+- Inherits [`BaseScript`](basescript.md)
+- Created with `Instance.new("Script")`
 
-An entry-point Luau file, mounted from src/scripts at boot and started on its own coroutine; modules are required by string and never appear in the tree.
+Luau that RUNS. Every enabled Script in the world is started on its own coroutine when the world does, and one that is not in the world does not run -- which is the whole difference between storing a script and using it.
 
 **Members below are the ones this class DECLARES.** Everything its base
 offers is on the base's page, which is what keeps one added member on
@@ -15,4 +15,4 @@ offers is on the base's page, which is what keeps one added member on
 
 | Name | Type | Default | Access | Description |
 |---|---|---|---|---|
-| `Enabled` | `boolean` | `true` | read/write | Whether this script starts at boot; writing it afterwards has no effect in v1, neither stopping a running script nor starting one that did not run, because what sets it acts before the boot it applies to. |
+| `Enabled` | `boolean` | `true` | read/write | Whether this script starts when the world does; writing it afterwards has no effect in v1, neither stopping a running script nor starting one that did not run, because what sets it acts before the start it applies to. |

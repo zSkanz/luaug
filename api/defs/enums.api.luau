@@ -26,26 +26,31 @@ local Definition: Schema.Definition = {
     Enums = {
         {
             Name = "StreamingMode",
-            Doc = "How a `Model` behaves when the streaming system reaches it (api-design.md §2.1).",
+            Doc = "How a `Model` behaves when the streaming system reaches it. The grid decides WHEN something "
+                .. "becomes eligible and this decides WHAT comes with it, which is the whole of what a person "
+                .. "has to say about a world they built by hand (ADR 0053).",
             Items = {
                 {
-                    Name = "Default",
+                    Name = "Nonatomic",
                     Value = 0,
-                    Doc = "Its descendants stream in and out independently, which is what a world of scenery "
-                        .. "wants: a distant building's parts can leave one at a time.",
+                    Doc = "Its descendants are placed in cells one at a time, each by its own position, and they "
+                        .. "arrive and leave independently. The default, and what a world of loose scenery "
+                        .. "wants: a distant hillside's parts can go one at a time.",
                 },
                 {
                     Name = "Atomic",
                     Value = 1,
-                    Doc = "The model streams as ONE unit: either every descendant is resident or none is. What a "
-                        .. "machine assembled from moving parts needs, because half a mechanism is worse than "
-                        .. "none of it.",
+                    Doc = "The model is ONE unit: it goes in a single cell however far its parts spread, and it "
+                        .. "materialises and evicts whole. A house arrives as a house rather than as forty parts "
+                        .. "appearing in an order nobody chose, and a machine assembled from moving parts is "
+                        .. "never half a mechanism.",
                 },
                 {
                     Name = "Persistent",
                     Value = 2,
-                    Doc = "Never streamed out, whatever the focus does. The character, the checkpoint it "
-                        .. "respawns at, and anything a script holds a long-lived reference to.",
+                    Doc = "Never enters the grid at all. It stays in the scene, it exists before the first tick, "
+                        .. "and no eviction reaches it however far the focus walks. The spawn, the checkpoint, "
+                        .. "and anything a script holds a long-lived reference to.",
                 },
             } :: { Schema.EnumItem },
         },
@@ -91,7 +96,7 @@ local Definition: Schema.Definition = {
                     Value = 3,
                     Doc = "The triangles themselves. Accepted and not yet implemented: this release collides "
                         .. "against a hull and says so through this property reading back `Precise` while "
-                        .. "behaving as `Hull`. A triangle-mesh collider is asset-pipeline work (M7).",
+                        .. "behaving as `Hull`. A triangle-mesh collider is work the asset pipeline has yet to do.",
                 },
             },
         },
@@ -359,7 +364,7 @@ local Definition: Schema.Definition = {
                         .. "between. Bound to a `Bool` action it counts as pressed past half deflection, which "
                         .. "is the rule every analogue source here follows.\n\nFour of them, because a touch "
                         .. "scheme is a thumbstick and two or three buttons and four is one more than that. They "
-                        .. "are numbered rather than named for a purpose, because the purpose is the game''s.",
+                        .. "are numbered rather than named for a purpose, because the purpose is the game's.",
                 },
                 { Name = "Virtual2", Value = 95 },
                 { Name = "Virtual3", Value = 96 },
@@ -408,10 +413,10 @@ local Definition: Schema.Definition = {
                     Name = "Direction3D",
                     Value = 3,
                     Doc = "Three signed axes, returning a `vector`. **Declared and not driveable in v1**: no "
-                        .. "binding in §2.4's list names three axes, and inventing one would be designing the "
+                        .. "binding names three axes, and inventing one would be designing the "
                         .. "binding surface backwards from an enum item. `GetState` returns the zero vector. The "
                         .. "item exists because the enum is designed once and an item added later is the harder "
-                        .. "break -- the same reasoning `Enum.RunContext` carries in §2.1.",
+                        .. "break -- the same reasoning `Enum.RunContext` carries.",
                 },
                 {
                     Name = "ViewportPosition",
@@ -437,8 +442,8 @@ local Definition: Schema.Definition = {
                         .. "siblings, which is how a HUD button or an on-screen thumbstick drives an action "
                         .. "(§2.4). There is still no touch HARDWARE and no mobile port (R15); the item is "
                         .. "here because an on-screen control is the same thing a touch control will be, and "
-                        .. "the roadmap asked that when something eventually produces this family it produce "
-                        .. "it through this seam rather than growing a new one.",
+                        .. "when something eventually produces this family it is to produce it through this "
+                        .. "seam rather than grow a new one.",
                 },
             } :: { Schema.EnumItem },
         },
@@ -499,8 +504,8 @@ local Definition: Schema.Definition = {
                     Name = "Simulation",
                     Value = 0,
                     Doc = "The sim tick, with the fixed timestep. The default, because it is the safe one: an "
-                        .. "action nobody thought about fires where R10 holds and where the replay gate can see "
-                        .. "it. Everything a game DECIDES with should be here.",
+                        .. "action nobody thought about fires where determinism holds and where a replay can "
+                        .. "see it. Everything a game DECIDES with should be here.",
                 },
                 {
                     Name = "Render",

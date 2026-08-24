@@ -22,6 +22,7 @@
 #include "luaug/asset/chunk.h"
 #include "luaug/core/types.h"
 
+#include <array>
 #include <functional>
 #include <span>
 #include <vector>
@@ -52,6 +53,19 @@ enum class ChunkState : core::u8
 
 [[nodiscard]] const char* chunkStateName(ChunkState state) noexcept;
 
+// One size class's pair, or nothing (ADR 0053). A cell's `layer` is its class --
+// 0 detail, 1 structures, 2 terrain features -- and a mountain and a pebble stop
+// sharing a radius, which is the choice a single grid forces and always resolves
+// badly in one direction.
+//
+// **Zero means "the focus's own pair"**, which is what makes a world whose cells
+// are all layer 0 behave exactly as it did before layers meant anything.
+struct StreamingLayerRadii
+{
+    f64 minRadius = 0.0;
+    f64 loadRadius = 0.0;
+};
+
 // A thing the world streams around. `MinRadius` is the must-have ring
 // architecture.md §10 guarantees resident before the focus may advance into it;
 // `LoadRadius` is the best-effort one.
@@ -60,6 +74,28 @@ struct StreamingFocus
     core::DVec3 position;
     f64 minRadius = 512.0;
     f64 loadRadius = 1024.0;
+
+    // Indexed by `ChunkId::layer`. A layer outside the array -- including a
+    // negative one, which a hand-written index could carry -- takes the pair
+    // above rather than being refused: a cell in a class this build has no
+    // radius for is still a cell, and streaming it at the base distance is the
+    // answer that keeps a world whole.
+    std::array<StreamingLayerRadii, static_cast<usize>(ChunkLayerCount)> layers{};
+
+    [[nodiscard]] f64 minRadiusFor(core::i32 layer) const noexcept
+    {
+        const f64 own = inRange(layer) ? layers[static_cast<usize>(layer)].minRadius : 0.0;
+        return own > 0.0 ? own : minRadius;
+    }
+
+    [[nodiscard]] f64 loadRadiusFor(core::i32 layer) const noexcept
+    {
+        const f64 own = inRange(layer) ? layers[static_cast<usize>(layer)].loadRadius : 0.0;
+        return own > 0.0 ? own : loadRadius;
+    }
+
+private:
+    [[nodiscard]] static bool inRange(core::i32 layer) noexcept { return layer >= 0 && layer < ChunkLayerCount; }
 };
 
 struct StreamingBudget
@@ -168,8 +204,6 @@ private:
         Chunk decoded;
         u32 bytes = 0;
     };
-
-    [[nodiscard]] f64 scoreOf(const ChunkIndexEntry& entry) const noexcept;
 
     ChunkIndex m_index;
     std::vector<Entry> m_entries;

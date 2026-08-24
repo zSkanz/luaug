@@ -53,6 +53,23 @@ bool StreamingHost::load(const asset::ContentMounts& mounts, const std::filesyst
         return false;
     }
 
+    return addIndex(index, [&mounts](const asset::ChunkIndexEntry& entry) -> std::optional<std::filesystem::path> {
+        const asset::ResolvedContent resolved = mounts.resolve(entry.urn);
+        if (resolved.source != asset::ResolvedContent::Source::Loose) {
+            // A chunk in a PACK would be resident already, which defeats the
+            // point (`asset/chunk.h`). Anything else is a file that is not there.
+            return std::nullopt;
+        }
+        return resolved.path;
+    });
+}
+
+bool StreamingHost::addIndex(const asset::ChunkIndex& index, const ChunkResolver& resolve)
+{
+    if (index.chunks.empty()) {
+        return false;
+    }
+
     // Resolved here and never again (D039). Resolution opens the candidate file
     // to decide whether it is there, and doing that inside the pump put a
     // filesystem call on the frame thread once per chunk load -- ten to thirty
@@ -63,21 +80,47 @@ bool StreamingHost::load(const asset::ContentMounts& mounts, const std::filesyst
     // time a focus walks near it. A world whose index names files the build did
     // not produce is a broken build, and hearing about it at boot is strictly
     // better than hearing about it three minutes into a fly-through.
-    m_chunkPaths.clear();
+    asset::ChunkIndex merged = m_manager.index();
+    if (merged.chunks.empty()) {
+        merged.chunkSize = index.chunkSize;
+    }
+    else if (merged.chunkSize != index.chunkSize) {
+        // Every cell in one world agrees about the grid, which is what makes a
+        // position a cell id at all. Two answers is not a world.
+        const core::I18nArg args[] = {{"content", std::string("chunkSize")}};
+        core::log(LogLevel::Warn, LUAUG_TR("app.warn.chunk_missing"), args);
+        return false;
+    }
+
     for (const asset::ChunkIndexEntry& entry : index.chunks) {
-        const asset::ResolvedContent resolved = mounts.resolve(entry.urn);
-        if (resolved.source != asset::ResolvedContent::Source::Loose) {
-            // A chunk in a PACK would be resident already, which defeats the
-            // point (`asset/chunk.h`). Anything else is a file that is not there.
+        if (merged.find(entry.id) != nullptr) {
+            const core::I18nArg args[] = {{"content", entry.urn}};
+            core::log(LogLevel::Warn, LUAUG_TR("app.warn.chunk_duplicate"), args);
+            continue;
+        }
+        const std::optional<std::filesystem::path> path = resolve(entry);
+        if (!path.has_value()) {
             const core::I18nArg args[] = {{"content", entry.urn}};
             core::log(LogLevel::Warn, LUAUG_TR("app.warn.chunk_missing"), args);
             continue;
         }
-        m_chunkPaths.emplace(entry.id, resolved.path);
+        m_chunkPaths.insert_or_assign(entry.id, *path);
+        merged.chunks.push_back(entry);
     }
 
-    m_manager.setIndex(std::move(index));
+    std::sort(merged.chunks.begin(), merged.chunks.end(),
+              [](const asset::ChunkIndexEntry& a, const asset::ChunkIndexEntry& b) { return a.id < b.id; });
+    m_manager.setIndex(std::move(merged));
+    installCallbacks();
 
+    const core::I18nArg args[] = {{"count", static_cast<core::i64>(m_manager.index().chunks.size())}};
+    core::log(LogLevel::Info, LUAUG_TR("app.info.streaming_world"), args);
+    m_active = true;
+    return true;
+}
+
+void StreamingHost::installCallbacks()
+{
     asset::StreamingCallbacks callbacks;
     callbacks.beginLoad = [this](asset::ChunkId id, const asset::ChunkIndexEntry& entry) {
         const platform::IoStats io = platform::ioStats();
@@ -99,11 +142,6 @@ bool StreamingHost::load(const asset::ContentMounts& mounts, const std::filesyst
         }
     };
     m_manager.setCallbacks(std::move(callbacks));
-
-    const core::I18nArg args[] = {{"count", static_cast<core::i64>(m_manager.index().chunks.size())}};
-    core::log(LogLevel::Info, LUAUG_TR("app.info.streaming_world"), args);
-    m_active = true;
-    return true;
 }
 
 void StreamingHost::setWorld(scene::World* world, core::InstanceId streamRoot)
@@ -178,6 +216,19 @@ std::vector<asset::StreamingFocus> StreamingHost::collectFoci() const
         // a script happens to write them, and a property that depends on
         // statement order is a trap.
         focus.minRadius = std::min(state.streamingMinRadius, state.streamingLoadRadius);
+
+        // The size classes (ADR 0053). Layer 0 is detail and IS the pair above,
+        // which is what makes a world of cells that are all layer 0 behave
+        // exactly as it did. A zero here means "follow that pair", and the same
+        // smaller-of-the-two rule applies for the same reason.
+        const auto layerPair = [](f64 minRadius, f64 loadRadius) {
+            asset::StreamingLayerRadii radii;
+            radii.loadRadius = loadRadius;
+            radii.minRadius = loadRadius > 0.0 ? std::min(minRadius, loadRadius) : minRadius;
+            return radii;
+        };
+        focus.layers[1] = layerPair(state.streamingStructureMinRadius, state.streamingStructureLoadRadius);
+        focus.layers[2] = layerPair(state.streamingTerrainMinRadius, state.streamingTerrainLoadRadius);
         foci.push_back(focus);
     }
     return foci;

@@ -313,13 +313,13 @@ What order a `UIListLayout` lays its children out in (§2.2).
 
 ## Enum.StreamingMode
 
-How a `Model` behaves when the streaming system reaches it (api-design.md §2.1).
+How a `Model` behaves when the streaming system reaches it. The grid decides WHEN something becomes eligible and this decides WHAT comes with it, which is the whole of what a person has to say about a world they built by hand (ADR 0053).
 
 | Item | Value | Description |
 |---|---|---|
-| `Default` | 0 | Its descendants stream in and out independently, which is what a world of scenery wants: a distant building's parts can leave one at a time. |
-| `Atomic` | 1 | The model streams as ONE unit: either every descendant is resident or none is. What a machine assembled from moving parts needs, because half a mechanism is worse than none of it. |
-| `Persistent` | 2 | Never streamed out, whatever the focus does. The character, the checkpoint it respawns at, and anything a script holds a long-lived reference to. |
+| `Nonatomic` | 0 | Its descendants are placed in cells one at a time, each by its own position, and they arrive and leave independently. The default, and what a world of loose scenery wants: a distant hillside's parts can go one at a time. |
+| `Atomic` | 1 | The model is ONE unit: it goes in a single cell however far its parts spread, and it materialises and evicts whole. A house arrives as a house rather than as forty parts appearing in an order nobody chose, and a machine assembled from moving parts is never half a mechanism. |
+| `Persistent` | 2 | Never enters the grid at all. It stays in the scene, it exists before the first tick, and no eviction reaches it however far the focus walks. The spawn, the checkpoint, and anything a script holds a long-lived reference to. |
 
 ## Enum.UserInputType
 

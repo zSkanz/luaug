@@ -198,3 +198,90 @@ TEST_CASE("evicting a chunk that was never resident is a no-op")
     fixture.glue.evict(asset::ChunkId{7, 7, 0});
     CHECK(fixture.glue.residentChunks() == 0);
 }
+
+TEST_CASE("an atomic model arrives whole and leaves with none left behind")
+{
+    Fixture fixture;
+
+    // The unit `Atomic` buys (ADR 0053): a group is a `Model` and the parts
+    // under it, and it materialises in ONE call. Half a mechanism is what the
+    // mode exists to prevent, so "arrives whole" is the assertion and not
+    // "arrives".
+    asset::Chunk chunk = chunkWith(asset::ChunkId{1, 1, 1}, 3);
+    chunk.strings.emplace_back("Gatehouse");
+    chunk.groups.push_back(asset::ChunkGroup{static_cast<core::u32>(chunk.strings.size() - 1)});
+    for (asset::ChunkInstance& record : chunk.instances) {
+        record.group = 0;
+    }
+
+    CHECK(fixture.glue.materialize(chunk.id, chunk) >= 0.0);
+    const core::InstanceId folder =
+        fixture.scene.world.findFirstChild(fixture.root, fixture.scene.world.atoms().intern("Chunk_1_1_1"));
+    REQUIRE(folder.valid());
+    // One child of the folder -- the model -- rather than three loose parts.
+    CHECK(fixture.scene.world.childCount(folder) == 1);
+    const core::InstanceId model =
+        fixture.scene.world.findFirstChild(folder, fixture.scene.world.atoms().intern("Gatehouse"));
+    REQUIRE(model.valid());
+    CHECK(fixture.scene.world.childCount(model) == 3);
+
+    fixture.glue.evict(chunk.id);
+    CHECK(fixture.glue.residentChunks() == 0);
+    CHECK(fixture.scene.world.childCount(fixture.root) == 0);
+    // `destroyed` rather than `alive`: a destroy marks and the retirement that
+    // stops a handle resolving happens at the end of a drain, which is what
+    // gives a `Destroying` handler something to work with.
+    CHECK(fixture.scene.world.destroyed(model));
+}
+
+TEST_CASE("a group whose model cannot be created leaves its parts in the folder")
+{
+    Fixture fixture;
+
+    // A flatter world rather than a missing one. The fixture registers `Model`,
+    // so this asserts the shape of the fallback by naming a group whose index a
+    // record uses and whose model is the only thing that could fail.
+    asset::Chunk chunk = chunkWith(asset::ChunkId{0, 0, 0}, 2);
+    chunk.strings.emplace_back("Cluster");
+    chunk.groups.push_back(asset::ChunkGroup{static_cast<core::u32>(chunk.strings.size() - 1)});
+    chunk.instances[0].group = 0;
+    // Out of range: the second record names no group and stays a child of the
+    // folder, which is what an index that named nothing must not turn into a
+    // crash.
+    chunk.instances[1].group = 7;
+
+    CHECK(fixture.glue.materialize(chunk.id, chunk) >= 0.0);
+    const core::InstanceId folder =
+        fixture.scene.world.findFirstChild(fixture.root, fixture.scene.world.atoms().intern("Chunk_0_0_0"));
+    REQUIRE(folder.valid());
+    CHECK(fixture.scene.world.childCount(folder) == 2);
+}
+
+TEST_CASE("the tags a cell carries reach the instances it makes")
+{
+    Fixture fixture;
+
+    // Rule 5 of ADR 0053, and the reason a record carries tags at all: a path
+    // into `Workspace` is sometimes nil in a world that is not all present, so
+    // `TagService` is the documented way to find things -- and it can only
+    // answer for a streamed instance if the cell remembers the tag.
+    asset::Chunk chunk = chunkWith(asset::ChunkId{0, 0, 0}, 2);
+    chunk.strings.emplace_back("Landmark");
+    const auto tagIndex = static_cast<core::u32>(chunk.strings.size() - 1);
+    chunk.tagRefs.push_back(tagIndex);
+    chunk.instances[0].firstTag = 0;
+    chunk.instances[0].tagCount = 1;
+
+    CHECK(fixture.glue.materialize(chunk.id, chunk) >= 0.0);
+
+    std::vector<core::InstanceId> tagged;
+    fixture.scene.world.collectTagged(fixture.scene.world.atoms().intern("Landmark"), tagged);
+    CHECK(tagged.size() == 1);
+
+    // And they go with the instance: an eviction that left a tag behind would
+    // leave `GetTagged` answering with a handle to nothing.
+    fixture.glue.evict(chunk.id);
+    tagged.clear();
+    fixture.scene.world.collectTagged(fixture.scene.world.atoms().intern("Landmark"), tagged);
+    CHECK(tagged.empty());
+}

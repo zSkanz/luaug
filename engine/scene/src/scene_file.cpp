@@ -960,6 +960,43 @@ std::optional<core::EngineError> readScene(World& world, std::string_view json, 
     return std::nullopt;
 }
 
+core::InstanceId readSceneNode(World& world, std::string_view nodeJson, core::InstanceId parent, SceneIoReport* report,
+                               const StampSource& stamps)
+{
+    SceneIoReport local;
+    SceneIoReport& out = report != nullptr ? *report : local;
+
+    core::JsonDocument document;
+    if (const core::JsonDocument::ParseResult parsed = document.parse(nodeJson); !parsed.ok)
+        return {};
+
+    const JsonValue node = document.root();
+    if (node.type() != core::JsonType::Object)
+        return {};
+
+    std::vector<PendingReference> pending;
+    const core::InstanceId built = readInstance(world, parent, node, pending, out, &stamps, 0);
+    if (!built.valid())
+        return {};
+
+    // Resolved against the NODE rather than against a scene root, because that
+    // is what this subtree has: a path leaving it names something the caller's
+    // document holds and this world does not, and it is dropped with a count
+    // exactly as a scene drops one leaving the scene.
+    for (const PendingReference& reference : pending) {
+        const core::InstanceId target = resolvePath(world, built, reference.path);
+        if (!target.valid()) {
+            ++out.droppedReferences;
+            continue;
+        }
+        if (reference.isAttribute)
+            (void)world.setAttribute(reference.owner, reference.property, Value{target});
+        else
+            (void)world.setProperty(reference.owner, reference.property, Value{target});
+    }
+    return built;
+}
+
 std::string writeStamp(const World& world, core::InstanceId root, SceneIoReport* report, StampLibrary* stamps)
 {
     SceneIoReport local;

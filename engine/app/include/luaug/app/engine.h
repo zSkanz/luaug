@@ -131,6 +131,16 @@ struct EngineOptions
     // Headless and one frame. It is a capture, not a run.
     std::filesystem::path saveScenePath;
 
+    // **Partition the project's scene and exit** (ADR 0053).
+    //
+    // The same work a run does on the way to its first frame, done on its own
+    // so that `luaug build` can pre-warm the cache -- and it is the same code,
+    // not a second path, which is the whole reason the ADR asked for it here
+    // rather than in the asset compiler. The artifact carries `.luaug/`, so a
+    // cache warmed by this travels with the game and the player's first launch
+    // pays nothing.
+    bool partitionOnly = false;
+
     bool frameStats = false;
 
     // M7's gate, as a flag. Empty writes no report and asserts nothing.

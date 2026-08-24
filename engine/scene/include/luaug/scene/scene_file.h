@@ -165,6 +165,19 @@ void clearScene(World& world);
 [[nodiscard]] std::optional<core::EngineError>
 readScene(World& world, std::string_view json, SceneIoReport* report = nullptr, const StampSource& stamps = {});
 
+// Builds ONE scene node -- a plain instance or a stamped one -- under `parent`,
+// exactly as `readScene` would build it.
+//
+// Exposed for the partitioner (ADR 0053), which has to see what a node's
+// subtree actually IS and cannot always read that out of the scene: a stamped
+// node carries a mark and its overrides, and its parts live in the stamp file.
+// The partitioner builds such a node into a scratch world, writes it back out
+// in full, and goes on walking text -- so one stamp is resident at a time and
+// the expansion is the same code the editor and the loader use, rather than a
+// second reading of what a stamp means.
+[[nodiscard]] core::InstanceId readSceneNode(World& world, std::string_view nodeJson, core::InstanceId parent,
+                                             SceneIoReport* report = nullptr, const StampSource& stamps = {});
+
 // --- Stamps (ADR 0049) -------------------------------------------------------
 //
 // **A stamp file is a scene of one subtree, and it is the same format.** Same

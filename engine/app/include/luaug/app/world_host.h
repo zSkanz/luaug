@@ -28,6 +28,7 @@
 #include "luaug/script/services.h"
 
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -102,12 +103,35 @@ struct WorldHostOptions
     // and means a project with no stamps -- or a scene whose stamped instances
     // are counted as missing rather than silently dropped.
     //
-    // **Before `bootScene` and not after it**, which is not tidiness: every
-    // caller writes this struct with designated initialisers ending at
-    // `bootScene`, and a field added after that one is a field none of them
-    // names -- which Clang reports as `-Wmissing-field-initializers` and
-    // `-Werror` turns into six broken builds. MSVC says nothing, which is what
-    // the Tier-2 stage exists to catch.
+    // **Give a field added here a default member initializer**, which is not
+    // tidiness: Clang reports a skipped field without one as
+    // `-Wmissing-field-initializers`, `-Werror` turns that into six broken
+    // builds, and MSVC says nothing at all -- which is what the Tier-2 stage
+    // exists to catch. Position is irrelevant; the default is what matters.
+    // **Partitions the scene before it is applied** (ADR 0053), and answers with
+    // the file to apply instead: what stayed authored, with everything the grid
+    // took out of it.
+    //
+    // A hook rather than a step this class performs, for one reason of order.
+    // The partitioner needs the class, enum and atom registries -- a scene node
+    // means what `readSceneNode` says it means -- and those exist only once this
+    // host has built them. So the caller supplies the policy and this supplies
+    // the moment: after the registries, before the scene, and therefore before
+    // a line of script (D067's order, one step earlier).
+    //
+    // Absent, or answering with an empty path, leaves `bootScene` to be applied
+    // as it is, which is every project that streams nothing.
+    //
+    // **The `= nullptr` is load-bearing**, and the rule is narrower than the
+    // paragraph below it used to say. Clang's `-Wmissing-field-initializers`
+    // fires for a field a designated initialiser SKIPS and that has no default
+    // member initializer of its own -- position in the struct has nothing to do
+    // with it. `headless` is skipped by three call sites and says nothing,
+    // because it has a default; this one without a default broke every one of
+    // them under `-Werror`, on Clang, where MSVC was silent. That is what the
+    // Tier-2 stage is for.
+    std::function<std::filesystem::path(scene::World&, const std::filesystem::path&)> partitionScene = nullptr;
+
     scene::StampSource bootStamps;
     std::filesystem::path bootScene;
 };

@@ -324,8 +324,19 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
     // project before `06-scene` has -- a run that refused to start because a
     // file was malformed would be a worse answer than a run that says so.
     if (!options.bootScene.empty()) {
+        // **The grid gets the scene before the world does** (ADR 0053). What
+        // comes back is what stayed authored; the rest is cells, and the
+        // streaming host has been told about them by the same call.
+        std::filesystem::path sceneFile = options.bootScene;
+        if (options.partitionScene) {
+            if (std::filesystem::path partitioned = options.partitionScene(*m_world, options.bootScene);
+                !partitioned.empty()) {
+                sceneFile = std::move(partitioned);
+            }
+        }
+
         std::string sceneText;
-        if (!readFile(options.bootScene, sceneText)) {
+        if (!readFile(sceneFile, sceneText)) {
             core::log(LogLevel::Warn, LUAUG_TR("scene.err.scene_unreadable"));
         }
         else if (const std::optional<core::EngineError> sceneError =

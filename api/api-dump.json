@@ -171,6 +171,20 @@
       ]
     },
     {
+      "Name": "BaseScript",
+      "Extends": "Instance",
+      "Tags": ["Abstract"],
+      "Properties": [
+        {
+          "Name": "Source",
+          "Type": "string",
+          "Default": "\"\""
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "Camera",
       "Extends": "PVInstance",
       "Tags": [],
@@ -1171,6 +1185,11 @@
         {
           "Name": "PrimaryPart",
           "Type": "BasePart?"
+        },
+        {
+          "Name": "StreamingMode",
+          "Type": "Enum.StreamingMode",
+          "Default": "Enum.StreamingMode.Nonatomic"
         }
       ],
       "Methods": [
@@ -1180,6 +1199,14 @@
           "Returns": ["vector"]
         }
       ],
+      "Events": []
+    },
+    {
+      "Name": "ModuleScript",
+      "Extends": "BaseScript",
+      "Tags": [],
+      "Properties": [],
+      "Methods": [],
       "Events": []
     },
     {
@@ -1408,8 +1435,8 @@
     },
     {
       "Name": "Script",
-      "Extends": "Instance",
-      "Tags": ["NotCreatable"],
+      "Extends": "BaseScript",
+      "Tags": [],
       "Properties": [
         {
           "Name": "Enabled",
@@ -1592,6 +1619,30 @@
           "Name": "PauseOutsideLoadedArea",
           "Type": "boolean",
           "Default": "false",
+          "ThreadSafety": "ReadParallel"
+        },
+        {
+          "Name": "StructureLoadRadius",
+          "Type": "number",
+          "Default": "0",
+          "ThreadSafety": "ReadParallel"
+        },
+        {
+          "Name": "StructureMinRadius",
+          "Type": "number",
+          "Default": "0",
+          "ThreadSafety": "ReadParallel"
+        },
+        {
+          "Name": "TerrainLoadRadius",
+          "Type": "number",
+          "Default": "0",
+          "ThreadSafety": "ReadParallel"
+        },
+        {
+          "Name": "TerrainMinRadius",
+          "Type": "number",
+          "Default": "0",
           "ThreadSafety": "ReadParallel"
         }
       ],
@@ -4662,7 +4713,7 @@
           "Value": 1
         },
         {
-          "Name": "Default",
+          "Name": "Nonatomic",
           "Value": 0
         },
         {

@@ -16,9 +16,18 @@ using core::I18nArg;
 using core::u64;
 
 // magic(4) + version(4) + flags(4) + id(12) + bounds(48) + instanceCount(4) +
-// stringCount(4). Little-endian scalars, the same convention `pack.cpp` states.
-constexpr usize HeaderBytes = 80;
-constexpr usize InstanceRecordBytes = 96;
+// groupCount(4) + tagRefCount(4) + stringCount(4). Little-endian scalars, the
+// same convention `pack.cpp` states.
+constexpr usize HeaderBytes = 88;
+constexpr usize InstanceRecordBytes = 140;
+constexpr usize GroupRecordBytes = 4;
+constexpr usize TagRefBytes = 4;
+
+// The three booleans, packed into the u32 the record already spends on
+// alignment. One field rather than three, so adding a fourth costs nothing.
+constexpr u32 FlagAnchored = 1u << 0;
+constexpr u32 FlagCanCollide = 1u << 1;
+constexpr u32 FlagCanQuery = 1u << 2;
 
 void writeU32(std::vector<std::byte>& out, u32 value)
 {
@@ -167,15 +176,26 @@ std::vector<std::byte> encodeChunk(const Chunk& chunk)
     writeDVec3(out, chunk.bounds.min);
     writeDVec3(out, chunk.bounds.max);
     writeU32(out, static_cast<u32>(chunk.instances.size()));
+    writeU32(out, static_cast<u32>(chunk.groups.size()));
+    writeU32(out, static_cast<u32>(chunk.tagRefs.size()));
     writeU32(out, static_cast<u32>(chunk.strings.size()));
 
     for (const ChunkInstance& instance : chunk.instances) {
         writeU32(out, static_cast<u32>(instance.kind));
         writeU32(out, instance.shape);
-        writeU32(out, instance.anchored ? 1u : 0u);
+        writeU32(out, instance.collisionFidelity);
+        writeU32(out, (instance.anchored ? FlagAnchored : 0u) | (instance.canCollide ? FlagCanCollide : 0u) |
+                          (instance.canQuery ? FlagCanQuery : 0u));
         writeU32(out, instance.name);
         writeU32(out, instance.meshContent);
+        writeU32(out, instance.collisionGroup);
+        writeU32(out, instance.group);
+        writeU32(out, instance.firstTag);
+        writeU32(out, instance.tagCount);
         writeF32(out, instance.transparency);
+        writeF32(out, instance.friction);
+        writeF32(out, instance.restitution);
+        writeF32(out, instance.density);
         writeDVec3(out, instance.cframe.position);
         for (usize row = 0; row < 3; ++row) {
             for (usize column = 0; column < 3; ++column) {
@@ -188,6 +208,13 @@ std::vector<std::byte> encodeChunk(const Chunk& chunk)
         writeF32(out, instance.color.r);
         writeF32(out, instance.color.g);
         writeF32(out, instance.color.b);
+    }
+
+    for (const ChunkGroup& group : chunk.groups) {
+        writeU32(out, group.name);
+    }
+    for (const u32 tag : chunk.tagRefs) {
+        writeU32(out, tag);
     }
 
     for (const std::string& text : chunk.strings) {
@@ -226,6 +253,8 @@ std::optional<core::EngineError> decodeChunk(std::span<const std::byte> bytes, C
     out.bounds.max = reader.dvec3();
 
     const u32 instanceCount = reader.u32v();
+    const u32 groupCount = reader.u32v();
+    const u32 tagRefCount = reader.u32v();
     const u32 stringCount = reader.u32v();
     if (!reader.ok()) {
         return malformed();
@@ -234,11 +263,13 @@ std::optional<core::EngineError> decodeChunk(std::span<const std::byte> bytes, C
     // Counted before it is believed, which is M7's own finding from the mesh
     // format: a bounds-checked reader is not a safe reader, because the
     // allocation happens first.
-    if (instanceCount > MaxChunkInstances) {
+    if (instanceCount > MaxChunkInstances || groupCount > MaxChunkGroups || tagRefCount > MaxChunkTagRefs) {
         return core::makeError(LUAUG_TR("asset.chunk.err.too_large"));
     }
     const usize remaining = bytes.size() - reader.at();
-    if (static_cast<u64>(instanceCount) * InstanceRecordBytes > remaining) {
+    if (static_cast<u64>(instanceCount) * InstanceRecordBytes + static_cast<u64>(groupCount) * GroupRecordBytes +
+            static_cast<u64>(tagRefCount) * TagRefBytes >
+        remaining) {
         return malformed();
     }
 
@@ -251,10 +282,21 @@ std::optional<core::EngineError> decodeChunk(std::span<const std::byte> bytes, C
         }
         instance.kind = static_cast<ChunkInstance::Kind>(kind);
         instance.shape = static_cast<u8>(reader.u32v());
-        instance.anchored = reader.u32v() != 0;
+        instance.collisionFidelity = static_cast<u8>(reader.u32v());
+        const u32 flags = reader.u32v();
+        instance.anchored = (flags & FlagAnchored) != 0;
+        instance.canCollide = (flags & FlagCanCollide) != 0;
+        instance.canQuery = (flags & FlagCanQuery) != 0;
         instance.name = reader.u32v();
         instance.meshContent = reader.u32v();
+        instance.collisionGroup = reader.u32v();
+        instance.group = reader.u32v();
+        instance.firstTag = reader.u32v();
+        instance.tagCount = reader.u32v();
         instance.transparency = reader.f32v();
+        instance.friction = reader.f32v();
+        instance.restitution = reader.f32v();
+        instance.density = reader.f32v();
         instance.cframe.position = reader.dvec3();
         for (usize row = 0; row < 3; ++row) {
             for (usize column = 0; column < 3; ++column) {
@@ -269,6 +311,24 @@ std::optional<core::EngineError> decodeChunk(std::span<const std::byte> bytes, C
         out.instances.push_back(instance);
     }
 
+    out.groups.reserve(groupCount);
+    for (u32 i = 0; i < groupCount; ++i) {
+        ChunkGroup group;
+        group.name = reader.u32v();
+        if (!reader.ok()) {
+            return malformed();
+        }
+        out.groups.push_back(group);
+    }
+
+    out.tagRefs.reserve(tagRefCount);
+    for (u32 i = 0; i < tagRefCount; ++i) {
+        out.tagRefs.push_back(reader.u32v());
+    }
+    if (!reader.ok()) {
+        return malformed();
+    }
+
     out.strings.reserve(std::min<u32>(stringCount, 4096));
     for (u32 i = 0; i < stringCount; ++i) {
         const u32 length = reader.u32v();
@@ -279,13 +339,30 @@ std::optional<core::EngineError> decodeChunk(std::span<const std::byte> bytes, C
         reader = Reader(bytes, reader.at() + length);
     }
 
-    // A string index that names nothing is a mesh URN nobody can resolve, and
-    // it would surface as an invisible part rather than as an error.
+    // Every index a record carries names something. A string index that does
+    // not is a mesh URN nobody can resolve, and it would surface as an
+    // invisible part rather than as an error; a group or tag index that does
+    // not is the same failure one level along.
+    const auto namesAString = [&](u32 index) { return index == ChunkInstance::NoString || index < out.strings.size(); };
     for (const ChunkInstance& instance : out.instances) {
-        if (instance.name != ChunkInstance::NoString && instance.name >= out.strings.size()) {
+        if (!namesAString(instance.name) || !namesAString(instance.meshContent) ||
+            !namesAString(instance.collisionGroup)) {
             return malformed();
         }
-        if (instance.meshContent != ChunkInstance::NoString && instance.meshContent >= out.strings.size()) {
+        if (instance.group != ChunkInstance::NoGroup && instance.group >= out.groups.size()) {
+            return malformed();
+        }
+        if (static_cast<u64>(instance.firstTag) + instance.tagCount > out.tagRefs.size()) {
+            return malformed();
+        }
+    }
+    for (const ChunkGroup& group : out.groups) {
+        if (!namesAString(group.name)) {
+            return malformed();
+        }
+    }
+    for (const u32 tag : out.tagRefs) {
+        if (tag >= out.strings.size()) {
             return malformed();
         }
     }
@@ -312,6 +389,15 @@ std::string writeChunkIndex(const ChunkIndex& index)
         json.field("bytes", static_cast<u64>(entry.bytes));
         json.field("minY", entry.bounds.min.y);
         json.field("maxY", entry.bounds.max.y);
+        // The horizontal extent, which is NOT derivable from the id: an atomic
+        // model lives in one cell however far it spreads (ADR 0053), so a cell
+        // may be wider than its footprint. Written always and read with the
+        // footprint as the fallback, so an index from before this existed still
+        // means what it meant.
+        json.field("minX", entry.bounds.min.x);
+        json.field("maxX", entry.bounds.max.x);
+        json.field("minZ", entry.bounds.min.z);
+        json.field("maxZ", entry.bounds.max.z);
         json.endObject();
     }
     json.endArray();
@@ -363,6 +449,14 @@ std::optional<core::EngineError> readChunkIndex(std::string_view json, ChunkInde
         // they are infinitely tall.
         entry.bounds.min.y = row["minY"].asNumber(-core::kInfinityD);
         entry.bounds.max.y = row["maxY"].asNumber(core::kInfinityD);
+        // The footprint is the FALLBACK rather than the answer. A cell holding
+        // an atomic model that overhangs is wider than its own square, and an
+        // index that described only the square would keep the overhang outside
+        // the loading ring until the square came in.
+        entry.bounds.min.x = row["minX"].asNumber(entry.bounds.min.x);
+        entry.bounds.max.x = row["maxX"].asNumber(entry.bounds.max.x);
+        entry.bounds.min.z = row["minZ"].asNumber(entry.bounds.min.z);
+        entry.bounds.max.z = row["maxZ"].asNumber(entry.bounds.max.z);
 
         if (entry.urn.empty()) {
             const I18nArg args[] = {{"detail", "a chunk with no URN"}};

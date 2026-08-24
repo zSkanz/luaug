@@ -67,6 +67,11 @@ private:
     struct Resident
     {
         core::InstanceId folder;
+        // One `Model` per `asset::ChunkGroup`, in the chunk's own order, so a
+        // record's `group` index means the same thing here that it means in the
+        // payload. An entry may be invalid -- see `materialize` for why it is
+        // kept rather than skipped.
+        std::vector<core::InstanceId> groups;
         std::vector<core::InstanceId> instances;
     };
 

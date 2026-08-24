@@ -229,12 +229,29 @@ per-part props.
 (streaming is a system, not scene-root state).
 - Props: `Enabled: boolean`, `LoadRadius: number`, `MinRadius: number`,
   `PauseOutsideLoadedArea: boolean`
+- **A radius pair per size class** (ADR 0053): `StructureMinRadius`,
+  `StructureLoadRadius`, `TerrainMinRadius`, `TerrainLoadRadius`, all zero by
+  default and meaning *follow the base pair*. `MinRadius` and `LoadRadius` are
+  the DETAIL class, which is what makes a world authored before size classes
+  existed behave exactly as it did. A mountain and a pebble stop sharing a
+  distance, which is the choice one grid forces and always resolves badly in
+  one direction.
 - Methods: `AddFocus(instance)`, `RemoveFocus(instance)`,
   `LoadAreaAsync(position, radius)`
 - Events: `AreaLoaded(position, radius)`, `InstanceStreamedOut(instance)`
   (streamed-out = reparent to nil, exactly the Roblox contract).
 - Per-model control: `Model.StreamingMode: Enum.StreamingMode`
-  (Default/Atomic/Persistent).
+  (Nonatomic/Atomic/Persistent). The grid decides WHEN something becomes
+  eligible and the model decides WHAT comes with it, and that is the whole of
+  what a person says about a world they built by hand.
+- **`PauseOutsideLoadedArea` is the authoritative world's.** A replica cannot
+  pause a simulation it does not own; it holds its camera and shows that it is
+  loading (ADR 0053, decided ahead of the multiplayer phase so that phase does
+  not rediscover it).
+- **A path into `Workspace` may be nil**, and `TagService` is the documented way
+  around it. `GetInstanceAddedSignal` and `GetInstanceRemovedSignal` are exactly
+  what fires as cells arrive and leave, and a streamed instance carries the tags
+  it was authored with.
 
 **`TagService`** — the CollectionService pattern with a clearer name:
 `GetTagged(tag) → {Instance}`, `GetInstanceAddedSignal(tag) →
@@ -554,7 +571,7 @@ change how it falls.
 | `RaycastParams` / `RaycastResult` | `RaycastParams.new { Filter = {Instance}, FilterType = Enum.RaycastFilterType.Exclude, CollisionGroup = "Default" }` (table constructor); result: `Instance`, `Position`, `Normal`, `Distance`. Both are read-only once built: a params object mutated between two casts is a question that means something different depending on when the engine looked at it. The filter covers a named instance's **descendants**, so filtering a `Model` filters its parts, and each word means what it says at the edges — an empty `Exclude` filter hits everything and an empty `Include` filter hits nothing. `CollisionGroup` is the empty string for "any group". **`RaycastResult.Material` is not in M5**: `BasePart.Material` is not either, and a field that reported a value nothing sets would be worse than one that is absent — both arrive with the surface-material work. Note for `--!strict` callers: Luau table types are invariant, so `Filter = { part }` needs `:: { Instance }` — the annotation a `{Instance}` field costs. |
 | `Random` | `Random.new(seed?)`: `NextNumber(min?, max?)`, `NextInteger(min, max)`, `NextUnitVector()`, `Clone()`. `NextNumber()` is [0, 1) and `NextNumber(min, max)` is [min, max) — half-open, like every other range in the engine; `NextInteger(min, max)` is inclusive at **both** ends, which is the one place the engine is not half-open and the reason it is spelled out. `min > max`, or a non-integer bound to `NextInteger`, raises `script.err.random_range`. `NextUnitVector` is uniform over the sphere, not merely unit length. The seed is any number, truncated toward zero. Deterministic streams (R10) — see the note below the table. |
 | `Content` | A type alias of `string` in v1 (`asset://…`, `save://…` URIs); reserved to become opaque later. It is a real exported type name, generated into `engine.d.luau` (§5), so `local c: Content = "asset://models/tree.glb"` type-checks — which is what makes the alias worth having before it becomes opaque. |
-| `Enum` | Global `Enum` namespace; `EnumItem` = `Name`, `Value`, `EnumType` — and `EnumType` is the enum **object**, not its name as a string, so `Enum.PartShape.Ball.EnumType == Enum.PartShape`. `Enum.X:GetEnumItems()` returns a **fresh** array on every call, in declaration order (fresh so a caller may sort it; ordered because R10 forbids container order reaching observable order). v1 enums: `EasingStyle` (Linear, Sine, Quad, Cubic, Quart, Quint, Exponential, Circular, Back, Bounce, Elastic), `EasingDirection`, `KeyCode` (keys + mouse + gamepad buttons), `InputActionType` (Bool, Direction1D, Direction2D, Direction3D, ViewportPosition), `InputDeviceType` (KeyboardMouse, Gamepad, Touch), `InputRate` (Simulation, Render — ADR 0039), `PartShape`, `Material` (small v1 set), `CollisionFidelity` (Default, Hull, Box, Precise), `RotationOrder` (XYZ, XZY, YXZ, YZX, ZXY, ZYX — all six permutations; YXZ wherever an `order` parameter is omitted), `RaycastFilterType` (Include, Exclude), `StreamingMode` (Default, Atomic, Persistent), `PlaybackState`, `CharacterState` (Grounded, Airborne), `AutomaticSize`, `FillDirection`, `HorizontalAlignment`, `VerticalAlignment`, `SortOrder`, `ScaleType` (Stretch, Slice, Tile), `WindowMode`, `LogLevel` (Trace, Debug, Info, Warning, Error — ascending severity, and `Value` orders them), `RunContext` (Client, Server — declared and carrying both items in v1, but nothing reads them; §2.1). |
+| `Enum` | Global `Enum` namespace; `EnumItem` = `Name`, `Value`, `EnumType` — and `EnumType` is the enum **object**, not its name as a string, so `Enum.PartShape.Ball.EnumType == Enum.PartShape`. `Enum.X:GetEnumItems()` returns a **fresh** array on every call, in declaration order (fresh so a caller may sort it; ordered because R10 forbids container order reaching observable order). v1 enums: `EasingStyle` (Linear, Sine, Quad, Cubic, Quart, Quint, Exponential, Circular, Back, Bounce, Elastic), `EasingDirection`, `KeyCode` (keys + mouse + gamepad buttons), `InputActionType` (Bool, Direction1D, Direction2D, Direction3D, ViewportPosition), `InputDeviceType` (KeyboardMouse, Gamepad, Touch), `InputRate` (Simulation, Render — ADR 0039), `PartShape`, `Material` (small v1 set), `CollisionFidelity` (Default, Hull, Box, Precise), `RotationOrder` (XYZ, XZY, YXZ, YZX, ZXY, ZYX — all six permutations; YXZ wherever an `order` parameter is omitted), `RaycastFilterType` (Include, Exclude), `StreamingMode` (Nonatomic, Atomic, Persistent), `PlaybackState`, `CharacterState` (Grounded, Airborne), `AutomaticSize`, `FillDirection`, `HorizontalAlignment`, `VerticalAlignment`, `SortOrder`, `ScaleType` (Stretch, Slice, Tile), `WindowMode`, `LogLevel` (Trace, Debug, Info, Warning, Error — ascending severity, and `Value` orders them), `RunContext` (Client, Server — declared and carrying both items in v1, but nothing reads them; §2.1). |
 
 **What `typeof` returns.** `typeof(Vector3.new(1, 2, 3))` is **`"vector"`** —
 Vector3 *is* the VM primitive (divergence #9, §9), which is why every signature

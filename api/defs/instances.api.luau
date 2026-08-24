@@ -281,6 +281,20 @@ local Classes: { Schema.Class } = {
                 Type = "BasePart?",
                 Doc = "The part this model's pivot follows; Clone rewires it to the copy, since it is the reference into a cloned subtree that catches people.",
             },
+            {
+                Name = "StreamingMode",
+                Type = "Enum.StreamingMode",
+                Default = "Enum.StreamingMode.Nonatomic",
+                Doc = "What this model does when the world is partitioned into a streaming grid (ADR 0053). It "
+                    .. "is the one thing a person says about a world they built by hand: the grid decides WHEN "
+                    .. "something becomes eligible, and this decides WHAT comes with it.\n\n**The default "
+                    .. "changes nothing.** `Nonatomic` places each part in the cell its own position falls in, "
+                    .. "which is how a world of loose scenery already behaves. `Atomic` makes the model one "
+                    .. "unit that lives in a single cell however far it spreads, and `Persistent` keeps it out "
+                    .. "of the grid entirely so it is always there.\n\nIt is read when the world is "
+                    .. "partitioned, not every frame: changing it at run time changes nothing until the world "
+                    .. "is built again.",
+            },
         },
         Methods = {
             {

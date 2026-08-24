@@ -37,7 +37,8 @@ class World;
 
 namespace luaug::app {
 class IconAtlas;
-}
+class StreamingHost;
+} // namespace luaug::app
 
 namespace luaug::rhi {
 class ICmdList;
@@ -183,6 +184,14 @@ public:
     // says: the reload destroys the runtime this points at.
     void setScriptTarget(script::ScriptRuntime* runtime) noexcept { runtime_ = runtime; }
 
+    // The streaming host, for the panel `api-design.md` has promised since M7
+    // and nothing has drawn (ADR 0053). Null in a project that streams nothing,
+    // which is most of them, and the panel simply is not there.
+    //
+    // A pointer rather than a copy of the numbers, because what the panel shows
+    // is a map of every cell's state and that is a vector the host already owns.
+    void setStreamingTarget(const StreamingHost* streaming) noexcept { streaming_ = streaming; }
+
     // Takes over the process log sink and keeps the last few hundred lines for
     // the console pane, chaining to whatever sink was installed so the console
     // and the log FILE both get every line. Called once, by the host, after the
@@ -228,6 +237,7 @@ private:
     // the process.
     [[maybe_unused]] bool layoutBuilt_ = false;
     [[maybe_unused]] EditorCommands commands_;
+    const StreamingHost* streaming_ = nullptr;
     [[maybe_unused]] EditorPanels panels_;
     [[maybe_unused]] EditorDialogs dialogs_;
     [[maybe_unused]] Editor* editor_ = nullptr;

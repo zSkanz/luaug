@@ -278,6 +278,12 @@ struct PVComponent
 struct ModelComponent
 {
     core::InstanceId primaryPart;
+
+    // `Enum.StreamingMode`'s value, stored raw for the reason `PartComponent`
+    // stores a shape that way: the generated accessor then needs no per-enum
+    // C++ type. Read by the partitioner and by nothing on a frame path -- it
+    // decides what a cell holds, once, when the world is written down.
+    i32 streamingMode = 0;
 };
 
 struct ScriptComponent

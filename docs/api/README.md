@@ -42,6 +42,7 @@ guided tour.
 | [`AnimationPlayer`](animationplayer.md) | [`Instance`](instance.md) | Plays a skinned mesh's animation clips (§2.2). |
 | [`AudioGroup`](audiogroup.md) | [`Instance`](instance.md) | A mixing bus (§2.1, §2.2). |
 | [`BasePart`](basepart.md) | [`PVInstance`](pvinstance.md) | The abstract base of every solid object in the world: a transform, a size and a look. |
+| [`BaseScript`](basescript.md) | [`Instance`](instance.md) | The abstract base of anything that carries Luau code. |
 | [`Camera`](camera.md) | [`PVInstance`](pvinstance.md) | The viewpoint the world is rendered from. |
 | [`CharacterBody`](characterbody.md) | [`BasePart`](basepart.md) | A capsule that walks: the player, or anything that should climb a ramp and step over a kerb instead of tumbling. |
 | [`DataModel`](datamodel.md) | [`Instance`](instance.md) | The root of the instance tree, reached through the `game` global. |
@@ -55,11 +56,12 @@ guided tour.
 | [`Instance`](instance.md) | — | The root of the class hierarchy: a node in the tree, carrying a name, a parent, attributes and tags. |
 | [`MeshPart`](meshpart.md) | [`BasePart`](basepart.md) | A part whose geometry is an imported mesh rather than a primitive solid. |
 | [`Model`](model.md) | [`PVInstance`](pvinstance.md) | A group of parts handled as one object, with a pivot to move it by and an extents box to measure it with. |
+| [`ModuleScript`](modulescript.md) | [`BaseScript`](basescript.md) | Luau that is REQUIRED rather than run. |
 | [`PVInstance`](pvinstance.md) | [`Instance`](instance.md) | The base of everything with a position and orientation in the world: a pivot to move it by, and an offset saying where that pivot sits. |
 | [`Part`](part.md) | [`BasePart`](basepart.md) | The primitive solid: a part whose geometry is one of a small set of shapes rather than an imported mesh. |
 | [`PointLight`](pointlight.md) | [`Instance`](instance.md) | A light radiating equally in every direction from its parent's position. |
 | [`ScreenGui`](screengui.md) | [`Instance`](instance.md) | The root of one screen-space UI tree, parented to `UIService` (§2.2). |
-| [`Script`](script.md) | [`Instance`](instance.md) | An entry-point Luau file, mounted from src/scripts at boot and started on its own coroutine; modules are required by string and never appear in the tree. |
+| [`Script`](script.md) | [`BaseScript`](basescript.md) | Luau that RUNS. |
 | [`ScrollFrame`](scrollframe.md) | [`UIObject`](uiobject.md) | A `Frame` whose contents can be larger than it is (§2.2). |
 | [`Sound`](sound.md) | [`Instance`](instance.md) | One sound, playing or not (§2.2). |
 | [`SpotLight`](spotlight.md) | [`Instance`](instance.md) | A light confined to a cone about its parent's forward direction. |

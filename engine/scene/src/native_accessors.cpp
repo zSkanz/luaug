@@ -61,6 +61,17 @@ constexpr f64 DegreesToRadians = 0.017453292519943295;
     return std::isfinite(value);
 }
 
+// A streaming radius that may legitimately be zero, which is how a size class
+// says "follow the base pair" (ADR 0053, `world.h`).
+[[nodiscard]] bool setLayerRadius(const Value& value, f64& field)
+{
+    const auto* number = std::get_if<f64>(&value);
+    if (number == nullptr || !std::isfinite(*number) || *number < 0.0)
+        return false;
+    field = *number;
+    return true;
+}
+
 } // namespace
 
 // --- Component hooks --------------------------------------------------------
@@ -261,6 +272,28 @@ bool setModelPrimaryPart(World& world, core::InstanceId id, const Value& value)
     if (valueType(value) != ValueType::Nil)
         return false;
     model->primaryPart = core::InstanceId{};
+    return true;
+}
+
+Value getModelStreamingMode(const World& world, core::InstanceId id)
+{
+    const ModelComponent* model = world.models().find(id);
+    if (model == nullptr)
+        return Value{};
+    return Value{EnumValue{generated::StreamingModeEnumId, model->streamingMode}};
+}
+
+bool setModelStreamingMode(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* item = std::get_if<EnumValue>(&value);
+    ModelComponent* model = world.models().find(id);
+    if (item == nullptr || model == nullptr || item->enumId != generated::StreamingModeEnumId)
+        return false;
+    // The registry rather than the id alone, for the reason `Part.Shape` gives:
+    // an id by itself would let the enum accept a number no item carries.
+    if (world.enums().findValue(item->enumId, item->value) == nullptr)
+        return false;
+    model->streamingMode = item->value;
     return true;
 }
 
@@ -988,6 +1021,49 @@ bool setStreamingServiceMinRadius(World& world, core::InstanceId, const Value& v
     // must-have ring, which is the same answer without the trap.
     world.engineState().streamingMinRadius = *number;
     return true;
+}
+
+// The other two size classes' radii (ADR 0053). Zero is legal and means "follow
+// the pair above", so these refuse a negative rather than a non-positive -- the
+// one place a streaming radius may be zero, and the reason is in `world.h`.
+Value getStreamingServiceStructureMinRadius(const World& world, core::InstanceId)
+{
+    return world.engineState().streamingStructureMinRadius;
+}
+
+bool setStreamingServiceStructureMinRadius(World& world, core::InstanceId, const Value& value)
+{
+    return setLayerRadius(value, world.engineState().streamingStructureMinRadius);
+}
+
+Value getStreamingServiceStructureLoadRadius(const World& world, core::InstanceId)
+{
+    return world.engineState().streamingStructureLoadRadius;
+}
+
+bool setStreamingServiceStructureLoadRadius(World& world, core::InstanceId, const Value& value)
+{
+    return setLayerRadius(value, world.engineState().streamingStructureLoadRadius);
+}
+
+Value getStreamingServiceTerrainMinRadius(const World& world, core::InstanceId)
+{
+    return world.engineState().streamingTerrainMinRadius;
+}
+
+bool setStreamingServiceTerrainMinRadius(World& world, core::InstanceId, const Value& value)
+{
+    return setLayerRadius(value, world.engineState().streamingTerrainMinRadius);
+}
+
+Value getStreamingServiceTerrainLoadRadius(const World& world, core::InstanceId)
+{
+    return world.engineState().streamingTerrainLoadRadius;
+}
+
+bool setStreamingServiceTerrainLoadRadius(World& world, core::InstanceId, const Value& value)
+{
+    return setLayerRadius(value, world.engineState().streamingTerrainLoadRadius);
 }
 
 Value getStreamingServicePauseOutsideLoadedArea(const World& world, core::InstanceId)

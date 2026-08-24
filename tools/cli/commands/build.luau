@@ -178,6 +178,24 @@ local function run(options: Options): number
         end
     end
 
+    -- **The partition, pre-warmed into `.luaug/` before the copy** (ADR 0053).
+    -- The artifact carries `.luaug/` whole, so a cache warmed here travels with
+    -- the game and the player's first launch pays nothing for it. It is the
+    -- SAME code a run takes -- the host's own boot, stopped before the first
+    -- frame -- rather than a second path that can go stale on its own.
+    --
+    -- Not fatal when it fails: a game whose scene could not be partitioned
+    -- still runs, and partitions itself on first launch. Saying so beats
+    -- refusing to build.
+    local host = engine
+    if host ~= nil then
+        local partition = process.run({ host, project.root, "--partition" })
+        if not partition.ok then
+            print(partition.stdout .. partition.stderr)
+            print(tr("cli.build.warn.no_partition"))
+        end
+    end
+
     local name = productName(project)
     local output = options.output or projectlib.joined(project.root, "dist", options.target)
 

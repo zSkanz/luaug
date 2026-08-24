@@ -81,15 +81,6 @@ void StreamingManager::setFoci(std::span<const StreamingFocus> foci)
     m_foci.assign(foci.begin(), foci.end());
 }
 
-f64 StreamingManager::scoreOf(const ChunkIndexEntry& entry) const noexcept
-{
-    f64 best = std::numeric_limits<f64>::infinity();
-    for (const StreamingFocus& focus : m_foci) {
-        best = std::min(best, core::distanceSquared(entry.bounds, focus.position));
-    }
-    return best;
-}
-
 void StreamingManager::onChunkLoaded(ChunkId id, std::span<const std::byte> bytes)
 {
     const ChunkIndexEntry* const indexEntry = m_index.find(id);
@@ -132,27 +123,44 @@ void StreamingManager::tick(const StreamingBudget& budget)
 {
     const f64 started = nowMs();
 
-    f64 loadRadius = 0.0;
-    for (const StreamingFocus& focus : m_foci) {
-        loadRadius = std::max(loadRadius, focus.loadRadius);
-    }
-    const f64 wantDistance = loadRadius * loadRadius;
-    const f64 dropDistance = (loadRadius * EvictHysteresis) * (loadRadius * EvictHysteresis);
-
     // Scores first, for every chunk, because both halves below read them and
     // computing them twice would be the same answer at twice the price.
+    //
+    // **The radius is asked of the focus AND of the chunk's layer** (ADR 0053).
+    // One radius per focus is what a single grid forces, and it resolves badly
+    // in one direction whichever way it is set: a mountain and a pebble cannot
+    // share a distance. A cell is wanted when ANY focus wants it, which is the
+    // same union the score already takes.
     for (usize i = 0; i < m_entries.size(); ++i) {
         const ChunkIndexEntry& indexEntry = m_index.chunks[i];
         Entry& entry = m_entries[i];
-        entry.score = scoreOf(indexEntry);
+
+        f64 best = std::numeric_limits<f64>::infinity();
+        bool inside = false;
+        bool pastDrop = true;
+        for (const StreamingFocus& focus : m_foci) {
+            const f64 distance = core::distanceSquared(indexEntry.bounds, focus.position);
+            best = std::min(best, distance);
+
+            const f64 loadRadius = focus.loadRadiusFor(indexEntry.id.layer);
+            const f64 wantDistance = loadRadius * loadRadius;
+            const f64 dropRadius = loadRadius * EvictHysteresis;
+            if (distance <= wantDistance) {
+                inside = true;
+            }
+            if (distance <= dropRadius * dropRadius) {
+                pastDrop = false;
+            }
+        }
+        entry.score = best;
 
         // Hysteresis, and this is where it lives: a chunk becomes wanted inside
         // the load radius and stops being wanted only once it is past the wider
         // one. Between the two it keeps whatever it already was.
-        if (entry.score <= wantDistance) {
+        if (inside) {
             entry.wanted = true;
         }
-        else if (entry.score > dropDistance) {
+        else if (pastDrop) {
             entry.wanted = false;
         }
     }
@@ -298,7 +306,8 @@ bool StreamingManager::minimumRingResident() const noexcept
 {
     for (usize i = 0; i < m_entries.size(); ++i) {
         for (const StreamingFocus& focus : m_foci) {
-            const f64 minSquared = focus.minRadius * focus.minRadius;
+            const f64 minRadius = focus.minRadiusFor(m_index.chunks[i].id.layer);
+            const f64 minSquared = minRadius * minRadius;
             if (core::distanceSquared(m_index.chunks[i].bounds, focus.position) <= minSquared &&
                 m_entries[i].state != ChunkState::Resident) {
                 return false;

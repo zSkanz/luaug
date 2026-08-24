@@ -210,3 +210,127 @@ TEST_CASE("a malformed chunk index is refused rather than half-read")
     REQUIRE(error.has_value());
     CHECK(error->message.find("asset.chunk.err.index_malformed") != std::string::npos);
 }
+
+TEST_CASE("a group, its members and their tags survive the format")
+{
+    seedRealCatalog();
+
+    // The one file-format change E5 makes (ADR 0053), and the two additions it
+    // needed to be honest: a record now carries the rest of what a `BasePart`
+    // is, and it carries the tags a script finds it by.
+    Chunk chunk;
+    chunk.id = ChunkId{1, 1, 1};
+    chunk.bounds = chunkBounds(chunk.id, DefaultChunkSize);
+    chunk.strings = {"Gatehouse", "Pier", "Landmark", "Glass"};
+    chunk.groups.push_back(ChunkGroup{0});
+    chunk.tagRefs = {2};
+
+    ChunkInstance pier;
+    pier.name = 1;
+    pier.group = 0;
+    pier.firstTag = 0;
+    pier.tagCount = 1;
+    pier.canCollide = false;
+    pier.canQuery = false;
+    pier.friction = 0.05f;
+    pier.restitution = 0.9f;
+    pier.density = 3.5f;
+    pier.collisionGroup = 3;
+    pier.collisionFidelity = 2;
+    chunk.instances.push_back(pier);
+
+    const std::vector<std::byte> bytes = encodeChunk(chunk);
+    Chunk decoded;
+    REQUIRE(!decodeChunk(bytes, decoded).has_value());
+
+    REQUIRE(decoded.groups.size() == 1);
+    CHECK(decoded.stringAt(decoded.groups[0].name) == "Gatehouse");
+    REQUIRE(decoded.instances.size() == 1);
+    const ChunkInstance& back = decoded.instances[0];
+    CHECK(back.group == 0);
+    CHECK(back.tagCount == 1);
+    CHECK(decoded.stringAt(decoded.tagRefs[back.firstTag]) == "Landmark");
+    CHECK(back.canCollide == false);
+    CHECK(back.canQuery == false);
+    // Compared EXACTLY rather than approximately, because the format's job is
+    // to give back the same bits: a tolerance here would pass a writer that
+    // truncated a float on its way to disk.
+    CHECK(back.friction == 0.05f);
+    CHECK(back.restitution == 0.9f);
+    CHECK(back.density == 3.5f);
+    CHECK(decoded.stringAt(back.collisionGroup) == "Glass");
+    CHECK(back.collisionFidelity == 2);
+}
+
+TEST_CASE("a group index that names nothing is refused")
+{
+    seedRealCatalog();
+
+    // The same rule the string indices have, one level along: an index that
+    // names no group would surface as a part parented to nothing rather than as
+    // an error.
+    Chunk chunk;
+    chunk.id = ChunkId{0, 0, 0};
+    chunk.bounds = chunkBounds(chunk.id, DefaultChunkSize);
+    ChunkInstance orphan;
+    orphan.group = 4;
+    chunk.instances.push_back(orphan);
+
+    Chunk decoded;
+    CHECK(decodeChunk(encodeChunk(chunk), decoded).has_value());
+
+    Chunk overrun;
+    overrun.id = ChunkId{0, 0, 0};
+    overrun.bounds = chunkBounds(overrun.id, DefaultChunkSize);
+    ChunkInstance tagged;
+    tagged.firstTag = 0;
+    tagged.tagCount = 3;
+    overrun.instances.push_back(tagged);
+    CHECK(decodeChunk(encodeChunk(overrun), decoded).has_value());
+}
+
+TEST_CASE("the index carries a cell's real extent, not only its square")
+{
+    seedRealCatalog();
+
+    // An atomic model lives in one cell however far it spreads (ADR 0053), so a
+    // cell may be wider than its footprint -- and an index that described only
+    // the footprint would keep the overhang outside the loading ring until the
+    // cell centre came in.
+    ChunkIndex index;
+    index.chunkSize = 256.0f;
+
+    ChunkIndexEntry wide;
+    wide.id = ChunkId{1, 0, 1};
+    wide.bounds = chunkBounds(wide.id, index.chunkSize);
+    wide.bounds.min.x -= 40.0;
+    wide.bounds.max.z += 12.0;
+    wide.bounds.min.y = -3.0;
+    wide.bounds.max.y = 21.0;
+    wide.urn = "asset://world/gate.lchunk";
+    wide.instanceCount = 3;
+    index.chunks.push_back(wide);
+
+    ChunkIndex back;
+    REQUIRE(!readChunkIndex(writeChunkIndex(index), back).has_value());
+    REQUIRE(back.chunks.size() == 1);
+    CHECK(back.chunks[0].bounds.min.x == doctest::Approx(wide.bounds.min.x));
+    CHECK(back.chunks[0].bounds.max.z == doctest::Approx(wide.bounds.max.z));
+    CHECK(back.chunks[0].bounds.min.y == doctest::Approx(-3.0));
+}
+
+TEST_CASE("an index written before cells had a real extent still reads")
+{
+    seedRealCatalog();
+
+    // The footprint is the FALLBACK, so a row with no horizontal bounds means
+    // what it always meant rather than an empty box.
+    const std::string older = R"({"format":"luaug-chunk-index","version":1,"chunkSize":256,"chunks":[)"
+                              R"({"x":2,"z":0,"layer":0,"urn":"asset://world/c.lchunk","instances":1,"bytes":8,)"
+                              R"("minY":-1,"maxY":1}]})";
+    ChunkIndex index;
+    REQUIRE(!readChunkIndex(older, index).has_value());
+    REQUIRE(index.chunks.size() == 1);
+    CHECK(index.chunks[0].bounds.min.x == doctest::Approx(512.0));
+    CHECK(index.chunks[0].bounds.max.x == doctest::Approx(768.0));
+}
