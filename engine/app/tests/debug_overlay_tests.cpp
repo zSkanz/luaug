@@ -265,6 +265,13 @@ TEST_CASE("on a real device, F3 flips the panel")
             // as a hole.
             CHECK(atlas.find("class.NoSuchClassExists", 16u).valid);
             CHECK_FALSE(atlas.has("class.NoSuchClassExists"));
+            // **The add menu leans on exactly this.** It draws `class.<Name>`
+            // for every creatable class without asking whether the theme has
+            // one, because this fallback is what makes the answer always a
+            // picture -- and a menu with a hole in one row is worse than a menu
+            // with no pictures at all.
+            CHECK(atlas.find("class.Part", 16u).valid);
+            CHECK(atlas.find("class.Folder", 16u).valid);
             CHECK(atlas.has(luaug::app::icons::ClassPart));
             // The six that were drawn a day later than the rest. They were
             // ABSENT from the theme rather than present and broken, which is
