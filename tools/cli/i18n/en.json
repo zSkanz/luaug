@@ -56,5 +56,6 @@
   "cli.new.created": "Created {path}. Next: cd {name} && rokit install && luaug dev",
   "cli.new.err.exists": "{path} already exists.",
   "cli.new.err.unknown_template": "No template named \"{name}\". The v1 template is \"starter\".",
-  "cli.new.err.bad_name": "\"{name}\" is not a usable project name: use letters, digits, dashes and underscores."
+  "cli.new.err.bad_name": "\"{name}\" is not a usable project name: use letters, digits, dashes and underscores.",
+  "cli.new.err.no_install": "Cannot find the LuauG installation this CLI belongs to: nothing above this script holds a templates directory."
 }

@@ -98,41 +98,123 @@ end
 local PlayerPresets = { "win-msvc-player", "linux-clang-player" }
 local DevPresets = { "win-msvc-dev", "linux-clang-dev", "macos-clang-dev", "win-msvc-debug" }
 
---- Every directory `luaug-host` could reasonably be, in the order worth trying.
+--- The profile the packaged editor is built from (ADR 0054). Last of the three,
+--- because inside this repository a `dev` build is what somebody is iterating on
+--- and an `editor` build is an artifact they produced an hour ago.
+local EditorPresets = { "win-msvc-editor", "linux-clang-editor" }
+
+--- Where this CLI is installed: the directory holding its template tree, the
+--- generated definitions, and — in an installation rather than a source tree —
+--- the engine binaries beside them (ADR 0054).
 ---
---- `LUAUG_HOST` first, because a developer who set it means it. Then the build
---- tree, since inside this repository that is where it always is (R14 puts it
---- outside the source tree, so the path comes from `LUAUG_BUILD_ROOT`). Then
---- beside this CLI, which is the shape an installed release has.
-local function engineCandidates(presets: { string }): { string }
-    local name = executableName("luaug-host")
+--- **Found by looking for the layout rather than by counting up from this file,
+--- and that is D045.** `new.luau` counted two directories, which was right while
+--- it lived one level higher and stopped being right the moment it moved; the
+--- command still ran and failed inside `listDirectory` on a path with `../..` in
+--- the middle of it. A count is a fact about a directory layout that no check
+--- holds still.
+---
+--- Inside this repository this is the repository root, which is what makes the
+--- installed shape the same code path as the developed one rather than a second
+--- one that only runs where nobody is looking.
+local function installRoot(): string?
+    local here = string.match(debug.info(1, "s"), "^(.*)[/\\][^/\\]+$")
+    if here == nil then
+        return nil
+    end
+    local current = path.format(path.resolve(here))
+    for _ = 1, 8 do
+        if fs.exists(joined(current, "templates", "starter")) then
+            return current
+        end
+        local parent = path.dirname(current)
+        if parent == current or parent == "" then
+            break
+        end
+        current = parent
+    end
+    return nil
+end
+
+--- The three places a binary this CLI drives can be, named so the ORDER is a
+--- thing a test can hold still rather than a comment about what happens.
+export type Roots = {
+    -- What somebody pointed at explicitly, from the environment.
+    explicit: string?,
+    -- `LUAUG_BUILD_ROOT`: inside this repository the binaries are always there,
+    -- because R14 puts builds outside the source tree.
+    buildRoot: string?,
+    -- Where this CLI is installed, which is where a downloaded release keeps
+    -- them. `nil` when the layout is not recognisable.
+    install: string?,
+}
+
+--- Every path a named binary could be at, in the order worth trying. Pure: the
+--- caller reads the environment, this decides the order.
+---
+--- **`process.cwd()` is deliberately not in it, and used to be** (ADR 0054). It
+--- was the last candidate, under a comment calling it "beside this CLI, which is
+--- the shape an installed release has" — and it is not beside the CLI, it is
+--- wherever the person is standing. It found a host only when somebody happened
+--- to be inside the installation, and would otherwise pick up any stray binary
+--- in the directory they ran from. `install` is the answer it was reaching for.
+---
+--- `buildPath` is where a preset directory keeps the binary; `installPath` is
+--- where the packaged folder keeps it. They differ because a build tree is
+--- organised by the source layout and an installation by what a person opens.
+local function hostCandidates(buildPath: string, installPath: string, presets: { string }, roots: Roots): { string }
     local candidates: { string } = {}
 
-    local explicit = process.env.LUAUG_HOST
-    if explicit ~= nil and explicit ~= "" then
-        table.insert(candidates, explicit)
+    if roots.explicit ~= nil and roots.explicit ~= "" then
+        table.insert(candidates, roots.explicit)
     end
 
-    local buildRoot = process.env.LUAUG_BUILD_ROOT
-    if buildRoot ~= nil and buildRoot ~= "" then
+    if roots.buildRoot ~= nil and roots.buildRoot ~= "" then
         for _, preset in presets do
-            table.insert(candidates, joined(buildRoot, preset, "engine", "app", name))
+            table.insert(candidates, joined(roots.buildRoot, preset, buildPath))
         end
     end
 
-    table.insert(candidates, joined(path.format(process.cwd()), name))
+    if roots.install ~= nil and roots.install ~= "" then
+        table.insert(candidates, joined(roots.install, installPath))
+    end
+
     return candidates
 end
 
-local function findEngine(): string?
+--- Where an installation keeps the host a person edits and runs with, and where
+--- it keeps the `player` one `luaug build` packages (ADR 0054). Two binaries
+--- rather than one, each with the content directory the host resolves beside
+--- its own executable: a package that shipped only the editor host would make
+--- `luaug build` package the editor into somebody's game, which is D057.
+local InstalledEngine = "luaug-host"
+local InstalledPlayer = "player/luaug-host"
+
+--- Every path `luaug dev` and `luaug edit` would accept a host at, in order.
+--- Pure, so the ORDER is a thing a test drives rather than a comment.
+local function engineCandidates(roots: Roots): { string }
+    local name = executableName("luaug-host")
     local presets: { string } = {}
-    for _, preset in PlayerPresets do
-        table.insert(presets, preset)
+    for _, group in { PlayerPresets, DevPresets, EditorPresets } do
+        for _, preset in group do
+            table.insert(presets, preset)
+        end
     end
-    for _, preset in DevPresets do
-        table.insert(presets, preset)
-    end
-    for _, candidate in engineCandidates(presets) do
+    return hostCandidates(joined("engine", "app", name), executableName(InstalledEngine), presets, roots)
+end
+
+--- The environment as the three roots. One function, so that every search below
+--- reads the same environment in the same order.
+local function environmentRoots(explicit: string?): Roots
+    return {
+        explicit = explicit,
+        buildRoot = process.env.LUAUG_BUILD_ROOT,
+        install = installRoot(),
+    }
+end
+
+local function findEngine(): string?
+    for _, candidate in engineCandidates(environmentRoots(process.env.LUAUG_HOST)) do
         if fs.exists(candidate) then
             return candidate
         end
@@ -153,29 +235,19 @@ end
 --- contains -- the exact shape of the defect this is fixing. `LUAUG_PLAYER_HOST`
 --- is the door for somebody who has a player binary somewhere this does not
 --- look, and a dev binary reached that way is a choice with a name on it.
-local function findPlayerEngine(): string?
+--- `player/` in an installation, and it is deliberately not the binary beside
+--- it: what a person edits with carries the overlay, the inspector and a REPL
+--- against its own VM, and what their players receive must not (D057).
+local function playerCandidates(roots: Roots): { string }
     local name = executableName("luaug-host")
+    return hostCandidates(joined("engine", "app", name), executableName(InstalledPlayer), PlayerPresets, roots)
+end
 
-    local explicit = process.env.LUAUG_PLAYER_HOST
-    if explicit ~= nil and explicit ~= "" and fs.exists(explicit) then
-        return explicit
-    end
-
-    local buildRoot = process.env.LUAUG_BUILD_ROOT
-    if buildRoot ~= nil and buildRoot ~= "" then
-        for _, preset in PlayerPresets do
-            local candidate = joined(buildRoot, preset, "engine", "app", name)
-            if fs.exists(candidate) then
-                return candidate
-            end
+local function findPlayerEngine(): string?
+    for _, candidate in playerCandidates(environmentRoots(process.env.LUAUG_PLAYER_HOST)) do
+        if fs.exists(candidate) then
+            return candidate
         end
-    end
-
-    -- Beside this CLI, which is the shape an installed release has: what ships
-    -- in one is a player binary, because that is what `luaug build` packages.
-    local beside = joined(path.format(process.cwd()), name)
-    if fs.exists(beside) then
-        return beside
     end
     return nil
 end
@@ -184,27 +256,23 @@ end
 --- anything else `tools/` builds. Kept as one function because "where did the
 --- build put it" has exactly one answer and two copies of it would drift the
 --- first time a preset was renamed.
-local function findTool(base: string): string?
+---
+--- `editor` before `dev` here and last in the engine search, which is not an
+--- inconsistency: a tool has no profile-dependent behaviour, so the newest build
+--- will do, while a HOST somebody is iterating on is the one they mean.
+local ToolPresets =
+    { "win-msvc-editor", "win-msvc-dev", "linux-clang-editor", "linux-clang-dev", "macos-clang-dev", "win-msvc-debug" }
+
+local function toolCandidates(base: string, roots: Roots): { string }
     local name = executableName(base)
+    return hostCandidates(joined("tools", base, name), name, ToolPresets, roots)
+end
 
-    local explicit = process.env[`LUAUG_{string.upper(base)}`]
-    if explicit ~= nil and explicit ~= "" and fs.exists(explicit) then
-        return explicit
-    end
-
-    local buildRoot = process.env.LUAUG_BUILD_ROOT
-    if buildRoot ~= nil and buildRoot ~= "" then
-        for _, preset in { "win-msvc-dev", "linux-clang-dev", "macos-clang-dev", "win-msvc-debug" } do
-            local candidate = joined(buildRoot, preset, "tools", base, name)
-            if fs.exists(candidate) then
-                return candidate
-            end
+local function findTool(base: string): string?
+    for _, candidate in toolCandidates(base, environmentRoots(process.env[`LUAUG_{string.upper(base)}`])) do
+        if fs.exists(candidate) then
+            return candidate
         end
-    end
-
-    local beside = joined(path.format(process.cwd()), name)
-    if fs.exists(beside) then
-        return beside
     end
     return nil
 end
@@ -280,6 +348,14 @@ return {
     findEngine = findEngine,
     findPlayerEngine = findPlayerEngine,
     findTool = findTool,
+    installRoot = installRoot,
+    -- The three searches as pure functions of their roots, which is the only
+    -- reason they are reachable: "an explicit variable, then the build tree,
+    -- then the installation" is a claim, and a claim in a comment is not one
+    -- anything holds to (ADR 0054).
+    engineCandidates = engineCandidates,
+    playerCandidates = playerCandidates,
+    toolCandidates = toolCandidates,
     executableName = executableName,
     sourceDirectories = sourceDirectories,
     sourceSnapshot = sourceSnapshot,

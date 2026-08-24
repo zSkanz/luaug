@@ -26,6 +26,7 @@ local pathlib = require("@std/path")
 local process = require("@std/process")
 
 local catalog = require("../catalog")
+local projectlib = require("../project")
 
 local tr = catalog.tr
 
@@ -48,15 +49,36 @@ local function cmakeListsPath(): string
     return tostring(pathlib.normalize(`{here or "tools/cli/commands"}/../../../CMakeLists.txt`))
 end
 
+--- The stamp an installation carries in place of the source tree it was built
+--- from (ADR 0054). Its first line is the version; everything after it says
+--- where the number came from, for whoever opens the file.
+local StampName = "VERSION"
+
 --- The LuauG version, read from the `project()` declaration CMake expands into
---- `LUAUG_VERSION_STRING`. `nil` when this is not a source tree.
+--- `LUAUG_VERSION_STRING` — or, in an installation, from the stamp the packager
+--- wrote out of that same declaration.
+---
+--- **Two sources and still one authority.** ADR 0031 forbids a version typed
+--- into a file where two copies can drift; the stamp is not typed, it is
+--- derived, and it is written at the moment the binary built from that
+--- declaration is copied. What would be a second copy is a literal in this file,
+--- and there is none.
 local function luaug(): Reading
     local path = cmakeListsPath()
-    if not fs.exists(path) then
-        return { value = nil, source = path }
+    if fs.exists(path) then
+        local declared = string.match(fs.readFileToString(path), "project%s*%(%s*LuauG%s+VERSION%s+([%d%.]+)")
+        return { value = declared :: string?, source = path }
     end
-    local declared = string.match(fs.readFileToString(path), "project%s*%(%s*LuauG%s+VERSION%s+([%d%.]+)")
-    return { value = declared :: string?, source = path }
+
+    local install = projectlib.installRoot()
+    if install ~= nil then
+        local stamp = projectlib.joined(install, StampName)
+        if fs.exists(stamp) then
+            local first = string.match(fs.readFileToString(stamp), "^%s*([%d%.]+)")
+            return { value = first :: string?, source = stamp }
+        end
+    end
+    return { value = nil, source = path }
 end
 
 --- The version of the Lute interpreter running this script.
@@ -97,4 +119,5 @@ return {
     run = run,
     luaug = luaug,
     lute = lute,
+    StampName = StampName,
 }

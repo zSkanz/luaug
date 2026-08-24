@@ -28,29 +28,15 @@ local Templates = { starter = true }
 
 --- Where this CLI's own files live, so the template and the engine definitions
 --- are found relative to the installation rather than to the caller's cwd.
---- **Found by walking up rather than by counting, and that is D045.** It
---- counted two directories up from its own source, which was right while this
---- command lived at `tools/cli/new.luau` and stopped being right the moment it
---- moved into `commands/`. Nothing said so: the command still ran and failed
---- inside `listDirectory` on a path with `../..` in the middle of it. A count
---- is a fact about a directory layout that no check holds still; looking for
---- the thing being looked for is not.
-local function cliRoot(): string
-    local here = string.match(debug.info(1, "s"), "^(.*)[/\\][^/\\]+$") or "tools/cli"
-    local current = here
-    for _ = 1, 8 do
-        if fs.exists(projectlib.joined(current, "templates", "starter")) then
-            return current
-        end
-        local parent = projectlib.joined(current, "..")
-        if parent == current then
-            break
-        end
-        current = parent
-    end
-    -- The old answer, so a failure names a path a reader recognises rather than
-    -- an empty string turning every path below into a relative one.
-    return projectlib.joined(here, "..", "..")
+---
+--- **This used to be a walk of its own, and it was the walk the rest of the CLI
+--- should have been doing** (ADR 0054). D045 taught it here — a count two
+--- directories up was right while this command lived one level higher and
+--- stopped being right the moment it moved, and nothing said so — while the
+--- engine search and `--version` kept counting and kept looking in the working
+--- directory. `projectlib.installRoot` is that same walk, asked once.
+local function cliRoot(): string?
+    return projectlib.installRoot()
 end
 
 local function copyTree(from: string, to: string, substitutions: { [string]: string })
@@ -97,6 +83,13 @@ local function run(options: Options): number
     end
 
     local root = cliRoot()
+    if root == nil then
+        -- Named rather than guessed. A relative path from here would scaffold a
+        -- project out of whatever happened to be beside the working directory,
+        -- which is the failure this whole command is written against.
+        print(tr("cli.new.err.no_install"))
+        return 1
+    end
     copyTree(projectlib.joined(root, "templates", options.template), target, { ["{{name}}"] = options.name })
 
     -- `.luaug/` is generated and gitignored, which is why it is written here
