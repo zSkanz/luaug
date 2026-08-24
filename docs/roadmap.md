@@ -1262,7 +1262,7 @@ size were normal.
 | E1 | The Editor | XXL | `luaug edit`: an application with a menu bar and dockable panels; a viewport you click, fly and select in; **play, pause, step, stop and save**; a **content browser** with folders and context menus, from which **opening a scene loads it**; **undo and redo**; and a scene format that makes a project's world data. **Built, awaiting review** |
 | E2 | Moving Things | L | Translate, rotate and scale manipulators; creating instances; reparenting by drag; multi-select — the direct manipulation the loop and the undo stack make safe. **Specified below, in progress** |
 | E3 | Assets and Prefabs | M | Prefabs as scenes, an asset importer path from the browser, and a scene that references what it uses. **The model is settled: ADR 0048** -- content holds SOURCES, an instance in the world may be a LINK to one, and editing a linked instance breaks the link and makes it its own thing. Written at E2 from the human's own description rather than invented while wiring a browser |
-| E4 | The Editor Ships | M | The distribution question ADR 0046 deliberately declined, and the editor's own performance gate |
+| E4 | The Editor Ships | M | The distribution question ADR 0046 deliberately declined, and the editor's own performance gate: a folder somebody downloads, and an Explorer that costs what is open rather than what exists. **Settled: ADR 0054.** Specified below, in progress |
 | E5 | The World You Build | L | A world authored in `Workspace` becomes a streamed world on its own — no generator script, nothing sorted by hand. `Model.StreamingMode` makes the model the unit rather than the part; cells are chosen by size as well as position on the `layer` that has existed unused since M7. **Settled: ADR 0053.** Placed here rather than in phase 2 because it is an authoring capability and E3's stamps are its neighbour |
 
 **What moved into E1 and why it was right.** Undo was E2's, and E1 grew delete
@@ -1566,6 +1566,99 @@ changes over time.
   gate item every milestone since M4 has proven is where the real defects come
   from.
 
+
+### E4 — The Editor Ships (M)
+
+**Settled by
+[ADR 0054](decisions/0054-the-editor-ships-as-a-folder-and-the-cli-finds-its-own-install.md).**
+Two halves, and they are one sentence: **a person downloads the editor, and the
+editor stays fast on the world they build with it.** The first is the question
+[ADR 0046](decisions/0046-the-editor-is-a-mode-of-the-engine-binary.md) declined
+on purpose and told this phase not to answer by accident; the second is the gate
+that milestone said the editor would owe once it had one.
+
+#### What the reconnaissance found
+
+- **The repository already believes it has an installed shape, and it has never
+  had one.** `project.luau`'s last engine candidate is `process.cwd()` under a
+  comment calling it "beside this CLI"; `version.luau` reads a `CMakeLists.txt`
+  an installation does not have; `new.luau` walks up looking for the layout and
+  is the only one of the three that is right. Nothing noticed, because nothing
+  in this repository has ever run outside it.
+- **The Explorer walks the whole world every frame.** `collectTree` is a full
+  preorder over every instance, called at the top of `drawExplorer`, and the
+  visibility pass over its output is a second one. The *drawing* is already
+  clipped — `ImGuiListClipper` over the visible rows, at an exact row pitch — so
+  the panel is fast for the reason a profile would not show first: the cost is
+  all in the walk, and the walk is charged for a world nobody can see.
+- **The content browser is already virtualised, and the comment beside it says
+  the Explorer is not.** That comment was written when neither was, and half of
+  it stopped being true when the row clipper landed. It is the half that is
+  cheap to fix that is still open.
+
+#### Scope
+
+- **An `editor` build profile**: Release, the debug UI on, the Luau compiler on,
+  the C++ suite off. Built by `scripts/gates/shipping-build.sh` beside `shipping`
+  and `player`, for the reason those two are there — a profile nothing builds is
+  a profile nobody knows is broken.
+- **`tools/repo/package.luau` and `scripts/package.ps1`**: the folder and the
+  archive. The host, its content, the CLI and the pinned Lute, the template, the
+  generated definitions, `assetc`, `iconpatch`, the licences and a version stamp.
+- **The attributions the repository already generates**, carried into the
+  archive rather than written a second time for it.
+- **`installRoot()` as the one answer to where the CLI is installed**, asked by
+  the engine search, the tool search, the template copy and `--version` — with
+  the candidate roots passed in, so the order is a pure function a test drives.
+- **The Explorer descends only into what is open.** One walk instead of two, and
+  it does not enter a collapsed subtree or a generated one at all.
+- **The editor's own performance gate, asserted on counted work rather than on a
+  clock** — the instrument E5's partition peak argued for, applied to a panel.
+- **The manual says how to install it**, and building from source stops being
+  the first sentence a reader meets.
+
+#### NOT in scope
+
+An installer, code signing, and an update channel — each is a dependency and a
+decision, and all three are about an archive that has to exist first. A Linux or
+macOS package: `luaug build` is Windows-only and says so, and a packaging path no
+tier here can execute is one that ships broken. A project browser or start
+screen: `luaug new` then `luaug edit` is the path, and inventing a start screen
+at the packaging milestone would be inventing it without having watched anybody
+need it. Bundling `luau-lsp` and `stylua`, which is a redistribution question
+bought for two commands that already fail politely. And making the repository
+public, which is the human's and is in the ledger.
+
+#### Gate (definition of done)
+
+- **A person who has never built this can use it.** The archive is unpacked on a
+  machine with no repository, no `LUAUG_BUILD_ROOT` and no rokit, and
+  `luaug --version`, `luaug new`, `luaug edit` and `luaug build` all work from
+  it. The transcript goes in the gate record.
+- **The installed resolution is asserted, not described.** A test drives the
+  order — an explicit environment variable, then the build tree, then the
+  installation — and a second one proves the installation is found when the
+  working directory is somewhere else entirely, which is the case that has never
+  worked.
+- **`luaug --version` answers inside an installation**, with the number the
+  binary in it was built from, and the stamp names where that number came from.
+- **The `editor` profile is compiled and linked by the gate**, on the tier the
+  shipping stage already runs.
+- **The archive carries its attributions**, generated from the manifest, and the
+  licence audit is still green.
+- **The Explorer costs what is open, not what exists.** A world an order of
+  magnitude larger than the flagship's, with the same subtrees expanded, visits
+  the **same** number of instances — equal, not merely fewer. A test asserts the
+  equality, for the reason E5's peak measurement asserted one: a bound that is
+  merely small passes while the defect is still there.
+- **The cost is recorded as work, not as a clock.** `docs/perf-baselines.md`
+  gains an editor row giving the instances the Explorer visits per frame before
+  and after, on worlds whose sizes are stated — a number that is the same on any
+  machine, which is what the baselines methodology asks for and what a threshold
+  on a busy machine cannot be. A wall-clock impression from a person with the
+  editor open belongs in the gate record beside it, where a number that depends
+  on the machine belongs.
+- **`scripts/localgate.ps1` is green on every stage.**
 
 ### E5 — The World You Build (L)
 
