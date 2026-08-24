@@ -6,14 +6,73 @@
 #include "luaug/platform/sdl_interop.h"
 
 #include <SDL3/SDL_mouse.h>
+#include <SDL3/SDL_properties.h>
 #include <SDL3/SDL_rect.h>
 #include <SDL3/SDL_surface.h>
+#include <SDL3/SDL_video.h>
+
+#if defined(_WIN32)
+// clang-format off
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+// clang-format on
+#endif
+
 #include <span>
 #include <string>
 
 #include "window_impl.h"
 
 namespace luaug::platform {
+
+namespace {
+
+// **Windows 11 rounds every window's corners, and this engine draws into them.**
+//
+// The rounding is the shell's frame, not ours: the editor's dockspace, the
+// launcher's panel and a game's framebuffer all reach the edge of the client
+// area, so a rounded corner clips content the APPLICATION drew rather than
+// softening chrome the SYSTEM drew. The shell's own theme has had a rounding of
+// zero from the day it was data (ADR 0056); this is the half of that decision
+// the window manager owns.
+//
+// Asked for through `dwmapi.dll` at runtime rather than by linking it: the
+// attribute arrived in Windows 11 and does not exist on 10, so a link-time
+// dependency would be a hard requirement bought for a preference, and the
+// version check is the call failing. Every failure here is silent and
+// survivable -- a rounded corner is a cosmetic loss and refusing to open a
+// window is not.
+void squareTheCorners([[maybe_unused]] SDL_Window* handle)
+{
+#if defined(_WIN32)
+    void* hwnd = SDL_GetPointerProperty(SDL_GetWindowProperties(handle), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+    if (hwnd == nullptr)
+        return;
+
+    // DWMWA_WINDOW_CORNER_PREFERENCE and DWMWCP_DONOTROUND, by value: the
+    // enumerators are only declared by a recent Windows SDK, and this file is
+    // compiled against whichever one the machine has.
+    constexpr int kCornerPreference = 33;
+    constexpr int kDoNotRound = 1;
+
+    using SetAttribute = long(__stdcall*)(void*, unsigned long, const void*, unsigned long);
+    HMODULE dwm = ::LoadLibraryW(L"dwmapi.dll");
+    if (dwm == nullptr)
+        return;
+    if (const auto set =
+            reinterpret_cast<SetAttribute>(reinterpret_cast<void*>(::GetProcAddress(dwm, "DwmSetWindowAttribute")));
+        set != nullptr) {
+        const int preference = kDoNotRound;
+        (void)set(hwnd, kCornerPreference, &preference, sizeof(preference));
+    }
+    // Left loaded: the window outlives this call and DWM is in every process
+    // that has one anyway, so unloading would be returning a reference the
+    // system had already given us.
+#endif
+}
+
+} // namespace
 
 void WindowDeleter::operator()(Window* window) const noexcept
 {
@@ -43,6 +102,8 @@ WindowPtr createWindow(const WindowDesc& desc, core::EngineError* outError)
             *outError = core::makeError(LUAUG_TR("platform.err.window_failed"), {}, SDL_GetError());
         return {};
     }
+
+    squareTheCorners(handle);
 
     return WindowPtr(new Window(handle));
 }
