@@ -6,19 +6,23 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 ## State
 
 - **E3 — Content and Prefabs — IN PROGRESS, opened 2026-08-23**, and it was
-  specified by the human in four messages rather than by a brief. Everything they
-  asked for is built and behind a green six-stage gate; what is left is a person
-  using it.
+  specified by the human in a conversation rather than by a brief. Everything
+  they asked for is built and behind a green six-stage gate; what is left is a
+  person using it.
 
-  **Four ADRs carry it, and three of them REVERSE something.** 0050: a script is
-  an ordinary instance carrying its own `Source`, which reverses 0048's "a Script
-  is created as a FILE" — a script whose identity is a file cannot go in a
-  prefab, be copied with the thing it belongs to, or live in a library. 0051: a
-  prefab is INHERITED and an edit is an override, which reverses 0049's
-  break-on-edit — break-on-edit says a prefab is a starting point, and this says
-  it is a definition. 0052: `content/` gains a tree of instances beside its
-  files, global to every scene. And 0049 itself named the thing: a **Stamp**,
-  chosen by the human over prefab, blueprint and model.
+  **Four ADRs carry it, and three of them REVERSE something — one of them
+  itself.** 0049 named the thing: a **Stamp**, chosen by the human over prefab,
+  blueprint and model. 0050: a script is an ordinary instance carrying its own
+  `Source`, which reverses 0048's "a Script is created as a FILE" — a script
+  whose identity is a file cannot go in a prefab, be copied with the thing it
+  belongs to, or live in a library. 0051: a prefab is INHERITED and an edit is
+  an override, which reverses 0049's break-on-edit — break-on-edit says a prefab
+  is a starting point, and this says it is a definition. **0052 is the one that
+  reverses itself**: `content/` was given a global tree of instances beside its
+  files, and it was taken out the same afternoon when the human asked whether
+  Unity and Unreal have two contents. They do not — each has one folder of
+  files, and a prefab in either is a file. The ADR stays as the record, because
+  the reason is worth more than the decision was.
 
   **Each reversal was right when it was written and wrong when it was used**,
   which is the pattern worth naming: 0048 and 0049 were both written from the
@@ -31,6 +35,19 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   the link; changing the source moves every instance that has not overridden
   that property; a structural change is written in full and unlinked rather than
   refused, because a save that refuses is a save that loses work.
+
+  **And the editor grew the things a person expects to already be there**:
+  dragging an instance into the content browser makes a prefab of it and
+  dragging one out places it, `Del` `F2` `Ctrl+D` `Ctrl+S`, and a clipboard that
+  holds TEXT rather than ids — which is what lets a copy survive the delete, the
+  scene load or the stamp session that happens between it and the paste.
+
+  **Two manipulator defects, and the second was found by asking the first's
+  question again.** D078: a comment said the snap was in the gizmo's frame and
+  the code snapped in the world's, so a local drag left its own arm. D079: a
+  `Size` is in the part's own frame, so a world-space scale arm on a turned part
+  pointed one way and grew it another. Both are the same shape — a rule stated
+  in one space and applied in another — and it is worth expecting a third.
 
 - **E2 — Moving Things — COMPLETE except for a person looking, 2026-08-23.** Seventeen commits in,
   every one behind a green six-stage gate. **Every item of scope is built.** What
@@ -179,7 +196,7 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
 - **All four of E2's frozen interfaces are built and tested**, which is the point
   the plan said nothing fans out before: the selection set, the gesture and its
   extracted undo key, the manipulator arithmetic, and `Editor`'s verbs.
-- **Twelve defects closed in this milestone and ten of them came from a person
+- **Fifteen defects closed across E2 and E3, twelve of them found by a person
   using the editor**, which is now the pattern every milestone since M4 has
   repeated. D067 is why the editor was unusable on the flagship at all: a boot
   scene was applied AFTER the entry scripts had built the world, destroying every
