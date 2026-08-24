@@ -93,6 +93,23 @@ ContentKind contentKindOf(std::string_view fileName) noexcept
             return ContentKind::Texture;
     }
 
+    // The four `Sound.Content` documents it decodes, and the two faces
+    // `TextLabel.Font` reads. Recorded here because the property pickers ask
+    // this question -- what a `Sound` may be pointed at is what a person wants
+    // listed when they click its `Content` -- and until they existed nothing
+    // did.
+    static constexpr std::array<std::string_view, 4> kAudio{".wav", ".mp3", ".flac", ".ogg"};
+    for (const std::string_view extension : kAudio) {
+        if (endsWith(name, extension))
+            return ContentKind::Audio;
+    }
+
+    static constexpr std::array<std::string_view, 2> kFonts{".ttf", ".otf"};
+    for (const std::string_view extension : kFonts) {
+        if (endsWith(name, extension))
+            return ContentKind::Font;
+    }
+
     return ContentKind::Other;
 }
 
@@ -215,6 +232,8 @@ namespace {
     case ContentKind::Folder:
     case ContentKind::Mesh:
     case ContentKind::Texture:
+    case ContentKind::Audio:
+    case ContentKind::Font:
     case ContentKind::Other:
         break;
     }
@@ -324,6 +343,30 @@ bool ContentTree::createFolder(std::string_view folderName)
         return false;
 
     return refresh();
+}
+
+std::vector<std::string> ContentTree::filesOfKind(ContentKind kind) const
+{
+    std::vector<std::string> found;
+    std::error_code ec;
+    if (m_root.empty() || !std::filesystem::is_directory(m_root, ec))
+        return found;
+
+    for (const std::filesystem::directory_entry& entry : std::filesystem::recursive_directory_iterator(m_root, ec)) {
+        if (ec)
+            break;
+        if (!entry.is_regular_file(ec))
+            continue;
+        const std::string name = entry.path().filename().string();
+        if (contentKindOf(name) != kind)
+            continue;
+        // Generic, because this becomes half of an `asset://` URI and those are
+        // forward-slashed on every tier.
+        found.push_back(entry.path().lexically_relative(m_root).generic_string());
+    }
+
+    std::sort(found.begin(), found.end());
+    return found;
 }
 
 ContentTree::ImportReport ContentTree::import(std::span<const std::filesystem::path> sources)

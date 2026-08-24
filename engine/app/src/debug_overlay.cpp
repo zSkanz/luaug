@@ -364,13 +364,24 @@ void drawIconBadge(const IconAtlas* icons, ImVec2 origin, float size)
 // need one, and a column of them is a column of boxes. The affordance is the icon and the tooltip; the toolbar keeps
 // its frames, because a toolbar button IS a button.
 bool iconButton(const IconAtlas* icons, std::string_view id, float size, const char* strId, const char* word,
-                const char* tip, bool frameless = false)
+                const char* tip, bool frameless = false, bool fillRowHeight = false)
 {
     if (frameless) {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
+        // **`fillRowHeight` is what puts a toolbar's icons on the same line as
+        // its text field.** Frameless normally means the button IS the picture,
+        // which is what a tree row wants -- it places its chevron by hand at an
+        // exact pitch, and a taller button would overflow the row. A TOOLBAR
+        // wants the opposite: the tallest thing on the line is an input at frame
+        // height, and an item shorter than it sits at the top of the line rather
+        // than in the middle of it. Padding the button out to frame height
+        // centres the picture inside it, which is one number rather than a
+        // cursor nudge before every item -- and a nudge makes the line taller,
+        // which is the gap that shows up under the tab bar.
+        const float pad = fillRowHeight ? (ImGui::GetFrameHeight() - size) * 0.5f : 0.0f;
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, pad > 0.0f ? pad : 0.0f));
         // **A frame is a fill AND a border, and the border was surviving.**
         // `ImageButton` renders both, so a transparent `ImGuiCol_Button` leaves
         // the outline behind -- which is invisible while the theme draws no
@@ -1222,7 +1233,20 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                     ImGui::SetKeyboardFocusHere();
                 }
                 ImGui::SetNextItemWidth(210.0f);
-                ImGui::InputTextWithHint("##add-filter", "filter", g_addFilter.data(), g_addFilter.size());
+                // "search" rather than "filter": one is what a person is doing
+                // and the other is what the code is doing, and a hint is written
+                // for the first of those. It is also the word on every other box
+                // in this shell now, and three names for one gesture is three
+                // things to learn.
+                ImGui::InputTextWithHint("##add-filter", "search", g_addFilter.data(), g_addFilter.size());
+
+                // **Escape closes it**, which is what Escape does to every
+                // transient thing on a screen. The shell's own Escape handler
+                // deliberately refuses while a popup is open -- it would take
+                // the key from the dialogs that need it -- so the popup that
+                // wants it has to ask, and this is the one that does.
+                if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+                    ImGui::CloseCurrentPopup();
 
                 const std::string_view filter(g_addFilter.data());
                 if (ImGui::BeginChild("add-list", ImVec2(210.0f, 260.0f))) {
@@ -1436,8 +1460,29 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
     return changed;
 }
 
+// The kind name the IDL wrote into a descriptor, as the browser's own enum.
+// Anything unrecognised is `Other`, which lists nothing rather than everything:
+// a picker that fell back to the whole project would be a file dialog with extra
+// steps, which is the thing `contentKind` exists to avoid.
+[[nodiscard]] ContentKind contentKindNamed(std::string_view name) noexcept
+{
+    if (name == "Mesh")
+        return ContentKind::Mesh;
+    if (name == "Texture")
+        return ContentKind::Texture;
+    if (name == "Audio")
+        return ContentKind::Audio;
+    if (name == "Font")
+        return ContentKind::Font;
+    return ContentKind::Other;
+}
+
+// `tree` is the content browser's, and null wherever there is none -- the F3
+// overlay over a running game has an inspector and no project. The `Content`
+// editor then keeps its text field and its drop target and offers an empty list,
+// which is the honest state rather than a hidden control.
 void drawEditor(scene::World& world, Inspector& inspector, std::span<const core::InstanceId> targets,
-                const scene::PropertyDesc& descriptor, const SharedValue& shared)
+                const scene::PropertyDesc& descriptor, const SharedValue& shared, ContentTree* tree)
 {
     if (shared.state == SharedState::Unreadable) {
         // The class declares the property and the world cannot read it: a null
@@ -1486,7 +1531,9 @@ void drawEditor(scene::World& world, Inspector& inspector, std::span<const core:
         return;
     }
 
-    const EditorKind kind = editorFor(descriptor.type);
+    const EditorKind kind = editorFor(descriptor);
+    const std::string_view kindName =
+        descriptor.contentKind.valid() ? world.atoms().text(descriptor.contentKind) : std::string_view{};
     ImGui::PushID(static_cast<int>(descriptor.name.id));
     ImGui::SetNextItemWidth(-FLT_MIN);
 
@@ -1568,6 +1615,88 @@ void drawEditor(scene::World& world, Inspector& inspector, std::span<const core:
                   : ImGui::InputText("##value", buffer, sizeof(buffer), ImGuiInputTextFlags_EnterReturnsTrue);
         if (entered)
             commit(scene::Value{std::string(buffer)});
+        break;
+    }
+    case EditorKind::Content: {
+        // **A URI is a string, and a person is not a URI.** The engine resolves
+        // `asset://…` through the mounts and could not care which file a person
+        // meant; what a person has is a name they half remember and a browser
+        // full of files. So this is three ways in and they are all the same
+        // property: type the path, pick it from the ones this property ACCEPTS,
+        // or drag the file onto the field.
+        const std::string& current = std::get<std::string>(shared.value);
+        char buffer[256]{};
+        if (!mixed && current.size() + 1 <= sizeof(buffer))
+            std::snprintf(buffer, sizeof(buffer), "%s", current.c_str());
+
+        const float pickWidth = ImGui::GetFrameHeight();
+        ImGui::SetNextItemWidth(-(pickWidth + ImGui::GetStyle().ItemInnerSpacing.x));
+        const bool typed = ImGui::InputTextWithHint("##value", mixed ? "mixed" : "asset://", buffer, sizeof(buffer),
+                                                    ImGuiInputTextFlags_EnterReturnsTrue);
+        if (typed)
+            commit(scene::Value{std::string(buffer)});
+
+        // **The field itself takes a drop from the browser.** Dragging a file
+        // onto the property it belongs to is the gesture every engine has, and
+        // it is the one that does not require knowing what the path is called.
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* took = ImGui::AcceptDragDropPayload(kContentDragPayload); took != nullptr) {
+                const auto* dragged = static_cast<const ContentDrag*>(took->Data);
+                commit(scene::Value{std::string("asset://") + dragged->path});
+            }
+            ImGui::EndDragDropTarget();
+        }
+
+        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+        if (ImGui::Button("...", ImVec2(pickWidth, 0.0f)))
+            ImGui::OpenPopup("content-pick");
+
+        if (ImGui::BeginPopup("content-pick")) {
+            // Read when the popup OPENS rather than every frame: a project's
+            // assets are a directory walk, and a list that is rebuilt sixty
+            // times a second is one the filter is fighting.
+            static std::vector<std::string> candidates;
+            static std::array<char, 96> search{};
+            if (ImGui::IsWindowAppearing()) {
+                candidates =
+                    tree != nullptr ? tree->filesOfKind(contentKindNamed(kindName)) : std::vector<std::string>{};
+                search.fill(0);
+                ImGui::SetKeyboardFocusHere();
+            }
+            ImGui::SetNextItemWidth(ImGui::GetFontSize() * 16.0f);
+            ImGui::InputTextWithHint("##content-search", "search", search.data(), search.size());
+            const std::string_view needle{search.data()};
+
+            ImGui::Separator();
+            if (ImGui::BeginChild("content-list", ImVec2(ImGui::GetFontSize() * 16.0f, ImGui::GetFontSize() * 12.0f))) {
+                // Clearing is a real answer and the first one offered: a
+                // property that names nothing is a legal property, and hunting
+                // for the way to say so is worse than an extra row.
+                if (ImGui::Selectable("(none)")) {
+                    commit(scene::Value{std::string{}});
+                    ImGui::CloseCurrentPopup();
+                }
+
+                std::size_t shown = 0;
+                for (const std::string& candidate : candidates) {
+                    if (!needle.empty() && !containsFold(candidate, needle))
+                        continue;
+                    ++shown;
+                    if (ImGui::Selectable(candidate.c_str())) {
+                        commit(scene::Value{std::string("asset://") + candidate});
+                        ImGui::CloseCurrentPopup();
+                    }
+                }
+                if (candidates.empty()) {
+                    ImGui::TextDisabled("No %s files under content/.", kindName.empty() ? "matching" : kindName.data());
+                }
+                else if (shown == 0) {
+                    ImGui::TextDisabled("Nothing matches \"%s\".", search.data());
+                }
+            }
+            ImGui::EndChild();
+            ImGui::EndPopup();
+        }
         break;
     }
     case EditorKind::Vector3: {
@@ -1696,7 +1825,7 @@ void drawEditor(scene::World& world, Inspector& inspector, std::span<const core:
 // frame, and its state between frames has nowhere else to live.
 core::u64 g_propertyGesture = 0;
 
-void drawProperties(scene::World& world, Inspector& inspector)
+void drawProperties(scene::World& world, Inspector& inspector, ContentTree* tree = nullptr)
 {
     // **The whole selection, not the primary.** A grid pointed at one instance
     // while three are highlighted is the editor disagreeing with itself, and it
@@ -1739,7 +1868,7 @@ void drawProperties(scene::World& world, Inspector& inspector)
             ImGui::TableSetColumnIndex(0);
 
             const std::string_view propertyName = world.atoms().text(descriptor->name);
-            const EditorKind kind = editorFor(descriptor->type);
+            const EditorKind kind = editorFor(*descriptor);
 
             // **A composite's name is a disclosure**, open by default: the rows
             // under it are where its numbers are edited, and starting closed
@@ -1795,7 +1924,7 @@ void drawProperties(scene::World& world, Inspector& inspector)
             }
 
             ImGui::TableSetColumnIndex(1);
-            drawEditor(world, inspector, targets, *descriptor, shared);
+            drawEditor(world, inspector, targets, *descriptor, shared, tree);
 
             // The rows a composite is actually edited in. Disabled with the
             // same rule the widget above uses, because they are the same
@@ -1972,7 +2101,7 @@ void drawConsole(script::ScriptRuntime* runtime)
     ImGui::SameLine();
     const float resetWidth = ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().FramePadding.x * 2.0f;
     ImGui::SetNextItemWidth(-(resetWidth + ImGui::GetStyle().ItemSpacing.x));
-    ImGui::InputTextWithHint("##filter", "filter", filter.data(), filter.size());
+    ImGui::InputTextWithHint("##filter", "search", filter.data(), filter.size());
     ImGui::SameLine();
     ImGui::BeginDisabled(filter[0] == 0);
     if (ImGui::Button("Reset"))
@@ -2448,6 +2577,11 @@ void buildDefaultLayout(ImGuiID dockspace)
         return icons::ContentMesh;
     case ContentKind::Texture:
         return icons::ContentTexture;
+    case ContentKind::Audio:
+    case ContentKind::Font:
+        // No drawing of their own yet, and the generic file is the honest
+        // fallback rather than borrowing a mesh's or a texture's.
+        return icons::ContentOther;
     case ContentKind::Chunk:
         return icons::ContentChunk;
     case ContentKind::Other:
@@ -2487,6 +2621,10 @@ bool drawContentIcon(const IconAtlas* icons, const ContentEntry& entry, float si
         return "mesh";
     case ContentKind::Texture:
         return "tex";
+    case ContentKind::Audio:
+        return "audio";
+    case ContentKind::Font:
+        return "font";
     case ContentKind::Chunk:
         return "chunk";
     case ContentKind::Other:
@@ -2598,20 +2736,38 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
     ContentTree& tree = editor.content();
     const float toolbarIcon = ImGui::GetTextLineHeight();
 
+    // **One line, two heights, and the taller one decides.** Everything on this
+    // row is drawn at text height -- the icons, the separators, the path's own
+    // words -- and the search box at the end of it is a FRAMED widget, taller by
+    // twice the theme's padding. Left alone the short things sit at the top of
+    // the line and the box hangs below them, which is what a person sees as a
+    // toolbar that is not lined up.
+    //
+    // `AlignTextToFramePadding` fixes the TEXT and only the text: it moves the
+    // line's baseline, and an `ImageButton` is not placed against a baseline. So
+    // the icons are nudged by hand, and `onRow` is that nudge -- called before
+    // each of them rather than once, because each is its own item.
+    ImGui::AlignTextToFramePadding();
+    const auto onRow = [](float itemHeight) {
+        const float slack = ImGui::GetFrameHeight() - itemHeight;
+        if (slack > 0.0f)
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + slack * 0.5f);
+    };
+
     ImGui::BeginDisabled(tree.atRoot());
-    if (iconButton(icons, icons::ActionUp, toolbarIcon, "up", "up", "up one folder", true))
+    if (iconButton(icons, icons::ActionUp, toolbarIcon, "up", "up", "up one folder", true, true))
         (void)tree.leave();
     ImGui::EndDisabled();
 
     ImGui::SameLine();
-    if (iconButton(icons, icons::ActionRefresh, toolbarIcon, "refresh", "refresh", "re-read this folder", true))
+    if (iconButton(icons, icons::ActionRefresh, toolbarIcon, "refresh", "refresh", "re-read this folder", true, true))
         (void)tree.refresh();
 
     ImGui::SameLine();
     // The shell's dialog, so the toolbar button and the folder's own
     // right-click menu reach the same one. A FOLDER rather than a generic
     // "new", because what it makes is a folder and the picture can say so.
-    if (iconButton(icons, icons::ContentFolder, toolbarIcon, "new-folder", "new folder", "new folder", true))
+    if (iconButton(icons, icons::ContentFolder, toolbarIcon, "new-folder", "new folder", "new folder", true, true))
         dialogs.newFolder = true;
 
     // **Bringing a file in from the machine**, which is the other half of a
@@ -2620,7 +2776,8 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
     // window does the same thing and lands in the same folder.
     ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
     ImGui::BeginDisabled(!platform::canPickFolder());
-    if (iconButton(icons, icons::ActionAdd, toolbarIcon, "import", "import", "import files into this folder", true))
+    if (iconButton(icons, icons::ActionAdd, toolbarIcon, "import", "import", "import files into this folder", true,
+                   true))
         commands.importAssets = true;
     ImGui::EndDisabled();
 
@@ -2638,6 +2795,7 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
     // button's word is only its fallback for a missing atlas, so the first
     // step wore a picture and no name -- which reads as a button nobody named
     // rather than as the root of the chain.
+    onRow(toolbarIcon);
     (void)drawIcon(icons, icons::ContentFolder, toolbarIcon);
     ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
     if (tree.atRoot()) {
@@ -2679,6 +2837,7 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
             // the chain IS a folder, and a row that pictures only the first of
             // them says the rest are something else -- coloured, because a
             // folder somebody coloured is the same folder here.
+            onRow(toolbarIcon);
             (void)drawIcon(icons, icons::ContentFolder, toolbarIcon, editor.contentColor(here));
             ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
             // The one you are IN is not a button: it goes nowhere, and a
@@ -2731,7 +2890,7 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
         if (room > wanted) {
             ImGui::SameLine(ImGui::GetCursorPosX() + room - wanted);
             if (iconButton(icons, viewIcon, toolbarIcon, "view", names[static_cast<int>(panels.contentView)],
-                           "how entries are laid out", true)) {
+                           "how entries are laid out", true, true)) {
                 ImGui::OpenPopup("view-menu");
             }
         }
@@ -3676,7 +3835,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     if (panels.properties) {
         if (ImGui::Begin("Properties", &panels.properties)) {
             if (world != nullptr && inspector != nullptr) {
-                drawProperties(*world, *inspector);
+                drawProperties(*world, *inspector, editor != nullptr ? &editor->content() : nullptr);
                 drawWriteLog(*world, *inspector);
             }
         }
@@ -4466,6 +4625,12 @@ DebugOverlay::DebugOverlay(platform::Window& window, rhi::IDevice& device, Shell
     // been staged -- and it is said once rather than drawn silently wrong.
     if (!loadUiFont())
         core::log(core::LogLevel::Warn, LUAUG_TR("engine.overlay.warn.font_missing"));
+    // The code face, added second so the UI one stays `Fonts[0]` and therefore
+    // the default. False is the same normal state and gets the same treatment:
+    // the script editor falls back to the UI face, which is readable and wrongly
+    // spaced, and the log says which.
+    if (!loadCodeFont())
+        core::log(core::LogLevel::Warn, LUAUG_TR("engine.overlay.warn.code_font_missing"));
 
     if (!ImGui_ImplSDL3_InitForSDLGPU(sdlWindow)) {
         ImGui::DestroyContext();

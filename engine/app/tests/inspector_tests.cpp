@@ -30,6 +30,11 @@
 #include <variant>
 #include <vector>
 
+#include "../../audio/generated/class_descriptors.gen.h"
+#include "../../input/generated/class_descriptors.gen.h"
+#include "../../render/generated/class_descriptors.gen.h"
+#include "../../scene/generated/class_descriptors.gen.h"
+#include "../../ui/generated/class_descriptors.gen.h"
 #include "inspector_fixture.h"
 
 using luaug::app::coalesceKeyFor;
@@ -1060,4 +1065,71 @@ TEST_CASE("the visible walk and the full walk agree when everything is open")
         CHECK(visible[index].id == all[index].id);
         CHECK(visible[index].depth == all[index].depth);
     }
+}
+
+// --- Content properties -------------------------------------------------------
+//
+// A `Content` is a string as far as the engine is concerned, because it is a URI
+// and resolving it belongs to the mount. The DESCRIPTOR is the only thing that
+// knows it is one, and which files it may name -- the value can never say,
+// because a URI and a name are the same bytes.
+
+TEST_CASE("a Content property gets a picker and a plain string does not")
+{
+    scene::PropertyDesc plain;
+    plain.type = scene::ValueType::String;
+    CHECK(editorFor(plain) == EditorKind::Text);
+
+    core::AtomTable atoms;
+    scene::PropertyDesc content;
+    content.type = scene::ValueType::String;
+    content.contentKind = atoms.intern("Audio");
+    CHECK(editorFor(content) == EditorKind::Content);
+
+    // The type-only overload cannot know, and answers what it can. That is why
+    // there are two: an attribute and a datatype's component have a `ValueType`
+    // and no descriptor at all.
+    CHECK(editorFor(scene::ValueType::String) == EditorKind::Text);
+}
+
+TEST_CASE("every Content property the engine ships says which files it accepts")
+{
+    // **The whole picker rests on this.** A `Content` with no kind falls back to
+    // a text field, which is what the panel did for all of them before -- so a
+    // property that shipped without the annotation would silently lose its
+    // picker and nothing would fail.
+    core::AtomTable atoms;
+    scene::ClassRegistry classes;
+    scene::EnumRegistry enums;
+    // **Every module that registers classes**, because a `Content` property can
+    // be declared in any of them -- `MeshPart` is render's, `Sound` is audio's,
+    // `TextLabel` is ui's -- and a sweep that saw only one module would pass
+    // while four others quietly lost their pickers.
+    scene::generated::registerEnums(enums, atoms);
+    scene::generated::registerClasses(classes, atoms);
+    luaug::render::generated::registerClasses(classes, atoms);
+    luaug::ui::generated::registerClasses(classes, atoms);
+    luaug::audio::generated::registerClasses(classes, atoms);
+    luaug::input::generated::registerClasses(classes, atoms);
+
+    std::size_t contentProperties = 0;
+    for (scene::ClassId id = 1; id < static_cast<scene::ClassId>(classes.classCount()); ++id) {
+        const scene::ClassDescriptor* descriptor = classes.find(id);
+        if (descriptor == nullptr)
+            continue;
+        for (const scene::PropertyDesc& property : descriptor->properties) {
+            if (property.type != scene::ValueType::String || !property.contentKind.valid())
+                continue;
+            ++contentProperties;
+            const std::string_view kind = atoms.text(property.contentKind);
+            const std::string where = std::string(atoms.text(descriptor->name)) + "." +
+                                      std::string(atoms.text(property.name)) +
+                                      " has an unknown content kind: " + std::string(kind);
+            CHECK_MESSAGE((kind == "Mesh" || kind == "Texture" || kind == "Audio" || kind == "Font"), where);
+        }
+    }
+    // Five today: a mesh, two images, a font and a sound. A number rather than a
+    // list, so adding one is a one-line change here and dropping one is a
+    // failure.
+    CHECK(contentProperties == 5);
 }

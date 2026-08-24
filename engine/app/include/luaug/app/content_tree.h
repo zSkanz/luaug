@@ -43,6 +43,11 @@ enum class ContentKind
     Stamp,
     Mesh,
     Texture,
+    // What a `Sound` may be pointed at, and what a `TextLabel` may be. Kinds of
+    // their own since the property pickers had to answer "which files may this
+    // property name" -- a question nothing asked before.
+    Audio,
+    Font,
     Chunk,
     Other,
 };
@@ -168,6 +173,18 @@ public:
     // is a different request, and doing it by accident because somebody
     // multi-selected one is not an outcome to design for.
     [[nodiscard]] ImportReport import(std::span<const std::filesystem::path> sources);
+
+    // Every file of one kind under the whole root, content-relative and sorted.
+    //
+    // **The whole tree rather than the folder that is open**, which is the
+    // opposite of what this class does everywhere else and is right here: a
+    // property picker is asking "which files may this name", and the answer does
+    // not depend on where somebody happened to leave the browser.
+    //
+    // Walked on demand rather than kept: it is read when a picker opens, and a
+    // cache would be a second thing to invalidate on every import, rename and
+    // delete -- for a directory a project's asset count fits in.
+    [[nodiscard]] std::vector<std::string> filesOfKind(ContentKind kind) const;
 
     // The part of a name before the extension this kind carries, for a rename
     // box to start from: `main` for `main.scene.json`, not `main.scene`.

@@ -105,6 +105,10 @@ enum class EditorKind : core::u8
     UDim,
     UDim2,
     Rect,
+    // A `Content` property: a URI naming a file under `content/`. A string as
+    // far as the engine is concerned, and a picker as far as a person is --
+    // which is what `PropertyDesc::contentKind` exists to make possible.
+    Content,
     // Displayed and never written. Reparenting from the panel is out of M4's
     // scope, and `Parent` is an Instance property -- so an editable reference
     // widget would be the one feature the brief excluded, arriving by accident.
@@ -113,6 +117,14 @@ enum class EditorKind : core::u8
 };
 
 [[nodiscard]] EditorKind editorFor(scene::ValueType type) noexcept;
+
+// The same question asked of the DESCRIPTOR, which knows two things the type
+// does not: that a string is a `Content`, and which files it may name.
+//
+// Two overloads rather than one, because the type-only form is what a caller
+// with a bare `ValueType` has -- a datatype's component, an attribute -- and
+// widening it would make every one of those pass something they do not have.
+[[nodiscard]] EditorKind editorFor(const scene::PropertyDesc& descriptor) noexcept;
 
 // The enum a property accepts, from the DESCRIPTOR and not from whatever the
 // property currently holds. `scene::InvalidEnum` when the property is not an

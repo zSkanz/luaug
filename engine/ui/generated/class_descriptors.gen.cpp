@@ -318,6 +318,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("Font"),
             .type = scene::ValueType::String,
+            .contentKind = atoms.intern("Font"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
@@ -439,6 +440,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("Image"),
             .type = scene::ValueType::String,
+            .contentKind = atoms.intern("Texture"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,

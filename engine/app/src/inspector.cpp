@@ -183,6 +183,16 @@ EditorKind editorFor(scene::ValueType type) noexcept
     return EditorKind::ReadOnlyText;
 }
 
+EditorKind editorFor(const scene::PropertyDesc& descriptor) noexcept
+{
+    // A `Content` is a string, and the descriptor is the only thing that knows
+    // it is one: the value cannot say, because a URI and a name are the same
+    // bytes. `contentKind` is set by the IDL for exactly these properties.
+    if (descriptor.type == scene::ValueType::String && descriptor.contentKind.valid())
+        return EditorKind::Content;
+    return editorFor(descriptor.type);
+}
+
 bool editable(const scene::PropertyDesc& descriptor) noexcept
 {
     if (descriptor.readOnly || descriptor.set == nullptr)

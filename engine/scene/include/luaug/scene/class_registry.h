@@ -95,6 +95,22 @@ struct PropertyDesc
     // domain is a fact about the class.
     core::NameAtom enumName{};
 
+    // For a `Content` property, which KIND of file it may name -- `Mesh`,
+    // `Texture`, `Audio`, `Font` -- and an empty atom for everything else.
+    //
+    // The same shape as `enumName` above and for the same argument. A `Content`
+    // is a string as far as the engine is concerned, because it is a URI and
+    // resolving it belongs to the mount; nothing downstream can tell a sound's
+    // from a mesh's. That is fine for the runtime and useless for a person, and
+    // the editor's picker is the caller: a list offering every file in the
+    // project would be a file dialog with extra steps.
+    //
+    // An atom rather than an enum for the reason the enum name is one: these
+    // arrays are static and shared by every registry a process builds, so
+    // anything assigned at registration time would mean something different in
+    // the second one.
+    core::NameAtom contentKind{};
+
     ThreadSafety threadSafety = ThreadSafety::Unsafe;
     bool readOnly = false;
     // Backed, stored, read back faithfully -- and nothing acts on it yet. Not

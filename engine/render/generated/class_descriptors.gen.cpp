@@ -52,6 +52,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("MeshContent"),
             .type = scene::ValueType::String,
+            .contentKind = atoms.intern("Mesh"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,

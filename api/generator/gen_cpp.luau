@@ -631,6 +631,12 @@ local function generate(target: Module)
                 if enumName ~= nil then
                     emit(`            .enumName = atoms.intern("{enumName}"),`)
                 end
+                if property.ContentKind ~= nil then
+                    -- The same shape and the same argument as `enumName`: which
+                    -- files a `Content` may name is a fact about the CLASS, and
+                    -- the value -- a string -- can never answer it.
+                    emit(`            .contentKind = atoms.intern("{property.ContentKind}"),`)
+                end
                 emit(`            .threadSafety = {scope}ThreadSafety::{property.ThreadSafety or "Unsafe"},`)
                 emit(`            .readOnly = {if property.ReadOnly == true then "true" else "false"},`)
                 emit(`            .inert = {if property.Inert == true then "true" else "false"},`)

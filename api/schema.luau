@@ -107,6 +107,20 @@ export type Property = {
     --- (`number_at_least_zero`) rather than minted per property, so a reader
     --- who has seen one has seen them all.
     ErrorKey: string?,
+    --- **Which files a `Content` property may name**, as one of the kinds the
+    --- editor's content browser recognises: `Mesh`, `Texture`, `Audio`, `Font`.
+    ---
+    --- A `Content` is a string as far as the engine is concerned -- it is a URI,
+    --- and resolving it is the mount's job -- so nothing downstream can tell a
+    --- sound's from a mesh's. That is fine for the runtime and useless for a
+    --- person: clicking `Sound.Content` should offer the sounds, and a picker
+    --- that offered every file in the project would be a file dialog with extra
+    --- steps.
+    ---
+    --- The class knows the answer and the value never can, which is the same
+    --- argument `enumName` makes one field up. Absent means the property accepts
+    --- anything, which is the honest answer for one that genuinely does.
+    ContentKind: string?,
     Doc: string,
 }
 

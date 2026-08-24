@@ -76,6 +76,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("Content"),
             .type = scene::ValueType::String,
+            .contentKind = atoms.intern("Audio"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,

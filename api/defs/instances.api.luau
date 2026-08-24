@@ -549,6 +549,7 @@ local Classes: { Schema.Class } = {
             {
                 Name = "MeshContent",
                 Type = "Content",
+                ContentKind = "Mesh",
                 Doc = "The glTF file this part renders. Setting it replaces the geometry; a file that fails to "
                     .. "import leaves the previous mesh in place and reports why, because a part that silently "
                     .. "becomes invisible is harder to diagnose than one that says it could not load.",
@@ -569,7 +570,7 @@ local Classes: { Schema.Class } = {
                     .. "property reads back what was written rather than what it resolved to, because a "
                     .. "value that silently became another value is worse than one that says what it did.",
             },
-        },
+        } :: { Schema.Property },
     },
     {
         Name = "Weld",
@@ -1080,6 +1081,7 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Image",
                 Type = "Content",
+                ContentKind = "Texture",
                 Default = '""',
                 Doc = "A glyph for this binding, as an `asset://` URI. Empty means none.",
             },
@@ -1302,6 +1304,7 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Font",
                 Type = "Content",
+                ContentKind = "Font",
                 Default = '""',
                 Doc = "The typeface, as an `asset://` URI to a TrueType file. Empty is the engine's own "
                     .. "default face -- **Inter**, OFL 1.1, vendored and staged beside the binary -- and so is "
@@ -1398,6 +1401,7 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Image",
                 Type = "Content",
+                ContentKind = "Texture",
                 Default = '""',
                 Doc = "The picture, as an `asset://` URI. A compiled texture out of a pack or an ordinary "
                     .. "PNG out of a source tree; both work, because dev mode is the mode people spend their "
@@ -1623,6 +1627,7 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Content",
                 Type = "Content",
+                ContentKind = "Audio",
                 Default = '""',
                 Doc = "The audio, as an `asset://` URI. WAV, MP3, FLAC and Ogg Vorbis, decoded once and "
                     .. "cached: a sound does not re-read its file sixty times a second.\n\nA URI that "
