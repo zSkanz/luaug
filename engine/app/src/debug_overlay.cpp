@@ -348,8 +348,11 @@ void drawIconBadge(const IconAtlas* icons, ImVec2 origin, float size)
 // `strId` rather than the label, because the label changes with state (play
 // becomes stop) and an ImGui id that changes with state is a button that loses
 // its press half way through.
-// `frameless` drops the button's background and its padding, leaving the
-// picture and its hit box.
+// `frameless` drops the button's background, its BORDER and its padding, leaving
+// the picture and its hit box. All three, because a frame is not one thing: a
+// transparent fill with the theme's outline still on it is a grey square around
+// a sixteen-pixel glyph, which is what a chevron column looked like the day the
+// shell learned to draw borders.
 //
 // It also removes a trap worth naming, because this file fell into it: a FRAMED
 // button occupies its face plus the theme's padding, so a caller centring one by
@@ -367,10 +370,16 @@ bool iconButton(const IconAtlas* icons, std::string_view id, float size, const c
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
+        // **A frame is a fill AND a border, and the border was surviving.**
+        // `ImageButton` renders both, so a transparent `ImGuiCol_Button` leaves
+        // the outline behind -- which is invisible while the theme draws no
+        // borders and is a grey square around every chevron the moment it does.
+        // Frameless has to mean both halves or it means neither.
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
     }
     const auto unstyle = [frameless]() {
         if (frameless) {
-            ImGui::PopStyleVar();
+            ImGui::PopStyleVar(2);
             ImGui::PopStyleColor(3);
         }
     };
