@@ -20,6 +20,7 @@
 #include "luaug/app/frame_scheduler.h"
 #include "luaug/app/inspector.h"
 #include "luaug/app/launcher.h"
+#include "luaug/app/script_editor_panel.h"
 #include "luaug/core/id.h"
 #include "luaug/platform/event.h"
 #include "luaug/rhi/types.h"
@@ -36,8 +37,13 @@ namespace luaug::scene {
 class World;
 }
 
+namespace luaug::audio {
+class AudioSystem;
+}
+
 namespace luaug::app {
 class IconAtlas;
+class ScriptEditor;
 class StreamingHost;
 } // namespace luaug::app
 
@@ -141,6 +147,24 @@ public:
     // the mouse.
     void setGameHoldsPointer(bool held) noexcept { gameHoldsPointer_ = held; }
 
+    // The open scripts, or null (ADR 0057). Null draws no code panes, which is
+    // every shell but the editor's.
+    //
+    // A pointer rather than a member for the same reason `Editor` is one: the
+    // tabs outlive a reload and the overlay does not own the world they point
+    // into.
+    void setScriptEditor(ScriptEditor* scripts) noexcept { scripts_ = scripts; }
+
+    // What the code pane asked for while it drew, drained like `takeCommands`
+    // and for the same reason: saving writes a file and reloading replaces the
+    // world, and neither may happen inside an ImGui callback.
+    [[nodiscard]] ScriptEditorCommands takeScriptCommands() noexcept
+    {
+        ScriptEditorCommands taken = std::move(scriptCommands_);
+        scriptCommands_ = ScriptEditorCommands{};
+        return taken;
+    }
+
     // The icon atlas the panels draw from, or null. Null is a legal state and
     // not a broken one: the atlas is built on the first frame that has a
     // command list, and every panel falls back to text until it is.
@@ -195,6 +219,16 @@ public:
     // A pointer rather than a copy of the numbers, because what the panel shows
     // is a map of every cell's state and that is a vector the host already owns.
     void setStreamingTarget(const StreamingHost* streaming) noexcept { streaming_ = streaming; }
+
+    // The mixer, so a `Content` naming a sound can be AUDITIONED from the
+    // properties grid without running the world. Null -- the default -- draws
+    // no speaker on those rows, which is what a shell with no audio wants.
+    //
+    // The grid does not know it is looking at a `Sound`, and must not: the
+    // button hangs off the property's declared `ContentKind`, so it is on every
+    // Audio content in the IDL and on nothing else. There is still no switch on
+    // a class name in this file.
+    void setAudioTarget(audio::AudioSystem* audio) noexcept { audio_ = audio; }
 
     // What the launcher shell draws and writes its decisions into (ADR 0055).
     // Null in every other shell, which is what makes this a pointer rather than
@@ -254,6 +288,9 @@ private:
     [[maybe_unused]] IconAtlas* icons_ = nullptr;
     [[maybe_unused]] rhi::TextureHandle viewportTexture_;
     [[maybe_unused]] LauncherView* launcher_ = nullptr;
+    [[maybe_unused]] ScriptEditor* scripts_ = nullptr;
+    [[maybe_unused]] ScriptEditorCommands scriptCommands_;
+    [[maybe_unused]] audio::AudioSystem* audio_ = nullptr;
 };
 
 } // namespace luaug::app

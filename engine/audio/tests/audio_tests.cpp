@@ -230,6 +230,11 @@ struct ContentFixture
         root = std::filesystem::temp_directory_path(ec) / "luaug-audio-content";
         std::filesystem::remove_all(root, ec);
         writeTone(root / "sfx" / "tone.wav", 44100u, 11025u);
+        // **Longer than the placeholder tone**, which is the whole point of it:
+        // every duration case below is a comparison against one second, and a
+        // fixture that was only ever shorter than that could not tell a sound
+        // measured by its file from one measured by the constant.
+        writeTone(root / "sfx" / "long.wav", 44100u, 44100u * 3u);
         mounts.mountDirectory(root);
     }
 
@@ -305,4 +310,181 @@ TEST_CASE("swapping the mounts drops what was decoded against the old ones")
 
     fixture.system.setContentMounts(nullptr);
     CHECK(fixture.system.stats().clipsLoaded == 0);
+}
+
+TEST_CASE("a decoded sound is as long as its file, not as long as the placeholder")
+{
+    // D092. `tick` measured every sound in the world against a one-second
+    // constant, which was correct for the whole of M6 -- nothing decoded a file,
+    // so every sound WAS a one-second tone -- and was never revisited when M7
+    // made `Content` real.
+    Fixture fixture;
+    ContentFixture content;
+    fixture.system.setContentMounts(&content.mounts);
+
+    // Both directions, because a length that is merely "not one" could still be
+    // any wrong number: a quarter of a second is shorter than the placeholder
+    // and three seconds is longer, and each is its own file's own length.
+    CHECK(fixture.system.clipDuration("asset://sfx/tone.wav") == doctest::Approx(0.25).epsilon(0.01));
+    CHECK(fixture.system.clipDuration("asset://sfx/long.wav") == doctest::Approx(3.0).epsilon(0.01));
+
+    // And a content that names nothing is still one second, because one second
+    // is how long the tone such a sound plays lasts.
+    CHECK(fixture.system.clipDuration("asset://sfx/absent.wav") == doctest::Approx(1.0).epsilon(0.001));
+    CHECK(fixture.system.clipDuration("") == doctest::Approx(1.0).epsilon(0.001));
+}
+
+TEST_CASE("Ended fires at the end of the FILE")
+{
+    Fixture fixture;
+    ContentFixture content;
+    fixture.system.setContentMounts(&content.mounts);
+
+    const InstanceId id = fixture.make("Sound");
+    scene::SoundComponent& sound = fixture.sound(id);
+    sound.content = "asset://sfx/long.wav";
+    sound.playing = true;
+    (void)fixture.events(); // `Loaded`, which fires on the first tick.
+
+    // **The second the defect stopped at.** A two-minute track that plays for
+    // one second is what was reported, and this is the same thing at three.
+    fixture.run(60);
+    CHECK(fixture.sound(id).playing);
+    const std::vector<std::string> atOne = fixture.events();
+    CHECK(std::ranges::find(atOne, "Ended") == atOne.end());
+
+    fixture.run(60);
+    CHECK(fixture.sound(id).playing);
+
+    // Past three seconds, with a tick of slack for the frame or two a resampler
+    // moves the boundary by.
+    fixture.run(65);
+    CHECK_FALSE(fixture.sound(id).playing);
+    const std::vector<std::string> atEnd = fixture.events();
+    CHECK(std::ranges::count(atEnd, "Ended") == 1);
+    CHECK(fixture.sound(id).timePosition == doctest::Approx(3.0).epsilon(0.01));
+}
+
+TEST_CASE("a looped sound wraps at the file's length")
+{
+    Fixture fixture;
+    ContentFixture content;
+    fixture.system.setContentMounts(&content.mounts);
+
+    const InstanceId id = fixture.make("Sound");
+    scene::SoundComponent& sound = fixture.sound(id);
+    sound.content = "asset://sfx/long.wav";
+    sound.playing = true;
+    sound.looped = true;
+    (void)fixture.events();
+
+    // Three and a half seconds of a three-second file is half a second in --
+    // wrapped by the FILE's length.
+    fixture.run(210);
+    CHECK(fixture.sound(id).playing);
+    CHECK(fixture.sound(id).timePosition == doctest::Approx(0.5).epsilon(0.02));
+
+    // And the quarter-second file is what makes the case discriminating: 0.7 s
+    // of it is 0.2 s in, which is a number neither the old constant nor the
+    // other file could produce.
+    fixture.sound(id).content = "asset://sfx/tone.wav";
+    fixture.sound(id).timePosition = 0.0;
+    fixture.run(42);
+    CHECK(fixture.sound(id).timePosition == doctest::Approx(0.2).epsilon(0.05));
+}
+
+TEST_CASE("the mixer keeps its cursor unless the timeline has really moved")
+{
+    // D093, as the rule rather than as the plumbing. The two clocks are the same
+    // clock in a healthy run and are quantised differently -- the simulation
+    // steps in whole ticks, the device in whole buffers -- so on any given frame
+    // one is ahead of the other by less than either quantum.
+    constexpr double tolerance = 0.25;
+
+    // A tick and a buffer apart is the ordinary case, and taking the timeline
+    // here is what replayed sixteen milliseconds of audio sixty times a second.
+    CHECK_FALSE(audio::detail::shouldTakeTimeline(1.000, 0.984, 3.0, false, tolerance));
+    CHECK_FALSE(audio::detail::shouldTakeTimeline(0.984, 1.000, 3.0, false, tolerance));
+    CHECK_FALSE(audio::detail::shouldTakeTimeline(1.0, 1.0, 3.0, false, tolerance));
+
+    // A script seeking is not a quantisation, and the mixer follows it.
+    CHECK(audio::detail::shouldTakeTimeline(1.0, 2.5, 3.0, false, tolerance));
+    CHECK(audio::detail::shouldTakeTimeline(2.5, 0.0, 3.0, false, tolerance));
+
+    // **A loop is compared the short way round.** The frame in which the mixer
+    // has wrapped and the timeline has not is a whole clip apart by subtraction
+    // and a millisecond apart in fact; calling it a seek would put a click at
+    // the top of every loop.
+    CHECK_FALSE(audio::detail::shouldTakeTimeline(0.001, 2.999, 3.0, true, tolerance));
+    CHECK_FALSE(audio::detail::shouldTakeTimeline(2.999, 0.001, 3.0, true, tolerance));
+    // And the same two numbers on a sound that does NOT loop are exactly the
+    // seek they look like.
+    CHECK(audio::detail::shouldTakeTimeline(0.001, 2.999, 3.0, false, tolerance));
+    // A seek inside a looped sound is still a seek.
+    CHECK(audio::detail::shouldTakeTimeline(0.1, 1.6, 3.0, true, tolerance));
+}
+
+TEST_CASE("an audition plays a file without a Sound and without the world")
+{
+    // The editor's preview. It is deliberately not a `Sound` and deliberately
+    // not a voice: the one thing it has that neither of those may have is a
+    // cursor the wall clock drives.
+    Fixture fixture;
+    ContentFixture content;
+    fixture.system.setContentMounts(&content.mounts);
+
+    CHECK_FALSE(fixture.system.auditioning());
+
+    fixture.system.audition("asset://sfx/long.wav", 0.5f, 1.0f);
+    CHECK(fixture.system.auditioning());
+    CHECK(fixture.system.auditioning("asset://sfx/long.wav"));
+    // Which is what a play button on one row asks so that the OTHER rows do not
+    // draw themselves as playing.
+    CHECK_FALSE(fixture.system.auditioning("asset://sfx/tone.wav"));
+
+    // Starting another replaces it. Two previews at once is not a thing anybody
+    // asked for.
+    fixture.system.audition("asset://sfx/tone.wav", 0.5f, 1.0f);
+    CHECK(fixture.system.auditioning("asset://sfx/tone.wav"));
+    CHECK_FALSE(fixture.system.auditioning("asset://sfx/long.wav"));
+
+    fixture.system.stopAudition();
+    CHECK_FALSE(fixture.system.auditioning());
+
+    // **A file that will not decode is not auditioned.** A button that latched
+    // on silence would say the opposite of what happened; the warning the
+    // decoder already logged is the honest answer.
+    fixture.system.audition("asset://sfx/absent.wav", 0.5f, 1.0f);
+    CHECK_FALSE(fixture.system.auditioning());
+
+    // And it holds a clip pointer like every voice does, so replacing the
+    // mounts has to take it with them.
+    fixture.system.audition("asset://sfx/tone.wav", 0.5f, 1.0f);
+    REQUIRE(fixture.system.auditioning());
+    fixture.system.setContentMounts(nullptr);
+    CHECK_FALSE(fixture.system.auditioning());
+}
+
+TEST_CASE("an audition does not touch the sound it was started from")
+{
+    Fixture fixture;
+    ContentFixture content;
+    fixture.system.setContentMounts(&content.mounts);
+
+    const InstanceId id = fixture.make("Sound");
+    scene::SoundComponent& sound = fixture.sound(id);
+    sound.content = "asset://sfx/long.wav";
+    sound.timePosition = 1.25;
+
+    fixture.system.audition(sound.content, sound.volume, sound.playbackSpeed);
+    fixture.run(30);
+
+    // `Playing` is the game's state and `TimePosition` is the simulation's, and
+    // a preview owns neither. The timeline did not advance because the sound is
+    // not playing -- which is exactly the state an audition has to work in.
+    CHECK(fixture.system.auditioning());
+    CHECK_FALSE(fixture.sound(id).playing);
+    CHECK(fixture.sound(id).timePosition == doctest::Approx(1.25));
+    const std::vector<std::string> seen = fixture.events();
+    CHECK(std::ranges::find(seen, "Ended") == seen.end());
 }

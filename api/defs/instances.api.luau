@@ -1622,7 +1622,9 @@ local Classes: { Schema.Class } = {
             .. "reproduces both exactly and a headless run with no audio device produces the same `Ended` on "
             .. "the same tick as a run with speakers. What the speakers do is downstream of the simulation and "
             .. "never an input to it -- otherwise a script reading `TimePosition` would be reading the wall "
-            .. "clock through a side door (R10).",
+            .. "clock through a side door (R10).\n\n**How long it is, is the FILE's.** `TimePosition` "
+            .. "advances on the simulation's clock and stops at the length of what `Content` decoded to, so "
+            .. "the two facts a sound is made of come from the two places that own them.",
         Properties = {
             {
                 Name = "Content",
@@ -1635,9 +1637,15 @@ local Classes: { Schema.Class } = {
                     .. "id. A sound that went silent because a file was missing is a bug report about the "
                     .. "sound; a placeholder that is audibly a placeholder is one about the file. "
                     .. '`DebugService:GetStat("AudioClipsMissing")` is how a script asks which it '
-                    .. "got.\n\nWhere in the file the sound is comes from `TimePosition` every frame "
-                    .. "rather than from a cursor the mixer keeps, so the audio is a function of the "
-                    .. "simulation and a replay reproduces it.",
+                    .. "got.\n\n**The file's length is the sound's length.** `Ended` fires when "
+                    .. "`TimePosition` reaches it, so a two-minute track plays for two minutes; a "
+                    .. "content that names nothing is one second long, because that is how long the "
+                    .. "placeholder tone is.\n\nThe mixer keeps its own cursor and takes "
+                    .. "`TimePosition` whenever the two part company -- a seek, a rewind, a sound "
+                    .. "stopped and started. It has to: the timeline moves in whole ticks and a "
+                    .. "device moves in buffers, so a cursor re-read every frame stutters between "
+                    .. "them. Nothing in the simulation reads that cursor, which is what keeps a "
+                    .. "replay exact (R10).",
             },
             {
                 Name = "Playing",

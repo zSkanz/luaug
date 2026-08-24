@@ -1,6 +1,7 @@
 #include "luaug/app/debug_overlay.h"
 
 #include "luaug/app/streaming_host.h"
+#include "luaug/audio/audio.h"
 
 #if LUAUG_DEBUG_UI
 
@@ -42,6 +43,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_set>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -517,6 +519,12 @@ std::array<char, 64> g_addFilter{};
 // The instance index whose add popup is open, or zero. Slot zero is never an
 // instance, which is what makes it usable as "none".
 core::u32 g_addOpenRow = 0;
+// Whether something nearer than the shell has already answered this frame's
+// Escape. Set by the popup that closes itself with it and consumed by the
+// shell's handler at the end of the frame, which is the only order the two can
+// run in -- panels draw, then shortcuts. See both ends for why the popup being
+// open is not a question that can be asked afterwards.
+bool g_escapeTaken = false;
 // Whether the right-drag in progress BEGAN over the viewport image. Latched on
 // the press, because that is the only moment the question can be answered: once
 // the pointer is held it stops reporting a position, and asking afterwards lets
@@ -869,7 +877,8 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             // highlight and the height; the arrow, the icon, the name and the
             // plus are placed on top of it afterwards, which is also what puts
             // them OVER the highlight rather than under it.
-            if (ImGui::Selectable("##row", inspector.isSelected(row.id), ImGuiSelectableFlags_AllowOverlap,
+            if (ImGui::Selectable("##row", inspector.isSelected(row.id),
+                                  ImGuiSelectableFlags_AllowOverlap | ImGuiSelectableFlags_AllowDoubleClick,
                                   ImVec2(0.0f, rowHeight))) {
                 // Ctrl adds and removes, shift takes the run from the primary
                 // to here, a plain click replaces. The range is taken over
@@ -885,6 +894,16 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 }
                 else {
                     inspector.select(row.id);
+                }
+
+                // **Double-clicking a script opens it** (ADR 0057), which is the
+                // door somebody looks for first. Recorded rather than acted on:
+                // the tab needs the instance's `Source` and where it came from,
+                // and both are the loop's to look up at the safe point.
+                if (commands != nullptr && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
+                    world.classes().isA(world.classOf(row.id),
+                                        world.classes().findId(world.atoms().lookup("BaseScript")))) {
+                    commands->openScript = row.id;
                 }
             }
             // Asked while the selectable is still the last item, which is the
@@ -1245,8 +1264,16 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 // deliberately refuses while a popup is open -- it would take
                 // the key from the dialogs that need it -- so the popup that
                 // wants it has to ask, and this is the one that does.
-                if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+                //
+                // And it SAYS it took the key, because closing a popup takes
+                // effect immediately: by the time the shell's handler runs there
+                // is no popup left for its guard to see, and the one press
+                // closed the menu and dropped the selection the menu had been
+                // opened for. One Escape, one thing.
+                if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
                     ImGui::CloseCurrentPopup();
+                    g_escapeTaken = true;
+                }
 
                 const std::string_view filter(g_addFilter.data());
                 if (ImGui::BeginChild("add-list", ImVec2(210.0f, 260.0f))) {
@@ -1482,7 +1509,8 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
 // editor then keeps its text field and its drop target and offers an empty list,
 // which is the honest state rather than a hidden control.
 void drawEditor(scene::World& world, Inspector& inspector, std::span<const core::InstanceId> targets,
-                const scene::PropertyDesc& descriptor, const SharedValue& shared, ContentTree* tree)
+                const scene::PropertyDesc& descriptor, const SharedValue& shared, ContentTree* tree,
+                const IconAtlas* icons, audio::AudioSystem* audio)
 {
     if (shared.state == SharedState::Unreadable) {
         // The class declares the property and the world cannot read it: a null
@@ -1629,8 +1657,21 @@ void drawEditor(scene::World& world, Inspector& inspector, std::span<const core:
         if (!mixed && current.size() + 1 <= sizeof(buffer))
             std::snprintf(buffer, sizeof(buffer), "%s", current.c_str());
 
+        // **A speaker on the rows that name a sound**, which is what makes a
+        // `Content` something you can check rather than something you hope
+        // about. It hangs off the property's declared `ContentKind` and not off
+        // the class, so it is on every Audio content in the IDL and on nothing
+        // else -- this file still has no switch on a class name in it.
+        //
+        // Nothing to audition on a mixed selection or an empty path: one button
+        // cannot preview four different files, and there is no file in the
+        // second case.
+        const bool audible =
+            audio != nullptr && contentKindNamed(kindName) == ContentKind::Audio && !mixed && !current.empty();
+
         const float pickWidth = ImGui::GetFrameHeight();
-        ImGui::SetNextItemWidth(-(pickWidth + ImGui::GetStyle().ItemInnerSpacing.x));
+        const float inner = ImGui::GetStyle().ItemInnerSpacing.x;
+        ImGui::SetNextItemWidth(-(audible ? pickWidth * 2.0f + inner * 2.0f : pickWidth + inner));
         const bool typed = ImGui::InputTextWithHint("##value", mixed ? "mixed" : "asset://", buffer, sizeof(buffer),
                                                     ImGuiInputTextFlags_EnterReturnsTrue);
         if (typed)
@@ -1647,9 +1688,44 @@ void drawEditor(scene::World& world, Inspector& inspector, std::span<const core:
             ImGui::EndDragDropTarget();
         }
 
-        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+        ImGui::SameLine(0.0f, inner);
         if (ImGui::Button("...", ImVec2(pickWidth, 0.0f)))
             ImGui::OpenPopup("content-pick");
+
+        if (audible) {
+            ImGui::SameLine(0.0f, inner);
+            // **Play and pause are the same button**, because they are the same
+            // question asked twice -- and a person who has just started a
+            // two-minute track needs the way to stop it in the place they
+            // started it, not somewhere else on the row.
+            const bool playing = audio->auditioning(current);
+            if (iconButton(icons, playing ? icons::ActionPause : icons::ActionPlay, pickWidth, "audition",
+                           playing ? "||" : ">",
+                           playing ? "stop the preview" : "hear this file without running the game")) {
+                if (playing) {
+                    audio->stopAudition();
+                }
+                else {
+                    // **At the volume and speed this instance would play it
+                    // at**, read the way every other row reads a value: by name
+                    // off the selection. A class with no `Volume` simply
+                    // auditions at half, which is the same default a `Sound`
+                    // carries.
+                    //
+                    // The GROUP, the distance and the master volume are left
+                    // out on purpose. Those are the mix, and an audition is the
+                    // file -- a preview that went silent because the listener
+                    // is far from the part would be a preview nobody can use.
+                    const auto number = [&](const char* name, f32 fallback) {
+                        const SharedValue read = sharedValue(world, targets, world.atoms().intern(name));
+                        if (read.state == SharedState::Unreadable || !std::holds_alternative<f64>(read.value))
+                            return fallback;
+                        return static_cast<f32>(std::get<f64>(read.value));
+                    };
+                    audio->audition(current, number("Volume", 0.5f), number("PlaybackSpeed", 1.0f));
+                }
+            }
+        }
 
         if (ImGui::BeginPopup("content-pick")) {
             // Read when the popup OPENS rather than every frame: a project's
@@ -1825,7 +1901,8 @@ void drawEditor(scene::World& world, Inspector& inspector, std::span<const core:
 // frame, and its state between frames has nowhere else to live.
 core::u64 g_propertyGesture = 0;
 
-void drawProperties(scene::World& world, Inspector& inspector, ContentTree* tree = nullptr)
+void drawProperties(scene::World& world, Inspector& inspector, ContentTree* tree = nullptr,
+                    const IconAtlas* icons = nullptr, audio::AudioSystem* audio = nullptr)
 {
     // **The whole selection, not the primary.** A grid pointed at one instance
     // while three are highlighted is the editor disagreeing with itself, and it
@@ -1924,7 +2001,7 @@ void drawProperties(scene::World& world, Inspector& inspector, ContentTree* tree
             }
 
             ImGui::TableSetColumnIndex(1);
-            drawEditor(world, inspector, targets, *descriptor, shared, tree);
+            drawEditor(world, inspector, targets, *descriptor, shared, tree, icons, audio);
 
             // The rows a composite is actually edited in. Disabled with the
             // same rule the widget above uses, because they are the same
@@ -3746,6 +3823,7 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
 void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,
                      script::ScriptRuntime* runtime, Editor* editor, rhi::TextureHandle viewport, bool& laidOut,
                      EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs, IconAtlas* icons,
+                     ScriptEditor* scripts, ScriptEditorCommands& scriptCommands, audio::AudioSystem* audio,
                      bool furniture)
 {
     // **F3 down: the world and nothing else.** Returning before the dockspace
@@ -3808,6 +3886,16 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
             drawContent(*editor, commands, panels, dialogs, icons);
     }
 
+    // **Siblings of the Viewport, in the central node** (ADR 0057). A window per
+    // open script rather than a tab bar of our own: the dockspace already turns
+    // siblings in one node into a tab strip, and it also lets somebody drag one
+    // out to sit BESIDE the world rather than over it -- which is what was asked
+    // for and what a hand-rolled tab bar would have refused.
+    if (scripts != nullptr) {
+        const ImGuiDockNode* central = ImGui::DockBuilderGetCentralNode(dockspace);
+        drawScriptEditor(*scripts, central != nullptr ? static_cast<core::u32>(central->ID) : 0u, scriptCommands);
+    }
+
     if (panels.explorer) {
         if (ImGui::Begin("Explorer", &panels.explorer)) {
             if (world != nullptr && inspector != nullptr) {
@@ -3835,7 +3923,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     if (panels.properties) {
         if (ImGui::Begin("Properties", &panels.properties)) {
             if (world != nullptr && inspector != nullptr) {
-                drawProperties(*world, *inspector, editor != nullptr ? &editor->content() : nullptr);
+                drawProperties(*world, *inspector, editor != nullptr ? &editor->content() : nullptr, icons, audio);
                 drawWriteLog(*world, *inspector);
             }
         }
@@ -3868,7 +3956,13 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // the key from either would make the shell's own dialogs unclosable. So it
     // is asked for last, after everything that could have wanted it.
     const bool popupOpen = ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
-    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !ImGui::IsAnyItemActive() && !popupOpen) {
+    // **And only when nothing NEARER has already taken it this frame.**
+    // `popupOpen` cannot answer that on its own: a popup that closed itself with
+    // Escape is already off the stack when this runs, so the same press would
+    // arrive here as though there had never been a menu. See the add-child popup
+    // in `drawExplorer`.
+    const bool escapeTaken = std::exchange(g_escapeTaken, false);
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !ImGui::IsAnyItemActive() && !popupOpen && !escapeTaken) {
         // **In play mode Escape stops**, which is what Unreal does and what
         // this editor now needs rather than merely wants. A running game holds
         // the pointer, and while it does the panels do not see the mouse at all
@@ -4755,7 +4849,7 @@ void DebugOverlay::render(rhi::ICmdList& cmd, rhi::TextureHandle target, const F
         drawLauncher(launcher_);
     else if (shell_ == Shell::Editor)
         drawEditorShell(frame, world_, root_, inspector_, runtime_, editor_, viewportTexture_, layoutBuilt_, commands_,
-                        panels_, dialogs_, icons_, visible_);
+                        panels_, dialogs_, icons_, scripts_, scriptCommands_, audio_, visible_);
     else
         drawShell(frame, world_, root_, inspector_, runtime_, streaming_);
     ImGui::Render();

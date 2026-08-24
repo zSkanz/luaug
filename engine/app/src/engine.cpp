@@ -1,5 +1,7 @@
 #include "luaug/app/engine.h"
 
+#include "luaug/app/script_editor.h"
+
 #include <lua.h>
 
 // `std::sort` for the frame-time median, and `std::ptrdiff_t` beside it. Both
@@ -455,6 +457,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // inert unless `--edit` asked for them, and the target is not created until
     // a panel has said how big it is.
     Editor editor;
+    // The open scripts (ADR 0057). Beside the `Editor` rather than inside it
+    // because they outlive a reload: a tab is keyed on an instance and a
+    // breakpoint on a chunk, and `reloadWorld` replaces every instance in the
+    // world while the chunk names stay what they were.
+    ScriptEditor scripts;
+    // Raised by a script save and acted on where a world may legally be
+    // swapped, which is not where the panel's commands are drained.
+    bool scriptReloadAsked = false;
     // What this person had last time: their content-folder colours, and the
     // scene they were looking at (the scene is read separately below, because
     // the boot has to know it before an `Editor` exists).
@@ -846,6 +856,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // outlives every world this process builds, which is the whole reason
         // `setWorld` is idempotent.
         overlay->setStreamingTarget(&streaming);
+        // Re-pointed on every reload, unlike streaming: the mixer belongs to the
+        // `WorldHost` a reload destroys. What the properties grid does with it is
+        // audition a `Content`, which is the one thing that has to work
+        // while the world is not ticking at all.
+        overlay->setAudioTarget(&host->audio());
         // After the console sink is installed, so the shell chains to it rather
         // than replacing it (D017).
         overlay->captureLog();
@@ -1062,6 +1077,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // from the same world.
             if (overlay.has_value()) {
                 const EditorCommands editorCommands = overlay->takeCommands();
+                // Set by a script save, acted on further down beside the dev
+                // server's reload -- see the comment there.
+                scriptReloadAsked = false;
                 if (editorCommands.play.has_value()) {
                     if (*editorCommands.play)
                         editor.play(host->world());
@@ -1070,6 +1088,70 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 }
                 if (editorCommands.pause.has_value())
                     editor.setPaused(*editorCommands.pause);
+
+                // --- The script editor (ADR 0057) ------------------------
+                //
+                // Every one of these is here for the reason the block above
+                // states: opening a tab reads a property, saving walks a file,
+                // and a reload replaces the world -- none of which may happen
+                // inside the callback that noticed the click.
+                if (editorCommands.openScript.valid()) {
+                    scene::World& w = host->world();
+                    const core::InstanceId id = editorCommands.openScript;
+                    const std::optional<scene::Value> source = w.getProperty(id, w.atoms().intern("Source"));
+                    const auto* text = source.has_value() ? std::get_if<std::string>(&source.value()) : nullptr;
+                    scripts.open(id, script::scriptChunkName(host->runtime().state(), id),
+                                 std::string(script::mountedPathOf(host->runtime().state(), id)),
+                                 std::string(w.atoms().text(w.name(id))), text != nullptr ? *text : std::string{});
+                }
+
+                ScriptEditorCommands scriptCommands = overlay->takeScriptCommands();
+
+                // **The text goes into the world as it is typed**, so pressing
+                // play runs what is on the screen. `Ctrl+S` is about the FILE,
+                // not about the engine -- which is what "an instance is the only
+                // thing that runs" buys.
+                for (const std::size_t index : scriptCommands.edited) {
+                    const OpenScript* tab = scripts.at(index);
+                    if (tab == nullptr || !host->world().alive(tab->instance))
+                        continue;
+                    (void)host->world().setProperty(tab->instance, host->world().atoms().intern("Source"),
+                                                    scene::Value{tab->document.text()});
+                    editor.touch();
+                }
+
+                if (scriptCommands.toggleBreakpointLine.has_value()) {
+                    if (const OpenScript* tab = scripts.at(scripts.activeIndex()); tab != nullptr)
+                        (void)scripts.toggleBreakpoint(tab->chunk, *scriptCommands.toggleBreakpointLine);
+                }
+
+                if (scriptCommands.save.has_value()) {
+                    const std::size_t index = *scriptCommands.save;
+                    if (const OpenScript* tab = scripts.at(index); tab != nullptr) {
+                        if (tab->file.empty()) {
+                            // It lives in the scene, so saving it is saving the
+                            // scene -- the `Source` is already in the world.
+                            if (editor.saveOpenScene(host->world()))
+                                scripts.markSaved(index);
+                        }
+                        else if (platform::writeTextFile(options.scriptPath / tab->file, tab->document.text())) {
+                            scripts.markSaved(index);
+                            // The file on disk and the world now agree, and the
+                            // world is what runs -- so a reload is what makes
+                            // the running VM agree too.
+                            scriptCommands.reload = true;
+                        }
+                    }
+                }
+
+                if (scriptCommands.close.has_value())
+                    (void)scripts.close(*scriptCommands.close);
+
+                // Not acted on here. A reload destroys the `WorldHost` this
+                // block is still reading from, so it waits for the one place a
+                // world may be swapped -- the same place the dev server's does.
+                if (scriptCommands.reload)
+                    scriptReloadAsked = true;
                 if (!editorCommands.openScene.empty()) {
                     // Out of play mode first. Loading a scene while playing
                     // would leave the snapshot describing a world that no longer
@@ -1467,6 +1549,28 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             return streaming.areaResident(position, radius);
         });
 
+        // **The editor's own reload** (ADR 0057), which `luaug edit` has never
+        // had: it is started without `--dev-control`, and the only call site was
+        // gated on it. Saving a script writes the file and then rebuilds the
+        // world from source, which is the loop somebody editing code expects and
+        // the one the dev server has given `luaug dev` since M3.
+        if (scriptReloadAsked) {
+            scriptReloadAsked = false;
+            if (editor.inPlayMode())
+                editor.stop(host->world(), inspector);
+            const ReloadReport reloaded = reloadWorld(host, worldOptions);
+            if (reloaded.ok) {
+                inspector.onWorldChanged();
+                overlay->setInspectionTarget(&host->world(), host->runtime().dataModel(), &inspector);
+                overlay->setScriptTarget(&host->runtime());
+                // Every instance in the world is a new one, so a tab holding an
+                // old id is holding nothing. The chunk names -- and therefore
+                // the breakpoints -- are unchanged, which is why they are keyed
+                // on those.
+                (void)scripts.forgetDestroyed(host->world());
+            }
+        }
+
         // The only place a reload happens, and for the same reason: a world
         // swapped mid-tick would break within-run determinism, which is the
         // rule architecture.md §4 states (and the reason the connection hands
@@ -1741,6 +1845,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // play mode. A paused game that kept humming would be the same
         // half-stopped state the three-state model exists to remove.
         host->audio().setSuspended(options.editor && !advancing(editor.runState()));
+        // **Pressing play ends the preview.** An audition is a thing the tool is
+        // doing while the world is stopped, and a file still playing over the
+        // top of a running game is the same wrong-owner mistake the suspension
+        // itself exists to prevent.
+        if (advancing(editor.runState()))
+            host->audio().stopAudition();
         host->audio().update(host->world(), host->currentCamera());
 
         // The physics wireframe (roadmap M5, "Jolt debug-draw bridge"): what the
@@ -2276,6 +2386,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 if (options.editor) {
                     overlay->setEditorTarget(&editor, viewportTarget.texture());
                     overlay->setIcons(&iconAtlas);
+                    overlay->setScriptEditor(&scripts);
                 }
                 overlay->render(*cmd, options.editor && present.valid() ? present : target, frame);
             }

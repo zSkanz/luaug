@@ -15,6 +15,7 @@
 #include <mutex>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -52,9 +53,28 @@ constexpr u32 kChannels = 2;
 // thing to lose, and an unbounded mix is an unbounded callback.
 constexpr core::usize kMaxVoices = 64;
 
-// What one voice sounds like until M7 can decode a file. See the header: a
-// placeholder that is audibly a placeholder, and not silence.
+// How long the PLACEHOLDER TONE lasts, and nothing else. See the header: a
+// sound whose content names nothing still plays, as a tone that is audibly a
+// placeholder rather than as silence, and this is that tone's length.
+//
+// It used to be every sound's length, which is D092: `tick` measured
+// `TimePosition` against this constant whatever the file was, so a two-minute
+// track fired `Ended` and stopped itself after one second. A decoded sound is
+// measured against ITS OWN length now -- `clipDuration` -- and this is what is
+// left when there is no clip to ask.
 constexpr f64 kPlaceholderDuration = 1.0;
+
+// How far the mixer's cursor and the simulation's timeline may drift apart
+// before the cursor is taken from the timeline. See `detail::shouldTakeTimeline`
+// in the header for what the two clocks are and why they differ at all.
+//
+// A quarter second is chosen from both sides. It is far larger than the gap the
+// two quantisations can open -- one fixed step plus one device buffer, which is
+// under thirty milliseconds at any rate this engine runs -- and far smaller than
+// any seek a person or a script performs on purpose. A seek SMALLER than this is
+// not resynced, and that is the honest cost: the sound keeps playing from within
+// a quarter second of where it was asked to go.
+constexpr f64 kResyncTolerance = 0.25;
 
 // The mixer's view of one sound. Written by the main thread under the lock and
 // read by the audio callback -- a lock rather than a lock-free ring because the
@@ -77,6 +97,13 @@ struct Clip
 
 struct Voice
 {
+    // **Which sound this is.** Voices used to be matched between frames by
+    // INDEX, which is stable only while the sound set is: one sound stopping
+    // shifted every voice after it onto a different clip's cursor. The id costs
+    // a linear scan over at most sixty-four entries once a frame and makes
+    // "the same sound" mean the same sound.
+    core::InstanceId id;
+
     f32 amplitude = 0.0f;
     f32 frequency = 440.0f;
     f64 phase = 0.0;
@@ -86,14 +113,29 @@ struct Voice
     // resolved -- which still plays the placeholder tone, because a sound that
     // went silent because a file was missing is a bug report about the sound.
     const Clip* clip = nullptr;
-    // Where in the clip this voice is, in FRAMES, taken from the sound's own
-    // `TimePosition` every frame.
+    // Where in the clip this voice is, in FRAMES. **Advanced by the callback and
+    // SEEDED from the sound's `TimePosition`**, rather than taken from it afresh
+    // every frame.
     //
-    // Taken rather than accumulated, and that is the whole reason the audio here
-    // can be reasoned about: the timeline is the SIM clock's (M6 brief, Decision
-    // 9), so the mixer is a function of simulation state rather than a second
-    // clock that drifts against it. A cursor the callback advanced on its own
-    // would make "where is this sound" have two answers.
+    // Taken afresh is what M6 shipped and it is D093. The reasoning was sound --
+    // the timeline is the sim clock's (M6 brief, Decision 9) and the mixer must
+    // not become a second clock the simulation can read -- but the two clocks
+    // are quantised differently and only one of them is smooth. `TimePosition`
+    // moves in fixed steps at the tick rate; this cursor moves at the device's.
+    // A frame in which no tick ran therefore dragged the cursor BACKWARDS by a
+    // frame's worth of samples and the mixer replayed audio it had just played,
+    // as often as sixty times a second. That is what it sounded like.
+    //
+    // The invariant that mattered is untouched, because it was never about this
+    // number: nothing here is ever read BY the simulation. `TimePosition` still
+    // advances by `FixedTimestep * PlaybackSpeed` per tick, `Ended` still fires
+    // from it, and a replay still reproduces both exactly. What changed is only
+    // what the speakers do between two ticks, which the API's own words already
+    // called downstream of the simulation and never an input to it.
+    //
+    // The timeline is still taken whenever the two have genuinely parted
+    // company -- a seek, a rewind, a sound stopped and started -- which is
+    // `detail::shouldTakeTimeline`.
     f64 cursor = 0.0;
     f64 cursorStep = 1.0;
     bool looped = false;
@@ -114,6 +156,55 @@ struct Voice
     return static_cast<f32>(220.0 * std::pow(2.0, semitone / 12.0));
 }
 
+// **One clip, mixed into the buffer, cursor advanced.** Written once because
+// there are two callers now -- the world's voices and the audition -- and a
+// second copy of a resampling loop is a second place for them to disagree about
+// what the end of a clip means.
+//
+// Returns false when a non-looped voice ran off the end, which is what retires
+// an audition.
+[[nodiscard]] bool mixClip(float* samples, ma_uint32 frameCount, const Clip& clip, f64& cursor, f64 step, f32 amplitude,
+                           bool looped) noexcept
+{
+    for (ma_uint32 frame = 0; frame < frameCount; ++frame) {
+        // Nearest sample rather than interpolated. At playback speed one --
+        // which is every sound in every game most of the time -- the cursor
+        // lands exactly on a frame and this is a copy; at other speeds it is a
+        // repitch whose artefacts are below what a game mix reveals.
+        // Interpolation is a quality decision and there is no quality dial to
+        // hang it on.
+        const auto index = static_cast<core::usize>(cursor);
+        if (index >= clip.frames) {
+            if (!looped) {
+                return false;
+            }
+            // Wrapped by the CLIP's length rather than reset to zero: a loop
+            // that restarted at the buffer boundary would click once per buffer
+            // instead of once per loop.
+            cursor = std::fmod(cursor, static_cast<f64>(clip.frames));
+            continue;
+        }
+        const core::usize at = index * kChannels;
+        samples[frame * kChannels] += clip.samples[at] * amplitude;
+        samples[frame * kChannels + 1] += clip.samples[at + 1] * amplitude;
+        cursor += step;
+    }
+    return true;
+}
+
+// What the editor is auditioning, if anything. See `AudioSystem::audition`: it
+// is deliberately not a `Voice` and deliberately not a `Sound`, because the one
+// thing it has that neither of those may have is a cursor the wall clock drives.
+struct Audition
+{
+    const Clip* clip = nullptr;
+    std::string content;
+    f64 cursor = 0.0;
+    f64 cursorStep = 1.0;
+    f32 amplitude = 0.0f;
+    bool active = false;
+};
+
 } // namespace
 
 struct AudioSystem::Impl
@@ -123,6 +214,7 @@ struct AudioSystem::Impl
 
     std::mutex mutex;
     std::vector<Voice> voices;
+    Audition audition;
 
     std::atomic<u64> underruns{0};
     std::atomic<u64> dropped{0};
@@ -184,29 +276,8 @@ struct AudioSystem::Impl
                 continue;
 
             if (voice.clip != nullptr) {
-                for (ma_uint32 frame = 0; frame < frameCount; ++frame) {
-                    // Nearest sample rather than interpolated. At playback speed
-                    // one -- which is every sound in every game most of the time
-                    // -- the cursor lands exactly on a frame and this is a copy;
-                    // at other speeds it is a repitch whose artefacts are below
-                    // what a game mix reveals. Interpolation is a quality
-                    // decision and M7 has no quality dial to hang it on.
-                    const auto index = static_cast<core::usize>(voice.cursor);
-                    if (index >= voice.clip->frames) {
-                        if (!voice.looped) {
-                            break;
-                        }
-                        // Wrapped by the CLIP's length rather than reset to
-                        // zero: a loop that restarted at the buffer boundary
-                        // would click once per buffer instead of once per loop.
-                        voice.cursor = std::fmod(voice.cursor, static_cast<f64>(voice.clip->frames));
-                        continue;
-                    }
-                    const core::usize at = index * kChannels;
-                    samples[frame * kChannels] += voice.clip->samples[at] * voice.amplitude;
-                    samples[frame * kChannels + 1] += voice.clip->samples[at + 1] * voice.amplitude;
-                    voice.cursor += voice.cursorStep;
-                }
+                (void)mixClip(samples, frameCount, *voice.clip, voice.cursor, voice.cursorStep, voice.amplitude,
+                              voice.looped);
                 continue;
             }
 
@@ -222,6 +293,20 @@ struct AudioSystem::Impl
                 if (voice.phase > 6.283185307179586)
                     voice.phase -= 6.283185307179586;
             }
+        }
+
+        // **The audition is mixed whatever the world is doing**, including while
+        // the mixer is suspended -- suspension empties `voices` and the audition
+        // was never in them. That is the point of it: the editor suspends audio
+        // precisely because the world is not ticking, and a preview is what
+        // somebody asks for in exactly that state.
+        //
+        // It is also the one cursor in this file the device advances on its own
+        // authority, which it may do because nothing in the simulation can see
+        // it.
+        if (self->audition.active && self->audition.clip != nullptr) {
+            self->audition.active = mixClip(samples, frameCount, *self->audition.clip, self->audition.cursor,
+                                            self->audition.cursorStep, self->audition.amplitude, false);
         }
 
         // Soft-clipped rather than left to wrap: a mix past full scale is a game
@@ -308,19 +393,32 @@ void AudioSystem::tick(scene::World& world, f64 fixedDt)
         if (!sound.playing)
             return;
 
+        // **How long this sound is, rather than how long a placeholder tone is.**
+        //
+        // D092: this used to be `kPlaceholderDuration` for every sound in the
+        // world, which was right for all of M6 -- nothing decoded a file, so
+        // every sound WAS a one-second tone -- and was never revisited when M7
+        // made `Content` real. A two-minute track played for one second and then
+        // stopped itself, and the `Ended` it fired while doing so was a lie
+        // about the file.
+        //
+        // Decoded on the first ask and answered from the cache after, so this is
+        // a lookup per playing sound per tick and not a decode.
+        const f64 duration = clipDuration(sound.content);
+
         sound.timePosition += fixedDt * static_cast<f64>(sound.playbackSpeed);
-        if (sound.timePosition < kPlaceholderDuration)
+        if (sound.timePosition < duration)
             return;
 
         if (sound.looped) {
             // Wrapped rather than reset, so a loop does not lose the fraction of
             // a tick it overshot by -- which over a minute is a loop that drifts
             // against everything else in the scene.
-            sound.timePosition = std::fmod(sound.timePosition, kPlaceholderDuration);
+            sound.timePosition = std::fmod(sound.timePosition, duration);
             return;
         }
 
-        sound.timePosition = kPlaceholderDuration;
+        sound.timePosition = duration;
         sound.playing = false;
         world.changes().push(scene::Change{scene::ChangeKind::InstanceEventNoArgs, id, {}, ended});
     });
@@ -376,10 +474,13 @@ void AudioSystem::update(scene::World& world, core::InstanceId listener)
             return;
 
         Voice voice;
+        voice.id = id;
         voice.amplitude = std::fmin(gain, 4.0f);
         voice.clip = m_impl->clipFor(sound.content);
         if (voice.clip != nullptr) {
-            // The cursor comes from the SOUND, every frame. See `Voice::cursor`.
+            // The SEED. Whether it is used is decided under the lock below,
+            // against the cursor the callback has been advancing -- see
+            // `Voice::cursor` and `detail::shouldTakeTimeline`.
             voice.cursor = sound.timePosition * static_cast<f64>(kSampleRate);
             voice.cursorStep = static_cast<f64>(sound.playbackSpeed);
             voice.looped = sound.looped;
@@ -405,15 +506,64 @@ void AudioSystem::update(scene::World& world, core::InstanceId listener)
 
     {
         std::lock_guard<std::mutex> lock(m_impl->mutex);
-        // Phases are carried across so a continuing voice does not click every
-        // frame. Matched by index, which is stable while the sound set is: a
-        // sound stopping shifts the rest, and one click on the frame a sound
-        // stops is not worth an id map on the audio thread.
-        for (core::usize index = 0; index < next.size() && index < m_impl->voices.size(); ++index)
-            next[index].phase = m_impl->voices[index].phase;
+        // **What a continuing voice keeps from the frame before**, matched by
+        // instance id rather than by position in the list. By position is what
+        // M6 shipped: it is stable only while the sound set is, so one sound
+        // stopping handed every voice after it another sound's phase.
+        constexpr f64 rate = static_cast<f64>(kSampleRate);
+        for (Voice& fresh : next) {
+            const Voice* previous = nullptr;
+            for (const Voice& old : m_impl->voices) {
+                if (old.id == fresh.id) {
+                    previous = &old;
+                    break;
+                }
+            }
+            if (previous == nullptr)
+                continue;
+
+            // The tone's phase, so a continuing placeholder does not click once
+            // a frame.
+            fresh.phase = previous->phase;
+
+            // A voice that changed clip -- somebody edited `Content` -- starts
+            // where the timeline says and nowhere else. There is no continuity
+            // between two different files to preserve.
+            if (fresh.clip == nullptr || fresh.clip != previous->clip)
+                continue;
+
+            if (!detail::shouldTakeTimeline(previous->cursor / rate, fresh.cursor / rate,
+                                            static_cast<f64>(fresh.clip->frames) / rate, fresh.looped,
+                                            kResyncTolerance)) {
+                fresh.cursor = previous->cursor;
+            }
+        }
         m_impl->voices.swap(next);
     }
 }
+
+namespace detail {
+
+bool shouldTakeTimeline(f64 mixerSeconds, f64 timelineSeconds, f64 duration, bool looped, f64 tolerance) noexcept
+{
+    f64 drift = mixerSeconds - timelineSeconds;
+    if (looped && duration > 0.0) {
+        // The SHORT way round the loop. A mixer that has already wrapped and a
+        // timeline that has not are a whole clip apart by subtraction and a few
+        // milliseconds apart in fact, and calling that a seek would put a click
+        // at the top of every loop.
+        drift = std::fmod(drift, duration);
+        if (drift > duration * 0.5) {
+            drift -= duration;
+        }
+        else if (drift < -duration * 0.5) {
+            drift += duration;
+        }
+    }
+    return std::fabs(drift) > tolerance;
+}
+
+} // namespace detail
 
 const Clip* AudioSystem::Impl::clipFor(std::string_view content)
 {
@@ -445,17 +595,51 @@ const Clip* AudioSystem::Impl::clipFor(std::string_view content)
         ma_decoder_config config = ma_decoder_config_init(ma_format_f32, kChannels, kSampleRate);
         ma_decoder decoder{};
         if (ma_decoder_init_memory(bytes.data(), bytes.size(), &config, &decoder) == MA_SUCCESS) {
-            ma_uint64 frames = 0;
-            if (ma_decoder_get_length_in_pcm_frames(&decoder, &frames) == MA_SUCCESS && frames > 0) {
-                clip = std::make_shared<Clip>();
-                clip->samples.resize(static_cast<core::usize>(frames) * kChannels);
-                ma_uint64 read = 0;
-                (void)ma_decoder_read_pcm_frames(&decoder, clip->samples.data(), frames, &read);
-                clip->frames = static_cast<u32>(read);
-                clip->samples.resize(static_cast<core::usize>(clip->frames) * kChannels);
-                if (clip->frames == 0) {
-                    clip.reset();
+            // **The declared length is a hint, and reading until the decoder
+            // stops is the answer.** D094: this used to require a length and
+            // drop the clip when it could not get one, and miniaudio's own
+            // header says it cannot get one for Ogg Vorbis -- a format this
+            // engine's API documents as supported, and which therefore played
+            // the placeholder tone instead of the file. The estimate is also a
+            // frame or two out either way once a resampler is in the path, which
+            // is a clipped tail or a silent one.
+            ma_uint64 hint = 0;
+            if (ma_decoder_get_length_in_pcm_frames(&decoder, &hint) != MA_SUCCESS) {
+                hint = 0;
+            }
+
+            // One second at a time when there is no hint: large enough that a
+            // short sound is a single read, small enough that the slack on the
+            // last chunk is not worth measuring.
+            constexpr core::usize kChunkFrames = kSampleRate;
+
+            clip = std::make_shared<Clip>();
+            clip->samples.resize((hint > 0 ? static_cast<core::usize>(hint) : kChunkFrames) * kChannels);
+
+            core::usize filled = 0;
+            for (;;) {
+                core::usize capacity = clip->samples.size() / kChannels;
+                if (filled == capacity) {
+                    capacity += kChunkFrames;
+                    clip->samples.resize(capacity * kChannels);
                 }
+                ma_uint64 read = 0;
+                const ma_result status = ma_decoder_read_pcm_frames(&decoder, clip->samples.data() + filled * kChannels,
+                                                                    static_cast<ma_uint64>(capacity - filled), &read);
+                filled += static_cast<core::usize>(read);
+                // Both halves are an end: `MA_AT_END` with a partial read is the
+                // last chunk of a file, and a successful read of nothing is a
+                // decoder that has no more to give.
+                if (status != MA_SUCCESS || read == 0) {
+                    break;
+                }
+            }
+
+            clip->frames = static_cast<u32>(filled);
+            clip->samples.resize(filled * kChannels);
+            clip->samples.shrink_to_fit();
+            if (clip->frames == 0) {
+                clip.reset();
             }
             ma_decoder_uninit(&decoder);
         }
@@ -480,6 +664,63 @@ const Clip* AudioSystem::Impl::clipFor(std::string_view content)
     return inserted->second.get();
 }
 
+f64 AudioSystem::clipDuration(std::string_view content)
+{
+    if (m_impl == nullptr) {
+        return kPlaceholderDuration;
+    }
+    const Clip* clip = m_impl->clipFor(content);
+    if (clip == nullptr || clip->frames == 0) {
+        // The tone's length, because the tone is what such a sound plays.
+        return kPlaceholderDuration;
+    }
+    return static_cast<f64>(clip->frames) / static_cast<f64>(kSampleRate);
+}
+
+void AudioSystem::audition(std::string_view content, f32 volume, f32 speed)
+{
+    if (m_impl == nullptr) {
+        return;
+    }
+    // Decoded outside the lock, like `update` does and for the same reason: a
+    // decode is file I/O and the audio callback must never wait on one.
+    const Clip* clip = m_impl->clipFor(content);
+
+    const std::lock_guard<std::mutex> lock(m_impl->mutex);
+    m_impl->audition.clip = clip;
+    m_impl->audition.content.assign(content);
+    m_impl->audition.cursor = 0.0;
+    m_impl->audition.cursorStep = static_cast<f64>(std::fmax(speed, 0.01f));
+    m_impl->audition.amplitude = std::clamp(volume, 0.0f, 1.0f);
+    // **A file that will not decode is not auditioned.** The warning `clipFor`
+    // already logged is the honest answer, and a preview button that latches on
+    // silence says the opposite of what happened.
+    m_impl->audition.active = clip != nullptr;
+}
+
+void AudioSystem::stopAudition() noexcept
+{
+    if (m_impl == nullptr) {
+        return;
+    }
+    const std::lock_guard<std::mutex> lock(m_impl->mutex);
+    m_impl->audition.active = false;
+    m_impl->audition.clip = nullptr;
+    m_impl->audition.content.clear();
+}
+
+bool AudioSystem::auditioning(std::string_view content) const
+{
+    if (m_impl == nullptr) {
+        return false;
+    }
+    const std::lock_guard<std::mutex> lock(m_impl->mutex);
+    if (!m_impl->audition.active) {
+        return false;
+    }
+    return content.empty() || m_impl->audition.content == content;
+}
+
 void AudioSystem::setContentMounts(const asset::ContentMounts* mounts) noexcept
 {
     if (m_impl == nullptr) {
@@ -496,6 +737,10 @@ void AudioSystem::setContentMounts(const asset::ContentMounts* mounts) noexcept
     // into it. One frame of silence when a world is swapped; a dangling read
     // otherwise.
     m_impl->voices.clear();
+    // The audition holds one of those pointers too.
+    m_impl->audition.active = false;
+    m_impl->audition.clip = nullptr;
+    m_impl->audition.content.clear();
     m_impl->clips.clear();
     m_impl->clipsLoaded.store(0, std::memory_order_relaxed);
     m_impl->clipsMissing.store(0, std::memory_order_relaxed);

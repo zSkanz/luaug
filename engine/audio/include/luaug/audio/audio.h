@@ -32,6 +32,7 @@
 #include "luaug/core/types.h"
 
 #include <optional>
+#include <string_view>
 
 namespace luaug::scene {
 class World;
@@ -43,6 +44,32 @@ using core::f32;
 using core::f64;
 using core::u32;
 using core::u64;
+
+namespace detail {
+
+// **When the mixer's cursor is taken from the simulation instead of kept.**
+//
+// The two clocks are the same clock in a healthy run -- the simulation advances
+// `TimePosition` by a fixed step and the device advances the cursor by a buffer
+// -- but they are quantised differently, so on any given frame one of them is
+// ahead. Re-seeding the cursor from the timeline every frame is what D093 was:
+// a frame in which no tick ran dragged the cursor BACK by a frame's worth of
+// samples and the mixer replayed sixteen milliseconds it had already played,
+// sixty times a second.
+//
+// So the cursor is kept, and the timeline is taken only when the two have
+// genuinely parted company -- which is a seek, a rewind, or a sound that was
+// stopped and started again. `tolerance` is what "genuinely" means: a drift
+// smaller than it is the two clocks being quantised differently, and a drift
+// larger than it is somebody having moved one of them.
+//
+// A looped sound is compared the short way round the loop, so the frame in
+// which the mixer has wrapped and the timeline has not is not mistaken for a
+// seek to the beginning of the file.
+[[nodiscard]] bool shouldTakeTimeline(f64 mixerSeconds, f64 timelineSeconds, f64 duration, bool looped,
+                                      f64 tolerance) noexcept;
+
+} // namespace detail
 
 struct AudioStats
 {
@@ -92,6 +119,41 @@ public:
     // Advances every playing sound by one tick and raises `Ended` and `Loaded`
     // on the world's change queue. Called from the sim tick.
     void tick(scene::World& world, f64 fixedDt);
+
+    // How long the sound this content names is, in seconds -- decoding it on the
+    // first ask, like `update` does, and answering from the same cache after.
+    //
+    // **This is what the timeline is measured against**, which is why it is here
+    // rather than inside the mixer: `Ended` fires when `TimePosition` reaches a
+    // sound's LENGTH, and until D092 that length was a one-second constant for
+    // every sound in the world -- so a two-minute track stopped after a second.
+    // A content that names nothing, or that cannot be decoded, answers with the
+    // placeholder tone's length, because the tone is what such a sound plays.
+    [[nodiscard]] f64 clipDuration(std::string_view content);
+
+    // **Auditioning a file is not the game playing a sound**, and this is the
+    // whole difference between the two.
+    //
+    // Somebody clicking a speaker in the properties grid wants to hear what a
+    // `Content` names. Every way of doing that THROUGH the `Sound` is wrong in
+    // the same way: `Playing` is the game's state, `Ended` is a past-tense fact
+    // about the simulation's timeline, and a world that is not ticking cannot
+    // advance either. So an audition is its own voice with its own cursor,
+    // advanced by the DEVICE -- which is exactly why it may not be a `Sound`. A
+    // timeline the wall clock drives is the one thing the rest of this class
+    // exists to keep out of the world (R10).
+    //
+    // It is heard while `setSuspended` is on, which is the state of an editor
+    // that is not playing, and it stops on its own at the end of the clip.
+    // Auditioning while one is already playing replaces it: the button is a
+    // preview and two previews at once is not a thing anybody asked for.
+    void audition(std::string_view content, f32 volume, f32 speed);
+    void stopAudition() noexcept;
+
+    // Whether an audition is running -- of this content, or of anything when
+    // `content` is empty. False the moment it reaches the end, which is what
+    // turns a pause button back into a play button.
+    [[nodiscard]] bool auditioning(std::string_view content = {}) const;
 
     // Pushes this frame's voice state to the mixer. Called once per frame, after
     // the ticks -- what the speakers do is a consequence of the simulation.

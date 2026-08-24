@@ -1078,8 +1078,13 @@ declare extern type Sound extends Instance with
     --- generated tone whose pitch comes from a hash of the id. A sound that went silent because a file
     --- was missing is a bug report about the sound; a placeholder that is audibly a placeholder is one
     --- about the file. `DebugService:GetStat("AudioClipsMissing")` is how a script asks which it got.
-    --- Where in the file the sound is comes from `TimePosition` every frame rather than from a cursor
-    --- the mixer keeps, so the audio is a function of the simulation and a replay reproduces it.
+    --- **The file's length is the sound's length.** `Ended` fires when `TimePosition` reaches it, so a
+    --- two-minute track plays for two minutes; a content that names nothing is one second long, because
+    --- that is how long the placeholder tone is. The mixer keeps its own cursor and takes
+    --- `TimePosition` whenever the two part company -- a seek, a rewind, a sound stopped and started.
+    --- It has to: the timeline moves in whole ticks and a device moves in buffers, so a cursor re-read
+    --- every frame stutters between them. Nothing in the simulation reads that cursor, which is what
+    --- keeps a replay exact (R10).
     Content: Content
     --- Whether the timeline is advancing. Writing it is the same as calling `Play` or `Stop`, and
     --- reading it is how a script asks without keeping its own flag.
