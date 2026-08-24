@@ -103,6 +103,8 @@ scene::Value getPointLightBrightness(const scene::World& world, core::InstanceId
 bool setPointLightBrightness(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getPointLightRange(const scene::World& world, core::InstanceId id);
 bool setPointLightRange(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getPointLightEnabled(const scene::World& world, core::InstanceId id);
+bool setPointLightEnabled(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getPointLightShadows(const scene::World& world, core::InstanceId id);
 bool setPointLightShadows(scene::World& world, core::InstanceId id, const scene::Value& value);
 void attachPointLightComponents(scene::World& world, core::InstanceId id);
@@ -117,6 +119,8 @@ scene::Value getSpotLightRange(const scene::World& world, core::InstanceId id);
 bool setSpotLightRange(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getSpotLightAngle(const scene::World& world, core::InstanceId id);
 bool setSpotLightAngle(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSpotLightEnabled(const scene::World& world, core::InstanceId id);
+bool setSpotLightEnabled(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getSpotLightShadows(const scene::World& world, core::InstanceId id);
 bool setSpotLightShadows(scene::World& world, core::InstanceId id, const scene::Value& value);
 void attachSpotLightComponents(scene::World& world, core::InstanceId id);

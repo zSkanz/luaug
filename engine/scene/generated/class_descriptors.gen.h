@@ -122,6 +122,8 @@ Value getBasePartAnchored(const World& world, core::InstanceId id);
 bool setBasePartAnchored(World& world, core::InstanceId id, const Value& value);
 Value getBasePartCanCollide(const World& world, core::InstanceId id);
 bool setBasePartCanCollide(World& world, core::InstanceId id, const Value& value);
+Value getBasePartCanTouch(const World& world, core::InstanceId id);
+bool setBasePartCanTouch(World& world, core::InstanceId id, const Value& value);
 Value getBasePartCanQuery(const World& world, core::InstanceId id);
 bool setBasePartCanQuery(World& world, core::InstanceId id, const Value& value);
 Value getBasePartCollisionGroup(const World& world, core::InstanceId id);

@@ -304,6 +304,22 @@ bool setPointLightRange(scene::World& world, core::InstanceId id, const Value& v
     return true;
 }
 
+Value getPointLightEnabled(const scene::World& world, core::InstanceId id)
+{
+    const scene::PointLightComponent* light = readPointLight(world, id);
+    return light == nullptr ? Value{} : Value{light->enabled};
+}
+
+bool setPointLightEnabled(scene::World& world, core::InstanceId id, const Value& value)
+{
+    const auto* flag = std::get_if<bool>(&value);
+    scene::PointLightComponent* light = writePointLight(world, id);
+    if (flag == nullptr || light == nullptr)
+        return false;
+    light->enabled = *flag;
+    return true;
+}
+
 Value getPointLightShadows(const scene::World& world, core::InstanceId id)
 {
     const scene::PointLightComponent* light = readPointLight(world, id);
@@ -404,6 +420,22 @@ bool setSpotLightAngle(scene::World& world, core::InstanceId id, const Value& va
     if (!takePositive(value, angle) || angle >= 180.0f)
         return false;
     light->angle = angle;
+    return true;
+}
+
+Value getSpotLightEnabled(const scene::World& world, core::InstanceId id)
+{
+    const scene::SpotLightComponent* light = readSpotLight(world, id);
+    return light == nullptr ? Value{} : Value{light->enabled};
+}
+
+bool setSpotLightEnabled(scene::World& world, core::InstanceId id, const Value& value)
+{
+    const auto* flag = std::get_if<bool>(&value);
+    scene::SpotLightComponent* light = writeSpotLight(world, id);
+    if (flag == nullptr || light == nullptr)
+        return false;
+    light->enabled = *flag;
     return true;
 }
 

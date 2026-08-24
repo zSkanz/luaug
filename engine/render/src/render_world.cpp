@@ -342,6 +342,12 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
     // --- Lights -------------------------------------------------------------
 
     world.pointLights().forEach([&](core::InstanceId id, const scene::PointLightComponent& light) {
+        // **Before anything else, including the budget.** That is what makes
+        // `Enabled` different from a brightness of zero: a disabled light does
+        // not occupy a slot, so turning a room's lights off gives the rest of
+        // the scene the slots back.
+        if (!light.enabled)
+            return;
         if (!inWorld(world, id, root))
             return;
         CFrameD anchor;
@@ -364,6 +370,8 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
     });
 
     world.spotLights().forEach([&](core::InstanceId id, const scene::SpotLightComponent& light) {
+        if (!light.enabled)
+            return;
         if (!inWorld(world, id, root))
             return;
         CFrameD anchor;

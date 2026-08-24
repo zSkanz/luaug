@@ -418,7 +418,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(moduleScriptDesc);
 
     // --- BasePart ---
-    static std::array<PropertyDesc, 15> basePartProperties;
+    static std::array<PropertyDesc, 16> basePartProperties;
     basePartProperties = {{
         PropertyDesc{
             .name = atoms.intern("CFrame"),
@@ -507,6 +507,17 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
             .get = native::getBasePartCanCollide,
             .set = native::setBasePartCanCollide,
+        },
+        PropertyDesc{
+            .name = atoms.intern("CanTouch"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether this part takes part in touch reporting at all. **It gates the PAIR**: a part with this off is silent, and so is whatever touches it -- because a signal naming a part that said not to report touches would be that part reporting one on somebody else's handler. That is the difference from CanQuery, which is about one part being found and is therefore one part's decision. Off is what a world full of scenery wants: contacts are still solved, and nothing is queued for scripts that were never going to listen.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getBasePartCanTouch,
+            .set = native::setBasePartCanTouch,
         },
         PropertyDesc{
             .name = atoms.intern("CanQuery"),

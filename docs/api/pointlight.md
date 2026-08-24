@@ -17,5 +17,6 @@ offers is on the base's page, which is what keeps one added member on
 |---|---|---|---|---|
 | `Brightness` | `number` | — | read/write | How much light this emits. Zero is off without the instance having to be destroyed. |
 | `Color` | `Color3` | — | read/write | The light's colour, multiplied by Brightness. Not clamped, so a channel above one is a legal over-bright tint. |
+| `Enabled` | `boolean` | `true` | read/write | Whether this light contributes anything. Off is not the same as a Brightness of zero: a disabled light is skipped before the renderer counts it against the light budget, so turning a room's lights off gives the rest of the scene the slots back. |
 | `Range` | `number` | — | read/write | The radius in metres beyond which this light contributes nothing, which is what lets the renderer skip it for distant geometry. |
 | `Shadows` | `boolean` | — | read/write, **inert** | Whether this light should cast shadows. Stored and reported faithfully, and not yet acted on: this release casts shadows from the sun alone. |

@@ -579,6 +579,13 @@ declare extern type BasePart extends PVInstance with
     --- is what makes a checkpoint, a trigger volume or a pickup work: things pass through it and it
     --- notices.
     CanCollide: boolean
+    --- Whether this part takes part in touch reporting at all. **It gates the PAIR**: a part with this
+    --- off is silent, and so is whatever touches it -- because a signal naming a part that said not to
+    --- report touches would be that part reporting one on somebody else's handler. That is the
+    --- difference from CanQuery, which is about one part being found and is therefore one part's
+    --- decision. Off is what a world full of scenery wants: contacts are still solved, and nothing is
+    --- queued for scripts that were never going to listen.
+    CanTouch: boolean
     --- Whether raycasts, shapecasts and box queries can see this part. Independent of CanCollide,
     --- because a part that blocks movement and a part a camera ray should ignore are different
     --- questions.
@@ -746,6 +753,10 @@ declare extern type PointLight extends Instance with
     --- The radius in metres beyond which this light contributes nothing, which is what lets the
     --- renderer skip it for distant geometry.
     Range: number
+    --- Whether this light contributes anything. Off is not the same as a Brightness of zero: a disabled
+    --- light is skipped before the renderer counts it against the light budget, so turning a room's
+    --- lights off gives the rest of the scene the slots back.
+    Enabled: boolean
     --- Whether this light should cast shadows. Stored and reported faithfully, and not yet acted on:
     --- this release casts shadows from the sun alone.
     Shadows: boolean
@@ -760,6 +771,10 @@ declare extern type SpotLight extends Instance with
     Range: number
     --- The full width of the cone in degrees.
     Angle: number
+    --- Whether this light contributes anything. Off is not the same as a Brightness of zero: a disabled
+    --- light is skipped before the renderer counts it against the light budget, so turning a room's
+    --- lights off gives the rest of the scene the slots back.
+    Enabled: boolean
     --- Whether this light should cast shadows. Stored and not yet acted on, as on PointLight.
     Shadows: boolean
 end

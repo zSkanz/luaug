@@ -91,6 +91,11 @@
           "Default": "true"
         },
         {
+          "Name": "CanTouch",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
           "Name": "CollisionGroup",
           "Type": "string",
           "Default": "\"Default\""
@@ -1317,6 +1322,11 @@
           "Type": "Color3"
         },
         {
+          "Name": "Enabled",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
           "Name": "Range",
           "Type": "number"
         },
@@ -1578,6 +1588,11 @@
         {
           "Name": "Color",
           "Type": "Color3"
+        },
+        {
+          "Name": "Enabled",
+          "Type": "boolean",
+          "Default": "true"
         },
         {
           "Name": "Range",

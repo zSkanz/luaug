@@ -655,6 +655,17 @@ void PhysicsSync::publishContacts()
         if (!m_scene.alive(first) || !m_scene.alive(second))
             continue;
 
+        // **`CanTouch` gates the PAIR**, which is why it is asked here rather
+        // than per side below: a signal naming a part that said not to report
+        // touches would be that part reporting one on somebody else's handler.
+        // The contact was still solved -- what stops is the queueing, which is
+        // the cost a world full of scenery is paying for listeners it does not
+        // have.
+        const RigidBodyComponent* firstBody = m_scene.rigidBodies().find(first);
+        const RigidBodyComponent* secondBody = m_scene.rigidBodies().find(second);
+        if ((firstBody != nullptr && !firstBody->canTouch) || (secondBody != nullptr && !secondBody->canTouch))
+            continue;
+
         const core::NameAtom name = event.phase == physics::ContactPhase::Began ? touched : touchEnded;
 
         Change change;

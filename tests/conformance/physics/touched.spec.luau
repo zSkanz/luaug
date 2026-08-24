@@ -129,6 +129,47 @@ describe("Touched", function()
         -- Through, not onto.
         expect(crate.Position.y < -1):ToBe(true)
     end)
+
+    it("does not fire for a part whose CanTouch is off", function()
+        local quiet = part("Quiet", vector.create(0, 0, 0), vector.create(20, 2, 20))
+        quiet.Anchored = true
+        quiet.CanTouch = false
+        local crate = part("Crate", vector.create(0, 6, 0), vector.create(2, 2, 2))
+
+        local touched = false
+        track(quiet.Touched:Connect(function()
+            touched = true
+        end))
+
+        task.wait(2)
+        expect(touched):ToBe(false)
+        -- **And it still collides.** `CanTouch` is about reporting, not about
+        -- the solver: a part that stopped stopping things would be `CanCollide`
+        -- under another name.
+        expect(crate.Position.y > 0):ToBe(true)
+    end)
+
+    it("silences the OTHER part of the pair too, because it gates the pair", function()
+        -- The half worth pinning: a signal naming a part that said not to report
+        -- touches would be that part reporting one on somebody else's handler.
+        local quiet = part("Quiet", vector.create(0, 0, 0), vector.create(20, 2, 20))
+        quiet.Anchored = true
+        quiet.CanTouch = false
+        local crate = part("Crate", vector.create(0, 6, 0), vector.create(2, 2, 2))
+
+        local crateTouched = false
+        track(crate.Touched:Connect(function()
+            crateTouched = true
+        end))
+
+        task.wait(2)
+        expect(crateTouched):ToBe(false)
+    end)
+
+    it("is on by default, so nothing that worked before has to be changed", function()
+        local plain = part("Plain", vector.create(0, 0, 0), vector.create(4, 4, 4))
+        expect(plain.CanTouch):ToBe(true)
+    end)
 end)
 
 describe("TouchEnded", function()

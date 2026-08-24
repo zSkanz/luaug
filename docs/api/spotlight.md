@@ -18,5 +18,6 @@ offers is on the base's page, which is what keeps one added member on
 | `Angle` | `number` | — | read/write | The full width of the cone in degrees. |
 | `Brightness` | `number` | — | read/write | How much light this emits. |
 | `Color` | `Color3` | — | read/write | The light's colour, multiplied by Brightness. |
+| `Enabled` | `boolean` | `true` | read/write | Whether this light contributes anything. Off is not the same as a Brightness of zero: a disabled light is skipped before the renderer counts it against the light budget, so turning a room's lights off gives the rest of the scene the slots back. |
 | `Range` | `number` | — | read/write | The distance in metres beyond which this light contributes nothing. |
 | `Shadows` | `boolean` | — | read/write, **inert** | Whether this light should cast shadows. Stored and not yet acted on, as on PointLight. |

@@ -417,6 +417,17 @@ local Classes: { Schema.Class } = {
                     .. "it and it notices.",
             },
             {
+                Name = "CanTouch",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether this part takes part in touch reporting at all. **It gates the PAIR**: a part with "
+                    .. "this off is silent, and so is whatever touches it -- because a signal naming a part that "
+                    .. "said not to report touches would be that part reporting one on somebody else's handler. "
+                    .. "That is the difference from CanQuery, which is about one part being found and is therefore "
+                    .. "one part's decision. Off is what a world full of scenery wants: contacts are still solved, "
+                    .. "and nothing is queued for scripts that were never going to listen.",
+            },
+            {
                 Name = "CanQuery",
                 Type = "boolean",
                 Default = "true",
@@ -814,6 +825,14 @@ local Classes: { Schema.Class } = {
                     .. "renderer skip it for distant geometry.",
             },
             {
+                Name = "Enabled",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether this light contributes anything. Off is not the same as a Brightness of zero: a "
+                    .. "disabled light is skipped before the renderer counts it against the light budget, so "
+                    .. "turning a room's lights off gives the rest of the scene the slots back.",
+            },
+            {
                 Name = "Shadows",
                 Inert = true,
                 Type = "boolean",
@@ -852,6 +871,14 @@ local Classes: { Schema.Class } = {
                 Type = "number",
                 ErrorKey = "scene.err.number_cone_degrees",
                 Doc = "The full width of the cone in degrees.",
+            },
+            {
+                Name = "Enabled",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether this light contributes anything. Off is not the same as a Brightness of zero: a "
+                    .. "disabled light is skipped before the renderer counts it against the light budget, so "
+                    .. "turning a room's lights off gives the rest of the scene the slots back.",
             },
             {
                 Name = "Shadows",

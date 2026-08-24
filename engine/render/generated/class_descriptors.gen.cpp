@@ -144,7 +144,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(cameraDesc);
 
     // --- PointLight ---
-    static std::array<scene::PropertyDesc, 4> pointLightProperties;
+    static std::array<scene::PropertyDesc, 5> pointLightProperties;
     pointLightProperties = {{
         scene::PropertyDesc{
             .name = atoms.intern("Color"),
@@ -180,6 +180,17 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .set = native::setPointLightRange,
         },
         scene::PropertyDesc{
+            .name = atoms.intern("Enabled"),
+            .type = scene::ValueType::Bool,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether this light contributes anything. Off is not the same as a Brightness of zero: a disabled light is skipped before the renderer counts it against the light budget, so turning a room's lights off gives the rest of the scene the slots back.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getPointLightEnabled,
+            .set = native::setPointLightEnabled,
+        },
+        scene::PropertyDesc{
             .name = atoms.intern("Shadows"),
             .type = scene::ValueType::Bool,
             .threadSafety = scene::ThreadSafety::Unsafe,
@@ -203,7 +214,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(pointLightDesc);
 
     // --- SpotLight ---
-    static std::array<scene::PropertyDesc, 5> spotLightProperties;
+    static std::array<scene::PropertyDesc, 6> spotLightProperties;
     spotLightProperties = {{
         scene::PropertyDesc{
             .name = atoms.intern("Color"),
@@ -248,6 +259,17 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_cone_degrees"),
             .get = native::getSpotLightAngle,
             .set = native::setSpotLightAngle,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Enabled"),
+            .type = scene::ValueType::Bool,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether this light contributes anything. Off is not the same as a Brightness of zero: a disabled light is skipped before the renderer counts it against the light budget, so turning a room's lights off gives the rest of the scene the slots back.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getSpotLightEnabled,
+            .set = native::setSpotLightEnabled,
         },
         scene::PropertyDesc{
             .name = atoms.intern("Shadows"),

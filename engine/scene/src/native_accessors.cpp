@@ -521,6 +521,24 @@ bool setBasePartCanCollide(World& world, core::InstanceId id, const Value& value
     return true;
 }
 
+Value getBasePartCanTouch(const World& world, core::InstanceId id)
+{
+    const RigidBodyComponent* body = readBody(world, id);
+    return body == nullptr ? Value{} : Value{body->canTouch};
+}
+
+bool setBasePartCanTouch(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* flag = std::get_if<bool>(&value);
+    RigidBodyComponent* body = writeBody(world, id);
+    if (flag == nullptr || body == nullptr)
+        return false;
+    // No rebuild, unlike `Anchored`: what this changes is which contacts are
+    // PUBLISHED, and the solver never knew about it.
+    body->canTouch = *flag;
+    return true;
+}
+
 Value getBasePartCanQuery(const World& world, core::InstanceId id)
 {
     const RigidBodyComponent* body = readBody(world, id);

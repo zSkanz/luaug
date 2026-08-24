@@ -97,6 +97,11 @@ struct RigidBodyComponent
     // Written by the SCRIPT and read by the mirror.
     bool anchored = false;
     bool canCollide = true;
+    // **Gates the PAIR rather than one side.** A part with this off is silent
+    // and so is whatever touches it, because a signal naming a part that said
+    // not to report touches would be that part reporting one on somebody else's
+    // handler. Contacts are still solved; what stops is the queueing.
+    bool canTouch = true;
     bool canQuery = true;
     // The group's name, interned. Resolved to a simulation group by the glue,
     // which is the only party that knows the group table exists.
@@ -211,6 +216,9 @@ struct PointLightComponent
     core::Color3 color{1.0f, 1.0f, 1.0f};
     f32 brightness = 1.0f;
     f32 range = 16.0f;
+    // Skipped before the renderer counts it against the light budget, which is
+    // what makes this different from a brightness of zero.
+    bool enabled = true;
     // Stored and reported faithfully; this release casts shadows from the sun
     // alone (M4 brief, Decision 10). A property that round-trips is honest; one
     // that silently reads back false would not be.
@@ -224,6 +232,8 @@ struct SpotLightComponent
     f32 range = 16.0f;
     // Full cone width in degrees.
     f32 angle = 45.0f;
+    // As on `PointLightComponent`: skipped before the budget is counted.
+    bool enabled = true;
     bool shadows = false;
 };
 

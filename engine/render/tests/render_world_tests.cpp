@@ -76,6 +76,7 @@ struct Fixture
     scene::ClassId workspaceClass = scene::InvalidClass;
     scene::ClassId cameraClass = scene::InvalidClass;
     scene::ClassId meshPartClass = scene::InvalidClass;
+    scene::ClassId pointLightClass = scene::InvalidClass;
 
     void registerRenderClasses()
     {
@@ -108,6 +109,16 @@ struct Fixture
         };
         meshPart.detachComponents = [](scene::World& w, core::InstanceId id) { w.meshParts().remove(id); };
         meshPartClass = classes.registerClass(meshPart);
+
+        scene::ClassDescriptor pointLight;
+        pointLight.name = atoms.intern("PointLight");
+        pointLight.super = instanceClass;
+        pointLight.defaultName = pointLight.name;
+        pointLight.attachComponents = [](scene::World& w, core::InstanceId id) {
+            w.pointLights().add(id, scene::PointLightComponent{});
+        };
+        pointLight.detachComponents = [](scene::World& w, core::InstanceId id) { w.pointLights().remove(id); };
+        pointLightClass = classes.registerClass(pointLight);
     }
 
     // A camera at the origin looking down -Z, which is the direction api-design
@@ -776,4 +787,40 @@ TEST_CASE("a selected instance comes out marked, and nothing else does")
     for (core::usize index = 0; index < plain.draws.size(); ++index)
         differs = differs || plain.draws[index].outlined != selected.draws[index].outlined;
     CHECK(differs);
+}
+
+TEST_CASE("a disabled light contributes nothing, and does not spend a budget slot")
+{
+    // **`Enabled` is not a brightness of zero, and this is the difference.** A
+    // light at zero brightness is still a light: it is extracted, it is counted,
+    // and it occupies one of the slots the renderer has to spend. A disabled one
+    // is skipped before any of that, so turning a room's lights off gives the
+    // rest of the scene the slots back.
+    Fixture fixture;
+    fixture.registerRenderClasses();
+    const core::InstanceId workspace = fixture.world.create(fixture.workspaceClass);
+    (void)fixture.cameraLookingDownNegativeZ(workspace);
+
+    const core::InstanceId host = fixture.part(workspace);
+    fixture.world.parts().find(host)->cframe.position = core::DVec3{0.0, 0.0, -5.0};
+
+    const core::InstanceId lamp = fixture.world.create(fixture.pointLightClass);
+    (void)fixture.world.setParent(lamp, host);
+
+    render::MeshLibrary meshes;
+    render::RenderWorld lit;
+    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, lit);
+    REQUIRE(lit.lights.size() == 1);
+
+    // Zero brightness is still a light, which is what makes the two properties
+    // different questions rather than two spellings of one.
+    fixture.world.pointLights().find(lamp)->brightness = 0.0f;
+    render::RenderWorld dark;
+    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, dark);
+    CHECK(dark.lights.size() == 1);
+
+    fixture.world.pointLights().find(lamp)->enabled = false;
+    render::RenderWorld off;
+    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, off);
+    CHECK(off.lights.empty());
 }
