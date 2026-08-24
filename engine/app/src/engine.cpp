@@ -1092,10 +1092,17 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     (void)editor.openStamp(editorCommands.openStamp, host->classes(), host->enums(), host->atoms(),
                                            inspector);
                 }
+                // **The GAME's world, asked for by name rather than through
+                // `authored()`**, which is the stage while a stamp is open. A
+                // save moves every linked instance to match the file it just
+                // wrote (ADR 0051), and those live in the world the stage is
+                // standing in front of.
                 if (editorCommands.saveStamp)
-                    (void)editor.saveStamp();
-                if (editorCommands.closeStamp)
-                    (void)editor.closeStamp(inspector, editorCommands.closeStampSaving);
+                    (void)editor.saveStamp(host->world(), host->runtime().dataModel());
+                if (editorCommands.closeStamp) {
+                    (void)editor.closeStamp(host->world(), host->runtime().dataModel(), inspector,
+                                            editorCommands.closeStampSaving);
+                }
 
                 // One question about every verb rather than a flag on each:
                 // "did anything change since the last save".

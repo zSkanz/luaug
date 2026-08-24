@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <fstream>
 #include <system_error>
 
 namespace luaug::app {
@@ -22,6 +23,41 @@ namespace {
             c = static_cast<char>(c - 'A' + 'a');
     }
     return out;
+}
+
+// The class a stamp file is rooted at, read from the head of the file.
+//
+// **A prefix rather than a parse**, and the size is the argument: a stamp of a
+// whole character is hundreds of kilobytes, a folder can hold forty of them, and
+// this runs on every refresh to draw a row. The format is ours and the writer
+// emits `class` as the root node's first field, so the answer is always in the
+// first line -- and a file that does not have it there gets no answer rather
+// than a wrong one, which costs a generic icon and nothing else.
+[[nodiscard]] std::string rootClassOf(const std::filesystem::path& file)
+{
+    constexpr std::streamsize kHead = 512;
+    std::ifstream stream(file, std::ios::binary);
+    if (!stream)
+        return {};
+
+    std::string head;
+    head.resize(static_cast<std::size_t>(kHead));
+    stream.read(head.data(), kHead);
+    head.resize(static_cast<std::size_t>(stream.gcount()));
+
+    const std::string::size_type at = head.find("\"root\"");
+    if (at == std::string::npos)
+        return {};
+    const std::string::size_type key = head.find("\"class\"", at);
+    if (key == std::string::npos)
+        return {};
+    const std::string::size_type open = head.find('"', head.find(':', key));
+    if (open == std::string::npos)
+        return {};
+    const std::string::size_type close = head.find('"', open + 1);
+    if (close == std::string::npos)
+        return {};
+    return head.substr(open + 1, close - open - 1);
 }
 
 [[nodiscard]] std::string joinRelative(std::string_view base, std::string_view name)
@@ -113,6 +149,10 @@ bool ContentTree::refresh()
             const std::uintmax_t size = std::filesystem::file_size(entry.path(), ec);
             row.size = ec ? 0 : static_cast<core::u64>(size);
             ec.clear();
+            // Read here rather than while drawing: `refresh` happens when
+            // something changes and the panel draws sixty times a second.
+            if (row.kind == ContentKind::Stamp)
+                row.rootClass = rootClassOf(entry.path());
         }
         m_entries.push_back(std::move(row));
     }
@@ -195,6 +235,20 @@ std::string ContentTree::stemOf(const ContentEntry& entry)
     // texture is no longer one.
     const std::string::size_type dot = entry.name.rfind('.');
     return dot == std::string::npos || entry.kind == ContentKind::Folder ? entry.name : entry.name.substr(0, dot);
+}
+
+std::string ContentTree::displayNameOf(const ContentEntry& entry)
+{
+    constexpr std::string_view suffix = ".json";
+    const std::string_view extension = extensionFor(entry.kind);
+    // Only where the kind declares a COMPOUND suffix. `extensionFor` is the one
+    // answer to "what part of this name says what it is", and asking it here is
+    // what stops this from trimming a `.json` that is somebody's own data.
+    if (extension.size() > suffix.size() && entry.name.size() > suffix.size() &&
+        lowered(entry.name).compare(entry.name.size() - suffix.size(), suffix.size(), suffix) == 0) {
+        return entry.name.substr(0, entry.name.size() - suffix.size());
+    }
+    return entry.name;
 }
 
 bool ContentTree::rename(const ContentEntry& entry, std::string_view newName)

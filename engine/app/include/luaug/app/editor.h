@@ -771,6 +771,12 @@ public:
         // Whether anything has changed since the last save. Advisory: it is what
         // the close button asks about, not a lock.
         bool dirty = false;
+        // **The file as the world's linked instances were built from it** --
+        // read on open and replaced on every save. `scene::restamp` needs it to
+        // tell an override apart from an instance that is merely out of date,
+        // and there is nowhere else it could come from: the file on disk is
+        // already the new one by the time anybody asks.
+        std::string baseline;
 
         [[nodiscard]] bool open() const noexcept { return !path.empty(); }
     };
@@ -785,8 +791,15 @@ public:
     bool openStamp(std::string_view path, scene::ClassRegistry& classes, scene::EnumRegistry& enums,
                    core::AtomTable& atoms, Inspector& inspector);
 
-    // Writes the open stage back to its file. Nothing is destroyed.
-    bool saveStamp();
+    // Writes the open stage back to its file, and moves every linked instance
+    // of it in `game` to match (ADR 0051).
+    //
+    // **The world is the game's, not the stage's**, and that is the whole point:
+    // a stamp is a definition, so saving one is the moment everything that is an
+    // instance of it changes. `gameRoot` is where the walk starts -- the
+    // `DataModel` rather than the `Workspace`, because a linked instance is not
+    // obliged to live under one.
+    bool saveStamp(scene::World& game, core::InstanceId gameRoot);
 
     // Drops the stage. `save` writes it out first; without it the edits go with
     // it, which is what "close without saving" means.
@@ -794,7 +807,7 @@ public:
     // **The game's world was never touched, so there is nothing to put back.**
     // That is the difference between a stage and the first cut of this, and it
     // is why a person no longer finds their prefab standing in their game.
-    bool closeStamp(Inspector& inspector, bool save);
+    bool closeStamp(scene::World& game, core::InstanceId gameRoot, Inspector& inspector, bool save);
 
     // Marks the open stamp as changed. Called by the frame loop whenever an
     // editor verb touches the world, because "did anything change" is a question

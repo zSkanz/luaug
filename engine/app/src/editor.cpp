@@ -874,7 +874,7 @@ bool Editor::openStamp(std::string_view path, scene::ClassRegistry& classes, sce
     }
 
     m_stage = std::move(stage);
-    m_stamp = StampSession{relative, root, false};
+    m_stamp = StampSession{relative, root, false, text};
 
     // A different world in the plainest sense -- a different `scene::World`
     // object -- so everything a panel keyed by id has to go. That is what
@@ -889,7 +889,7 @@ bool Editor::openStamp(std::string_view path, scene::ClassRegistry& classes, sce
     return true;
 }
 
-bool Editor::saveStamp()
+bool Editor::saveStamp(scene::World& game, core::InstanceId gameRoot)
 {
     if (!m_stamp.open() || m_stage == nullptr || !m_stage->world().alive(m_stamp.root)) {
         m_status = EditorStatus{"there is no stamp open to save", true};
@@ -904,18 +904,40 @@ bool Editor::saveStamp()
         return false;
     }
 
+    // **Every linked instance in the game's world follows the file** (ADR
+    // 0051), measured against the text they were built from -- which is why the
+    // session carries it. Done AFTER the write, so a save that could not reach
+    // the disk does not move the world to match a file that is not there.
+    //
+    // Not an undo step, and that is deliberate: this is a change to a FILE, and
+    // the history a person can undo here belongs to the stage. What the world
+    // now holds is what the file says, which is the one thing an undo could not
+    // put back.
+    scene::SceneIoReport moved;
+    const core::u32 followed =
+        game.alive(gameRoot) ? scene::restamp(game, gameRoot, m_stamp.path, m_stamp.baseline, text, &moved) : 0u;
+    m_stamp.baseline = text;
+
     m_stamp.dirty = false;
-    m_status = EditorStatus{"saved " + m_stamp.path + " (" + std::to_string(report.instances) + " instance(s))", false};
+    std::string message = "saved " + m_stamp.path + " (" + std::to_string(report.instances) + " instance(s))";
+    if (followed > 0)
+        message += ", " + std::to_string(followed) + " in the world";
+    // Said out loud rather than counted quietly: an instance somebody changed
+    // structurally stops following its stamp, and finding that out by noticing
+    // one lamp post did not move is how a person stops trusting the link.
+    if (moved.unlinkedStamps > 0)
+        message += ", " + std::to_string(moved.unlinkedStamps) + " left alone (changed structurally)";
+    m_status = EditorStatus{message, false};
     return true;
 }
 
-bool Editor::closeStamp(Inspector& inspector, bool save)
+bool Editor::closeStamp(scene::World& game, core::InstanceId gameRoot, Inspector& inspector, bool save)
 {
     if (!m_stamp.open())
         return false;
 
     const std::string closed = m_stamp.path;
-    const bool wrote = save && saveStamp();
+    const bool wrote = save && saveStamp(game, gameRoot);
 
     // The stage goes, and with it every instance in it. **The game's world was
     // never touched**, so there is nothing to restore and no snapshot to keep --

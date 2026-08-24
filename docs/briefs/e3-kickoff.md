@@ -114,8 +114,10 @@ And `openworld_soak` is still quarantined (D066).
 - **A prefab whose source is another prefab** — a variant. Making one is refused
   outright rather than half-answered: which level an override belongs to has no
   answer yet (ADR 0049, ADR 0051).
-- **A `content.Stamp` drawing.** A `.stamp.json` has a `ContentKind` of its own
-  and wears `class.Model` as a stand-in, with a comment saying so.
+- ~~**A `content.Stamp` drawing.**~~ Not owed after all, and the correction came
+  from the human the day after this was written (D082): a stamp row wears the
+  icon of the instance it is a file OF, badged. A file of a character draws as a
+  character, which is more than a drawing of a stamp could have said.
 - **`src/scripts` is still the mount**, and every example in this repository is
   built on it. Whether it goes away is ADR 0050's open question.
 - **Nothing in `content/` is reachable from a script.** There is no global for

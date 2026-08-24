@@ -622,3 +622,119 @@ TEST_CASE("a structural change is not an override, so the instance is written in
     CHECK(other.world.childCount(placed) == 2);
     CHECK_FALSE(other.world.stampOf(placed).valid());
 }
+
+TEST_CASE("restamp moves every live instance of a stamp, in place, keeping its overrides")
+{
+    // **The reported defect**: "criei uma stamp linkada na workspace, editei a
+    // stamp do content e não atualizou a stamp da workspace". Changing a stamp
+    // changed every instance of it across a save and a LOAD -- the test above
+    // says so -- and nothing at all while the world sat there. This is the same
+    // arithmetic done live.
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+    const core::InstanceId original = partUnder(fixture, workspace, "Post", core::DVec3{});
+    (void)partUnder(fixture, original, "Lantern", core::DVec3{});
+    const std::string before = scene::writeStamp(fixture.world, original);
+    (void)fixture.world.destroy(original);
+    fixture.world.retireDestroyed();
+
+    // Two linked instances, and a neighbour after them: the neighbour is what
+    // proves the refresh happens IN PLACE rather than by rebuilding, because a
+    // rebuilt instance would land after it.
+    SceneIoReport placing;
+    const core::InstanceId first = scene::readStamp(fixture.world, before, workspace, "post", &placing);
+    const core::InstanceId second = scene::readStamp(fixture.world, before, workspace, "post", &placing);
+    const core::InstanceId neighbour = partUnder(fixture, workspace, "Neighbour", core::DVec3{});
+    REQUIRE(first.valid());
+    REQUIRE(second.valid());
+
+    // What the second one has of its own: one value on the instance, one on
+    // something inside it, and a name.
+    fixture.world.setName(second, fixture.atom("Second"));
+    scene::PartComponent* body = fixture.world.parts().find(second);
+    REQUIRE(body != nullptr);
+    body->cframe.position = core::DVec3{5.0, 0.0, 0.0};
+    scene::PartComponent* inner = fixture.world.parts().find(fixture.world.firstChild(second));
+    REQUIRE(inner != nullptr);
+    inner->transparency = 0.5f;
+
+    // **The file moves on structurally**: a child added and a child taken away,
+    // which is exactly what was reported and what a load-time refresh would
+    // have handled and a live one did not.
+    Fixture edited;
+    (void)makeWorkspace(edited);
+    SceneIoReport ignored;
+    const core::InstanceId editing = scene::readStamp(edited.world, before, core::InstanceId{}, "post", &ignored);
+    REQUIRE(editing.valid());
+    (void)edited.world.destroy(edited.world.firstChild(editing));
+    edited.world.retireDestroyed();
+    const core::InstanceId glow = partUnder(edited, editing, "Glow", core::DVec3{});
+    scene::PartComponent* glowBody = edited.world.parts().find(glow);
+    REQUIRE(glowBody != nullptr);
+    glowBody->size = {9.0f, 9.0f, 9.0f};
+    const std::string after = scene::writeStamp(edited.world, editing);
+
+    SceneIoReport moved;
+    CHECK(scene::restamp(fixture.world, workspace, "post", before, after, &moved) == 2);
+
+    for (const core::InstanceId instance : {first, second}) {
+        CHECK(fixture.childNames(instance) == std::vector<std::string>{"Glow"});
+        // Same instance, same parent, same place among its siblings.
+        CHECK(fixture.world.alive(instance));
+        CHECK(fixture.world.parentOf(instance) == workspace);
+        // From the FILE, because nobody overrode it here.
+        const scene::PartComponent* refreshed = fixture.world.parts().find(fixture.world.firstChild(instance));
+        REQUIRE(refreshed != nullptr);
+        CHECK(static_cast<double>(refreshed->size.x) == doctest::Approx(9.0));
+    }
+    CHECK(fixture.world.nextSibling(first) == second);
+    CHECK(fixture.world.nextSibling(second) == neighbour);
+
+    // **What the second one had of its own is still its own.** A refresh that
+    // ate this would be a reset, and a person who had moved one lamp post would
+    // find it back at the origin every time somebody else saved the file.
+    CHECK(fixture.nameOf(second) == "Second");
+    body = fixture.world.parts().find(second);
+    REQUIRE(body != nullptr);
+    CHECK(body->cframe.position.x == doctest::Approx(5.0));
+    // The override INSIDE it named the lantern, and the lantern is gone from the
+    // file -- dropped and counted rather than fatal, exactly as a load does it.
+    CHECK(moved.refusedProperties > 0);
+    const scene::PartComponent* replaced = fixture.world.parts().find(fixture.world.firstChild(second));
+    REQUIRE(replaced != nullptr);
+    CHECK(static_cast<double>(replaced->transparency) == doctest::Approx(0.0));
+}
+
+TEST_CASE("restamp leaves an instance whose shape has moved on, and counts it")
+{
+    // The rule the writer already applies, from the other side: somebody who
+    // added a child to ONE lamp post is not asking for it to be thrown away the
+    // next time the file is saved. It is not an instance of that stamp any more.
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+    const core::InstanceId original = partUnder(fixture, workspace, "Post", core::DVec3{});
+    (void)partUnder(fixture, original, "Lantern", core::DVec3{});
+    const std::string before = scene::writeStamp(fixture.world, original);
+    (void)fixture.world.destroy(original);
+    fixture.world.retireDestroyed();
+
+    SceneIoReport ignored;
+    const core::InstanceId mine = scene::readStamp(fixture.world, before, workspace, "post", &ignored);
+    REQUIRE(mine.valid());
+    (void)partUnder(fixture, mine, "Banner", core::DVec3{});
+
+    Fixture edited;
+    (void)makeWorkspace(edited);
+    const core::InstanceId editing = scene::readStamp(edited.world, before, core::InstanceId{}, "post", &ignored);
+    REQUIRE(editing.valid());
+    (void)partUnder(edited, editing, "Glow", core::DVec3{});
+    const std::string after = scene::writeStamp(edited.world, editing);
+
+    SceneIoReport moved;
+    CHECK(scene::restamp(fixture.world, workspace, "post", before, after, &moved) == 0);
+    CHECK(moved.unlinkedStamps == 1);
+    CHECK(fixture.childNames(mine) == std::vector<std::string>{"Lantern", "Banner"});
+
+    // And a stamp nobody in the world is an instance of moves nothing.
+    CHECK(scene::restamp(fixture.world, workspace, "some-other-stamp", before, after, &moved) == 0);
+}

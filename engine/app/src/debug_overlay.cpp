@@ -2152,10 +2152,13 @@ void buildDefaultLayout(ImGuiID dockspace)
     case ContentKind::Scene:
         return icons::ContentScene;
     case ContentKind::Stamp:
-        // **The set owes a `content.Stamp` drawing** and this is the honest
-        // stand-in until it exists: a `Model` is a group of instances handled
-        // as one thing, which is what a stamp is a file of. Falling back to the
-        // generic content icon would say less than that.
+        // **A `Model` wearing the stamp badge**, which is not a stand-in for a
+        // drawing the set owes -- it is the same sentence the Explorer makes,
+        // read the other way round. There, a badged icon says "this instance
+        // comes from a file"; here it says "this file is what one comes from",
+        // and one mark for one idea beats two drawings for it. The base is a
+        // `Model` because a stamp is a group of instances handled as one thing.
+        // The badge is drawn by the browser, over this.
         return icons::ClassModel;
     case ContentKind::Mesh:
         return icons::ContentMesh;
@@ -2167,6 +2170,24 @@ void buildDefaultLayout(ImGuiID dockspace)
         break;
     }
     return icons::ContentOther;
+}
+
+// The icon a content row wears.
+//
+// **A stamp wears the icon of the instance it is a file OF** -- a character's
+// stamp draws as a character and a lamp post's as a part -- because that is the
+// thing a person recognises in a folder of forty, and because a file of a
+// character IS a character as far as anybody browsing is concerned. The kind's
+// own icon is the fallback for a stamp whose root this build could not read or
+// has no drawing for; the badge on top is what says "a file one comes from"
+// rather than "the instance itself".
+bool drawContentIcon(const IconAtlas* icons, const ContentEntry& entry, float size, std::optional<core::Color3> tint)
+{
+    if (entry.kind == ContentKind::Stamp && !entry.rootClass.empty() &&
+        drawIcon(icons, "class." + entry.rootClass, size, tint)) {
+        return true;
+    }
+    return drawIcon(icons, contentKindIcon(entry.kind), size, tint);
 }
 
 [[nodiscard]] const char* contentKindLabel(ContentKind kind) noexcept
@@ -2485,7 +2506,7 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                         ContentDrag payload;
                         (void)std::snprintf(payload.path, sizeof(payload.path), "%s", entry.path.c_str());
                         ImGui::SetDragDropPayload(kContentDragPayload, &payload, sizeof(payload));
-                        ImGui::TextUnformatted(entry.name.c_str());
+                        ImGui::TextUnformatted(ContentTree::displayNameOf(entry).c_str());
                         ImGui::EndDragDropSource();
                     }
 
@@ -2546,12 +2567,19 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                     // Placed on the cell rather than stacked after it, for the
                     // reason the explorer's are: the icon and the text are two
                     // heights and the cell has one shape.
+                    // **`lantern-post.stamp`, not `lantern-post.stamp.json`.**
+                    // `.json` is how the file is stored and this panel is the
+                    // one place that has to say what it IS.
+                    const std::string shown = ContentTree::displayNameOf(entry);
+
                     if (layout.nameBelow) {
                         const float centreX = entryOrigin.x + (layout.cell.x - entryIcon) * 0.5f;
                         ImGui::SetCursorPos(ImVec2(centreX, entryOrigin.y + ImGui::GetStyle().ItemInnerSpacing.y));
-                        (void)drawIcon(icons, contentKindIcon(entry.kind), entryIcon, tint);
+                        const ImVec2 iconOrigin = ImGui::GetCursorScreenPos();
+                        if (drawContentIcon(icons, entry, entryIcon, tint) && entry.kind == ContentKind::Stamp)
+                            drawIconBadge(icons, iconOrigin, entryIcon);
 
-                        const std::string label = elideToWidth(entry.name, layout.cell.x);
+                        const std::string label = elideToWidth(shown, layout.cell.x);
                         const float textX =
                             entryOrigin.x + (layout.cell.x - ImGui::CalcTextSize(label.c_str()).x) * 0.5f;
                         ImGui::SetCursorPos(
@@ -2565,13 +2593,23 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                     else {
                         float entryX = entryOrigin.x;
                         ImGui::SetCursorPos(ImVec2(entryX, entryOrigin.y + (entryHeight - entryIcon) * 0.5f));
-                        if (drawIcon(icons, contentKindIcon(entry.kind), entryIcon, tint))
+                        const ImVec2 iconOrigin = ImGui::GetCursorScreenPos();
+                        if (drawContentIcon(icons, entry, entryIcon, tint)) {
+                            // **The same badge the Explorer puts on a stamped
+                            // instance**, on the file it stamps from. One mark
+                            // for one idea: a person who has learned it in the
+                            // hierarchy does not learn it again here, and the
+                            // set can owe a `content.Stamp` drawing for as long
+                            // as it likes without this row being mute.
+                            if (entry.kind == ContentKind::Stamp)
+                                drawIconBadge(icons, iconOrigin, entryIcon);
                             entryX += entryIcon + ImGui::GetStyle().ItemInnerSpacing.x;
+                        }
 
                         const float textY = entryOrigin.y + (entryHeight - ImGui::GetTextLineHeight()) * 0.5f;
                         ImGui::SetCursorPos(ImVec2(entryX, textY));
-                        ImGui::TextUnformatted(entry.name.c_str());
-                        entryX += ImGui::CalcTextSize(entry.name.c_str()).x + 12.0f;
+                        ImGui::TextUnformatted(shown.c_str());
+                        entryX += ImGui::CalcTextSize(shown.c_str()).x + 12.0f;
 
                         if (const char* label = contentKindLabel(entry.kind); label[0] != '\0') {
                             ImGui::SetCursorPos(ImVec2(entryX, textY));

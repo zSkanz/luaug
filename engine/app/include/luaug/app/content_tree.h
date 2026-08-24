@@ -53,6 +53,15 @@ struct ContentEntry
     // path in a scene file means the same thing on all of them.
     std::string path;
     ContentKind kind = ContentKind::Other;
+    // For a stamp, the class of the instance the file is rooted at -- `Model`,
+    // `Part`, whatever somebody made it from. Empty for everything else and for
+    // a stamp this build could not read.
+    //
+    // **A stamp's icon is its root's icon**, which is the browser's whole reason
+    // for wanting this: a file of a character wears the character's icon and a
+    // file of a lamp post wears a part's, and a person recognises their own
+    // prefab in a folder of forty without reading a single name.
+    std::string rootClass;
     // Bytes, or zero for a folder. Shown rather than used: a person deciding
     // whether a texture is the 4K one wants this and nothing else does.
     core::u64 size = 0;
@@ -134,6 +143,17 @@ public:
     // The part of a name before the extension this kind carries, for a rename
     // box to start from: `main` for `main.scene.json`, not `main.scene`.
     [[nodiscard]] static std::string stemOf(const ContentEntry& entry);
+
+    // The name as a person reads it: `lantern-post.stamp`, not
+    // `lantern-post.stamp.json`.
+    //
+    // **`.json` is how the file is STORED and `.stamp` is what it is**, and the
+    // browser is the one place that has to say the second rather than the first.
+    // Only the trailing `.json` of a compound suffix goes -- a `.json` that is
+    // somebody's own data file keeps it, because for that one the storage IS
+    // what it is. The name on disk is untouched: this is a label, and every
+    // path, rename and load still spells the whole thing.
+    [[nodiscard]] static std::string displayNameOf(const ContentEntry& entry);
 
     // Rejects what a filesystem or a URN cannot carry: empty, a separator, a
     // relative-path segment, or a control character. Exposed so a panel can grey

@@ -1416,17 +1416,138 @@ TEST_CASE("opening a stamp builds a world of its own and leaves the game's alone
     stage.setName(glow, fixture.atom("Glow"));
     REQUIRE_FALSE(stage.setParent(glow, editing).has_value());
 
-    REQUIRE(editor.closeStamp(inspector, true));
+    REQUIRE(editor.closeStamp(world, root, inspector, true));
     CHECK(editor.stage() == nullptr);
-    // Still untouched, and the edit went to the FILE.
-    CHECK(world.instanceCount() == before);
-    CHECK(world.childCount(post) == 1);
+    // The edit went to the FILE -- and `post` is an instance of that file, so it
+    // has the new child too. Nothing else moved: `before` plus exactly one.
+    world.retireDestroyed();
+    CHECK(world.instanceCount() == before + 1);
+    CHECK(world.childCount(post) == 2);
+    CHECK(world.alive(scenery));
+    CHECK(world.parentOf(scenery) == root);
 
     // Reopening reads what was saved, which is the round trip that proves the
     // write happened at all.
     REQUIRE(editor.openStamp("lantern-post", fixture.classes, fixture.enums, fixture.atoms, inspector));
     CHECK(editor.stage()->world().childCount(editor.stampSession().root) == 2);
-    REQUIRE(editor.closeStamp(inspector, false));
+    REQUIRE(editor.closeStamp(world, root, inspector, false));
+}
+
+TEST_CASE("saving a stamp moves every linked instance of it in the world")
+{
+    // **The reported defect**, in the words it was reported in: "criei uma stamp
+    // linkada na workspace, editei a stamp do content -- adicionei um filho ou
+    // removi dentro dela -- e salvei, e não atualizou a stamp da workspace". A
+    // stamp is a definition (ADR 0051), so saving one is the moment everything
+    // that is an instance of it changes. It was only true across a save and a
+    // LOAD before this: nothing re-read the file while the world sat there.
+    StampProject project("follow");
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(project.root / "content");
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId post = fixture.widget(world, "Post");
+    const core::InstanceId lantern = fixture.widget(world, "Lantern");
+    REQUIRE_FALSE(world.setParent(post, root).has_value());
+    REQUIRE_FALSE(world.setParent(lantern, post).has_value());
+    REQUIRE(editor.createStamp(world, post, root, "lantern-post"));
+
+    // A second one, linked, and a THIRD that is a copy: the copy is nobody's
+    // instance and has to stay exactly where it is.
+    REQUIRE(editor.instantiateStamp(world, "lantern-post", root, root, inspector, true));
+    const core::InstanceId second = inspector.selection();
+    REQUIRE(editor.instantiateStamp(world, "lantern-post", root, root, inspector, false));
+    const core::InstanceId copy = inspector.selection();
+    CHECK_FALSE(world.stampOf(copy).valid());
+
+    // **A name of its own**, which is the instance's rather than the stamp's --
+    // it is written on the scene's node, not in the file -- and is therefore the
+    // one thing a refresh must leave exactly where it found it.
+    //
+    // A PROPERTY override is proven in `scene_file_tests` instead of here: this
+    // suite's fixture keeps property values in a table keyed by `InstanceId`
+    // alone, so a reference world built beside the live one reads the live one's
+    // values through colliding ids. That is an artefact of the fixture and not
+    // of the format, and putting the claim where the values live per world is
+    // the honest way to answer it.
+    world.setName(second, fixture.atom("Second"));
+
+    REQUIRE(editor.openStamp("lantern-post", fixture.classes, fixture.enums, fixture.atoms, inspector));
+    scene::World& stage = editor.stage()->world();
+    const core::InstanceId editing = editor.stampSession().root;
+
+    // Added inside it, and one taken away -- the two structural edits the report
+    // named.
+    const core::InstanceId glow = stage.create(fixture.widgetClass);
+    stage.setName(glow, fixture.atom("Glow"));
+    REQUIRE_FALSE(stage.setParent(glow, editing).has_value());
+    (void)stage.destroy(stage.findFirstChild(editing, fixture.atom("Lantern")));
+    stage.retireDestroyed();
+
+    REQUIRE(editor.saveStamp(world, root));
+
+    // Both linked ones followed: the lantern is gone and the glow is there.
+    for (const core::InstanceId instance : {post, second}) {
+        CHECK(world.childCount(instance) == 1);
+        CHECK(world.findFirstChild(instance, fixture.atom("Glow")).valid());
+        CHECK_FALSE(world.findFirstChild(instance, fixture.atom("Lantern")).valid());
+        // And it is still the same instance, at the same place among its
+        // siblings -- rebuilt in place rather than replaced, so nothing holding
+        // a reference to it lost it.
+        CHECK(world.alive(instance));
+        CHECK(world.parentOf(instance) == root);
+    }
+    CHECK(world.nextSibling(post) == second);
+
+    // Still its own name, which is what makes this a refresh rather than a
+    // reset.
+    CHECK(world.atoms().text(world.name(second)) == "Second");
+
+    // The copy is nobody's instance and did not move.
+    CHECK(world.childCount(copy) == 1);
+    CHECK(world.findFirstChild(copy, fixture.atom("Lantern")).valid());
+
+    REQUIRE(editor.closeStamp(world, root, inspector, false));
+}
+
+TEST_CASE("an instance that was changed structurally stops following its stamp")
+{
+    // The other half of the rule the writer already applies: somebody who added
+    // a child to ONE lamp post is not asking for it to be thrown away the next
+    // time the file is saved. It is not an instance of that stamp any more, and
+    // the count is what says so out loud.
+    StampProject project("diverged");
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(project.root / "content");
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId post = fixture.widget(world, "Post");
+    REQUIRE_FALSE(world.setParent(post, root).has_value());
+    REQUIRE(editor.createStamp(world, post, root, "post"));
+
+    // Its own, added in the world rather than in the file.
+    const core::InstanceId mine = fixture.widget(world, "Mine");
+    REQUIRE_FALSE(world.setParent(mine, post).has_value());
+
+    REQUIRE(editor.openStamp("post", fixture.classes, fixture.enums, fixture.atoms, inspector));
+    scene::World& stage = editor.stage()->world();
+    const core::InstanceId glow = stage.create(fixture.widgetClass);
+    stage.setName(glow, fixture.atom("Glow"));
+    REQUIRE_FALSE(stage.setParent(glow, editor.stampSession().root).has_value());
+    REQUIRE(editor.saveStamp(world, root));
+
+    // Left exactly as it was, and the status says it was left.
+    CHECK(world.childCount(post) == 1);
+    CHECK(world.findFirstChild(post, fixture.atom("Mine")).valid());
+    CHECK(editor.status().message.find("left alone") != std::string::npos);
+
+    REQUIRE(editor.closeStamp(world, root, inspector, false));
 }
 
 TEST_CASE("closing a stamp without saving drops the stage and what was done on it")
@@ -1447,12 +1568,12 @@ TEST_CASE("closing a stamp without saving drops the stage and what was done on i
     scene::World& stage = editor.stage()->world();
     const core::InstanceId glow = stage.create(fixture.widgetClass);
     REQUIRE_FALSE(stage.setParent(glow, editor.stampSession().root).has_value());
-    REQUIRE(editor.closeStamp(inspector, false));
+    REQUIRE(editor.closeStamp(world, root, inspector, false));
 
     // Nothing was written, so what comes back is what was there.
     REQUIRE(editor.openStamp("post", fixture.classes, fixture.enums, fixture.atoms, inspector));
     CHECK(editor.stage()->world().childCount(editor.stampSession().root) == 0);
-    REQUIRE(editor.closeStamp(inspector, false));
+    REQUIRE(editor.closeStamp(world, root, inspector, false));
 }
 
 TEST_CASE("a stamp cannot be opened while the world is playing, or twice")
@@ -1478,7 +1599,7 @@ TEST_CASE("a stamp cannot be opened while the world is playing, or twice")
     REQUIRE(editor.openStamp("post", fixture.classes, fixture.enums, fixture.atoms, inspector));
     // A second one would need a second stage, and the editor shows one thing.
     CHECK_FALSE(editor.openStamp("post", fixture.classes, fixture.enums, fixture.atoms, inspector));
-    REQUIRE(editor.closeStamp(inspector, false));
+    REQUIRE(editor.closeStamp(world, root, inspector, false));
 
     // A stamp that is not there builds no stage and leaves nothing behind.
     CHECK_FALSE(editor.openStamp("no-such-stamp", fixture.classes, fixture.enums, fixture.atoms, inspector));

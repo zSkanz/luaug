@@ -656,6 +656,35 @@ void applyNode(World& world, core::InstanceId id, const JsonValue& json, std::ve
     }
 }
 
+// **What an instance has of its own** (ADR 0051), keyed by the path inside the
+// stamp: `""` is the instance itself and `Lantern.Bulb` is something under it.
+//
+// Applied AFTER the stamp has been built, which is what makes an override an
+// override -- the stamp says what a thing is and these say what this one of them
+// is like. One function rather than two, because a load and a live refresh
+// (`restamp`) put the same overrides back on top of the same file and two
+// spellings of that would disagree the first time either moved.
+void applyOverrides(World& world, core::InstanceId placed, const JsonValue& overrides,
+                    std::vector<PendingReference>& pending, SceneIoReport& report)
+{
+    if (overrides.type() != core::JsonType::Object)
+        return;
+
+    for (core::usize index = 0; index < overrides.size(); ++index) {
+        const std::string_view path = overrides.keyAt(index);
+        const core::InstanceId target = path.empty() ? placed : resolveInside(world, placed, path);
+        if (!target.valid()) {
+            // The stamp moved on and no longer has what this override names.
+            // Counted rather than fatal, exactly as an unknown class is: a scene
+            // should still open, minus what is gone.
+            ++report.refusedProperties;
+            continue;
+        }
+        applyProperties(world, target, overrides[path], pending, report);
+        ++report.overrides;
+    }
+}
+
 core::InstanceId readInstance(World& world, core::InstanceId parent, const JsonValue& json,
                               std::vector<PendingReference>& pending, SceneIoReport& report, const StampSource* stamps,
                               int depth)
@@ -678,26 +707,7 @@ core::InstanceId readInstance(World& world, core::InstanceId parent, const JsonV
         }
         world.setName(placed, world.atoms().intern(json["name"].asString()));
 
-        // **What this instance has of its own** (ADR 0051), keyed by the path
-        // inside the stamp: `""` is the instance itself and `Lantern.Bulb` is
-        // something under it. Applied AFTER the stamp has been built, which is
-        // what makes an override an override -- the stamp says what a thing is
-        // and these say what this one of them is like.
-        if (const JsonValue overrides = json["overrides"]; overrides.type() == core::JsonType::Object) {
-            for (core::usize index = 0; index < overrides.size(); ++index) {
-                const std::string_view path = overrides.keyAt(index);
-                const core::InstanceId target = path.empty() ? placed : resolveInside(world, placed, path);
-                if (!target.valid()) {
-                    // The stamp moved on and no longer has what this override
-                    // names. Counted rather than fatal, exactly as an unknown
-                    // class is: a scene should still open, minus what is gone.
-                    ++report.refusedProperties;
-                    continue;
-                }
-                applyProperties(world, target, overrides[path], pending, report);
-                ++report.overrides;
-            }
-        }
+        applyOverrides(world, placed, json["overrides"], pending, report);
         ++report.stamped;
         return placed;
     }
@@ -987,6 +997,120 @@ core::InstanceId readStamp(World& world, std::string_view json, core::InstanceId
         return wanted == stamp ? std::optional<std::string>(std::string(json)) : std::nullopt;
     };
     return placeStamp(world, parent, stamp, out, &source, 0);
+}
+
+core::u32 restamp(World& world, core::InstanceId root, std::string_view stamp, std::string_view before,
+                  std::string_view after, SceneIoReport* report)
+{
+    SceneIoReport local;
+    SceneIoReport& out = report != nullptr ? *report : local;
+
+    const core::NameAtom mark = world.atoms().lookup(stamp);
+    if (!mark.valid() || !world.alive(root))
+        return 0;
+
+    core::JsonDocument document;
+    if (const core::JsonDocument::ParseResult parsed = document.parse(after); !parsed.ok)
+        return 0;
+    const JsonValue file = document.root();
+    const JsonValue rootNode = file["root"];
+    if (file["format"].asString() != kFormat || file["version"].asInteger() != kVersion ||
+        rootNode.type() != core::JsonType::Object)
+        return 0;
+
+    // **The file as the live instances were built from it**, in a world of its
+    // own. "What has this one got of its own" is a question about two trees and
+    // there is no cheaper honest way to ask it -- the same argument the writer
+    // makes, one save earlier.
+    World reference(world.classes(), world.enums(), world.atoms(), kReferenceSeed);
+    SceneIoReport ignored;
+    const core::InstanceId referenceRoot = readStamp(reference, before, {}, stamp, &ignored);
+    if (!referenceRoot.valid())
+        return 0;
+
+    const ClassId rootClass = world.classes().findId(world.atoms().intern(rootNode["class"].asString()));
+    if (rootClass == InvalidClass)
+        return 0;
+
+    // Collected before anything is touched: the walk and the rebuild cannot be
+    // one pass, because the rebuild replaces the children the walk is standing
+    // in.
+    std::vector<core::InstanceId> subtree;
+    subtree.push_back(root);
+    world.collectDescendants(root, subtree);
+
+    const StampSource source = [after, stamp](std::string_view wanted) -> std::optional<std::string> {
+        return wanted == stamp ? std::optional<std::string>(std::string(after)) : std::nullopt;
+    };
+
+    core::u32 refreshed = 0;
+    for (const core::InstanceId target : subtree) {
+        if (!world.alive(target) || world.stampOf(target) != mark)
+            continue;
+
+        // **Not an instance of that stamp any more**, so it is left exactly as
+        // it is and counted. Somebody added a child to this one, or deleted
+        // one, and rebuilding it from the file would throw that away -- which is
+        // the same rule the writer applies for the same reason.
+        if (world.classOf(target) != rootClass || !sameShape(world, target, reference, referenceRoot)) {
+            ++out.unlinkedStamps;
+            continue;
+        }
+
+        // What it has of its own, measured against the file it came from and
+        // kept as text: the tree it was measured on is about to stop existing.
+        std::unordered_map<core::u32, std::string> paths;
+        JsonWriter kept;
+        kept.beginObject();
+        bool anyOverride = false;
+        SceneIoReport measured;
+        collectOverrides(kept, anyOverride, world, target, reference, referenceRoot, target, paths, measured);
+        if (anyOverride)
+            kept.endObject();
+        kept.endObject();
+
+        core::JsonDocument overrides;
+        const bool hasOverrides = anyOverride && overrides.parse(kept.text()).ok;
+
+        // **The instance itself survives**: its id, its parent, its place among
+        // its siblings and every reference anything else holds to it. Destroying
+        // and rebuilding it would move it to the end of its parent, and an
+        // Explorer whose rows jump every time somebody saves is one nobody
+        // trusts.
+        std::vector<core::InstanceId> children;
+        world.collectChildren(target, children);
+        for (const core::InstanceId child : children)
+            (void)world.destroy(child);
+
+        std::vector<PendingReference> pending;
+        applyNode(world, target, rootNode, pending, out);
+        if (const JsonValue nodes = rootNode["children"]; nodes.type() == core::JsonType::Array) {
+            for (core::usize index = 0; index < nodes.size(); ++index)
+                (void)readInstance(world, target, nodes.at(index), pending, out, &source, 1);
+        }
+        if (hasOverrides)
+            applyOverrides(world, target, overrides.root()["overrides"], pending, out);
+
+        // Inside the stamp, against the stamp's own root -- the rule
+        // `placeStamp` states and for the same reason: a path inside a stamp
+        // names something inside that stamp.
+        for (const PendingReference& entry : pending) {
+            const core::InstanceId found = resolvePath(world, target, entry.path);
+            if (!found.valid()) {
+                ++out.droppedReferences;
+                continue;
+            }
+            if (entry.isAttribute)
+                (void)world.setAttribute(entry.owner, entry.property, Value{found});
+            else
+                (void)world.setProperty(entry.owner, entry.property, Value{found});
+        }
+
+        ++out.stamped;
+        ++refreshed;
+    }
+
+    return refreshed;
 }
 
 } // namespace luaug::scene

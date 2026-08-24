@@ -190,4 +190,27 @@ readScene(World& world, std::string_view json, SceneIoReport* report = nullptr, 
 [[nodiscard]] core::InstanceId readStamp(World& world, std::string_view json, core::InstanceId parent,
                                          std::string_view stamp, SceneIoReport* report = nullptr);
 
+// Re-applies a stamp file to every live instance of it, in the subtree at
+// `root`. Returns how many were refreshed.
+//
+// **A stamp is a definition, so changing it changes what already exists** (ADR
+// 0051) -- and until this, that was only true across a save and a load. A
+// linked instance in a running editor is an ordinary subtree carrying a mark;
+// nothing re-read the file while it sat there. This is the same arithmetic done
+// live: what each instance has of its own is measured against the file it was
+// built from, its children are rebuilt from the file as it stands now, and the
+// overrides go back on top.
+//
+// **`before` is the file's PREVIOUS text and it is not optional.** An instance
+// that differs from the new file is either overridden or merely out of date, and
+// only the text it was built from tells those two apart.
+//
+// The instances keep their ids, their parents and their place among their
+// siblings, so a reference held to one of them survives -- see the body for what
+// that costs and why the alternative costs more. **A subtree whose shape has
+// moved on is left alone** and counted in `unlinkedStamps`: it is not an
+// instance of that stamp any more, which is the rule the writer already applies.
+[[nodiscard]] core::u32 restamp(World& world, core::InstanceId root, std::string_view stamp, std::string_view before,
+                                std::string_view after, SceneIoReport* report = nullptr);
+
 } // namespace luaug::scene
