@@ -1926,8 +1926,18 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // Paused: the editor's own view. Playing: the game's, unchanged --
             // which is what makes the viewport show the GAME when you press play
             // rather than a tool's idea of it.
+            //
+            // **Unless the game has no camera at all** (D088). Pressing play on a
+            // project whose scripts never made one left nothing to render
+            // through, and the frame fell back to the M1 "the engine is alive"
+            // pulse -- a background cycling through colours where a world should
+            // be. The editor's camera is the fallback and never the winner: a
+            // game with a camera is still shown through its own, which is the
+            // whole of what pressing play means.
             const render::ViewOverride editorView{editor.cameraCFrame(), EditorFieldOfView, 0.1f, 5000.0f};
-            const bool useEditorView = options.editor && editing(editor.runState()) && editor.cameraAdopted();
+            const bool gameHasCamera = host->currentCamera().valid();
+            const bool useEditorView =
+                options.editor && editor.cameraAdopted() && (editing(editor.runState()) || !gameHasCamera);
             // **The selection, drawn as a silhouette rather than as a box.** The
             // wire box E1 shipped says where a thing's BOUNDS are, which for
             // anything that is not a cube is a shape the object does not have --

@@ -422,6 +422,34 @@ bool iconButton(const IconAtlas* icons, std::string_view id, float size, const c
     return classIconId(world.atoms().text(descriptor->name));
 }
 
+// One step of the content browser's path, as a control that looks like the text
+// it is.
+//
+// **A breadcrumb is not a row of buttons.** `SmallButton` draws a filled,
+// bordered box, which was invisible while the shell drew neither and became a
+// rectangle around every folder name the moment a theme did. What a path wants
+// is words you can click, so the frame goes and the affordance is what every
+// file manager uses instead: the cursor changes and the word underlines.
+[[nodiscard]] bool crumbButton(const char* label)
+{
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
+    const bool pressed = ImGui::SmallButton(label);
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor(3);
+
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+        const ImVec2 lo = ImGui::GetItemRectMin();
+        const ImVec2 hi = ImGui::GetItemRectMax();
+        ImGui::GetWindowDrawList()->AddLine(ImVec2(lo.x, hi.y), ImVec2(hi.x, hi.y), ImGui::GetColorU32(ImGuiCol_Text));
+    }
+    return pressed;
+}
+
 // Case-insensitive substring, for the add menu's filter box. ASCII, because
 // every class name in this engine is (R1) and a full Unicode fold would be a
 // dependency for a filter over thirty identifiers.
@@ -2527,7 +2555,7 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
         // nowhere is drawn the same way at the end of the chain.
         ImGui::TextUnformatted("content");
     }
-    else if (ImGui::SmallButton("content")) {
+    else if (crumbButton("content")) {
         while (!tree.atRoot())
             (void)tree.leave();
     }
@@ -2568,7 +2596,7 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
             if (last) {
                 ImGui::TextUnformatted(segment.c_str());
             }
-            else if (ImGui::SmallButton(segment.c_str())) {
+            else if (crumbButton(segment.c_str())) {
                 for (int up = 0; up < depth - step - 1; ++up)
                     (void)tree.leave();
             }
