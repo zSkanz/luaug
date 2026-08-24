@@ -1088,6 +1088,29 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 if (editorCommands.breakStamp.valid())
                     (void)editor.breakStamp(authored(), editorCommands.breakStamp);
 
+                // **A subtree dragged between the two trees** (ADR 0052). Which
+                // world is which comes from the payload rather than from what
+                // is active, because a drag ENDS in the other one -- and the
+                // click that would have made it active has not happened.
+                if (editorCommands.copySubject.valid() && editor.contentWorld() != nullptr) {
+                    scene::World& tree = *editor.contentWorld();
+                    scene::World& from = editorCommands.copyFromContent ? tree : host->world();
+                    scene::World& to = editorCommands.copyFromContent ? host->world() : tree;
+                    const core::InstanceId into =
+                        editorCommands.copyParent.valid()
+                            ? editorCommands.copyParent
+                            : (editorCommands.copyFromContent ? host->workspace() : editor.contentRoot());
+                    (void)editor.copyAcross(from, editorCommands.copySubject, to, into, inspector);
+                    // The destination is what a person is now looking at, so it
+                    // is the tree the next verb acts on.
+                    editor.setContentTreeActive(!editorCommands.copyFromContent);
+                    // Written when the TREE is what changed, which is the
+                    // other direction: a drag out of the library leaves the
+                    // library alone.
+                    if (!editorCommands.copyFromContent)
+                        (void)editor.saveContentTree();
+                }
+
                 // **Opening and closing both replace the world**, so they are
                 // drained here beside play and stop rather than acted on where
                 // they were clicked -- a panel behind this one is still drawing
@@ -1100,6 +1123,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     (void)editor.saveStamp();
                 if (editorCommands.closeStamp)
                     (void)editor.closeStamp(inspector, editorCommands.closeStampSaving);
+
+                // Which tree the last click was in, drained before anything
+                // acts: every verb below reads `authored()`, and that has to be
+                // the world the click was made in rather than the one it was
+                // made in last frame.
+                if (editorCommands.activeIsContentTree.has_value())
+                    editor.setContentTreeActive(*editorCommands.activeIsContentTree);
 
                 // One question about every verb rather than a flag on each:
                 // "did anything change since the last save".

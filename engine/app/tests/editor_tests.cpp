@@ -1559,6 +1559,68 @@ TEST_CASE("which tree is in front decides what a verb acts on")
     CHECK_FALSE(bare.saveContentTree());
 }
 
+TEST_CASE("a subtree dragged between the two trees is copied, and the source is left alone")
+{
+    // **Nothing carries an instance across.** An `InstanceId` belongs to the
+    // world that minted it, so what crosses is the DESCRIPTION -- the same
+    // `writeStamp`/`readStamp` pair a prefab is made of -- which is why both
+    // directions cost one function rather than two (ADR 0052).
+    StampProject project("copy-across");
+    app::testing::Fixture fixture;
+    scene::World scene_(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(project.root / "content");
+    editor.openContentTree(fixture.classes, fixture.enums, fixture.atoms);
+    REQUIRE(editor.contentWorld() != nullptr);
+    scene::World& tree = *editor.contentWorld();
+
+    const core::InstanceId sceneRoot = fixture.widget(scene_, "Root");
+    const core::InstanceId post = fixture.widget(scene_, "Post");
+    const core::InstanceId lantern = fixture.widget(scene_, "Lantern");
+    REQUIRE_FALSE(scene_.setParent(post, sceneRoot).has_value());
+    REQUIRE_FALSE(scene_.setParent(lantern, post).has_value());
+
+    // Scene -> project's tree.
+    REQUIRE(editor.copyAcross(scene_, post, tree, editor.contentRoot(), inspector));
+    CHECK(tree.childCount(editor.contentRoot()) == 1);
+    const core::InstanceId stored = tree.firstChild(editor.contentRoot());
+    REQUIRE(stored.valid());
+    CHECK(tree.atoms().text(tree.name(stored)) == "Post");
+    // The subtree came with it.
+    CHECK(tree.childCount(stored) == 1);
+    // **The source is untouched**, which is what makes it a copy rather than a
+    // move: dragging into a library does not empty the scene.
+    CHECK(scene_.alive(post));
+    CHECK(scene_.parentOf(post) == sceneRoot);
+    // Selected in the destination, because that is what a person is now looking
+    // at, and revealed for the reason D075 exists.
+    CHECK(inspector.selection() == stored);
+    CHECK(inspector.takeReveal() == stored);
+
+    // And back the other way, which is the whole point of a library.
+    const core::u32 before = scene_.childCount(sceneRoot);
+    REQUIRE(editor.copyAcross(tree, stored, scene_, sceneRoot, inspector));
+    CHECK(scene_.childCount(sceneRoot) == before + 1);
+    CHECK(tree.childCount(editor.contentRoot()) == 1);
+    const core::InstanceId placed = inspector.selection();
+    REQUIRE(placed.valid());
+    CHECK(placed != post);
+    CHECK(scene_.childCount(placed) == 1);
+    // **No mark.** A copy dragged out of a library is a thing in a world, not
+    // an instance of the row it was dragged from -- and a mark naming the drag
+    // would point at a file that does not exist.
+    CHECK_FALSE(scene_.stampOf(placed).valid());
+
+    // One undo step for the whole subtree, on the world that changed.
+    REQUIRE(editor.undo(scene_, inspector));
+    CHECK(scene_.childCount(sceneRoot) == before);
+
+    // Nothing to copy, and nowhere to put it: refused rather than half-done.
+    CHECK_FALSE(editor.copyAcross(scene_, core::InstanceId{}, tree, editor.contentRoot(), inspector));
+    CHECK_FALSE(editor.copyAcross(scene_, post, tree, core::InstanceId{}, inspector));
+}
+
 // --- E2: dragging a manipulator ---------------------------------------------
 //
 // The whole loop, headless: a camera, a viewport, a press on a handle, frames

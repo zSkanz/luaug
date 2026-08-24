@@ -182,6 +182,12 @@ struct EditorPanels
     bool properties = true;
     bool viewport = true;
     bool content = true;
+    // The project's instance tree (ADR 0052). **Its own panel and not a tab in
+    // the Explorer**, and the reason is dragging: only one tab is drawn per
+    // frame, so a drag from the scene's tree to the project's could not exist
+    // at all. Two panels can both be on screen, and a thing you can see is a
+    // thing you can drag to.
+    bool contentTree = true;
     bool console = true;
     bool stats = true;
 
@@ -318,6 +324,21 @@ struct EditorCommands
     // Take the mark off this one, so it stops following its file.
     core::InstanceId breakStamp;
 
+    // Which tree a row was last clicked in (ADR 0052), or nothing when nobody
+    // clicked one this frame. It decides what every verb acts on, because a
+    // selection belongs to a world.
+    std::optional<bool> activeIsContentTree;
+
+    // **A subtree dragged from one tree to the other**, and it is a copy: an
+    // `InstanceId` belongs to the world that minted it, so what crosses is the
+    // description rather than the instance. `copyFromContent` says which way,
+    // because the two ids mean nothing without it.
+    core::InstanceId copySubject;
+    bool copyFromContent = false;
+    // In the destination. Invalid means "the root of it", which is what a drop
+    // on the viewport means.
+    core::InstanceId copyParent;
+
     // **Open a stamp for editing**, save what is open, or close it. Opening
     // replaces the world with the stamp and closing puts the scene back, so
     // all three are drained at the safe point like everything else that
@@ -349,9 +370,10 @@ struct EditorCommands
     {
         return play.has_value() || pause.has_value() || save || newScene || quit || resetLayout || clearSelection ||
                undo || redo || colorAsked || stampSubject.valid() || !placeStamp.empty() || breakStamp.valid() ||
-               !openStamp.empty() || saveStamp || closeStamp || createClass != scene::InvalidClass || deleteSelection ||
-               duplicateSelection || reparentTo.valid() || renameInstance.valid() || !saveAs.empty() ||
-               !openScene.empty() || !createFolder.empty() || !deleteContent.empty() || !renameContent.empty();
+               !openStamp.empty() || saveStamp || closeStamp || copySubject.valid() ||
+               createClass != scene::InvalidClass || deleteSelection || duplicateSelection || reparentTo.valid() ||
+               renameInstance.valid() || !saveAs.empty() || !openScene.empty() || !createFolder.empty() ||
+               !deleteContent.empty() || !renameContent.empty();
     }
 };
 
@@ -933,6 +955,21 @@ public:
     };
     [[nodiscard]] static ReparentPlan planReparent(const scene::World& world, std::span<const core::InstanceId> ids,
                                                    core::InstanceId newParent, core::InstanceId root);
+
+    // **Copies a subtree from one world into another** (ADR 0052), which is what
+    // dragging between the scene and the project's tree does.
+    //
+    // A COPY and not a move, and not a reparent: an `InstanceId` belongs to the
+    // world that minted it, so there is no operation that carries an instance
+    // across. What crosses is the DESCRIPTION -- `writeStamp` out, `readStamp`
+    // in -- which is the same pair a prefab is made of, and the reason both
+    // directions cost one function rather than two.
+    //
+    // The undo step is recorded on the DESTINATION, because that is the world
+    // that changed. Dragging out of the project's tree leaves it untouched,
+    // which is what a library is for.
+    bool copyAcross(scene::World& from, core::InstanceId id, scene::World& to, core::InstanceId parent,
+                    Inspector& inspector);
 
     // Whether a drop of `ids` onto `newParent` would move anything at all.
     [[nodiscard]] static bool canReparent(const scene::World& world, std::span<const core::InstanceId> ids,

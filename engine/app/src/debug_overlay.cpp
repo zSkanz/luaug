@@ -350,6 +350,18 @@ std::vector<const scene::PropertyDesc*> g_properties;
 // nothing anywhere saying why.
 constexpr const char* kInstanceDragPayload = "luaug.instances";
 
+// What a dragged row carries.
+//
+// **An id is not enough, because there are two worlds.** The same `InstanceId`
+// names one instance in the scene and an unrelated one in the project's tree, so
+// the payload says which it came from -- and that is what lets one drop target
+// tell "reparent within this tree" from "copy across from the other" (ADR 0052).
+struct InstanceDrag
+{
+    core::InstanceId id;
+    bool fromContentTree = false;
+};
+
 // The instance tree, virtualised.
 //
 // **Every row used to be drawn every frame**, which on the flagship is 4,300
@@ -433,7 +445,8 @@ constexpr const char* kInstanceDragPayload = "luaug.instances";
 // its own, and hiding it would leave somebody editing a set of children with
 // nothing saying what they are children OF.
 void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspector, EditorCommands* commands,
-                  EditorDialogs* dialogs, const IconAtlas* icons, bool showGenerated, bool drawRoot = false)
+                  EditorDialogs* dialogs, const IconAtlas* icons, bool showGenerated, bool drawRoot = false,
+                  bool isContentTree = false, bool anotherTreeHoldsTheSelection = false)
 {
     // How much of the depth is above the first row that gets drawn. One when
     // the root is hidden, zero when it is not -- and every position on a row is
@@ -629,6 +642,19 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 // `g_visible` rather than over the whole tree, because a range
                 // somebody drew with the mouse across a collapsed branch would
                 // pick up rows they cannot see.
+                // **Clicking a row says which tree is in front.** A selection
+                // belongs to a world -- an id from one names an unrelated
+                // instance in the other -- so the click that makes one is the
+                // moment that decides what every verb acts on.
+                //
+                // And it drops whatever the OTHER tree was holding first,
+                // because there is no honest way to carry a selection across:
+                // the ids would resolve, to the wrong instances.
+                if (anotherTreeHoldsTheSelection)
+                    inspector.clearSelection();
+                if (commands != nullptr)
+                    commands->activeIsContentTree = isContentTree;
+
                 const ImGuiIO& io = ImGui::GetIO();
                 if (io.KeyCtrl) {
                     inspector.toggle(row.id);
@@ -662,14 +688,36 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             // afterwards would be reading that window's last item rather than
             // the row's.
             if (commands != nullptr && ImGui::BeginDragDropTarget()) {
-                // **Lit only where the drop would do something.** A row that
-                // highlights under the pointer and then refuses is the same
-                // broken promise a field that takes a drag the world rejects
-                // makes -- so the rule is asked here, a frame before the drag
-                // ends, through the one function the verb itself uses.
-                if (Editor::canReparent(world, inspector.selectionSet(), row.id, root)) {
-                    if (ImGui::AcceptDragDropPayload(kInstanceDragPayload) != nullptr)
+                // **Two drops, told apart by where the drag came from.**
+                //
+                // From this same tree it is a reparent, and the row lights only
+                // where the move would do something -- a row that highlights and
+                // then refuses is the same broken promise a field that takes a
+                // drag the world rejects makes, so the rule is asked here, a
+                // frame early, through the one function the verb itself uses.
+                //
+                // From the OTHER tree it is a copy, because an `InstanceId`
+                // belongs to the world that minted it and nothing carries an
+                // instance across (ADR 0052). Anywhere authorable will take one.
+                const ImGuiPayload* peek = ImGui::GetDragDropPayload();
+                const InstanceDrag* incoming = peek != nullptr && peek->IsDataType(kInstanceDragPayload) &&
+                                                       peek->DataSize == static_cast<int>(sizeof(InstanceDrag))
+                                                   ? static_cast<const InstanceDrag*>(peek->Data)
+                                                   : nullptr;
+                const bool fromHere = incoming != nullptr && incoming->fromContentTree == isContentTree;
+
+                const bool takes = incoming != nullptr &&
+                                   (fromHere ? Editor::canReparent(world, inspector.selectionSet(), row.id, root)
+                                             : Editor::canParentInto(world, row.id, root));
+                if (takes && ImGui::AcceptDragDropPayload(kInstanceDragPayload) != nullptr) {
+                    if (fromHere) {
                         commands->reparentTo = row.id;
+                    }
+                    else {
+                        commands->copySubject = incoming->id;
+                        commands->copyFromContent = incoming->fromContentTree;
+                        commands->copyParent = row.id;
+                    }
                 }
                 ImGui::EndDragDropTarget();
             }
@@ -683,13 +731,12 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 if (!inspector.isSelected(row.id))
                     inspector.select(row.id);
 
-                // **The payload is a marker and carries no ids.** What moves is
-                // the selection, read at the drain exactly like the delete and
-                // the duplicate -- ids in the payload would be a second copy of
-                // the answer, and the copy is the one that goes stale when a
-                // panel changes the selection mid-drag.
-                const char marker = 0;
-                ImGui::SetDragDropPayload(kInstanceDragPayload, &marker, sizeof(marker));
+                // **The payload says WHERE FROM, and that is all it has to
+                // say.** Within one tree what moves is the selection, read at
+                // the drain like the delete and the duplicate; across two it is
+                // this one instance, because a selection cannot span worlds.
+                const InstanceDrag dragged{row.id, isContentTree};
+                ImGui::SetDragDropPayload(kInstanceDragPayload, &dragged, sizeof(dragged));
 
                 const core::usize dragging = inspector.selectionCount();
                 if (dragging > 1)
@@ -1910,6 +1957,28 @@ void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& co
         if (native != nullptr && size.x >= 1.0f && size.y >= 1.0f) {
             ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)), size);
 
+            // **Dropped into the WORLD** (ADR 0052): dragging something out of
+            // the project's tree and onto the viewport is the shortest way to
+            // say "one of those, here". It lands under `Workspace` rather than
+            // where the pointer is, because a drop point is a pixel and a
+            // placement is a position -- the two only meet through a pick, and
+            // a prefab that landed inside whatever happened to be behind the
+            // cursor would be a surprise every time it worked.
+            if (ImGui::BeginDragDropTarget()) {
+                const ImGuiPayload* dropped = ImGui::AcceptDragDropPayload(kInstanceDragPayload);
+                if (dropped != nullptr && dropped->DataSize == static_cast<int>(sizeof(InstanceDrag))) {
+                    const InstanceDrag* incoming = static_cast<const InstanceDrag*>(dropped->Data);
+                    // Only FROM the project's tree. A row of the scene dragged
+                    // onto the scene means nothing -- it is already there.
+                    if (incoming->fromContentTree) {
+                        commands.copySubject = incoming->id;
+                        commands.copyFromContent = true;
+                        commands.copyParent = {};
+                    }
+                }
+                ImGui::EndDragDropTarget();
+            }
+
             // Hovering the IMAGE, not the window: a click on the tab, the
             // border or the space beside a letterboxed image is not a click on
             // the world, and treating it as one deselects whatever the person
@@ -2483,6 +2552,7 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
         ImGui::MenuItem("Properties", nullptr, &panels.properties);
         ImGui::MenuItem("Viewport", nullptr, &panels.viewport);
         ImGui::MenuItem("Content", nullptr, &panels.content);
+        ImGui::MenuItem("Content Tree", nullptr, &panels.contentTree);
         ImGui::MenuItem("Console", nullptr, &panels.console);
         ImGui::MenuItem("Stats", nullptr, &panels.stats);
         ImGui::Separator();
@@ -2859,39 +2929,26 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
                 // inside instance in both, the same verbs in both -- and
                 // nothing in `Content` runs, which is the one sentence that
                 // explains the difference.
-                scene::World* const contentTree = editor != nullptr ? editor->contentWorld() : nullptr;
-                if (contentTree == nullptr || editingStamp) {
-                    drawExplorer(*world, treeRoot, *inspector, &commands, &dialogs, icons, panels.showGenerated,
-                                 editingStamp);
-                }
-                else if (ImGui::BeginTabBar("trees")) {
-                    if (ImGui::BeginTabItem("scene")) {
-                        // **Switching drops the selection**, because an id from
-                        // one world names an unrelated instance in the other --
-                        // and a properties grid pointed at somebody else is how
-                        // an edit lands on the wrong object.
-                        if (editor->contentTreeActive()) {
-                            editor->setContentTreeActive(false);
-                            inspector->onWorldChanged();
-                        }
-                        drawExplorer(*world, treeRoot, *inspector, &commands, &dialogs, icons, panels.showGenerated,
-                                     false);
-                        ImGui::EndTabItem();
-                    }
-                    if (ImGui::BeginTabItem("content")) {
-                        if (!editor->contentTreeActive()) {
-                            editor->setContentTreeActive(true);
-                            inspector->onWorldChanged();
-                        }
-                        // The root row IS drawn here, for the reason a stamp's
-                        // is: it is the thing being edited rather than a piece
-                        // of chrome, and everything under it hangs off it.
-                        drawExplorer(*contentTree, editor->contentRoot(), *inspector, &commands, &dialogs, icons, true,
-                                     true);
-                        ImGui::EndTabItem();
-                    }
-                    ImGui::EndTabBar();
-                }
+                const bool contentHoldsIt = editor != nullptr && editor->contentTreeActive();
+                drawExplorer(*world, treeRoot, *inspector, &commands, &dialogs, icons, panels.showGenerated,
+                             editingStamp, false, contentHoldsIt);
+            }
+        }
+        ImGui::End();
+    }
+
+    // **The project's tree, beside the scene's** (ADR 0052). Its own panel, so
+    // that both are on screen and a subtree can be dragged from one to the
+    // other -- which a tab bar makes impossible, because only one tab is drawn.
+    if (panels.contentTree && editor != nullptr && editor->contentWorld() != nullptr &&
+        !editor->stampSession().open()) {
+        if (ImGui::Begin("content tree", &panels.contentTree)) {
+            if (inspector != nullptr) {
+                // The root row IS drawn, for the reason a stamp's is: it is the
+                // thing being worked in rather than a piece of chrome, and
+                // everything under it hangs off it.
+                drawExplorer(*editor->contentWorld(), editor->contentRoot(), *inspector, &commands, &dialogs, icons,
+                             true, true, true, !editor->contentTreeActive());
             }
         }
         ImGui::End();

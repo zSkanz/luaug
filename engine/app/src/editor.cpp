@@ -668,6 +668,47 @@ Editor::ReparentPlan Editor::planReparent(const scene::World& world, std::span<c
     return plan;
 }
 
+bool Editor::copyAcross(scene::World& from, core::InstanceId id, scene::World& to, core::InstanceId parent,
+                        Inspector& inspector)
+{
+    if (!from.alive(id) || !to.alive(parent)) {
+        m_status = EditorStatus{"there is nothing to copy there", true};
+        return false;
+    }
+    if (isEngineOwned(from, id, from.parentOf(id))) {
+        m_status = EditorStatus{"that is one of the engine's own", true};
+        return false;
+    }
+
+    // **The description crosses, not the instance.** `writeStamp` is exactly
+    // "this subtree, completely, as text" -- which is what a prefab file is --
+    // so a drag between two worlds is the same pair of functions a prefab is
+    // made of rather than a third mechanism.
+    scene::SceneIoReport wrote;
+    const std::string text = scene::writeStamp(from, id, &wrote);
+
+    m_history.record(to, "Copy " + std::string(from.atoms().text(from.name(id))));
+
+    scene::SceneIoReport read;
+    const core::InstanceId placed = scene::readStamp(to, text, parent, "<dragged>", &read);
+    if (!placed.valid()) {
+        (void)m_history.undo(to);
+        m_status = EditorStatus{"that could not be copied", true};
+        return false;
+    }
+
+    // **The mark does not cross.** A copy dragged out of a library is a thing
+    // in a world, not an instance of the thing it was dragged from -- and a
+    // mark naming `<dragged>` would point at a file that does not exist. What
+    // it KEEPS is whatever marks are inside it, because those name real files.
+    to.setStamp(placed, core::NameAtom{});
+
+    inspector.select(placed);
+    inspector.reveal(placed);
+    m_status = EditorStatus{"copied " + std::to_string(read.instances) + " instance(s)", false};
+    return true;
+}
+
 bool Editor::canReparent(const scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId newParent,
                          core::InstanceId root)
 {
