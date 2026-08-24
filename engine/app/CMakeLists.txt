@@ -19,6 +19,7 @@ luaug_add_module(app
         src/screenshot.cpp
         src/soak.cpp
         src/ui_text.cpp
+        src/ui_theme.cpp
         src/streaming_host.cpp
         src/debug_overlay.cpp
         src/inspector.cpp
@@ -177,6 +178,7 @@ luaug_add_module_tests(app
         tests/soak_tests.cpp
         tests/two_worlds_tests.cpp
         tests/project_config_tests.cpp
+        tests/ui_theme_tests.cpp
 )
 
 if(LUAUG_BUILD_TESTS)
@@ -372,7 +374,14 @@ if(LUAUG_BUILD_TESTS)
             -DPROJECT=${CMAKE_SOURCE_DIR}/examples/10-open-world
             -DGENERATOR=${CMAKE_SOURCE_DIR}/examples/10-open-world/tools/generate_world.luau
             -DREPO=${CMAKE_SOURCE_DIR}
-            -DWORLD=${CMAKE_SOURCE_DIR}/examples/10-open-world/content/world
+            # **A scene rather than a directory of chunk sources** (ADR 0053).
+            # The flagship's generator used to write `content/world/*.chunk.json`
+            # for `assetc` to compile; it writes a SCENE now, and the engine cuts
+            # that into cells on the way to the first frame. What this gate has
+            # to ensure exists therefore moved with it -- `EXISTS` answers for a
+            # file exactly as it did for a directory, so the check itself did not
+            # have to change.
+            -DWORLD=${CMAKE_SOURCE_DIR}/examples/10-open-world/content/scenes/main.scene.json
             -DREPORT=${CMAKE_CURRENT_BINARY_DIR}/openworld-soak.json
             -DFRAMES=6000
             -DCEILING_MB=384

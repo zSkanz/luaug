@@ -13,8 +13,14 @@
 # same step `run.bat` performs, for the same reason and in the same order.
 #
 # Expects: GENERATOR (the .luau file), REPO (the repository root -- the
-# generator writes to a path relative to it), and WORLD (the directory whose
-# absence means "generate").
+# generator writes to a path relative to it), and WORLD (the path whose absence
+# means "generate").
+#
+# **`WORLD` is a path and not necessarily a directory** (ADR 0053). A generator
+# that writes chunk sources produces a folder; one that writes a scene the engine
+# partitions at play produces a file, and the flagship's moved from the first to
+# the second. `EXISTS` answers for both, which is why this file did not have to
+# learn the difference.
 
 if(NOT DEFINED GENERATOR OR NOT DEFINED REPO OR NOT DEFINED WORLD)
     message(FATAL_ERROR "ensure_generated_world.cmake needs -DGENERATOR=, -DREPO= and -DWORLD=")
