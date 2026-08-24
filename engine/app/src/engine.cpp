@@ -1316,10 +1316,25 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // wrong: it made the tool and the game two authors of one transform,
             // which is a disagreement no arbitration settles (D061).
             if (!editor.cameraAdopted()) {
-                if (const core::InstanceId cameraId = host->currentCamera(); cameraId.valid()) {
-                    if (const scene::CameraComponent* camera = host->world().cameras().find(cameraId);
-                        camera != nullptr)
-                        editor.adoptCamera(camera->cframe);
+                const core::InstanceId cameraId = host->currentCamera();
+                const scene::CameraComponent* camera =
+                    cameraId.valid() ? host->world().cameras().find(cameraId) : nullptr;
+                if (camera != nullptr) {
+                    editor.adoptCamera(camera->cframe);
+                }
+                else {
+                    // **A world with no camera still gets the editor's own**
+                    // (D088). Adoption exists so that opening a project does not
+                    // teleport the view; with nothing to adopt it was waiting
+                    // forever, `useEditorView` stayed false, and `extract`
+                    // produced no camera at all -- so the viewport fell through
+                    // to the M1 "the engine is alive" pulse, and a person who had
+                    // just made a blank project saw a rainbow cycling where their
+                    // world should be.
+                    //
+                    // A blank project is exactly what the launcher makes, which
+                    // is why this surfaced the day it shipped and not before.
+                    editor.adoptCamera(editor.cameraCFrame());
                 }
             }
         }
