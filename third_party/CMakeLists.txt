@@ -80,7 +80,13 @@ set(SDL_HAPTIC        OFF CACHE BOOL "" FORCE)
 set(SDL_HIDAPI        OFF CACHE BOOL "" FORCE)
 set(SDL_SENSOR        OFF CACHE BOOL "" FORCE)
 set(SDL_CAMERA        OFF CACHE BOOL "" FORCE)
-set(SDL_DIALOG        OFF CACHE BOOL "" FORCE)
+# ON since E6: the launcher shows the system folder picker so somebody can
+# point at a project that is not in their recent list (ADR 0055). It is the
+# first caller this subsystem has had -- everything else in this block is off
+# because nothing called it, and this row moved when something did. The launcher
+# does not DEPEND on it: a platform where the picker cannot be shown gets a path
+# field and a message saying so.
+set(SDL_DIALOG        ON  CACHE BOOL "" FORCE)
 set(SDL_TRAY          OFF CACHE BOOL "" FORCE)
 set(SDL_POWER         OFF CACHE BOOL "" FORCE)
 

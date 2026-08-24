@@ -2,14 +2,20 @@
 
 #include "luaug/core/text_key.h"
 #include "luaug/platform/async_io.h"
+#include "luaug/platform/sdl_interop.h"
 
+#include <SDL3/SDL_dialog.h>
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_hints.h>
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_platform_defines.h>
+#include <SDL3/SDL_process.h>
+#include <SDL3/SDL_stdinc.h>
 #include <chrono>
+#include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #if defined(_WIN32)
@@ -77,6 +83,23 @@ void resolvePaths()
     }
 
     paths.contentDir = paths.executableDir / "content";
+
+    // **Per user and per machine, and it may legitimately be nowhere.** SDL
+    // creates the directory as a side effect of answering, so this is also the
+    // only place it gets made; a platform that has no such location answers null
+    // and every caller keeps its state in memory for one session instead.
+    if (char* pref = SDL_GetPrefPath("LuauG", "LuauG"); pref != nullptr) {
+        paths.userDir = std::filesystem::path(pref);
+        SDL_free(pref);
+    }
+
+    // **Not derived from the one above, because they are different questions.**
+    // `userDir` is where an application hides its own state; this is where a
+    // person keeps their work, and offering to create somebody's game inside
+    // `AppData` is offering to put it where they will never find it. SDL owns
+    // this string and it is not freed.
+    if (const char* documents = SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS); documents != nullptr)
+        paths.documentsDir = std::filesystem::path(documents);
 #endif
 }
 
@@ -261,6 +284,85 @@ const Paths& paths()
         resolvePaths();
 
     return pathsSlot();
+}
+
+bool startDetached(const std::vector<std::string>& args)
+{
+    if (args.empty())
+        return false;
+
+    // SDL wants a null-terminated array of C strings and keeps nothing, so the
+    // pointers only have to outlive the call.
+    std::vector<const char*> argv;
+    argv.reserve(args.size() + 1);
+    for (const std::string& argument : args)
+        argv.push_back(argument.c_str());
+    argv.push_back(nullptr);
+
+    // `false`: the child inherits this process's streams rather than getting
+    // pipes nobody is reading. A detached editor whose output went into a pipe
+    // with no reader would block the first time it logged enough to fill it.
+    SDL_Process* process = SDL_CreateProcess(argv.data(), false);
+    if (process == nullptr)
+        return false;
+
+    // Destroying the handle does not kill the child -- SDL documents this as
+    // releasing our side of it -- which is exactly what "detached" means here.
+    SDL_DestroyProcess(process);
+    return true;
+}
+
+bool canPickFolder()
+{
+#if defined(SDL_PLATFORM_ANDROID)
+    return false;
+#else
+    // There is no compile-time symbol that says whether SDL was built with its
+    // dialog subsystem, and asking at runtime is the honest form of the question
+    // anyway: on Linux the picker is a portal or a helper program that may
+    // simply not be installed. What this can say is that the build has the
+    // entry point; a refusal at show time is reported through the callback.
+    return true;
+#endif
+}
+
+namespace {
+
+// The callback SDL hands the result to, and the C++ one it forwards to. One at a
+// time on purpose: two folder pickers open at once is not a state any of this
+// has to represent, and the second `pickFolder` replaces the first's callback
+// rather than leaking it.
+std::function<void(std::filesystem::path)>& folderCallback()
+{
+    static std::function<void(std::filesystem::path)> callback;
+    return callback;
+}
+
+void SDLCALL onFolderChosen([[maybe_unused]] void* userdata, const char* const* files, [[maybe_unused]] int filter)
+{
+    std::function<void(std::filesystem::path)> callback;
+    callback.swap(folderCallback());
+    if (!callback)
+        return;
+
+    // Null means the dialog failed; an empty first entry means it was
+    // cancelled. Both are "no folder", which is what the caller asked about.
+    if (files == nullptr || files[0] == nullptr) {
+        callback(std::filesystem::path{});
+        return;
+    }
+    callback(std::filesystem::path(files[0]));
+}
+
+} // namespace
+
+void pickFolder(Window& window, std::string_view startIn, std::function<void(std::filesystem::path)> done)
+{
+    folderCallback() = std::move(done);
+
+    const std::string start(startIn);
+    SDL_ShowOpenFolderDialog(&onFolderChosen, nullptr, nativeWindow(window), start.empty() ? nullptr : start.c_str(),
+                             false);
 }
 
 } // namespace luaug::platform

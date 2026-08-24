@@ -10,13 +10,19 @@
 #include "luaug/core/types.h"
 
 #include <filesystem>
+#include <functional>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
 namespace luaug::platform {
 
 using core::u64;
+
+// Declared in window.h. A reference is all `pickFolder` needs, and including
+// that header here would make every consumer of the platform basics carry it.
+class Window;
 
 struct InitOptions
 {
@@ -104,6 +110,24 @@ struct Paths
     // Where the engine's own content (message catalogs, compiled shaders) is
     // staged next to the binary -- the same shape a packaged build uses.
     std::filesystem::path contentDir;
+    // Where this USER's own state goes: the launcher's project list, and
+    // whatever else outlives one project and one installation. Per user and per
+    // machine, from `SDL_GetPrefPath`, and created by SDL on the way out.
+    //
+    // **Empty when the platform has nowhere to put it**, which is a real answer
+    // rather than a failure: a caller with no user directory keeps its state in
+    // memory for one session, and every one of them is a convenience. Nothing
+    // the engine needs to RUN lives here.
+    std::filesystem::path userDir;
+    // Where this user keeps documents, which is where the launcher offers to
+    // put a new project. Distinct from `userDir` and not derivable from it: one
+    // is where an application hides its own state and the other is where a
+    // person looks for their work. SDL's own header says of this folder that it
+    // "is a good place to save a user's projects".
+    //
+    // Empty where the platform has no such notion, and the launcher then leaves
+    // its location field blank rather than seeding it with somewhere wrong.
+    std::filesystem::path documentsDir;
 };
 
 // Both members are ABSOLUTE on every desktop tier. On Android they are
@@ -113,10 +137,38 @@ struct Paths
 // through platform::readFile (file.h), which SDL resolves per platform;
 // std::filesystem and fopen find nothing inside a package.
 //
-// The user-data and cache directories architecture.md §2 also names are not
-// here yet: nothing in M1 writes to either (the bytecode and shader caches
-// live under the build root per §8), and a path nobody uses is a path nobody
-// has checked. They arrive with their first consumer.
+// `userDir` arrived with its first consumer, which is what this comment used to
+// say would happen: the launcher's project list (ADR 0055). The cache directory
+// architecture.md §2 also names is still not here, for the same reason it was
+// not before -- the bytecode and shader caches live under the build root per §8,
+// and a path nobody uses is a path nobody has checked.
 [[nodiscard]] const Paths& paths();
+
+// Starts another program and does not wait for it. Used by the launcher to
+// start the editor on the project somebody chose (ADR 0055), which is a
+// relaunch rather than a load: everything a project decides is resolved at boot.
+//
+// `args[0]` is the executable. The child inherits this process's streams, so
+// what it logs appears where the launcher's did -- which is what makes a failure
+// to start the editor visible at all.
+//
+// True when the child was created. That is all it can mean: a program that
+// starts and then exits nonzero has still started, and nothing here waits to
+// find out.
+[[nodiscard]] bool startDetached(const std::vector<std::string>& args);
+
+// Whether this build can show the system's own folder picker. False on a
+// platform with none, and false in a build with `SDL_DIALOG` off -- callers ask
+// so they can say WHY the button did nothing, rather than doing nothing.
+[[nodiscard]] bool canPickFolder();
+
+// Shows the system folder picker and calls `done` with what was chosen, or with
+// an empty path when the person cancelled or the picker could not be shown.
+//
+// **Asynchronous, and the callback arrives on the event thread**: SDL delivers
+// the result while `pumpEvents` runs, so a caller must keep pumping and must not
+// assume the callback has happened by the time this returns. `window` is the
+// parent, so the dialog is modal to it on the platforms that can do that.
+void pickFolder(Window& window, std::string_view startIn, std::function<void(std::filesystem::path)> done);
 
 } // namespace luaug::platform
