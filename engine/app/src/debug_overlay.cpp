@@ -216,6 +216,82 @@ bool drawIcon(const IconAtlas* icons, std::string_view id, float size,
     return true;
 }
 
+// The badge over an icon already drawn at `size`, with its top-left at `origin`
+// in SCREEN space (ADR 0049's mark, `icons/README.md`'s `overlay.` namespace).
+//
+// **Two draws, in this order, every time.** First `overlay.StampBase` -- the
+// solid silhouette -- in the panel's own BACKGROUND colour and slightly larger,
+// which punches a clean hole in whatever is underneath. Then `overlay.Stamp` --
+// the same silhouette with the mark cut out -- in the foreground, centred in
+// that hole.
+//
+// **The knockout is what makes the badge exist.** Measured across the class set
+// at 16 px, 37 of 42 icons already have ink where the badge goes -- 51% under
+// `class.Workspace` and 49% under `class.Folder` -- so a bare badge lands on a
+// folder's body and is not there.
+//
+// Drawn through the window's draw list rather than as an ImGui item, because it
+// is not one: it sits ON a row that has already been laid out, it takes no
+// space and no clicks, and an `Image` here would take both.
+//
+// **Its colour is its own.** A badge means the same thing on every icon, so it
+// takes its own role rather than the subject's -- tinting it `spatial` on a
+// `Part` and `ui` on a `Frame` would make one mark's colour mean two things.
+void drawIconBadge(const IconAtlas* icons, ImVec2 origin, float size)
+{
+    if (icons == nullptr || !icons->ready() || size <= 0.0f)
+        return;
+
+    SDL_GPUTexture* native = g_device != nullptr ? rhi::nativeTexture(*g_device, icons->texture()) : nullptr;
+    if (native == nullptr)
+        return;
+
+    const IconAtlas::Overlay& overlay = icons->overlay();
+    const float mark = size * overlay.scale;
+    const float halo = mark * overlay.haloScale;
+    if (!(mark > 0.0f))
+        return;
+
+    const IconSprite base = icons->find(icons::OverlayStampBase, static_cast<core::u32>(halo + 0.5f));
+    const IconSprite face = icons->find(icons::OverlayStamp, static_cast<core::u32>(mark + 0.5f));
+    if (!base.valid || !face.valid)
+        return;
+
+    // The corner the theme asked for, measured from the icon's own box.
+    const bool right = overlay.corner == IconAtlas::Overlay::Corner::BottomRight ||
+                       overlay.corner == IconAtlas::Overlay::Corner::TopRight;
+    const bool bottom = overlay.corner == IconAtlas::Overlay::Corner::BottomRight ||
+                        overlay.corner == IconAtlas::Overlay::Corner::BottomLeft;
+
+    // **Both are centred on one point**, which is what keeps the rim even. The
+    // two files share an outer silhouette exactly, so a badge positioned by its
+    // corner instead would put the whole difference on one side.
+    const ImVec2 centre(origin.x + (right ? size - halo * 0.5f : halo * 0.5f),
+                        origin.y + (bottom ? size - halo * 0.5f : halo * 0.5f));
+
+    const auto quad = [&centre](float edge) {
+        const float half = edge * 0.5f;
+        return std::pair<ImVec2, ImVec2>{ImVec2(centre.x - half, centre.y - half),
+                                         ImVec2(centre.x + half, centre.y + half)};
+    };
+
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    const auto [haloMin, haloMax] = quad(halo);
+    const auto [markMin, markMax] = quad(mark);
+
+    // The panel's own background, so the hole matches whatever the row is
+    // painted on -- including a selected row, which is a different colour from
+    // the window behind it.
+    const ImVec4 behind = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
+    const ImVec4 front = iconTint(icons, icons::OverlayStamp);
+
+    const auto texture = static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native));
+    draw->AddImage(texture, haloMin, haloMax, ImVec2(base.u0, base.v0), ImVec2(base.u1, base.v1),
+                   ImGui::ColorConvertFloat4ToU32(ImVec4(behind.x, behind.y, behind.z, 1.0f)));
+    draw->AddImage(texture, markMin, markMax, ImVec2(face.u0, face.v0), ImVec2(face.u1, face.v1),
+                   ImGui::ColorConvertFloat4ToU32(front));
+}
+
 // A button whose face is an icon, with the word as its fallback and its tooltip.
 //
 // Six drawn words in a row is a sentence somebody reads; six pictures is a
@@ -890,9 +966,30 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             // before it is where the name goes.
             if (haveIcon) {
                 ImGui::SetCursorPos(ImVec2(penX, centred(iconSize)));
+                // Screen space, taken before the draw: the badge below is not
+                // an ImGui item and has to be placed against the icon's own box
+                // rather than against whatever the cursor is after it.
+                const ImVec2 iconOrigin = ImGui::GetCursorScreenPos();
                 if (drawIcon(icons, classIconId(world, row.id), iconSize, Editor::folderColor(world, row.id))) {
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("%.*s", static_cast<int>(className.size()), className.data());
+                    // **The badge goes on the stamp's ROOT and nowhere else.**
+                    // Every part of a stamped house is inside a stamped
+                    // subtree, and badging all forty of them is noise -- the
+                    // root is where the mark lives (ADR 0049) and where "is
+                    // this linked?" is a question worth answering.
+                    const core::NameAtom stamp = world.stampOf(row.id);
+                    if (stamp.valid())
+                        drawIconBadge(icons, iconOrigin, iconSize);
+
+                    if (ImGui::IsItemHovered()) {
+                        if (stamp.valid()) {
+                            const std::string_view file = world.atoms().text(stamp);
+                            ImGui::SetTooltip("%.*s -- stamped from content/%.*s", static_cast<int>(className.size()),
+                                              className.data(), static_cast<int>(file.size()), file.data());
+                        }
+                        else {
+                            ImGui::SetTooltip("%.*s", static_cast<int>(className.size()), className.data());
+                        }
+                    }
                     penX += iconSize + ImGui::GetStyle().ItemInnerSpacing.x;
                 }
             }
@@ -900,20 +997,6 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             ImGui::SetCursorPos(ImVec2(penX, centred(ImGui::GetTextLineHeight())));
             ImGui::TextUnformatted(label);
             penX += ImGui::CalcTextSize(label).x + ImGui::GetStyle().ItemSpacing.x;
-
-            // **A stamped row says so.** Changing the file changes this
-            // instance, which is the whole point of the mark and exactly the
-            // kind of thing somebody should not have to remember.
-            if (const core::NameAtom stamp = world.stampOf(row.id); stamp.valid()) {
-                ImGui::SetCursorPos(ImVec2(penX, centred(ImGui::GetTextLineHeight())));
-                ImGui::TextDisabled("(stamp)");
-                if (ImGui::IsItemHovered()) {
-                    const std::string_view text = world.atoms().text(stamp);
-                    ImGui::SetTooltip("follows content/%.*s -- editing anything inside breaks the link",
-                                      static_cast<int>(text.size()), text.data());
-                }
-                penX += ImGui::CalcTextSize("(stamp)").x + ImGui::GetStyle().ItemSpacing.x;
-            }
 
             // Only where an instance can actually go: nothing authored lives
             // inside something streaming materialised, and offering a plus that

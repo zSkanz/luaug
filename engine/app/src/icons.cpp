@@ -155,6 +155,28 @@ bool IconAtlas::readTheme(const std::filesystem::path& themeDir, Source& out, st
     if (const std::string_view declared = root["defaultRole"].asString(); !declared.empty())
         out.defaultRole = std::string(declared);
 
+    // **The badge's geometry, in the theme rather than in the code.** That is
+    // what lets a plugin move it or resize it without a line of C++, and it is
+    // read whole rather than per-field: a theme that says `overlay` is
+    // describing a badge, and half of one is not a thing to merge.
+    if (const core::JsonValue block = root["overlay"]; block.type() == core::JsonType::Object) {
+        IconAtlas::Overlay overlay;
+        if (const core::f64 scale = block["scale"].asNumber(0.0); scale > 0.0)
+            overlay.scale = static_cast<f32>(scale);
+        if (const core::f64 halo = block["haloScale"].asNumber(0.0); halo > 0.0)
+            overlay.haloScale = static_cast<f32>(halo);
+        const std::string_view corner = block["corner"].asString();
+        if (corner == "bottom-left")
+            overlay.corner = IconAtlas::Overlay::Corner::BottomLeft;
+        else if (corner == "top-right")
+            overlay.corner = IconAtlas::Overlay::Corner::TopRight;
+        else if (corner == "top-left")
+            overlay.corner = IconAtlas::Overlay::Corner::TopLeft;
+        else
+            overlay.corner = IconAtlas::Overlay::Corner::BottomRight;
+        out.overlay = overlay;
+    }
+
     // The last theme consulted supplies the fallback, which for a chain that
     // always ends at `default` means `default`'s.
     if (const std::string_view declared = root["fallback"].asString(); !declared.empty())
@@ -195,6 +217,16 @@ bool IconAtlas::load(rhi::IDevice& device, rhi::ICmdList& cmd, const std::filesy
         return false;
     }
     m_sources.push_back(std::move(fallbackTheme));
+
+    // **First hit wins, like every other lookup here.** A theme with no block
+    // leaves the defaults, which are `default`'s own -- so a plugin that only
+    // recolours does not have to restate the badge's geometry to keep it.
+    for (const Source& source : m_sources) {
+        if (source.overlay.has_value()) {
+            m_overlay = *source.overlay;
+            break;
+        }
+    }
 
     // Every id any source names, so an override for an id `default` does not
     // carry still gets a cell.

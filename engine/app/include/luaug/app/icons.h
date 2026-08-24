@@ -162,6 +162,44 @@ public:
     // nothing -- a typo in a plugin's manifest must not make an icon vanish.
     [[nodiscard]] std::optional<core::Color3> tintFor(std::string_view id, Panel panel) const;
 
+    // --- The badge ------------------------------------------------------------
+    //
+    // **An overlay is not an icon in a row.** It is a mark in the CORNER of one,
+    // and it is the only namespace whose ids are never drawn on their own: a
+    // badge is two draws, a solid silhouette in the panel's own background
+    // followed by the same silhouette with the mark cut out, in the foreground.
+    //
+    // **The knockout is what makes it exist, and the measurement says so.**
+    // Across the class set at 16 px, 37 of 42 icons already have ink where the
+    // badge goes -- 51% under `class.Workspace`, 49% under `class.Folder` -- so
+    // a badge drawn without it lands on a folder's body and disappears.
+    //
+    // The numbers live in the THEME rather than here, which is the point: a
+    // plugin can move the badge or resize it with no code at all. A theme with
+    // no `overlay` block gets these, which are `default`'s own.
+    struct Overlay
+    {
+        // Of the icon's edge.
+        f32 scale = 0.40f;
+        // The knockout is drawn this much bigger than the mark, so the hole has
+        // a rim. The two share an outer silhouette exactly, so scaling them
+        // apart is what this ratio is FOR -- doing it any other way puts the
+        // rim on one side.
+        f32 haloScale = 1.22f;
+        // `bottom-right` is the only corner `default` uses; the field is here so
+        // a theme can say otherwise.
+        enum class Corner : core::u8
+        {
+            BottomRight,
+            BottomLeft,
+            TopRight,
+            TopLeft,
+        };
+        Corner corner = Corner::BottomRight;
+    };
+
+    [[nodiscard]] const Overlay& overlay() const noexcept { return m_overlay; }
+
     [[nodiscard]] bool tinting() const noexcept { return m_tinting; }
     void setTinting(bool on) noexcept { m_tinting = on; }
 
@@ -204,6 +242,9 @@ private:
         std::unordered_map<std::string, RoleColor> palette;
         std::unordered_map<std::string, std::string> roles;
         std::string defaultRole;
+        // Layered like everything else: the first theme in the chain that
+        // declares a block supplies it whole.
+        std::optional<Overlay> overlay;
         bool loose = false;
     };
 
@@ -212,6 +253,7 @@ private:
     std::vector<Source> m_sources;
     std::unordered_map<std::string, Cell> m_cells;
     std::string m_fallbackId;
+    Overlay m_overlay;
     bool m_tinting = true;
     std::string m_status;
     rhi::TextureHandle m_texture;

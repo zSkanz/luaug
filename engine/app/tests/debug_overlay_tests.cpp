@@ -272,6 +272,15 @@ TEST_CASE("on a real device, F3 flips the panel")
             // one-line change now they exist.
             CHECK(atlas.has(luaug::app::icons::ActionDelete));
             CHECK(atlas.has(luaug::app::icons::ActionSave));
+            // **The badge is two ids and needs both**, because it is two draws:
+            // a solid silhouette that punches a hole and the same silhouette
+            // with the mark cut out. One without the other is a badge that
+            // disappears on 37 of the 42 class icons.
+            CHECK(atlas.has(luaug::app::icons::OverlayStamp));
+            CHECK(atlas.has(luaug::app::icons::OverlayStampBase));
+            CHECK(atlas.find(luaug::app::icons::OverlayStampBase, 16u).valid);
+            // The theme's own numbers, read rather than assumed.
+            CHECK(static_cast<double>(atlas.overlay().scale) == doctest::Approx(0.40));
             // --- The palette ---------------------------------------------
             //
             // The tint says what KIND of thing an icon is and never which
@@ -330,6 +339,13 @@ TEST_CASE("on a real device, F3 flips the panel")
 
             luaug::app::IconAtlas plainAtlas;
             CHECK(plainAtlas.load(*device, *cmd, plain.parent_path().parent_path(), {}));
+            // **A theme with no `overlay` block draws the badge at the
+            // documented defaults**, which is what makes the numbers living in
+            // data rather than in code safe: a plugin that only recolours does
+            // not have to restate the badge's geometry to keep it.
+            CHECK(static_cast<double>(plainAtlas.overlay().scale) == doctest::Approx(0.40));
+            CHECK(static_cast<double>(plainAtlas.overlay().haloScale) == doctest::Approx(1.22));
+            CHECK(plainAtlas.overlay().corner == luaug::app::IconAtlas::Overlay::Corner::BottomRight);
             CHECK(plainAtlas.has(luaug::app::icons::ClassPart));
             CHECK(plainAtlas.find(luaug::app::icons::ClassPart, 16u).valid);
             // Nothing to tint with, so the caller uses its own foreground --
@@ -340,6 +356,35 @@ TEST_CASE("on a real device, F3 flips the panel")
 
             std::error_code plainError;
             std::filesystem::remove_all(plain.parent_path().parent_path(), plainError);
+
+            // --- And a theme that MOVES it ------------------------------
+            //
+            // The other half of the same claim: a badge whose geometry is data
+            // is a badge a plugin can move, and a test that only proved the
+            // defaults would prove the constants were reachable rather than
+            // that they were read.
+            const std::filesystem::path moved =
+                std::filesystem::temp_directory_path() / "luaug-moved-badge" / "icons" / "default";
+            std::filesystem::remove_all(moved.parent_path().parent_path());
+            std::filesystem::create_directories(moved / "class");
+            std::filesystem::copy_file(iconRoot / "icons" / "default" / "class" / "Part.png",
+                                       moved / "class" / "Part.png");
+            {
+                std::ofstream manifest(moved / "theme.json", std::ios::binary | std::ios::trunc);
+                manifest << R"({"id":"moved","fallback":"class.Part",)"
+                         << R"("overlay":{"scale":0.6,"haloScale":1.5,"corner":"top-left"},)"
+                         << R"("icons":{"class.Part":"class/Part.png"}})";
+            }
+
+            luaug::app::IconAtlas movedAtlas;
+            CHECK(movedAtlas.load(*device, *cmd, moved.parent_path().parent_path(), {}));
+            CHECK(static_cast<double>(movedAtlas.overlay().scale) == doctest::Approx(0.6));
+            CHECK(static_cast<double>(movedAtlas.overlay().haloScale) == doctest::Approx(1.5));
+            CHECK(movedAtlas.overlay().corner == luaug::app::IconAtlas::Overlay::Corner::TopLeft);
+            movedAtlas.destroy(*device);
+
+            std::error_code movedError;
+            std::filesystem::remove_all(moved.parent_path().parent_path(), movedError);
         }
         else {
             MESSAGE("no staged icon theme beside this test binary; the atlas was not exercised");
