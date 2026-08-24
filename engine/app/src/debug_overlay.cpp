@@ -478,6 +478,10 @@ bool iconButton(const IconAtlas* icons, std::string_view id, float size, const c
 // walk that never enters a closed subtree at all, so this is the only list the
 // panel builds and its length is what is open rather than what exists.
 std::vector<TreeRow> g_visible;
+// The whole tree and what a search kept of it. Only filled while something is
+// typed into the Explorer's search box -- see the block that uses them.
+std::vector<TreeRow> g_searchRows;
+std::unordered_set<core::u32> g_searchHits;
 // The way down to something just created, moved or copied. See the reveal below.
 std::vector<core::InstanceId> g_ancestors;
 // Which instances are expanded, and which have been seen at all. Held here
@@ -628,6 +632,16 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
     // measured from it.
     const u32 depthBase = drawRoot ? 0u : 1u;
 
+    // **The search box, above the tree it searches.**
+    //
+    // Held per WORLD, like the expanded set below and for the same reason: a
+    // filter that survived a scene load would be hiding most of whatever
+    // somebody just opened, with nothing on screen saying why.
+    static std::array<char, 96> explorerFilter{};
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::InputTextWithHint("##explorer-filter", "search", explorerFilter.data(), explorerFilter.size());
+    const std::string_view explorerNeedle{explorerFilter.data()};
+
     // **A DIFFERENT world opens collapsed; a restored one does not.** Loading a
     // scene or starting a new one arrives here as a world nobody has expanded
     // anything in, and a tree that remembered would be showing somebody the
@@ -642,6 +656,7 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
         g_explorerWorld = inspector.worldIdentity();
         g_open.clear();
         g_openKnown.clear();
+        explorerFilter.fill(0);
     }
 
     // **Something was just made, moved or copied: open the way to it.** Before
@@ -672,44 +687,95 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
     //
     // Parent before child, so a closed or hidden ancestor is answered once and
     // its whole subtree is never touched.
-    collectVisibleTree(
-        world, root, drawRoot,
-        [&](const TreeRow& row) {
-            // **What streaming made is not the scene.** It pumps in edit mode as
-            // well as in play -- deliberately, because a world you cannot see is
-            // a world you cannot edit -- but the serializer skips a generated
-            // subtree whole and nothing authored may live in one, so sixty
-            // `Chunk_x_y_z` folders standing between a person and the four
-            // things they wrote is the root's own complaint again: scrolling
-            // past a world to find the thing you came for. Window > Streamed
-            // Content brings them back.
-            if (!showGenerated && world.generated(row.id))
-                return TreeVisit::Skip;
+    // **Searching a TREE is not filtering a list**, and the difference is what
+    // this block is. A row that matches is no use on its own: everything above
+    // it has to be on screen or the match is unreachable, and everything under a
+    // matching container is what somebody was looking FOR when they typed the
+    // container's name. So the set is the matches, their ancestors, and their
+    // descendants -- and while it is non-empty the open/closed state is ignored,
+    // because a person searching has already said what they want to see.
+    //
+    // **And this one walk IS the whole world**, which is the cost the panel
+    // otherwise refuses to pay (ADR 0054). It is paid only while something is
+    // typed: a search is a thing somebody is doing, and the frame after they
+    // clear the box the panel is back to costing what is open.
+    if (!explorerNeedle.empty()) {
+        collectTree(world, root, g_searchRows);
 
-            const bool hasChildren = world.childCount(row.id) > 0;
-            if (!hasChildren)
-                return TreeVisit::Collapsed;
-
-            // The services under `game` are what anyone opening this wants to
-            // see; deeper than that is a project's own tree and is its business.
-            // Seeded once per instance rather than every frame, so collapsing
-            // one stays collapsed.
-            if (!g_openKnown.contains(row.id.index)) {
-                g_openKnown.insert(row.id.index);
-                // **The root only**, and when it is the world's it is not drawn
-                // -- opening it is what puts the services on screen at all. What
-                // is INSIDE them is the scene, and showing all of that means
-                // scrolling past a world to find the thing you came for.
-                //
-                // A stamp's root opens for the opposite reason: it IS what
-                // somebody opened, and a stage that starts collapsed shows one
-                // row.
-                if (row.depth == 0)
-                    g_open.insert(row.id.index);
+        g_searchHits.clear();
+        // Preorder, so `depth` alone says which run of rows is under a match:
+        // everything deeper than a hit, until a row at the hit's depth or above.
+        u32 keepBelow = std::numeric_limits<u32>::max();
+        for (const TreeRow& row : g_searchRows) {
+            if (row.depth <= keepBelow)
+                keepBelow = std::numeric_limits<u32>::max();
+            if (keepBelow != std::numeric_limits<u32>::max()) {
+                g_searchHits.insert(row.id.index);
+                continue;
             }
-            return g_open.contains(row.id.index) ? TreeVisit::Expanded : TreeVisit::Collapsed;
-        },
-        g_visible);
+            if (!showGenerated && world.generated(row.id))
+                continue;
+            if (containsFold(world.atoms().text(world.name(row.id)), explorerNeedle)) {
+                g_searchHits.insert(row.id.index);
+                keepBelow = row.depth;
+            }
+        }
+
+        // The way up from every hit, so nothing on screen is an orphan.
+        for (const TreeRow& row : g_searchRows) {
+            if (!g_searchHits.contains(row.id.index))
+                continue;
+            for (core::InstanceId up = world.parentOf(row.id); up.valid() && up != root; up = world.parentOf(up))
+                g_searchHits.insert(up.index);
+        }
+
+        g_visible.clear();
+        for (const TreeRow& row : g_searchRows) {
+            if (!showGenerated && world.generated(row.id))
+                continue;
+            if ((row.depth > 0 || drawRoot) && g_searchHits.contains(row.id.index))
+                g_visible.push_back(row);
+        }
+    }
+    else
+        collectVisibleTree(
+            world, root, drawRoot,
+            [&](const TreeRow& row) {
+                // **What streaming made is not the scene.** It pumps in edit mode as
+                // well as in play -- deliberately, because a world you cannot see is
+                // a world you cannot edit -- but the serializer skips a generated
+                // subtree whole and nothing authored may live in one, so sixty
+                // `Chunk_x_y_z` folders standing between a person and the four
+                // things they wrote is the root's own complaint again: scrolling
+                // past a world to find the thing you came for. Window > Streamed
+                // Content brings them back.
+                if (!showGenerated && world.generated(row.id))
+                    return TreeVisit::Skip;
+
+                const bool hasChildren = world.childCount(row.id) > 0;
+                if (!hasChildren)
+                    return TreeVisit::Collapsed;
+
+                // The services under `game` are what anyone opening this wants to
+                // see; deeper than that is a project's own tree and is its business.
+                // Seeded once per instance rather than every frame, so collapsing
+                // one stays collapsed.
+                if (!g_openKnown.contains(row.id.index)) {
+                    g_openKnown.insert(row.id.index);
+                    // **The root only**, and when it is the world's it is not drawn
+                    // -- opening it is what puts the services on screen at all. What
+                    // is INSIDE them is the scene, and showing all of that means
+                    // scrolling past a world to find the thing you came for.
+                    //
+                    // A stamp's root opens for the opposite reason: it IS what
+                    // somebody opened, and a stage that starts collapsed shows one
+                    // row.
+                    if (row.depth == 0)
+                        g_open.insert(row.id.index);
+                }
+                return g_open.contains(row.id.index) ? TreeVisit::Expanded : TreeVisit::Collapsed;
+            },
+            g_visible);
 
     // **One height for a row, decided once and told to everybody.**
     //
@@ -2628,6 +2694,26 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
         }
     }
 
+    // **What you are looking for, in the folder you are in.**
+    //
+    // Per folder rather than across the tree, because that is what the panel
+    // shows: a browser that answered with matches from somewhere else would be
+    // a search result wearing a folder's chrome. Cleared when you leave the
+    // folder, for the same reason -- a filter that survived the move would hide
+    // most of wherever you arrived, and nothing on screen would say why.
+    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x * 2.0f);
+    ImGui::TextDisabled("|");
+    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x * 2.0f);
+    static std::array<char, 96> contentFilter{};
+    static std::string contentFilterFolder;
+    if (contentFilterFolder != tree.currentFolder()) {
+        contentFilterFolder = tree.currentFolder();
+        contentFilter.fill(0);
+    }
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 9.0f);
+    ImGui::InputTextWithHint("##content-filter", "search", contentFilter.data(), contentFilter.size());
+    const std::string_view contentNeedle{contentFilter.data()};
+
     // **The view, as one button that opens the three.**
     //
     // Three buttons in a row was what this was and it read as a control panel
@@ -2666,7 +2752,17 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
     ImGui::Separator();
 
     if (ImGui::BeginChild("entries")) {
-        const std::vector<ContentEntry>& entries = tree.entries();
+        // What the filter left. Pointers into the tree's own vector, which
+        // outlives this frame -- and a list rather than a test inside the loop,
+        // because the grid indexes by position and a skipped entry would leave
+        // a hole in it.
+        static std::vector<const ContentEntry*> entryList;
+        entryList.clear();
+        for (const ContentEntry& candidate : tree.entries()) {
+            if (contentNeedle.empty() || containsFold(candidate.name, contentNeedle))
+                entryList.push_back(&candidate);
+        }
+        const std::vector<const ContentEntry*>& entries = entryList;
         const ContentLayout layout = contentLayoutFor(panels.contentView, ImGui::GetContentRegionAvail().x);
         const float entryHeight = layout.cell.y;
 
@@ -2703,6 +2799,14 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                             pitch * static_cast<float>(rows)));
         ImGui::SetCursorPos(gridOrigin);
 
+        // **A filter that hides everything says so.** An empty folder and a
+        // folder filtered down to nothing look identical, and one of them means
+        // there is nothing here while the other means you are not looking at it.
+        if (entries.empty() && !tree.entries().empty()) {
+            ImGui::SetCursorPos(gridOrigin);
+            ImGui::TextDisabled("Nothing here matches \"%s\".", contentFilter.data());
+        }
+
         ImGuiListClipper clipper;
         clipper.Begin(rows, pitch);
         while (clipper.Step()) {
@@ -2711,7 +2815,7 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                     const int index = row * columns + column;
                     if (index >= static_cast<int>(entries.size()))
                         break;
-                    const ContentEntry& entry = entries[static_cast<std::size_t>(index)];
+                    const ContentEntry& entry = *entries[static_cast<std::size_t>(index)];
                     ImGui::PushID(index);
 
                     const ImVec2 entryOrigin(gridOrigin.x + static_cast<float>(column) * strideX,
