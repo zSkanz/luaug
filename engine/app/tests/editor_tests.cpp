@@ -2219,7 +2219,8 @@ TEST_CASE("framing keeps the direction and only moves the position")
 
     for (int row = 0; row < 3; ++row) {
         for (int column = 0; column < 3; ++column)
-            CHECK(framed.rotation.m[row][column] == doctest::Approx(current.rotation.m[row][column]));
+            CHECK(static_cast<double>(framed.rotation.m[row][column]) ==
+                  doctest::Approx(static_cast<double>(current.rotation.m[row][column])));
     }
     CHECK(framed.position.x != doctest::Approx(current.position.x));
 }
