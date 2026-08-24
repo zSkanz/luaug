@@ -466,6 +466,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // its callback arrives while events are pumped.
     std::vector<std::filesystem::path> importedPaths;
     bool importPending = false;
+    // The instance an Explorer import will parent what it makes under, held
+    // across the frames the dialog is open.
+    core::InstanceId importParent;
 
     ViewportTarget viewportTarget;
     // The editor's icons, built once from `content/icons` on the first frame
@@ -1085,6 +1088,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // drawing, and a modal opened there owns the loop.
                 if (editorCommands.importAssets && !importPending && window != nullptr) {
                     importPending = true;
+                    // Remembered across the frames the dialog is open: the
+                    // answer arrives from a callback, and by then the menu that
+                    // asked is long gone.
+                    importParent = editorCommands.importParent;
                     platform::pickFiles(*window, editor.content().root().string(), true,
                                         [&importedPaths, &importPending](std::vector<std::filesystem::path> chosen) {
                                             importedPaths = std::move(chosen);
@@ -1096,6 +1103,34 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     const ContentTree::ImportReport report = editor.content().import(importedPaths);
                     importedPaths.clear();
                     editor.reportImport(report);
+
+                    // **And the instance, when the Explorer is what asked.** A
+                    // mesh is the one kind the world has a class for today; a
+                    // texture is worn by a material and a sound is played by a
+                    // `Sound`, and neither is a thing to put in a tree on its
+                    // own. So this creates what it can and the status line has
+                    // already said what came in.
+                    if (importParent.valid() && authored().alive(importParent)) {
+                        const std::string folder = editor.content().currentFolder();
+                        const scene::ClassId meshPartClass =
+                            authored().classes().findId(authored().atoms().intern("MeshPart"));
+                        for (const std::string& name : report.imported) {
+                            if (contentKindOf(name) != ContentKind::Mesh || meshPartClass == scene::InvalidClass)
+                                continue;
+                            if (!editor.createInstance(authored(), meshPartClass, importParent, authoredRoot(),
+                                                       inspector)) {
+                                continue;
+                            }
+                            // `asset://` plus the path under the content root,
+                            // which is what a mount resolves and what a scene
+                            // stores. `createInstance` selects what it made, so
+                            // the selection IS the thing to point at the file.
+                            const std::string urn = "asset://" + (folder.empty() ? name : folder + "/" + name);
+                            (void)authored().setProperty(inspector.selection(),
+                                                         authored().atoms().intern("MeshContent"), scene::Value{urn});
+                        }
+                    }
+                    importParent = core::InstanceId{};
                 }
                 // Before the delete and the duplicate, so a frame that somehow
                 // carried both acts on a world the create has already finished

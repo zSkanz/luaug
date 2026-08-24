@@ -326,6 +326,13 @@ struct EditorCommands
     // picker; the loop shows it, because a dialog opened from inside an ImGui
     // callback is a frame that has not finished drawing.
     bool importAssets = false;
+    // Set when the request came from the EXPLORER rather than from the browser.
+    // What is imported still lands in `content/` -- that is where a project's
+    // files live and there is nowhere else for them to go -- and what changes is
+    // that a mesh also arrives in the world, under this instance. A file the
+    // world has no class for is imported and nothing more, which is the honest
+    // half of the answer.
+    core::InstanceId importParent;
 
     // --- What a right-click asked for ----------------------------------------
     //
@@ -450,7 +457,7 @@ struct EditorCommands
                !openStamp.empty() || saveStamp || closeStamp || createClass != scene::InvalidClass || deleteSelection ||
                duplicateSelection || reparentTo.valid() || renameInstance.valid() || !saveAs.empty() ||
                !openScene.empty() || !createFolder.empty() || !deleteContent.empty() || !renameContent.empty() ||
-               importAssets;
+               importAssets || importParent.valid();
     }
 };
 

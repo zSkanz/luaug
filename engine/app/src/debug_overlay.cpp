@@ -927,6 +927,19 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                     ImGui::Separator();
                 }
 
+                // **Bringing a file in from the machine, and getting the
+                // instance for it.** The file still lands in `content/` --
+                // that is where a project's files live and there is nowhere
+                // else for them to go -- and what the Explorer adds is the
+                // thing in the world that names it. A file the world has no
+                // class for is imported and nothing more, which is honest and
+                // is what the status line then says.
+                if (ImGui::MenuItem("Import...", nullptr, false, platform::canPickFolder())) {
+                    commands->importAssets = true;
+                    commands->importParent = row.id;
+                }
+                ImGui::Separator();
+
                 if (ImGui::MenuItem("Rename...", "F2", false, !engineOwned)) {
                     dialogs->renameTarget = row.id;
                     dialogs->renameContentPath.clear();
@@ -2788,6 +2801,12 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                             dialogs.renameContent = true;
                         }
                         ImGui::Separator();
+                        // Here as well as on the folder's own menu: a person who
+                        // right-clicks lands on whatever was under the pointer,
+                        // and which of the two menus they opened is not a
+                        // distinction they made on purpose.
+                        if (ImGui::MenuItem("Import...", nullptr, false, platform::canPickFolder()))
+                            commands.importAssets = true;
                         if (ImGui::MenuItem("Delete"))
                             dialogs.deleteContentPath = entry.path;
                         ImGui::PopStyleVar();
@@ -2890,6 +2909,13 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
         // about the FOLDER rather than about a thing in it.
         if (ImGui::BeginPopupContextWindow("folder-menu",
                                            ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
+            // **Where a person looks for it.** A toolbar button is where the
+            // thing lives; a right-click is where somebody goes when they have
+            // just decided they want it, and an item that is only on the
+            // toolbar is one people conclude does not exist.
+            if (ImGui::MenuItem("Import...", nullptr, false, platform::canPickFolder()))
+                commands.importAssets = true;
+            ImGui::Separator();
             if (ImGui::MenuItem("New Folder..."))
                 dialogs.newFolder = true;
             if (ImGui::MenuItem("Refresh"))
