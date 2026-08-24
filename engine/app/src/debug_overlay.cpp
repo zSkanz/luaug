@@ -779,7 +779,7 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                     ImGui::Separator();
                 }
 
-                if (ImGui::MenuItem("Rename...", nullptr, false, !engineOwned)) {
+                if (ImGui::MenuItem("Rename...", "F2", false, !engineOwned)) {
                     dialogs->renameTarget = row.id;
                     dialogs->renameContentPath.clear();
                     dialogs->renameSeed = std::string(instanceName);
@@ -799,7 +799,7 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                                     static_cast<int>(count));
                 (void)std::snprintf(deleteLabel, sizeof(deleteLabel), count > 1 ? "Delete %d" : "Delete",
                                     static_cast<int>(count));
-                if (ImGui::MenuItem(duplicateLabel, nullptr, false, !engineOwned))
+                if (ImGui::MenuItem(duplicateLabel, "Ctrl+D", false, !engineOwned))
                     commands->duplicateSelection = true;
 
                 // --- Stamps (ADR 0049) --------------------------------------
@@ -821,7 +821,7 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                     dialogs->newStamp = true;
                 }
                 ImGui::Separator();
-                if (ImGui::MenuItem(deleteLabel, nullptr, false, !engineOwned))
+                if (ImGui::MenuItem(deleteLabel, "Del", false, !engineOwned))
                     commands->deleteSelection = true;
                 ImGui::PopStyleVar();
                 ImGui::EndPopup();
@@ -2544,7 +2544,7 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
         // Greyed rather than hidden when there is nothing to save to: the item
         // has to be where somebody expects it even when it cannot act, or they
         // conclude the editor cannot do it at all.
-        if (ImGui::MenuItem("Save Scene", nullptr, false, !editor.openScenePath().empty()))
+        if (ImGui::MenuItem("Save Scene", "Ctrl+S", false, !editor.openScenePath().empty()))
             commands.save = true;
         if (ImGui::MenuItem("Save Scene As..."))
             dialogs.saveAs = true;
@@ -2564,7 +2564,7 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
 
         if (ImGui::MenuItem(undoLabel.c_str(), "Ctrl+Z", false, editor.history().canUndo()))
             commands.undo = true;
-        if (ImGui::MenuItem(redoLabel.c_str(), "Ctrl+Y", false, editor.history().canRedo()))
+        if (ImGui::MenuItem(redoLabel.c_str(), "Ctrl+Y / Ctrl+Shift+Z", false, editor.history().canRedo()))
             commands.redo = true;
         ImGui::Separator();
         if (ImGui::MenuItem("Preferences..."))
@@ -3035,10 +3035,58 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // the keyboard, because Ctrl+Z inside a text box is the box's own undo and
     // taking it would make typing a name unrecoverable.
     if (!ImGui::IsAnyItemActive() && !popupOpen && ImGui::GetIO().KeyCtrl) {
-        if (ImGui::IsKeyPressed(ImGuiKey_Z, false))
-            commands.undo = true;
+        if (ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
+            // Ctrl+Shift+Z is redo everywhere except Windows, and on Windows it
+            // is redo as well as Ctrl+Y -- so both work and nobody has to learn
+            // which half of their habits this editor kept.
+            if (ImGui::GetIO().KeyShift)
+                commands.redo = true;
+            else
+                commands.undo = true;
+        }
         if (ImGui::IsKeyPressed(ImGuiKey_Y, false))
             commands.redo = true;
+        // **Ctrl+S saves what is open**, which is a stamp while one is and the
+        // scene otherwise. One key, because "save" is one intention and the
+        // person pressing it is not thinking about which document it reaches.
+        if (ImGui::IsKeyPressed(ImGuiKey_S, false)) {
+            if (editor != nullptr && editor->stampSession().open())
+                commands.saveStamp = true;
+            else if (editor != nullptr && !editor->openScenePath().empty())
+                commands.save = true;
+            else
+                commands.wantSaveAs = true;
+        }
+    }
+
+    // --- Delete, F2 and Ctrl+D ---------------------------------------------
+    //
+    // **The three every editor has**, on the keys every editor puts them on, so
+    // that hands already know them. Under the same guard as the rest: not while
+    // a field has the keyboard, because Delete in a text box is a character and
+    // F2 in one is nothing.
+    //
+    // **And not while playing.** A running world is one `stop` is about to put
+    // back, so an edit made in it is work about to be thrown away without a
+    // word -- which is worse than a key that does nothing.
+    if (editor != nullptr && world != nullptr && inspector != nullptr && !ImGui::IsAnyItemActive() && !popupOpen &&
+        !editor->inPlayMode() && inspector->selectionCount() > 0) {
+        const bool engineOwned = Editor::isEngineOwned(*world, inspector->selection(), root);
+
+        if (ImGui::IsKeyPressed(ImGuiKey_Delete, false) && !engineOwned)
+            commands.deleteSelection = true;
+        if (ImGui::IsKeyPressed(ImGuiKey_D, false) && ImGui::GetIO().KeyCtrl && !engineOwned)
+            commands.duplicateSelection = true;
+
+        // F2 opens the box on the PRIMARY, because renaming four things to one
+        // name is not a thing anybody means -- which is the same reason the
+        // menu item beside it is singular.
+        if (ImGui::IsKeyPressed(ImGuiKey_F2, false) && !engineOwned) {
+            dialogs.renameTarget = inspector->selection();
+            dialogs.renameContentPath.clear();
+            dialogs.renameSeed = std::string(world->atoms().text(world->name(inspector->selection())));
+            dialogs.renameInstance = true;
+        }
     }
 
     if (commands.wantSaveAs) {
