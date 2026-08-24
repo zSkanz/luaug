@@ -198,9 +198,14 @@ coordination would cost more than it saved.
 
 ## Gate Record
 
-**BUILT, awaiting review, 2026-08-24.** Everything below is a result from this
-machine; the two items a person has to answer are marked as such and are the
-same limit E1 recorded.
+**SIGNED OFF 2026-08-24.** The human approved it after using the editor the
+milestone fixed -- D087 was reported and closed between the build and the
+sign-off, which is the pattern every milestone since M4 has repeated.
+
+Everything below is a result from this machine; the two items a person has to
+answer are marked as such and are the same limit E1 recorded. **The last row is
+still pending at sign-off**: nobody has unzipped the archive on a machine that
+has never built this repository. That is recorded rather than quietly ticked.
 
 Closing run, `scripts/localgate.ps1`:
 

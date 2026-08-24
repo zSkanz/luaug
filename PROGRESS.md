@@ -5,7 +5,8 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- **E4 — The Editor Ships — BUILT, awaiting review, 2026-08-24.** The question
+- **E4 — The Editor Ships — COMPLETE, signed off 2026-08-24**, tagged
+  `milestone/e4`. The question
   [ADR 0046](docs/decisions/0046-the-editor-is-a-mode-of-the-engine-binary.md)
   wrote down and refused to answer in passing, answered on purpose in
   [ADR 0054](docs/decisions/0054-the-editor-ships-as-a-folder-and-the-cli-finds-its-own-install.md);
@@ -31,6 +32,12 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   with one binary would have made `luaug build` ship the editor, the inspector
   and a REPL inside somebody's game, so `player/` carries its own host and its
   own content.
+
+  **Signed off with one gate item outstanding, and it is recorded as such.** The
+  human approved the milestone after using it; nobody has yet unzipped the
+  archive on a machine that has never built this repository and opened
+  `luaug edit` from it. Everything around that is driven by `tests/installed`,
+  which runs the packaged CLI with the environment emptied.
 
   **The editor's own performance gate, and it is a number no machine can move.**
   The Explorer walked every instance in the world every frame and then walked the
@@ -179,11 +186,14 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
   citations. That file exists because three human-reported defects were removed
   from this one while it was being rewritten to close M4. **A close rewrites this
   file wholesale; it can no longer take the open list with it.**
-- **The next action, as a sentence:** run `scripts/package.ps1`, unzip the
-  archive it writes on a machine that has never built this, open
-  `examples/06-scene` in it, and record what you see in E4's and E5's Gate
-  Records — those two milestones are both waiting on the same thing, which is a
-  person looking.
+- **The next action, as a sentence:** migrate `examples/05-streaming` and
+  `examples/10-open-world` off the generator path onto the partitioner (ADR
+  0053), together with `tests/support/ensure_generated_world.cmake` and
+  `openworld_soak`, because they are one movement — the human has said they will
+  ask for it, and it is the only red on the tree.
+- **E5 is still awaiting review**, and what it is waiting for is a person: the
+  chunk-state overlay on `examples/06-scene`. Its Gate Record carries every
+  other item with a result.
 - **What is left of E2, E3, E4 and E5 is one thing and it is the same thing:**
   the pictures. **The ImGui shell cannot render headlessly and SDL does not
   accept injected input**, so every visual claim rests on the human looking —
