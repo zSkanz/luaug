@@ -6,7 +6,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 project(LuauG
-    VERSION 0.0.1
+    VERSION 1.0.0
     DESCRIPTION "Standalone game engine scripted in Luau with a familiar Instance/Service developer experience"
     LANGUAGES CXX C)
 
