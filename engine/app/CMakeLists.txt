@@ -143,6 +143,20 @@ add_custom_command(TARGET luaug_host POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/third_party/inter/docs/font-files/InterVariable.ttf"
         "$<TARGET_FILE_DIR:luaug_host>/content/fonts/Inter.ttf"
+    # The CODE face (ADR 0057). Cousine, which ImGui already vendors among its
+    # sample assets, under the SIL OFL 1.1 -- the same licence Inter ships under
+    # and one `tools/repo/licensecheck.luau` already admits. No new dependency
+    # row: this is a file inside a tree the manifest already pins by commit, so
+    # it cannot move without somebody bumping ImGui on purpose. Its credit is
+    # declared through the manifest's `bundled` list, because
+    # THIRD_PARTY_NOTICES.md is generated and a hand-added line would be
+    # overwritten by the next `vendor.luau notices`.
+    #
+    # Inter is still the engine's typeface. A code editor set in a proportional
+    # face is not a code editor, which is the whole of why there are two.
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/third_party/imgui/misc/fonts/Cousine-Regular.ttf"
+        "$<TARGET_FILE_DIR:luaug_host>/content/fonts/Mono.ttf"
     # The editor's icon themes. A plain recursive copy and deliberately NOT
     # through `assetc`: that path sends every image to basisu for KTX2/UASTC
     # with generated mips, which is right for a world texture and wrong for a

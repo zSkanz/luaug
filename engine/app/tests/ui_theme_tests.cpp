@@ -96,6 +96,51 @@ TEST_CASE("every theme is complete and legible")
     }
 }
 
+TEST_CASE("every syntax token is legible on the code pane's own ground")
+{
+    // **The ground is `surface`, not `background`** (ADR 0057): a code pane is a
+    // recessed area like a text field, and a palette measured against the window
+    // would be measured against a colour the code is never drawn on.
+    //
+    // Eight tokens, two themes, and the same 4.5:1 the eleven interface tokens
+    // are held to -- because a comment nobody can read is a comment nobody
+    // writes, and "subtle" is the word people use for grey-on-grey right up
+    // until somebody else opens the file.
+    for (const app::Theme& theme : app::themes()) {
+        const app::SyntaxPalette& syntax = theme.syntax;
+        const app::ThemePalette& p = theme.palette;
+        const struct
+        {
+            const char* name;
+            core::Color3 color;
+        } tokens[]{
+            {"keyword", syntax.keyword},   {"identifier", syntax.identifier},
+            {"number", syntax.number},     {"string", syntax.string},
+            {"comment", syntax.comment},   {"operatorToken", syntax.operatorToken},
+            {"attribute", syntax.attribute}, {"errorToken", syntax.errorToken},
+        };
+
+        for (const auto& token : tokens) {
+            const core::f32 ratio = app::contrastRatio(token.color, p.surface);
+            INFO(std::string(theme.id) << " / syntax." << std::string(token.name) << " = "
+                                       << static_cast<double>(ratio) << ":1");
+            CHECK(ratio >= app::kMinimumContrast);
+        }
+    }
+}
+
+TEST_CASE("the code face is a second file, and it is not the interface one")
+{
+    // Two faces, and the difference is the point: Inter is proportional and a
+    // code editor set in a proportional face is not a code editor. Asserted so
+    // that somebody staging one file and not the other finds out here.
+    CHECK(app::uiFontFile().filename() == "Inter.ttf");
+    CHECK(app::codeFontFile().filename() == "Mono.ttf");
+    CHECK(app::uiFontFile() != app::codeFontFile());
+    // Beside each other, so one staging rule covers both.
+    CHECK(app::uiFontFile().parent_path() == app::codeFontFile().parent_path());
+}
+
 TEST_CASE("a theme's ground and its raised surface are distinguishable")
 {
     // Not a contrast-ratio case: these are two surfaces rather than ink on a

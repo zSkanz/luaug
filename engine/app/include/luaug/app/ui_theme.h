@@ -49,6 +49,8 @@
 #include <string>
 #include <string_view>
 
+struct ImFont;
+
 namespace luaug::app {
 
 // The colours a shell draws with.
@@ -89,6 +91,37 @@ struct ThemePalette
     // Something failed, or is about to destroy work.
     core::Color3 danger;
     core::Color3 success;
+};
+
+// What code looks like (ADR 0057).
+//
+// ADR 0056 left this open in as many words -- "a syntax-highlighting palette for
+// the console or a future script editor, which is a different problem with a
+// different set of tokens" -- and this is the different set. One colour per
+// class Luau's own lexer distinguishes (`TokenKind` in `script_document.h`), so
+// there is no kind the highlighter can produce that nobody named a colour for.
+//
+// **Judged against the code pane's ground, which is `surface` rather than
+// `background`.** A code pane is a recessed area like a text field, and a
+// palette measured against the window would be measured against a colour the
+// code is never drawn on.
+struct SyntaxPalette
+{
+    core::Color3 keyword;
+    // Ordinary text: a variable, a field, a function's name. Usually the pane's
+    // own foreground, and a token of its own so that a theme MAY say otherwise.
+    core::Color3 identifier;
+    core::Color3 number;
+    core::Color3 string;
+    core::Color3 comment;
+    // Punctuation. Quieter than an identifier on purpose: an operator is
+    // structure rather than content, and colouring it as loudly as a name makes
+    // a line of arithmetic unreadable.
+    core::Color3 operatorToken;
+    // `@native`, `@checked`.
+    core::Color3 attribute;
+    // A broken string, comment or codepoint -- what a half-typed line produces.
+    core::Color3 errorToken;
 };
 
 // The numbers. One set, shared by every theme -- see the header note.
@@ -141,6 +174,7 @@ struct Theme
     // for whoever needs to state it rather than measure it.
     bool dark = true;
     ThemePalette palette;
+    SyntaxPalette syntax;
 };
 
 // Every theme this build carries, in the order the Preferences dialog lists
@@ -210,6 +244,17 @@ struct Appearance
 // one face, and the wordmark in `branding/` is set in it too.
 [[nodiscard]] std::filesystem::path uiFontFile();
 
+// And the code pane's, which is a different question (ADR 0057).
+//
+// **Inter is still the engine's typeface.** This is the face the script editor
+// draws CODE in, and it is monospace because a code editor set in a proportional
+// face is not a code editor -- every column lands somewhere different from the
+// one above it, and a caret drawn by arithmetic stops matching the glyphs.
+// `content/fonts/Mono.ttf` is Cousine, already vendored inside ImGui's own
+// sample assets under the SIL OFL 1.1, which is the licence Inter ships under
+// and which `tools/repo/licensecheck.luau` already admits.
+[[nodiscard]] std::filesystem::path codeFontFile();
+
 // --- The ImGui half ---------------------------------------------------------
 //
 // Declared unconditionally and inert in a shipping build, the shape
@@ -228,5 +273,16 @@ void applyTheme(const Theme& theme, core::f32 scale);
 // in the log, because a shell that silently looks wrong is a shell somebody
 // files a defect about.
 [[nodiscard]] bool loadUiFont();
+
+// The same for the code face. False leaves `codeFont()` null and the script
+// editor draws in the UI face -- readable, wrongly spaced, and said out loud.
+[[nodiscard]] bool loadCodeFont();
+
+// What `loadCodeFont` produced, or null. **Forward-declared rather than
+// included**: this header stays free of ImGui, and the two translation units
+// that actually draw with the pointer include `imgui.h` themselves -- the same
+// arrangement `platform::nativeWindow` uses to hand out an `SDL_Window*` without
+// putting SDL in a header.
+[[nodiscard]] ImFont* codeFont() noexcept;
 
 } // namespace luaug::app

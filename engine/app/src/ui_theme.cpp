@@ -70,6 +70,17 @@ constexpr Theme kDark{
             .danger = rgb(0xF87F73),
             .success = rgb(0x46C46E),
         },
+    .syntax =
+        {
+            .keyword = rgb(0xC9A0FF),
+            .identifier = rgb(0xDDE1E6),
+            .number = rgb(0xF5B682),
+            .string = rgb(0x9CD67F),
+            .comment = rgb(0x7E8894),
+            .operatorToken = rgb(0xA9B2BD),
+            .attribute = rgb(0xFFD479),
+            .errorToken = rgb(0xF87F73),
+        },
 };
 
 constexpr Theme kLight{
@@ -94,6 +105,17 @@ constexpr Theme kLight{
             .warning = rgb(0x8A5A00),
             .danger = rgb(0xB3261E),
             .success = rgb(0x16733C),
+        },
+    .syntax =
+        {
+            .keyword = rgb(0x7B24C4),
+            .identifier = rgb(0x1A1D21),
+            .number = rgb(0xA6431F),
+            .string = rgb(0x17693C),
+            .comment = rgb(0x5E6773),
+            .operatorToken = rgb(0x3D444D),
+            .attribute = rgb(0x8A5A00),
+            .errorToken = rgb(0xB3261E),
         },
 };
 
@@ -200,6 +222,11 @@ f32 resolveUiScale(f32 requested, f32 displayScale) noexcept
 std::filesystem::path uiFontFile()
 {
     return platform::paths().contentDir / "fonts" / "Inter.ttf";
+}
+
+std::filesystem::path codeFontFile()
+{
+    return platform::paths().contentDir / "fonts" / "Mono.ttf";
 }
 
 #if LUAUG_DEBUG_UI
@@ -388,6 +415,33 @@ void applyTheme(const Theme& theme, f32 scale)
     ImGui::GetStyle() = style;
 }
 
+namespace {
+// Held here rather than handed back through `loadCodeFont`, so that the header
+// can promise an `ImFont*` without ever naming ImGui's own header.
+ImFont* g_codeFont = nullptr;
+} // namespace
+
+ImFont* codeFont() noexcept
+{
+    return g_codeFont;
+}
+
+bool loadCodeFont()
+{
+    if (ImGui::GetCurrentContext() == nullptr)
+        return false;
+
+    const std::filesystem::path file = codeFontFile();
+    if (!platform::fileExists(file))
+        return false;
+
+    // The same size as the UI face. A code pane at a different point size from
+    // the panel around it is the sort of thing nobody can name and everybody
+    // notices, and the interface scale multiplies both.
+    g_codeFont = ImGui::GetIO().Fonts->AddFontFromFileTTF(file.string().c_str(), themeMetrics().fontSize);
+    return g_codeFont != nullptr;
+}
+
 bool loadUiFont()
 {
     if (ImGui::GetCurrentContext() == nullptr)
@@ -419,6 +473,16 @@ void applyTheme(const Theme&, f32)
 bool loadUiFont()
 {
     return false;
+}
+
+bool loadCodeFont()
+{
+    return false;
+}
+
+ImFont* codeFont() noexcept
+{
+    return nullptr;
 }
 
 #endif
