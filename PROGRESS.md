@@ -5,10 +5,11 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- **E3 — Content and Prefabs — IN PROGRESS, opened 2026-08-23**, and it was
-  specified by the human in a conversation rather than by a brief. Everything
-  they asked for is built and behind a green six-stage gate; what is left is a
-  person using it.
+- **E3 — Content and Prefabs — COMPLETE, signed off 2026-08-23**, and it was
+  specified by the human in a conversation rather than by a brief — one message
+  at a time, while the thing was being built and used. `docs/briefs/e3-kickoff.md`
+  is the record that would have been the brief, written at the close and labelled
+  as such.
 
   **Four ADRs carry it, and three of them REVERSE something — one of them
   itself.** 0049 named the thing: a **Stamp**, chosen by the human over prefab,
@@ -49,57 +50,18 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   pointed one way and grew it another. Both are the same shape — a rule stated
   in one space and applied in another — and it is worth expecting a third.
 
-- **E2 — Moving Things — COMPLETE except for a person looking, 2026-08-23.** Seventeen commits in,
-  every one behind a green six-stage gate. **Every item of scope is built.** What
-  is left is the Gate Record, the screenshots and a person's sign-off. The
-  brief's "Where E2 stands" section is the full account.
+- **E2 — Moving Things — COMPLETE, 2026-08-23**, seventeen commits, every item
+  of scope built and tested. `docs/briefs/e2-kickoff.md` carries the Gate Record
+  and the account; what is left of it is the pictures, which is what is left of
+  E3 too and for the same reason.
 
-  **D076 found a hole in the test fixture that had been open since M6.**
-  `inspector_fixture.h` claims one property of every `ValueType` and asserts on
-  the variant's size — and counting is not covering: four types appended by M6
-  were named by no property, so four editor branches were executed by no test at
-  all. The M4 brief's entering risk 6, word for word, found exactly the way it
-  said it would be.
-
-  **The properties grid answers for the whole selection**, and the two rules that
-  shape it are both tests: the rows are intersected by name AND by type, because
-  two classes that declare one name for two types cannot share a widget; and a
-  property read-only on any member is read-only for the set, for the same reason
-  `editable` exists — a field that takes a drag the world then refuses is a claim
-  the panel cannot keep.
-
-  **A row is a drag source and a drop target**, and the rule the drop previews is
-  the rule the verb applies: `planReparent` is asked by both, so a row lights up
-  only where the drop would move something. Dropping BETWEEN rows is reordering,
-  not reparenting, and there is no `World` verb for it — out of scope rather than
-  undone.
-
-  **The manipulators exist**: translate, rotate and scale, world or local axes, a
-  grid with a modifier that suspends it, W E R to switch. The rule they are built
-  on is one sentence — *a drag is solved against where it STARTED, never against
-  last frame* — and two properties fall out of it that are both tests: a drag is
-  exact however slowly it is made, and three parts a metre apart are still a metre
-  apart afterwards.
-
-  **Nine defects, seven found by a person using the thing**, and three of them
-  are the same shape: D070, D071 and D073 are each a piece of arithmetic that is
-  right for ONE and wrong for many — one instance, one world, one draw. A
-  milestone whose whole subject is "many" was always going to find them.
-
-  **Specified at kickoff from four read-only reconnaissance passes** — the
-  method ADR 0046 used to size E1 — in
-  [`docs/roadmap.md`](docs/roadmap.md#e2--moving-things-l) and
-  [`docs/briefs/e2-kickoff.md`](docs/briefs/e2-kickoff.md). All three things
-  those passes found broken are fixed: the undo key that only computed when one
-  write was pending, the selection outline that shook four kilometres out, and
-  `isEngineOwned` not knowing about `generated`.
-
-  **And a great deal arrived that this brief never mentioned**, which is the
-  pattern E1 recorded and this milestone repeated: the icon set was wired end to
-  end and then tinted by role, a scene became creatable from the editor as a FILE
-  (ADR 0048), and the flagship's world moved into one (D074). Each was asked for
-  by the person using the editor, and each is written up where it belongs rather
-  than folded into the milestone's own scope.
+  **Two findings outlive it.** D073's shape — a rule that is right for ONE and
+  wrong for many — appeared three times in a milestone whose whole subject is
+  "many", and the worst of them put a tool's cost inside
+  `buildInstanceBatches`, which every pass of the frame depends on. And D076's:
+  a `static_assert` that COUNTS is not a test that COVERS — the fixture asserted
+  `variant_size_v<Value> == 13` and named nine of them, so four editor branches
+  had never been executed by anything.
 
 - **E1 — The Editor — COMPLETE, signed off 2026-08-22**, tagged `milestone/e1`. Post-v1 phase 1,
   opened by human decision the same day v1.0.0 shipped. `luaug edit` is an
@@ -187,12 +149,15 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
   citations. That file exists because three human-reported defects were removed
   from this one while it was being rewritten to close M4. **A close rewrites this
   file wholesale; it can no longer take the open list with it.**
-- **The next action, as a sentence:** open the editor on a project, convert
-  something to a stamp, place two of them, change the source and watch both
-  move — then capture what a person sees into `docs/images/`, because every claim
-  left in E2 and E3 is one only a human looking at a window can settle. **The
-  ImGui shell cannot render headlessly and SDL does not accept injected input**,
-  so there is no automated path to either.
+- **The next action, as a sentence:** decide what E4 is. E1, E2 and E3 are all
+  signed off, and what the editor does not have is no longer a list of items
+  inside a milestone — it is a choice about which of them matters next.
+  `docs/briefs/e3-kickoff.md`'s closing section names four, and the roadmap's
+  post-v1 phase names more.
+- **What is left of E2 and E3 is one thing and it is the same thing:** the
+  pictures. **The ImGui shell cannot render headlessly and SDL does not accept
+  injected input**, so every visual claim rests on the human looking — which for
+  E3 they did, message by message, while it was being built.
 - **All four of E2's frozen interfaces are built and tested**, which is the point
   the plan said nothing fans out before: the selection set, the gesture and its
   extracted undo key, the manipulator arithmetic, and `Editor`'s verbs.
@@ -320,67 +285,18 @@ Entries for the planning session and for M0 through M4 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
 
-- **2026-08-23 (session 19, Claude Opus): E2's manipulators, and eight defects a
-  person found.** Sixteen commits, each behind a green six-stage gate.
+- **2026-08-23 (session 19, Claude Opus): E2 built and closed, E3 built and
+  closed.** Thirty-eight commits, every one behind a green six-stage gate. The
+  full entry is in
+  [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md); the
+  two briefs carry the Gate Records and what each cost.
 
-  **Did:** the four frozen interfaces — the selection as a set, the edit as a
-  gesture, the manipulator arithmetic, and `Editor`'s verbs — then the
-  manipulators themselves: translate, rotate and scale, world or local, a grid
-  and a modifier that suspends it. The selection outline became a silhouette. The
-  icon set was wired end to end and then tinted by role. `Script` became creatable
-  as a FILE (ADR 0048), and the flagship's world moved into a scene (D074), which
-  is the arrangement the human asked for in four words: like Unity and Unreal.
-
-  **Learned, and it is one shape said three times.** D070, D071 and D073 are each
-  a piece of arithmetic or a rule that is right for ONE and wrong for many — one
-  world's transform history, one selection, one draw in a batch. Nothing was
-  wrong with any of them when it was written; a milestone whose whole subject is
-  "many" is what asks the bigger question. D073 is the one to carry: I solved a
-  tool's problem inside `buildInstanceBatches`, which every pass of the frame
-  depends on, and it took every boulder and every tree canopy out of the flagship.
-  The cost of a tool belongs in the tool's pass.
-
-  **Also learned, twice in one day:** a POST_BUILD stage only runs when the target
-  relinks. An edit to `@luaug/camera` did not reach the STAGED copy, so a fix that
-  was correct in the source read as broken in the run — the same trap `CLAUDE.md`
-  documents for shaders, at the same price.
-
-  **Then, in the same session, E2's last two items.** The properties grid now
-  answers for the whole selection, and a row is a drag source and a drop target.
-
-  **Learned again, from the other end:** both of those turned out to be a
-  DECISION dressed as a widget. What rows a mixed selection has, and whether a
-  drop would move anything, are questions the panel cannot be asked — it needs a
-  window — so both went into free functions a test can call, and both were
-  break-verified by making them wrong and watching the right test fail. The drop
-  target then asks the SAME function the verb applies, which is the only way a
-  row that lights up cannot then refuse.
-
-  **Then three more the human hit in one sitting**, and the first was not the one
-  they reported: "why can I not add a child to a Folder" was the plus working and
-  the tree never opening (D075), a `UDim` was two unlabelled boxes (D076), and the
-  plus now follows the pointer instead of sitting on every selected row.
-
-  **Learned from D076, and it is the one to carry:** a `static_assert` that
-  COUNTS is not a test that COVERS. The fixture asserted `variant_size_v<Value>
-  == 13` and named nine of them.
-
-  **And one from E3, from the other end:** `tests/hotreload` caught a
-  use-after-free the same hour it was written. A frame held `scene::World&` for
-  its whole length and a reload REPLACES that world — it surfaced as a Jolt
-  assertion inside a physics update that had nothing to do with any of it. What
-  changes underneath is asked for at the point of use now, not cached.
-
-  **D077 is the same shape as D073 and worth saying so.** "The plus does not
-  appear on a Folder" was reported and then corrected by the reporter: it does
-  not appear on the `Chunk_*` rows, which is RIGHT, and it did appear on
-  everything inside them, which is not. Streaming marks a chunk's folder and not
-  its contents -- `authorable` says so in its own comment -- and both the plus
-  and `createInstance` asked the question of the instance instead of the
-  ancestry. One rule, `canParentInto`, is now the only place it is answered.
-
-  **Next:** open the editor on the flagship, capture what a person sees, and
-  write E2's Gate Record. There is nothing left to build.
+  **The one thing to carry out of it**: three written decisions were reversed
+  within a day of shipping, each by the person who asked for the first one, and
+  each reversal took one sentence to argue — because the first one was in a file
+  somebody could argue with. The third is mine: I offered a choice whose losing
+  option's own description listed its costs, and a person choosing between two
+  things they have not built yet is choosing on the framing.
 
 - **2026-08-21 (session 11, Claude Opus): M6 built and signed off.** Moved to
   the archive with the rest of M6.
