@@ -14,6 +14,7 @@
 #include "luaug/app/frame_scheduler.h"
 #include "luaug/app/icons.h"
 #include "luaug/app/inspector.h"
+#include "luaug/app/launcher.h"
 #include "luaug/app/partition_cache.h"
 #include "luaug/app/reload.h"
 #include "luaug/app/screenshot.h"
@@ -1018,6 +1019,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         if (options.editor && inspector.pendingCount() > 0)
             editor.history().record(authored(), "Edit", coalesceKeyFor(inspector.gesture(), inspector.pending()));
 
+        // **A typed property is a change to the document**, and it does not come
+        // through `EditorCommands` -- it is drained here, which is the one place
+        // that knows a write actually landed.
+        if (options.editor && inspector.pendingCount() > 0)
+            editor.touch();
+
         inspector.applyPending(authored());
 
         // A click resolves here too, and AFTER the drain rather than before:
@@ -1151,9 +1158,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 }
 
                 // One question about every verb rather than a flag on each:
-                // "did anything change since the last save".
-                if (editorCommands.any())
-                    editor.touchStamp();
+                // "did anything change since the last save". `mutatesWorld`
+                // rather than `any` because clearing a selection is not a change
+                // to the document, and a close confirmation that appeared after
+                // pressing Escape is one people learn to dismiss without reading.
+                if (editorCommands.mutatesWorld())
+                    editor.touch();
 
                 // --- The clipboard --------------------------------------
                 //
@@ -1204,9 +1214,27 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     }
                 }
                 // File > Exit. The same door the window's own close button is,
-                // so a person who reached for the menu gets the same shutdown.
+                // so a person who reached for the menu gets the same shutdown --
+                // and by the time it arrives here the question about unsaved
+                // work has already been asked and answered.
                 if (editorCommands.quit)
                     quit = true;
+
+                // **Leaving this project for another one** (ADR 0055). Both
+                // start the browser as a new process and close this editor,
+                // which is what a project being a PROCESS makes them: a project
+                // decides the content mounts, the Luau VM and the layout, all
+                // resolved at boot.
+                if (editorCommands.newProject || editorCommands.openProject) {
+                    if (platform::startDetached({hostExecutablePath().string(), "--launcher"})) {
+                        quit = true;
+                    }
+                    else {
+                        // Said rather than silently doing nothing. The editor
+                        // stays open, which is the safe half of the failure.
+                        core::log(core::LogLevel::Error, LUAUG_TR("app.err.launcher_start_failed"));
+                    }
+                }
                 if (editorCommands.undo)
                     (void)editor.undo(authored(), inspector);
                 if (editorCommands.redo)
@@ -1271,6 +1299,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             }
 
             const bool gizmoTook = editor.driveGizmo(authored(), inspector);
+            // A drag moves parts without ever producing a command, so the one
+            // place that knows it happened is here.
+            if (gizmoTook)
+                editor.touch();
 
             const core::InstanceId wasSelected = inspector.selection();
             if (!gizmoTook)
@@ -1686,7 +1718,18 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         if (!options.headless) {
             const std::span<const platform::Event> events = platform::pumpEvents();
             for (const platform::Event& event : events) {
-                if (event.type == platform::EventType::Quit || event.type == platform::EventType::WindowCloseRequested)
+                if (event.type != platform::EventType::Quit &&
+                    event.type != platform::EventType::WindowCloseRequested) {
+                    continue;
+                }
+                // **The window's close button asks too**, and it is the door
+                // most people use. Without this the editor threw away an
+                // afternoon on a click that every other application makes safe;
+                // the shell draws the question and the answer comes back as
+                // `EditorCommands::quit`.
+                if (options.editor && editor.hasUnsavedWork())
+                    editor.requestClose();
+                else
                     quit = true;
             }
 

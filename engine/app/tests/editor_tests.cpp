@@ -2247,3 +2247,74 @@ TEST_CASE("what is framed is in front of the camera, at a distance that fits it"
     const core::CFrameD tiny = app::framedCamera(current, centre, 0.0);
     CHECK(tiny.position.z - centre.z > 0.5);
 }
+
+// --- Unsaved work -----------------------------------------------------------
+//
+// The question every application with a document asks. What can be asserted
+// without a window is when it would be asked, which is the half that decides
+// whether an afternoon survives a click on the close button.
+
+TEST_CASE("a scene that has been edited says so, and saving takes it back")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 21u);
+    Editor editor;
+
+    CHECK_FALSE(editor.sceneDirty());
+    CHECK_FALSE(editor.hasUnsavedWork());
+
+    editor.touch();
+    CHECK(editor.sceneDirty());
+    CHECK(editor.hasUnsavedWork());
+
+    // Starting over is not the same as saving, and it clears the flag for a
+    // different reason: whoever asked for it was asked about the old scene
+    // first, if there was anything to ask about.
+    Inspector inspector;
+    editor.newScene(world, inspector);
+    CHECK_FALSE(editor.hasUnsavedWork());
+}
+
+TEST_CASE("what changes the document and what merely changes the view are different questions")
+{
+    // **Why this is `mutatesWorld` and not `any`.** A confirmation that appeared
+    // after pressing Escape is a confirmation people learn to dismiss without
+    // reading, and the one that matters is then dismissed too.
+    app::EditorCommands commands;
+    commands.clearSelection = true;
+    CHECK(commands.any());
+    CHECK_FALSE(commands.mutatesWorld());
+
+    commands.clear();
+    commands.resetLayout = true;
+    CHECK(commands.any());
+    CHECK_FALSE(commands.mutatesWorld());
+
+    // Saving writes the document rather than changing it, and the flag is
+    // cleared where the write happens.
+    commands.clear();
+    commands.save = true;
+    CHECK_FALSE(commands.mutatesWorld());
+
+    commands.clear();
+    commands.deleteSelection = true;
+    CHECK(commands.mutatesWorld());
+
+    commands.clear();
+    commands.undo = true;
+    CHECK(commands.mutatesWorld());
+}
+
+TEST_CASE("a close request is a question, and it is answered rather than repeated")
+{
+    Editor editor;
+    CHECK_FALSE(editor.closeRequested());
+
+    editor.requestClose();
+    CHECK(editor.closeRequested());
+
+    // Cleared by whichever of the three buttons was pressed, so a cancelled
+    // close does not re-open the dialog on the next frame.
+    editor.clearCloseRequest();
+    CHECK_FALSE(editor.closeRequested());
+}

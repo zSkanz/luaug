@@ -327,10 +327,17 @@ bool iconButton(const IconAtlas* icons, std::string_view id, float size, const c
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
+        // **And the border, which is not the same thing as the fill.** ImGui
+        // draws a framed button's outline from `FrameBorderSize` regardless of
+        // what colour the fill is, so a transparent button under a theme that
+        // borders its frames (ADR 0056) is an empty box around a glyph -- which
+        // is exactly the column of boxes `frameless` exists to prevent, arriving
+        // by a different route.
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
     }
     const auto unstyle = [frameless]() {
         if (frameless) {
-            ImGui::PopStyleVar();
+            ImGui::PopStyleVar(2);
             ImGui::PopStyleColor(3);
         }
     };
@@ -2380,6 +2387,19 @@ struct ContentLayout
     return cut;
 }
 
+// Opening another scene loses whatever is unsaved, so it asks the same question
+// closing does -- through the same `dialogs.pending`, which is what keeps one
+// answer for four doors (ADR 0055's launcher added the third and fourth).
+void openSceneOrAsk(Editor& editor, EditorCommands& commands, EditorDialogs& dialogs, std::string_view path)
+{
+    if (editor.hasUnsavedWork()) {
+        dialogs.pending = EditorDialogs::Pending::OpenScene;
+        dialogs.pendingScene = std::string(path);
+        return;
+    }
+    commands.openScene = std::string(path);
+}
+
 void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs,
                  const IconAtlas* icons)
 {
@@ -2582,7 +2602,7 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                         if (entry.kind == ContentKind::Folder)
                             (void)tree.enter(entry.name);
                         else if (entry.kind == ContentKind::Scene)
-                            commands.openScene = entry.path;
+                            openSceneOrAsk(editor, commands, dialogs, entry.path);
                         // **Opening a stamp EDITS it**, the way opening a
                         // scene edits a scene -- which is the pairing that
                         // makes the browser one idea rather than two. Placing
@@ -2610,7 +2630,7 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                         // not a row.
                         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, entrySpacing);
                         if (entry.kind == ContentKind::Scene && ImGui::MenuItem("Open"))
-                            commands.openScene = entry.path;
+                            openSceneOrAsk(editor, commands, dialogs, entry.path);
                         if (entry.kind == ContentKind::Stamp) {
                             if (ImGui::MenuItem("Open"))
                                 commands.openStamp = entry.path;
@@ -2779,19 +2799,60 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
         return;
 
     if (ImGui::BeginMenu("File")) {
-        if (ImGui::MenuItem("New Scene"))
-            commands.newScene = true;
+        // **Anything that would throw work away asks first**, and it asks in one
+        // place: `dialogs.pending` remembers which door was used and the answer
+        // re-issues it. Without work to lose there is nothing to ask about, and
+        // a dialog that appeared anyway would be a dialog people learn to
+        // dismiss without reading.
+        const auto guard = [&](EditorDialogs::Pending what) {
+            if (!editor.hasUnsavedWork())
+                return false;
+            dialogs.pending = what;
+            return true;
+        };
+
+        // **A project is a process** (ADR 0055), so both of these start the
+        // browser and close this editor rather than swapping a project inside a
+        // running one. The browser is where a project is made and where one is
+        // picked, which is why File has no second copy of either.
+        if (ImGui::MenuItem("New Project...")) {
+            if (!guard(EditorDialogs::Pending::NewProject))
+                commands.newProject = true;
+        }
+        if (ImGui::MenuItem("Open Project...")) {
+            if (!guard(EditorDialogs::Pending::OpenProject))
+                commands.openProject = true;
+        }
         ImGui::Separator();
-        // Greyed rather than hidden when there is nothing to save to: the item
-        // has to be where somebody expects it even when it cannot act, or they
-        // conclude the editor cannot do it at all.
-        if (ImGui::MenuItem("Save Scene", "Ctrl+S", false, !editor.openScenePath().empty()))
-            commands.save = true;
+        if (ImGui::MenuItem("New Scene")) {
+            if (!guard(EditorDialogs::Pending::NewScene))
+                commands.newScene = true;
+        }
+        ImGui::Separator();
+        // **Ctrl+S saves whatever is being edited**, and on a stamp stage that
+        // is the stamp. One shortcut rather than two, because "save what I am
+        // looking at" is the only thing a person means by it -- and a Ctrl+S
+        // that wrote the scene while somebody was editing a prefab would save
+        // the wrong document without saying so.
+        const bool stampOpen = editor.stampSession().open();
+        if (stampOpen) {
+            if (ImGui::MenuItem("Save Stamp", "Ctrl+S"))
+                commands.saveStamp = true;
+        }
+        else {
+            // Greyed rather than hidden when there is nothing to save to: the
+            // item has to be where somebody expects it even when it cannot act,
+            // or they conclude the editor cannot do it at all.
+            if (ImGui::MenuItem("Save Scene", "Ctrl+S", false, !editor.openScenePath().empty()))
+                commands.save = true;
+        }
         if (ImGui::MenuItem("Save Scene As..."))
             dialogs.saveAs = true;
         ImGui::Separator();
-        if (ImGui::MenuItem("Exit"))
-            commands.quit = true;
+        if (ImGui::MenuItem("Exit")) {
+            if (!guard(EditorDialogs::Pending::Quit))
+                commands.quit = true;
+        }
         ImGui::EndMenu();
     }
 
@@ -2971,6 +3032,12 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
     }
     if (!dialogs.deleteContentPath.empty())
         ImGui::OpenPopup("Delete");
+    // The window's own close button arrives as a platform event, so the frame
+    // loop raises it on the editor and this is where it becomes a question.
+    if (editor.closeRequested() && dialogs.pending == EditorDialogs::Pending::None)
+        dialogs.pending = EditorDialogs::Pending::Quit;
+    if (dialogs.pending != EditorDialogs::Pending::None)
+        ImGui::OpenPopup("Unsaved Changes");
 
     ImGui::SetNextWindowSize(ImVec2(400.0f, 0.0f), ImGuiCond_Appearing);
     if (ImGui::BeginPopupModal("Rename", nullptr, ImGuiWindowFlags_NoResize)) {
@@ -3113,6 +3180,93 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         ImGui::SameLine();
         if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))) {
             dialogs.deleteContentPath.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    // **The question every application with a document asks**, asked in one
+    // place: closing, starting over, opening something else and leaving for
+    // another project all lose the same edits, so `dialogs.pending` remembers
+    // which of them asked and the answer re-issues it.
+    ImGui::SetNextWindowSize(ImVec2(460.0f, 0.0f), ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("Unsaved Changes", nullptr, ImGuiWindowFlags_NoResize)) {
+        const bool stampOpen = editor.stampSession().open();
+        const bool haveSomewhereToSave = stampOpen || !editor.openScenePath().empty();
+
+        if (stampOpen) {
+            ImGui::TextWrapped("Save changes to %s?", editor.stampSession().path.c_str());
+        }
+        else if (!editor.openScenePath().empty()) {
+            ImGui::TextWrapped("Save changes to %s?", editor.openScenePath().c_str());
+        }
+        else {
+            // An untitled scene has nowhere to go, so the honest question is a
+            // different one and the buttons below say so.
+            ImGui::TextWrapped("This scene has never been saved.");
+        }
+        ImGui::Spacing();
+        ImGui::TextDisabled("Discarding loses every edit since the last save, and there is no undo for that.");
+        ImGui::Spacing();
+
+        // Three answers and no more, in the order every application puts them:
+        // keep the work, throw it away, or change your mind.
+        const auto proceed = [&]() {
+            switch (dialogs.pending) {
+            case EditorDialogs::Pending::Quit:
+                commands.quit = true;
+                break;
+            case EditorDialogs::Pending::NewScene:
+                commands.newScene = true;
+                break;
+            case EditorDialogs::Pending::OpenScene:
+                commands.openScene = dialogs.pendingScene;
+                break;
+            case EditorDialogs::Pending::NewProject:
+                commands.newProject = true;
+                break;
+            case EditorDialogs::Pending::OpenProject:
+                commands.openProject = true;
+                break;
+            case EditorDialogs::Pending::None:
+                break;
+            }
+            dialogs.pending = EditorDialogs::Pending::None;
+            dialogs.pendingScene.clear();
+            editor.clearCloseRequest();
+            ImGui::CloseCurrentPopup();
+        };
+
+        if (ImGui::Button(haveSomewhereToSave ? "Save" : "Save As...", ImVec2(130.0f, 0.0f))) {
+            if (stampOpen) {
+                commands.saveStamp = true;
+                proceed();
+            }
+            else if (haveSomewhereToSave) {
+                commands.save = true;
+                proceed();
+            }
+            else {
+                // **The name has to be typed before anything can be written**,
+                // and what was asked for is dropped rather than queued behind a
+                // second dialog: a person who has just been asked where to save
+                // will ask again for whatever they wanted, and an action that
+                // fired after an unrelated box closed would be a surprise.
+                commands.wantSaveAs = true;
+                dialogs.pending = EditorDialogs::Pending::None;
+                dialogs.pendingScene.clear();
+                editor.clearCloseRequest();
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Don't Save", ImVec2(130.0f, 0.0f)))
+            proceed();
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(130.0f, 0.0f))) {
+            dialogs.pending = EditorDialogs::Pending::None;
+            dialogs.pendingScene.clear();
+            editor.clearCloseRequest();
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();

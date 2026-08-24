@@ -171,6 +171,12 @@ bool Editor::save(scene::World& world, const std::filesystem::path& path)
         return false;
     }
 
+    // **Here rather than at each caller**, because every scene write goes
+    // through this one function -- Save, Save As and the save half of a
+    // confirmation all land here, and a flag cleared at three call sites is a
+    // flag one of them will forget.
+    m_sceneDirty = false;
+
     std::string message = "saved " + std::to_string(report.instances) + " instance(s) to " + path.string();
     // Counted rather than swallowed. A reference that pointed outside the scene
     // is a thing the person authored and the file cannot hold, and finding that
@@ -1412,6 +1418,9 @@ void Editor::newScene(scene::World& world, Inspector& inspector)
     // Undoing into a world that no longer exists is not undoing.
     m_history.clear();
     m_openScene.clear();
+    // A scene nobody has touched yet. Whoever asked for this was asked about the
+    // old one first, if there was anything to ask about.
+    m_sceneDirty = false;
     inspector.select(core::InstanceId{});
     inspector.onWorldChanged();
     m_status = EditorStatus{"new scene -- untitled until you save it", false};
@@ -1510,6 +1519,7 @@ bool Editor::openScene(scene::World& world, std::string_view relativePath, Inspe
 
     m_openScene = std::string(relativePath);
     m_history.clear();
+    m_sceneDirty = false;
     // The status `load` set names the file; naming the scene is more useful,
     // because the browser is already showing the file.
     m_status = EditorStatus{"opened " + m_openScene, false};

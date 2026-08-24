@@ -198,6 +198,27 @@ struct EditorDialogs
     // that asks; an instance is recovered by reopening the scene, which is a
     // door a person already knows.
     std::string deleteContentPath;
+
+    // **What is about to throw work away, waiting to be answered.**
+    //
+    // Every application with a document asks this, and it asks it in one place
+    // rather than at each door: closing, starting over, opening something else
+    // and leaving for another project all lose the same edits, so they all raise
+    // the same question and the answer re-issues whichever of them asked.
+    enum class Pending : core::u8
+    {
+        None,
+        Quit,
+        NewScene,
+        OpenScene,
+        NewProject,
+        OpenProject,
+    };
+    Pending pending = Pending::None;
+    // The scene `Pending::OpenScene` was going to open. Carried because the
+    // answer arrives frames after the double-click, and by then the browser is
+    // looking at something else.
+    std::string pendingScene;
 };
 
 struct EditorPanels
@@ -295,6 +316,12 @@ struct EditorCommands
     // Close the editor. The menu's File > Exit, which is the one every
     // application has and the one people reach for before the window button.
     bool quit = false;
+    // **Leave this project for another one.** Both start the project browser as
+    // a new process and close this editor, which is what a project being a
+    // PROCESS makes them (ADR 0055): the browser is where a project is made and
+    // where one is picked, so File has no second copy of either.
+    bool newProject = false;
+    bool openProject = false;
     // --- What a right-click asked for ----------------------------------------
     //
     // Every one of these mutates a world or a directory, so none of them acts
@@ -394,6 +421,22 @@ struct EditorCommands
     bool resetLayout = false;
 
     void clear() noexcept { *this = EditorCommands{}; }
+    // **Which of these actually change the world.** A narrower question than
+    // `any()`, and it exists because the answer decides whether closing the
+    // editor asks about unsaved work: `any()` is true for clearing a selection
+    // and for resetting the layout, and a confirmation that appeared after
+    // pressing Escape would be a confirmation people learn to dismiss without
+    // reading.
+    //
+    // Saving is deliberately absent: it writes the document rather than changing
+    // it, and the flag is cleared where the write happens.
+    [[nodiscard]] bool mutatesWorld() const noexcept
+    {
+        return createClass != scene::InvalidClass || deleteSelection || duplicateSelection || reparentTo.valid() ||
+               renameInstance.valid() || paste || pasteInto || cutSelection || !placeStamp.empty() ||
+               breakStamp.valid() || stampSubject.valid() || undo || redo || newScene;
+    }
+
     [[nodiscard]] bool any() const noexcept
     {
         return play.has_value() || pause.has_value() || save || newScene || quit || resetLayout || clearSelection ||
@@ -1220,6 +1263,38 @@ public:
     // Seeds the editor camera from wherever the world's camera currently is, so
     // pressing pause does not teleport the view. Called once, when the editor
     // first has a camera to copy.
+    // --- Unsaved work ---------------------------------------------------------
+    //
+    // **A scene is a document, and a document that has changed says so.** The
+    // stamp stage has had this since E3 (`StampSession::dirty`); the scene
+    // itself did not, which is why closing the editor threw away an afternoon
+    // without a word.
+    //
+    // Advisory rather than a lock, exactly as the stamp's is: what it decides is
+    // whether a question is asked, never whether an edit is allowed.
+    [[nodiscard]] bool sceneDirty() const noexcept { return m_sceneDirty; }
+    [[nodiscard]] bool hasUnsavedWork() const noexcept { return m_sceneDirty || m_stamp.dirty; }
+
+    // Marks whatever is being edited as changed: the STAGE when one is open,
+    // and the scene otherwise. One call at the frame's safe point rather than a
+    // flag on each verb, because "did anything change" is a question about every
+    // verb rather than about any one of them.
+    void touch() noexcept
+    {
+        if (m_stamp.open())
+            m_stamp.dirty = true;
+        else
+            m_sceneDirty = true;
+    }
+
+    // Somebody asked to close and there is work to lose, so the shell owes them
+    // a question. Held on the editor rather than in the overlay's dialog state
+    // because the window's own close button arrives as a platform event, which
+    // the frame loop sees and the panels do not.
+    void requestClose() noexcept { m_closeRequested = true; }
+    [[nodiscard]] bool closeRequested() const noexcept { return m_closeRequested; }
+    void clearCloseRequest() noexcept { m_closeRequested = false; }
+
     void adoptCamera(const core::CFrameD& cframe) noexcept;
     [[nodiscard]] bool cameraAdopted() const noexcept { return m_cameraAdopted; }
 
@@ -1340,6 +1415,8 @@ private:
     std::string m_openScene;
     UndoStack m_history;
 
+    bool m_sceneDirty = false;
+    bool m_closeRequested = false;
     core::CFrameD m_cameraCFrame;
     bool m_cameraAdopted = false;
     // Where `focusCamera` is taking the position, and how long it has left.

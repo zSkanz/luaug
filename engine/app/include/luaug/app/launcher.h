@@ -127,6 +127,13 @@ struct NewProjectResult
                                              const std::filesystem::path& definitions,
                                              const NewProjectRequest& request);
 
+// This executable, as something `platform::startDetached` can run.
+//
+// One answer, because two things start the engine now: the launcher opening a
+// project, and the editor leaving one for the browser (ADR 0055). A second copy
+// of this would be a second place to be wrong about a rename.
+[[nodiscard]] std::filesystem::path hostExecutablePath();
+
 // What the launcher panel is looking at, and what it decided while it drew.
 //
 // The same shape `EditorCommands` has and for the same reason: a panel that

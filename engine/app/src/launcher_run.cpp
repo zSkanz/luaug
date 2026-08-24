@@ -48,11 +48,12 @@ using core::LogLevel;
     return userDir.empty() ? std::filesystem::path{} : userDir / "projects.json";
 }
 
-// This executable, as something `startDetached` can run. `executableDir` is what
-// the platform layer resolves; the name is ours because the launcher is only
-// ever the engine's own host and never a renamed packaged game -- a packaged
-// game has a `game/` beside it and never reaches this file.
-[[nodiscard]] std::filesystem::path selfPath()
+} // namespace
+
+// `executableDir` is what the platform layer resolves; the name is ours because
+// this is only ever the engine's own host and never a renamed packaged game -- a
+// packaged game has a `game/` beside it and never reaches the launcher.
+std::filesystem::path hostExecutablePath()
 {
 #if defined(_WIN32)
     return platform::paths().executableDir / "luaug-host.exe";
@@ -60,8 +61,6 @@ using core::LogLevel;
     return platform::paths().executableDir / "luaug-host";
 #endif
 }
-
-} // namespace
 
 std::optional<core::EngineError> runLauncher(const EngineOptions& options)
 {
@@ -178,7 +177,7 @@ std::optional<core::EngineError> runLauncher(const EngineOptions& options)
             const std::array<I18nArg, 1> args{I18nArg{"path", project.string()}};
             core::log(LogLevel::Info, LUAUG_TR("app.info.launcher_opening"), args);
 
-            if (platform::startDetached({selfPath().string(), project.string(), "--edit"})) {
+            if (platform::startDetached({hostExecutablePath().string(), project.string(), "--edit"})) {
                 quit = true;
                 continue;
             }
