@@ -20,6 +20,8 @@ luaug_add_module(app
         src/soak.cpp
         src/ui_text.cpp
         src/ui_theme.cpp
+        src/script_document.cpp
+        src/script_syntax.cpp
         src/streaming_host.cpp
         src/debug_overlay.cpp
         src/inspector.cpp
@@ -179,6 +181,7 @@ luaug_add_module_tests(app
         tests/two_worlds_tests.cpp
         tests/project_config_tests.cpp
         tests/ui_theme_tests.cpp
+        tests/script_document_tests.cpp
 )
 
 if(LUAUG_BUILD_TESTS)
