@@ -5,65 +5,56 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
+- **E6 — The Launcher — BUILT, awaiting review, 2026-08-24.** Opened on the
+  human's word an hour after E4 was signed off, for the reason E4's own scope
+  list predicted: the archive was unzipped and the first question was *what do I
+  open*.
+  [ADR 0055](docs/decisions/0055-the-launcher-is-the-engine-with-no-project-open.md)
+  settles the shape, [`docs/roadmap.md` § E6](docs/roadmap.md#e6--the-launcher-m)
+  is the scope, and [`docs/briefs/e6-kickoff.md`](docs/briefs/e6-kickoff.md)
+  carries the gate.
+
+  **You double-click the engine and it asks which project you want.** A third
+  shell beside the F3 overlay and the editor's dockspace, with no world, no Luau
+  VM and no physics behind it -- a launcher that booted a simulation to show a
+  list of folders would be absurd. Choosing a project starts the editor as a new
+  process, because everything a project decides is resolved at boot.
+
+  **The quality bar was given as Unity and Unreal, and those two do not agree
+  with each other.** Unity's Hub is a separate application whose real job is
+  choosing which editor VERSION a project opens with; this engine has one engine
+  per installation, and a folder holding two is two folders. Unreal and Godot put
+  the browser in the editor binary, which is what ADR 0046 already decided here
+  for the editor itself and for the same measured reason.
+
+  **Five reconnaissance passes and all five found the seam already cut**, which
+  is why this was one pass: the overlay already had shells, `platform.h` had said
+  since M1 that the user directory would "arrive with its first consumer", and
+  `SDL_CreateProcess`, `SDL_GetPrefPath` and `SDL_ShowOpenFolderDialog` are all
+  in the pinned SDL. `SDL_DIALOG` was one of a sweep of subsystems turned off
+  because nothing called them; this is the first caller.
+
+  **And the smoke test found the thing the plan got wrong.** The New Project
+  field was seeded from `userDir`, and `SDL_GetPrefPath` returns a trailing
+  separator, so `parent_path()` answered the directory itself -- new projects
+  landed inside `AppData\Roaming`, where nobody would look for them. Found by
+  listing that directory and seeing a whole scaffolded project in it.
+  `SDL_FOLDER_DOCUMENTS` is the answer and SDL's own header says so.
+
+  **A defect this milestone did not cause but had to fix**: D086's version bump
+  moved `LUAUG_VERSION_STRING`, `WorldHost::boot` writes it into `EngineState`,
+  and the world hash walks `EngineState` -- so every determinism trace changed.
+  Re-recorded on both tiers. The engine version is observable world state, and a
+  hash that ignored part of the world would be the worse answer.
+
 - **E4 — The Editor Ships — COMPLETE, signed off 2026-08-24**, tagged
-  `milestone/e4`. The question
-  [ADR 0046](docs/decisions/0046-the-editor-is-a-mode-of-the-engine-binary.md)
-  wrote down and refused to answer in passing, answered on purpose in
-  [ADR 0054](docs/decisions/0054-the-editor-ships-as-a-folder-and-the-cli-finds-its-own-install.md);
-  [`docs/roadmap.md` § E4](docs/roadmap.md#e4--the-editor-ships-m) is the scope
-  and [`docs/briefs/e4-kickoff.md`](docs/briefs/e4-kickoff.md) the gate.
-
-  **There is an archive now, and it has been run from outside this repository.**
-  `scripts/package.ps1` builds the two profiles, writes the folder, drives the
-  packaged `luaug` from a scratch directory with no `LUAUG_BUILD_ROOT` and no
-  `LUAUG_HOST` in its environment, and only then compresses it — 16 MiB.
-  `luaug --version`, `luaug new` and `luaug build` all answer from inside it, and
-  the game that comes out of that build runs and prints its own script's line.
-
-  **The repository already believed it had an installed shape and had never had
-  one.** Three answers to "where am I" in one CLI, two of them wrong: the engine
-  search ended at `process.cwd()` under a comment calling it "beside this CLI",
-  and `--version` read a `CMakeLists.txt` an installation does not have. Only
-  `luaug new` was right, and it was right because D045 had already cost that
-  lesson once. Nothing here could have caught it, because nothing here had ever
-  run outside the source tree — which is now what `tests/installed` does.
-
-  **Two hosts in the folder, and that is D057 rather than caution.** A package
-  with one binary would have made `luaug build` ship the editor, the inspector
-  and a REPL inside somebody's game, so `player/` carries its own host and its
-  own content.
-
-  **Signed off with one gate item outstanding, and it is recorded as such.** The
-  human approved the milestone after using it; nobody has yet unzipped the
-  archive on a machine that has never built this repository and opened
-  `luaug edit` from it. Everything around that is driven by `tests/installed`,
-  which runs the packaged CLI with the environment emptied.
-
-  **The editor's own performance gate, and it is a number no machine can move.**
-  The Explorer walked every instance in the world every frame and then walked the
-  result again to drop what was under a closed node; the *drawing* was already
-  clipped, which is exactly why no profile ever showed it. One walk now, entering
-  nothing that is closed or hidden. Asserted as an EQUALITY over two worlds an
-  order of magnitude apart — 5 instances visited in both — for the reason E5's
-  partition peak had to be an equality: a bound that is merely small passes while
-  the defect is still there. Break-verified.
-
-  **And the packaging itself caused one, reported within the hour.** D087: the
-  engine search had preferred the `player` profile since D057, which cost nothing
-  while no machine had a player build -- and the first thing this milestone does
-  is make one. `luaug edit` then launched a binary with no ImGui linked into it
-  at all, which in edit mode is a black window: the world goes to an offscreen
-  texture and the panels are the only thing that draws it. Player is last now,
-  and `luaug edit` asks the binary what it is instead of inferring it from where
-  it was found. **A preference that is right only because nothing has exercised
-  the alternative is a preference nothing is holding.**
-
-  **And packaging found something a release had been carrying for two days.**
-  D086: `v1.0.0` was tagged and published while `project(LuauG VERSION ...)` still
-  said `0.0.1`, so the released binary, the api dump and `luaug --version` all
-  reported 0.0.1 — faithfully, which is the point. ADR 0031's derivation was never
-  the problem; the declaration had no owner. Bumped, and the packager now refuses
-  to build a folder whose name would disagree with the newest release tag.
+  `milestone/e4`. Its entry moved to
+  [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md) when E6
+  was written up. [`docs/briefs/e4-kickoff.md`](docs/briefs/e4-kickoff.md)
+  carries the Gate Record, and the one row still pending at sign-off is recorded
+  there as pending. **The archive exists**: `LuauG-1.0.0-win64.zip`, built by
+  `scripts/package.ps1`, which proves the folder works from outside this
+  repository before it compresses it.
 
 - **E5 — The World You Build — BUILT, awaiting review, 2026-08-24.** Landed in
   one pass behind a green six-stage gate, which is what
@@ -186,7 +177,11 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
   citations. That file exists because three human-reported defects were removed
   from this one while it was being rewritten to close M4. **A close rewrites this
   file wholesale; it can no longer take the open list with it.**
-- **The next action, as a sentence:** migrate `examples/05-streaming` and
+- **The next action, as a sentence:** open the packaged
+  `LuauG-1.0.0-win64\luaug-host.exe` on a machine with no build tree, make a
+  project in it, and say whether the launcher is what was asked for -- E6's gate
+  and E5's both end at a person looking.
+- **Then:** migrate `examples/05-streaming` and
   `examples/10-open-world` off the generator path onto the partitioner (ADR
   0053), together with `tests/support/ensure_generated_world.cmake` and
   `openworld_soak`, because they are one movement — the human has said they will

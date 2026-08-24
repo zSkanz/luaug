@@ -10,24 +10,31 @@ template and the type definitions.
 
 ```
 LuauG-1.0.0-win64/
+  luaug-host.exe           the editor — double-click it
   luaug.cmd  luaug.ps1     the command line, as you type it
-  luaug-host.exe           the editor
-  content/                 what it loads beside itself
+  content/                 what the editor loads beside itself
   player/                  the engine your players get
   tools/  templates/       the command line and what it scaffolds
 ```
 
-Put the folder on your `PATH`, or make an alias, and every `luaug …` line in
-this manual works as written:
+**Double-click `luaug-host.exe` and the project browser opens.** It lists what
+you have opened before, makes a new project from a template, and starts the
+editor on whichever you choose — which is all you need to get from a downloaded
+folder to a world you are editing.
+
+The same thing from a terminal, plus everything else the command line does:
 
 ```powershell
+luaug              # nothing to open yet — the browser
 luaug --version
 luaug new hello
 luaug edit hello
 ```
 
-Nothing else is required to make a game. The folder finds its own engine, its
-own template and its own version, wherever you run it from.
+Put the folder on your `PATH`, or make an alias, and every `luaug …` line in
+this manual works as written. Nothing else is required to make a game: the
+folder finds its own engine, its own template and its own version, wherever you
+run it from.
 
 **Windows for now.** The archive carries a Windows editor and a Windows engine,
 and `luaug build` produces a Windows folder. Linux and macOS are built from

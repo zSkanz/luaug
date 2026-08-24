@@ -1,9 +1,18 @@
 # The visual editor
 
 ```bash
-luaug edit
 luaug edit examples/06-scene
 ```
+
+**With no project named — `luaug edit` on its own, or the engine
+double-clicked — you get the project browser first.** It lists what you have
+opened before, marks anything that has moved, opens a folder you point it at, and
+makes a new project from a template. Choosing one starts the editor on it.
+
+The browser is not a separate application either, and neither is what it starts:
+a project decides the content it mounts, the scripts it runs and the layout its
+panels remember, all of which are read once when a project opens. So choosing one
+starts a fresh editor rather than reloading the one you are looking at.
 
 The editor is not a separate application. It is a **mode of the engine**: the
 same binary, the same frame loop, the same world. What changes is that while the
