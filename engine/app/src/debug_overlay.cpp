@@ -2043,6 +2043,64 @@ void reportLookInput(Editor& editor, bool overViewport)
 // around a rendered world reads as a bug rather than as a frame. Its rectangle
 // is handed to the editor every frame because that rectangle is the only thing
 // that maps a mouse position onto a ray.
+// The image and everything that reads a pointer over it, without the window
+// around it.
+//
+// Split out so that F3 can show the WORLD with none of the furniture -- see
+// `drawViewportFullscreen`. It sets the editor's viewport rect from whatever
+// window it is called inside, which is what keeps the aspect ratio, the picking
+// ray and the image somebody is looking at agreeing with each other whichever
+// of the two is drawing.
+void drawViewportBody(Editor& editor, rhi::TextureHandle texture, EditorCommands& commands)
+{
+    const ImVec2 size = ImGui::GetContentRegionAvail();
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    editor.setViewport(ViewportRect{origin.x, origin.y, size.x, size.y});
+
+    SDL_GPUTexture* native = texture.valid() ? rhi::nativeTexture(*g_device, texture) : nullptr;
+    if (native != nullptr && size.x >= 1.0f && size.y >= 1.0f) {
+        ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)), size);
+
+        // **Dropped into the WORLD** (ADR 0052): dragging something out of
+        // the project's tree and onto the viewport is the shortest way to
+        // say "one of those, here". It lands under `Workspace` rather than
+        // where the pointer is, because a drop point is a pixel and a
+        // placement is a position -- the two only meet through a pick, and
+        // a prefab that landed inside whatever happened to be behind the
+        // cursor would be a surprise every time it worked.
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* dropped = ImGui::AcceptDragDropPayload(kContentDragPayload); dropped != nullptr) {
+                commands.placeStamp = static_cast<const ContentDrag*>(dropped->Data)->path;
+                commands.placeStampLinked = true;
+                commands.placeStampParent = {};
+            }
+            ImGui::EndDragDropTarget();
+        }
+
+        // Hovering the IMAGE, not the window: a click on the tab, the
+        // border or the space beside a letterboxed image is not a click on
+        // the world, and treating it as one deselects whatever the person
+        // was working on.
+        const bool overImage = ImGui::IsItemHovered();
+        const ImVec2 mouse = ImGui::GetMousePos();
+        const core::Vec2 inViewport{mouse.x - origin.x, mouse.y - origin.y};
+
+        // **The pointer, every frame, not just on a click.** A manipulator
+        // needs where it is and whether the button is held; a click alone
+        // cannot say either. `pressed` is gated on the image because a drag
+        // that began in another panel is not this one's, and `down` is NOT,
+        // because a drag that leaves the viewport is still a drag and one
+        // that ends outside it still ends.
+        editor.setPointer(inViewport, overImage && ImGui::IsMouseClicked(ImGuiMouseButton_Left),
+                          ImGui::IsMouseDown(ImGuiMouseButton_Left));
+
+        if (overImage && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+            editor.requestPick(inViewport, ImGui::GetIO().KeyCtrl);
+
+        reportLookInput(editor, overImage);
+    }
+}
+
 void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& commands, bool& open,
                   const IconAtlas* icons)
 {
@@ -2052,54 +2110,36 @@ void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& co
 
     if (visible) {
         drawTransport(editor, commands, icons);
+        drawViewportBody(editor, texture, commands);
+    }
+    ImGui::End();
+}
 
-        const ImVec2 size = ImGui::GetContentRegionAvail();
-        const ImVec2 origin = ImGui::GetCursorScreenPos();
-        editor.setViewport(ViewportRect{origin.x, origin.y, size.x, size.y});
-
-        SDL_GPUTexture* native = texture.valid() ? rhi::nativeTexture(*g_device, texture) : nullptr;
-        if (native != nullptr && size.x >= 1.0f && size.y >= 1.0f) {
-            ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)), size);
-
-            // **Dropped into the WORLD** (ADR 0052): dragging something out of
-            // the project's tree and onto the viewport is the shortest way to
-            // say "one of those, here". It lands under `Workspace` rather than
-            // where the pointer is, because a drop point is a pixel and a
-            // placement is a position -- the two only meet through a pick, and
-            // a prefab that landed inside whatever happened to be behind the
-            // cursor would be a surprise every time it worked.
-            if (ImGui::BeginDragDropTarget()) {
-                if (const ImGuiPayload* dropped = ImGui::AcceptDragDropPayload(kContentDragPayload);
-                    dropped != nullptr) {
-                    commands.placeStamp = static_cast<const ContentDrag*>(dropped->Data)->path;
-                    commands.placeStampLinked = true;
-                    commands.placeStampParent = {};
-                }
-                ImGui::EndDragDropTarget();
-            }
-
-            // Hovering the IMAGE, not the window: a click on the tab, the
-            // border or the space beside a letterboxed image is not a click on
-            // the world, and treating it as one deselects whatever the person
-            // was working on.
-            const bool overImage = ImGui::IsItemHovered();
-            const ImVec2 mouse = ImGui::GetMousePos();
-            const core::Vec2 inViewport{mouse.x - origin.x, mouse.y - origin.y};
-
-            // **The pointer, every frame, not just on a click.** A manipulator
-            // needs where it is and whether the button is held; a click alone
-            // cannot say either. `pressed` is gated on the image because a drag
-            // that began in another panel is not this one's, and `down` is NOT,
-            // because a drag that leaves the viewport is still a drag and one
-            // that ends outside it still ends.
-            editor.setPointer(inViewport, overImage && ImGui::IsMouseClicked(ImGuiMouseButton_Left),
-                              ImGui::IsMouseDown(ImGuiMouseButton_Left));
-
-            if (overImage && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-                editor.requestPick(inViewport, ImGui::GetIO().KeyCtrl);
-
-            reportLookInput(editor, overImage);
-        }
+// **What F3 shows in the editor**, and the reason it has to show anything at
+// all: in the editor the world is rendered into a TEXTURE and the screen itself
+// is only cleared, so hiding the panels hides the world with them -- a black
+// window, reported as one. The overlay's own contract calls F3 "the cheapest
+// way to look at the world without the furniture", and this is the half that
+// makes that true.
+//
+// A window of its own rather than the docked one undocked: the layout somebody
+// arranged is theirs, and a keystroke that rearranged it would cost more than
+// it showed. It sets the viewport rect to the whole screen while it is up, so
+// the view is the view and a click still lands where it looks.
+void drawViewportFullscreen(Editor& editor, rhi::TextureHandle texture, EditorCommands& commands)
+{
+    const ImGuiViewport* screen = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(screen->Pos);
+    ImGui::SetNextWindowSize(screen->Size);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                                       ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus |
+                                       ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoDocking |
+                                       ImGuiWindowFlags_NoBackground;
+    const bool visible = ImGui::Begin("fullscreen-viewport", nullptr, flags);
+    ImGui::PopStyleVar();
+    if (visible) {
+        drawViewportBody(editor, texture, commands);
     }
     ImGui::End();
 }
@@ -3051,8 +3091,18 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
 // had.
 void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,
                      script::ScriptRuntime* runtime, Editor* editor, rhi::TextureHandle viewport, bool& laidOut,
-                     EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs, IconAtlas* icons)
+                     EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs, IconAtlas* icons,
+                     bool furniture)
 {
+    // **F3 down: the world and nothing else.** Returning before the dockspace
+    // rather than hiding each panel, because a dockspace with no windows in it
+    // is still a dockspace and would draw its own background over the picture.
+    if (!furniture) {
+        if (editor != nullptr)
+            drawViewportFullscreen(*editor, viewport, commands);
+        return;
+    }
+
     // Before the dockspace. `DockSpaceOverViewport` measures the work area, and
     // a menu bar declared after it would sit on top of the panels by its own
     // height.
@@ -3608,7 +3658,14 @@ void DebugOverlay::handleEvents(std::span<const platform::Event> events)
 
 void DebugOverlay::render(rhi::ICmdList& cmd, rhi::TextureHandle target, const Frame& frame)
 {
-    if (!active_ || !visible_ || !target.valid())
+    // **The editor draws while hidden, and every other shell does not.** In the
+    // editor the world lives in a texture that only ImGui puts on the screen,
+    // so an early return here is a black window; the shell below draws the
+    // viewport alone in that state. The F3 overlay is drawn OVER a finished
+    // frame and has nothing to show when it is down.
+    if (!active_ || !target.valid())
+        return;
+    if (!visible_ && shell_ != Shell::Editor)
         return;
 
     // The frame currently being recorded. Null means the caller is outside
@@ -3622,7 +3679,7 @@ void DebugOverlay::render(rhi::ICmdList& cmd, rhi::TextureHandle target, const F
     ImGui::NewFrame();
     if (shell_ == Shell::Editor)
         drawEditorShell(frame, world_, root_, inspector_, runtime_, editor_, viewportTexture_, layoutBuilt_, commands_,
-                        panels_, dialogs_, icons_);
+                        panels_, dialogs_, icons_, visible_);
     else
         drawShell(frame, world_, root_, inspector_, runtime_, streaming_);
     ImGui::Render();
