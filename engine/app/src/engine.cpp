@@ -367,17 +367,26 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
     if (!options.headless) {
         const std::array<I18nArg, 1> titleArgs{I18nArg{"version", LUAUG_VERSION_STRING}};
+        // **Where the editor was left, if it was ever left anywhere.** Read
+        // before the window exists, which is why it is a static reader: the
+        // window has to be CREATED at the remembered size rather than created at
+        // the default and resized, or a person watches their editor open small
+        // and jump every launch.
+        const std::optional<platform::WindowPlacement> placement =
+            options.editor ? Editor::recallWindow(options.scriptPath / ".luaug") : std::nullopt;
         window = platform::createWindow(
             {
                 .titleKey = LUAUG_TR("platform.window.title"),
                 .titleArgs = titleArgs,
                 .title = options.windowTitle,
-                .width = options.width,
-                .height = options.height,
+                .width = placement.has_value() ? placement->width : options.width,
+                .height = placement.has_value() ? placement->height : options.height,
             },
             &error);
         if (window == nullptr)
             return error;
+        if (placement.has_value())
+            platform::setWindowPlacement(*window, *placement);
 
         // The window wears whatever icon this executable carries in its own
         // resources (roadmap M8). Nothing is configured and nothing is
@@ -1186,6 +1195,21 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     rememberedScene = editor.openScenePath();
                     editor.rememberState(options.scriptPath / ".luaug");
                 }
+                // **Asked rather than subscribed to.** A move and a resize are
+                // both "the window is somewhere else now", SDL reports them as
+                // several events each and neither is the last one -- so the
+                // question is asked once a frame and answered by comparison.
+                // `rememberWindow` returns without doing anything when nothing
+                // moved, which is every frame but the ones that matter.
+                if (window != nullptr)
+                    editor.rememberWindow(platform::windowPlacement(*window));
+
+                // The manipulator's mode and space, snapping, the browser's
+                // layout. Drained once here rather than written inside each
+                // setter, because those are keystrokes -- `Ctrl+L` twice would
+                // otherwise be two files written from inside an input handler.
+                if (editor.takePreferencesDirty())
+                    editor.rememberState(options.scriptPath / ".luaug");
             }
 
             // **The manipulator gets the pointer first.** A press that lands on

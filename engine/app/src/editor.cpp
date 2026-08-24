@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -309,6 +310,80 @@ void Editor::setContentColor(std::string_view path, std::optional<core::Color3> 
         m_contentColors.erase(std::string(path));
 }
 
+namespace {
+// The manipulator's mode and the browser's layout, as WORDS.
+//
+// `.luaug/editor.json` is a file a person opens when something is wrong with
+// it, and `"gizmo": 2` tells them nothing while `"gizmo": "scale"` tells them
+// everything. An unknown word falls back rather than failing: a project written
+// by a newer build should still open here, minus what this one cannot say --
+// which is the rule the scene format already follows.
+[[nodiscard]] std::string_view gizmoModeName(GizmoMode mode) noexcept
+{
+    switch (mode) {
+    case GizmoMode::Rotate:
+        return "rotate";
+    case GizmoMode::Scale:
+        return "scale";
+    case GizmoMode::Translate:
+        break;
+    }
+    return "translate";
+}
+
+[[nodiscard]] GizmoMode gizmoModeFrom(std::string_view name) noexcept
+{
+    if (name == "rotate")
+        return GizmoMode::Rotate;
+    if (name == "scale")
+        return GizmoMode::Scale;
+    return GizmoMode::Translate;
+}
+
+[[nodiscard]] std::string_view contentViewName(EditorPanels::ContentView view) noexcept
+{
+    switch (view) {
+    case EditorPanels::ContentView::Tiles:
+        return "tiles";
+    case EditorPanels::ContentView::Icons:
+        return "icons";
+    case EditorPanels::ContentView::List:
+        break;
+    }
+    return "list";
+}
+
+[[nodiscard]] EditorPanels::ContentView contentViewFrom(std::string_view name) noexcept
+{
+    if (name == "tiles")
+        return EditorPanels::ContentView::Tiles;
+    if (name == "icons")
+        return EditorPanels::ContentView::Icons;
+    return EditorPanels::ContentView::List;
+}
+// The window block, or nothing. Shared by `recallState` and the static reader,
+// because the window is asked about twice -- once before there is an editor and
+// once after -- and two spellings of "what does this file say" is how the two
+// answers end up different.
+[[nodiscard]] std::optional<platform::WindowPlacement> readWindow(const core::JsonValue& root)
+{
+    const core::JsonValue window = root["window"];
+    if (window.type() != core::JsonType::Object)
+        return std::nullopt;
+
+    platform::WindowPlacement placement;
+    placement.x = static_cast<core::i32>(window["x"].asInteger());
+    placement.y = static_cast<core::i32>(window["y"].asInteger());
+    placement.width = static_cast<core::i32>(window["width"].asInteger());
+    placement.height = static_cast<core::i32>(window["height"].asInteger());
+    placement.maximized = window["maximized"].asBool();
+    // A size of nothing is not a window somebody left; it is a truncated file.
+    if (placement.width <= 0 || placement.height <= 0)
+        return std::nullopt;
+    return placement;
+}
+} // namespace
+
 void Editor::rememberState(const std::filesystem::path& stateDirectory) const
 {
     // JSON of one field rather than the bare path, because the second thing an
@@ -317,6 +392,48 @@ void Editor::rememberState(const std::filesystem::path& stateDirectory) const
     core::JsonWriter writer;
     writer.beginObject();
     writer.field("openScene", m_openScene);
+
+    // **What a person set, rather than what they did.** The manipulator's mode
+    // and space, snapping and its steps, and how the browser lays entries out:
+    // none of it is about the world, all of it is somebody's answer to "how do I
+    // work", and an editor that asks the question again every launch is one they
+    // answer by hand every morning. The docking, the panel sizes and which tab
+    // is open are ImGui's `.luaug/layout.ini` -- two files because two writers,
+    // not because two ideas.
+    writer.key("tools");
+    writer.beginObject();
+    writer.field("gizmo", gizmoModeName(m_gizmoMode));
+    // The word rather than a flag, for the same reason: `"space": false` names
+    // nothing, and `local` and `world` are what the toolbar itself says.
+    writer.field("space", m_gizmoLocal ? "local" : "world");
+    writer.field("snap", m_snap);
+    writer.key("snapSteps");
+    writer.beginArray();
+    for (const f32 step : m_snapStep)
+        writer.value(static_cast<core::f64>(step));
+    writer.endArray();
+    writer.endObject();
+
+    writer.key("panels");
+    writer.beginObject();
+    writer.field("contentView", contentViewName(m_contentView));
+    writer.endObject();
+
+    // **The OS window, which ImGui's layout file cannot hold**: that one knows
+    // about the panels INSIDE a window and nothing about the window. Two halves
+    // of one expectation -- "it opens the way I left it" -- and a person cannot
+    // tell which file answers which half.
+    if (m_window.has_value()) {
+        writer.key("window");
+        writer.beginObject();
+        writer.field("x", static_cast<core::i64>(m_window->x));
+        writer.field("y", static_cast<core::i64>(m_window->y));
+        writer.field("width", static_cast<core::i64>(m_window->width));
+        writer.field("height", static_cast<core::i64>(m_window->height));
+        writer.field("maximized", m_window->maximized);
+        writer.endObject();
+    }
+
     if (!m_contentColors.empty()) {
         writer.key("folderColors");
         writer.beginObject();
@@ -345,14 +462,81 @@ void Editor::recallState(const std::filesystem::path& stateDirectory)
     if (const core::JsonDocument::ParseResult parsed = document.parse(text); !parsed.ok)
         return;
 
-    const core::JsonValue colors = document.root()["folderColors"];
-    if (colors.type() != core::JsonType::Object)
-        return;
-    for (core::usize index = 0; index < colors.size(); ++index) {
-        const std::string_view path = colors.keyAt(index);
-        if (const std::optional<core::Color3> color = parseHexColor(colors[path].asString()); color.has_value())
-            m_contentColors.emplace(std::string(path), *color);
+    const core::JsonValue root = document.root();
+
+    // Every block is optional and each is read on its own. A file written before
+    // one of these existed is not a broken file -- it is a file from last week,
+    // and the missing block means "whatever this build's default is".
+    if (const core::JsonValue tools = root["tools"]; tools.type() == core::JsonType::Object) {
+        m_gizmoMode = gizmoModeFrom(tools["gizmo"].asString());
+        m_gizmoLocal = tools["space"].asString() == "local";
+        if (const core::JsonValue snap = tools["snap"]; snap.type() == core::JsonType::Boolean)
+            m_snap = snap.asBool();
+        if (const core::JsonValue steps = tools["snapSteps"]; steps.type() == core::JsonType::Array) {
+            for (core::usize index = 0; index < steps.size() && index < std::size(m_snapStep); ++index) {
+                // Through the setter's rule rather than around it: a hand-edited
+                // zero or a negative is a snap that divides by nothing.
+                const auto step = static_cast<f32>(steps.at(index).asNumber());
+                m_snapStep[index] = step > 0.0f ? step : m_snapStep[index];
+            }
+        }
     }
+
+    if (const core::JsonValue panels = root["panels"]; panels.type() == core::JsonType::Object)
+        m_contentView = contentViewFrom(panels["contentView"].asString());
+
+    m_window = readWindow(root);
+
+    // Read last and not returned from early: a file with no colours still has
+    // everything above it.
+    if (const core::JsonValue colors = root["folderColors"]; colors.type() == core::JsonType::Object) {
+        for (core::usize index = 0; index < colors.size(); ++index) {
+            const std::string_view path = colors.keyAt(index);
+            if (const std::optional<core::Color3> color = parseHexColor(colors[path].asString()); color.has_value())
+                m_contentColors.emplace(std::string(path), *color);
+        }
+    }
+
+    // Recalling is not a change somebody made.
+    m_preferencesDirty = false;
+}
+
+std::optional<platform::WindowPlacement> Editor::recallWindow(const std::filesystem::path& stateDirectory)
+{
+    std::string text;
+    if (!platform::readTextFile(stateDirectory / "editor.json", text))
+        return std::nullopt;
+
+    core::JsonDocument document;
+    if (const core::JsonDocument::ParseResult parsed = document.parse(text); !parsed.ok)
+        return std::nullopt;
+
+    return readWindow(document.root());
+}
+
+void Editor::rememberWindow(const platform::WindowPlacement& placement) noexcept
+{
+    // **A maximised window's geometry is not the geometry to keep.** SDL reports
+    // the screen it fills, so storing that and restoring it would give somebody
+    // who un-maximises a window the size of their display with a title bar. The
+    // geometry stays whatever it was when the window was last normal, and the
+    // flag carries the rest.
+    if (placement.maximized) {
+        if (m_window.has_value() && m_window->maximized)
+            return;
+        platform::WindowPlacement kept = m_window.value_or(placement);
+        kept.maximized = true;
+        m_window = kept;
+        m_preferencesDirty = true;
+        return;
+    }
+
+    if (m_window.has_value() && m_window->x == placement.x && m_window->y == placement.y &&
+        m_window->width == placement.width && m_window->height == placement.height && !m_window->maximized) {
+        return;
+    }
+    m_window = placement;
+    m_preferencesDirty = true;
 }
 
 std::string Editor::recallOpenScene(const std::filesystem::path& stateDirectory)
@@ -1428,6 +1612,7 @@ void Editor::setGizmoMode(GizmoMode mode) noexcept
     if (m_drag.has_value())
         return;
     m_gizmoMode = mode;
+    m_preferencesDirty = true;
 }
 
 void Editor::setGizmoLocal(bool local) noexcept
@@ -1435,6 +1620,7 @@ void Editor::setGizmoLocal(bool local) noexcept
     if (m_drag.has_value())
         return;
     m_gizmoLocal = local;
+    m_preferencesDirty = true;
 }
 
 f32 Editor::snapStep(GizmoMode mode) const noexcept
@@ -1445,6 +1631,7 @@ f32 Editor::snapStep(GizmoMode mode) const noexcept
 void Editor::setSnapStep(GizmoMode mode, f32 step) noexcept
 {
     m_snapStep[static_cast<core::usize>(mode)] = step > 0.0f ? step : 0.0f;
+    m_preferencesDirty = true;
 }
 
 std::optional<GizmoFrame> Editor::gizmoFrame(const scene::World& world, const Inspector& inspector) const

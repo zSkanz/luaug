@@ -93,6 +93,25 @@ u32 windowId(const Window& window) noexcept
     return SDL_GetWindowID(window.handle());
 }
 
+WindowPlacement windowPlacement(const Window& window) noexcept
+{
+    WindowPlacement placement;
+    SDL_GetWindowPosition(window.handle(), &placement.x, &placement.y);
+    SDL_GetWindowSize(window.handle(), &placement.width, &placement.height);
+    placement.maximized = (SDL_GetWindowFlags(window.handle()) & SDL_WINDOW_MAXIMIZED) != 0;
+    return placement;
+}
+
+void setWindowPlacement(Window& window, const WindowPlacement& placement)
+{
+    if (placement.width > 0 && placement.height > 0) {
+        (void)SDL_SetWindowSize(window.handle(), placement.width, placement.height);
+        (void)SDL_SetWindowPosition(window.handle(), placement.x, placement.y);
+    }
+    if (placement.maximized)
+        (void)SDL_MaximizeWindow(window.handle());
+}
+
 WindowSize windowPixelSize(const Window& window) noexcept
 {
     WindowSize size;

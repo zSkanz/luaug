@@ -2127,6 +2127,10 @@ void buildDefaultLayout(ImGuiID dockspace)
 
     ImGui::DockBuilderDockWindow("viewport", centre);
     ImGui::DockBuilderDockWindow("explorer", left);
+    // Properties first for the reason content is: a tab node opens on whichever
+    // window was docked LAST, and "which one greets somebody" is a decision
+    // rather than a consequence of call order -- so it is set explicitly below
+    // and the order here is only what makes the tabs read left to right.
     ImGui::DockBuilderDockWindow("properties", right);
     ImGui::DockBuilderDockWindow("stats", right);
     // Content first, so it is the tab that opens. The two share a node on
@@ -2410,8 +2414,12 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
         if (ImGui::BeginPopup("view-menu")) {
             for (int index = 0; index < 3; ++index) {
                 const auto view = static_cast<EditorPanels::ContentView>(index);
-                if (ImGui::MenuItem(names[index], nullptr, panels.contentView == view))
+                if (ImGui::MenuItem(names[index], nullptr, panels.contentView == view)) {
                     panels.contentView = view;
+                    // Written through to the editor, which is the one that has a
+                    // file: this panel's copy dies with the run.
+                    editor.setContentView(view);
+                }
             }
             ImGui::EndPopup();
         }
@@ -3063,6 +3071,12 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         const bool asked = commands.resetLayout;
         commands.resetLayout = false;
         laidOut = true;
+        // **The browser opens the way it was left**, which the panel struct
+        // cannot answer by itself -- it is rebuilt from nothing every launch.
+        // Seeded here rather than at construction because this is the first
+        // frame that has an editor in hand.
+        if (!asked && editor != nullptr)
+            panels.contentView = editor->contentView();
         const ImGuiDockNode* node = ImGui::DockBuilderGetNode(dockspace);
         // Asked for, or never arranged. `DockBuilderRemoveNode` throws away an
         // arrangement somebody chose, so it only runs when they said so or when
@@ -3070,8 +3084,14 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         if (asked || node == nullptr || (!node->IsSplitNode() && node->Windows.Size == 0)) {
             buildDefaultLayout(dockspace);
             builtThisFrame = true;
-            if (asked)
+            if (asked) {
                 panels = EditorPanels{};
+                // Reset Layout means the arrangement, and the browser's layout
+                // is part of it -- so the remembered one goes with it rather
+                // than coming back on the next launch.
+                if (editor != nullptr)
+                    editor->setContentView(panels.contentView);
+            }
         }
     }
 
@@ -3265,9 +3285,18 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
 
     // After every panel has been declared, because focusing a window ImGui has
     // not seen this frame does nothing. Only on the frame the default layout
-    // was built: a person who later chose the console should find the console.
-    if (builtThisFrame)
+    // was built: a person who later chose the console should find the console,
+    // and the ini remembers which tab that was.
+    //
+    // **Properties before content**, and the order is the point twice over: each
+    // call selects the tab in its OWN node, so both nodes get the tab they
+    // should open on, and the last call is the one that also takes keyboard
+    // focus -- which belongs to the panel somebody is about to browse rather
+    // than to the one they are about to read.
+    if (builtThisFrame) {
+        ImGui::SetWindowFocus("properties");
         ImGui::SetWindowFocus("content");
+    }
 }
 
 void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,
@@ -3397,6 +3426,13 @@ DebugOverlay::~DebugOverlay()
 {
     if (!active_)
         return;
+
+    // **Written on the way out.** ImGui saves the ini by itself, but on a timer
+    // -- so an arrangement made in the last few seconds before somebody quits is
+    // an arrangement they made twice. `IniFilename` is null for every shell but
+    // the editor, and `SaveIniSettingsToDisk` is only called when it is not.
+    if (const ImGuiIO& io = ImGui::GetIO(); io.IniFilename != nullptr)
+        ImGui::SaveIniSettingsToDisk(io.IniFilename);
 
     // Renderer first: it releases GPU objects through the device, which is
     // still alive because the constructor's contract says it must be.

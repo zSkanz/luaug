@@ -5,6 +5,7 @@
 #include <luaug/app/picking.h>
 #include <luaug/core/id.h>
 #include <luaug/core/math.h>
+#include <luaug/platform/window.h>
 #include <luaug/rhi/types.h>
 #include <luaug/scene/scene_file.h>
 #include <luaug/scene/world.h>
@@ -1007,6 +1008,51 @@ public:
     // Empty when no scene has been opened. Content-relative.
     [[nodiscard]] const std::string& openScenePath() const noexcept { return m_openScene; }
 
+    // How the content browser was laid out last time.
+    //
+    // **Kept here rather than only in `EditorPanels`** because this is the class
+    // that has a file: the panel struct lives for as long as the shell and is
+    // rebuilt from nothing every launch, and a preference somebody set once
+    // belongs to the project rather than to the run. The shell seeds its own
+    // copy from this on the first frame and writes back through the setter.
+    [[nodiscard]] EditorPanels::ContentView contentView() const noexcept { return m_contentView; }
+    void setContentView(EditorPanels::ContentView view) noexcept
+    {
+        m_contentView = view;
+        m_preferencesDirty = true;
+    }
+
+    // Where the OS window was when somebody last had it.
+    //
+    // **A static reader, like `recallOpenScene`**, and for the same reason: the
+    // window is created before there is an editor to ask, so this has to be
+    // answerable from the file alone. Nothing when the file has no window block,
+    // which is what a first launch and every non-editor shell get.
+    [[nodiscard]] static std::optional<platform::WindowPlacement>
+    recallWindow(const std::filesystem::path& stateDirectory);
+
+    // Records where the window is now. Called from the frame loop when the
+    // window moves or is resized -- there is no other moment that knows.
+    void rememberWindow(const platform::WindowPlacement& placement) noexcept;
+
+    // One-shot: true once after anything a PERSON chose has changed -- the
+    // manipulator's mode and space, snapping, the browser's layout.
+    //
+    // A flag rather than a write inside each setter, because the toggles are
+    // keystrokes: `Ctrl+L` twice would be two files written from inside an input
+    // handler. The frame loop drains this once and writes once, which is the
+    // same shape as every other command in this editor.
+    //
+    // **On change rather than at exit** for the reason the open scene is: an
+    // editor that only wrote this on a clean shutdown would forget it the one
+    // time somebody most wants it.
+    [[nodiscard]] bool takePreferencesDirty() noexcept
+    {
+        const bool changed = m_preferencesDirty;
+        m_preferencesDirty = false;
+        return changed;
+    }
+
     [[nodiscard]] const EditorStatus& status() const noexcept { return m_status; }
 
     [[nodiscard]] UndoStack& history() noexcept { return m_history; }
@@ -1112,7 +1158,11 @@ public:
     // manipulator with no snap is the one that feels like a toy.
     [[nodiscard]] bool snapping() const noexcept { return m_snap && !m_snapSuspended; }
     void setSnapSuspended(bool suspended) noexcept { m_snapSuspended = suspended; }
-    void setSnap(bool on) noexcept { m_snap = on; }
+    void setSnap(bool on) noexcept
+    {
+        m_snap = on;
+        m_preferencesDirty = true;
+    }
     // Metres for translate and scale, degrees for rotate.
     [[nodiscard]] f32 snapStep(GizmoMode mode) const noexcept;
     void setSnapStep(GizmoMode mode, f32 step) noexcept;
@@ -1234,6 +1284,9 @@ private:
     bool m_gizmoLocal = false;
     bool m_snap = true;
     bool m_snapSuspended = false;
+    EditorPanels::ContentView m_contentView = EditorPanels::ContentView::List;
+    std::optional<platform::WindowPlacement> m_window;
+    bool m_preferencesDirty = false;
     // Metres, metres, degrees -- indexed by `GizmoMode`. A quarter of a metre
     // and fifteen degrees are the steps every editor lands on because they are
     // the ones a room and a corner are built from.

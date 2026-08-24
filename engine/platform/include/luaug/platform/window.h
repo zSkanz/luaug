@@ -127,4 +127,34 @@ struct WindowInsets
 
 [[nodiscard]] WindowInsets windowSafeAreaInsets(const Window& window) noexcept;
 
+// Where a window is and how big, in LOGICAL units -- the numbers a person set by
+// dragging an edge, not the pixels a swapchain needs.
+//
+// Logical because that is what survives a move between displays: the same window
+// on a doubled display has twice the pixels and is the same size to the person
+// who sized it, and restoring the pixel count would double it (D055 is the same
+// distinction from the other end).
+struct WindowPlacement
+{
+    i32 x = 0;
+    i32 y = 0;
+    i32 width = 0;
+    i32 height = 0;
+    // Restored by MAXIMISING rather than by placing: a maximised window's
+    // position and size are the ones it will have when somebody un-maximises it,
+    // and writing those back as a plain geometry loses the state entirely.
+    bool maximized = false;
+};
+
+[[nodiscard]] WindowPlacement windowPlacement(const Window& window) noexcept;
+
+// Puts a window back where it was. A zero or negative size is ignored rather
+// than applied, so a truncated or hand-edited file cannot produce a window
+// nobody can find or grab.
+//
+// **Placed before it is maximised**, which is the order that matters: the
+// restore geometry has to be set while the window is normal or un-maximising
+// later lands somewhere the person never put it.
+void setWindowPlacement(Window& window, const WindowPlacement& placement);
+
 } // namespace luaug::platform

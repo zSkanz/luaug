@@ -29,6 +29,7 @@
 
 using namespace luaug;
 using luaug::app::Editor;
+using luaug::app::EditorPanels;
 using luaug::app::GizmoFrame;
 using luaug::app::GizmoHandle;
 using luaug::app::GizmoMode;
@@ -1116,6 +1117,82 @@ TEST_CASE("a folder in the world carries its own colour, and undo takes it back"
     CHECK(Editor::folderColor(world, folder).has_value());
     REQUIRE(editor.undo(world, inspector));
     CHECK_FALSE(Editor::folderColor(world, folder).has_value());
+}
+
+TEST_CASE("how somebody set the editor up survives closing it")
+{
+    // **The standing request this answers**: "o layout em si do editor deve ser
+    // lembrado ... movimentação local e world deve se lembrar disso também ...
+    // tamanho e posições de janela". The docking, the panel sizes and which tab
+    // is open are ImGui's `layout.ini`; everything a person set that is NOT an
+    // ImGui window lives here, and this is the round trip through it.
+    const std::filesystem::path state = std::filesystem::temp_directory_path() / "luaug-editor-prefs-test" / ".luaug";
+    std::error_code cleanup;
+    std::filesystem::remove_all(state.parent_path(), cleanup);
+
+    // Nothing written yet: a first launch gets this build's defaults and no
+    // window to restore.
+    CHECK_FALSE(Editor::recallWindow(state).has_value());
+
+    {
+        Editor editor;
+        CHECK(editor.gizmoMode() == GizmoMode::Translate);
+        CHECK_FALSE(editor.gizmoLocal());
+        CHECK_FALSE(editor.takePreferencesDirty());
+
+        editor.setGizmoMode(GizmoMode::Rotate);
+        editor.setGizmoLocal(true);
+        editor.setSnap(false);
+        editor.setSnapStep(GizmoMode::Translate, 0.5f);
+        editor.setContentView(EditorPanels::ContentView::Icons);
+        editor.rememberWindow(platform::WindowPlacement{80, 40, 1500, 900, false});
+        // One flag for all of it, drained once by the frame loop rather than
+        // written from inside each setter.
+        CHECK(editor.takePreferencesDirty());
+        CHECK_FALSE(editor.takePreferencesDirty());
+        editor.rememberState(state);
+    }
+
+    Editor reopened;
+    reopened.recallState(state);
+    CHECK(reopened.gizmoMode() == GizmoMode::Rotate);
+    CHECK(reopened.gizmoLocal());
+    CHECK_FALSE(reopened.snapping());
+    CHECK(static_cast<double>(reopened.snapStep(GizmoMode::Translate)) == doctest::Approx(0.5));
+    CHECK(reopened.contentView() == EditorPanels::ContentView::Icons);
+    // Recalling is not something a person did, so nothing is owed to the file.
+    CHECK_FALSE(reopened.takePreferencesDirty());
+
+    // Readable before there is an editor, because the window is created first.
+    const std::optional<platform::WindowPlacement> window = Editor::recallWindow(state);
+    REQUIRE(window.has_value());
+    CHECK(window->x == 80);
+    CHECK(window->width == 1500);
+    CHECK(window->height == 900);
+    CHECK_FALSE(window->maximized);
+
+    // **A maximised window keeps the geometry it will have when it is not.**
+    // SDL reports the screen a maximised window fills, and storing that would
+    // hand somebody who un-maximises it a window the size of their display.
+    reopened.rememberWindow(platform::WindowPlacement{0, 0, 3840, 2160, true});
+    reopened.rememberState(state);
+    const std::optional<platform::WindowPlacement> full = Editor::recallWindow(state);
+    REQUIRE(full.has_value());
+    CHECK(full->maximized);
+    CHECK(full->width == 1500);
+    CHECK(full->height == 900);
+
+    // A file from before any of this existed is not a broken file: every block
+    // is optional and the rest of it still reads.
+    REQUIRE(luaug::platform::writeTextFile(state / "editor.json", "{\"openScene\":\"scenes/main.scene.json\"}"));
+    Editor older;
+    older.recallState(state);
+    CHECK(older.gizmoMode() == GizmoMode::Translate);
+    CHECK(older.snapping());
+    CHECK_FALSE(Editor::recallWindow(state).has_value());
+    CHECK(Editor::recallOpenScene(state) == "scenes/main.scene.json");
+
+    std::filesystem::remove_all(state.parent_path(), cleanup);
 }
 
 TEST_CASE("a content folder's colour survives the editor closing")
