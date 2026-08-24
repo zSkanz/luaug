@@ -5,6 +5,53 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
+- **E5 — The World You Build — BUILT, awaiting review, 2026-08-24.** Landed in
+  one pass behind a green six-stage gate, which is what
+  [`docs/roadmap.md` § E5](docs/roadmap.md#e5--the-world-you-build-l) asked for:
+  a partitioner with no `StreamingMode` writes the wrong cells and a
+  `StreamingMode` with no partitioner has no caller.
+  [ADR 0053](docs/decisions/0053-the-grid-decides-when-and-the-model-decides-what.md)
+  settles it and [`docs/briefs/e5-kickoff.md`](docs/briefs/e5-kickoff.md) carries
+  the reconnaissance, the design decisions and the gate.
+
+  **A person builds in `Workspace` and presses play.** The scene is partitioned
+  on the way to the first frame, cached by a hash of the file, and `luaug build`
+  pre-warms the same directory through the same code -- a `--partition` mode that
+  boots and stops, rather than a second path that can go stale.
+
+  **Seven things the specification assumed were already true and were not**, and
+  they are the reason this milestone was larger than the ADR's own sizing. Three
+  were fixes rather than additions: the chunk index carried a world-space box in
+  ONE axis and derived x and z from the cell footprint, so an atomic model that
+  overhangs was scored as though it did not; a cell record could not say
+  `CanCollide`, a collision group, a friction or a collision fidelity, which
+  costs nothing while only a generator writes cells and silently changes an
+  AUTHORED world; and a record carried no tags at all, without which the ADR's
+  own rule 5 -- address by tag, never by path -- cannot work for a single
+  streamed instance. The Streaming panel `docs/manual` has promised since M7 also
+  did not exist: `StreamingManager::view` was written "for the overlay the
+  deliverable owes" and had no caller anywhere in the tree.
+
+  **And one measurement overturned the design.** The size-class cuts were
+  proposed at 8 m and 64 m; measured against the flagship's 26,884 instances they
+  put the ground -- 69% of the world, and the one thing that has to be visible at
+  distance -- in the middle class and left the long-radius class empty. The
+  reason is worth more than the number: the flagship's terrain is not made of
+  large features, it is 18,496 tiles of 32 m, and classifying by a PART's extent
+  will never find terrain authored as many small pieces. The cuts are 12 m and
+  24 m, in the gap the data has, and an `Atomic` model is classified by the whole
+  model's extent.
+
+  **The default changes nothing, and it is provable rather than argued.**
+  `examples/10-open-world`'s authored scene has exactly one streamable candidate
+  and a `Weld` pins it, so the flagship produces zero cells and its residual
+  scene is byte-identical to the original. That falls out of the splice: what
+  stays authored is copied verbatim and no number is ever reformatted.
+
+  **What is left is a person looking.** The gate item that is deliberately not
+  automatable, plus the chunk-state screenshot -- and the same limit E1 recorded
+  applies: the ImGui shell cannot render headlessly.
+
 - **E3 — Content and Prefabs — COMPLETE, signed off 2026-08-23**, and it was
   specified by the human in a conversation rather than by a brief — one message
   at a time, while the thing was being built and used. `docs/briefs/e3-kickoff.md`
@@ -50,56 +97,21 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   pointed one way and grew it another. Both are the same shape — a rule stated
   in one space and applied in another — and it is worth expecting a third.
 
-- **E2 — Moving Things — COMPLETE, 2026-08-23**, seventeen commits, every item
-  of scope built and tested. `docs/briefs/e2-kickoff.md` carries the Gate Record
-  and the account; what is left of it is the pictures, which is what is left of
-  E3 too and for the same reason.
+- **E2 — Moving Things — COMPLETE, 2026-08-23.** Its entry moved to
+  [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md) with
+  E1's, and [`docs/briefs/e2-kickoff.md`](docs/briefs/e2-kickoff.md) carries the
+  Gate Record. The pattern worth keeping here: **nine defects, seven found by a
+  person using the thing**, and three of them were the same shape -- a piece of
+  arithmetic that is right for ONE and wrong for many.
 
-  **Two findings outlive it.** D073's shape — a rule that is right for ONE and
-  wrong for many — appeared three times in a milestone whose whole subject is
-  "many", and the worst of them put a tool's cost inside
-  `buildInstanceBatches`, which every pass of the frame depends on. And D076's:
-  a `static_assert` that COUNTS is not a test that COVERS — the fixture asserted
-  `variant_size_v<Value> == 13` and named nine of them, so four editor branches
-  had never been executed by anything.
-
-- **E1 — The Editor — COMPLETE, signed off 2026-08-22**, tagged `milestone/e1`. Post-v1 phase 1,
-  opened by human decision the same day v1.0.0 shipped. `luaug edit` is an
-  application: a menu bar, dockable panels, a viewport you click and fly through,
-  **play / pause / step / stop**, **save**, a **content browser** with folders and
-  right-click menus, and **undo and redo**. The brief is
-  [`docs/briefs/e1-kickoff.md`](docs/briefs/e1-kickoff.md), with the Gate Record,
-  what the milestone became, and what it deliberately does not have.
-
-  **Read the brief's first paragraph before planning E2.** This milestone was
-  opened as "the editor opens" and closed as an editor, absorbing most of what
-  the first cut called E2. Every addition came from a person using it and every
-  one was right — but a milestone this size is not a template, and the roadmap
-  now says so where the next one is planned.
-
-  **Two decisions carry it and both are their own documents**: ADR 0046, the
-  editor is a mode of the engine binary drawn in ImGui, decided by five
-  reconnaissance passes rather than by taste; and ADR 0047, the authored world is
-  data and scripts are behaviour, which is what `examples/06-scene` exists to
-  demonstrate. Code-first is not deprecated by either — `Instance.new` at runtime
-  stays first-class the way it is in Unity.
-
-  **Seven defects, six of them found by a person opening the thing**, and five
-  of those were one architectural mistake appearing five times: the editor
-  inheriting the game's decisions instead of taking them. One sentence resolves
-  them and it governs the tick, the cursor, the audio, the camera and the
-  keyboard — *while the editor is editing, the tool owns the machine, and
-  pressing play hands it back.*
-
-  **What it does not have** is in full at the end of the brief; E2 owns the
-  manipulators, creating an instance and multi-select, and what remains after
-  that is a stop that restores the world and not the Luau VM. **ADR 0047's boot
-  order is no longer on that list** — it was fixed as D067, and the bill for
-  shipping it inverted is written there. One limit is not a gap and is worth
-  knowing: **the ImGui shell cannot render headlessly and SDL does not accept
-  injected input**, so there is no automated path to a picture of this editor or
-  to a click inside it. Every image in `docs/images/e1/` was captured from a real
-  window.
+- **E1 — The Editor — COMPLETE, signed off 2026-08-22**, tagged `milestone/e1`.
+  Its entry moved to
+  [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md) when E5
+  was written up and this file passed its ~300-line cap again (§11).
+  [`docs/briefs/e1-kickoff.md`](docs/briefs/e1-kickoff.md) carries the Gate
+  Record. One limit from it is not a gap and is worth keeping here: **the ImGui
+  shell cannot render headlessly and SDL does not accept injected input**, so
+  there is no automated path to a picture of the editor or to a click inside it.
 
 - **M8 — Flagship, Hardening, Docs, v1.0 — COMPLETE and RELEASED 2026-08-22**,
   tagged `milestone/m8` and `v1.0.0`, both on `origin`, with the GitHub release
@@ -284,6 +296,39 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
 Entries for the planning session and for M0 through M4 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
+
+- **2026-08-24 (session 21, Claude Opus): E5 built in one pass.** Two commits,
+  behind a green six-stage gate.
+
+  **Did:** `Model.StreamingMode` with `Nonatomic` the default; the partitioner,
+  which reads the scene as TEXT and builds one authored node at a time into a
+  scratch world; the residual splice; the cache under `.luaug/partition/` keyed
+  by the scene's hash and validated against the stamps it read; chunk format 2
+  with groups, tags and the rest of `BasePart`; size classes on `ChunkId::layer`
+  with a radius pair each on `StreamingService`; the streaming map in the debug
+  overlay; `--partition` and its use by `luaug build`; and `examples/06-scene`
+  grown from six instances to four hundred with no generator in the project.
+
+  **Learned, and a test found it rather than a reading:** the peak measurement --
+  partition two worlds an order of magnitude apart and require the SAME peak, not
+  merely a small one -- failed on its first run. `World::destroy` marks a subtree
+  and defers the generation bump to `retireDestroyed`, which the scheduler calls
+  at the end of a drain, and a partitioner has no drain. The scratch world was
+  keeping every node it had ever built, which is exactly the "holds the world"
+  the class exists to make impossible. A peak that is merely small would have
+  passed; requiring it to be EQUAL is what caught it.
+
+  **Learned twice more, both at the seams.** `-Wmissing-field-initializers` fires
+  for a field a designated initialiser skips and that has no default member
+  initializer -- position in the struct has nothing to do with it, which is what
+  `world_host.h`'s own note used to say and now does not. And a partitioner that
+  read `StreamingMode` out of the JSON left the component field stored and unread,
+  which `inertcheck` refused: reading it off the built component instead is both
+  what the check wanted and the better answer, since what an enum name MEANS is
+  `readSceneNode`'s to say.
+
+  **Next:** capture the chunk-state overlay on `examples/06-scene` and write E5's
+  Gate Record, then migrate the examples still using the generator path.
 
 - **2026-08-23 (session 19, Claude Opus): E2 built and closed, E3 built and
   closed.** Thirty-eight commits, every one behind a green six-stage gate. The
