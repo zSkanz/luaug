@@ -5,6 +5,52 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
+- **E7 — The Look — BUILT, awaiting review, 2026-08-24.** Opened on the human's
+  word while E6 was still warm, and it is the first milestone in this phase that
+  is about the shell rather than about what the shell does.
+  [ADR 0056](docs/decisions/0056-the-shell-has-one-theme-and-it-is-square.md)
+  settles it, [`docs/roadmap.md` § E7](docs/roadmap.md#e7--the-look-m) is the
+  scope, and [`docs/briefs/e7-kickoff.md`](docs/briefs/e7-kickoff.md) carries the
+  gate and the findings.
+
+  **Six milestones built an editor and none of them decided what it should look
+  like**, so the defaults decided: `ImGui::StyleColorsDark()` called once and
+  never touched again -- a palette drawn for a translucent debug window over a
+  running game -- and ImGui's built-in 13-pixel bitmap face drawing every word in
+  all three shells, while `content/fonts/Inter.ttf` sat staged beside the binary
+  for the GAME's text. Nine colours were written out as literals at their call
+  sites, three of them the same orange in three places, because there was
+  nowhere else to put them.
+
+  **A theme is data now, and square is not part of it.** Eleven palette tokens
+  and one metrics table in `ui_theme.h`, from which sixty-odd ImGui slots are
+  derived; rounding is one number, it is zero, and it is shared by every theme,
+  because somebody switching from dark to light is changing the light and not
+  the product. Two themes, per user in `<userDir>/appearance.json` beside the
+  launcher's recents -- which panels are open is a fact about a project, and how
+  big the text is, is a fact about a person's eyes.
+
+  **The palette is measured, and the measurement found two failures on its first
+  run.** Every foreground token clears 4.5:1 against every ground it is drawn on
+  -- window, field and hovered row. `textMuted` and `danger` cleared it against
+  the window and failed against a HOVERED ROW, which is the ground somebody is
+  looking at exactly when they are about to act. Nothing about that is visible by
+  looking: all three were perfectly pleasant colours failing a threshold, which
+  is the whole argument for having one. R18's habit, applied to the shell.
+
+  **And the icon atlas needed no change at all**, because `IconAtlas::tintFor`
+  picks light or dark from the panel's own background luminance rather than from
+  a setting -- `icons.h` says it was written that way "so it follows a style
+  change for free". A light theme is the first style change there has ever been,
+  and every icon in both shells re-tinted with no line of code. A decision
+  written down as a reason paid off for a caller that did not exist when it was
+  written.
+
+  **What is left is the same thing E1 through E6 left**: a person looking. The
+  four pictures are in `docs/images/e7/` and were taken off the running window,
+  because the ImGui shell cannot render headlessly and SDL does not accept
+  injected input.
+
 - **E6 — The Launcher — COMPLETE, signed off 2026-08-24**, tagged
   `milestone/e6`. Opened on the
   human's word an hour after E4 was signed off, for the reason E4's own scope
@@ -190,6 +236,22 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
   citations. That file exists because three human-reported defects were removed
   from this one while it was being rewritten to close M4. **A close rewrites this
   file wholesale; it can no longer take the open list with it.**
+- **E7 is awaiting review, and what it is waiting for is a person looking at
+  four pictures.** `docs/images/e7/` carries the launcher and the editor in both
+  themes; the rest of its gate is assertions and is green.
+- **THREE agent sessions are writing this tree, not two**, and it was noticed
+  the way collisions are: a `-Only windows` gate reported green over a
+  `debug_overlay.cpp` whose edits were not in the binary, and `git log` grew
+  four commits during one session. Nothing was lost -- `engine/app/CMakeLists.txt`
+  and a Clang fix to `editor_tests.cpp` were swept into another session's commits
+  and are in `main` -- but the divided-tree protocol under Blocked describes two
+  windows and there are three. **It is the human's to arbitrate**, and the cheap
+  mitigation until they do is the one Finding 4 names: check the ARTIFACT, not
+  the exit code.
+- **`PROGRESS.md` is over its ~300-line cap** (§11) and was before this entry
+  was added. Archiving is a wholesale rewrite of this file, which is exactly the
+  operation two concurrent writers must not both perform, so it is named here
+  rather than done.
 - **The next action, as a sentence:** capture the chunk-state overlay on
   `examples/06-scene` and fill E5's last gate row, which is the only milestone
   still awaiting review.
@@ -315,6 +377,38 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
 Entries for the planning session and for M0 through M4 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
+
+- **2026-08-24 (session 23, Claude Opus): E7 built in one pass.** Opened on the
+  human's word with a brief of three words and one shape -- clean, simple,
+  professional, and square -- covering the editor and the launcher alike.
+
+  **Did:** `engine/app/ui_theme.{h,cpp}` and its tests; `applyTheme` deriving
+  every ImGui slot from eleven tokens; square in all eleven of ImGui's rounding
+  members; Inter loaded from the content already staged beside the binary, with
+  the built-in face as a said-out-loud fallback; a display-following interface
+  scale with a per-user override; `appearance.json` beside the launcher's
+  recents and a theme picker in Preferences; the launcher relaid out with a
+  header band, the list as the subject and NEW PROJECT before OPEN; every panel
+  renamed to Title Case, which cost a layout-file name; and the nine hardcoded
+  colours replaced by six token reads.
+
+  **Learned, and a test found it rather than a reading:** a palette checked only
+  against the window background is a palette whose text goes grey the moment
+  somebody points at it. Two of the first values committed measured above 5:1
+  over the window and below 4.5:1 over a hovered row.
+
+  **Learned twice more, and both are about believing a build.** A green
+  `-Only windows` reported success over a `debug_overlay.cpp` whose edits were
+  not in the binary -- the object's timestamp sat between two writes of the
+  source. That is not D040, which was ninja recording no header dependencies at
+  all; it is an edit landing mid-compile. **The cheap check is the artifact, not
+  the exit code**: `grep -a` for a string only the new code has took one second.
+  And renaming an ImGui window throws away every saved layout silently, because
+  a `.ini` is keyed by window NAME and the shell's "has anybody arranged this
+  yet" test sees a split node full of windows that no longer exist.
+
+  **Next:** open both shells, in both themes, and say whether this is what was
+  asked for -- E7's gate ends at a person looking, as E5's and E6's did.
 
 - **2026-08-24 (session 22, Claude Opus): E4 built.** The milestone was ordered
   intent and nothing else when the session opened -- the ledger's own next action

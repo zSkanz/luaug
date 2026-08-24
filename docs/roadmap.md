@@ -1265,6 +1265,7 @@ size were normal.
 | E4 | The Editor Ships | M | The distribution question ADR 0046 deliberately declined, and the editor's own performance gate: a folder somebody downloads, and an Explorer that costs what is open rather than what exists. **Settled: ADR 0054.** Specified below, in progress |
 | E5 | The World You Build | L | A world authored in `Workspace` becomes a streamed world on its own — no generator script, nothing sorted by hand. `Model.StreamingMode` makes the model the unit rather than the part; cells are chosen by size as well as position on the `layer` that has existed unused since M7. **Settled: ADR 0053.** Placed here rather than in phase 2 because it is an authoring capability and E3's stamps are its neighbour |
 | E6 | The Launcher | M | `luaug-host` with no project opens a project browser instead of printing a usage error: recent projects, a new one from a template, a folder picker, and the editor started on what you chose. **Settled: ADR 0055.** Specified below, in progress |
+| E7 | The Look | M | The shell stops looking like the debug overlay it grew out of: one theme as data rather than `StyleColorsDark` plus nine literals, Inter instead of a 13 px bitmap face, square everywhere, a palette measured against WCAG rather than argued about, and a launcher laid out for somebody arriving rather than for whoever wired it. **Settled: ADR 0056.** Specified below, in progress |
 
 **What moved into E1 and why it was right.** Undo was E2's, and E1 grew delete
 and duplicate — the two actions that make its absence dangerous. The content
@@ -1827,4 +1828,85 @@ Anything that opens a project without starting the editor.
 - **The engine still refuses what it refused.** A host given a path that is not
   there reports it exactly as before; the launcher is what happens when there is
   no path at all, not a fallback that swallows a mistyped one.
+- **`scripts/localgate.ps1` is green on every stage.**
+
+
+### E7 — The Look (M)
+
+**Settled by
+[ADR 0056](decisions/0056-the-shell-has-one-theme-and-it-is-square.md).**
+Opened 2026-08-24, on the human's word, an hour after E6 was built and for a
+reason six milestones had been carrying: nothing in E1 through E6 ever decided
+what the editor should look like, so the default decided for them. The brief was
+given as three words and one shape -- **clean, simple, professional**, and
+**square** -- and it covers the editor and the launcher alike, because they are
+two shells of one binary and a person meets the launcher first.
+
+**What the default had been deciding.** `ImGui::StyleColorsDark()` called once at
+construction and never touched again; no font loaded at all, so every shell drew
+in ImGui's built-in 13-pixel bitmap face while `content/fonts/Inter.ttf` sat
+staged beside the binary for the game's own text; nine colours written out as
+literals at their call sites, three of them the same orange in three places; and
+nothing scaling with the display, though `platform::windowDisplayScale` has
+existed since M6.
+
+#### Scope
+
+- **A theme is data.** `engine/app/ui_theme.h`: eleven palette tokens and one
+  table of metrics, from which `applyTheme` derives ImGui's sixty-odd colour
+  slots. The only file in the repository that decides a colour or a corner
+  radius.
+- **Square, everywhere there is a corner.** One number in `ThemeMetrics`, zero,
+  written into all eleven of ImGui's rounding members -- and a border colour that
+  is load-bearing rather than decorative, because with no radius the line is what
+  separates two panels.
+- **A palette that is measured rather than argued about.** Every foreground token
+  clears 4.5:1 (WCAG 2.1 AA) against every ground it is drawn on: the window, a
+  field, and a hovered row. Computed by `contrastRatio` and asserted, not
+  commented.
+- **Two themes**, dark and light, because one palette behind an abstraction is an
+  abstraction with no second case.
+- **Inter as the shell's typeface**, from the content already staged beside the
+  binary, with the built-in face as a stated fallback rather than a silent one.
+- **The shell scales with the display**, and a person can override it. Per user
+  in `<userDir>/appearance.json` beside the launcher's recents, because it is a
+  fact about their eyes and not about a project -- which is also what lets the
+  launcher have the setting at all.
+- **The launcher, laid out for somebody arriving**: a header band carrying the
+  wordmark, the project list as the screen's subject, making a project before
+  opening one, and every message in one place at the bottom rather than under
+  whichever column produced it.
+- **The editor's panels named the way an application names them** -- Title Case,
+  which costs one layout file name.
+
+#### NOT in scope
+
+Themes loaded from a file, chosen by a plugin, or authored outside the
+repository: a theme is a struct, and a fourth one is somebody writing a struct.
+Per-theme metrics. A syntax-highlighting palette for the console or for a script
+editor, which is a different problem with a different set of tokens. A second
+typeface -- the engine has one face by human decision (M7). Icon themes, which
+`icons/README.md` already owns and which are chosen separately. Anything that
+changes what a panel DOES.
+
+#### Gate (definition of done)
+
+- **The palette is legible, and the test says so rather than the author.** Every
+  theme, every foreground token, against the window background, a field and a
+  raised surface, at 4.5:1 -- in `ui_theme_tests.cpp`, with no ImGui in the
+  header it tests. Two of the first values committed failed this and were
+  changed because of it.
+- **The shell is square, asserted.** `themeMetrics().rounding == 0`, and a border
+  that is not also zero.
+- **The appearance survives a process, and a broken file does not break the
+  shell.** Round-trip through `appearance.json`; a missing file, an unparseable
+  one, a theme name this build does not carry and a scale that is not a number
+  all open on the default.
+- **Both themes are looked at, in both shells.** Screenshots in the gate record.
+  The same limit E1 recorded applies -- the ImGui shell cannot render headlessly
+  and SDL does not accept injected input -- so this one is a person, and the
+  pictures are taken off the running window.
+- **The typeface actually reaches the window.** A screenshot in Inter rather than
+  in ProggyClean, and the fallback said out loud in the log when the content is
+  not staged.
 - **`scripts/localgate.ps1` is green on every stage.**

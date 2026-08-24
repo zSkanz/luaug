@@ -6,6 +6,7 @@
 
 #include "luaug/app/backends.h"
 #include "luaug/app/icons.h"
+#include "luaug/app/ui_theme.h"
 #include "luaug/core/build_info.h"
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
@@ -62,6 +63,45 @@ namespace {
 // Main-thread only, like everything else that touches SDL's event queue.
 platform::Window* g_window = nullptr;
 const rhi::IDevice* g_device = nullptr;
+
+// What this person chose to look at the engine through (ADR 0056), and what the
+// display said when the window opened.
+//
+// Beside `g_window` and for the same reason: the Preferences dialog is a free
+// function several call frames below anything holding an overlay, and the one
+// live ImGui context already makes a second set of these meaningless.
+Appearance g_appearance;
+f32 g_displayScale = 1.0f;
+
+// Re-styles ImGui and writes the choice back, which is one action rather than
+// two: an appearance somebody changed and did not get back next launch is a
+// setting they conclude does not work.
+void applyAppearance()
+{
+    applyTheme(themeById(g_appearance.themeId), resolveUiScale(g_appearance.scale, g_displayScale));
+    (void)saveAppearance(appearanceFile(), g_appearance);
+}
+
+// The theme currently drawing. Every call site that used to write a colour out
+// by hand asks this instead.
+[[nodiscard]] const ThemePalette& palette() noexcept
+{
+    return themeById(g_appearance.themeId).palette;
+}
+
+[[nodiscard]] ImVec4 themeColor(core::Color3 color) noexcept
+{
+    return ImVec4(color.r, color.g, color.b, 1.0f);
+}
+
+// A step between two tokens, for the handful of states that are "that colour,
+// nearer this one" rather than a decision of their own -- a hovered primary
+// button, a pressed one.
+[[nodiscard]] ImVec4 themeBlend(core::Color3 from, core::Color3 to, f32 amount) noexcept
+{
+    return ImVec4(from.r + (to.r - from.r) * amount, from.g + (to.g - from.g) * amount,
+                  from.b + (to.b - from.b) * amount, 1.0f);
+}
 
 // Frame time, sampled and held; everything else read directly.
 //
@@ -327,17 +367,10 @@ bool iconButton(const IconAtlas* icons, std::string_view id, float size, const c
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
-        // **And the border, which is not the same thing as the fill.** ImGui
-        // draws a framed button's outline from `FrameBorderSize` regardless of
-        // what colour the fill is, so a transparent button under a theme that
-        // borders its frames (ADR 0056) is an empty box around a glyph -- which
-        // is exactly the column of boxes `frameless` exists to prevent, arriving
-        // by a different route.
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
     }
     const auto unstyle = [frameless]() {
         if (frameless) {
-            ImGui::PopStyleVar(2);
+            ImGui::PopStyleVar();
             ImGui::PopStyleColor(3);
         }
     };
@@ -367,12 +400,17 @@ bool iconButton(const IconAtlas* icons, std::string_view id, float size, const c
 // prefix. A class this build's theme has never heard of falls back, which is
 // what makes a project's own class draw as a generic instance rather than as a
 // hole.
+[[nodiscard]] std::string classIconId(std::string_view className)
+{
+    return "class." + std::string(className);
+}
+
 [[nodiscard]] std::string classIconId(const scene::World& world, core::InstanceId id)
 {
     const scene::ClassDescriptor* descriptor = world.classes().find(world.classOf(id));
     if (descriptor == nullptr)
         return std::string(icons::ClassInstance);
-    return "class." + std::string(world.atoms().text(descriptor->name));
+    return classIconId(world.atoms().text(descriptor->name));
 }
 
 // Case-insensitive substring, for the add menu's filter box. ASCII, because
@@ -1079,10 +1117,43 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                         if (!filter.empty() && !containsFold(candidateName, filter))
                             continue;
 
+                        // **The icon a row of this class would wear**, drawn
+                        // beside the name here for the reason it is drawn in the
+                        // tree at all: a list of thirty identifiers is read by
+                        // shape before it is read by word, and a menu that names
+                        // what it will make without showing it is a menu you have
+                        // to read twice.
+                        //
+                        // The name is still what the item IS -- the selectable
+                        // spans the row and the icon is drawn over it -- so
+                        // filtering, keyboard focus and the click target are
+                        // exactly what they were.
                         char item[96];
-                        (void)std::snprintf(item, sizeof(item), "%.*s", static_cast<int>(candidateName.size()),
+                        (void)std::snprintf(item, sizeof(item), "##%.*s", static_cast<int>(candidateName.size()),
                                             candidateName.data());
-                        if (ImGui::Selectable(item)) {
+                        const ImVec2 itemOrigin = ImGui::GetCursorPos();
+                        const bool chosen = ImGui::Selectable(item);
+                        // Taken here, because the icon and the name are drawn
+                        // over the selectable afterwards and `IsItemHovered`
+                        // answers about the LAST item -- which would make the
+                        // description below appear only over the word.
+                        const bool itemHovered = ImGui::IsItemHovered();
+
+                        const float itemIcon = ImGui::GetTextLineHeight();
+                        ImGui::SetCursorPos(itemOrigin);
+                        // The ATLAS falls back for a class no theme has heard
+                        // of -- `debug_overlay_tests.cpp` holds it to that -- so
+                        // there is nothing to do here for a project's own class.
+                        // False means there is no atlas at all, which is a build
+                        // with no icons rather than a class with none, and then
+                        // the name simply stands where it always did.
+                        if (drawIcon(icons, classIconId(candidateName), itemIcon))
+                            ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+                        else
+                            ImGui::SetCursorPos(itemOrigin);
+                        ImGui::TextUnformatted(candidateName.data(), candidateName.data() + candidateName.size());
+
+                        if (chosen) {
                             commands->createClass = classId;
                             commands->createParent = row.id;
                             ImGui::CloseCurrentPopup();
@@ -1090,7 +1161,7 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                         // The IDL's own prose, which the properties grid already
                         // shows for a property and which is the only description
                         // of a class anywhere at runtime.
-                        if (candidate->doc[0] != 0 && ImGui::IsItemHovered()) {
+                        if (candidate->doc[0] != 0 && itemHovered) {
                             ImGui::BeginTooltip();
                             ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
                             ImGui::TextUnformatted(candidate->doc);
@@ -1907,7 +1978,7 @@ void drawTransport(Editor& editor, EditorCommands& commands, const IconAtlas* ic
         ImGui::SameLine();
         (void)drawIcon(icons, icons::ClassModel, glyph);
         ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.72f, 0.35f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, themeColor(palette().warning));
         ImGui::Text("%s%s", session.path.c_str(), session.dirty ? " *" : "");
         ImGui::PopStyleColor();
         return;
@@ -2035,8 +2106,7 @@ void drawTransport(Editor& editor, EditorCommands& commands, const IconAtlas* ic
     // rather than in a modal: somebody pressing save twice a minute should not
     // have to dismiss anything.
     if (!editor.status().message.empty()) {
-        const ImVec4 colour =
-            editor.status().failed ? ImVec4(1.0f, 0.45f, 0.35f, 1.0f) : ImVec4(0.55f, 0.75f, 0.55f, 1.0f);
+        const ImVec4 colour = editor.status().failed ? themeColor(palette().danger) : themeColor(palette().success);
         ImGui::TextColored(colour, "%s", editor.status().message.c_str());
     }
 }
@@ -2156,7 +2226,7 @@ void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& co
                   const IconAtlas* icons)
 {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-    const bool visible = ImGui::Begin("viewport", &open);
+    const bool visible = ImGui::Begin("Viewport", &open);
     ImGui::PopStyleVar();
 
     if (visible) {
@@ -2218,21 +2288,21 @@ void buildDefaultLayout(ImGuiID dockspace)
     const ImGuiID right = ImGui::DockBuilderSplitNode(centre, ImGuiDir_Right, 0.28f, nullptr, &centre);
     const ImGuiID bottom = ImGui::DockBuilderSplitNode(centre, ImGuiDir_Down, 0.26f, nullptr, &centre);
 
-    ImGui::DockBuilderDockWindow("viewport", centre);
-    ImGui::DockBuilderDockWindow("explorer", left);
+    ImGui::DockBuilderDockWindow("Viewport", centre);
+    ImGui::DockBuilderDockWindow("Explorer", left);
     // Properties first for the reason content is: a tab node opens on whichever
     // window was docked LAST, and "which one greets somebody" is a decision
     // rather than a consequence of call order -- so it is set explicitly below
     // and the order here is only what makes the tabs read left to right.
-    ImGui::DockBuilderDockWindow("properties", right);
-    ImGui::DockBuilderDockWindow("stats", right);
+    ImGui::DockBuilderDockWindow("Properties", right);
+    ImGui::DockBuilderDockWindow("Stats", right);
     // Content first, so it is the tab that opens. The two share a node on
     // purpose -- they are both "the thing under the viewport" and neither
     // deserves permanent floor space -- but which one greets somebody is a
     // decision rather than a consequence of call order, so it is also set
     // explicitly below.
-    ImGui::DockBuilderDockWindow("content", bottom);
-    ImGui::DockBuilderDockWindow("console", bottom);
+    ImGui::DockBuilderDockWindow("Content", bottom);
+    ImGui::DockBuilderDockWindow("Console", bottom);
 
     ImGui::DockBuilderFinish(dockspace);
 }
@@ -2403,7 +2473,7 @@ void openSceneOrAsk(Editor& editor, EditorCommands& commands, EditorDialogs& dia
 void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs,
                  const IconAtlas* icons)
 {
-    if (!ImGui::Begin("content", &panels.content)) {
+    if (!ImGui::Begin("Content", &panels.content)) {
         ImGui::End();
         return;
     }
@@ -2590,7 +2660,7 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
 
                     const bool isOpenScene = entry.kind == ContentKind::Scene && entry.path == editor.openScenePath();
                     if (isOpenScene)
-                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.85f, 0.55f, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_Text, themeColor(palette().accent));
 
                     // Double-click, because a single click is how somebody
                     // browses and opening a scene throws away what is in the
@@ -2986,6 +3056,52 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         // Deliberately small and deliberately real. An empty preferences window
         // is a promise; one holding the setting somebody actually reaches for is
         // a place the next setting knows where to go.
+        // **First, because it is the one setting that changes what every other
+        // panel looks like** -- and because a person who came here looking for
+        // one thing came looking for this.
+        ImGui::SeparatorText("Appearance");
+        const Theme& current = themeById(g_appearance.themeId);
+        ImGui::SetNextItemWidth(220.0f);
+        if (ImGui::BeginCombo("Theme", std::string(current.name).c_str())) {
+            for (const Theme& theme : themes()) {
+                const bool selected = theme.id == current.id;
+                if (ImGui::Selectable(std::string(theme.name).c_str(), selected)) {
+                    g_appearance.themeId = std::string(theme.id);
+                    // Applied on the spot rather than on Close: a theme you
+                    // have to dismiss a dialog to see is a theme you choose by
+                    // trial and error.
+                    applyAppearance();
+                }
+                if (selected)
+                    ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+
+        // Shown resolved rather than as the stored zero, so the slider says what
+        // the shell is actually drawn at. Committed on release: dragging it
+        // rewrites the whole style every frame, and writing the file that often
+        // is a file write per pixel of travel.
+        f32 scale = resolveUiScale(g_appearance.scale, g_displayScale);
+        if (ImGui::SliderFloat("Interface scale", &scale, kMinimumUiScale, kMaximumUiScale, "%.2fx")) {
+            g_appearance.scale = scale;
+            applyTheme(themeById(g_appearance.themeId), resolveUiScale(scale, g_displayScale));
+        }
+        if (ImGui::IsItemDeactivatedAfterEdit())
+            applyAppearance();
+        ImGui::SameLine();
+        if (ImGui::Button("Match display")) {
+            // Zero is the stored spelling of "ask the display", which is what
+            // this button puts back -- not the number the display happens to
+            // report today, because that one is wrong the moment somebody
+            // changes monitors.
+            g_appearance.scale = 0.0f;
+            applyAppearance();
+        }
+        ImGui::TextDisabled("This display reports %.2fx. Theme and scale are yours, not the project's.",
+                            static_cast<double>(g_displayScale));
+
+        ImGui::Spacing();
         ImGui::SeparatorText("Viewport");
         f32 speed = editor.cameraSpeed();
         if (ImGui::DragFloat("Camera speed (m/s)", &speed, 0.5f, 0.1f, 2000.0f, "%.1f"))
@@ -3011,7 +3127,9 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         ImGui::SeparatorText("Where these live");
         ImGui::TextWrapped("The panel layout and the scene you had open are per-person and are kept in the project's "
                            ".luaug directory. What a RUN of the project starts with is the project's own decision, "
-                           "and lives in luaug.toml.");
+                           "and lives in luaug.toml. The theme and the interface scale are neither: they are about "
+                           "your eyes and your monitor, so they follow you across every project and live in your own "
+                           "user directory.");
 
         ImGui::Spacing();
         if (ImGui::Button("Close", ImVec2(120.0f, 0.0f)))
@@ -3354,7 +3472,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     }
 
     if (panels.explorer) {
-        if (ImGui::Begin("explorer", &panels.explorer)) {
+        if (ImGui::Begin("Explorer", &panels.explorer)) {
             if (world != nullptr && inspector != nullptr) {
                 // **While a stamp is open the tree is the STAMP's**, root row
                 // and all: no services, no scene, nothing but what is in the
@@ -3378,7 +3496,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     }
 
     if (panels.properties) {
-        if (ImGui::Begin("properties", &panels.properties)) {
+        if (ImGui::Begin("Properties", &panels.properties)) {
             if (world != nullptr && inspector != nullptr) {
                 drawProperties(*world, *inspector);
                 drawWriteLog(*world, *inspector);
@@ -3390,13 +3508,13 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // Draws with no VM for the same reason it does in the overlay: the LOG half
     // is what somebody wants when the VM failed to boot.
     if (panels.console) {
-        if (ImGui::Begin("console", &panels.console))
+        if (ImGui::Begin("Console", &panels.console))
             drawConsole(runtime);
         ImGui::End();
     }
 
     if (panels.stats) {
-        if (ImGui::Begin("stats", &panels.stats)) {
+        if (ImGui::Begin("Stats", &panels.stats)) {
             drawStats(frame);
             if (runtime != nullptr)
                 drawMemory(*runtime);
@@ -3446,8 +3564,8 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
             editor->setGizmoMode(GizmoMode::Scale);
 
         // **F frames the selection**, which is the one camera shortcut every
-        // editor in this shape shares -- so it is what somebody's hands already
-        // reach for.
+        // editor in this shape shares -- Studio, Unity, Unreal and Blender all
+        // put it here, so it is what somebody's hands already reach for.
         //
         // Nothing happens with nothing selected, and nothing happens for a
         // selection with no extent: a `Folder` has a position and no size, and
@@ -3559,8 +3677,8 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // focus -- which belongs to the panel somebody is about to browse rather
     // than to the one they are about to read.
     if (builtThisFrame) {
-        ImGui::SetWindowFocus("properties");
-        ImGui::SetWindowFocus("content");
+        ImGui::SetWindowFocus("Properties");
+        ImGui::SetWindowFocus("Content");
     }
 }
 
@@ -3577,19 +3695,23 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
 
 [[nodiscard]] ImU32 chunkStateColor(asset::ChunkState state)
 {
+    // Through the palette, so the map is legible in both themes -- the colours
+    // it carried were picked against a dark ground and three of the five were
+    // invisible on a light one.
+    const ThemePalette& p = palette();
     switch (state) {
     case asset::ChunkState::Resident:
-        return IM_COL32(90, 190, 110, 230);
+        return ImGui::ColorConvertFloat4ToU32(ImVec4(p.success.r, p.success.g, p.success.b, 0.90f));
     case asset::ChunkState::Decoded:
-        return IM_COL32(220, 200, 80, 230);
+        return ImGui::ColorConvertFloat4ToU32(ImVec4(p.warning.r, p.warning.g, p.warning.b, 0.90f));
     case asset::ChunkState::Loading:
-        return IM_COL32(80, 150, 220, 230);
+        return ImGui::ColorConvertFloat4ToU32(ImVec4(p.accent.r, p.accent.g, p.accent.b, 0.90f));
     case asset::ChunkState::Failed:
-        return IM_COL32(220, 90, 80, 230);
+        return ImGui::ColorConvertFloat4ToU32(ImVec4(p.danger.r, p.danger.g, p.danger.b, 0.90f));
     case asset::ChunkState::Unloaded:
         break;
     }
-    return IM_COL32(90, 90, 96, 160);
+    return ImGui::ColorConvertFloat4ToU32(ImVec4(p.border.r, p.border.g, p.border.b, 0.70f));
 }
 
 void drawStreaming(const StreamingHost& streaming)
@@ -3700,12 +3822,54 @@ void copyInto(char* buffer, std::size_t size, std::string_view text)
     buffer[count] = '\0';
 }
 
+// --- Small pieces the two columns share --------------------------------------
+
+// A quiet label over a block. With no rounding and no cards, a label and the
+// space under it are what make a group read as one thing -- which is the whole
+// technique this screen is drawn with.
+void sectionLabel(const char* text)
+{
+    ImGui::TextDisabled("%s", text);
+    ImGui::Spacing();
+}
+
+// **The one button on a screen that wears the accent.** Everything else is a
+// surface, for the reason `applyTheme` states: spend the brand colour on every
+// button and it stops saying anything.
+//
+// **And it takes the accent off when it cannot act**, rather than relying on
+// `BeginDisabled`'s alpha. A dimmed brand colour is still the brand colour, so a
+// disabled primary drawn that way reads as the thing to press -- which is the
+// one place on this screen where being wrong costs somebody a click into
+// nothing. Refusing looks like a surface; the caller still wraps it in
+// `BeginDisabled`, which is what makes it actually refuse.
+bool primaryButton(const char* label, ImVec2 size, bool enabled)
+{
+    const ThemePalette& p = palette();
+    const core::Color3 face = enabled ? p.accent : p.surfaceRaised;
+    ImGui::PushStyleColor(ImGuiCol_Button, themeColor(face));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, themeBlend(face, p.text, 0.20f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, themeBlend(face, p.onAccent, 0.20f));
+    ImGui::PushStyleColor(ImGuiCol_Text, themeColor(enabled ? p.onAccent : p.textMuted));
+    const bool pressed = ImGui::Button(label, size);
+    ImGui::PopStyleColor(4);
+    return pressed;
+}
+
 // The list, and the two things a row can do.
 void drawLauncherProjects(LauncherView& view)
 {
     ProjectList& projects = *view.projects;
     if (projects.entries().empty()) {
-        ImGui::TextDisabled("No projects yet. Make one, or open a folder you already have.");
+        // Inside the same bordered box the list would fill, rather than as a
+        // bare line where the box would have been: an empty state that changes
+        // the shape of the screen reads as something having gone wrong.
+        if (ImGui::BeginChild("##projects", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders)) {
+            ImGui::Spacing();
+            ImGui::TextDisabled("No projects yet.");
+            ImGui::TextDisabled("Make one on the right, or open a folder you already have.");
+        }
+        ImGui::EndChild();
         return;
     }
 
@@ -3726,19 +3890,34 @@ void drawLauncherProjects(LauncherView& view)
             }
 
             const bool hovered = ImGui::IsItemHovered();
-            ImGui::SetCursorPos(ImVec2(origin.x + ImGui::GetStyle().FramePadding.x * 2.0f, origin.y));
+            const ImVec2 rowMin = ImGui::GetItemRectMin();
+            const ImVec2 rowMax = ImGui::GetItemRectMax();
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            // **A bar on the left rather than a tint across the row.** A square
+            // list has no shape of its own to mark, and a filled row competes
+            // with the selection colour the rest of the shell already spends
+            // the accent on.
+            if (hovered) {
+                draw->AddRectFilled(rowMin, ImVec2(rowMin.x + 3.0f * ImGui::GetStyle().FontScaleMain, rowMax.y),
+                                    ImGui::ColorConvertFloat4ToU32(themeColor(palette().accent)));
+            }
+            // One hairline per row, which is what separates rows when nothing is
+            // rounded and nothing is filled.
+            draw->AddLine(ImVec2(rowMin.x, rowMax.y), ImVec2(rowMax.x, rowMax.y),
+                          ImGui::ColorConvertFloat4ToU32(themeColor(palette().border)));
+
+            const float textX = origin.x + ImGui::GetStyle().FramePadding.x * 2.0f;
+            ImGui::SetCursorPos(ImVec2(textX, origin.y + ImGui::GetStyle().FramePadding.y));
             if (entry.missing) {
                 ImGui::TextDisabled("%s", entry.name.c_str());
-                ImGui::SetCursorPos(ImVec2(origin.x + ImGui::GetStyle().FramePadding.x * 2.0f,
-                                           origin.y + ImGui::GetTextLineHeightWithSpacing()));
+                ImGui::SetCursorPos(ImVec2(textX, origin.y + ImGui::GetTextLineHeightWithSpacing()));
                 // Said out loud, and the row stays. A list that edits itself
                 // when a drive is unplugged is a list nobody can trust.
-                ImGui::TextColored(ImVec4(0.85f, 0.55f, 0.35f, 1.0f), "missing — %s", entry.path.string().c_str());
+                ImGui::TextColored(themeColor(palette().warning), "missing - %s", entry.path.string().c_str());
             }
             else {
                 ImGui::TextUnformatted(entry.name.c_str());
-                ImGui::SetCursorPos(ImVec2(origin.x + ImGui::GetStyle().FramePadding.x * 2.0f,
-                                           origin.y + ImGui::GetTextLineHeightWithSpacing()));
+                ImGui::SetCursorPos(ImVec2(textX, origin.y + ImGui::GetTextLineHeightWithSpacing()));
                 ImGui::TextDisabled("%s", entry.path.string().c_str());
             }
 
@@ -3765,7 +3944,7 @@ void drawLauncherNew(LauncherView& view)
 
     if (g_launcherTemplates.empty()) {
         // Said rather than shown as a disabled button nobody can explain.
-        ImGui::TextColored(ImVec4(0.85f, 0.55f, 0.35f, 1.0f), "No templates found under %s.",
+        ImGui::TextColored(themeColor(palette().warning), "No templates found under %s.",
                            view.templatesDir.string().c_str());
         return;
     }
@@ -3786,16 +3965,16 @@ void drawLauncherNew(LauncherView& view)
     ImGui::Spacing();
     ImGui::TextUnformatted("Name");
     ImGui::SetNextItemWidth(-1.0f);
-    ImGui::InputText("##name", form.name, sizeof(form.name));
+    ImGui::InputTextWithHint("##name", "my-game", form.name, sizeof(form.name));
 
     ImGui::Spacing();
     ImGui::TextUnformatted("Location");
-    const float browseWidth = ImGui::CalcTextSize("Browse…").x + ImGui::GetStyle().FramePadding.x * 4.0f;
+    const float browseWidth = ImGui::CalcTextSize("Browse...").x + ImGui::GetStyle().FramePadding.x * 4.0f;
     ImGui::SetNextItemWidth(-(browseWidth + ImGui::GetStyle().ItemSpacing.x));
     ImGui::InputText("##parent", form.parent, sizeof(form.parent));
     ImGui::SameLine();
     ImGui::BeginDisabled(!view.canBrowse);
-    if (ImGui::Button("Browse…"))
+    if (ImGui::Button("Browse...", ImVec2(browseWidth, 0.0f)))
         view.browse = true;
     ImGui::EndDisabled();
     if (!view.canBrowse && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
@@ -3804,13 +3983,17 @@ void drawLauncherNew(LauncherView& view)
     ImGui::Spacing();
 
     // The refusal is shown BEFORE the button is pressed, which is the difference
-    // between a form and a form that argues with you.
+    // between a form and a form that argues with you. The line is reserved
+    // whether or not it is showing, so the Create button does not jump out from
+    // under the pointer the moment somebody types a space.
     const bool nameOk = validProjectName(form.name);
     if (form.name[0] != '\0' && !nameOk)
-        ImGui::TextColored(ImVec4(0.85f, 0.55f, 0.35f, 1.0f), "Letters, digits, dashes and underscores.");
+        ImGui::TextColored(themeColor(palette().warning), "Letters, digits, dashes and underscores.");
+    else
+        ImGui::NewLine();
 
     ImGui::BeginDisabled(!nameOk);
-    if (ImGui::Button("Create", ImVec2(-1.0f, ImGui::GetFrameHeight() * 1.4f))) {
+    if (primaryButton("Create project", ImVec2(-1.0f, ImGui::GetFrameHeight() * 1.4f), nameOk)) {
         const NewProjectResult result =
             createProject(view.templatesDir, view.definitions,
                           {.parent = std::filesystem::path(form.parent),
@@ -3830,6 +4013,89 @@ void drawLauncherNew(LauncherView& view)
     ImGui::EndDisabled();
 }
 
+void drawLauncherOpen(LauncherView& view)
+{
+    LauncherForm& form = g_launcherForm;
+
+    const float buttonWidth = ImGui::CalcTextSize("Open").x + ImGui::GetStyle().FramePadding.x * 4.0f;
+    ImGui::SetNextItemWidth(-(buttonWidth + ImGui::GetStyle().ItemSpacing.x));
+    ImGui::InputTextWithHint("##openpath", "path to a project", form.open, sizeof(form.open));
+    ImGui::SameLine();
+    if (ImGui::Button("Open", ImVec2(buttonWidth, 0.0f))) {
+        const std::filesystem::path chosen(form.open);
+        if (chosen.empty())
+            view.message = "Type a path, or press Browse beside the location field.";
+        else if (!isProjectDirectory(chosen))
+            view.message = chosen.string() + " is not a project: it has no luaug.toml and no src/scripts.";
+        else
+            view.open = chosen;
+    }
+    ImGui::BeginDisabled(!view.canBrowse);
+    if (ImGui::Button("Browse for a project...", ImVec2(-1.0f, 0.0f)))
+        view.browse = true;
+    ImGui::EndDisabled();
+}
+
+// The band across the top: the wordmark, and which engine this is.
+//
+// A band rather than a line of text, because it is the only thing on this screen
+// that is not a control and it should not read as one. `WindowPadding` is zero
+// for this window so the band can reach both edges; the body child below puts
+// the padding back.
+void drawLauncherHeader()
+{
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const ThemePalette& p = palette();
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float pad = style.WindowPadding.x;
+    const float height = ImGui::GetFrameHeight() * 2.2f;
+
+    const ImVec2 min = ImGui::GetCursorScreenPos();
+    const ImVec2 max(min.x + viewport->WorkSize.x, min.y + height);
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilled(min, max, ImGui::ColorConvertFloat4ToU32(themeColor(p.surfaceRaised)));
+    // The one accent rule on the screen, and it is under the name rather than
+    // around a button: it says which product this is, which is the only thing
+    // the header is for.
+    draw->AddLine(ImVec2(min.x, max.y), ImVec2(max.x, max.y), ImGui::ColorConvertFloat4ToU32(themeColor(p.accent)),
+                  2.0f);
+
+    // **`FontSizeBase`, not `GetFontSize()`.** The second is the size AFTER the
+    // global scale factors, so feeding it back into `PushFont` multiplies the
+    // scale in a second time -- ImGui's own header says so in capitals. Nothing
+    // saw it because the scale was one until this milestone gave it a setting.
+    ImGui::PushFont(nullptr, style.FontSizeBase * 1.75f);
+    const float titleHeight = ImGui::GetFontSize();
+    ImGui::SetCursorScreenPos(ImVec2(min.x + pad, min.y + (height - titleHeight) * 0.5f));
+    ImGui::TextUnformatted("LuauG");
+    const float titleWidth = ImGui::GetItemRectSize().x;
+    ImGui::PopFont();
+
+    ImGui::SetCursorScreenPos(
+        ImVec2(min.x + pad + titleWidth + style.ItemSpacing.x * 1.5f, min.y + (height - ImGui::GetFontSize()) * 0.5f));
+    ImGui::TextDisabled("%s", LUAUG_VERSION_STRING);
+
+    ImGui::SetCursorScreenPos(ImVec2(min.x, max.y));
+}
+
+// The last thing that happened, in a band of its own at the bottom.
+//
+// At the bottom rather than under whichever column produced it: a message that
+// appears somewhere different depending on what you pressed is a message
+// somebody has to hunt for, and half of these are refusals.
+void drawLauncherFooter(const LauncherView& view, float height)
+{
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const ImVec2 min = ImGui::GetCursorScreenPos();
+    const ImVec2 max(min.x + ImGui::GetMainViewport()->WorkSize.x, min.y + height);
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilled(min, max, ImGui::ColorConvertFloat4ToU32(themeColor(palette().surface)));
+    draw->AddLine(min, ImVec2(max.x, min.y), ImGui::ColorConvertFloat4ToU32(themeColor(palette().border)));
+
+    ImGui::SetCursorScreenPos(ImVec2(min.x + style.WindowPadding.x, min.y + (height - ImGui::GetFontSize()) * 0.5f));
+    ImGui::TextColored(themeColor(palette().warning), "%s", view.message.c_str());
+}
+
 void drawLauncher(LauncherView* view)
 {
     if (view == nullptr || view->projects == nullptr)
@@ -3845,71 +4111,56 @@ void drawLauncher(LauncherView* view)
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
+    // Zero, so the header and the footer can be bands that reach both edges. The
+    // body child puts the real padding back, which is the only way to have both
+    // in one window.
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::Begin("##launcher", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                      ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus);
+    ImGui::PopStyleVar();
 
-    ImGui::PushFont(nullptr, ImGui::GetFontSize() * 1.6f);
-    ImGui::TextUnformatted("LuauG");
-    ImGui::PopFont();
-    ImGui::SameLine();
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextDisabled("%s", LUAUG_VERSION_STRING);
+    drawLauncherHeader();
 
-    ImGui::Separator();
-    ImGui::Spacing();
+    const float footerHeight = view->message.empty() ? 0.0f : ImGui::GetFrameHeight() * 1.6f;
+    if (ImGui::BeginChild("##body", ImVec2(0.0f, -footerHeight), ImGuiChildFlags_AlwaysUseWindowPadding)) {
+        // Two columns: what you have on the left, what you can make on the
+        // right. The proportion is deliberate -- the list is the thing somebody
+        // came for, and on every launch after the first it is the only thing
+        // they touch.
+        const float rightWidth = std::min(viewport->WorkSize.x * 0.38f, 420.0f);
+        if (ImGui::BeginTable("##launcher-columns", 2, ImGuiTableFlags_None)) {
+            ImGui::TableSetupColumn("##left", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("##right", ImGuiTableColumnFlags_WidthFixed, rightWidth);
 
-    // Two columns: what you have on the left, what you can make on the right.
-    // The proportion is deliberate -- the list is the thing somebody came for.
-    const float rightWidth = std::min(viewport->WorkSize.x * 0.38f, 420.0f);
-    if (ImGui::BeginTable("##launcher-columns", 2, ImGuiTableFlags_None)) {
-        ImGui::TableSetupColumn("##left", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("##right", ImGuiTableColumnFlags_WidthFixed, rightWidth);
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            sectionLabel("YOUR PROJECTS");
+            drawLauncherProjects(*view);
 
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        ImGui::TextUnformatted("Projects");
-        ImGui::Spacing();
-        drawLauncherProjects(*view);
+            ImGui::TableSetColumnIndex(1);
+            // **Making one comes before opening one**, which is the opposite of
+            // the order this screen shipped with. Somebody who has projects
+            // opens them from the list on the left; the right-hand column is
+            // where somebody who has none goes, and for them the first thing
+            // should be the thing they need.
+            sectionLabel("NEW PROJECT");
+            drawLauncherNew(*view);
 
-        ImGui::TableSetColumnIndex(1);
-        ImGui::TextUnformatted("Open a folder");
-        ImGui::Spacing();
-        {
-            const float buttonWidth = ImGui::CalcTextSize("Open").x + ImGui::GetStyle().FramePadding.x * 4.0f;
-            ImGui::SetNextItemWidth(-(buttonWidth + ImGui::GetStyle().ItemSpacing.x));
-            ImGui::InputTextWithHint("##openpath", "path to a project", form.open, sizeof(form.open));
-            ImGui::SameLine();
-            if (ImGui::Button("Open")) {
-                const std::filesystem::path chosen(form.open);
-                if (chosen.empty())
-                    view->message = "Type a path, or press Browse beside the location field.";
-                else if (!isProjectDirectory(chosen))
-                    view->message = chosen.string() + " is not a project: it has no luaug.toml and no src/scripts.";
-                else
-                    view->open = chosen;
-            }
-            ImGui::BeginDisabled(!view->canBrowse);
-            if (ImGui::Button("Browse for a project…", ImVec2(-1.0f, 0.0f)))
-                view->browse = true;
-            ImGui::EndDisabled();
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            sectionLabel("OPEN AN EXISTING FOLDER");
+            drawLauncherOpen(*view);
+
+            ImGui::EndTable();
         }
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-        ImGui::TextUnformatted("New project");
-        ImGui::Spacing();
-        drawLauncherNew(*view);
-
-        ImGui::EndTable();
     }
+    ImGui::EndChild();
 
-    if (!view->message.empty()) {
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::TextWrapped("%s", view->message.c_str());
-    }
+    if (footerHeight > 0.0f)
+        drawLauncherFooter(*view, footerHeight);
 
     ImGui::End();
 }
@@ -3927,7 +4178,7 @@ void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, I
         // gates, a test with no scene -- and it gets the stats panel it has
         // always had.
         if (world != nullptr && inspector != nullptr) {
-            ImGui::SeparatorText("explorer");
+            ImGui::SeparatorText("Explorer");
             if (ImGui::BeginChild("explorer", ImVec2(0.0f, 200.0f), ImGuiChildFlags_Borders))
                 // Everything, including what streaming made: this is the debug
                 // overlay rather than the editor, and it exists to show the
@@ -3935,27 +4186,27 @@ void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, I
                 drawExplorer(*world, root, *inspector, nullptr, nullptr, nullptr, true);
             ImGui::EndChild();
 
-            ImGui::SeparatorText("properties");
+            ImGui::SeparatorText("Properties");
             drawProperties(*world, *inspector);
             drawWriteLog(*world, *inspector);
         }
 
         if (runtime != nullptr) {
-            ImGui::SeparatorText("memory");
+            ImGui::SeparatorText("Memory");
             drawMemory(*runtime);
         }
 
         // Only for a project that streams. A panel of zeroes on every example
         // that does not would be furniture nobody can act on.
         if (streaming != nullptr && streaming->active()) {
-            ImGui::SeparatorText("streaming");
+            ImGui::SeparatorText("Streaming");
             drawStreaming(*streaming);
         }
 
         // The console draws even with no VM: the LOG half is the half a person
         // wants when the VM failed to boot, which is the moment they most want
         // it. The input line simply does nothing.
-        ImGui::SeparatorText("console");
+        ImGui::SeparatorText("Console");
         drawConsole(runtime);
     }
     ImGui::End();
@@ -4019,7 +4270,24 @@ DebugOverlay::DebugOverlay(platform::Window& window, rhi::IDevice& device, Shell
         std::filesystem::create_directories(std::filesystem::path(layoutPath_).parent_path(), ec);
         io.IniFilename = layoutPath_.c_str();
     }
-    ImGui::StyleColorsDark();
+    // **The shell's own look (ADR 0056), before anything draws.** Two things
+    // rather than one: `StyleColorsDark` was written for a debug window over a
+    // game, and ImGui's default face is a 13 px bitmap designed for a debugger
+    // -- which between them are most of the reason this editor read as an
+    // overlay with panels rather than as an application.
+    g_appearance = loadAppearance(appearanceFile());
+    // Read once, here, because it is the display the window OPENED on. Following
+    // a monitor change would mean re-rasterising the atlas mid-frame, and a
+    // person who drags the editor to a second screen can reopen it -- which is
+    // what every editor in this shape does today.
+    g_displayScale = platform::windowDisplayScale(window);
+    applyTheme(themeById(g_appearance.themeId), resolveUiScale(g_appearance.scale, g_displayScale));
+
+    // Before the backend starts, so the atlas it builds is the one with Inter
+    // in it. False is a normal outcome -- a build tree whose content has not
+    // been staged -- and it is said once rather than drawn silently wrong.
+    if (!loadUiFont())
+        core::log(core::LogLevel::Warn, LUAUG_TR("engine.overlay.warn.font_missing"));
 
     if (!ImGui_ImplSDL3_InitForSDLGPU(sdlWindow)) {
         ImGui::DestroyContext();

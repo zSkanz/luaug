@@ -115,7 +115,7 @@ Generated, gitignored, and safe to delete:
 | `types/engine.d.luau` | The engine's type definitions, for the analyzer. |
 | `content.lpack` · `content.manifest.json` | The compiled content. |
 | `content/**.lchunk` · `content.chunks.json` | Compiled streaming chunks. |
-| `editor-layout.ini` · `editor.json` | Editor panel layout and last-open scene. |
+| `editor-layout.v2.ini` · `editor.json` | Editor panel layout and last-open scene. |
 
 ## tests/
 
