@@ -776,13 +776,6 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     if (options.editor && host->bootSceneApplied())
         editor.adoptOpenScene(sceneRelative);
 
-    // **The project's own tree**, built once, against the world's registries so
-    // an instance can move between the two (ADR 0052). After the host, because
-    // it is the host that owns them; before the first frame, because the
-    // Explorer draws it.
-    if (options.editor)
-        editor.openContentTree(host->classes(), host->enums(), host->atoms());
-
     // `game`, which is where the tree the explorer walks starts. Re-pointed
     // after every reload, because a reload destroys this world and builds
     // another (ADR 0024).
@@ -968,21 +961,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // at the point of use, both answers are always the current ones.
         const auto stageOf = [&]() -> Editor::Stage* { return options.editor ? editor.stage() : nullptr; };
         const auto authored = [&]() -> scene::World& {
-            if (Editor::Stage* const open = stageOf(); open != nullptr)
-                return open->world();
-            // The project's tree when its tab is in front (ADR 0052): a
-            // selection belongs to the tree it was made in, and every verb has
-            // to act on the same world the panels are showing.
-            if (options.editor && editor.contentTreeActive() && editor.contentWorld() != nullptr)
-                return *editor.contentWorld();
-            return host->world();
+            Editor::Stage* const open = stageOf();
+            return open != nullptr ? open->world() : host->world();
         };
         const auto authoredRoot = [&]() -> core::InstanceId {
-            if (Editor::Stage* const open = stageOf(); open != nullptr)
-                return open->workspace();
-            if (options.editor && editor.contentTreeActive() && editor.contentWorld() != nullptr)
-                return editor.contentRoot();
-            return host->runtime().dataModel();
+            Editor::Stage* const open = stageOf();
+            return open != nullptr ? open->workspace() : host->runtime().dataModel();
         };
 
         if (options.editor && inspector.pendingCount() > 0)
@@ -1069,15 +1053,27 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     }
                 }
                 // --- Stamps (ADR 0049) ---------------------------------
-                if (editorCommands.stampSubject.valid() && !editorCommands.stampName.empty()) {
-                    (void)editor.createStamp(authored(), editorCommands.stampSubject, authoredRoot(),
-                                             editorCommands.stampName);
+                if (editorCommands.stampSubject.valid() &&
+                    (!editorCommands.stampName.empty() || !editorCommands.stampFolder.empty())) {
+                    // A dialog gives the whole name; a drop into the browser
+                    // gives the folder and leaves the name to the instance,
+                    // because that panel has an id and not a name.
+                    const std::string name =
+                        !editorCommands.stampName.empty()
+                            ? editorCommands.stampName
+                            : editorCommands.stampFolder + "/" +
+                                  std::string(authored().atoms().text(authored().name(editorCommands.stampSubject)));
+                    (void)editor.createStamp(authored(), editorCommands.stampSubject, authoredRoot(), name);
                 }
                 if (!editorCommands.placeStamp.empty()) {
                     // **Under the selection when there is one**, which is what
                     // a person means by placing something while looking at a
                     // folder -- and under `Workspace` otherwise.
-                    const core::InstanceId primary = inspector.selection();
+                    // A drop names where it landed; the menu item does not,
+                    // and falls back to the selection.
+                    const core::InstanceId primary = editorCommands.placeStampParent.valid()
+                                                         ? editorCommands.placeStampParent
+                                                         : inspector.selection();
                     const core::InstanceId parent =
                         primary.valid() && Editor::canParentInto(authored(), primary, authoredRoot())
                             ? primary
@@ -1087,29 +1083,6 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 }
                 if (editorCommands.breakStamp.valid())
                     (void)editor.breakStamp(authored(), editorCommands.breakStamp);
-
-                // **A subtree dragged between the two trees** (ADR 0052). Which
-                // world is which comes from the payload rather than from what
-                // is active, because a drag ENDS in the other one -- and the
-                // click that would have made it active has not happened.
-                if (editorCommands.copySubject.valid() && editor.contentWorld() != nullptr) {
-                    scene::World& tree = *editor.contentWorld();
-                    scene::World& from = editorCommands.copyFromContent ? tree : host->world();
-                    scene::World& to = editorCommands.copyFromContent ? host->world() : tree;
-                    const core::InstanceId into =
-                        editorCommands.copyParent.valid()
-                            ? editorCommands.copyParent
-                            : (editorCommands.copyFromContent ? host->workspace() : editor.contentRoot());
-                    (void)editor.copyAcross(from, editorCommands.copySubject, to, into, inspector);
-                    // The destination is what a person is now looking at, so it
-                    // is the tree the next verb acts on.
-                    editor.setContentTreeActive(!editorCommands.copyFromContent);
-                    // Written when the TREE is what changed, which is the
-                    // other direction: a drag out of the library leaves the
-                    // library alone.
-                    if (!editorCommands.copyFromContent)
-                        (void)editor.saveContentTree();
-                }
 
                 // **Opening and closing both replace the world**, so they are
                 // drained here beside play and stop rather than acted on where
@@ -1124,25 +1097,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 if (editorCommands.closeStamp)
                     (void)editor.closeStamp(inspector, editorCommands.closeStampSaving);
 
-                // Which tree the last click was in, drained before anything
-                // acts: every verb below reads `authored()`, and that has to be
-                // the world the click was made in rather than the one it was
-                // made in last frame.
-                if (editorCommands.activeIsContentTree.has_value())
-                    editor.setContentTreeActive(*editorCommands.activeIsContentTree);
-
                 // One question about every verb rather than a flag on each:
                 // "did anything change since the last save".
                 if (editorCommands.any())
                     editor.touchStamp();
-
-                // **The project's tree is written on CHANGE**, not at exit. It
-                // is a thing two people edit and a thing nothing else writes,
-                // so an editor that only saved it on a clean shutdown would
-                // lose it exactly once -- which is the same argument the
-                // remembered scene is written on change for (ADR 0052).
-                if (editorCommands.any() && editor.contentTreeActive())
-                    (void)editor.saveContentTree();
 
                 if (editorCommands.renameInstance.valid())
                     (void)editor.renameInstance(authored(), editorCommands.renameInstance, authoredRoot(),

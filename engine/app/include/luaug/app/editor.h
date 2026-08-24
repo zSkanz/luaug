@@ -185,19 +185,13 @@ struct EditorPanels
     // textures, prefab files. The field keeps its old name because every layout
     // in `.luaug/` already stores it.
     //
-    // The rename is not cosmetic. There were briefly two panels called
-    // "content", which is two answers to one question -- and the human asked
-    // the obvious thing, which is whether they now had two of them. What a
-    // person means by CONTENT is the global store; what this is, is a folder.
+    // **There is exactly one content, and it is a folder.** For one afternoon
+    // there were two -- this, and a global tree of instances -- and the human
+    // asked the question that settles it: Unity has one Project window and
+    // Unreal has one Content Browser, both a folder of files, and a prefab in
+    // either is a file. Two stores is two answers to "where does this live"
+    // (ADR 0052 records the reversal and why).
     bool content = true;
-    // **`content` on screen**: the project's instance tree (ADR 0052), which is
-    // the global store the other panel is not.
-    //
-    // Its own panel and not a tab in the Explorer, and the reason is dragging:
-    // only one tab is drawn per frame, so a drag from the scene's tree to the
-    // project's could not exist at all. Two panels can both be on screen, and a
-    // thing you can see is a thing you can drag to.
-    bool contentTree = true;
     bool console = true;
     bool stats = true;
 
@@ -325,29 +319,21 @@ struct EditorCommands
     // halves or neither, like every other pair here.
     core::InstanceId stampSubject;
     std::string stampName;
+    // Set instead of `stampName` by a drop into the content browser: the folder
+    // it landed in, with the name taken from the instance itself.
+    std::string stampFolder;
     // Place one, under the selection if there is one and under `Workspace`
     // otherwise. The path is content-relative, which is what the browser has.
     std::string placeStamp;
     // Whether that placement INHERITS from the stamp or is a copy that does not
     // (ADR 0051). Both are things a person means by "instance this".
     bool placeStampLinked = true;
+    // Under this, or under the selection when it is invalid. A drop names the
+    // row it landed on, which is the whole reason a drop is worth having beside
+    // the menu item that does the same thing.
+    core::InstanceId placeStampParent;
     // Take the mark off this one, so it stops following its file.
     core::InstanceId breakStamp;
-
-    // Which tree a row was last clicked in (ADR 0052), or nothing when nobody
-    // clicked one this frame. It decides what every verb acts on, because a
-    // selection belongs to a world.
-    std::optional<bool> activeIsContentTree;
-
-    // **A subtree dragged from one tree to the other**, and it is a copy: an
-    // `InstanceId` belongs to the world that minted it, so what crosses is the
-    // description rather than the instance. `copyFromContent` says which way,
-    // because the two ids mean nothing without it.
-    core::InstanceId copySubject;
-    bool copyFromContent = false;
-    // In the destination. Invalid means "the root of it", which is what a drop
-    // on the viewport means.
-    core::InstanceId copyParent;
 
     // **Open a stamp for editing**, save what is open, or close it. Opening
     // replaces the world with the stamp and closing puts the scene back, so
@@ -379,8 +365,8 @@ struct EditorCommands
     [[nodiscard]] bool any() const noexcept
     {
         return play.has_value() || pause.has_value() || save || newScene || quit || resetLayout || clearSelection ||
-               undo || redo || colorAsked || stampSubject.valid() || !placeStamp.empty() || breakStamp.valid() ||
-               !openStamp.empty() || saveStamp || closeStamp || copySubject.valid() ||
+               undo || redo || colorAsked || stampSubject.valid() || !stampFolder.empty() || !placeStamp.empty() ||
+               breakStamp.valid() || !openStamp.empty() || saveStamp || closeStamp ||
                createClass != scene::InvalidClass || deleteSelection || duplicateSelection || reparentTo.valid() ||
                renameInstance.valid() || !saveAs.empty() || !openScene.empty() || !createFolder.empty() ||
                !deleteContent.empty() || !renameContent.empty();
@@ -703,46 +689,6 @@ public:
     // exactly the economy that makes checking the instance alone wrong.
     [[nodiscard]] static bool authorable(const scene::World& world, core::InstanceId id, core::InstanceId root);
 
-    // --- The content tree (ADR 0052) -----------------------------------------
-    //
-    // **A second tree, global to every scene in the project.** The world is what
-    // a scene holds and this is what the PROJECT holds: prefabs, shared scripts,
-    // anything somebody wants once rather than once per scene. Instance inside
-    // instance, exactly like the Workspace -- because it is made of instances,
-    // in a `scene::World` of its own.
-    //
-    // **Nothing in it runs.** A `Script` here is stored, not started: what makes
-    // a script run is being in the WORLD when the world runs, which is the whole
-    // difference between the two trees and the one sentence that explains both.
-    //
-    // It is one file, `content/content.tree.json`, in the scene format -- the
-    // same writer and reader, over a different root. A project's content is a
-    // thing two people edit, so it is written on change rather than at exit: an
-    // editor that only saved on a clean shutdown would lose it exactly once.
-    [[nodiscard]] scene::World* contentWorld() noexcept { return m_content_.world.get(); }
-    [[nodiscard]] const scene::World* contentWorld() const noexcept { return m_content_.world.get(); }
-    [[nodiscard]] core::InstanceId contentRoot() const noexcept { return m_content_.root; }
-
-    // Which of the Explorer's two trees is in front.
-    //
-    // **It decides what every editor verb acts on**, not only what is drawn: a
-    // selection is a set of `InstanceId`s, and an id from one world names an
-    // unrelated instance in the other. The properties grid, the plus, delete,
-    // rename and undo all follow it -- so it lives on the editor rather than
-    // with the panel flags, which the frame loop cannot see.
-    [[nodiscard]] bool contentTreeActive() const noexcept { return m_contentTreeActive; }
-    void setContentTreeActive(bool active) noexcept { m_contentTreeActive = active; }
-
-    // Builds the tree, reading `content/content.tree.json` when there is one.
-    // Called with the project's registries, for the reason `Stage` gives.
-    void openContentTree(scene::ClassRegistry& classes, scene::EnumRegistry& enums, core::AtomTable& atoms);
-
-    // Writes it back. A no-op when there is no tree and no content root.
-    bool saveContentTree();
-
-    // The file it lives in, relative to `content/`.
-    static constexpr std::string_view ContentTreeFile = "content.tree.json";
-
     // --- The stage a stamp is edited on --------------------------------------
     //
     // **A stamp opens into a WORLD OF ITS OWN**, and the reason is the one a
@@ -965,21 +911,6 @@ public:
     };
     [[nodiscard]] static ReparentPlan planReparent(const scene::World& world, std::span<const core::InstanceId> ids,
                                                    core::InstanceId newParent, core::InstanceId root);
-
-    // **Copies a subtree from one world into another** (ADR 0052), which is what
-    // dragging between the scene and the project's tree does.
-    //
-    // A COPY and not a move, and not a reparent: an `InstanceId` belongs to the
-    // world that minted it, so there is no operation that carries an instance
-    // across. What crosses is the DESCRIPTION -- `writeStamp` out, `readStamp`
-    // in -- which is the same pair a prefab is made of, and the reason both
-    // directions cost one function rather than two.
-    //
-    // The undo step is recorded on the DESTINATION, because that is the world
-    // that changed. Dragging out of the project's tree leaves it untouched,
-    // which is what a library is for.
-    bool copyAcross(scene::World& from, core::InstanceId id, scene::World& to, core::InstanceId parent,
-                    Inspector& inspector);
 
     // Whether a drop of `ids` onto `newParent` would move anything at all.
     [[nodiscard]] static bool canReparent(const scene::World& world, std::span<const core::InstanceId> ids,
@@ -1227,17 +1158,6 @@ private:
     // than hashed so the file it is written to is the same bytes for the same
     // state -- the property every other format in this repository has.
     std::map<std::string, core::Color3> m_contentColors;
-    // The project's own tree, built once when the content root opens. A
-    // `Stage` in everything but name -- a bare world with a root and no
-    // services -- and named apart because the two never coexist by accident:
-    // a stage comes and goes, and this stays for the session.
-    struct ContentTreeWorld
-    {
-        std::unique_ptr<scene::World> world;
-        core::InstanceId root;
-    };
-    ContentTreeWorld m_content_;
-    bool m_contentTreeActive = false;
 
     StampSession m_stamp;
     // The world a stamp is edited in, or nothing. Built on open and dropped on

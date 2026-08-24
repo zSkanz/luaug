@@ -22,8 +22,6 @@ namespace {
 // stage is simulated and nothing in it reads the generator -- and a seed drawn
 // from anywhere else would make a stamp's bytes depend on when it was opened.
 constexpr core::u64 kStageSeed = 0x5741'4D50u;
-// The content tree's, for the same reason: nothing in it is simulated.
-constexpr core::u64 kContentSeed = 0x434F'4E54u;
 
 // The same format the headless path renders into. An editor's viewport is the
 // headless render with somebody watching, so a second format here would be a
@@ -668,47 +666,6 @@ Editor::ReparentPlan Editor::planReparent(const scene::World& world, std::span<c
     return plan;
 }
 
-bool Editor::copyAcross(scene::World& from, core::InstanceId id, scene::World& to, core::InstanceId parent,
-                        Inspector& inspector)
-{
-    if (!from.alive(id) || !to.alive(parent)) {
-        m_status = EditorStatus{"there is nothing to copy there", true};
-        return false;
-    }
-    if (isEngineOwned(from, id, from.parentOf(id))) {
-        m_status = EditorStatus{"that is one of the engine's own", true};
-        return false;
-    }
-
-    // **The description crosses, not the instance.** `writeStamp` is exactly
-    // "this subtree, completely, as text" -- which is what a prefab file is --
-    // so a drag between two worlds is the same pair of functions a prefab is
-    // made of rather than a third mechanism.
-    scene::SceneIoReport wrote;
-    const std::string text = scene::writeStamp(from, id, &wrote);
-
-    m_history.record(to, "Copy " + std::string(from.atoms().text(from.name(id))));
-
-    scene::SceneIoReport read;
-    const core::InstanceId placed = scene::readStamp(to, text, parent, "<dragged>", &read);
-    if (!placed.valid()) {
-        (void)m_history.undo(to);
-        m_status = EditorStatus{"that could not be copied", true};
-        return false;
-    }
-
-    // **The mark does not cross.** A copy dragged out of a library is a thing
-    // in a world, not an instance of the thing it was dragged from -- and a
-    // mark naming `<dragged>` would point at a file that does not exist. What
-    // it KEEPS is whatever marks are inside it, because those name real files.
-    to.setStamp(placed, core::NameAtom{});
-
-    inspector.select(placed);
-    inspector.reveal(placed);
-    m_status = EditorStatus{"copied " + std::to_string(read.instances) + " instance(s)", false};
-    return true;
-}
-
 bool Editor::canReparent(const scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId newParent,
                          core::InstanceId root)
 {
@@ -1254,72 +1211,6 @@ void Editor::adoptOpenScene(std::string_view relativePath)
     // difference between the editor knowing what it has and the editor
     // discarding a world to find out.
     m_openScene = std::string(relativePath);
-}
-
-void Editor::openContentTree(scene::ClassRegistry& classes, scene::EnumRegistry& enums, core::AtomTable& atoms)
-{
-    m_content_ = ContentTreeWorld{};
-    if (m_content.root().empty())
-        return;
-
-    m_content_.world = std::make_unique<scene::World>(classes, enums, atoms, kContentSeed);
-
-    // A `Folder` for a root, because that is what it is: a place to put things.
-    // Named `Content`, which is what the Explorer shows and what a path into it
-    // starts with.
-    const scene::ClassId folder = classes.findId(atoms.intern("Folder"));
-    m_content_.root = m_content_.world->create(folder);
-    if (!m_content_.root.valid()) {
-        m_content_ = ContentTreeWorld{};
-        return;
-    }
-    m_content_.world->setName(m_content_.root, atoms.intern("Content"));
-
-    // **A project with no tree yet is not an error.** Every project written
-    // before this had none, and one that greeted them with a message would be
-    // wrong about all of them.
-    std::string text;
-    if (!platform::readTextFile(m_content.root() / std::filesystem::path(ContentTreeFile), text))
-        return;
-
-    // The file's root IS the content root, so its own children are what gets
-    // built -- the same shape `readScene` gives the Workspace.
-    scene::SceneIoReport report;
-    const core::InstanceId built =
-        scene::readStamp(*m_content_.world, text, m_content_.root, std::string(ContentTreeFile), &report);
-    if (!built.valid()) {
-        m_status = EditorStatus{"the content tree could not be read", true};
-        return;
-    }
-
-    // What came back is one instance under the root; its children are the
-    // tree. Reparented up and dropped, so the file's own root does not become a
-    // second `Content` inside `Content`.
-    std::vector<core::InstanceId> moved;
-    for (core::InstanceId child = m_content_.world->firstChild(built); child.valid();
-         child = m_content_.world->nextSibling(child)) {
-        moved.push_back(child);
-    }
-    for (const core::InstanceId child : moved)
-        (void)m_content_.world->setParent(child, m_content_.root);
-    (void)m_content_.world->destroy(built);
-    m_content_.world->retireDestroyed();
-    m_content_.world->setStamp(m_content_.root, core::NameAtom{});
-}
-
-bool Editor::saveContentTree()
-{
-    if (m_content_.world == nullptr || !m_content_.root.valid() || m_content.root().empty())
-        return false;
-
-    scene::SceneIoReport report;
-    const std::string text = scene::writeStamp(*m_content_.world, m_content_.root, &report);
-    const std::filesystem::path path = m_content.root() / std::filesystem::path(ContentTreeFile);
-    if (!platform::createDirectories(path.parent_path()) || !platform::writeTextFile(path, text)) {
-        m_status = EditorStatus{"could not write the content tree", true};
-        return false;
-    }
-    return true;
 }
 
 void Editor::openContent(const std::filesystem::path& contentRoot)

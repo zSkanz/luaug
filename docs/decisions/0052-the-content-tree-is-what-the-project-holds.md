@@ -1,70 +1,67 @@
-# 0052 — The content tree is what the project holds, and nothing in it runs
+# 0052 — The content tree, and why it was taken out the same day
 
-- Status: accepted
-- Date: 2026-08-23
+- Status: **reversed** (accepted and reversed 2026-08-23)
 - Extends: 0047 (the world is data), 0050 (a script is an instance), 0051 (prefabs)
 
-## Context
+## What was decided
 
-The human asked for `content/` to be more than a folder of files:
+`content/` was given a TREE beside the files it already held: a `scene::World`
+of its own with a `Folder` for a root, written to `content/content.tree.json`,
+global to every scene — a place for prefabs, shared scripts, anything wanted
+once rather than once per scene. Nothing in it ran. It had its own panel, its own
+save path, and a drag that copied subtrees between it and the world.
 
-> a ideia do content é que ele seja tipo um explorer global entre todas as
-> schenes saca essa é a principal ideia dele e da mesma forma que eu posso
-> armazenar um prefab na workspace eu posso armazenar um prefab por exemplo no
-> content
+It was built, tested and shipped, and taken out the same afternoon.
 
-and, choosing between two shapes for it, picked a single tree of instances over
-a file per thing.
+## Why it was reversed
 
-Two decisions before it make this possible and make it worth having. A script is
-an ordinary instance carrying its own source (ADR 0050), so a shared script is a
-thing you can put somewhere. And a prefab is a definition instances inherit from
-(ADR 0051), so a library of them is a library rather than a pile of copies.
+The human asked one question:
 
-## Decision
+> más faz sentido ter esses 2 em unity e unreal n tem né?
 
-**`content/` gains a TREE, beside the files it already holds.** It is a
-`scene::World` of its own with a `Folder` for a root, written to
-`content/content.tree.json` in the scene format — the same writer and reader,
-over a different root.
+**No, they do not.** Unity has one Project window: the folder tree of `Assets/`,
+and a prefab is a file in it. Unreal has one Content Browser: `/Content`, and a
+Blueprint is a file in it. Neither has a second global tree of instances, and
+neither wants one.
 
-**Nothing in it runs**, and that is the whole difference between the two trees:
-what makes a `Script` run is being in the WORLD when the world runs. A script in
-the content tree is stored, exactly as a prefab there is stored.
+And the fault is in how the choice was put. The options offered were "a file per
+thing (like Unity and Unreal)" and "a single tree of instances", as though they
+were two shapes of one idea. They were not: the second one's own description
+carried its costs — *one file everybody edits, and a prefab that is no longer
+something you can send someone* — and both were built anyway. Two panels called
+"content" is what that looked like on screen, and it is what prompted the
+question.
 
-**Instance inside instance, and the same verbs.** The plus, delete, rename,
-duplicate, the properties grid and undo all work on it, because it is made of
-instances and they are written against `scene::World` rather than against the
-scene.
+**Everything else in this milestone already assumes a file.** A stamp IS a file;
+`Instance.stamp` reads a file; the override diff reads a file; the prefab stage
+opens a file. The tree was the one piece that did not fit, and it brought a
+second store, a second save path and a second answer to "where does this live".
 
-**Which tree is in front decides what a verb acts on**, and that is not a
-drawing decision: a selection is a set of `InstanceId`s, and an id from one
-world names an unrelated instance in the other. So switching tabs drops the
-selection — there is no honest way to carry one across — and the flag lives on
-the `Editor` rather than with the panel flags, because the frame loop needs it
-too.
+## What replaced it
 
-**It is written on change rather than at exit.** It is a thing two people edit
-and a thing nothing else writes, so an editor that only saved it on a clean
-shutdown would lose it exactly once — the same argument the remembered open
-scene is written on change for.
+Nothing new — the thing that was already there. `content/` is a folder, the
+`content` panel browses it, and a prefab is a file in it. What the tree was
+reaching for is served by the drags:
 
-## Consequences
+- **Drag an instance from the Explorer into the browser** and it becomes a
+  prefab file, in the folder it was dropped in, named after the instance. That
+  is what dragging from the hierarchy into the Project window means in every
+  editor that has both.
+- **Drag a prefab out of the browser** onto an Explorer row to place it there,
+  or onto the viewport to place it under `Workspace`.
 
-- **The file browser stays.** A scene is a file and opening one is a file
-  operation; the tree is for instances. Two panels, two questions, and neither
-  pretends to be the other.
-- **A project with no tree is not an error**, and every project written before
-  this has none. It opens empty.
-- **The tree shares the world's registries**, like a prefab stage: a `ClassId`
-  is an index into a registry, so an instance could not move between the two
-  otherwise — and moving between them is the point.
-- **What is not answered here**: instancing a prefab that lives IN the tree
-  rather than in a file. The seam exists — a `StampSource` is a name and some
-  text — and pointing it at a subtree of the content tree is a small change; but
-  what a stamp's NAME then is, and what happens when somebody renames the
-  subtree it points at, are questions with no answer yet.
-- **And nothing in the tree is reachable from a script yet.** `game` is the
-  world; there is no global for the project's tree, deliberately, until somebody
-  needs one — a name on the global list is the hardest thing in this API to take
-  back (api-design.md §1.1).
+## What this is worth keeping for
+
+The decision is wrong and the record of it is not. Two things came out of the
+day that outlive it:
+
+- **`Editor::Stage` exists** because the tree needed a second world first, and
+  the prefab stage — which is right, and is Unity's prefab mode — is built on it.
+- **`World::classes()` and friends are non-const** for the same reason, which is
+  what lets the serializer build a reference tree to diff a stamped instance
+  against (ADR 0051).
+
+And the lesson is about the question rather than the answer: **an option whose
+own description lists its costs is an option to argue against, not one to offer
+neutrally.** A person choosing between two things they have not built yet is
+choosing on the framing, and the framing was mine.
