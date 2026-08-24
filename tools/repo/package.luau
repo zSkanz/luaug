@@ -157,10 +157,23 @@ local function copyTree(from: string, to: string, skip: { [string]: boolean }?)
     end
 end
 
-local function removeTree(target: string)
-    if fs.exists(target) then
-        fs.removeDirectory(target, { recursive = true })
+--- Clears a previous folder, and says WHY when it cannot.
+---
+--- **The commonest reason is the obvious one**: the editor that folder holds is
+--- open, and Windows will not unlink a running executable. That arrived as a
+--- stack trace from inside `fs.remove`, which is a traceback for a situation a
+--- sentence answers -- so it is caught here and named.
+local function removeTree(target: string): string?
+    if not fs.exists(target) then
+        return nil
     end
+    local ok, err = pcall(function()
+        fs.removeDirectory(target, { recursive = true })
+    end)
+    if ok then
+        return nil
+    end
+    return `{target} could not be cleared ({err}). If the editor from it is open, close it and run this again.`
 end
 
 --- One file into the folder, refusing rather than skipping when it is not
@@ -257,7 +270,11 @@ local function run(): number
     local out = flags.out or joined(buildRoot, "package")
     local target = joined(out, name)
 
-    removeTree(target)
+    local blocked = removeTree(target)
+    if blocked ~= nil then
+        print(`package: {blocked}`)
+        return 1
+    end
     fs.createDirectory(target, { makeParents = true })
 
     -- The editor, which is what the folder is for.
