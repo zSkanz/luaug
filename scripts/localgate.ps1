@@ -105,20 +105,8 @@ function Get-BashPath {
     throw "bash not found. Install Git for Windows, or run with -Only to skip the shell gates."
 }
 
-function Get-DeveloperShellEnv {
-    # The presets use Ninja with `strategy: external`, so cl, cmake and ninja
-    # must already be on PATH -- Visual Studio bundles the last two, and the fix
-    # is almost never "install CMake", it is to run vcvars64.bat first.
-    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-    if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found; is Visual Studio installed?" }
-
-    $install = & $vswhere -latest -products * `
-        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
-        -property installationPath
-    if (-not $install) { throw "No Visual Studio with the C++ toolset was found." }
-
-    return Join-Path $install 'VC\Auxiliary\Build\vcvars64.bat'
-}
+# `Get-DeveloperShellEnv`, shared with `package.ps1` rather than written twice.
+. "$PSScriptRoot/devshell.ps1"
 
 # Two stages want the image now -- the formatting gate and the Tier-2 build --
 # so it is built once and reused. Docker's layer cache makes the second call

@@ -59,6 +59,9 @@ dist/
 # directory. It removes it on the way out; the entry is here so that a run
 # interrupted halfway does not leave a whole scaffolded project staged.
 /.luaug-packaging-test/
+# `tests/installed` does the same through the PACKAGED CLI rather than this
+# tree's, which is the difference the suite exists for.
+/.luaug-installed-test/
 
 # `luaug test`'s machine-readable report. Written beside the suite when no
 # --report path is given, and regenerated on every run.

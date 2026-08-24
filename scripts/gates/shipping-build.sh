@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# The two profiles nothing else in this repository builds, compiled and linked.
+# The three profiles nothing else in this repository builds, compiled and
+# linked.
 #
 # `shipping` is here because that is how it came to be broken for an unknown
 # length of time (D056): `LUAUG_LUAU_COMPILER=OFF` and `LUAUG_DEBUG_UI=OFF` are
@@ -11,6 +12,12 @@
 # without this, no gate would ever compile. That was precisely the objection
 # that ruled out "just ship the shipping profile": a profile nothing builds is a
 # profile nobody knows is broken.
+#
+# **`editor` is the third, and it is the same argument a third time** (ADR
+# 0054). It is what `tools/repo/package.luau` copies into the archive somebody
+# downloads: Release, the debug UI ON and the C++ suite OFF, which is again a
+# combination no other profile has. Nothing else would ever configure it, so
+# without this the thing people install would be the one build nothing checks.
 #
 # WHAT THIS BUILDS, AND WHY IT IS NOT THE WHOLE TREE.
 #
@@ -40,6 +47,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
 preset="${LUAUG_SHIPPING_PRESET:-linux-clang-shipping}"
 playerPreset="${LUAUG_PLAYER_PRESET:-linux-clang-player}"
+editorPreset="${LUAUG_EDITOR_PRESET:-linux-clang-editor}"
 
 if [[ -z "${LUAUG_BUILD_ROOT:-}" ]]; then
     echo "shipping-build: LUAUG_BUILD_ROOT is not set (rule R14: builds are out-of-tree)" >&2
@@ -64,3 +72,9 @@ cmake --preset "$playerPreset"
 
 echo "== build (luaug_host) =="
 cmake --build --preset "$playerPreset" --target luaug_host
+
+echo "== configure ($editorPreset) =="
+cmake --preset "$editorPreset"
+
+echo "== build (luaug_host) =="
+cmake --build --preset "$editorPreset" --target luaug_host

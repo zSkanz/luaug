@@ -22,9 +22,14 @@ include(CMakeDependentOption)
 # hundred test translation units into the same tree is work nobody asked for.
 # It is not a claim that the profile is untested; the gate builds and links it
 # on every run, which is exactly what `shipping` gets and for the same argument.
+#
+# **Off for `editor` for that second reason exactly** (ADR 0054). That profile is
+# what `tools/repo/package.luau` copies into the archive somebody downloads, and
+# a packaging run that first compiles the C++ suite pays for a thing it then
+# does not ship.
 cmake_dependent_option(LUAUG_BUILD_TESTS
     "Build C++ unit and integration tests" ON
-    "NOT LUAUG_PROFILE MATCHES \"^(shipping|player)$\"" OFF)
+    "NOT LUAUG_PROFILE MATCHES \"^(shipping|player|editor)$\"" OFF)
 
 # The Luau compiler is present in every profile except shipping, which loads
 # precompiled bytecode only (ADR 0002). Expressed as a dependent option so the
@@ -102,6 +107,11 @@ option(LUAUG_SHADER_TOOLCHAIN
 # turn off: a released game carried the overlay, the inspector and a Luau REPL
 # against its own VM, because the only profile without them could not compile
 # the Luau the game ships as source.
+#
+# **On for `editor`, which is what that profile is** (ADR 0054). The editor is
+# drawn in ImGui (ADR 0046) and is a dev build by nature; what separates it from
+# `dev` is not a feature but the difference between a build tree and an artifact
+# somebody downloads.
 cmake_dependent_option(LUAUG_DEBUG_UI
     "Build the Dear ImGui debug overlay (ADR 0011: dev builds only)" ON
     "NOT LUAUG_PROFILE MATCHES \"^(shipping|player)$\";LUAUG_RHI_SDLGPU" OFF)
@@ -127,9 +137,9 @@ cmake_dependent_option(LUAUG_PHYSICS_DEBUG_DRAW
 set(LUAUG_SANITIZE "" CACHE STRING
     "Comma-separated sanitizer list passed to -fsanitize (e.g. address,undefined)")
 
-if(NOT LUAUG_PROFILE MATCHES "^(debug|dev|profile|player|shipping)$")
+if(NOT LUAUG_PROFILE MATCHES "^(debug|dev|profile|player|editor|shipping)$")
     message(FATAL_ERROR
-        "LUAUG_PROFILE must be one of: debug, dev, profile, player, shipping (got '${LUAUG_PROFILE}')")
+        "LUAUG_PROFILE must be one of: debug, dev, profile, player, editor, shipping (got '${LUAUG_PROFILE}')")
 endif()
 
 message(STATUS "LuauG: profile=${LUAUG_PROFILE} luau_compiler=${LUAUG_LUAU_COMPILER} debug_ui=${LUAUG_DEBUG_UI} tests=${LUAUG_BUILD_TESTS}")
