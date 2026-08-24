@@ -41,6 +41,16 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   partition peak had to be an equality: a bound that is merely small passes while
   the defect is still there. Break-verified.
 
+  **And the packaging itself caused one, reported within the hour.** D087: the
+  engine search had preferred the `player` profile since D057, which cost nothing
+  while no machine had a player build -- and the first thing this milestone does
+  is make one. `luaug edit` then launched a binary with no ImGui linked into it
+  at all, which in edit mode is a black window: the world goes to an offscreen
+  texture and the panels are the only thing that draws it. Player is last now,
+  and `luaug edit` asks the binary what it is instead of inferring it from where
+  it was found. **A preference that is right only because nothing has exercised
+  the alternative is a preference nothing is holding.**
+
   **And packaging found something a release had been carrying for two days.**
   D086: `v1.0.0` was tagged and published while `project(LuauG VERSION ...)` still
   said `0.0.1`, so the released binary, the api dump and `luaug --version` all

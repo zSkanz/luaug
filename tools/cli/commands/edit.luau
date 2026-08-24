@@ -50,6 +50,17 @@ local function run(options: Options): number
         return 3
     end
 
+    -- **Asked of the binary, not assumed from where it was found** (D087). A
+    -- host built without the debug UI has no ImGui linked into it at all, so
+    -- `--edit` gives you a window with the world rendered into an offscreen
+    -- texture and nothing on screen but the backdrop clear. It runs, it exits
+    -- zero, and it is black -- which is the failure this whole command is
+    -- written against, arriving through the one thing nothing checked.
+    if not projectlib.hostHasDebugUi(engine) then
+        print(tr("cli.edit.err.no_editor_host", { path = engine }))
+        return 3
+    end
+
     print(tr("cli.edit.opening", { path = project.root }))
 
     local result = process.run(engineArguments(engine, project.root), { stdio = "inherit" })

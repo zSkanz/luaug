@@ -120,6 +120,38 @@ test.suite("install", function(suite)
         assert.eq(candidates[#candidates], projectlib.joined("/install/" .. projectlib.executableName("assetc")))
     end)
 
+    suite:case("the engine search takes a player host last, and used to take it first", function()
+        -- D087. A player build has no ImGui compiled into it at all, so
+        -- `luaug edit` launching one is a window with the world rendered into
+        -- an offscreen texture and nothing but the backdrop on screen. It cost
+        -- nothing while no machine had a player build; this repository grew a
+        -- command that makes one.
+        local candidates = projectlib.engineCandidates({ buildRoot = "/build" })
+        local dev = indexOf(candidates, "/build/win-msvc-dev/engine/app/" .. projectlib.executableName("luaug-host"))
+        local editor =
+            indexOf(candidates, "/build/win-msvc-editor/engine/app/" .. projectlib.executableName("luaug-host"))
+        local player =
+            indexOf(candidates, "/build/win-msvc-player/engine/app/" .. projectlib.executableName("luaug-host"))
+
+        assert.that(dev > 0 and editor > 0 and player > 0, "a preset group is missing from the engine search")
+        assert.that(dev < editor, "an artifact is preferred over the build somebody is working in")
+        assert.that(editor < player, "a host with no editor in it is preferred over one that has an editor")
+    end)
+
+    suite:case("a host says which profile it was built from", function()
+        -- Asked of the binary rather than inferred from the path, because a path
+        -- is not a profile: `LUAUG_HOST` points anywhere, an installation holds
+        -- two hosts and a build tree can hold five.
+        local engine = projectlib.findEngine()
+        if engine == nil then
+            print("no engine built on this machine, so the probe was not exercised")
+            return
+        end
+        local profile = projectlib.hostProfile(engine)
+        assert.that(profile ~= nil, `{engine} did not report a profile under --version`)
+        assert.that(projectlib.hostHasDebugUi(engine), `luaug edit would refuse the host it found: {profile}`)
+    end)
+
     suite:case("this repository is its own installation root", function()
         -- What makes the installed shape the same code path as the developed
         -- one rather than a second one that only runs where nobody is looking.

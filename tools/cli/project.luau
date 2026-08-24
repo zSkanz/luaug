@@ -84,24 +84,35 @@ local function executableName(base: string): string
     return if platform.win32 then `{base}.exe` else base
 end
 
---- The presets that produce a host somebody can RUN a project with, in the
---- order worth trying.
+--- The profile `luaug build` packages, and the only one it accepts (D057). It
+--- carries the Luau compiler and no ImGui, which is exactly what a shipped game
+--- needs and exactly what no other profile offered: `shipping` links no compiler
+--- (ADR 0002) and `luaug build` ships a game's Luau as SOURCE (ADR 0045), so the
+--- packager had `dev` as its only option and every released binary carried the
+--- debug overlay, the inspector and a REPL against its own VM.
 ---
---- **`player` first, and it is not a preference** (D057). That profile carries
---- the Luau compiler and no ImGui, which is exactly what a shipped game needs
---- and exactly what no other profile offered: `shipping` links no compiler
---- (ADR 0002) and `luaug build` ships a game's Luau as SOURCE (ADR 0045), so
---- the packager had `dev` as its only option and every released binary carried
---- the debug overlay, the inspector and a REPL against its own VM.
----
---- `luaug dev` is happy with any of them; `luaug build` asks which one it got.
+--- **It is the LAST thing `findEngine` will accept, and it used to be the first**
+--- (D087). Nothing had a player build on the machine it was running on, so
+--- putting it first cost nothing -- until this repository grew a command that
+--- makes one, and `luaug edit` started launching a binary with no editor
+--- compiled into it. A black window, because in edit mode the world goes to an
+--- offscreen texture and the panels are the only thing that draws it.
 local PlayerPresets = { "win-msvc-player", "linux-clang-player" }
+
+--- What somebody working in this repository is iterating on, which is what they
+--- mean when they type a command that runs the engine.
 local DevPresets = { "win-msvc-dev", "linux-clang-dev", "macos-clang-dev", "win-msvc-debug" }
 
---- The profile the packaged editor is built from (ADR 0054). Last of the three,
---- because inside this repository a `dev` build is what somebody is iterating on
---- and an `editor` build is an artifact they produced an hour ago.
+--- The profile the packaged editor is built from (ADR 0054). After `dev`,
+--- because an `editor` build is an artifact somebody produced an hour ago and a
+--- `dev` build is what they are working in.
 local EditorPresets = { "win-msvc-editor", "linux-clang-editor" }
+
+--- The profiles built with no debug UI at all (`cmake/luaug_options.cmake`
+--- turns `LUAUG_DEBUG_UI` off for exactly these two). A host built from one of
+--- them cannot draw an editor, an inspector or the F3 overlay -- there is no
+--- ImGui target linked into it to draw them with.
+local NoDebugUiProfiles: { [string]: boolean } = { player = true, shipping = true }
 
 --- Where this CLI is installed: the directory holding its template tree, the
 --- generated definitions, and — in an installation rather than a source tree —
@@ -195,7 +206,7 @@ local InstalledPlayer = "player/luaug-host"
 local function engineCandidates(roots: Roots): { string }
     local name = executableName("luaug-host")
     local presets: { string } = {}
-    for _, group in { PlayerPresets, DevPresets, EditorPresets } do
+    for _, group in { DevPresets, EditorPresets, PlayerPresets } do
         for _, preset in group do
             table.insert(presets, preset)
         end
@@ -260,6 +271,34 @@ end
 --- `editor` before `dev` here and last in the engine search, which is not an
 --- inconsistency: a tool has no profile-dependent behaviour, so the newest build
 --- will do, while a HOST somebody is iterating on is the one they mean.
+--- Which profile a host binary was built from, asked of the binary rather than
+--- inferred from where it was found (D087).
+---
+--- **A path is not a profile.** The search below prefers presets in an order
+--- that is right most of the time, and "most of the time" is exactly the kind of
+--- claim that produces a black window: `LUAUG_HOST` can point anywhere, an
+--- installation carries two hosts, and a build tree can hold five. The binary
+--- knows what it is and says so under `--version`; nothing else does.
+---
+--- `nil` when it does not answer, and callers treat that as "carry on": a host
+--- this cannot interrogate is a host that may well work, and refusing on a
+--- failed probe would be refusing on no evidence.
+local function hostProfile(engine: string): string?
+    local probe = process.run({ engine, "--version" })
+    if not probe.ok then
+        return nil
+    end
+    return string.match(probe.stdout, "LuauG%s+[%d%.]+%s+%(([%w_%-]+)%)")
+end
+
+--- Whether this host has an editor, an inspector and an overlay compiled into
+--- it. Unknown profiles pass: the deny list is the one `luaug_options.cmake`
+--- writes, and a profile nobody has heard of is not evidence of absence.
+local function hostHasDebugUi(engine: string): boolean
+    local profile = hostProfile(engine)
+    return profile == nil or not NoDebugUiProfiles[profile]
+end
+
 local ToolPresets =
     { "win-msvc-editor", "win-msvc-dev", "linux-clang-editor", "linux-clang-dev", "macos-clang-dev", "win-msvc-debug" }
 
@@ -349,6 +388,8 @@ return {
     findPlayerEngine = findPlayerEngine,
     findTool = findTool,
     installRoot = installRoot,
+    hostProfile = hostProfile,
+    hostHasDebugUi = hostHasDebugUi,
     -- The three searches as pure functions of their roots, which is the only
     -- reason they are reachable: "an explicit variable, then the build tree,
     -- then the installation" is a claim, and a claim in a comment is not one

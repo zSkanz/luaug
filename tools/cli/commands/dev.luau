@@ -62,6 +62,14 @@ local function run(options: Options): number
         return 2
     end
 
+    -- A player host RUNS a project perfectly well, so this says so rather than
+    -- refusing the way `luaug edit` does (D087). What it cannot do is F3, the
+    -- inspector or the REPL -- there is no ImGui linked into it -- and losing
+    -- those without being told is the same surprise in a smaller size.
+    if not projectlib.hostHasDebugUi(engine) then
+        print(tr("cli.dev.warn.no_debug_ui", { path = engine }))
+    end
+
     local token = devserver.mintToken()
     local port = options.port or projectlib.devPort(project)
 
