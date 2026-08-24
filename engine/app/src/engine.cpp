@@ -1200,12 +1200,22 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // a handle is not a press asking to select whatever is behind it,
             // and losing the selection on the frame you grab its gizmo is the
             // commonest way a first manipulator is unusable.
-            // **Re-aimed every frame**, because a stamp opening or closing
-            // swaps the world underneath the panels -- and an overlay still
-            // pointing at the other one would be drawing a tree that is not
-            // the tree the verbs act on.
-            if (overlay.has_value())
-                overlay->setInspectionTarget(&authored(), authoredRoot(), &inspector);
+            // **The scene's world, or the stage's -- never the project's
+            // tree.** The Explorer draws what this points at, and the project's
+            // tree has a panel of its own that is handed its world directly. It
+            // WAS `authored()` for one commit, and the effect was an Explorer
+            // that went blank the moment somebody clicked a row in the other
+            // panel: it was drawing the content world rooted at the content
+            // root, whose children it was told not to draw.
+            //
+            // Re-aimed every frame all the same, because a stamp opening or
+            // closing does swap the world underneath the panels.
+            if (overlay.has_value()) {
+                Editor::Stage* const open = stageOf();
+                scene::World& shown = open != nullptr ? open->world() : host->world();
+                const core::InstanceId shownRoot = open != nullptr ? open->workspace() : host->runtime().dataModel();
+                overlay->setInspectionTarget(&shown, shownRoot, &inspector);
+            }
 
             const bool gizmoTook = editor.driveGizmo(authored(), inspector);
 

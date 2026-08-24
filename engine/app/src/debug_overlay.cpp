@@ -2032,13 +2032,17 @@ void buildDefaultLayout(ImGuiID dockspace)
     ImGui::DockBuilderDockWindow("explorer", left);
     ImGui::DockBuilderDockWindow("properties", right);
     ImGui::DockBuilderDockWindow("stats", right);
-    // Content first, so it is the tab that opens. The two share a node on
+    // Files first, so it is the tab that opens. The two share a node on
     // purpose -- they are both "the thing under the viewport" and neither
     // deserves permanent floor space -- but which one greets somebody is a
     // decision rather than a consequence of call order, so it is also set
     // explicitly below.
-    ImGui::DockBuilderDockWindow("content", bottom);
+    ImGui::DockBuilderDockWindow("files", bottom);
     ImGui::DockBuilderDockWindow("console", bottom);
+    // **The project's tree goes beside the scene's**, not under the viewport:
+    // the two trees are read together and dragged between, and a store you have
+    // to switch tabs to see is a store you forget you have.
+    ImGui::DockBuilderDockWindow("content", left);
 
     ImGui::DockBuilderFinish(dockspace);
 }
@@ -2174,7 +2178,7 @@ struct ContentLayout
 void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs,
                  const IconAtlas* icons)
 {
-    if (!ImGui::Begin("content", &panels.content)) {
+    if (!ImGui::Begin("files", &panels.content)) {
         ImGui::End();
         return;
     }
@@ -2551,8 +2555,8 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
         ImGui::MenuItem("Explorer", nullptr, &panels.explorer);
         ImGui::MenuItem("Properties", nullptr, &panels.properties);
         ImGui::MenuItem("Viewport", nullptr, &panels.viewport);
-        ImGui::MenuItem("Content", nullptr, &panels.content);
-        ImGui::MenuItem("Content Tree", nullptr, &panels.contentTree);
+        ImGui::MenuItem("Files", nullptr, &panels.content);
+        ImGui::MenuItem("Content", nullptr, &panels.contentTree);
         ImGui::MenuItem("Console", nullptr, &panels.console);
         ImGui::MenuItem("Stats", nullptr, &panels.stats);
         ImGui::Separator();
@@ -2942,7 +2946,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // other -- which a tab bar makes impossible, because only one tab is drawn.
     if (panels.contentTree && editor != nullptr && editor->contentWorld() != nullptr &&
         !editor->stampSession().open()) {
-        if (ImGui::Begin("content tree", &panels.contentTree)) {
+        if (ImGui::Begin("content", &panels.contentTree)) {
             if (inspector != nullptr) {
                 // The root row IS drawn, for the reason a stamp's is: it is the
                 // thing being worked in rather than a piece of chrome, and
@@ -3054,7 +3058,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // not seen this frame does nothing. Only on the frame the default layout
     // was built: a person who later chose the console should find the console.
     if (builtThisFrame)
-        ImGui::SetWindowFocus("content");
+        ImGui::SetWindowFocus("files");
 }
 
 void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,

@@ -181,12 +181,22 @@ struct EditorPanels
     bool explorer = true;
     bool properties = true;
     bool viewport = true;
+    // **`files` on screen, and it browses `content/` on disk**: scenes, meshes,
+    // textures, prefab files. The field keeps its old name because every layout
+    // in `.luaug/` already stores it.
+    //
+    // The rename is not cosmetic. There were briefly two panels called
+    // "content", which is two answers to one question -- and the human asked
+    // the obvious thing, which is whether they now had two of them. What a
+    // person means by CONTENT is the global store; what this is, is a folder.
     bool content = true;
-    // The project's instance tree (ADR 0052). **Its own panel and not a tab in
-    // the Explorer**, and the reason is dragging: only one tab is drawn per
-    // frame, so a drag from the scene's tree to the project's could not exist
-    // at all. Two panels can both be on screen, and a thing you can see is a
-    // thing you can drag to.
+    // **`content` on screen**: the project's instance tree (ADR 0052), which is
+    // the global store the other panel is not.
+    //
+    // Its own panel and not a tab in the Explorer, and the reason is dragging:
+    // only one tab is drawn per frame, so a drag from the scene's tree to the
+    // project's could not exist at all. Two panels can both be on screen, and a
+    // thing you can see is a thing you can drag to.
     bool contentTree = true;
     bool console = true;
     bool stats = true;
