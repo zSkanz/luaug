@@ -131,7 +131,11 @@ local function main(): number
         if not rejectUnknownFlags(parsed, {}) then
             return 2
         end
-        return edit.run({ path = firstPositional(parsed, ".") })
+        -- `nil` rather than "." when nothing was typed, which is the difference
+        -- between "open this" and "open something" (ADR 0055): the first
+        -- refuses a directory that is not a project, and the second is what
+        -- opens the launcher.
+        return edit.run({ path = parsed.positional[1] })
     end
 
     if parsed.command == "test" then

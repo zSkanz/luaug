@@ -75,6 +75,18 @@ test.suite("edit", function(suite)
         assert.strNotContains(refused.output, "stack traceback")
     end)
 
+    suite:case("nothing typed asks the host for the project browser", function()
+        -- **The one place `luaug edit` does NOT refuse** (ADR 0055). A path
+        -- that is not a project is still a refusal -- the case above -- because
+        -- somebody who names a directory means that one, and answering a typo
+        -- with a project list answers a different question. Nothing typed is
+        -- the other question, and it has an answer now.
+        assert.eq(edit.engineArguments("/build/luaug-host", nil), {
+            "/build/luaug-host",
+            "--launcher",
+        })
+    end)
+
     suite:case("the engine command line is the project and --edit", function()
         -- The narrow seam this file's header describes. `--edit` is a boolean
         -- on an ordinary windowed session, not a mode that replaces the loop

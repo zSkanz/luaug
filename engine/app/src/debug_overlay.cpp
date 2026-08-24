@@ -6,6 +6,8 @@
 
 #include "luaug/app/backends.h"
 #include "luaug/app/icons.h"
+#include "luaug/core/build_info.h"
+#include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
 #include "luaug/core/math.h"
 #include "luaug/core/text_key.h"
@@ -3435,6 +3437,256 @@ void drawStreaming(const StreamingHost& streaming)
     }
 }
 
+// --- The project browser (ADR 0055) ------------------------------------------
+//
+// **One window filling the screen, and no dockspace.** The editor's shell is
+// arrangeable because somebody works in it for hours; this is a screen you look
+// at once per session and leave, and a launcher whose panels can be dragged
+// apart is a launcher somebody can break.
+//
+// Every decision it takes is written into the `LauncherView` the caller owns and
+// acted on by the loop, for the reason `EditorCommands` exists: starting a
+// process from inside an ImGui callback is a frame that never finishes drawing.
+
+// What the person is typing. Held here rather than in the view, because it is
+// the panel's own state in exactly the way the explorer's expanded set is: the
+// loop has no use for a half-typed name.
+struct LauncherForm
+{
+    // Sized rather than dynamic, because ImGui's text field takes a buffer. Long
+    // enough for a path somebody would actually type.
+    char name[64]{};
+    char parent[512]{};
+    char open[512]{};
+    int templateIndex = 0;
+    bool creating = false;
+    bool seeded = false;
+};
+
+LauncherForm g_launcherForm;
+std::vector<std::string> g_launcherTemplates;
+
+void copyInto(char* buffer, std::size_t size, std::string_view text)
+{
+    const std::size_t count = std::min(text.size(), size - 1);
+    std::memcpy(buffer, text.data(), count);
+    buffer[count] = '\0';
+}
+
+// The list, and the two things a row can do.
+void drawLauncherProjects(LauncherView& view)
+{
+    ProjectList& projects = *view.projects;
+    if (projects.entries().empty()) {
+        ImGui::TextDisabled("No projects yet. Make one, or open a folder you already have.");
+        return;
+    }
+
+    const float rowHeight = ImGui::GetFrameHeight() * 2.0f;
+    if (ImGui::BeginChild("##projects", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders)) {
+        std::filesystem::path forget;
+        for (const RecentProject& entry : projects.entries()) {
+            ImGui::PushID(entry.path.string().c_str());
+
+            const ImVec2 origin = ImGui::GetCursorPos();
+            // The whole row is the target, so opening a project is a click
+            // anywhere on it rather than a hunt for a button.
+            if (ImGui::Selectable("##row", false, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(0.0f, rowHeight))) {
+                if (entry.missing)
+                    view.message = entry.path.string() + " is not there any more.";
+                else
+                    view.open = entry.path;
+            }
+
+            const bool hovered = ImGui::IsItemHovered();
+            ImGui::SetCursorPos(ImVec2(origin.x + ImGui::GetStyle().FramePadding.x * 2.0f, origin.y));
+            if (entry.missing) {
+                ImGui::TextDisabled("%s", entry.name.c_str());
+                ImGui::SetCursorPos(ImVec2(origin.x + ImGui::GetStyle().FramePadding.x * 2.0f,
+                                           origin.y + ImGui::GetTextLineHeightWithSpacing()));
+                // Said out loud, and the row stays. A list that edits itself
+                // when a drive is unplugged is a list nobody can trust.
+                ImGui::TextColored(ImVec4(0.85f, 0.55f, 0.35f, 1.0f), "missing — %s", entry.path.string().c_str());
+            }
+            else {
+                ImGui::TextUnformatted(entry.name.c_str());
+                ImGui::SetCursorPos(ImVec2(origin.x + ImGui::GetStyle().FramePadding.x * 2.0f,
+                                           origin.y + ImGui::GetTextLineHeightWithSpacing()));
+                ImGui::TextDisabled("%s", entry.path.string().c_str());
+            }
+
+            if (hovered) {
+                const float buttonWidth = ImGui::CalcTextSize("Remove").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+                ImGui::SameLine(ImGui::GetContentRegionAvail().x - buttonWidth);
+                ImGui::SetCursorPosY(origin.y + (rowHeight - ImGui::GetFrameHeight()) * 0.5f);
+                if (ImGui::SmallButton("Remove"))
+                    forget = entry.path;
+            }
+
+            ImGui::SetCursorPos(ImVec2(origin.x, origin.y + rowHeight));
+            ImGui::PopID();
+        }
+        if (!forget.empty())
+            projects.forget(forget);
+    }
+    ImGui::EndChild();
+}
+
+void drawLauncherNew(LauncherView& view)
+{
+    LauncherForm& form = g_launcherForm;
+
+    if (g_launcherTemplates.empty()) {
+        // Said rather than shown as a disabled button nobody can explain.
+        ImGui::TextColored(ImVec4(0.85f, 0.55f, 0.35f, 1.0f), "No templates found under %s.",
+                           view.templatesDir.string().c_str());
+        return;
+    }
+
+    ImGui::TextUnformatted("Template");
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::BeginCombo("##template", g_launcherTemplates[static_cast<std::size_t>(form.templateIndex)].c_str())) {
+        for (int i = 0; i < static_cast<int>(g_launcherTemplates.size()); ++i) {
+            const bool selected = i == form.templateIndex;
+            if (ImGui::Selectable(g_launcherTemplates[static_cast<std::size_t>(i)].c_str(), selected))
+                form.templateIndex = i;
+            if (selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Name");
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::InputText("##name", form.name, sizeof(form.name));
+
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Location");
+    const float browseWidth = ImGui::CalcTextSize("Browse…").x + ImGui::GetStyle().FramePadding.x * 4.0f;
+    ImGui::SetNextItemWidth(-(browseWidth + ImGui::GetStyle().ItemSpacing.x));
+    ImGui::InputText("##parent", form.parent, sizeof(form.parent));
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!view.canBrowse);
+    if (ImGui::Button("Browse…"))
+        view.browse = true;
+    ImGui::EndDisabled();
+    if (!view.canBrowse && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("This build has no folder picker. Type a path instead.");
+
+    ImGui::Spacing();
+
+    // The refusal is shown BEFORE the button is pressed, which is the difference
+    // between a form and a form that argues with you.
+    const bool nameOk = validProjectName(form.name);
+    if (form.name[0] != '\0' && !nameOk)
+        ImGui::TextColored(ImVec4(0.85f, 0.55f, 0.35f, 1.0f), "Letters, digits, dashes and underscores.");
+
+    ImGui::BeginDisabled(!nameOk);
+    if (ImGui::Button("Create", ImVec2(-1.0f, ImGui::GetFrameHeight() * 1.4f))) {
+        const NewProjectResult result =
+            createProject(view.templatesDir, view.definitions,
+                          {.parent = std::filesystem::path(form.parent),
+                           .name = form.name,
+                           .templateName = g_launcherTemplates[static_cast<std::size_t>(form.templateIndex)]});
+        if (result.error.has_value()) {
+            view.message = core::engineCatalog().format(result.error->key, {});
+            if (!result.error->detail.empty())
+                view.message += " (" + result.error->detail + ")";
+        }
+        else {
+            // Made and opened in one press, which is what somebody pressing
+            // Create is asking for.
+            view.open = result.path;
+        }
+    }
+    ImGui::EndDisabled();
+}
+
+void drawLauncher(LauncherView* view)
+{
+    if (view == nullptr || view->projects == nullptr)
+        return;
+
+    LauncherForm& form = g_launcherForm;
+    if (!form.seeded) {
+        form.seeded = true;
+        copyInto(form.parent, sizeof(form.parent), view->defaultParent.string());
+        g_launcherTemplates = availableTemplates(view->templatesDir);
+    }
+
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->WorkPos);
+    ImGui::SetNextWindowSize(viewport->WorkSize);
+    ImGui::Begin("##launcher", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                     ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus);
+
+    ImGui::PushFont(nullptr, ImGui::GetFontSize() * 1.6f);
+    ImGui::TextUnformatted("LuauG");
+    ImGui::PopFont();
+    ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("%s", LUAUG_VERSION_STRING);
+
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Two columns: what you have on the left, what you can make on the right.
+    // The proportion is deliberate -- the list is the thing somebody came for.
+    const float rightWidth = std::min(viewport->WorkSize.x * 0.38f, 420.0f);
+    if (ImGui::BeginTable("##launcher-columns", 2, ImGuiTableFlags_None)) {
+        ImGui::TableSetupColumn("##left", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("##right", ImGuiTableColumnFlags_WidthFixed, rightWidth);
+
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::TextUnformatted("Projects");
+        ImGui::Spacing();
+        drawLauncherProjects(*view);
+
+        ImGui::TableSetColumnIndex(1);
+        ImGui::TextUnformatted("Open a folder");
+        ImGui::Spacing();
+        {
+            const float buttonWidth = ImGui::CalcTextSize("Open").x + ImGui::GetStyle().FramePadding.x * 4.0f;
+            ImGui::SetNextItemWidth(-(buttonWidth + ImGui::GetStyle().ItemSpacing.x));
+            ImGui::InputTextWithHint("##openpath", "path to a project", form.open, sizeof(form.open));
+            ImGui::SameLine();
+            if (ImGui::Button("Open")) {
+                const std::filesystem::path chosen(form.open);
+                if (chosen.empty())
+                    view->message = "Type a path, or press Browse beside the location field.";
+                else if (!isProjectDirectory(chosen))
+                    view->message = chosen.string() + " is not a project: it has no luaug.toml and no src/scripts.";
+                else
+                    view->open = chosen;
+            }
+            ImGui::BeginDisabled(!view->canBrowse);
+            if (ImGui::Button("Browse for a project…", ImVec2(-1.0f, 0.0f)))
+                view->browse = true;
+            ImGui::EndDisabled();
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        ImGui::TextUnformatted("New project");
+        ImGui::Spacing();
+        drawLauncherNew(*view);
+
+        ImGui::EndTable();
+    }
+
+    if (!view->message.empty()) {
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextWrapped("%s", view->message.c_str());
+    }
+
+    ImGui::End();
+}
+
 void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,
                script::ScriptRuntime* runtime, const StreamingHost* streaming)
 {
@@ -3649,7 +3901,7 @@ void DebugOverlay::render(rhi::ICmdList& cmd, rhi::TextureHandle target, const F
     // frame and has nothing to show when it is down.
     if (!active_ || !target.valid())
         return;
-    if (!visible_ && shell_ != Shell::Editor)
+    if (!visible_ && shell_ != Shell::Editor && shell_ != Shell::Launcher)
         return;
 
     // The frame currently being recorded. Null means the caller is outside
@@ -3661,7 +3913,9 @@ void DebugOverlay::render(rhi::ICmdList& cmd, rhi::TextureHandle target, const F
     ImGui_ImplSDLGPU3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
-    if (shell_ == Shell::Editor)
+    if (shell_ == Shell::Launcher)
+        drawLauncher(launcher_);
+    else if (shell_ == Shell::Editor)
         drawEditorShell(frame, world_, root_, inspector_, runtime_, editor_, viewportTexture_, layoutBuilt_, commands_,
                         panels_, dialogs_, icons_, visible_);
     else

@@ -19,6 +19,7 @@
 #include "luaug/app/editor.h"
 #include "luaug/app/frame_scheduler.h"
 #include "luaug/app/inspector.h"
+#include "luaug/app/launcher.h"
 #include "luaug/core/id.h"
 #include "luaug/platform/event.h"
 #include "luaug/rhi/types.h"
@@ -61,6 +62,9 @@ enum class Shell
     // `luaug edit`. A dockspace, a 3D viewport, and a layout that survives a
     // restart.
     Editor,
+    // The host started with no project (ADR 0055). One window, a list of
+    // projects and a way to make one -- and no world behind any of it.
+    Launcher,
 };
 
 class DebugOverlay
@@ -192,6 +196,11 @@ public:
     // is a map of every cell's state and that is a vector the host already owns.
     void setStreamingTarget(const StreamingHost* streaming) noexcept { streaming_ = streaming; }
 
+    // What the launcher shell draws and writes its decisions into (ADR 0055).
+    // Null in every other shell, which is what makes this a pointer rather than
+    // a member: an overlay over a running game has no project list.
+    void setLauncherTarget(LauncherView* launcher) noexcept { launcher_ = launcher; }
+
     // Takes over the process log sink and keeps the last few hundred lines for
     // the console pane, chaining to whatever sink was installed so the console
     // and the log FILE both get every line. Called once, by the host, after the
@@ -244,6 +253,7 @@ private:
     [[maybe_unused]] bool gameHoldsPointer_ = false;
     [[maybe_unused]] IconAtlas* icons_ = nullptr;
     [[maybe_unused]] rhi::TextureHandle viewportTexture_;
+    [[maybe_unused]] LauncherView* launcher_ = nullptr;
 };
 
 } // namespace luaug::app

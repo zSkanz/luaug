@@ -131,6 +131,10 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
             options.exitAfterFrames = true;
             continue;
         }
+        if (arg == "--launcher") {
+            options.launcher = true;
+            continue;
+        }
         if (arg == "--edit") {
             options.editor = true;
             continue;
@@ -363,8 +367,10 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
     // `--partition` is the same shape one step along: it boots, writes the
     // cache and returns without ever reaching the loop, so a frame budget would
     // be a ceiling on a loop that does not run.
+    // `--launcher` is the third: it has its own loop, no world and no frame
+    // budget, and it ends when somebody chooses a project or closes the window.
     if (!options.replayRoot.empty() || !options.benchRoot.empty() || !options.twoWorldsRoot.empty() ||
-        options.partitionOnly)
+        options.partitionOnly || options.launcher)
         return kExitOk;
 
     // A conformance run needs a ceiling for the same reason, and a generous one:
@@ -442,10 +448,17 @@ int main(int argc, char** argv)
     std::error_code packagedError;
     const bool hasPackagedProject = std::filesystem::is_directory(packagedProject, packagedError);
 
-    if (args.empty() && !hasPackagedProject) {
-        luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.no_script"));
-        return kExitUsage;
-    }
+    // **No project is no longer a usage error** (ADR 0055): given nothing at all,
+    // the host shows the project browser, which is what makes the engine
+    // something a person can double-click. Decided here and DISPATCHED at the
+    // bottom, so the launcher gets the log file and the crash handler like every
+    // other session -- a launcher whose failure went only to a console nobody
+    // opened would be the hardest thing here to diagnose.
+    //
+    // A host given a path that is not a project still refuses exactly as it did.
+    // This is the case where there is no path, not a fallback that swallows a
+    // bad one.
+    const bool noProjectGiven = args.empty() && !hasPackagedProject;
 
     if (!args.empty() && args[0] == "--version") {
         printVersion();
@@ -464,6 +477,8 @@ int main(int argc, char** argv)
     bool sizeFromFlags = false;
     if (const int usageExit = parseOptions(args, options, graphicsOverrides, sizeFromFlags); usageExit != kExitOk)
         return usageExit;
+    if (noProjectGiven)
+        options.launcher = true;
 
     // The project file, and the three-layer resolution it completes. A bare
     // script has no project and gets the preset plus the flags, which is the
@@ -568,6 +583,18 @@ int main(int argc, char** argv)
         if (const std::optional<luaug::core::EngineError> error =
                 luaug::app::runReplayGate(options.replayRoot, options.replayRecord)) {
             luaug::core::logText(LogLevel::Error, error->message);
+            return kExitScriptError;
+        }
+        return kExitOk;
+    }
+
+    if (options.launcher) {
+        if (const std::optional<luaug::core::EngineError> error = luaug::app::runLauncher(options)) {
+            luaug::core::logText(LogLevel::Error, error->message);
+            if (!error->detail.empty())
+                luaug::core::logText(LogLevel::Error, error->detail);
+            if (error->key.hash == LUAUG_TR("rhi.err.device_create_failed").hash)
+                return kExitNoGraphicsDevice;
             return kExitScriptError;
         }
         return kExitOk;

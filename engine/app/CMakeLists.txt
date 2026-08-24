@@ -22,6 +22,8 @@ luaug_add_module(app
         src/streaming_host.cpp
         src/debug_overlay.cpp
         src/inspector.cpp
+        src/launcher.cpp
+        src/launcher_run.cpp
         src/partition_cache.cpp
         src/picking.cpp
         src/editor.cpp
@@ -146,7 +148,18 @@ add_custom_command(TARGET luaug_host POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_SOURCE_DIR}/icons"
         "$<TARGET_FILE_DIR:luaug_host>/content/icons"
-    COMMENT "Staging the engine message catalog, the @luaug modules, the conformance runner and the editor icons")
+    # The project templates and the generated definitions, so the LAUNCHER can
+    # make a project (ADR 0055). `luaug new` reads them from the installation
+    # root and this reads them from content, which is the same tree copied to two
+    # places by `tools/repo/package.luau` -- and the test that compares what the
+    # two scaffolders produce is what keeps that from being two answers.
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/templates"
+        "$<TARGET_FILE_DIR:luaug_host>/content/templates"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/runtime/types/engine.d.luau"
+        "$<TARGET_FILE_DIR:luaug_host>/content/runtime/types/engine.d.luau"
+    COMMENT "Staging the engine message catalog, the @luaug modules, the conformance runner, the editor icons and the project templates")
 
 luaug_add_module_tests(app
     SOURCES
@@ -156,6 +169,7 @@ luaug_add_module_tests(app
         tests/world_host_tests.cpp
         tests/debug_overlay_tests.cpp
         tests/inspector_tests.cpp
+        tests/launcher_tests.cpp
         tests/picking_tests.cpp
         tests/editor_tests.cpp
         tests/content_tree_tests.cpp
@@ -218,8 +232,19 @@ if(LUAUG_BUILD_TESTS)
     add_test(NAME host_unknown_backend COMMAND luaug_host --rhi=nonesuch)
     set_tests_properties(host_unknown_backend PROPERTIES WILL_FAIL TRUE TIMEOUT 60)
 
-    add_test(NAME host_usage_without_script COMMAND luaug_host)
-    set_tests_properties(host_usage_without_script PROPERTIES WILL_FAIL TRUE TIMEOUT 60)
+    # **A host with no script used to refuse and now opens the project browser**
+    # (ADR 0055), so what this asserts moved rather than disappeared: a path that
+    # is not there is still a refusal, which is the case somebody reaches by
+    # typo. Nothing here can drive the browser -- it needs a window -- and what
+    # would go wrong quietly is a launcher that opened for a mistyped path
+    # instead of saying so.
+    #
+    # A path that EXISTS and holds no scripts is deliberately not this test: the
+    # host warns and runs it, which it has always done, because an empty project
+    # is a project somebody is part-way through making.
+    add_test(NAME host_refuses_a_path_that_is_not_there
+        COMMAND luaug_host ${CMAKE_SOURCE_DIR}/no-such-project --rhi=null --headless --frames=1)
+    set_tests_properties(host_refuses_a_path_that_is_not_there PROPERTIES WILL_FAIL TRUE TIMEOUT 60)
 
     # The M2 gate: ~900 Luau specs written against docs/api-design.md by authors
     # who were forbidden from reading `engine/` (MASTER_PROMPT §7). That is what

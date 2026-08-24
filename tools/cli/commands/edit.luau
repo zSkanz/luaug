@@ -21,24 +21,42 @@ local projectlib = require("../project")
 local tr = catalog.tr
 
 export type Options = {
-    path: string,
+    -- Nothing when the person typed `luaug edit` and nothing else. That is not
+    -- the same as ".": it means "open something", and what answers it is the
+    -- project browser (ADR 0055).
+    path: string?,
 }
 
 --- The engine command line for an editor session. Pure, and the only place the
 --- `--edit` flag is spelled.
-local function engineArguments(engine: string, root: string): { string }
+---
+--- With no project, the host's own launcher argv -- which is what `luaug edit`
+--- typed on its own now produces (ADR 0055). One function rather than two,
+--- because the two differ by exactly this and a test proves both through it.
+local function engineArguments(engine: string, root: string?): { string }
+    if root == nil then
+        return { engine, "--launcher" }
+    end
     return { engine, root, "--edit" }
 end
 
 local function run(options: Options): number
-    local project = projectlib.load(options.path)
-    if project.diagnostic ~= nil then
-        print(project.diagnostic)
-        return 2
-    end
-    if not projectlib.isProject(project) then
-        print(tr("cli.err.not_a_project", { path = project.root }))
-        return 2
+    -- **Nothing typed opens the browser**, and a path typed still has to be a
+    -- project. The difference matters: somebody who names a directory means
+    -- that one, and answering a typo with a project list would be answering a
+    -- different question.
+    local root: string? = nil
+    if options.path ~= nil then
+        local project = projectlib.load(options.path)
+        if project.diagnostic ~= nil then
+            print(project.diagnostic)
+            return 2
+        end
+        if not projectlib.isProject(project) then
+            print(tr("cli.err.not_a_project", { path = project.root }))
+            return 2
+        end
+        root = project.root
     end
 
     -- 3 rather than the 2 `dev` returns for the same condition: a missing
@@ -61,9 +79,11 @@ local function run(options: Options): number
         return 3
     end
 
-    print(tr("cli.edit.opening", { path = project.root }))
+    if root ~= nil then
+        print(tr("cli.edit.opening", { path = root }))
+    end
 
-    local result = process.run(engineArguments(engine, project.root), { stdio = "inherit" })
+    local result = process.run(engineArguments(engine, root), { stdio = "inherit" })
 
     -- **Closing the window is the ordinary way to leave an editor**, and on
     -- Windows a terminated process reports a negative code rather than zero. A

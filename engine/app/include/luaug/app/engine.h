@@ -29,6 +29,11 @@ struct EngineOptions
     // which is the M2 gate.
     u64 worldSeed = 1;
 
+    // The project browser rather than a session (ADR 0055). Set by `--launcher`,
+    // and set for a host started with no project at all -- which used to be a
+    // usage error and is now the commonest way somebody meets this engine.
+    bool launcher = false;
+
     // No window. The frame loop, the device and the render target all still
     // exist -- this is the CI harness and the shape a dedicated server would
     // take, not a mode where rendering is skipped.
@@ -178,5 +183,22 @@ struct EngineOptions
 // Runs to completion. Returns the first error that stopped it, or nothing on a
 // clean exit.
 [[nodiscard]] std::optional<core::EngineError> run(const EngineOptions& options);
+
+// The project browser (ADR 0055): what the host does when it is started with no
+// project at all, which used to be a usage error.
+//
+// **A loop of its own, and that is the decision rather than a shortcut.** There
+// is no world here, no Luau VM, no physics and no scheduler -- a launcher that
+// booted a simulation to show a list of folders would be absurd. What it shares
+// with `run` is the window, the device and the overlay, which is exactly the
+// part that draws.
+//
+// Choosing a project starts the editor as a NEW PROCESS and returns; everything
+// a project decides is resolved at boot, so swapping it inside a running host
+// would touch every seam for a screen that runs once.
+//
+// Only `width` and `height` are read from `options`. A headless launcher is not
+// a thing that can exist, and the caller is expected not to ask for one.
+[[nodiscard]] std::optional<core::EngineError> runLauncher(const EngineOptions& options);
 
 } // namespace luaug::app
