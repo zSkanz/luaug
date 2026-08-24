@@ -146,15 +146,29 @@ the overlay gaining a shell — and those are single-threaded orchestrator work.
 
 ## Gate Record
 
-**BUILT, awaiting review, 2026-08-24.** Built in one pass on the day the
-milestone opened, which is what the size said it would be — five reconnaissance
-passes found every seam already cut.
+**SIGNED OFF 2026-08-24.** Built in one pass on the day the milestone opened,
+which is what the size said it would be — five reconnaissance passes found
+every seam already cut. The human used it while it was being built, which is
+where D088 came from, and approved it after.
+
+**The picture is still outstanding at sign-off** and is recorded as such
+rather than quietly ticked: the ImGui shell cannot render headlessly.
 
 Closing run, `scripts/localgate.ps1`:
 
 ```
-  ok    docs · luau · format · shipping
-  FAIL  windows 43/44 · linux 40/41   — openworld_soak only, and it is E5's
+  ok    docs · luau · format · windows · shipping
+```
+
+`openworld_soak` was red for this whole milestone and is fixed at its close: the
+flagship's generator writes a SCENE now and the engine cuts that into cells at
+play (ADR 0053), so the gate ensures a file rather than a directory of chunk
+sources. That was E5's migration, and it is landed.
+
+The Linux tier is red on the OTHER session's uncommitted `ui_theme_tests.cpp`,
+which does not compile under Clang. Nothing in E6 touches it.
+
+```
 ```
 
 | Claim | Answer |

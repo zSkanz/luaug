@@ -5,7 +5,8 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
-- **E6 — The Launcher — BUILT, awaiting review, 2026-08-24.** Opened on the
+- **E6 — The Launcher — COMPLETE, signed off 2026-08-24**, tagged
+  `milestone/e6`. Opened on the
   human's word an hour after E4 was signed off, for the reason E4's own scope
   list predicted: the archive was unzipped and the first question was *what do I
   open*.
@@ -40,6 +41,18 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   landed inside `AppData\Roaming`, where nobody would look for them. Found by
   listing that directory and seeing a whole scaffolded project in it.
   `SDL_FOLDER_DOCUMENTS` is the answer and SDL's own header says so.
+
+  **Signed off with the picture still outstanding**, like E5's: the shell cannot
+  render headlessly, so every visual claim rests on the human looking -- which
+  for this one they did, message by message, while it was being built, and which
+  is where D088 came from.
+
+  **Three things arrived after the sign-off and before the session ended**, all
+  asked for while using it: **F frames the selection** -- the one camera shortcut
+  every editor in this shape shares, and it keeps the direction and moves only
+  the position -- a **Clear and a filter on the console**, and the flagship's
+  soak pointed at the scene its generator writes now, which was the last red on
+  the tree and is E5's migration finally landing.
 
   **A defect this milestone did not cause but had to fix**: D086's version bump
   moved `LUAUG_VERSION_STRING`, `WorldHost::boot` writes it into `EngineState`,
@@ -177,15 +190,21 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
   citations. That file exists because three human-reported defects were removed
   from this one while it was being rewritten to close M4. **A close rewrites this
   file wholesale; it can no longer take the open list with it.**
-- **The next action, as a sentence:** open the packaged
-  `LuauG-1.0.0-win64\luaug-host.exe` on a machine with no build tree, make a
-  project in it, and say whether the launcher is what was asked for -- E6's gate
-  and E5's both end at a person looking.
-- **Then:** migrate `examples/05-streaming` and
-  `examples/10-open-world` off the generator path onto the partitioner (ADR
-  0053), together with `tests/support/ensure_generated_world.cmake` and
-  `openworld_soak`, because they are one movement — the human has said they will
-  ask for it, and it is the only red on the tree.
+- **The next action, as a sentence:** capture the chunk-state overlay on
+  `examples/06-scene` and fill E5's last gate row, which is the only milestone
+  still awaiting review.
+- **`main` has no red of its own.** `openworld_soak` was the last one and it is
+  fixed: the flagship's generator writes a scene now and the gate ensures that
+  rather than a directory of chunk sources — E5's migration, landed. **What is
+  red in the WORKING TREE belongs to the other session**: `ui_theme_tests.cpp`
+  does not compile under Clang (`-Wdouble-promotion` on six
+  `doctest::Approx(float)` calls, the same diagnostic E5 hit), and their
+  appearance work in `debug_overlay.cpp` is uncommitted beside it.
+- **Two sessions edited `engine/app/src/debug_overlay.cpp` at the same time**,
+  which the protocol below does not anticipate — `engine/` is the builder's, and
+  something else is writing it. Nothing was lost: this session committed only its
+  own hunks and put the other's back on top. The next collision may not be
+  separable, and the protocol needs a sentence about it.
 - **E5 is still awaiting review**, and what it is waiting for is a person: the
   chunk-state overlay on `examples/06-scene`. Its Gate Record carries every
   other item with a result.
