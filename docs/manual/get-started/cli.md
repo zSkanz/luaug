@@ -146,9 +146,17 @@ double-clickable — see [Shipping a game](manual:guides/shipping).
 
 ## What the CLI is
 
-A wrapper around the pinned Lute runtime rather than a compiled binary, which is
-why `scripts/luaug.ps1` and `scripts/luaug.sh` exist. Put that directory on your
-`PATH` and every command on this page works as written.
+A wrapper around the pinned Lute runtime rather than a compiled binary. A
+downloaded LuauG carries that runtime and a `luaug.cmd` beside it, so putting the
+folder on your `PATH` is the whole installation; a source tree has
+`scripts/luaug.ps1` and `scripts/luaug.sh` doing the same job for the same
+reason. Either way, every command on this page works as written.
+
+**It finds its own engine.** The host it launches is the one in the installation
+it belongs to, whatever directory you are standing in — or the one in your build
+tree, when you have one. `LUAUG_HOST` overrides both, and `luaug build`
+deliberately ignores that override: what you pointed a dev server at must not
+decide what your players get.
 
 ## Where to look next
 

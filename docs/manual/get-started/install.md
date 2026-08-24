@@ -1,10 +1,55 @@
 # Install and toolchain
 
-LuauG is built from source. There is one bootstrap script, it is idempotent, and
-it refuses to report success when a step failed — a bootstrap that lies
-resurfaces later as a confusing build error.
+There are two ways to get LuauG, and most people want the first one.
 
-## What you need first
+## Download it
+
+A release is one archive holding one folder. Unzip it wherever you keep tools,
+and everything is inside: the editor, the engine, the command line, the project
+template and the type definitions.
+
+```
+LuauG-1.0.0-win64/
+  luaug.cmd  luaug.ps1     the command line, as you type it
+  luaug-host.exe           the editor
+  content/                 what it loads beside itself
+  player/                  the engine your players get
+  tools/  templates/       the command line and what it scaffolds
+```
+
+Put the folder on your `PATH`, or make an alias, and every `luaug …` line in
+this manual works as written:
+
+```powershell
+luaug --version
+luaug new hello
+luaug edit hello
+```
+
+Nothing else is required to make a game. The folder finds its own engine, its
+own template and its own version, wherever you run it from.
+
+**Windows for now.** The archive carries a Windows editor and a Windows engine,
+and `luaug build` produces a Windows folder. Linux and macOS are built from
+source, below.
+
+**Two commands want a little more.** `luaug check` runs the Luau analyzer and
+`luaug fmt` runs the formatter, and neither is in the archive — they are separate
+tools with their own release cadence, and both say so when they are missing:
+
+```
+rokit add JohnnyMorganz/luau-lsp
+rokit add JohnnyMorganz/StyLua
+```
+
+## Build it from source
+
+What you want if you are changing the engine itself, or if you are on Linux or
+macOS. There is one bootstrap script, it is idempotent, and it refuses to report
+success when a step failed — a bootstrap that lies resurfaces later as a
+confusing build error.
+
+### What you need first
 
 | | Windows | Linux / macOS |
 |---|---|---|
@@ -18,7 +63,7 @@ configure step says it cannot find CMake, the fix is almost never to install
 CMake — it is to run `VC\Auxiliary\Build\vcvars64.bat` first. The bootstrap
 detects this and prints the exact command.
 
-## Bootstrap
+### Bootstrap
 
 ```powershell
 scripts\bootstrap.ps1
@@ -41,7 +86,7 @@ It does four things:
 Versions are pinned rather than floating. Upgrading one is a deliberate,
 reviewed change, not something a fresh checkout does to you.
 
-## Build
+### Build
 
 ```powershell
 cmake --preset win-msvc-dev
@@ -56,7 +101,7 @@ ctest --preset win-msvc-dev
 > older header, and the symptom is a crash in code that has nothing wrong with
 > it.
 
-## The CLI
+### The CLI from a source tree
 
 `luaug` is a wrapper around the pinned Lute runtime rather than a compiled
 binary:
@@ -70,7 +115,20 @@ scripts\luaug.ps1 --version
 ```
 
 Put the `scripts` directory on your `PATH`, or make an alias, and the rest of
-this manual's `luaug …` lines work as written.
+this manual reads the same as it does from a downloaded folder.
+
+### Building the archive
+
+The same folder a release ships, from your own tree:
+
+```powershell
+scripts\package.ps1
+```
+
+It builds the two profiles a package needs, writes the folder, runs it from
+outside the repository to prove it can find its own engine, and only then
+compresses it. The order matters: an archive published without that middle step
+is one whose first user finds out it cannot.
 
 ## Your editor
 

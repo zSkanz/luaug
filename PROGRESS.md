@@ -5,6 +5,49 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
+- **E4 — The Editor Ships — BUILT, awaiting review, 2026-08-24.** The question
+  [ADR 0046](docs/decisions/0046-the-editor-is-a-mode-of-the-engine-binary.md)
+  wrote down and refused to answer in passing, answered on purpose in
+  [ADR 0054](docs/decisions/0054-the-editor-ships-as-a-folder-and-the-cli-finds-its-own-install.md);
+  [`docs/roadmap.md` § E4](docs/roadmap.md#e4--the-editor-ships-m) is the scope
+  and [`docs/briefs/e4-kickoff.md`](docs/briefs/e4-kickoff.md) the gate.
+
+  **There is an archive now, and it has been run from outside this repository.**
+  `scripts/package.ps1` builds the two profiles, writes the folder, drives the
+  packaged `luaug` from a scratch directory with no `LUAUG_BUILD_ROOT` and no
+  `LUAUG_HOST` in its environment, and only then compresses it — 16 MiB.
+  `luaug --version`, `luaug new` and `luaug build` all answer from inside it, and
+  the game that comes out of that build runs and prints its own script's line.
+
+  **The repository already believed it had an installed shape and had never had
+  one.** Three answers to "where am I" in one CLI, two of them wrong: the engine
+  search ended at `process.cwd()` under a comment calling it "beside this CLI",
+  and `--version` read a `CMakeLists.txt` an installation does not have. Only
+  `luaug new` was right, and it was right because D045 had already cost that
+  lesson once. Nothing here could have caught it, because nothing here had ever
+  run outside the source tree — which is now what `tests/installed` does.
+
+  **Two hosts in the folder, and that is D057 rather than caution.** A package
+  with one binary would have made `luaug build` ship the editor, the inspector
+  and a REPL inside somebody's game, so `player/` carries its own host and its
+  own content.
+
+  **The editor's own performance gate, and it is a number no machine can move.**
+  The Explorer walked every instance in the world every frame and then walked the
+  result again to drop what was under a closed node; the *drawing* was already
+  clipped, which is exactly why no profile ever showed it. One walk now, entering
+  nothing that is closed or hidden. Asserted as an EQUALITY over two worlds an
+  order of magnitude apart — 5 instances visited in both — for the reason E5's
+  partition peak had to be an equality: a bound that is merely small passes while
+  the defect is still there. Break-verified.
+
+  **And packaging found something a release had been carrying for two days.**
+  D086: `v1.0.0` was tagged and published while `project(LuauG VERSION ...)` still
+  said `0.0.1`, so the released binary, the api dump and `luaug --version` all
+  reported 0.0.1 — faithfully, which is the point. ADR 0031's derivation was never
+  the problem; the declaration had no owner. Bumped, and the packager now refuses
+  to build a folder whose name would disagree with the newest release tag.
+
 - **E5 — The World You Build — BUILT, awaiting review, 2026-08-24.** Landed in
   one pass behind a green six-stage gate, which is what
   [`docs/roadmap.md` § E5](docs/roadmap.md#e5--the-world-you-build-l) asked for:
@@ -52,50 +95,15 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   automatable, plus the chunk-state screenshot -- and the same limit E1 recorded
   applies: the ImGui shell cannot render headlessly.
 
-- **E3 — Content and Prefabs — COMPLETE, signed off 2026-08-23**, and it was
-  specified by the human in a conversation rather than by a brief — one message
-  at a time, while the thing was being built and used. `docs/briefs/e3-kickoff.md`
-  is the record that would have been the brief, written at the close and labelled
-  as such.
-
-  **Four ADRs carry it, and three of them REVERSE something — one of them
-  itself.** 0049 named the thing: a **Stamp**, chosen by the human over prefab,
-  blueprint and model. 0050: a script is an ordinary instance carrying its own
-  `Source`, which reverses 0048's "a Script is created as a FILE" — a script
-  whose identity is a file cannot go in a prefab, be copied with the thing it
-  belongs to, or live in a library. 0051: a prefab is INHERITED and an edit is
-  an override, which reverses 0049's break-on-edit — break-on-edit says a prefab
-  is a starting point, and this says it is a definition. **0052 is the one that
-  reverses itself**: `content/` was given a global tree of instances beside its
-  files, and it was taken out the same afternoon when the human asked whether
-  Unity and Unreal have two contents. They do not — each has one folder of
-  files, and a prefab in either is a file. The ADR stays as the record, because
-  the reason is worth more than the decision was.
-
-  **Each reversal was right when it was written and wrong when it was used**,
-  which is the pattern worth naming: 0048 and 0049 were both written from the
-  human's own words, shipped with tests, and corrected by the same person a day
-  later once they had the thing in their hands. The register keeps both halves.
-
-  **What a prefab does now**: convert any instance to one, place it linked or as
-  a copy, open it onto a stage that is a world of its own, and instance it from
-  code with `Instance.stamp`. Editing an instance overrides a property and keeps
-  the link; changing the source moves every instance that has not overridden
-  that property; a structural change is written in full and unlinked rather than
-  refused, because a save that refuses is a save that loses work.
-
-  **And the editor grew the things a person expects to already be there**:
-  dragging an instance into the content browser makes a prefab of it and
-  dragging one out places it, `Del` `F2` `Ctrl+D` `Ctrl+S`, and a clipboard that
-  holds TEXT rather than ids — which is what lets a copy survive the delete, the
-  scene load or the stamp session that happens between it and the paste.
-
-  **Two manipulator defects, and the second was found by asking the first's
-  question again.** D078: a comment said the snap was in the gizmo's frame and
-  the code snapped in the world's, so a local drag left its own arm. D079: a
-  `Size` is in the part's own frame, so a world-space scale arm on a turned part
-  pointed one way and grew it another. Both are the same shape — a rule stated
-  in one space and applied in another — and it is worth expecting a third.
+- **E3 — Content and Prefabs — COMPLETE, signed off 2026-08-23.** Its entry
+  moved to
+  [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md) with
+  E1's and E2's when E4 was written up and this file passed its ~300-line cap
+  again (§11). [`docs/briefs/e3-kickoff.md`](docs/briefs/e3-kickoff.md) carries
+  the Gate Record. The one thing worth keeping here: **three written decisions
+  were reversed within a day of shipping**, each by the person who asked for the
+  first one, and each reversal took one sentence to argue — because the first
+  one was in a file somebody could argue with.
 
 - **E2 — Moving Things — COMPLETE, 2026-08-23.** Its entry moved to
   [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md) with
@@ -161,18 +169,15 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
   citations. That file exists because three human-reported defects were removed
   from this one while it was being rewritten to close M4. **A close rewrites this
   file wholesale; it can no longer take the open list with it.**
-- **The next action, as a sentence:** decide what E4 is. E1, E2 and E3 are all
-  signed off, and what the editor does not have is no longer a list of items
-  inside a milestone — it is a choice about which of them matters next.
-  `docs/briefs/e3-kickoff.md`'s closing section names four, and the roadmap's
-  post-v1 phase names more.
-- **What is left of E2 and E3 is one thing and it is the same thing:** the
-  pictures. **The ImGui shell cannot render headlessly and SDL does not accept
-  injected input**, so every visual claim rests on the human looking — which for
-  E3 they did, message by message, while it was being built.
-- **All four of E2's frozen interfaces are built and tested**, which is the point
-  the plan said nothing fans out before: the selection set, the gesture and its
-  extracted undo key, the manipulator arithmetic, and `Editor`'s verbs.
+- **The next action, as a sentence:** run `scripts/package.ps1`, unzip the
+  archive it writes on a machine that has never built this, open
+  `examples/06-scene` in it, and record what you see in E4's and E5's Gate
+  Records — those two milestones are both waiting on the same thing, which is a
+  person looking.
+- **What is left of E2, E3, E4 and E5 is one thing and it is the same thing:**
+  the pictures. **The ImGui shell cannot render headlessly and SDL does not
+  accept injected input**, so every visual claim rests on the human looking —
+  which for E3 they did, message by message, while it was being built.
 - **Fifteen defects closed across E2 and E3, twelve of them found by a person
   using the editor**, which is now the pattern every milestone since M4 has
   repeated. D067 is why the editor was unusable on the flagship at all: a boot
@@ -185,30 +190,13 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
   engine — and widening the threshold instead would remove the only instrument
   watching a streamed world for a leak.
 
-- **The phase was re-cut at E1's review and ADR 0047 is why** (human decision,
-  2026-08-22). The first split put manipulators, saving and play in three
-  milestones; the review said in one sentence that edit, test and save are one
-  loop and an editor that delivers a third of it three times is not usable in
-  between. **E2 is now the loop, whole**, and underneath it the authored world
-  becomes DATA and scripts become BEHAVIOUR — the Unity, Unreal and Roblox
-  arrangement, asked for in those words. Code-first does not die: `Instance.new`
-  at runtime stays first-class, and what moves is where the world a project
-  *starts* with is written down.
-
-  **The three things E2 was told it needed and did not have all exist now**:
-  `World::snapshot()`, a file-writing capability the game VM is not given (R4),
-  and the scene format itself.
-
-- **D057 is closed and the fourth profile exists.** `player` is Release, links
-  the Luau compiler — which a packaged game needs, because `luaug build` ships
-  its Luau as source (ADR 0045) — and declares no ImGui target at all, so "the
-  artifact contains no overlay" is a link-time fact. `luaug build` REFUSES
-  anything else rather than warning, with the two commands that fix it in the
-  message; `--dev-host` is the door, and `LUAUG_HOST` is deliberately not
-  consulted, because "I pointed the dev server somewhere" must not decide what a
-  release contains. The gate builds it beside `shipping`, in the stage that
-  exists because a profile nothing builds is a profile nobody knows is broken —
-  which was this defect's own objection to shipping the `shipping` profile.
+- **There are five profiles now and the gate builds three of them.** `player`
+  (D057) carries the Luau compiler and no ImGui, which is what a packaged game
+  needs; `editor` (ADR 0054) is what somebody downloads. Both exist because a
+  profile nothing builds is a profile nobody knows is broken, and both are
+  compiled and linked by `scripts/gates/shipping-build.sh` for that reason.
+  `LUAUG_HOST` is deliberately not consulted by `luaug build`, because "I pointed
+  the dev server somewhere" must not decide what a release contains.
 - **`inertcheck` sweeps `EngineState` too** (D055), and widening it found three
   properties that were stored and read by nothing -- the blind spot was the size
   of a service, because a knob belonging to a service with one instance per world
@@ -231,15 +219,12 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
 
 ## Blocked — needs human
 
-- **THE RELEASE IS PUBLISHED, and what is left of it is one setting.** The
-  roadmap's last item — "tag `v1.0.0`, GitHub release with Windows binaries +
-  source instructions" — was done on 2026-08-22 on the human's word, against a
-  five-stage green gate. `LuauG-Open-World-v1.0.0-win64.zip` (6.7 MiB, from
-  `luaug build examples/10-open-world`) is attached, the notes carry the build
-  instructions and the known limits, and `milestone/m4`, `m7` and `m7.5` were
-  pushed with it — they had never left this clone, while `milestone/m8` and
-  `v1.0.0` already had, which is what the ledger got wrong before §2 corrected
-  it against the repo.
+- **THE RELEASE IS PUBLISHED, and what is left of it is one setting.** Tagged
+  `v1.0.0` on 2026-08-22 on the human's word, against a five-stage green gate,
+  with `LuauG-Open-World-v1.0.0-win64.zip` attached. **There is a second archive
+  to attach now** (ADR 0054): `LuauG-1.0.0-win64.zip`, the editor itself, which
+  is what turns a release from "here is a game somebody built" into "here is what
+  they built it with".
   - **The repository is PRIVATE, so the release reaches nobody.** Making a repo
     public is a one-way door in practice — the whole history becomes readable
     and cloneable, and un-publishing does not un-clone — so it is §10's kind of
@@ -297,6 +282,39 @@ Entries for the planning session and for M0 through M4 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
 
+- **2026-08-24 (session 22, Claude Opus): E4 built.** The milestone was ordered
+  intent and nothing else when the session opened -- the ledger's own next action
+  was "decide what E4 is" -- so the session wrote the roadmap section, ADR 0054
+  and the brief before touching code, and then built both halves of the row.
+
+  **Did:** the `editor` profile and its presets, built by the shipping gate;
+  `tools/repo/package.luau` and `scripts/package.ps1`, which build, write, VERIFY
+  and only then compress; `installRoot()` and the three searches it feeds, as
+  pure functions a test drives; the version stamp; `tests/installed`, which runs
+  the packaged CLI from a scratch directory with the environment emptied;
+  `collectVisibleTree` and the Explorer rewired onto it; and the manual's install
+  page, where downloading now comes before building from source.
+
+  **Learned, and the packager found it rather than a reading:** `v1.0.0` had been
+  tagged and released while the version declaration still said `0.0.1`, so the
+  released binary reported 0.0.1 and nothing was wrong anywhere -- every consumer
+  derived it faithfully, which is exactly what ADR 0031 asks for. **A derivation
+  chain is only as true as the thing at the top of it, and that one had no
+  owner.** It stayed invisible for a whole release because no artifact put the
+  number in front of a person; the first one that did was a folder named after
+  it. D086, fixed, with the packager now refusing a folder whose name would
+  disagree with the newest release tag.
+
+  **And a second thing the shape of the last milestone's:** the Explorer's cost
+  was invisible to a profiler for the same reason E5's scratch peak was invisible
+  to a test -- the expensive part was the bookkeeping, not the visible work.
+  Asserting equality rather than smallness is what makes either of them
+  falsifiable.
+
+  **Next:** unzip `LuauG-1.0.0-win64.zip` on a machine with no build tree, open
+  `examples/06-scene` in it, and fill E4's and E5's Gate Records with what it
+  looks like.
+
 - **2026-08-24 (session 21, Claude Opus): E5 built in one pass.** Two commits,
   behind a green six-stage gate.
 
@@ -330,18 +348,9 @@ there when this file passed its ~300-line cap.
   **Next:** capture the chunk-state overlay on `examples/06-scene` and write E5's
   Gate Record, then migrate the examples still using the generator path.
 
-- **2026-08-23 (session 19, Claude Opus): E2 built and closed, E3 built and
-  closed.** Thirty-eight commits, every one behind a green six-stage gate. The
-  full entry is in
-  [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md); the
-  two briefs carry the Gate Records and what each cost.
-
-  **The one thing to carry out of it**: three written decisions were reversed
-  within a day of shipping, each by the person who asked for the first one, and
-  each reversal took one sentence to argue — because the first one was in a file
-  somebody could argue with. The third is mine: I offered a choice whose losing
-  option's own description listed its costs, and a person choosing between two
-  things they have not built yet is choosing on the framing.
-
-- **2026-08-21 (session 11, Claude Opus): M6 built and signed off.** Moved to
-  the archive with the rest of M6.
+- **Sessions 19 and 11 (2026-08-23 and 2026-08-21)** are in
+  [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
+  when E4 was written up. The one thing to carry out of session 19: three
+  written decisions were reversed within a day of shipping, each by the person
+  who asked for the first one, and each reversal took one sentence to argue —
+  because the first one was in a file somebody could argue with.
