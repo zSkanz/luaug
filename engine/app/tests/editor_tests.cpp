@@ -2143,3 +2143,107 @@ TEST_CASE("a manipulator four kilometres out is submitted where it is, not where
 }
 
 // --- E2 / ADR 0048: a script is a file, and the editor writes it ------------
+
+// --- F: framing the selection -----------------------------------------------
+//
+// The camera shortcut every editor in this shape shares, split the way the rest
+// of this module is: a pure question about the world (`selectionBounds`) and a
+// pure piece of arithmetic (`framedCamera`), with the key that calls them living
+// in the ImGui half where nothing can assert on it.
+
+TEST_CASE("the bounds of a selection are the union of what is in it")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 7u);
+
+    const core::InstanceId a = partAt(fixture, world, "A", {-10.0, 0.0, 0.0}, {2.0f, 2.0f, 2.0f});
+    const core::InstanceId b = partAt(fixture, world, "B", {10.0, 0.0, 0.0}, {2.0f, 2.0f, 2.0f});
+
+    const std::array<core::InstanceId, 2> both{a, b};
+    core::DVec3 centre;
+    core::f64 radius = 0.0;
+    REQUIRE(app::selectionBounds(world, both, centre, radius));
+
+    CHECK(centre.x == doctest::Approx(0.0));
+    // The box is 22 x 2 x 2, so the sphere around it is half its diagonal.
+    CHECK(radius == doctest::Approx(std::sqrt(11.0 * 11.0 + 1.0 + 1.0)));
+}
+
+TEST_CASE("framing a model frames the model, not its pivot")
+{
+    // The reason `selectionBounds` walks descendants at all: selecting a
+    // container and pressing F must show the thing, and a container has a
+    // position and no size of its own.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 8u);
+
+    const core::InstanceId group = fixture.widget(world, "Group");
+    const core::InstanceId child = partAt(fixture, world, "Child", {50.0, 0.0, 0.0}, {4.0f, 4.0f, 4.0f});
+    REQUIRE_FALSE(world.setParent(child, group).has_value());
+
+    const std::array<core::InstanceId, 1> selection{group};
+    core::DVec3 centre;
+    core::f64 radius = 0.0;
+    REQUIRE(app::selectionBounds(world, selection, centre, radius));
+    CHECK(centre.x == doctest::Approx(50.0));
+    CHECK(radius > 0.0);
+}
+
+TEST_CASE("a selection with no extent is not framed at all")
+{
+    // A `Folder` has a position and no size. Moving the camera to "see" it
+    // would move the view somewhere arbitrary, so nothing happens instead.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 9u);
+    const core::InstanceId empty = fixture.widget(world, "Empty");
+
+    const std::array<core::InstanceId, 1> selection{empty};
+    core::DVec3 centre;
+    core::f64 radius = 0.0;
+    CHECK_FALSE(app::selectionBounds(world, selection, centre, radius));
+
+    // And neither is nothing at all.
+    CHECK_FALSE(app::selectionBounds(world, {}, centre, radius));
+}
+
+TEST_CASE("framing keeps the direction and only moves the position")
+{
+    // **The whole design in one assertion.** Reorienting as well would answer
+    // "show me this" with "and from over here", and a person who has arranged a
+    // view is not asking to lose it.
+    core::CFrameD current;
+    current.rotation = core::fromEulerYxz(core::Vec3{-0.3f, 1.1f, 0.0f});
+    current.position = {100.0, 100.0, 100.0};
+
+    const core::CFrameD framed = app::framedCamera(current, core::DVec3{0.0, 0.0, 0.0}, 5.0);
+
+    for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column)
+            CHECK(framed.rotation.m[row][column] == doctest::Approx(current.rotation.m[row][column]));
+    }
+    CHECK(framed.position.x != doctest::Approx(current.position.x));
+}
+
+TEST_CASE("what is framed is in front of the camera, at a distance that fits it")
+{
+    core::CFrameD current;
+    current.position = {0.0, 0.0, 0.0};
+
+    const core::DVec3 centre{0.0, 0.0, -40.0};
+    const core::f64 radius = 6.0;
+    const core::CFrameD framed = app::framedCamera(current, centre, radius);
+
+    // Identity rotation looks down -Z, so the camera has to end up on the +Z
+    // side of what it is looking at.
+    CHECK(framed.position.z > centre.z);
+    const core::f64 distance = framed.position.z - centre.z;
+    // Far enough that the sphere fits the vertical field of view with room, and
+    // not so far that it is a dot.
+    CHECK(distance > radius);
+    CHECK(distance < radius * 12.0);
+
+    // **A tiny thing is not framed from inside itself.** A part of no size would
+    // otherwise put the camera exactly on it, which renders as nothing at all.
+    const core::CFrameD tiny = app::framedCamera(current, centre, 0.0);
+    CHECK(tiny.position.z - centre.z > 0.5);
+}

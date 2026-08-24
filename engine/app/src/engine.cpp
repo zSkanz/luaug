@@ -1875,7 +1875,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // Paused: the editor's own view. Playing: the game's, unchanged --
             // which is what makes the viewport show the GAME when you press play
             // rather than a tool's idea of it.
-            const render::ViewOverride editorView{editor.cameraCFrame(), 70.0f, 0.1f, 5000.0f};
+            const render::ViewOverride editorView{editor.cameraCFrame(), EditorFieldOfView, 0.1f, 5000.0f};
             const bool useEditorView = options.editor && editing(editor.runState()) && editor.cameraAdopted();
             // **The selection, drawn as a silhouette rather than as a box.** The
             // wire box E1 shipped says where a thing's BOUNDS are, which for

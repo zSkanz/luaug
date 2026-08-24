@@ -1537,6 +1537,102 @@ void Editor::adoptCamera(const core::CFrameD& cframe) noexcept
     m_cameraAdopted = true;
 }
 
+// How long the camera takes to reach what F asked it to frame. Long enough to
+// read as a move rather than a cut, short enough that nobody waits for it.
+constexpr core::f32 kFocusSeconds = 0.18f;
+
+bool selectionBounds(const scene::World& world, std::span<const core::InstanceId> selection, core::DVec3& outCentre,
+                     core::f64& outRadius)
+{
+    bool any = false;
+    core::DVec3 lo{};
+    core::DVec3 hi{};
+
+    // Descendants included, so F on a `Model` frames the model. The walk is per
+    // selected instance rather than over the world, so it costs what is
+    // selected.
+    std::vector<core::InstanceId> descendants;
+    for (const core::InstanceId id : selection) {
+        if (!id.valid() || !world.alive(id))
+            continue;
+
+        descendants.clear();
+        world.collectDescendants(id, descendants);
+        descendants.push_back(id);
+
+        for (const core::InstanceId member : descendants) {
+            const scene::PartComponent* part = world.parts().find(member);
+            if (part == nullptr)
+                continue;
+
+            // The rotated box's axis-aligned extent, which is the same absolute
+            // -value trick the partitioner uses: a turned crate's reach along
+            // each world axis is its half-size dotted with the absolute row.
+            const core::Mat3& r = part->cframe.rotation;
+            const core::Vec3 h{part->size.x * 0.5f, part->size.y * 0.5f, part->size.z * 0.5f};
+            const auto extent = [&](int axis) {
+                return static_cast<core::f64>(std::abs(r.m[0][axis]) * h.x + std::abs(r.m[1][axis]) * h.y +
+                                              std::abs(r.m[2][axis]) * h.z);
+            };
+            const core::DVec3 c = part->cframe.position;
+            const core::DVec3 e{extent(0), extent(1), extent(2)};
+
+            if (!any) {
+                lo = {c.x - e.x, c.y - e.y, c.z - e.z};
+                hi = {c.x + e.x, c.y + e.y, c.z + e.z};
+                any = true;
+                continue;
+            }
+            lo = {std::min(lo.x, c.x - e.x), std::min(lo.y, c.y - e.y), std::min(lo.z, c.z - e.z)};
+            hi = {std::max(hi.x, c.x + e.x), std::max(hi.y, c.y + e.y), std::max(hi.z, c.z + e.z)};
+        }
+    }
+
+    if (!any)
+        return false;
+
+    outCentre = {(lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5, (lo.z + hi.z) * 0.5};
+    const core::DVec3 half{(hi.x - lo.x) * 0.5, (hi.y - lo.y) * 0.5, (hi.z - lo.z) * 0.5};
+    // The sphere around the box rather than the box, because the camera may be
+    // looking at it from any angle and a half-width is only the right distance
+    // from one of them.
+    outRadius = std::sqrt(half.x * half.x + half.y * half.y + half.z * half.z);
+    return true;
+}
+
+core::CFrameD framedCamera(const core::CFrameD& current, core::DVec3 centre, core::f64 radius, f32 fieldOfViewDegrees)
+{
+    // Never zero: a `Part` of no size, or a selection of one point, would put
+    // the camera exactly on it.
+    constexpr core::f64 kSmallest = 0.5;
+    // Room around the thing, so it is framed rather than filling the panel edge
+    // to edge.
+    constexpr core::f64 kMargin = 1.35;
+
+    const core::f64 half = static_cast<core::f64>(fieldOfViewDegrees) * 0.5 * 3.14159265358979323846 / 180.0;
+    const core::f64 sine = std::sin(half);
+    const core::f64 wanted = radius < kSmallest ? kSmallest : radius;
+    const core::f64 distance = sine > 1e-6 ? (wanted * kMargin) / sine : wanted * 4.0;
+
+    // `Mat3`'s columns are right, up and BACK, so backing off is +back.
+    const core::Mat3& basis = current.rotation;
+    const core::DVec3 back{static_cast<core::f64>(basis.m[2][0]), static_cast<core::f64>(basis.m[2][1]),
+                           static_cast<core::f64>(basis.m[2][2])};
+
+    core::CFrameD framed;
+    framed.rotation = current.rotation;
+    framed.position = {centre.x + back.x * distance, centre.y + back.y * distance, centre.z + back.z * distance};
+    return framed;
+}
+
+void Editor::focusCamera(core::DVec3 centre, core::f64 radius) noexcept
+{
+    if (!m_cameraAdopted)
+        return;
+    m_focusTarget = framedCamera(m_cameraCFrame, centre, radius).position;
+    m_focusRemaining = kFocusSeconds;
+}
+
 void Editor::setCameraSpeed(f32 metresPerSecond) noexcept
 {
     // A speed of zero is a camera that cannot move and a negative one flies
@@ -1562,6 +1658,26 @@ core::CFrameD Editor::driveCamera(core::Vec2 lookDelta, core::Vec3 move, f32 dt)
     // Just short of straight up and straight down. AT the pole the yaw axis and
     // the look direction are the same line and the camera spins on its own.
     constexpr f32 kPitchLimit = 1.5533f;
+
+    // **Taking the controls cancels the focus.** A tool that kept sliding the
+    // view after somebody started flying is a tool arguing with them, and the
+    // person's input is always the more recent answer.
+    if (m_focusRemaining > 0.0f) {
+        if (lookDelta.x != 0.0f || lookDelta.y != 0.0f || move.x != 0.0f || move.y != 0.0f || move.z != 0.0f) {
+            m_focusRemaining = 0.0f;
+        }
+        else {
+            const f32 step = dt < m_focusRemaining ? dt : m_focusRemaining;
+            const core::f64 t = m_focusRemaining > 0.0f ? static_cast<core::f64>(step / m_focusRemaining) : 1.0;
+            m_cameraCFrame.position = {
+                m_cameraCFrame.position.x + (m_focusTarget.x - m_cameraCFrame.position.x) * t,
+                m_cameraCFrame.position.y + (m_focusTarget.y - m_cameraCFrame.position.y) * t,
+                m_cameraCFrame.position.z + (m_focusTarget.z - m_cameraCFrame.position.z) * t,
+            };
+            m_focusRemaining -= step;
+            return m_cameraCFrame;
+        }
+    }
 
     m_yaw -= lookDelta.x * kRadiansPerPixel;
     m_pitch -= lookDelta.y * kRadiansPerPixel;

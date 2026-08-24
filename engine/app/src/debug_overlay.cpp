@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
@@ -1740,13 +1741,64 @@ void drawMemory(script::ScriptRuntime& runtime)
     ImGui::EndTable();
 }
 
+// Whether `line` matches what is typed in the filter, case-insensitively.
+//
+// Case-insensitive because a person hunting a warning types what they remember
+// and not what was printed, and a filter that misses `Chunk` for `chunk` is a
+// filter that reads as broken.
+[[nodiscard]] bool consoleMatches(std::string_view line, std::string_view needle)
+{
+    if (needle.empty())
+        return true;
+    if (needle.size() > line.size())
+        return false;
+    const auto lower = [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); };
+    for (std::string_view::size_type at = 0; at + needle.size() <= line.size(); ++at) {
+        std::string_view::size_type i = 0;
+        while (i < needle.size() && lower(line[at + i]) == lower(needle[i]))
+            ++i;
+        if (i == needle.size())
+            return true;
+    }
+    return false;
+}
+
 void drawConsole(script::ScriptRuntime* runtime)
 {
     ConsoleLog& log = console();
 
+    // **Clear and a filter, above the log they act on.** Both are things a
+    // person reaches for when the console has become unreadable, which is
+    // exactly when hunting for the control must not be part of the work.
+    static std::array<char, 128> filter{};
+    bool cleared = false;
+    if (ImGui::Button("Clear"))
+        cleared = true;
+    ImGui::SameLine();
+    const float resetWidth = ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+    ImGui::SetNextItemWidth(-(resetWidth + ImGui::GetStyle().ItemSpacing.x));
+    ImGui::InputTextWithHint("##filter", "filter", filter.data(), filter.size());
+    ImGui::SameLine();
+    ImGui::BeginDisabled(filter[0] == 0);
+    if (ImGui::Button("Reset"))
+        filter.fill(0);
+    ImGui::EndDisabled();
+
+    const std::string_view needle{filter.data()};
+    core::usize shown = 0;
+
     if (ImGui::BeginChild("log", ImVec2(0.0f, 160.0f), ImGuiChildFlags_Borders)) {
         std::lock_guard<std::mutex> lock(log.mutex);
+        // **Cleared under the same lock the sink writes under.** A clear that
+        // raced a line from another thread would drop one that arrived after the
+        // button and before the erase, which is the one kind of missing message
+        // nobody would ever explain.
+        if (cleared)
+            log.lines.clear();
         for (const ConsoleLog::Line& line : log.lines) {
+            if (!consoleMatches(line.text, needle))
+                continue;
+            ++shown;
             const ImVec4 colour = line.level == core::LogLevel::Error   ? ImVec4(1.0f, 0.45f, 0.4f, 1.0f)
                                   : line.level == core::LogLevel::Warn  ? ImVec4(1.0f, 0.85f, 0.4f, 1.0f)
                                   : line.level == core::LogLevel::Debug ? ImVec4(0.6f, 0.65f, 0.75f, 1.0f)
@@ -1755,6 +1807,13 @@ void drawConsole(script::ScriptRuntime* runtime)
             ImGui::TextUnformatted(line.text.c_str());
             ImGui::PopStyleColor();
         }
+        // **A filter that hides everything says so.** An empty pane and a pane
+        // filtered down to nothing look identical, and one of them means the
+        // engine has said nothing while the other means you are not looking at
+        // what it said.
+        if (shown == 0 && !log.lines.empty())
+            ImGui::TextDisabled("%zu line(s) hidden by the filter.", static_cast<std::size_t>(log.lines.size()));
+
         // Only while already at the bottom, so scrolling back to read something
         // is not undone by the next log line.
         if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
@@ -3231,6 +3290,20 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
             editor->setGizmoMode(GizmoMode::Rotate);
         if (ImGui::IsKeyPressed(ImGuiKey_R, false))
             editor->setGizmoMode(GizmoMode::Scale);
+
+        // **F frames the selection**, which is the one camera shortcut every
+        // editor in this shape shares -- so it is what somebody's hands already
+        // reach for.
+        //
+        // Nothing happens with nothing selected, and nothing happens for a
+        // selection with no extent: a `Folder` has a position and no size, and
+        // "showing" it would move the view somewhere arbitrary.
+        if (ImGui::IsKeyPressed(ImGuiKey_F, false) && world != nullptr && inspector != nullptr) {
+            core::DVec3 centre;
+            core::f64 radius = 0.0;
+            if (selectionBounds(*world, inspector->selectionSet(), centre, radius))
+                editor->focusCamera(centre, radius);
+        }
     }
     if (editor != nullptr)
         editor->setSnapSuspended(ImGui::GetIO().KeyAlt);

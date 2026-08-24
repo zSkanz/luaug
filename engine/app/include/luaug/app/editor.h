@@ -44,6 +44,29 @@ class World;
 
 namespace luaug::app {
 
+// The vertical field of view the editor's own camera looks through, in degrees.
+// One number rather than two: the frame loop builds the `ViewOverride` from it
+// and `framedCamera` frames against it, and a distance computed from a different
+// angle than the one being rendered puts the thing you asked to see off-screen.
+inline constexpr f32 EditorFieldOfView = 70.0f;
+
+// The world-space sphere a selection occupies, descendants included -- so
+// pressing F on a `Model` frames the model rather than its pivot.
+//
+// False when nothing in the selection has an extent, which is a real answer: a
+// selection of one `Folder` has a position and no size, and moving the camera
+// to "see" it would move it somewhere arbitrary.
+[[nodiscard]] bool selectionBounds(const scene::World& world, std::span<const core::InstanceId> selection,
+                                   core::DVec3& outCentre, core::f64& outRadius);
+
+// Where a camera has to sit to frame a sphere, looking the way it already looks.
+//
+// The distance is what puts the sphere inside the vertical field of view with a
+// margin, and it is clamped at the near end: a two-centimetre part would
+// otherwise be framed from inside its own surface.
+[[nodiscard]] core::CFrameD framedCamera(const core::CFrameD& current, core::DVec3 centre, core::f64 radius,
+                                         f32 fieldOfViewDegrees = EditorFieldOfView);
+
 // The 3D view's own colour target.
 //
 // An editor's viewport is a panel with UI around it, so the world cannot be
@@ -1200,6 +1223,18 @@ public:
     void adoptCamera(const core::CFrameD& cframe) noexcept;
     [[nodiscard]] bool cameraAdopted() const noexcept { return m_cameraAdopted; }
 
+    // **F: put the camera where it can see what is selected**, which every
+    // editor in this shape does and which somebody's hands therefore already
+    // know. The DIRECTION is kept and only the position moves: reorienting as
+    // well would answer "show me this" with "and from over here", and a person
+    // who has arranged a view is not asking to lose it.
+    //
+    // Eased over a fraction of a second rather than snapped, and any camera
+    // input cancels it -- a tool that keeps moving the view after somebody has
+    // taken the controls is a tool arguing with them.
+    void focusCamera(core::DVec3 centre, core::f64 radius) noexcept;
+    [[nodiscard]] bool focusing() const noexcept { return m_focusRemaining > 0.0f; }
+
     // What the shell saw the mouse and keyboard doing this frame.
     //
     // **The shell decides WHETHER to look and the frame loop decides HOW**, and
@@ -1307,6 +1342,9 @@ private:
 
     core::CFrameD m_cameraCFrame;
     bool m_cameraAdopted = false;
+    // Where `focusCamera` is taking the position, and how long it has left.
+    core::DVec3 m_focusTarget;
+    f32 m_focusRemaining = 0.0f;
     // Radians. Held separately from the CFrame because deriving them back out
     // of a rotation matrix every frame accumulates, and a fly camera that
     // slowly roll-drifts is a bug people describe as "the horizon is tilting".
