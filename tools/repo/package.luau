@@ -157,23 +157,43 @@ local function copyTree(from: string, to: string, skip: { [string]: boolean }?)
     end
 end
 
---- Clears a previous folder, and says WHY when it cannot.
+--- Clears a previous folder, and says WHY when it cannot -- **before it has
+--- removed anything**.
 ---
---- **The commonest reason is the obvious one**: the editor that folder holds is
---- open, and Windows will not unlink a running executable. That arrived as a
---- stack trace from inside `fs.remove`, which is a traceback for a situation a
---- sentence answers -- so it is caught here and named.
+--- The commonest reason is the obvious one: the editor that folder holds is
+--- open, and Windows will not unlink a running executable. The first version of
+--- this let `removeDirectory` walk the tree and fail when it reached the locked
+--- binary, which leaves a HALF-DELETED installation behind -- and half an
+--- installation starts, finds no content and behaves like a defect in the
+--- engine. That is worse than not clearing at all, and it is what happened.
+---
+--- So the binaries that can be locked are removed first, one at a time. A
+--- failure there has deleted nothing, because they are the first thing tried.
 local function removeTree(target: string): string?
     if not fs.exists(target) then
         return nil
     end
+
+    for _, relative in { executableName("luaug-host"), joined("player", executableName("luaug-host")) } do
+        local binary = joined(target, relative)
+        if fs.exists(binary) then
+            local ok, err = pcall(function()
+                fs.remove(binary)
+            end)
+            if not ok then
+                return `{binary} is in use ({err}). Close the editor or the game running from that folder, then run `
+                    .. `this again -- nothing has been removed.`
+            end
+        end
+    end
+
     local ok, err = pcall(function()
         fs.removeDirectory(target, { recursive = true })
     end)
     if ok then
         return nil
     end
-    return `{target} could not be cleared ({err}). If the editor from it is open, close it and run this again.`
+    return `{target} could not be cleared ({err}).`
 end
 
 --- One file into the folder, refusing rather than skipping when it is not

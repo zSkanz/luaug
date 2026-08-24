@@ -405,3 +405,35 @@ TEST_CASE("a document owns its strings")
     CHECK(document.root()["a"].asString() == "\xC3\xA9one");
     CHECK(document.root()["b"].asString() == "two");
 }
+
+TEST_CASE("a UTF-8 byte-order mark is skipped rather than refused")
+{
+    // **Notepad writes one by default**, and so does Windows PowerShell's
+    // `Out-File` for UTF-8, and so does Visual Studio. Every engine JSON a
+    // person edits by hand can therefore arrive with three bytes in front of
+    // it, and a strict reader -- which is not WRONG, RFC 8259 leaves this to the
+    // implementation -- turns that into a file that parses as nothing and is
+    // ignored in silence.
+    JsonDocument document;
+    const std::string withBom = std::string("\xEF\xBB\xBF") + R"({"scale":1.25,"theme":"dark"})";
+
+    const JsonDocument::ParseResult parsed = document.parse(withBom, "appearance.json");
+    REQUIRE_MESSAGE(parsed.ok, parsed.diagnostic);
+    CHECK(document.root()["scale"].asNumber() == doctest::Approx(1.25));
+    CHECK(document.root()["theme"].asString() == "dark");
+}
+
+TEST_CASE("a byte-order mark anywhere but the start is still what it was")
+{
+    // Only the very beginning, and only the UTF-8 spelling. A BOM in the middle
+    // of a document is a zero-width no-break space in somebody's data, and
+    // skipping one there would be editing what they wrote.
+    JsonDocument document;
+    const std::string inside = std::string(R"({"name":")") + "\xEF\xBB\xBF" + R"(a"})";
+    REQUIRE(document.parse(inside, "inside.json").ok);
+    CHECK(document.root()["name"].asString().size() == 4);
+
+    // And a document that is nothing but a mark is still not a document: what
+    // was skipped is a prefix, not a value.
+    CHECK_FALSE(document.parse("\xEF\xBB\xBF", "empty.json").ok);
+}

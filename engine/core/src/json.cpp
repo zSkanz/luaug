@@ -552,6 +552,23 @@ JsonDocument::ParseResult JsonDocument::parse(std::string_view json, std::string
     impl_->rootIndex = 0;
     impl_->ok = false;
 
+    // **A UTF-8 byte-order mark is skipped rather than refused.**
+    //
+    // JSON's own grammar has no place for one and RFC 8259 says an
+    // implementation MAY ignore it -- so a strict reader is not wrong, it is
+    // just useless against the files people actually have. Notepad writes a BOM
+    // by default, PowerShell's `Out-File` and `Set-Content` write one for UTF-8
+    // on Windows PowerShell, and so does Visual Studio; every one of those is a
+    // way somebody edits an engine JSON by hand, and the symptom was a file that
+    // parsed as nothing and was ignored in silence.
+    //
+    // Only at the very start, and only the UTF-8 spelling. A BOM in the middle
+    // of a document is a zero-width no-break space in somebody's data, and the
+    // UTF-16 ones are a file this parser could not read anyway.
+    constexpr std::string_view kUtf8Bom = "\xEF\xBB\xBF";
+    if (json.size() >= kUtf8Bom.size() && json.substr(0, kUtf8Bom.size()) == kUtf8Bom)
+        json.remove_prefix(kUtf8Bom.size());
+
     Impl::Parser parser{*impl_, json};
     if (!parser.run())
         return ParseResult{false, std::string{sourceName} + ": " + parser.error};
