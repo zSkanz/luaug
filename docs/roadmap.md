@@ -1264,6 +1264,7 @@ size were normal.
 | E3 | Assets and Prefabs | M | Prefabs as scenes, an asset importer path from the browser, and a scene that references what it uses. **The model is settled: ADR 0048** -- content holds SOURCES, an instance in the world may be a LINK to one, and editing a linked instance breaks the link and makes it its own thing. Written at E2 from the human's own description rather than invented while wiring a browser |
 | E4 | The Editor Ships | M | The distribution question ADR 0046 deliberately declined, and the editor's own performance gate: a folder somebody downloads, and an Explorer that costs what is open rather than what exists. **Settled: ADR 0054.** Specified below, in progress |
 | E5 | The World You Build | L | A world authored in `Workspace` becomes a streamed world on its own — no generator script, nothing sorted by hand. `Model.StreamingMode` makes the model the unit rather than the part; cells are chosen by size as well as position on the `layer` that has existed unused since M7. **Settled: ADR 0053.** Placed here rather than in phase 2 because it is an authoring capability and E3's stamps are its neighbour |
+| E6 | The Launcher | M | `luaug-host` with no project opens a project browser instead of printing a usage error: recent projects, a new one from a template, a folder picker, and the editor started on what you chose. **Settled: ADR 0055.** Specified below, in progress |
 
 **What moved into E1 and why it was right.** Undo was E2's, and E1 grew delete
 and duplicate — the two actions that make its absence dangerous. The content
@@ -1757,3 +1758,73 @@ serializer's `generated` skip stays and stays correct.
 - **`luaug check` and the full local gate are green**, and the docs say what a
   script may assume about a streamed world — the tag path written down, with the
   `nil` a path reference may return stated rather than discovered.
+
+### E6 — The Launcher (M)
+
+**Settled by
+[ADR 0055](decisions/0055-the-launcher-is-the-engine-with-no-project-open.md).**
+Opened 2026-08-24, on the human's word, an hour after E4 was signed off and for
+the reason E4's own scope list predicted: the archive was unzipped and the first
+question was *what do I open*. E4 named the absence deliberately — a project
+browser invented at a packaging milestone would have been invented without
+having watched anybody need one. Somebody has now needed one.
+
+**The quality bar was given in those words: Unity and Unreal.** What that means
+here is stated rather than left to taste, because the three comparison points do
+not agree with each other and one of them is answering a question this engine
+does not have. Unity's Hub is a separate application whose real job is choosing
+*which editor version* a project opens with; there is one engine in a LuauG
+installation, and a folder holding two of them is two folders. Unreal and Godot
+both put the browser in the editor binary. So does this.
+
+#### Scope
+
+- **A launcher shell.** `luaug-host` with no project shows a project browser
+  instead of printing a usage error: `Shell::Launcher` beside the F3 overlay and
+  the editor's dockspace, drawn by the same overlay, with no world, no Luau VM
+  and no physics behind it.
+- **Recent projects, per user.** `SDL_GetPrefPath` supplies the user directory
+  `platform.h` has been describing since M1 as arriving with its first consumer.
+  A project that has moved or been deleted is shown as missing and removable
+  rather than silently dropped.
+- **Creating a project**, from the template `luaug new` already scaffolds, with a
+  name and a location — and the two must produce identical trees.
+- **Opening a project by browsing for it**, through the native folder picker, and
+  by typing a path where there is no picker.
+- **Choosing a project starts the editor as a new process** and the launcher
+  quits. What a project decides — content mounts, the Luau VM, the `.luaurc`, the
+  partition cache, the editor layout — is everything the host resolves at boot.
+- **`luaug edit` with nowhere to go opens it too**, rather than reporting that
+  the working directory is not a project.
+
+#### NOT in scope
+
+Managing several engine versions, which is the job Unity's Hub exists for and
+which this engine does not have. A project list that syncs between machines. A
+template gallery: the launcher lists the template directory, so a second template
+is a directory rather than a feature. Cloning a project from a repository.
+Anything that opens a project without starting the editor.
+
+#### Gate (definition of done)
+
+- **Double-clicking the engine opens the launcher.** From the packaged folder,
+  with no arguments, on a machine with no build tree. A screenshot goes in the
+  gate record.
+- **The model is asserted without a window.** The recents list round-trips
+  through its file, deduplicates by path, orders by most recent, keeps a missing
+  project visible and removable, and refuses a directory that is not a project —
+  all in `launcher_tests.cpp`, with no ImGui in the header it tests.
+- **The launcher and `luaug new` scaffold the same project.** A test creates one
+  each way and compares the trees file by file, because two implementations of
+  one thing that nothing compares are two implementations that have already
+  drifted.
+- **A created project opens.** Made in the launcher, started by it, and the
+  editor comes up on it — the loop a person actually performs, driven as far as a
+  window allows and recorded for the part that needs a person.
+- **No native dialog is required.** With `SDL_DIALOG` unavailable or refused, the
+  path field still opens a project, and the launcher says why the picker did not
+  appear rather than doing nothing when the button is pressed.
+- **The engine still refuses what it refused.** A host given a path that is not
+  there reports it exactly as before; the launcher is what happens when there is
+  no path at all, not a fallback that swallows a mistyped one.
+- **`scripts/localgate.ps1` is green on every stage.**
