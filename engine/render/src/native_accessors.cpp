@@ -154,6 +154,31 @@ bool setMeshPartCollisionFidelity(scene::World& world, core::InstanceId id, cons
     return true;
 }
 
+Value getMeshPartMeshSize(const scene::World& world, core::InstanceId id)
+{
+    const scene::MeshPartComponent* mesh = readMeshPart(world, id);
+    if (mesh == nullptr)
+        return Value{};
+    return Value{mesh->meshSize};
+}
+
+bool setMeshPartMeshSize(scene::World& world, core::InstanceId id, const Value& value)
+{
+    const auto* size = std::get_if<core::Vec3>(&value);
+    scene::MeshPartComponent* mesh = writeMeshPart(world, id);
+    if (size == nullptr || mesh == nullptr)
+        return false;
+    // It is a DIVISOR, so a zero or a negative is not a small mesh -- it is a
+    // scale factor that is infinite or mirrored, and both reach the renderer and
+    // the hull builder as a shape neither can make. Refused here, where it
+    // becomes a keyed error.
+    if (!std::isfinite(size->x) || !std::isfinite(size->y) || !std::isfinite(size->z) || size->x <= 0.0f ||
+        size->y <= 0.0f || size->z <= 0.0f)
+        return false;
+    mesh->meshSize = *size;
+    return true;
+}
+
 void attachMeshPartComponents(scene::World& world, core::InstanceId id)
 {
     world.meshParts().add(id, scene::MeshPartComponent{});

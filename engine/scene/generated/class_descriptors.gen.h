@@ -92,6 +92,8 @@ Value getModelPrimaryPart(const World& world, core::InstanceId id);
 bool setModelPrimaryPart(World& world, core::InstanceId id, const Value& value);
 Value getModelStreamingMode(const World& world, core::InstanceId id);
 bool setModelStreamingMode(World& world, core::InstanceId id, const Value& value);
+Value getModelScale(const World& world, core::InstanceId id);
+bool setModelScale(World& world, core::InstanceId id, const Value& value);
 void attachModelComponents(World& world, core::InstanceId id);
 void detachModelComponents(World& world, core::InstanceId id);
 

@@ -595,6 +595,60 @@ TEST_CASE("a MeshPart collides as a hull once its points have been handed over")
     CHECK(mirror.backend.created[0].desc.shape.points.size() == 4);
 }
 
+TEST_CASE("a hull is scaled by Size over MeshSize, like the mesh on screen")
+{
+    // The collision shape and the drawn shape are the same shape or they are a
+    // lie. `MeshSize` is what the mesh measures as authored; `Size` is what the
+    // part is; the hull's points are in the mesh's own space, so the ratio is
+    // what carries one into the other.
+    Mirror mirror;
+    const core::NameAtom content = mirror.fixture.world.atoms().intern("asset://models/rock.glb");
+    mirror.sync.setCollisionPoints(content, {core::Vec3{0.0f, 0.0f, 0.0f}, core::Vec3{1.0f, 0.0f, 0.0f},
+                                             core::Vec3{0.0f, 1.0f, 0.0f}, core::Vec3{0.0f, 0.0f, 1.0f}});
+
+    const core::InstanceId id = mirror.part("Rock");
+    mirror.transform(id).size = core::Vec3{4.0f, 6.0f, 8.0f};
+    MeshPartComponent mesh;
+    mesh.meshContent = content;
+    mesh.collisionFidelity = 1;
+    mesh.meshSize = core::Vec3{2.0f, 2.0f, 4.0f};
+    mirror.fixture.world.meshParts().add(id, mesh);
+    mirror.step();
+
+    REQUIRE(mirror.backend.created.size() == 1);
+    const physics::ShapeDesc& shape = mirror.backend.created[0].desc.shape;
+    CHECK(shape.type == physics::ShapeType::ConvexHull);
+    // A factor rather than pre-scaled points: the points are SHARED across every
+    // part naming this file, and scaling them here would be a copy per body.
+    CHECK(shape.points.size() == 4);
+    CHECK(shape.pointScale.x == 2.0f);
+    CHECK(shape.pointScale.y == 3.0f);
+    CHECK(shape.pointScale.z == 2.0f);
+}
+
+TEST_CASE("a MeshPart nobody resized hands the backend an identity scale")
+{
+    // Both default to one, so every scene written before `MeshSize` existed
+    // builds exactly the hull it did then.
+    Mirror mirror;
+    const core::NameAtom content = mirror.fixture.world.atoms().intern("asset://models/rock.glb");
+    mirror.sync.setCollisionPoints(content, {core::Vec3{0.0f, 0.0f, 0.0f}, core::Vec3{1.0f, 0.0f, 0.0f},
+                                             core::Vec3{0.0f, 1.0f, 0.0f}, core::Vec3{0.0f, 0.0f, 1.0f}});
+
+    const core::InstanceId id = mirror.part("Rock");
+    MeshPartComponent mesh;
+    mesh.meshContent = content;
+    mesh.collisionFidelity = 1;
+    mirror.fixture.world.meshParts().add(id, mesh);
+    mirror.step();
+
+    REQUIRE(mirror.backend.created.size() == 1);
+    const physics::ShapeDesc& shape = mirror.backend.created[0].desc.shape;
+    CHECK(shape.pointScale.x == 1.0f);
+    CHECK(shape.pointScale.y == 1.0f);
+    CHECK(shape.pointScale.z == 1.0f);
+}
+
 TEST_CASE("CollisionFidelity Box is honoured exactly, points or no points")
 {
     // The one fidelity that names a shape rather than an accuracy, and it means

@@ -306,12 +306,12 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
     // the real one is not working, so a bug in the culler must not be able to
     // hide it.
     //
-    // A `MeshPart` whose mesh HAS loaded is the exception, and it is the one
-    // case where the wire box says something untrue. `BasePart.Size` does not
-    // scale a mesh -- the file's own bounds do -- so the box drawn from it is a
-    // unit cube at the mesh's origin, describing nothing about what is on
-    // screen. When the mesh has not loaded it is the opposite: the only sign
-    // the part exists at all, which is exactly what the debug path is for.
+    // A `MeshPart` whose mesh HAS loaded is the exception: the real geometry is
+    // on screen, and a box over it would be a second outline of the same thing
+    // in a different shape -- the box is the part's, and the mesh fills only as
+    // much of it as its own bounds reach. When the mesh has NOT loaded it is
+    // the opposite: the only sign the part exists at all, which is exactly what
+    // the debug path is for.
     world.parts().forEach([&](core::InstanceId id, const scene::PartComponent& part) {
         if (!inWorld(world, id, root))
             return;
@@ -422,7 +422,18 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         if (entry == nullptr || !entry->mesh.valid())
             return;
 
-        const Mat4 transform = core::toRenderMatrix(at(id, part->cframe), origin);
+        // `Size / MeshSize` is what makes `Size` mean the same thing on a
+        // `MeshPart` as it does on a `Part`. Both default to one, so a scene
+        // written before this existed produces exactly the matrix it did then --
+        // and the multiply is skipped outright when they match, which is every
+        // part nobody has resized.
+        Mat4 transform = core::toRenderMatrix(at(id, part->cframe), origin);
+        const Vec3 stretch{part->size.x / meshPart.meshSize.x, part->size.y / meshPart.meshSize.y,
+                           part->size.z / meshPart.meshSize.z};
+        if (stretch.x != 1.0f || stretch.y != 1.0f || stretch.z != 1.0f)
+            transform = transform * core::scaling(stretch);
+        // Transformed by the SCALED matrix, so the cull box and the shadow
+        // cast-in test both describe what is actually drawn.
         const AABB worldBounds = core::transformed(transform, entry->bounds);
 
         // The palette, appended once per MESH rather than once per section: a

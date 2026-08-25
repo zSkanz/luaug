@@ -1177,6 +1177,11 @@
         {
           "Name": "MeshContent",
           "Type": "Content"
+        },
+        {
+          "Name": "MeshSize",
+          "Type": "vector",
+          "Default": "vector.create(1, 1, 1)"
         }
       ],
       "Methods": [],
@@ -1190,6 +1195,11 @@
         {
           "Name": "PrimaryPart",
           "Type": "BasePart?"
+        },
+        {
+          "Name": "Scale",
+          "Type": "number",
+          "Default": "1"
         },
         {
           "Name": "StreamingMode",

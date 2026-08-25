@@ -135,6 +135,11 @@ physics::ShapeDesc PhysicsSync::shapeOf(core::InstanceId id, const PartComponent
         if (at != m_collisionPoints.end() && at->first == content && at->second.size() >= 4) {
             shape.type = physics::ShapeType::ConvexHull;
             shape.points = at->second;
+            // The same `Size / MeshSize` the renderer draws with, so the hull is
+            // the shape on screen and not the shape in the file. The box branch
+            // above needs no equivalent: it is already `part.size`.
+            shape.pointScale = core::Vec3{part.size.x / mesh->meshSize.x, part.size.y / mesh->meshSize.y,
+                                          part.size.z / mesh->meshSize.z};
         }
         return shape;
     }

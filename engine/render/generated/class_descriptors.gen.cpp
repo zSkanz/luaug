@@ -47,7 +47,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     const scene::ClassId instanceClass = classes.findId(atoms.intern("Instance"));
 
     // --- MeshPart ---
-    static std::array<scene::PropertyDesc, 2> meshPartProperties;
+    static std::array<scene::PropertyDesc, 3> meshPartProperties;
     meshPartProperties = {{
         scene::PropertyDesc{
             .name = atoms.intern("MeshContent"),
@@ -72,6 +72,17 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getMeshPartCollisionFidelity,
             .set = native::setMeshPartCollisionFidelity,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("MeshSize"),
+            .type = scene::ValueType::Vector3,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "What the mesh measures at its authored size, in metres. `Size` divided by this is what the part is scaled by, so setting `Size` to twice `MeshSize` draws the mesh at twice its authored size and collides with a hull to match -- which is what makes `Size` mean the same thing here as it does on a `Part`.\012\012**The import writes it, and it is saved with the scene.** It is not read back off the file: the mesh's real bounds are known only where something loaded it, and a scene has to describe the same world whether or not anything is rendering. A part whose `Size` and `MeshSize` are both one draws exactly as it always has.\012\012Writing it yourself stretches the mesh, which is a legitimate thing to want; zero and negative components are refused, since they are a division rather than a size.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector"),
+            .get = native::getMeshPartMeshSize,
+            .set = native::setMeshPartMeshSize,
         },
     }};
     scene::ClassDescriptor meshPartDesc;

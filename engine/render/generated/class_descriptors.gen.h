@@ -81,6 +81,8 @@ scene::Value getMeshPartMeshContent(const scene::World& world, core::InstanceId 
 bool setMeshPartMeshContent(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getMeshPartCollisionFidelity(const scene::World& world, core::InstanceId id);
 bool setMeshPartCollisionFidelity(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getMeshPartMeshSize(const scene::World& world, core::InstanceId id);
+bool setMeshPartMeshSize(scene::World& world, core::InstanceId id, const scene::Value& value);
 void attachMeshPartComponents(scene::World& world, core::InstanceId id);
 void detachMeshPartComponents(scene::World& world, core::InstanceId id);
 

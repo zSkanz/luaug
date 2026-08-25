@@ -96,6 +96,15 @@ struct ShapeDesc
     // ConvexHull only. Points are in the part's local space and the span must
     // outlive the `createBody` call and no longer.
     std::span<const core::Vec3> points;
+
+    // ConvexHull only: what to multiply each point by on the way in.
+    //
+    // A factor rather than pre-scaled points, because the points are shared --
+    // every `MeshPart` naming one file collides against one cached point cloud,
+    // and scaling in `scene` would mean a copy per body per resize. The backend
+    // already copies each point into its own array to build the hull, so this
+    // rides along for nothing.
+    core::Vec3 pointScale{1.0f, 1.0f, 1.0f};
 };
 
 // A collision group is an index into the world's collidability matrix.

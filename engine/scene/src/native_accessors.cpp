@@ -9,11 +9,13 @@
 // allocation on the read path beyond what a `Value` costs -- because these are
 // the innermost frames of the Instance facade, and architecture risk #1 is the
 // facade's overhead eating the ECS's win.
+#include "luaug/scene/pivot.h"
 #include "luaug/scene/world.h"
 
 #include <cmath>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "../generated/class_descriptors.gen.h"
 
@@ -272,6 +274,102 @@ bool setModelPrimaryPart(World& world, core::InstanceId id, const Value& value)
     if (valueType(value) != ValueType::Nil)
         return false;
     model->primaryPart = core::InstanceId{};
+    return true;
+}
+
+Value getModelScale(const World& world, core::InstanceId id)
+{
+    const ModelComponent* model = world.models().find(id);
+    if (model == nullptr)
+        return Value{};
+    return Value{static_cast<f64>(model->scale)};
+}
+
+// **The one accessor in this file that is not a field write**, and the reason it
+// is a setter rather than a `ScaleTo` method: a grid write, a script write and a
+// scene load then take one path, and none of them can forget to fan out.
+//
+// The fan-out is BAKED. Nothing multiplies by `scale` per frame -- the parts
+// under the model are simply at their new sizes, so a scaled model costs the
+// renderer and the solver exactly what an unscaled one costs. What that buys is
+// also what it costs: a descendant parented in afterwards is not scaled, which
+// the property's own Doc says out loud.
+//
+// **A scene load is correct by construction, not by luck.** `readInstance`
+// applies a node's properties BEFORE creating its children, so this write lands
+// on a model with nothing under it, finds nothing to scale, and the children
+// arrive at the sizes they were saved with -- which are already scaled. Were the
+// order the other way round, every load would scale a saved model twice.
+bool setModelScale(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* number = std::get_if<f64>(&value);
+    ModelComponent* model = world.models().find(id);
+    if (number == nullptr || model == nullptr)
+        return false;
+    // Zero is not a small model, it is a shape with no extent: the hull builder
+    // cannot make one and the renderer draws a plane. Negative is a mirror,
+    // which inverts every winding under the model.
+    if (!finite(*number) || *number <= 0.0)
+        return false;
+
+    // The RATIO, which is what makes the property absolute: setting 2 twice
+    // leaves the model twice its built size rather than four times.
+    const auto next = static_cast<f32>(*number);
+    const f64 ratio = *number / static_cast<f64>(model->scale);
+    model->scale = next;
+    // Not reachable through `setProperty`, which reads and compares before it
+    // calls a setter -- a ratio of exactly one means the value equals what the
+    // getter just returned, and that write never gets here. It stays because
+    // this is a plain function pointer anything may call, and walking a subtree
+    // to multiply every size by one is a cost with no answer attached.
+    if (ratio == 1.0)
+        return true;
+
+    // About the model's PIVOT, so a scaled model grows in place instead of
+    // drifting away from where it stood. `pivotOf` is the same answer
+    // `GetPivot` gives, which is the point of it living in `scene` now.
+    const core::CFrameD pivot = pivotOf(world, id);
+
+    const core::NameAtom sizeProperty = world.atoms().intern("Size");
+    const core::NameAtom cframeProperty = world.atoms().intern("CFrame");
+    const core::NameAtom pivotOffsetProperty = world.atoms().intern("PivotOffset");
+    const auto scaleF32 = static_cast<f32>(ratio);
+
+    std::vector<core::InstanceId> descendants;
+    world.collectDescendants(id, descendants);
+    for (const core::InstanceId descendant : descendants) {
+        if (const PartComponent* part = world.parts().find(descendant); part != nullptr) {
+            // Through `setProperty` rather than into the component, so the
+            // renderer, the physics mirror and every `Changed` connection see it
+            // through the path they already have.
+            core::CFrameD moved = part->cframe;
+            const core::DVec3 fromPivot{moved.position.x - pivot.position.x, moved.position.y - pivot.position.y,
+                                        moved.position.z - pivot.position.z};
+            moved.position = core::DVec3{pivot.position.x + fromPivot.x * ratio, pivot.position.y + fromPivot.y * ratio,
+                                         pivot.position.z + fromPivot.z * ratio};
+            // Rotation untouched: scaling is uniform, so an orientation is the
+            // one thing about a part that does not change with it.
+            (void)world.setProperty(descendant, cframeProperty, Value{moved});
+            (void)world.setProperty(
+                descendant, sizeProperty,
+                Value{core::Vec3{part->size.x * scaleF32, part->size.y * scaleF32, part->size.z * scaleF32}});
+        }
+
+        if (const PVComponent* pv = world.pvInstances().find(descendant); pv != nullptr) {
+            // The offset is a displacement from the object, so it scales with
+            // the object. Its rotation is a hinge direction and does not.
+            core::CFrameD offset = pv->pivotOffset;
+            offset.position =
+                core::DVec3{offset.position.x * ratio, offset.position.y * ratio, offset.position.z * ratio};
+            (void)world.setProperty(descendant, pivotOffsetProperty, Value{offset});
+        }
+
+        // A nested model's own number, written into the component and never
+        // through this setter: re-entering would fan the ratio out a second time
+        // over the same parts, once per level of nesting.
+        if (ModelComponent* nested = world.models().find(descendant); nested != nullptr)
+            nested->scale = static_cast<f32>(static_cast<f64>(nested->scale) * ratio);
+    }
     return true;
 }
 

@@ -425,7 +425,8 @@ struct CharacterPair
         JPH::Array<JPH::Vec3> points;
         points.reserve(desc.points.size());
         for (const core::Vec3& point : desc.points) {
-            points.push_back(toJolt(point));
+            points.push_back(toJolt(
+                core::Vec3{point.x * desc.pointScale.x, point.y * desc.pointScale.y, point.z * desc.pointScale.z}));
         }
         JPH::ConvexHullShapeSettings settings(points);
         settings.SetEmbedded();

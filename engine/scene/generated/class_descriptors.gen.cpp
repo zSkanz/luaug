@@ -311,7 +311,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(folderDesc);
 
     // --- Model ---
-    static std::array<PropertyDesc, 2> modelProperties;
+    static std::array<PropertyDesc, 3> modelProperties;
     modelProperties = {{
         PropertyDesc{
             .name = atoms.intern("PrimaryPart"),
@@ -335,6 +335,17 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
             .get = native::getModelStreamingMode,
             .set = native::setModelStreamingMode,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Scale"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How big this model is relative to the size it was built at. Setting it resizes every part under the model and moves each one about the model's pivot, so the whole thing grows in place rather than drifting away from where it stood.\012\012**It is absolute, not cumulative.** Setting 2 twice leaves the model twice its built size, not four times -- the write scales by the ratio between the new value and the old one. Setting 1 puts it back exactly.\012\012**A descendant added afterwards is not scaled.** The write fans out once over what is there and then it is done: nothing is multiplied by this per frame, which is what makes a scaled model cost the same to draw and simulate as an unscaled one. Parent the part first, then scale.\012\012Zero and negative values are refused. A part with no size is not a small part, it is a shape the solver cannot build.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getModelScale,
+            .set = native::setModelScale,
         },
     }};
     static std::array<MethodDesc, 1> modelMethods;

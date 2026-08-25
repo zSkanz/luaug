@@ -537,6 +537,58 @@ TEST_CASE("Transparency reaches the draw, picks the pass, and reverses the sort"
     }
 }
 
+TEST_CASE("Size over MeshSize is what a mesh is drawn at")
+{
+    // What makes `Size` mean the same thing on a `MeshPart` as it does on a
+    // `Part`. `MeshSize` is what the mesh measures as authored, so the ratio is
+    // the stretch, and the CULL BOX has to be built from the scaled matrix or a
+    // stretched mesh gets culled by the bounds of the unstretched one.
+    Fixture fixture;
+    fixture.registerRenderClasses();
+    const core::InstanceId workspace = fixture.world.create(fixture.workspaceClass);
+    (void)fixture.cameraLookingDownNegativeZ(workspace);
+
+    const core::NameAtom content = fixture.atoms.intern("asset://models/box.glb");
+    const core::InstanceId id = fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -10.0}, content);
+
+    render::MeshLibrary meshes;
+    render::MeshLibrary::Entry entry;
+    entry.mesh = render::MeshHandle{0, 1};
+    entry.bounds = core::AABB::fromCenterSize(core::Vec3{}, core::Vec3{1.0f, 1.0f, 1.0f});
+    entry.sectionCount = 1;
+    meshes.set(content, entry);
+
+    SUBCASE("both at one, which is every scene written before this existed")
+    {
+        render::RenderWorld snapshot;
+        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr,
+                        snapshot);
+        REQUIRE(snapshot.draws.size() == 1);
+        // The identity, exactly: the multiply is skipped rather than done with
+        // ones, so the matrix is bit-for-bit what it was.
+        CHECK(snapshot.draws[0].transform.m[0][0] == 1.0f);
+        CHECK(snapshot.draws[0].transform.m[1][1] == 1.0f);
+        CHECK(snapshot.draws[0].transform.m[2][2] == 1.0f);
+    }
+
+    SUBCASE("a part twice its mesh's size draws twice as big")
+    {
+        fixture.world.parts().find(id)->size = core::Vec3{4.0f, 6.0f, 2.0f};
+        fixture.world.meshParts().find(id)->meshSize = core::Vec3{2.0f, 2.0f, 4.0f};
+
+        render::RenderWorld snapshot;
+        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr,
+                        snapshot);
+        REQUIRE(snapshot.draws.size() == 1);
+        CHECK(snapshot.draws[0].transform.m[0][0] == 2.0f);
+        CHECK(snapshot.draws[0].transform.m[1][1] == 3.0f);
+        CHECK(snapshot.draws[0].transform.m[2][2] == 0.5f);
+        // And the translation is untouched: a stretch about the part's own
+        // origin, not a move.
+        CHECK(snapshot.draws[0].transform.m[3][2] == -10.0f);
+    }
+}
+
 TEST_CASE("a MeshPart's wire box appears only while its mesh has not loaded")
 {
     Fixture fixture;
@@ -568,8 +620,10 @@ TEST_CASE("a MeshPart's wire box appears only while its mesh has not loaded")
 
         render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr,
                         snapshot);
-        // `Size` does not scale a mesh -- the file's bounds do -- so a wire box
-        // built from it would be a unit cube describing nothing on screen.
+        // No wire box: the real geometry is on screen, and a box drawn from
+        // `Size` over it would be a second, differently-shaped outline of the
+        // same thing. (`Size` DOES scale the mesh now -- `Size / MeshSize` --
+        // but the box would still be the part's box and not the mesh's.)
         CHECK(snapshot.parts.empty());
         CHECK(snapshot.draws.size() == 1);
     }

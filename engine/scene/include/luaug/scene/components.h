@@ -79,6 +79,18 @@ struct MeshPartComponent
     // rather than by the renderer, which is why it sits with the geometry it
     // approximates rather than with the rigid body that uses it.
     i32 collisionFidelity = 0;
+
+    // What the mesh measures at `Size == meshSize`, so that `Size` means the
+    // same thing on a `MeshPart` as it does on a `Part`: the renderer and the
+    // physics hull both scale by `size / meshSize`.
+    //
+    // **Authored, not derived.** The mesh's real bounds are known only where
+    // something loaded it, and the world hash is required to be a pure function
+    // of the operation sequence -- a derived divisor would make a headless run
+    // and a rendered run disagree about the same scene. The import writes this
+    // from the compiled bounds; until then it is one, and a part whose `Size` is
+    // also one draws exactly as it did before this field existed.
+    core::Vec3 meshSize{1.0f, 1.0f, 1.0f};
 };
 
 // `BasePart`'s physical half (M5). Separate from `PartComponent` rather than
@@ -294,6 +306,17 @@ struct ModelComponent
     // C++ type. Read by the partitioner and by nothing on a frame path -- it
     // decides what a cell holds, once, when the world is written down.
     i32 streamingMode = 0;
+
+    // `Model.Scale`. **Absolute and already applied**: the number here is what
+    // the property reads back, and every part under the model is ALREADY at
+    // this size. Writing the property fans the ratio out over the subtree once;
+    // nothing re-reads this field per frame, and nothing multiplies by it.
+    //
+    // That is what makes a scaled model cost nothing to draw, and it is also
+    // why a descendant added afterwards is not scaled -- the fan-out already
+    // happened. Stated on the property's own Doc, because it is the one thing
+    // about `Scale` that surprises people.
+    f32 scale = 1.0f;
 };
 
 struct ScriptComponent

@@ -295,6 +295,22 @@ local Classes: { Schema.Class } = {
                     .. "partitioned, not every frame: changing it at run time changes nothing until the world "
                     .. "is built again.",
             },
+            {
+                Name = "Scale",
+                Type = "number",
+                Default = "1",
+                Doc = "How big this model is relative to the size it was built at. Setting it resizes every "
+                    .. "part under the model and moves each one about the model's pivot, so the whole thing "
+                    .. "grows in place rather than drifting away from where it stood.\n\n**It is "
+                    .. "absolute, not cumulative.** Setting 2 twice leaves the model twice its built size, "
+                    .. "not four times -- the write scales by the ratio between the new value and the old "
+                    .. "one. Setting 1 puts it back exactly.\n\n**A descendant added afterwards is "
+                    .. "not scaled.** The write fans out once over what is there and then it is done: "
+                    .. "nothing is multiplied by this per frame, which is what makes a scaled model cost "
+                    .. "the same to draw and simulate as an unscaled one. Parent the part first, then "
+                    .. "scale.\n\nZero and negative values are refused. A part with no size is not "
+                    .. "a small part, it is a shape the solver cannot build.",
+            },
         },
         Methods = {
             {
@@ -595,6 +611,21 @@ local Classes: { Schema.Class } = {
                     .. "to make a solid from -- three points are a triangle, not a hull.\n\nThe "
                     .. "property reads back what was written rather than what it resolved to, because a "
                     .. "value that silently became another value is worse than one that says what it did.",
+            },
+            {
+                Name = "MeshSize",
+                Type = "vector",
+                Default = "vector.create(1, 1, 1)",
+                Doc = "What the mesh measures at its authored size, in metres. `Size` divided by this is what "
+                    .. "the part is scaled by, so setting `Size` to twice `MeshSize` draws the mesh at twice "
+                    .. "its authored size and collides with a hull to match -- which is what makes `Size` mean "
+                    .. "the same thing here as it does on a `Part`.\n\n**The import writes it, and it "
+                    .. "is saved with the scene.** It is not read back off the file: the mesh's real bounds "
+                    .. "are known only where something loaded it, and a scene has to describe the same world "
+                    .. "whether or not anything is rendering. A part whose `Size` and `MeshSize` are both one "
+                    .. "draws exactly as it always has.\n\nWriting it yourself stretches the mesh, "
+                    .. "which is a legitimate thing to want; zero and negative components are refused, since "
+                    .. "they are a division rather than a size.",
             },
         } :: { Schema.Property },
     },
