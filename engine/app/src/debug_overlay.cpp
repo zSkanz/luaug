@@ -3157,7 +3157,13 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
     // add-a-child menu. Same picker, same keyboard, same prose on hover.
     ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
     if (iconButton(icons, icons::ActionAdd, toolbarIcon, "new-stamp", "new stamp", "new stamp", true, true))
+        dialogs.pickStampClass = true;
+    // Drained HERE, beside the `BeginPopup` it opens, so the popup lands in this
+    // window's ID scope whichever control asked for it.
+    if (dialogs.pickStampClass) {
+        dialogs.pickStampClass = false;
         ImGui::OpenPopup("new-stamp-class");
+    }
     if (ImGui::BeginPopup("new-stamp-class")) {
         // Null while nothing is being inspected -- a host with no world -- and
         // then there is no list of classes to offer.
@@ -3618,7 +3624,7 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
             if (ImGui::MenuItem("New Folder..."))
                 dialogs.newFolder = true;
             if (ImGui::MenuItem("New Stamp..."))
-                ImGui::OpenPopup("new-stamp-class");
+                dialogs.pickStampClass = true;
             if (ImGui::MenuItem("Refresh"))
                 (void)tree.refresh();
             ImGui::EndPopup();

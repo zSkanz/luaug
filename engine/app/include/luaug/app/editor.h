@@ -181,6 +181,13 @@ struct EditorDialogs
     // from `newStamp` below: that one stamps an instance somebody right-clicked,
     // this one makes the instance too.
     bool newStampFromClass = false;
+    // **Asking for the class picker, rather than opening it.** A menu item that
+    // called `OpenPopup` itself opened it inside the menu -- a child popup, in
+    // the menu's own ID scope, closed the moment the menu was -- so the folder's
+    // right-click item did nothing at all while the toolbar button worked. The
+    // flag is drained where the picker is BEGUN, which is the same pattern every
+    // other dialog in this shell already follows.
+    bool pickStampClass = false;
     // What the picker chose, carried to the name box: the two are one gesture
     // and the answer arrives a frame before the question is finished.
     scene::ClassId newStampClass = scene::InvalidClass;
