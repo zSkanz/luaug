@@ -98,6 +98,17 @@ for modelIndex = 1, ModelCount do
         cube.Name = `Cube{cubeIndex}`
         cube.Size = vector.create(0.13, 0.13, 0.13)
         cube.Color = Color3.fromRGB(40 * modelIndex % 255, 90, 200)
+        -- **Where the Heartbeat would put it, given from the start.** The
+        -- comment above this template has always said "each with a name, a
+        -- colour and a position" and the position was the one it did not give:
+        -- a `Part` is created at the origin, so all five hundred were stacked
+        -- inside each other until the first Heartbeat ran. Five hundred mutually
+        -- overlapping dynamic bodies is a hundred and twenty thousand collision
+        -- pairs against a budget of thirty-two thousand, so Jolt dropped
+        -- contacts and the tick took two hundred milliseconds -- inside a
+        -- fixture whose whole job is to time a reload.
+        local angle = (#Cubes + 1) * 0.05
+        cube.Position = vector.create(math.cos(angle) * 6, 0, math.sin(angle) * 6)
         cube.Parent = model
         table.insert(Cubes, cube)
     end

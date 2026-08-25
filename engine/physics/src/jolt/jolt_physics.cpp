@@ -691,7 +691,8 @@ class JoltWorld
 {
 public:
     explicit JoltWorld(const WorldDesc& desc)
-        : m_pairFilter(m_matrix), m_temp(tempBytes(desc)), m_jobs(JPH::cMaxPhysicsJobs), m_gravity(desc.gravity)
+        : m_pairFilter(m_matrix), m_temp(tempBytes(desc)), m_jobs(JPH::cMaxPhysicsJobs), m_gravity(desc.gravity),
+          m_contactBudget(contactBudget(desc))
     {
         m_system.Init(bodyBudget(desc), 0, contactBudget(desc), contactBudget(desc), m_broadPhaseLayers,
                       m_objectVsBroadPhase, m_pairFilter);
@@ -1042,13 +1043,60 @@ public:
         // One collision step per tick. Jolt allows several sub-steps per call;
         // the sim tick already IS the substep grid, and a second, hidden one
         // would make `FixedTimestep` mean two different things.
-        m_system.Update(fixedDt, 1, &m_temp, &m_jobs);
+        const JPH::EPhysicsUpdateError updateError = m_system.Update(fixedDt, 1, &m_temp, &m_jobs);
+        reportUpdateError(updateError);
         const auto end = std::chrono::steady_clock::now();
         m_timings.step = std::chrono::duration<f64>(end - begin).count();
 
         buildContactEvents();
         collectCharacterContacts();
         buildCharacterContactEvents();
+    }
+
+    // **What Jolt returned, said out loud, once.**
+    //
+    // The return value used to be discarded, and Jolt's own assert then fired
+    // with "an error occurred during the physics update, see
+    // EPhysicsUpdateError for more information" -- a message that tells you to
+    // go and look at something the log does not contain. Worse, in a build with
+    // asserts off there is no message at all, and every one of these means the
+    // same thing: **contacts were silently dropped**, which reads as parts
+    // sinking through each other rather than as an error.
+    //
+    // Once per distinct kind rather than per tick: a full buffer is full on
+    // every tick that follows, and a line a frame turns a log into a wall.
+    void reportUpdateError(JPH::EPhysicsUpdateError error) noexcept
+    {
+        if (error == JPH::EPhysicsUpdateError::None)
+            return;
+
+        const auto fresh = static_cast<core::u32>(error) & ~m_reportedUpdateErrors;
+        if (fresh == 0)
+            return;
+        m_reportedUpdateErrors |= fresh;
+
+        // Named rather than numbered, and each name says which budget to raise.
+        // All three come out of `PhysicsSystem::Init`'s contact arguments, which
+        // `contactBudget` derives from `WorldDesc::maxBodies`.
+        struct Named
+        {
+            JPH::EPhysicsUpdateError bit;
+            std::string_view text;
+        };
+        static constexpr std::array<Named, 3> kNames{
+            Named{JPH::EPhysicsUpdateError::ManifoldCacheFull, "the manifold cache is full"},
+            Named{JPH::EPhysicsUpdateError::BodyPairCacheFull, "the body-pair cache is full"},
+            Named{JPH::EPhysicsUpdateError::ContactConstraintsFull, "the contact constraint buffer is full"},
+        };
+        for (const Named& named : kNames) {
+            if ((fresh & static_cast<core::u32>(named.bit)) == 0)
+                continue;
+            const std::array<core::I18nArg, 2> args{
+                core::I18nArg{"reason", named.text},
+                core::I18nArg{"budget", static_cast<core::i64>(m_contactBudget)},
+            };
+            core::log(core::LogLevel::Warn, LUAUG_TR("physics.jolt.warn.update_error"), args);
+        }
     }
 
     [[nodiscard]] std::span<const ContactEvent> contacts() const noexcept { return m_events; }
@@ -2119,6 +2167,12 @@ private:
     std::vector<ContactEvent> m_events;
     StepTimings m_timings;
     core::Vec3 m_gravity{0.0f, -9.81f, 0.0f};
+    // What `PhysicsSystem::Init` was told, so a report about a full buffer can
+    // say how full is full.
+    JPH::uint m_contactBudget = 0;
+    // Which `EPhysicsUpdateError` bits have already been reported. A full buffer
+    // stays full, and a line a tick would bury everything else in the log.
+    core::u32 m_reportedUpdateErrors = 0;
 };
 
 // --- Process-wide Jolt state ------------------------------------------------
