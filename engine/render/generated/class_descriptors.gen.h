@@ -42,26 +42,27 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms);
 // would do it with a hash probe on a property write.
 inline constexpr scene::EnumId StreamingModeEnumId = 1;
 inline constexpr scene::EnumId PartShapeEnumId = 2;
-inline constexpr scene::EnumId CollisionFidelityEnumId = 3;
-inline constexpr scene::EnumId RaycastFilterTypeEnumId = 4;
-inline constexpr scene::EnumId CharacterStateEnumId = 5;
-inline constexpr scene::EnumId RotationOrderEnumId = 6;
-inline constexpr scene::EnumId LogLevelEnumId = 7;
-inline constexpr scene::EnumId RunContextEnumId = 8;
-inline constexpr scene::EnumId KeyCodeEnumId = 9;
-inline constexpr scene::EnumId InputActionTypeEnumId = 10;
-inline constexpr scene::EnumId InputDeviceTypeEnumId = 11;
-inline constexpr scene::EnumId UserInputTypeEnumId = 12;
-inline constexpr scene::EnumId InputRateEnumId = 13;
-inline constexpr scene::EnumId EasingStyleEnumId = 14;
-inline constexpr scene::EnumId EasingDirectionEnumId = 15;
-inline constexpr scene::EnumId PlaybackStateEnumId = 16;
-inline constexpr scene::EnumId FillDirectionEnumId = 17;
-inline constexpr scene::EnumId HorizontalAlignmentEnumId = 18;
-inline constexpr scene::EnumId VerticalAlignmentEnumId = 19;
-inline constexpr scene::EnumId SortOrderEnumId = 20;
-inline constexpr scene::EnumId AutomaticSizeEnumId = 21;
-inline constexpr scene::EnumId ScaleTypeEnumId = 22;
+inline constexpr scene::EnumId AlphaModeEnumId = 3;
+inline constexpr scene::EnumId CollisionFidelityEnumId = 4;
+inline constexpr scene::EnumId RaycastFilterTypeEnumId = 5;
+inline constexpr scene::EnumId CharacterStateEnumId = 6;
+inline constexpr scene::EnumId RotationOrderEnumId = 7;
+inline constexpr scene::EnumId LogLevelEnumId = 8;
+inline constexpr scene::EnumId RunContextEnumId = 9;
+inline constexpr scene::EnumId KeyCodeEnumId = 10;
+inline constexpr scene::EnumId InputActionTypeEnumId = 11;
+inline constexpr scene::EnumId InputDeviceTypeEnumId = 12;
+inline constexpr scene::EnumId UserInputTypeEnumId = 13;
+inline constexpr scene::EnumId InputRateEnumId = 14;
+inline constexpr scene::EnumId EasingStyleEnumId = 15;
+inline constexpr scene::EnumId EasingDirectionEnumId = 16;
+inline constexpr scene::EnumId PlaybackStateEnumId = 17;
+inline constexpr scene::EnumId FillDirectionEnumId = 18;
+inline constexpr scene::EnumId HorizontalAlignmentEnumId = 19;
+inline constexpr scene::EnumId VerticalAlignmentEnumId = 20;
+inline constexpr scene::EnumId SortOrderEnumId = 21;
+inline constexpr scene::EnumId AutomaticSizeEnumId = 22;
+inline constexpr scene::EnumId ScaleTypeEnumId = 23;
 
 } // namespace generated
 
@@ -75,6 +76,36 @@ inline constexpr scene::EnumId ScaleTypeEnumId = 22;
 // the ancestry, so only the declaring class carries one.
 namespace native
 {
+
+// Material
+scene::Value getMaterialColor(const scene::World& world, core::InstanceId id);
+bool setMaterialColor(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getMaterialTransparency(const scene::World& world, core::InstanceId id);
+bool setMaterialTransparency(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getMaterialColorMap(const scene::World& world, core::InstanceId id);
+bool setMaterialColorMap(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getMaterialNormalMap(const scene::World& world, core::InstanceId id);
+bool setMaterialNormalMap(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getMaterialMetallicRoughnessMap(const scene::World& world, core::InstanceId id);
+bool setMaterialMetallicRoughnessMap(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getMaterialEmissiveMap(const scene::World& world, core::InstanceId id);
+bool setMaterialEmissiveMap(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getMaterialMetalness(const scene::World& world, core::InstanceId id);
+bool setMaterialMetalness(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getMaterialRoughness(const scene::World& world, core::InstanceId id);
+bool setMaterialRoughness(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getMaterialEmissive(const scene::World& world, core::InstanceId id);
+bool setMaterialEmissive(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getMaterialNormalScale(const scene::World& world, core::InstanceId id);
+bool setMaterialNormalScale(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getMaterialAlphaMode(const scene::World& world, core::InstanceId id);
+bool setMaterialAlphaMode(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getMaterialAlphaCutoff(const scene::World& world, core::InstanceId id);
+bool setMaterialAlphaCutoff(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getMaterialDoubleSided(const scene::World& world, core::InstanceId id);
+bool setMaterialDoubleSided(scene::World& world, core::InstanceId id, const scene::Value& value);
+void attachMaterialComponents(scene::World& world, core::InstanceId id);
+void detachMaterialComponents(scene::World& world, core::InstanceId id);
 
 // MeshPart
 scene::Value getMeshPartMeshContent(const scene::World& world, core::InstanceId id);

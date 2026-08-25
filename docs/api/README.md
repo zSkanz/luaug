@@ -60,6 +60,7 @@ guided tour.
 | [`InputBinding`](inputbinding.md) | [`Instance`](instance.md) | One physical input that drives its parent `InputAction` (§2.4). |
 | [`InputContext`](inputcontext.md) | [`Instance`](instance.md) | A group of `InputAction` children that are live together (§2.4, ADR 0029). |
 | [`Instance`](instance.md) | — | The root of the class hierarchy: a node in the tree, carrying a name, a parent, attributes and tags. |
+| [`Material`](material.md) | [`Instance`](instance.md) | A surface: a colour, a set of maps, and how rough and metallic it is. |
 | [`MeshPart`](meshpart.md) | [`BasePart`](basepart.md) | A part whose geometry is an imported mesh rather than a primitive solid. |
 | [`Model`](model.md) | [`PVInstance`](pvinstance.md) | A group of parts handled as one object, with a pivot to move it by and an extents box to measure it with. |
 | [`ModuleScript`](modulescript.md) | [`BaseScript`](basescript.md) | Luau that is REQUIRED rather than run. |

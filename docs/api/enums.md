@@ -6,6 +6,16 @@ Reached as `Enum.<Name>.<Item>`. Every enum-typed property is **total**:
 there is no nil member of an enumeration, so a value meaning `unset` is
 declared as an item rather than left to a nil (ADR 0039).
 
+## Enum.AlphaMode
+
+How a `Material` reads the alpha channel of its colour. glTF's three modes, kept because they are what a file says and translating them into something else here would only move the switch.
+
+| Item | Value | Description |
+|---|---|---|
+| `Opaque` | 0 | Alpha is ignored entirely. The cheapest, and what almost everything is. |
+| `Mask` | 1 | Alpha is a coverage TEST against `AlphaCutoff`, not a blend: a pixel is drawn or it is not. Leaves and chain-link fences want this -- it stays in the opaque pass, so it writes depth and needs no sorting. |
+| `Blend` | 2 | Alpha blends. Glass and smoke want this, and it costs what every transparent surface costs: a sorted pass and no depth writes. |
+
 ## Enum.AutomaticSize
 
 Which axes a `UIObject` sizes to fit its contents on, overriding that half of `Size` (§2.2). Text and lists are what need it: a label whose box is smaller than its words is the commonest UI defect there is.

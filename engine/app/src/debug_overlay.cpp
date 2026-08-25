@@ -1603,8 +1603,6 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
         return ContentKind::Audio;
     if (name == "Font")
         return ContentKind::Font;
-    if (name == "Material")
-        return ContentKind::Material;
     return ContentKind::Other;
 }
 
@@ -2939,7 +2937,6 @@ void buildDefaultLayout(ImGuiID dockspace)
         return icons::ContentTexture;
     case ContentKind::Audio:
     case ContentKind::Font:
-    case ContentKind::Material:
         // No drawing of their own yet, and the generic file is the honest
         // fallback rather than borrowing a mesh's or a texture's.
         return icons::ContentOther;
@@ -2986,8 +2983,6 @@ bool drawContentIcon(const IconAtlas* icons, const ContentEntry& entry, float si
         return "audio";
     case ContentKind::Font:
         return "font";
-    case ContentKind::Material:
-        return "material";
     case ContentKind::Chunk:
         return "chunk";
     case ContentKind::Other:
@@ -3384,6 +3379,23 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                         // the thing you do to a world rather than to a file.
                         else if (entry.kind == ContentKind::Stamp)
                             commands.openStamp = entry.path;
+                    }
+
+                    // **What KIND of thing this stamp is, on hover.** A stamp
+                    // is a file of an instance, and which instance decides
+                    // everything about it: what a `Material` property will
+                    // accept, what dropping it in the world makes, whether it
+                    // is a character or a lamp post. The icon says it in a
+                    // picture and this says it in a word, because a picture is
+                    // a guess until somebody has learnt the set.
+                    if (ImGui::IsItemHovered()) {
+                        const std::string shownName = ContentTree::displayNameOf(entry);
+                        if (entry.kind == ContentKind::Stamp && !entry.rootClass.empty()) {
+                            ImGui::SetTooltip("%s -- a %s", shownName.c_str(), entry.rootClass.c_str());
+                        }
+                        else if (const char* label = contentKindLabel(entry.kind); label[0] != '\0') {
+                            ImGui::SetTooltip("%s -- %s", shownName.c_str(), label);
+                        }
                     }
 
                     // **A prefab is dragged out of here into the world**, which

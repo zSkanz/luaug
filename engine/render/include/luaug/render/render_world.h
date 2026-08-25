@@ -317,25 +317,25 @@ inline constexpr f32 kMaxSortDepth = 655.0f;
 // not do that by loading anything: extraction runs inside a frame and a file
 // read is not a frame's work. So resolution is a lookup, and whatever populates
 // this does so at the FrameStart safe point like every other mutation.
-// The materials somebody pointed a part at, by content id.
+// The textures a `Material` instance's maps name, by content URN.
 //
-// Separate from `MeshLibrary` because a material is not a property of a mesh:
-// two parts naming one material share one entry, changing the file changes
-// both, and a `Part` with no mesh at all still has a surface. It is also what
-// makes `BasePart.Material` a REPLACEMENT rather than a merge -- one lookup
-// answers with the whole block, and a merge would need per-field "is set" bits
-// on a struct whose virtue is being flat.
-class MaterialLibrary
+// **A texture library and not a material one**, which is what it was for one
+// release. A material is an instance now: its numbers live in a component and
+// its block is built from them each frame, so the only thing left to cache is
+// the expensive half -- the decoded, uploaded image behind a URN. Two materials
+// naming one image share one upload, which is the whole point of keying on the
+// name.
+class TextureLibrary
 {
 public:
-    void set(core::NameAtom content, const RenderMaterial& material);
+    void set(core::NameAtom content, rhi::TextureHandle texture);
     void clear() noexcept;
 
-    // Null for a URN nothing has loaded, which is the ordinary state of a part
-    // whose file has not been read yet. A part in that state draws as if it had
-    // no material -- its own `Color` -- rather than not drawing: a surface that
-    // vanishes while its material loads is worse than one that arrives plain.
-    [[nodiscard]] const RenderMaterial* find(core::NameAtom content) const noexcept;
+    // An invalid handle for a URN nothing has loaded, which is the ordinary
+    // state of a map whose file has not been read yet. A surface in that state
+    // draws untextured rather than not at all: one that vanished while its
+    // texture loaded would be worse.
+    [[nodiscard]] rhi::TextureHandle find(core::NameAtom content) const noexcept;
     [[nodiscard]] usize size() const noexcept { return entries_.size(); }
 
 private:
@@ -344,7 +344,7 @@ private:
     struct Slot
     {
         core::NameAtom content;
-        RenderMaterial material;
+        rhi::TextureHandle texture;
     };
     std::vector<Slot> entries_;
 };
@@ -482,16 +482,16 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
              // thousands long. Empty -- which is every frame a game renders --
              // costs one compare per draw.
              std::span<const core::InstanceId> outlined = {},
-             // The materials `BasePart.Material` names, or null in a build that
-             // does not load them -- a capture harness, a test. Null is exactly
-             // today's behaviour: every part draws its own `Color` and every mesh
-             // draws the block its file described.
+             // The textures the scene's materials name, or null in a build that
+             // does not load them -- a capture harness, a test. Null draws every
+             // material's numbers with no maps, which is a surface that has not
+             // finished loading rather than one that is wrong.
              //
-             // **A material REPLACES rather than merges.** One lookup answers
+             // **A material REPLACES rather than merges.** The instance answers
              // with the whole block, for every section of the part; a merge would
              // need per-field "is set" bits on a struct whose virtue is being
              // flat, and "which half of this material is mine" is not a question
              // anybody wants to answer while looking at a wrong-coloured wall.
-             const MaterialLibrary* materials = nullptr);
+             const TextureLibrary* textures = nullptr);
 
 } // namespace luaug::render

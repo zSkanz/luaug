@@ -42,10 +42,173 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     // the id is a lookup rather than a local: the module that owns a class is
     // the module that holds its `ClassId`. That module's `registerClasses`
     // must already have run -- engine/app/src/world_host.cpp orders them.
+    const scene::ClassId instanceClass = classes.findId(atoms.intern("Instance"));
     const scene::ClassId basePartClass = classes.findId(atoms.intern("BasePart"));
     const scene::ClassId attachmentClass = classes.findId(atoms.intern("Attachment"));
     const scene::ClassId pVInstanceClass = classes.findId(atoms.intern("PVInstance"));
-    const scene::ClassId instanceClass = classes.findId(atoms.intern("Instance"));
+
+    // --- Material ---
+    static std::array<scene::PropertyDesc, 13> materialProperties;
+    materialProperties = {{
+        scene::PropertyDesc{
+            .name = atoms.intern("Color"),
+            .type = scene::ValueType::Color3,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The base tint, multiplied into `ColorMap` if there is one. White with no map is a plain white surface.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
+            .get = native::getMaterialColor,
+            .set = native::setMaterialColor,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Transparency"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How see-through the surface is. Multiplied with the part's own `Transparency`, because both are real sources of it and honouring one leaves the other rendering wrong.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getMaterialTransparency,
+            .set = native::setMaterialTransparency,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("ColorMap"),
+            .type = scene::ValueType::String,
+            .contentKind = atoms.intern("Texture"),
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The base-colour image, sampled and multiplied by `Color`. Colour data, so it is encoded through the sRGB curve -- unlike the maps below, which are numbers.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getMaterialColorMap,
+            .set = native::setMaterialColorMap,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("NormalMap"),
+            .type = scene::ValueType::String,
+            .contentKind = atoms.intern("Texture"),
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "A tangent-space normal map. Linear data, not colour.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getMaterialNormalMap,
+            .set = native::setMaterialNormalMap,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("MetallicRoughnessMap"),
+            .type = scene::ValueType::String,
+            .contentKind = atoms.intern("Texture"),
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Occlusion, roughness and metalness in one image's R, G and B -- glTF's packing, and one property because they are one file. Linear data, not colour.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getMaterialMetallicRoughnessMap,
+            .set = native::setMaterialMetallicRoughnessMap,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("EmissiveMap"),
+            .type = scene::ValueType::String,
+            .contentKind = atoms.intern("Texture"),
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "What the surface glows with, multiplied by `Emissive`. Colour data.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getMaterialEmissiveMap,
+            .set = native::setMaterialEmissiveMap,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Metalness"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "0 is a dielectric -- plastic, stone, wood -- and 1 is bare metal. The values between are for a surface that is partly one and partly the other across its map, not for a material that is a bit metallic.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getMaterialMetalness,
+            .set = native::setMaterialMetalness,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Roughness"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "0 is a mirror and 1 is chalk. The default is what an untextured building block looks like; glTF's own default is 1, which is right for a file that forgot to say and wrong for a material somebody is about to author.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getMaterialRoughness,
+            .set = native::setMaterialRoughness,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Emissive"),
+            .type = scene::ValueType::Color3,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Light the surface gives off on its own. It does not light anything else -- that is a `PointLight` -- it only makes this surface bright.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
+            .get = native::getMaterialEmissive,
+            .set = native::setMaterialEmissive,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("NormalScale"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Scales the sampled normal's XY. One is the map as authored; zero is a flat surface.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getMaterialNormalScale,
+            .set = native::setMaterialNormalScale,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("AlphaMode"),
+            .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("AlphaMode"),
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How alpha is read: `Opaque` ignores it, `Mask` is a coverage test against `AlphaCutoff`, and `Blend` blends.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
+            .get = native::getMaterialAlphaMode,
+            .set = native::setMaterialAlphaMode,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("AlphaCutoff"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "What `Mask` tests against. Read only in that mode.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getMaterialAlphaCutoff,
+            .set = native::setMaterialAlphaCutoff,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("DoubleSided"),
+            .type = scene::ValueType::Bool,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether the back faces are drawn. Leaves and cloth want this; anything solid does not, and turning it on there doubles what the rasteriser does for nothing.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getMaterialDoubleSided,
+            .set = native::setMaterialDoubleSided,
+        },
+    }};
+    scene::ClassDescriptor materialDesc;
+    materialDesc.name = atoms.intern("Material");
+    materialDesc.super = instanceClass;
+    materialDesc.flags = scene::ClassFlags::None;
+    materialDesc.defaultName = atoms.intern("Material");
+    materialDesc.doc = "A surface: a colour, a set of maps, and how rough and metallic it is. Point a `BasePart` at one with its `Material` property and the part is drawn with it.\012\012**It is an instance, and what a project keeps in `content/` is a STAMP of one.** That is not a detail: everything a stamp already does is what a material wants -- one file, many instances, edit the file and every instance follows, override one and only that one differs. A format of its own would have been a second answer to all of it.\012\012So a material is made the way anything is made: create it in the world, set its fields, and stamp it into the content browser when you want to reuse it. A part may be pointed at either -- an instance you keep beside it, or an instance placed from a stamp, which is the same thing with a file behind it.\012\012**`BasePart.Color` multiplies this material's `Color`.** White on either side is the identity, so a plain part with no material and a white part with a white material look the same, and tinting one instance of a shared material does not tint the others.";
+    materialDesc.properties = materialProperties;
+    materialDesc.attachComponents = native::attachMaterialComponents;
+    materialDesc.detachComponents = native::detachMaterialComponents;
+    classes.registerClass(materialDesc);
 
     // --- MeshPart ---
     static std::array<scene::PropertyDesc, 3> meshPartProperties;
@@ -368,7 +531,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     animationPlayerDesc.super = instanceClass;
     animationPlayerDesc.flags = scene::ClassFlags::None;
     animationPlayerDesc.defaultName = atoms.intern("AnimationPlayer");
-    animationPlayerDesc.doc = "Plays a skinned mesh's animation clips (\302\247" "2.2). **Parent it to the `MeshPart` whose skeleton the clips belong to** -- that is where it looks for them, and an `AnimationPlayer` parented anywhere else finds nothing rather than guessing.\012\012It stores nothing: the tracks are the state, and each one is a handle a script holds rather than a child in the tree. Sampling happens at `PreAnimation` on the SimClock, so a clip's position at a given tick is the same in a replay as it was live.\012\012v1 is clip playback and linear blending -- no state machines, no IK, and no root motion.";
+    animationPlayerDesc.doc = "Plays a skinned mesh's animation clips (\302\247" "2.2).\012\012**Parent it to the `Model` whose character it is, and it drives every skinned `MeshPart` under that model.** A character is a body, a shirt and a pair of trousers -- several meshes wearing the same skeleton -- and one clip has to move all of them. Only one of the pieces needs to carry the animation; the clip is taken from the first that does, in tree order.\012\012**The joints are matched by NAME across the pieces, never by index.** Two files exported separately wear the same skeleton in the sense that matters -- the same joints, named the same -- and in no other: an exporter is free to order them differently, and a clip applied through the wrong index twists a sleeve in a way that looks like a broken animation rather than a mismatched rig. A joint one piece does not have is skipped, so a shirt with no fingers keeps its own sleeve.\012\012Parenting it straight to a `MeshPart` still works and drives exactly that mesh, which is what a character made of one piece wants.\012\012It stores nothing: the tracks are the state, and each one is a handle a script holds rather than a child in the tree. Sampling happens at `PreAnimation` on the SimClock, so a clip's position at a given tick is the same in a replay as it was live.\012\012v1 is clip playback and linear blending -- no state machines, no IK, and no root motion.";
     animationPlayerDesc.methods = animationPlayerMethods;
     classes.registerClass(animationPlayerDesc);
 

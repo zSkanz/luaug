@@ -33,6 +33,9 @@ end
 declare extern type EnumPartShape extends EnumItem with
 end
 
+declare extern type EnumAlphaMode extends EnumItem with
+end
+
 declare extern type EnumCollisionFidelity extends EnumItem with
 end
 
@@ -591,18 +594,18 @@ declare extern type BasePart extends PVInstance with
     Color: Color3
     --- How see-through this part is, 0 fully opaque and 1 fully invisible.
     Transparency: number
-    --- The material file this part's surface is described by, or empty for none. **`Color` multiplies
+    --- The `Material` instance this part's surface is described by, or nothing. **`Color` multiplies
     --- it.** A part with no material has a white base, so white times `Color` is `Color` -- which is
-    --- what a plain part has always looked like. A part WITH one takes that material's base colour, its
-    --- maps and its metalness and roughness, and tints the result by `Color`. Leaving `Color` white is
-    --- therefore the way to see a material exactly as it was authored, and it is what an import writes
-    --- on every part it creates. The fourth channel already worked this way: `Transparency` and the
-    --- material's own alpha have always been multiplied together, and doing the same to the other three
+    --- what a plain part has always looked like. A part WITH one takes that material's colour, its
+    --- maps, its metalness and its roughness, and tints the result by `Color`. Leaving `Color` white is
+    --- therefore how to see a material exactly as it was authored, and it is what an import writes on
+    --- every part it creates. The fourth channel already worked this way: `Transparency` and the
+    --- material's own have always been multiplied together, and doing the same to the other three
     --- removes an inconsistency rather than adding a rule. **There is no texture property on a part,
     --- and there will not be one.** A texture reaches a surface through a material or not at all, so
     --- that two parts can share one and changing it changes both. A `MeshPart` with no material draws
     --- the one its own file described, which is what an unimported mesh looks like.
-    Material: Content
+    Material: Material?
     --- Whether the simulation moves this part. An anchored part is immovable scenery that other parts
     --- collide with and gravity ignores -- not a very heavy part, a different kind of body -- so
     --- writing this rebuilds it in the simulation and keeps its transform.
@@ -671,6 +674,46 @@ declare extern type Part extends BasePart with
     --- oval. A `Wedge` is a ramp with its tall face towards -Z, so an unrotated one is walked UP as you
     --- walk towards -Z. Its collider is deliberately the whole box (§2.2's physics notes).
     Shape: EnumPartShape
+end
+
+declare extern type Material extends Instance with
+    --- The base tint, multiplied into `ColorMap` if there is one. White with no map is a plain white
+    --- surface.
+    Color: Color3
+    --- How see-through the surface is. Multiplied with the part's own `Transparency`, because both are
+    --- real sources of it and honouring one leaves the other rendering wrong.
+    Transparency: number
+    --- The base-colour image, sampled and multiplied by `Color`. Colour data, so it is encoded through
+    --- the sRGB curve -- unlike the maps below, which are numbers.
+    ColorMap: Content
+    --- A tangent-space normal map. Linear data, not colour.
+    NormalMap: Content
+    --- Occlusion, roughness and metalness in one image's R, G and B -- glTF's packing, and one property
+    --- because they are one file. Linear data, not colour.
+    MetallicRoughnessMap: Content
+    --- What the surface glows with, multiplied by `Emissive`. Colour data.
+    EmissiveMap: Content
+    --- 0 is a dielectric -- plastic, stone, wood -- and 1 is bare metal. The values between are for a
+    --- surface that is partly one and partly the other across its map, not for a material that is a bit
+    --- metallic.
+    Metalness: number
+    --- 0 is a mirror and 1 is chalk. The default is what an untextured building block looks like;
+    --- glTF's own default is 1, which is right for a file that forgot to say and wrong for a material
+    --- somebody is about to author.
+    Roughness: number
+    --- Light the surface gives off on its own. It does not light anything else -- that is a
+    --- `PointLight` -- it only makes this surface bright.
+    Emissive: Color3
+    --- Scales the sampled normal's XY. One is the map as authored; zero is a flat surface.
+    NormalScale: number
+    --- How alpha is read: `Opaque` ignores it, `Mask` is a coverage test against `AlphaCutoff`, and
+    --- `Blend` blends.
+    AlphaMode: EnumAlphaMode
+    --- What `Mask` tests against. Read only in that mode.
+    AlphaCutoff: number
+    --- Whether the back faces are drawn. Leaves and cloth want this; anything solid does not, and
+    --- turning it on there doubles what the rasteriser does for nothing.
+    DoubleSided: boolean
 end
 
 declare extern type MeshPart extends BasePart with
@@ -1688,6 +1731,12 @@ declare Enum: {
         Wedge: EnumPartShape,
         GetEnumItems: (self: any) -> { EnumPartShape },
     },
+    AlphaMode: {
+        Opaque: EnumAlphaMode,
+        Mask: EnumAlphaMode,
+        Blend: EnumAlphaMode,
+        GetEnumItems: (self: any) -> { EnumAlphaMode },
+    },
     CollisionFidelity: {
         Default: EnumCollisionFidelity,
         Hull: EnumCollisionFidelity,
@@ -2016,6 +2065,7 @@ declare Instance: {
         & (("Script") -> Script)
         & (("ModuleScript") -> ModuleScript)
         & (("Part") -> Part)
+        & (("Material") -> Material)
         & (("MeshPart") -> MeshPart)
         & (("Attachment") -> Attachment)
         & (("Bone") -> Bone)

@@ -4,7 +4,6 @@
 // project: a `.scene.json` is not a plain `.json`, a folder called `..` is not a
 // folder, and two people's screens have to agree about the order.
 #include "luaug/app/content_tree.h"
-#include "luaug/asset/material.h"
 #include "luaug/platform/file.h"
 
 #include <array>
@@ -370,40 +369,38 @@ TEST_CASE("a file that names nothing brings nothing")
 TEST_CASE("duplicating keeps a compound extension whole")
 {
     // **The case a naive split at the last dot gets wrong.** A duplicate of
-    // `stone.material.json` called `stone.material 2.json` is a file the browser
-    // no longer recognises as a material -- which is the whole reason the split
-    // asks the KIND what the suffix is.
+    // `main.scene.json` called `main.scene 2.json` is a file the browser no
+    // longer recognises as a scene -- which is the whole reason the split asks
+    // the KIND what the suffix is.
     Scratch scratch("duplicate-compound");
     scratch.folder("content");
-    scratch.file("content/stone.material.json", "{\"format\":\"luaug-material\"}");
     scratch.file("content/main.scene.json", "{}");
 
     app::ContentTree tree;
     REQUIRE(tree.open(scratch.root() / "content"));
 
-    const app::ContentEntry* material = nullptr;
+    const app::ContentEntry* scene = nullptr;
     for (const app::ContentEntry& entry : tree.entries()) {
-        if (entry.name == "stone.material.json")
-            material = &entry;
+        if (entry.name == "main.scene.json")
+            scene = &entry;
     }
-    REQUIRE(material != nullptr);
+    REQUIRE(scene != nullptr);
 
-    const std::string made = tree.duplicate(*material);
-    CHECK(made == "stone 2.material.json");
-    CHECK(std::filesystem::exists(scratch.root() / "content" / "stone 2.material.json"));
-    // And it is still a material as far as the browser is concerned, which is
-    // the half a wrong split silently loses.
-    CHECK(app::contentKindOf(made) == ContentKind::Material);
-    // The original is untouched: everything already pointed at it keeps working,
-    // which is why a material is a file rather than a property.
-    CHECK(std::filesystem::exists(scratch.root() / "content" / "stone.material.json"));
+    const std::string made = tree.duplicate(*scene);
+    CHECK(made == "main 2.scene.json");
+    CHECK(std::filesystem::exists(scratch.root() / "content" / "main 2.scene.json"));
+    // And it is still a scene as far as the browser is concerned, which is the
+    // half a wrong split silently loses.
+    CHECK(app::contentKindOf(made) == ContentKind::Scene);
+    // The original is untouched.
+    CHECK(std::filesystem::exists(scratch.root() / "content" / "main.scene.json"));
 }
 
 TEST_CASE("duplicating twice numbers upwards, and fills a gap")
 {
     Scratch scratch("duplicate-numbers");
     scratch.folder("content");
-    scratch.file("content/stone.material.json", "a");
+    scratch.file("content/stone.scene.json", "a");
 
     app::ContentTree tree;
     REQUIRE(tree.open(scratch.root() / "content"));
@@ -416,19 +413,19 @@ TEST_CASE("duplicating twice numbers upwards, and fills a gap")
         return nullptr;
     };
 
-    REQUIRE(findByName("stone.material.json") != nullptr);
-    CHECK(tree.duplicate(*findByName("stone.material.json")) == "stone 2.material.json");
-    REQUIRE(findByName("stone.material.json") != nullptr);
-    CHECK(tree.duplicate(*findByName("stone.material.json")) == "stone 3.material.json");
+    REQUIRE(findByName("stone.scene.json") != nullptr);
+    CHECK(tree.duplicate(*findByName("stone.scene.json")) == "stone 2.scene.json");
+    REQUIRE(findByName("stone.scene.json") != nullptr);
+    CHECK(tree.duplicate(*findByName("stone.scene.json")) == "stone 3.scene.json");
 
     // Delete the middle one and the next duplicate takes its place. "First
     // free" rather than a counter that only climbs, which is what somebody
     // expects after tidying up.
     std::error_code ec;
-    std::filesystem::remove(scratch.root() / "content" / "stone 2.material.json", ec);
+    std::filesystem::remove(scratch.root() / "content" / "stone 2.scene.json", ec);
     REQUIRE(tree.refresh());
-    REQUIRE(findByName("stone.material.json") != nullptr);
-    CHECK(tree.duplicate(*findByName("stone.material.json")) == "stone 2.material.json");
+    REQUIRE(findByName("stone.scene.json") != nullptr);
+    CHECK(tree.duplicate(*findByName("stone.scene.json")) == "stone 2.scene.json");
 }
 
 TEST_CASE("duplicating a plain file keeps its own extension")
@@ -561,126 +558,4 @@ TEST_CASE("the current folder survives the navigation that changes it")
     // Still the path it was taken at, whatever the tree did afterwards.
     CHECK(held == "a/b");
     CHECK(tree.currentFolder().empty());
-}
-
-TEST_CASE("a material can be made from nothing, which is how one starts")
-{
-    // **The dead end this closes**: import textures, and then have no way to
-    // build a surface out of them. A mesh and a texture arrive from outside and
-    // a stamp is made from what is in the world; a material is the one authored
-    // file somebody writes.
-    Scratch scratch("new-material");
-    scratch.folder("content/materials");
-
-    app::ContentTree tree;
-    REQUIRE(tree.open(scratch.root() / "content"));
-    REQUIRE(tree.enter("materials"));
-
-    const std::string made = tree.createMaterial("stone");
-    CHECK(made == "stone.material.json");
-    CHECK(std::filesystem::exists(scratch.root() / "content" / "materials" / "stone.material.json"));
-    // The browser knows what it is, which is what puts it in a `Material`
-    // property's picker.
-    CHECK(app::contentKindOf(made) == ContentKind::Material);
-
-    // And it is a real material: readable, named after the file, and the
-    // IDENTITY -- white with no maps, so a part pointed at it looks exactly as
-    // it did with none.
-    std::string text;
-    REQUIRE(platform::readTextFile(scratch.root() / "content" / "materials" / made, text));
-    asset::MaterialAsset back;
-    REQUIRE_FALSE(asset::readMaterial(text, made, back).has_value());
-    CHECK(back.name == "stone");
-    CHECK(back.baseColorFactor.r == 1.0f);
-    CHECK_FALSE(back.baseColor.present());
-}
-
-TEST_CASE("the material suffix is put back rather than required")
-{
-    // Typing `stone` means a material called stone, and typing the whole file
-    // name means the same thing. The same rule `rename` follows, for the same
-    // reason: the suffix is what makes it a material and typing a name is not
-    // asking to stop being one.
-    Scratch scratch("new-material-suffix");
-    scratch.folder("content");
-
-    app::ContentTree tree;
-    REQUIRE(tree.open(scratch.root() / "content"));
-
-    CHECK(tree.createMaterial("stone") == "stone.material.json");
-    CHECK(tree.createMaterial("brick.material.json") == "brick.material.json");
-    // Case is not a second name: a filesystem that ignores it would otherwise
-    // let two files claim one.
-    CHECK(tree.createMaterial("slate.MATERIAL.JSON") == "slate.MATERIAL.JSON");
-}
-
-TEST_CASE("a material is refused rather than overwriting one already there")
-{
-    // Two files with one name is a question, and answering it by destroying one
-    // of them is not an answer -- especially this one, which somebody may have
-    // spent an afternoon on.
-    Scratch scratch("new-material-clash");
-    scratch.folder("content");
-
-    app::ContentTree tree;
-    REQUIRE(tree.open(scratch.root() / "content"));
-    REQUIRE(tree.createMaterial("stone") == "stone.material.json");
-
-    // Written over, this would come back as the default block and take the
-    // person's work with it.
-    scratch.file("content/stone.material.json",
-                 R"({"format":"luaug-material","name":"mine","baseColorFactor":[0.5,0.25,0.125]})");
-
-    CHECK(tree.createMaterial("stone").empty());
-    CHECK(tree.createMaterial("stone.material.json").empty());
-
-    std::string text;
-    REQUIRE(platform::readTextFile(scratch.root() / "content" / "stone.material.json", text));
-    CHECK(text.find("mine") != std::string::npos);
-}
-
-TEST_CASE("a name a filesystem cannot carry is refused")
-{
-    Scratch scratch("new-material-names");
-    scratch.folder("content");
-
-    app::ContentTree tree;
-    REQUIRE(tree.open(scratch.root() / "content"));
-
-    // The same rule every other name in this browser follows.
-    CHECK(tree.createMaterial("").empty());
-    CHECK(tree.createMaterial("   ").empty());
-    CHECK(tree.createMaterial(".").empty());
-    CHECK(tree.createMaterial("..").empty());
-    CHECK(tree.createMaterial("a/b").empty());
-    CHECK(tree.createMaterial("../escape").empty());
-}
-
-TEST_CASE("a material lands in the folder the browser is looking at")
-{
-    // Which is what "new material" means to somebody standing in a folder --
-    // and the reason the toolbar button and the folder's own menu reach the
-    // same call.
-    Scratch scratch("new-material-folder");
-    scratch.folder("content/props/textures");
-
-    app::ContentTree tree;
-    REQUIRE(tree.open(scratch.root() / "content"));
-    REQUIRE(tree.enter("props"));
-    REQUIRE(tree.enter("textures"));
-
-    REQUIRE(tree.createMaterial("bark") == "bark.material.json");
-    CHECK(std::filesystem::exists(scratch.root() / "content" / "props" / "textures" / "bark.material.json"));
-    CHECK_FALSE(std::filesystem::exists(scratch.root() / "content" / "bark.material.json"));
-    // And the tree re-read, so it is on screen without anybody refreshing.
-    bool listed = false;
-    for (const app::ContentEntry& entry : tree.entries())
-        listed = listed || entry.name == "bark.material.json";
-    CHECK(listed);
-}
-
-TEST_CASE("a tree with no root makes nothing")
-{
-    app::ContentTree tree;
-    CHECK(tree.createMaterial("stone").empty());
 }

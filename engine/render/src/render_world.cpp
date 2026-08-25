@@ -142,29 +142,29 @@ const char* primitiveContent(core::i32 shape) noexcept
     }
 }
 
-void MaterialLibrary::set(core::NameAtom content, const RenderMaterial& material)
+void TextureLibrary::set(core::NameAtom content, rhi::TextureHandle texture)
 {
     const auto position =
         std::lower_bound(entries_.begin(), entries_.end(), content,
                          [](const Slot& slot, core::NameAtom value) { return slot.content.id < value.id; });
     if (position != entries_.end() && position->content == content) {
-        position->material = material;
+        position->texture = texture;
         return;
     }
-    entries_.insert(position, Slot{content, material});
+    entries_.insert(position, Slot{content, texture});
 }
 
-void MaterialLibrary::clear() noexcept
+void TextureLibrary::clear() noexcept
 {
     entries_.clear();
 }
 
-const RenderMaterial* MaterialLibrary::find(core::NameAtom content) const noexcept
+rhi::TextureHandle TextureLibrary::find(core::NameAtom content) const noexcept
 {
     const auto position =
         std::lower_bound(entries_.begin(), entries_.end(), content,
                          [](const Slot& slot, core::NameAtom value) { return slot.content.id < value.id; });
-    return position != entries_.end() && position->content == content ? &position->material : nullptr;
+    return position != entries_.end() && position->content == content ? position->texture : rhi::TextureHandle{};
 }
 
 void MeshLibrary::set(core::NameAtom content, const Entry& entry)
@@ -205,15 +205,48 @@ const MeshLibrary::Entry* MeshLibrary::find(core::NameAtom content) const noexce
 
 namespace {
 
-// The material a part names, or null -- for no material, for a library that is
-// not there, and for one whose file has not loaded yet. All three draw the same
-// way, and that is deliberate: a surface that vanishes while its material loads
-// is worse than one that arrives plain and then gets its texture.
-[[nodiscard]] const RenderMaterial* materialOf(const MaterialLibrary* materials, core::NameAtom content)
+// The block a part's `Material` instance describes, or false for a part that
+// names none.
+//
+// **Built from the instance every frame rather than cached.** A material is a
+// handful of floats and four texture lookups, a scene has tens of them, and a
+// cache would need invalidating on every property write -- which is the thing
+// `Changed` exists for and the thing a renderer must not have to subscribe to.
+//
+// The texture handles come from the library, which is keyed by the URN each map
+// names. A map whose file has not loaded yet is simply absent, and the surface
+// draws untextured until it arrives: a surface that vanished while its texture
+// loaded would be worse.
+[[nodiscard]] bool materialOf(const scene::World& world, core::InstanceId id, const TextureLibrary* textures,
+                              RenderMaterial& out)
 {
-    if (materials == nullptr || content.id == 0)
-        return nullptr;
-    return materials->find(content);
+    const scene::MaterialComponent* material = world.materials().find(id);
+    if (material == nullptr)
+        return false;
+
+    out = RenderMaterial{};
+    out.uniforms.baseColor[0] = material->color.r;
+    out.uniforms.baseColor[1] = material->color.g;
+    out.uniforms.baseColor[2] = material->color.b;
+    out.uniforms.baseColor[3] = 1.0f - material->transparency;
+    out.uniforms.emissive[0] = material->emissive.r;
+    out.uniforms.emissive[1] = material->emissive.g;
+    out.uniforms.emissive[2] = material->emissive.b;
+    out.uniforms.metallicRoughnessNormalCutoff[0] = material->metalness;
+    out.uniforms.metallicRoughnessNormalCutoff[1] = material->roughness;
+    out.uniforms.metallicRoughnessNormalCutoff[2] = material->normalScale;
+    // Read only in `Mask`, and zero everywhere else so the shader's test is
+    // "cutoff > 0" rather than a second uniform saying which mode this is.
+    out.uniforms.metallicRoughnessNormalCutoff[3] = material->alphaMode == 1 ? material->alphaCutoff : 0.0f;
+
+    const auto mapOf = [&](core::NameAtom urn) -> rhi::TextureHandle {
+        return textures == nullptr || urn.id == 0 ? rhi::TextureHandle{} : textures->find(urn);
+    };
+    out.baseColor = mapOf(material->colorMap);
+    out.normal = mapOf(material->normalMap);
+    out.metallicRoughness = mapOf(material->metallicRoughnessMap);
+    out.emissive = mapOf(material->emissiveMap);
+    return true;
 }
 
 // `BasePart.Color`, multiplied into a material's base colour and emissive.
@@ -243,7 +276,7 @@ void tintBy(RenderMaterial& material, const Color3& color)
 void extract(const scene::World& world, core::InstanceId root, core::InstanceId lightingHost, const MeshLibrary& meshes,
              f32 viewportAspect, f32 shadowRadius, const AnimationSystem* animation, f32 alpha,
              const TransformHistory* history, RenderWorld& out, const ViewOverride* view,
-             std::span<const core::InstanceId> outlined, const MaterialLibrary* materials)
+             std::span<const core::InstanceId> outlined, const TextureLibrary* materials)
 {
     out.clear();
     if (!root.valid())
@@ -472,7 +505,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         // and a section but tinted differently -- or pointed at different
         // materials -- are two bind sets, and collapsing them onto one slot
         // would draw the second in the first one's colour.
-        core::NameAtom material;
+        core::InstanceId material;
         Color3 tint{1.0f, 1.0f, 1.0f};
     };
     std::vector<ResolvedMaterial> resolved;
@@ -524,8 +557,10 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         // What the part itself says about its surface, resolved once for the
         // whole mesh rather than once per section: `Material` is a property of
         // the PART, and every section of it gets the same answer.
-        const core::NameAtom meshPart2Material = part->materialContent;
-        const RenderMaterial* partMaterial = materialOf(materials, meshPart2Material);
+        const core::InstanceId meshPart2Material = part->material;
+        RenderMaterial partMaterialBlock;
+        const bool hasPartMaterial =
+            meshPart2Material.valid() && materialOf(world, meshPart2Material, materials, partMaterialBlock);
 
         for (u32 section = 0; section < entry->sectionCount; ++section) {
             // Resolved before the cull test so that `material` is meaningful
@@ -581,8 +616,8 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
                 // A `Material` on the part REPLACES the file's block, for every
                 // section of it. A mesh with none keeps what its own file
                 // described, which is what an unimported mesh looks like.
-                if (partMaterial != nullptr)
-                    block = *partMaterial;
+                if (hasPartMaterial)
+                    block = partMaterialBlock;
                 tintBy(block, part->color);
                 out.materials.push_back(block);
                 resolved.push_back(ResolvedMaterial{meshPart.meshContent, localMaterial, materialSlot,
@@ -648,7 +683,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
     struct ResolvedPartMaterial
     {
         Color3 color;
-        core::NameAtom content;
+        core::InstanceId content;
         u32 slot;
     };
     std::vector<ResolvedPartMaterial> partMaterials;
@@ -686,11 +721,12 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         // Deduplicated by (material, colour) rather than by colour alone: two
         // parts sharing one material and one tint are one bind set, and two
         // sharing a tint but not a material are not.
-        const RenderMaterial* authored = materialOf(materials, part.materialContent);
+        RenderMaterial authored;
+        const bool hasMaterial = part.material.valid() && materialOf(world, part.material, materials, authored);
         u32 materialSlot = 0;
         bool found = false;
         for (const ResolvedPartMaterial& candidate : partMaterials) {
-            if (candidate.color == part.color && candidate.content == part.materialContent) {
+            if (candidate.color == part.color && candidate.content == part.material) {
                 materialSlot = candidate.slot;
                 found = true;
                 break;
@@ -698,8 +734,8 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         }
         if (!found) {
             RenderMaterial material;
-            if (authored != nullptr) {
-                material = *authored;
+            if (hasMaterial) {
+                material = authored;
             }
             else {
                 material.uniforms.baseColor[0] = 1.0f;
@@ -719,7 +755,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             tintBy(material, part.color);
             materialSlot = static_cast<u32>(out.materials.size());
             out.materials.push_back(material);
-            partMaterials.push_back(ResolvedPartMaterial{part.color, part.materialContent, materialSlot});
+            partMaterials.push_back(ResolvedPartMaterial{part.color, part.material, materialSlot});
         }
 
         const bool transparent = opacity < 1.0f;

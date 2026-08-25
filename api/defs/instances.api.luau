@@ -444,21 +444,21 @@ local Classes: { Schema.Class } = {
             },
             {
                 Name = "Material",
-                Type = "Content",
-                ContentKind = "Material",
-                Doc = "The material file this part's surface is described by, or empty for none.\n\n"
+                Type = "Material?",
+                Doc = "The `Material` instance this part's surface is described by, or nothing.\n\n"
                     .. "**`Color` multiplies it.** A part with no material has a white base, so white times "
                     .. "`Color` is `Color` -- which is what a plain part has always looked like. A part WITH "
-                    .. "one takes that material's base colour, its maps and its metalness and roughness, and "
-                    .. "tints the result by `Color`. Leaving `Color` white is therefore the way to see a "
-                    .. "material exactly as it was authored, and it is what an import writes on every part it "
-                    .. "creates.\n\nThe fourth channel already worked this way: `Transparency` "
-                    .. "and the material's own alpha have always been multiplied together, and doing the same "
-                    .. "to the other three removes an inconsistency rather than adding a rule.\n\n"
-                    .. "**There is no texture property on a part, and there will not be one.** A texture "
-                    .. "reaches a surface through a material or not at all, so that two parts can share one "
-                    .. "and changing it changes both.\n\nA `MeshPart` with no material draws the "
-                    .. "one its own file described, which is what an unimported mesh looks like.",
+                    .. "one takes that material's colour, its maps, its metalness and its roughness, and "
+                    .. "tints the result by `Color`. Leaving `Color` white is therefore how to see a "
+                    .. "material exactly as it was authored, and it is what an import writes on every part "
+                    .. "it creates.\n\nThe fourth channel already worked this way: "
+                    .. "`Transparency` and the material's own have always been multiplied together, and "
+                    .. "doing the same to the other three removes an inconsistency rather than adding a "
+                    .. "rule.\n\n**There is no texture property on a part, and there will not "
+                    .. "be one.** A texture reaches a surface through a material or not at all, so that two "
+                    .. "parts can share one and changing it changes both.\n\nA `MeshPart` with "
+                    .. "no material draws the one its own file described, which is what an unimported mesh "
+                    .. "looks like.",
             },
             {
                 Name = "Anchored",
@@ -597,6 +597,112 @@ local Classes: { Schema.Class } = {
                     .. "towards -Z. Its collider is deliberately the whole box (§2.2's physics notes).",
             },
         },
+    },
+    {
+        Name = "Material",
+        Extends = "Instance",
+        Module = "render",
+        Storage = "Material",
+        Doc = "A surface: a colour, a set of maps, and how rough and metallic it is. Point a `BasePart` at one "
+            .. "with its `Material` property and the part is drawn with it.\n\n**It is an "
+            .. "instance, and what a project keeps in `content/` is a STAMP of one.** That is not a detail: "
+            .. "everything a stamp already does is what a material wants -- one file, many instances, edit the "
+            .. "file and every instance follows, override one and only that one differs. A format of its own "
+            .. "would have been a second answer to all of it.\n\nSo a material is made the way "
+            .. "anything is made: create it in the world, set its fields, and stamp it into the content "
+            .. "browser when you want to reuse it. A part may be pointed at either -- an instance you keep "
+            .. "beside it, or an instance placed from a stamp, which is the same thing with a file behind "
+            .. "it.\n\n**`BasePart.Color` multiplies this material's `Color`.** White on either "
+            .. "side is the identity, so a plain part with no material and a white part with a white material "
+            .. "look the same, and tinting one instance of a shared material does not tint the others.",
+        Properties = {
+            {
+                Name = "Color",
+                Type = "Color3",
+                Doc = "The base tint, multiplied into `ColorMap` if there is one. White with no map is a "
+                    .. "plain white surface.",
+            },
+            {
+                Name = "Transparency",
+                Type = "number",
+                Default = "0",
+                Doc = "How see-through the surface is. Multiplied with the part's own `Transparency`, because "
+                    .. "both are real sources of it and honouring one leaves the other rendering wrong.",
+            },
+            {
+                Name = "ColorMap",
+                Type = "Content",
+                ContentKind = "Texture",
+                Doc = "The base-colour image, sampled and multiplied by `Color`. Colour data, so it is "
+                    .. "encoded through the sRGB curve -- unlike the maps below, which are numbers.",
+            },
+            {
+                Name = "NormalMap",
+                Type = "Content",
+                ContentKind = "Texture",
+                Doc = "A tangent-space normal map. Linear data, not colour.",
+            },
+            {
+                Name = "MetallicRoughnessMap",
+                Type = "Content",
+                ContentKind = "Texture",
+                Doc = "Occlusion, roughness and metalness in one image's R, G and B -- glTF's packing, and one "
+                    .. "property because they are one file. Linear data, not colour.",
+            },
+            {
+                Name = "EmissiveMap",
+                Type = "Content",
+                ContentKind = "Texture",
+                Doc = "What the surface glows with, multiplied by `Emissive`. Colour data.",
+            },
+            {
+                Name = "Metalness",
+                Type = "number",
+                Default = "0",
+                Doc = "0 is a dielectric -- plastic, stone, wood -- and 1 is bare metal. The values between "
+                    .. "are for a surface that is partly one and partly the other across its map, not for a "
+                    .. "material that is a bit metallic.",
+            },
+            {
+                Name = "Roughness",
+                Type = "number",
+                Default = "0.7",
+                Doc = "0 is a mirror and 1 is chalk. The default is what an untextured building block looks "
+                    .. "like; glTF's own default is 1, which is right for a file that forgot to say and wrong "
+                    .. "for a material somebody is about to author.",
+            },
+            {
+                Name = "Emissive",
+                Type = "Color3",
+                Doc = "Light the surface gives off on its own. It does not light anything else -- that is a "
+                    .. "`PointLight` -- it only makes this surface bright.",
+            },
+            {
+                Name = "NormalScale",
+                Type = "number",
+                Default = "1",
+                Doc = "Scales the sampled normal's XY. One is the map as authored; zero is a flat surface.",
+            },
+            {
+                Name = "AlphaMode",
+                Type = "Enum.AlphaMode",
+                Doc = "How alpha is read: `Opaque` ignores it, `Mask` is a coverage test against "
+                    .. "`AlphaCutoff`, and `Blend` blends.",
+            },
+            {
+                Name = "AlphaCutoff",
+                Type = "number",
+                Default = "0.5",
+                Doc = "What `Mask` tests against. Read only in that mode.",
+            },
+            {
+                Name = "DoubleSided",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether the back faces are drawn. Leaves and cloth want this; anything solid does not, "
+                    .. "and turning it on there doubles what the rasteriser does for nothing.",
+            },
+        } :: { Schema.Property },
     },
     {
         Name = "MeshPart",

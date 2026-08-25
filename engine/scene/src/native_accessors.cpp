@@ -862,21 +862,28 @@ bool setBasePartTransparency(World& world, core::InstanceId id, const Value& val
 Value getBasePartMaterial(const World& world, core::InstanceId id)
 {
     const PartComponent* part = readPart(world, id);
-    if (part == nullptr)
+    if (part == nullptr || !part->material.valid())
         return Value{};
-    return std::string(world.atoms().text(part->materialContent));
+    return Value{part->material};
 }
 
 bool setBasePartMaterial(World& world, core::InstanceId id, const Value& value)
 {
-    const auto* text = std::get_if<std::string>(&value);
     PartComponent* part = writePart(world, id);
-    if (text == nullptr || part == nullptr)
+    if (part == nullptr)
         return false;
-    // Interned, not resolved -- whether the file loads is the renderer's problem
-    // and a later one, and reading the property back must give what was written
-    // even when it does not (`MeshContent` says the same).
-    part->materialContent = world.atoms().intern(*text);
+    if (const auto* reference = std::get_if<core::InstanceId>(&value); reference != nullptr) {
+        // **A `Material` and nothing else.** The type says so, and a runtime
+        // write can still name anything -- a part pointed at a `Folder` would
+        // draw untextured with nothing saying why.
+        if (!world.alive(*reference) || world.materials().find(*reference) == nullptr)
+            return false;
+        part->material = *reference;
+        return true;
+    }
+    if (valueType(value) != ValueType::Nil)
+        return false;
+    part->material = core::InstanceId{};
     return true;
 }
 

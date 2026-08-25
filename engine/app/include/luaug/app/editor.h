@@ -964,6 +964,22 @@ public:
     // something inside what a system made, and **a subtree that already
     // contains a stamped instance**, which ADR 0049 declines to answer for
     // rather than half-answering.
+    // Makes a `Material` in the world and stamps it into the content browser in
+    // one step, returning the stamp's content-relative path or empty.
+    //
+    // **Both, because a material is both.** It is an instance -- you select it,
+    // you edit its fields in the Properties panel, you point parts at it -- and
+    // what a project keeps for reuse is a stamp of one. Making only the file
+    // would leave nothing to edit; making only the instance would leave nothing
+    // to reuse. So this does what converting does, one step earlier: it writes
+    // the file and the instance becomes an instance OF that file.
+    //
+    // The material it makes is the default block -- white, dielectric, no maps
+    // -- which is the identity: a part pointed at it looks exactly as it did
+    // with none. That is the right starting point, because the first thing
+    // anybody does is change one field and expect to see one change.
+    [[nodiscard]] std::string createMaterial(scene::World& world, core::InstanceId root, std::string_view name);
+
     bool createStamp(scene::World& world, core::InstanceId id, core::InstanceId root, std::string_view name);
 
     // **Places a stamp under `parent`**, selects it and asks the tree to reveal

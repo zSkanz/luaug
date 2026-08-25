@@ -16,7 +16,6 @@ luaug_add_module(asset
         src/content.cpp
         src/image.cpp
         src/gltf.cpp
-        src/material.cpp
         src/mesh_format.cpp
         src/model_split.cpp
         src/pack.cpp
@@ -53,7 +52,6 @@ luaug_add_module_tests(asset
         tests/content_tests.cpp
         tests/image_tests.cpp
         tests/gltf_tests.cpp
-        tests/material_tests.cpp
         tests/mesh_format_tests.cpp
         tests/model_split_tests.cpp
         tests/pack_tests.cpp

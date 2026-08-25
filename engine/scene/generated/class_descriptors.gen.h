@@ -40,26 +40,27 @@ void registerEnums(EnumRegistry& enums, core::AtomTable& atoms);
 // would do it with a hash probe on a property write.
 inline constexpr EnumId StreamingModeEnumId = 1;
 inline constexpr EnumId PartShapeEnumId = 2;
-inline constexpr EnumId CollisionFidelityEnumId = 3;
-inline constexpr EnumId RaycastFilterTypeEnumId = 4;
-inline constexpr EnumId CharacterStateEnumId = 5;
-inline constexpr EnumId RotationOrderEnumId = 6;
-inline constexpr EnumId LogLevelEnumId = 7;
-inline constexpr EnumId RunContextEnumId = 8;
-inline constexpr EnumId KeyCodeEnumId = 9;
-inline constexpr EnumId InputActionTypeEnumId = 10;
-inline constexpr EnumId InputDeviceTypeEnumId = 11;
-inline constexpr EnumId UserInputTypeEnumId = 12;
-inline constexpr EnumId InputRateEnumId = 13;
-inline constexpr EnumId EasingStyleEnumId = 14;
-inline constexpr EnumId EasingDirectionEnumId = 15;
-inline constexpr EnumId PlaybackStateEnumId = 16;
-inline constexpr EnumId FillDirectionEnumId = 17;
-inline constexpr EnumId HorizontalAlignmentEnumId = 18;
-inline constexpr EnumId VerticalAlignmentEnumId = 19;
-inline constexpr EnumId SortOrderEnumId = 20;
-inline constexpr EnumId AutomaticSizeEnumId = 21;
-inline constexpr EnumId ScaleTypeEnumId = 22;
+inline constexpr EnumId AlphaModeEnumId = 3;
+inline constexpr EnumId CollisionFidelityEnumId = 4;
+inline constexpr EnumId RaycastFilterTypeEnumId = 5;
+inline constexpr EnumId CharacterStateEnumId = 6;
+inline constexpr EnumId RotationOrderEnumId = 7;
+inline constexpr EnumId LogLevelEnumId = 8;
+inline constexpr EnumId RunContextEnumId = 9;
+inline constexpr EnumId KeyCodeEnumId = 10;
+inline constexpr EnumId InputActionTypeEnumId = 11;
+inline constexpr EnumId InputDeviceTypeEnumId = 12;
+inline constexpr EnumId UserInputTypeEnumId = 13;
+inline constexpr EnumId InputRateEnumId = 14;
+inline constexpr EnumId EasingStyleEnumId = 15;
+inline constexpr EnumId EasingDirectionEnumId = 16;
+inline constexpr EnumId PlaybackStateEnumId = 17;
+inline constexpr EnumId FillDirectionEnumId = 18;
+inline constexpr EnumId HorizontalAlignmentEnumId = 19;
+inline constexpr EnumId VerticalAlignmentEnumId = 20;
+inline constexpr EnumId SortOrderEnumId = 21;
+inline constexpr EnumId AutomaticSizeEnumId = 22;
+inline constexpr EnumId ScaleTypeEnumId = 23;
 
 } // namespace generated
 

@@ -1185,6 +1185,55 @@ bool Editor::closeStamp(scene::World& game, core::InstanceId gameRoot, Inspector
     return true;
 }
 
+std::string Editor::createMaterial(scene::World& world, core::InstanceId root, std::string_view name)
+{
+    if (!stampNameIsUsable(name))
+        return {};
+
+    const scene::ClassId materialClass = world.classes().findId(world.atoms().intern("Material"));
+    if (materialClass == scene::InvalidClass) {
+        m_status = EditorStatus{"this build has no Material class", true};
+        return {};
+    }
+
+    // Refused before anything is made, so a name that is taken does not leave an
+    // orphan `Material` in the world with no file behind it.
+    const std::string relative = normalizeStampPath(name);
+    std::error_code ec;
+    if (std::filesystem::exists(m_content.root() / std::filesystem::path(relative), ec)) {
+        m_status = EditorStatus{"something is already called that", true};
+        return {};
+    }
+
+    // Recorded BEFORE the instance exists, so one undo takes both back.
+    m_history.record(world, "Create Material");
+
+    const core::InstanceId made = world.create(materialClass);
+    // Named after the file, minus its folders and its suffix -- which is what
+    // somebody typed and what they will look for in the Explorer.
+    std::string stem = relative;
+    if (const std::string::size_type slash = stem.rfind('/'); slash != std::string::npos)
+        stem = stem.substr(slash + 1);
+    if (const std::string::size_type dot = stem.find('.'); dot != std::string::npos)
+        stem = stem.substr(0, dot);
+    world.setName(made, world.atoms().intern(stem));
+    if (world.setParent(made, root).has_value()) {
+        (void)m_history.undo(world);
+        m_status = EditorStatus{"nothing authored can live in that", true};
+        return {};
+    }
+
+    if (!createStamp(world, made, root, name)) {
+        // `createStamp` said why. Taking the instance back with it, because a
+        // material in the world that nothing wrote is not what was asked for.
+        (void)m_history.undo(world);
+        return {};
+    }
+
+    m_status = EditorStatus{"created " + relative, false};
+    return relative;
+}
+
 bool Editor::createStamp(scene::World& world, core::InstanceId id, core::InstanceId root, std::string_view name)
 {
     if (!world.alive(id)) {

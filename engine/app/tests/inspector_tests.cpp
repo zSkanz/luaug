@@ -1125,13 +1125,14 @@ TEST_CASE("every Content property the engine ships says which files it accepts")
             const std::string where = std::string(atoms.text(descriptor->name)) + "." +
                                       std::string(atoms.text(property.name)) +
                                       " has an unknown content kind: " + std::string(kind);
-            CHECK_MESSAGE(
-                (kind == "Mesh" || kind == "Texture" || kind == "Audio" || kind == "Font" || kind == "Material"),
-                where);
+            CHECK_MESSAGE((kind == "Mesh" || kind == "Texture" || kind == "Audio" || kind == "Font"), where);
         }
     }
-    // Six today: a mesh, two images, a font, a sound and a material. A number
-    // rather than a list, so adding one is a one-line change here and dropping
-    // one is a failure.
-    CHECK(contentProperties == 6);
+    // Nine today: a mesh, two images, a font, a sound, and a `Material`'s four
+    // maps. A number rather than a list, so adding one is a one-line change
+    // here and dropping one is a failure.
+    //
+    // **No `Material` kind any more**: a material is an instance, and the
+    // property that names one is an instance reference rather than a path.
+    CHECK(contentProperties == 9);
 }

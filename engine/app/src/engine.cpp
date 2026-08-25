@@ -576,10 +576,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     core::u64 transformHistoryWorld = 0;
 
     render::MeshLibrary meshLibrary;
-    // The materials `BasePart.Material` names. Beside the mesh library rather
-    // than inside it, because a material is not a property of a mesh: two parts
-    // naming one share one entry, and a `Part` with no mesh still has a surface.
-    render::MaterialLibrary materialLibrary;
+    // The textures the scene's `Material` instances name. Beside the mesh
+    // library rather than inside it: a texture is not a property of a mesh, and
+    // two materials naming one image share one upload.
+    render::TextureLibrary textureLibrary;
     render::MeshCache meshCache;
     render::MeshLoader meshLoader;
 
@@ -1567,10 +1567,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // **Made rather than found**, so it is not part of the walk that
                 // resolves an existing entry by path: there is nothing there yet.
                 if (!editorCommands.createMaterial.empty()) {
-                    const std::string made = editor.content().createMaterial(editorCommands.createMaterial);
-                    editor.report(made.empty() ? "could not create that material -- is something already called that?"
-                                               : "created " + made,
-                                  made.empty());
+                    // Into the world AND into the browser: a material is an
+                    // instance, and what a project keeps for reuse is a stamp of
+                    // one. `createMaterial` says why when it refuses.
+                    (void)editor.createMaterial(authored(), authoredRoot(), editorCommands.createMaterial);
                 }
                 if (!editorCommands.deleteContent.empty() || !editorCommands.renameContent.empty() ||
                     !editorCommands.duplicateContent.empty()) {
@@ -2361,7 +2361,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             if (renderer != nullptr && renderer->valid())
                 meshLoader.syncPrimitives(*device, *cmd, host->world(), meshCache, meshLibrary);
             if (renderer != nullptr && renderer->valid())
-                (void)meshLoader.syncMaterials(*device, *cmd, host->world(), host->workspace(), materialLibrary);
+                (void)meshLoader.syncTextures(*device, *cmd, host->world(), textureLibrary);
             if (renderer != nullptr && renderer->valid())
                 if (meshLoader.sync(*device, *cmd, host->world(), host->workspace(), meshCache, meshLibrary) > 0 &&
                     host->physics() != nullptr) {
@@ -2432,7 +2432,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             render::extract(authored(), stageOf() != nullptr ? stageOf()->workspace() : host->workspace(),
                             stageOf() != nullptr ? stageOf()->lighting() : host->lighting(), meshLibrary, aspect,
                             shadowRadius, host->animation(), renderAlpha, &transformHistory, snapshot,
-                            useEditorView ? &editorView : nullptr, outlined, &materialLibrary);
+                            useEditorView ? &editorView : nullptr, outlined, &textureLibrary);
             // The UI is laid out against the TARGET's size rather than the
             // window's: an offscreen render at 640x360 has to produce the
             // layout that resolution would, which is the whole of what the

@@ -884,21 +884,25 @@ TEST_CASE("a disabled light contributes nothing, and does not spend a budget slo
 
 namespace {
 
-// A material with a base colour of half grey and a green glow, so that a tint
+// A `Material` instance with a half-grey base and a green glow, so a tint
 // multiplying it produces a number nothing else in this file would.
-[[nodiscard]] render::RenderMaterial halfGrey()
+[[nodiscard]] core::InstanceId halfGreyMaterial(Fixture& fixture)
 {
-    render::RenderMaterial material;
-    material.uniforms.baseColor[0] = 0.5f;
-    material.uniforms.baseColor[1] = 0.5f;
-    material.uniforms.baseColor[2] = 0.5f;
-    material.uniforms.baseColor[3] = 1.0f;
-    material.uniforms.emissive[0] = 0.0f;
-    material.uniforms.emissive[1] = 0.8f;
-    material.uniforms.emissive[2] = 0.0f;
-    material.uniforms.metallicRoughnessNormalCutoff[0] = 1.0f;
-    material.uniforms.metallicRoughnessNormalCutoff[1] = 0.2f;
-    return material;
+    const core::InstanceId id = fixture.world.create(fixture.instanceClass);
+    scene::MaterialComponent material;
+    material.color = core::Color3{0.5f, 0.5f, 0.5f};
+    material.emissive = core::Color3{0.0f, 0.8f, 0.0f};
+    material.metalness = 1.0f;
+    material.roughness = 0.2f;
+    fixture.world.materials().add(id, material);
+    return id;
+}
+
+[[nodiscard]] bool nearF(core::f32 value, core::f32 expected) noexcept
+{
+    // Compared at f32: `doctest::Approx` takes a double and letting a uniform
+    // promote into it is a `-Wdouble-promotion` error under Clang.
+    return std::fabs(value - expected) < 1e-4f;
 }
 
 // A `Part` draws through the primitive registered under its shape's reserved
@@ -910,13 +914,6 @@ void registerBlock(Fixture& fixture, render::MeshLibrary& meshes)
     entry.bounds = core::AABB::fromCenterSize(core::Vec3{}, core::Vec3{1.0f, 1.0f, 1.0f});
     entry.sectionCount = 1;
     meshes.set(fixture.atoms.intern(render::primitiveContent(0)), entry);
-}
-
-[[nodiscard]] bool nearF(core::f32 value, core::f32 expected) noexcept
-{
-    // Compared at f32: `doctest::Approx` takes a double and letting a uniform
-    // promote into it is a `-Wdouble-promotion` error under Clang.
-    return std::fabs(value - expected) < 1e-4f;
 }
 
 } // namespace
@@ -935,11 +932,9 @@ TEST_CASE("a Part with no material draws its own Color, exactly as it always has
 
     render::MeshLibrary meshes;
     registerBlock(fixture, meshes);
-    render::MaterialLibrary materials;
 
     render::RenderWorld snapshot;
-    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, snapshot,
-                    nullptr, {}, &materials);
+    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, snapshot);
 
     REQUIRE(snapshot.materials.size() == 1);
     // White base times the colour IS the colour, which is the identity this
@@ -949,35 +944,32 @@ TEST_CASE("a Part with no material draws its own Color, exactly as it always has
     CHECK(nearF(snapshot.materials[0].uniforms.baseColor[2], 0.75f));
 }
 
-TEST_CASE("a material is tinted by the part's Color")
+TEST_CASE("a Material instance is tinted by the part's Color")
 {
     Fixture fixture;
     fixture.registerRenderClasses();
     const core::InstanceId workspace = fixture.world.create(fixture.workspaceClass);
     (void)fixture.cameraLookingDownNegativeZ(workspace);
 
-    const core::NameAtom material = fixture.atoms.intern("asset://materials/stone.material.json");
+    const core::InstanceId material = halfGreyMaterial(fixture);
     const core::InstanceId id = fixture.world.create(fixture.partClass);
     (void)fixture.world.setParent(id, workspace);
     fixture.world.parts().find(id)->cframe.position = core::DVec3{0.0, 0.0, -10.0};
-    fixture.world.parts().find(id)->materialContent = material;
+    fixture.world.parts().find(id)->material = material;
 
     render::MeshLibrary meshes;
     registerBlock(fixture, meshes);
-    render::MaterialLibrary materials;
-    materials.set(material, halfGrey());
-
     render::RenderWorld snapshot;
 
     SUBCASE("a white part shows the material exactly as authored")
     {
         render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr,
-                        snapshot, nullptr, {}, &materials);
+                        snapshot);
         REQUIRE(snapshot.materials.size() == 1);
         CHECK(nearF(snapshot.materials[0].uniforms.baseColor[0], 0.5f));
         CHECK(nearF(snapshot.materials[0].uniforms.emissive[1], 0.8f));
-        // And the material's own metalness and roughness came with it, rather
-        // than the dielectric defaults an untextured part gets.
+        // And its own metalness and roughness came with it, rather than the
+        // dielectric defaults an untextured part gets.
         CHECK(nearF(snapshot.materials[0].uniforms.metallicRoughnessNormalCutoff[0], 1.0f));
         CHECK(nearF(snapshot.materials[0].uniforms.metallicRoughnessNormalCutoff[1], 0.2f));
     }
@@ -986,27 +978,25 @@ TEST_CASE("a material is tinted by the part's Color")
     {
         fixture.world.parts().find(id)->color = core::Color3{1.0f, 0.5f, 0.0f};
         render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr,
-                        snapshot, nullptr, {}, &materials);
+                        snapshot);
         REQUIRE(snapshot.materials.size() == 1);
         CHECK(nearF(snapshot.materials[0].uniforms.baseColor[0], 0.5f));
         CHECK(nearF(snapshot.materials[0].uniforms.baseColor[1], 0.25f));
         CHECK(nearF(snapshot.materials[0].uniforms.baseColor[2], 0.0f));
         // The glow is tinted too: a red lamp made from a white glowing material
-        // is what somebody expects `Color` to do, and leaving emissive alone
-        // would light the part red and leave the glow green.
+        // is what somebody expects `Color` to do.
         CHECK(nearF(snapshot.materials[0].uniforms.emissive[1], 0.4f));
     }
 
-    SUBCASE("a material that has not loaded draws plain rather than not at all")
+    SUBCASE("a material whose maps have not loaded still draws its numbers")
     {
-        render::MaterialLibrary empty;
-        fixture.world.parts().find(id)->color = core::Color3{0.25f, 0.5f, 0.75f};
+        fixture.world.materials().find(material)->colorMap = fixture.atoms.intern("asset://t.png");
         render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr,
-                        snapshot, nullptr, {}, &empty);
+                        snapshot, nullptr, {}, nullptr);
         REQUIRE(snapshot.materials.size() == 1);
-        // A surface that vanished while its material loaded would be worse than
-        // one that arrives plain and then gets its texture.
-        CHECK(nearF(snapshot.materials[0].uniforms.baseColor[0], 0.25f));
+        // A surface that vanished while its texture loaded would be worse than
+        // one that arrives plain and then gets its map.
+        CHECK(nearF(snapshot.materials[0].uniforms.baseColor[0], 0.5f));
         CHECK(snapshot.draws.size() == 1);
     }
 }
@@ -1014,31 +1004,27 @@ TEST_CASE("a material is tinted by the part's Color")
 TEST_CASE("two parts differing only in tint are two bind sets")
 {
     // The dedupe key has to carry the part's colour and its material, or the
-    // second part draws in the first one's colour -- which looks like a random
-    // parts-share-a-colour bug and is a one-line key.
+    // second part draws in the first one's colour.
     Fixture fixture;
     fixture.registerRenderClasses();
     const core::InstanceId workspace = fixture.world.create(fixture.workspaceClass);
     (void)fixture.cameraLookingDownNegativeZ(workspace);
 
-    const core::NameAtom material = fixture.atoms.intern("asset://materials/stone.material.json");
+    const core::InstanceId material = halfGreyMaterial(fixture);
     for (int index = 0; index < 2; ++index) {
         const core::InstanceId id = fixture.world.create(fixture.partClass);
         (void)fixture.world.setParent(id, workspace);
         fixture.world.parts().find(id)->cframe.position = core::DVec3{static_cast<core::f64>(index), 0.0, -10.0};
-        fixture.world.parts().find(id)->materialContent = material;
+        fixture.world.parts().find(id)->material = material;
         fixture.world.parts().find(id)->color =
             index == 0 ? core::Color3{1.0f, 1.0f, 1.0f} : core::Color3{1.0f, 0.0f, 0.0f};
     }
 
     render::MeshLibrary meshes;
     registerBlock(fixture, meshes);
-    render::MaterialLibrary materials;
-    materials.set(material, halfGrey());
 
     render::RenderWorld snapshot;
-    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, snapshot,
-                    nullptr, {}, &materials);
+    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, snapshot);
 
     REQUIRE(snapshot.materials.size() == 2);
     CHECK(nearF(snapshot.materials[0].uniforms.baseColor[1], 0.5f));
@@ -1048,8 +1034,7 @@ TEST_CASE("two parts differing only in tint are two bind sets")
     // the rule that makes a wall of a hundred bricks one material.
     fixture.world.parts().forEach(
         [&](core::InstanceId id, scene::PartComponent&) { fixture.world.parts().find(id)->color = core::Color3{}; });
-    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, snapshot,
-                    nullptr, {}, &materials);
+    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, snapshot);
     CHECK(snapshot.materials.size() == 1);
 }
 
@@ -1076,28 +1061,24 @@ TEST_CASE("a MeshPart's material replaces the block its file described")
     entry.materials.push_back(fromFile);
     meshes.set(content, entry);
 
-    render::MaterialLibrary materials;
     render::RenderWorld snapshot;
 
     SUBCASE("with no material it keeps the file's block")
     {
         render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr,
-                        snapshot, nullptr, {}, &materials);
+                        snapshot);
         REQUIRE(snapshot.materials.size() == 1);
-        // Red, from the file. This is what stops every existing mesh scene
-        // going white the moment this property exists.
+        // Red, from the file. This is what stops every existing mesh scene going
+        // white the moment this property exists.
         CHECK(nearF(snapshot.materials[0].uniforms.baseColor[0], 1.0f));
         CHECK(nearF(snapshot.materials[0].uniforms.baseColor[1], 0.0f));
     }
 
     SUBCASE("with one it replaces it whole")
     {
-        const core::NameAtom material = fixture.atoms.intern("asset://materials/stone.material.json");
-        materials.set(material, halfGrey());
-        fixture.world.parts().find(id)->materialContent = material;
-
+        fixture.world.parts().find(id)->material = halfGreyMaterial(fixture);
         render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr,
-                        snapshot, nullptr, {}, &materials);
+                        snapshot);
         REQUIRE(snapshot.materials.size() == 1);
         // Not a merge: every channel comes from the material, including the ones
         // the file also had an opinion about.

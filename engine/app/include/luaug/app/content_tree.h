@@ -48,11 +48,6 @@ enum class ContentKind
     // property name" -- a question nothing asked before.
     Audio,
     Font,
-    // A material file (`asset/material.h`): the parameter block a `MeshPart`
-    // may be pointed at. A kind of its own for the same reason `Audio` is --
-    // `MaterialContent`'s picker has to answer "which files may this property
-    // name", and "every `.json` in the project" is not that answer.
-    Material,
     Chunk,
     Other,
 };
@@ -160,27 +155,6 @@ public:
     // is what a person means and is why the caller is expected to have asked
     // first.
     bool remove(const ContentEntry& entry);
-
-    // Writes an empty material into the current folder and re-reads, returning
-    // its file name or empty on failure.
-    //
-    // **A material has to be creatable from nothing**, because that is how one
-    // starts: import the textures, make a material, point it at them. Every
-    // other authored file in a project either arrives from outside (a mesh, a
-    // texture) or is made from something already in the world (a stamp, a
-    // scene); a material is the one you sit down and write.
-    //
-    // What it writes is the DEFAULT block -- white, dielectric, no maps -- which
-    // is the identity: a part pointed at it looks exactly as it did with no
-    // material at all. That is the right starting point, because the first thing
-    // anybody does is change one field and expect to see only that change.
-    //
-    // Refused, each with a false rather than an exception: no content root, a
-    // name that is not usable (`isUsableName` -- empty, a separator, a dot
-    // segment), and a name something in the folder already carries. **Refused
-    // rather than overwritten**: two files with one name is a question, and
-    // answering it by destroying one of them is not an answer.
-    [[nodiscard]] std::string createMaterial(std::string_view materialName);
 
     // Copies an entry beside itself and re-reads, returning the new file's name
     // or empty on failure.

@@ -179,6 +179,228 @@ bool setMeshPartMeshSize(scene::World& world, core::InstanceId id, const Value& 
     return true;
 }
 
+// --- Material -----------------------------------------------------------------
+
+void attachMaterialComponents(scene::World& world, core::InstanceId id)
+{
+    world.materials().add(id, scene::MaterialComponent{});
+}
+
+void detachMaterialComponents(scene::World& world, core::InstanceId id)
+{
+    world.materials().remove(id);
+}
+
+namespace {
+
+[[nodiscard]] scene::MaterialComponent* writeMaterial(scene::World& world, core::InstanceId id) noexcept
+{
+    return world.materials().find(id);
+}
+
+[[nodiscard]] const scene::MaterialComponent* readMaterial(const scene::World& world, core::InstanceId id) noexcept
+{
+    return world.materials().find(id);
+}
+
+// A map is a `Content` URN, interned and kept as written. Whether the file loads
+// is the renderer's problem and a later one; reading the property back must give
+// what was set even when it does not.
+[[nodiscard]] bool setMap(scene::World& world, core::InstanceId id, const Value& value, core::NameAtom& field)
+{
+    const auto* text = std::get_if<std::string>(&value);
+    if (text == nullptr || readMaterial(world, id) == nullptr)
+        return false;
+    field = world.atoms().intern(*text);
+    return true;
+}
+
+} // namespace
+
+Value getMaterialColor(const scene::World& world, core::InstanceId id)
+{
+    const scene::MaterialComponent* material = readMaterial(world, id);
+    return material == nullptr ? Value{} : Value{material->color};
+}
+
+bool setMaterialColor(scene::World& world, core::InstanceId id, const Value& value)
+{
+    const auto* color = std::get_if<core::Color3>(&value);
+    scene::MaterialComponent* material = writeMaterial(world, id);
+    if (color == nullptr || material == nullptr)
+        return false;
+    material->color = *color;
+    return true;
+}
+
+Value getMaterialTransparency(const scene::World& world, core::InstanceId id)
+{
+    const scene::MaterialComponent* material = readMaterial(world, id);
+    return material == nullptr ? Value{} : Value{static_cast<f64>(material->transparency)};
+}
+
+bool setMaterialTransparency(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::MaterialComponent* material = writeMaterial(world, id);
+    return material != nullptr && takeFinite(value, material->transparency);
+}
+
+Value getMaterialColorMap(const scene::World& world, core::InstanceId id)
+{
+    const scene::MaterialComponent* material = readMaterial(world, id);
+    if (material == nullptr)
+        return Value{};
+    return std::string(world.atoms().text(material->colorMap));
+}
+
+bool setMaterialColorMap(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::MaterialComponent* material = writeMaterial(world, id);
+    return material != nullptr && setMap(world, id, value, material->colorMap);
+}
+
+Value getMaterialNormalMap(const scene::World& world, core::InstanceId id)
+{
+    const scene::MaterialComponent* material = readMaterial(world, id);
+    if (material == nullptr)
+        return Value{};
+    return std::string(world.atoms().text(material->normalMap));
+}
+
+bool setMaterialNormalMap(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::MaterialComponent* material = writeMaterial(world, id);
+    return material != nullptr && setMap(world, id, value, material->normalMap);
+}
+
+Value getMaterialMetallicRoughnessMap(const scene::World& world, core::InstanceId id)
+{
+    const scene::MaterialComponent* material = readMaterial(world, id);
+    if (material == nullptr)
+        return Value{};
+    return std::string(world.atoms().text(material->metallicRoughnessMap));
+}
+
+bool setMaterialMetallicRoughnessMap(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::MaterialComponent* material = writeMaterial(world, id);
+    return material != nullptr && setMap(world, id, value, material->metallicRoughnessMap);
+}
+
+Value getMaterialEmissiveMap(const scene::World& world, core::InstanceId id)
+{
+    const scene::MaterialComponent* material = readMaterial(world, id);
+    if (material == nullptr)
+        return Value{};
+    return std::string(world.atoms().text(material->emissiveMap));
+}
+
+bool setMaterialEmissiveMap(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::MaterialComponent* material = writeMaterial(world, id);
+    return material != nullptr && setMap(world, id, value, material->emissiveMap);
+}
+
+Value getMaterialMetalness(const scene::World& world, core::InstanceId id)
+{
+    const scene::MaterialComponent* material = readMaterial(world, id);
+    return material == nullptr ? Value{} : Value{static_cast<f64>(material->metalness)};
+}
+
+bool setMaterialMetalness(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::MaterialComponent* material = writeMaterial(world, id);
+    return material != nullptr && takeFinite(value, material->metalness);
+}
+
+Value getMaterialRoughness(const scene::World& world, core::InstanceId id)
+{
+    const scene::MaterialComponent* material = readMaterial(world, id);
+    return material == nullptr ? Value{} : Value{static_cast<f64>(material->roughness)};
+}
+
+bool setMaterialRoughness(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::MaterialComponent* material = writeMaterial(world, id);
+    return material != nullptr && takeFinite(value, material->roughness);
+}
+
+Value getMaterialEmissive(const scene::World& world, core::InstanceId id)
+{
+    const scene::MaterialComponent* material = readMaterial(world, id);
+    return material == nullptr ? Value{} : Value{material->emissive};
+}
+
+bool setMaterialEmissive(scene::World& world, core::InstanceId id, const Value& value)
+{
+    const auto* color = std::get_if<core::Color3>(&value);
+    scene::MaterialComponent* material = writeMaterial(world, id);
+    if (color == nullptr || material == nullptr)
+        return false;
+    material->emissive = *color;
+    return true;
+}
+
+Value getMaterialNormalScale(const scene::World& world, core::InstanceId id)
+{
+    const scene::MaterialComponent* material = readMaterial(world, id);
+    return material == nullptr ? Value{} : Value{static_cast<f64>(material->normalScale)};
+}
+
+bool setMaterialNormalScale(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::MaterialComponent* material = writeMaterial(world, id);
+    return material != nullptr && takeFinite(value, material->normalScale);
+}
+
+Value getMaterialAlphaMode(const scene::World& world, core::InstanceId id)
+{
+    const scene::MaterialComponent* material = readMaterial(world, id);
+    if (material == nullptr)
+        return Value{};
+    return Value{scene::EnumValue{generated::AlphaModeEnumId, material->alphaMode}};
+}
+
+bool setMaterialAlphaMode(scene::World& world, core::InstanceId id, const Value& value)
+{
+    const auto* item = std::get_if<scene::EnumValue>(&value);
+    scene::MaterialComponent* material = writeMaterial(world, id);
+    if (item == nullptr || material == nullptr || item->enumId != generated::AlphaModeEnumId)
+        return false;
+    if (world.enums().findValue(item->enumId, item->value) == nullptr)
+        return false;
+    material->alphaMode = item->value;
+    return true;
+}
+
+Value getMaterialAlphaCutoff(const scene::World& world, core::InstanceId id)
+{
+    const scene::MaterialComponent* material = readMaterial(world, id);
+    return material == nullptr ? Value{} : Value{static_cast<f64>(material->alphaCutoff)};
+}
+
+bool setMaterialAlphaCutoff(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::MaterialComponent* material = writeMaterial(world, id);
+    return material != nullptr && takeFinite(value, material->alphaCutoff);
+}
+
+Value getMaterialDoubleSided(const scene::World& world, core::InstanceId id)
+{
+    const scene::MaterialComponent* material = readMaterial(world, id);
+    return material == nullptr ? Value{} : Value{material->doubleSided};
+}
+
+bool setMaterialDoubleSided(scene::World& world, core::InstanceId id, const Value& value)
+{
+    const auto* flag = std::get_if<bool>(&value);
+    scene::MaterialComponent* material = writeMaterial(world, id);
+    if (flag == nullptr || material == nullptr)
+        return false;
+    material->doubleSided = *flag;
+    return true;
+}
+
 // --- Bone ---------------------------------------------------------------------
 //
 // **No storage hook.** `Bone` inherits `Attachment`'s component, and declaring

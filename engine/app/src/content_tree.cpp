@@ -1,5 +1,4 @@
 #include <luaug/app/content_tree.h>
-#include <luaug/asset/material.h>
 #include <luaug/core/json.h>
 #include <luaug/platform/file.h>
 
@@ -84,8 +83,6 @@ ContentKind contentKindOf(std::string_view fileName) noexcept
         return ContentKind::Scene;
     if (endsWith(name, ".chunk.json"))
         return ContentKind::Chunk;
-    if (endsWith(name, asset::MaterialExtension))
-        return ContentKind::Material;
 
     static constexpr std::array<std::string_view, 4> kMeshes{".glb", ".gltf", ".fbx", ".obj"};
     for (const std::string_view extension : kMeshes) {
@@ -241,8 +238,6 @@ namespace {
         return kStampExtension;
     case ContentKind::Chunk:
         return ".chunk.json";
-    case ContentKind::Material:
-        return asset::MaterialExtension;
     case ContentKind::Folder:
     case ContentKind::Mesh:
     case ContentKind::Texture:
@@ -322,52 +317,6 @@ bool ContentTree::rename(const ContentEntry& entry, std::string_view newName)
         return false;
 
     return refresh();
-}
-
-std::string ContentTree::createMaterial(std::string_view materialName)
-{
-    if (m_root.empty() || !isUsableName(materialName))
-        return {};
-
-    // The suffix is put back rather than required, exactly as `rename` does it:
-    // typing `stone` means a material called stone, and typing
-    // `stone.material.json` means the same thing.
-    std::string target(materialName);
-    const std::string loweredTarget = lowered(target);
-    const std::string_view extension = asset::MaterialExtension;
-    if (target.size() < extension.size() ||
-        loweredTarget.compare(target.size() - extension.size(), extension.size(), extension) != 0) {
-        target += std::string(extension);
-    }
-
-    std::filesystem::path folder = m_root;
-    if (!m_relative.empty())
-        folder /= std::filesystem::path(m_relative);
-
-    std::error_code ec;
-    const std::filesystem::path path = folder / std::filesystem::path(target);
-    // Refused rather than replacing. Somebody who typed a name that is already
-    // taken has made a mistake, and a browser that answered by destroying their
-    // material is one they stop trusting with anything.
-    if (std::filesystem::exists(path, ec))
-        return {};
-
-    if (!platform::createDirectories(folder))
-        return {};
-    // The default block: white, dielectric, no maps. A part pointed at it looks
-    // exactly as it did with none, which is the starting point somebody wants --
-    // change one field, see one change.
-    asset::MaterialAsset made;
-    // Named after the file, which is what somebody typed and what they will
-    // look for. The two can drift later -- a material may be renamed inside
-    // itself -- and this is only the starting point.
-    made.name = target.substr(0, target.size() - extension.size());
-    if (!platform::writeTextFile(path, asset::writeMaterial(made)))
-        return {};
-
-    if (!refresh())
-        return {};
-    return target;
 }
 
 std::string ContentTree::duplicate(const ContentEntry& entry)

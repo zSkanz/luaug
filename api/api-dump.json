@@ -163,7 +163,7 @@
         },
         {
           "Name": "Material",
-          "Type": "Content"
+          "Type": "Material?"
         },
         {
           "Name": "Orientation",
@@ -1288,6 +1288,73 @@
           "Type": "vector",
           "ReadOnly": true,
           "ThreadSafety": "ReadParallel"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "Material",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "AlphaCutoff",
+          "Type": "number",
+          "Default": "0.5"
+        },
+        {
+          "Name": "AlphaMode",
+          "Type": "Enum.AlphaMode"
+        },
+        {
+          "Name": "Color",
+          "Type": "Color3"
+        },
+        {
+          "Name": "ColorMap",
+          "Type": "Content"
+        },
+        {
+          "Name": "DoubleSided",
+          "Type": "boolean",
+          "Default": "false"
+        },
+        {
+          "Name": "Emissive",
+          "Type": "Color3"
+        },
+        {
+          "Name": "EmissiveMap",
+          "Type": "Content"
+        },
+        {
+          "Name": "MetallicRoughnessMap",
+          "Type": "Content"
+        },
+        {
+          "Name": "Metalness",
+          "Type": "number",
+          "Default": "0"
+        },
+        {
+          "Name": "NormalMap",
+          "Type": "Content"
+        },
+        {
+          "Name": "NormalScale",
+          "Type": "number",
+          "Default": "1"
+        },
+        {
+          "Name": "Roughness",
+          "Type": "number",
+          "Default": "0.7"
+        },
+        {
+          "Name": "Transparency",
+          "Type": "number",
+          "Default": "0"
         }
       ],
       "Methods": [],
@@ -4097,6 +4164,23 @@
     }
   ],
   "Enums": [
+    {
+      "Name": "AlphaMode",
+      "Items": [
+        {
+          "Name": "Blend",
+          "Value": 2
+        },
+        {
+          "Name": "Mask",
+          "Value": 1
+        },
+        {
+          "Name": "Opaque",
+          "Value": 0
+        }
+      ]
+    },
     {
       "Name": "AutomaticSize",
       "Items": [

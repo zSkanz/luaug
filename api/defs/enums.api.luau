@@ -74,6 +74,32 @@ local Definition: Schema.Definition = {
             },
         },
         {
+            Name = "AlphaMode",
+            Doc = "How a `Material` reads the alpha channel of its colour. glTF's three modes, kept because they "
+                .. "are what a file says and translating them into something else here would only move the "
+                .. "switch.",
+            Items = {
+                {
+                    Name = "Opaque",
+                    Value = 0,
+                    Doc = "Alpha is ignored entirely. The cheapest, and what almost everything is.",
+                },
+                {
+                    Name = "Mask",
+                    Value = 1,
+                    Doc = "Alpha is a coverage TEST against `AlphaCutoff`, not a blend: a pixel is drawn or it is "
+                        .. "not. Leaves and chain-link fences want this -- it stays in the opaque pass, so it "
+                        .. "writes depth and needs no sorting.",
+                },
+                {
+                    Name = "Blend",
+                    Value = 2,
+                    Doc = "Alpha blends. Glass and smoke want this, and it costs what every transparent surface "
+                        .. "costs: a sorted pass and no depth writes.",
+                },
+            },
+        },
+        {
             Name = "CollisionFidelity",
             Doc = "How closely a `MeshPart`'s collision shape follows the geometry it renders (§2.2). The pairing "
                 .. "is a trade: the closer the shape, the more the solver pays for every contact against it.",

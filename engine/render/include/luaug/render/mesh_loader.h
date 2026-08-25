@@ -67,20 +67,19 @@ public:
     core::u32 sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world, core::InstanceId root,
                    MeshCache& cache, MeshLibrary& library, SkeletonLibrary* skeletons = nullptr);
 
-    // Loads every `BasePart.Material` the world names and the library does not
-    // yet hold. Same safe point, same rules, same return as `sync`.
+    // Loads every texture the world's `Material` instances name and the library
+    // does not yet hold. Same safe point, same rules, same return as `sync`.
     //
-    // Separate from `sync` because a material is not a property of a mesh: two
-    // parts naming one material are one entry, a `Part` with no mesh still has a
-    // surface, and a material file changes without its mesh changing. The two
-    // walks are over different pools for the same reason.
+    // Over the MATERIAL pool rather than over the parts: two parts sharing a
+    // material would otherwise be asked about twice, and a material nothing
+    // points at yet -- one somebody is building -- would never load its maps and
+    // would look broken in the property panel that is showing it.
     //
-    // **The URNs inside a material name SOURCE images** -- the `.png` the artist
-    // shipped -- and this decodes and uploads them. That is the dev-mode path
-    // ADR 0010 keeps forever; a shipped game's material arrives compiled with
-    // its textures already named by hash.
-    core::u32 syncMaterials(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world, core::InstanceId root,
-                            MaterialLibrary& library);
+    // **The URNs name SOURCE images** -- the `.png` the artist shipped -- and
+    // this decodes and uploads them. That is the dev-mode path ADR 0010 keeps
+    // forever; a shipped game's textures arrive compiled and named by hash.
+    core::u32 syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world,
+                           TextureLibrary& library);
 
     // Builds and uploads the five `Enum.PartShape` solids and registers them in
     // `library` under their reserved URNs (`primitiveContent`). Idempotent: the
