@@ -365,7 +365,11 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
             }
 
             asset::Model model;
-            if (auto error = asset::importGltf(bytes, path.parent_path(), {}, model); error.has_value()) {
+            // The palette is a fixed array in a uniform block, so the number of
+            // joints this renderer can pose is a fact the importer needs: past it,
+            // a rig is not posed badly, it indexes off the end and scatters.
+            const asset::GltfImportOptions importOptions{.maxSkinJoints = kMaxSkinJoints};
+            if (auto error = asset::importGltf(bytes, path.parent_path(), importOptions, model); error.has_value()) {
                 // **The reason, and not only that there was one.** `MeshContent`
                 // promises that a file which fails to import "reports why,
                 // because a part that silently becomes invisible is harder to
@@ -386,6 +390,19 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
                 return;
             }
             triangles = static_cast<core::u32>(model.mesh.indices.size() / 3);
+
+            // **Said out loud, because a character that quietly stopped being
+            // animatable is a bug report.** The numbers are the answer: this is
+            // not a file that failed, it is a rig larger than anything this
+            // build can pose, imported as the geometry it will always be.
+            if (model.bakedBindPose()) {
+                const core::I18nArg args[] = {
+                    {"path", path.string()},
+                    {"joints", static_cast<core::i64>(model.sourceJointCount)},
+                    {"budget", static_cast<core::i64>(kMaxSkinJoints)},
+                };
+                core::log(core::LogLevel::Info, LUAUG_TR("render.info.mesh_bind_pose_baked"), args);
+            }
 
             // A file with a skin gets the second stream and a file without gets
             // exactly what M4 uploaded -- which is what keeps an unskinned draw

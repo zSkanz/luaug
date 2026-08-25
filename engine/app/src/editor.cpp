@@ -1547,8 +1547,10 @@ bool Editor::saveOpenScene(scene::World& world)
 
 void Editor::reportImport(const ContentTree::ImportReport& report) noexcept
 {
-    if (report.imported.empty() && report.skipped.empty() && report.failed.empty())
+    if (report.imported.empty() && report.skipped.empty() && report.failed.empty() && report.companions.empty() &&
+        report.missing.empty()) {
         return;
+    }
 
     // **Counted, and the refusals named.** "Imported 3 files" is a sentence
     // nobody has to act on; "2 already here" is one they do, and the names are
@@ -1563,12 +1565,21 @@ void Editor::reportImport(const ContentTree::ImportReport& report) noexcept
         }
         return joined;
     };
+    // **Counted apart**, because a person who dragged in one file and sees
+    // "imported 7" would reasonably wonder what the other six are.
+    if (!report.companions.empty())
+        message += " and " + std::to_string(report.companions.size()) + " it needs";
     if (!report.skipped.empty())
         message += "; skipped " + listOf(report.skipped) + " (already here)";
     if (!report.failed.empty())
         message += "; could not read " + listOf(report.failed);
+    // **The one that decides whether the model works.** A `.gltf` whose buffer
+    // was not beside it imports perfectly and loads nothing, and this is the
+    // only moment anybody can be told which file to go and find.
+    if (!report.missing.empty())
+        message += "; NOT beside it: " + listOf(report.missing) + " -- the model will not load without them";
 
-    m_status = EditorStatus{message, !report.failed.empty()};
+    m_status = EditorStatus{message, !report.failed.empty() || !report.missing.empty()};
 }
 
 void Editor::adoptCamera(const core::CFrameD& cframe) noexcept

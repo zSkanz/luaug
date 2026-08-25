@@ -234,9 +234,43 @@ struct Model
     // construction, and the loader refuses a file where they are not.
     std::vector<SkinVertex> skin;
     std::vector<Joint> joints;
+
+    // **The bind pose, already resolved into a palette**: one matrix per joint,
+    // `jointGlobal * inverseBind`, which is what places a skinned mesh's
+    // vertices when nothing is animating it.
+    //
+    // A skinned mesh drawn with no palette at all is not "unskinned" -- it is
+    // every vertex left wherever the file's author modelled it, which for an
+    // export whose skeleton hangs off a unit conversion is a model a hundred
+    // times too large in the wrong orientation. glTF says a skinned node's own
+    // transform MUST be ignored, so there is nothing else to place it with.
+    //
+    // Resolved HERE because it needs the node graph and nothing downstream has
+    // one: a joint's global transform is every node from the scene root down,
+    // and the joint list is not closed under parenthood -- an exporter may leave
+    // an intermediate node out of the skin, and a chain rebuilt from
+    // `Joint::parent` then loses everything above the break.
+    //
+    // Empty when the bind pose was baked into the vertices instead
+    // (`GltfImportOptions::maxSkinJoints`), because then there is nothing left
+    // to pose.
+    std::vector<core::Mat4> restPalette;
+
+    // How many joints the file's skin had, whether or not this model still
+    // carries them. Zero for a file with no skin.
+    //
+    // Kept after a bake so the loader can say what it did and why: a character
+    // that silently stopped being animatable is a bug report, and one that says
+    // "677 joints, this build poses 64" is an answer.
+    core::u32 sourceJointCount = 0;
+
     std::vector<AnimationClip> clips;
 
     [[nodiscard]] bool skinned() const noexcept { return !joints.empty() && !skin.empty(); }
+
+    // Whether the skeleton was thrown away and its bind pose baked in. True only
+    // for a rig past the caller's budget.
+    [[nodiscard]] bool bakedBindPose() const noexcept { return sourceJointCount > 0 && joints.empty(); }
 };
 
 } // namespace luaug::asset

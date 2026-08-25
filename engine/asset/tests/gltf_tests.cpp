@@ -1021,3 +1021,103 @@ TEST_CASE_FIXTURE(CatalogFixture, "gltf: specular-glossiness is read as the meta
     // specular, which is worse than the plain material it would have replaced.
     CHECK_FALSE(material.metallicRoughness.present());
 }
+
+// --- A rig past what the caller can pose -------------------------------------
+//
+// The palette is a fixed array in a uniform block, so there is a joint count
+// past which a rig cannot be posed at all -- and past it a mesh does not pose
+// badly, its vertices index off the end of the palette and scatter. A downloaded
+// horse with 677 joints against a budget of 64 is what found it.
+//
+// So past the limit the import bakes the bind pose in and hands back a static
+// mesh. That is the whole trade and it costs nothing that was available: a rig
+// this build cannot pose is a rig whose bind pose is everything it will show.
+
+TEST_CASE_FIXTURE(CatalogFixture, "gltf: a rig within the budget keeps its skeleton")
+{
+    Model model;
+    GltfImportOptions options = unoptimized();
+    options.maxSkinJoints = 4;
+    REQUIRE_FALSE(importGltf(readFixture("skinned_bar.gltf"), dataDirectory(), options, model).has_value());
+
+    CHECK(model.skinned());
+    CHECK(model.joints.size() == 2u);
+    CHECK_FALSE(model.bakedBindPose());
+    // And it carries the pose it stands in when nothing is animating it, which
+    // is one matrix per joint.
+    CHECK(model.restPalette.size() == 2u);
+    CHECK(model.sourceJointCount == 2u);
+}
+
+TEST_CASE_FIXTURE(CatalogFixture, "gltf: a rig past the budget is baked into its bind pose")
+{
+    // **The fixture whose bind pose is not the identity**, which is the only one
+    // that can tell a bake from a no-op: its whole scene hangs under one node
+    // carrying a unit conversion and an axis swap -- the pair every FBX-derived
+    // export writes -- and its inverse bind matrices do not include it. The
+    // palette therefore IS that transform, which is exactly the case a
+    // downloaded model has and `skinned_bar` does not.
+    Model posed;
+    GltfImportOptions keep = unoptimized();
+    keep.maxSkinJoints = 4;
+    REQUIRE_FALSE(importGltf(readFixture("skinned_under_export.gltf"), dataDirectory(), keep, posed).has_value());
+
+    Model baked;
+    GltfImportOptions bake = unoptimized();
+    // One joint of budget against two: the same file, over the line.
+    bake.maxSkinJoints = 1;
+    REQUIRE_FALSE(importGltf(readFixture("skinned_under_export.gltf"), dataDirectory(), bake, baked).has_value());
+
+    // The skeleton is gone and says why it went.
+    CHECK(baked.bakedBindPose());
+    CHECK(baked.joints.empty());
+    CHECK(baked.skin.empty());
+    CHECK(baked.clips.empty());
+    CHECK(baked.restPalette.empty());
+    // **The count survives the skeleton**, because a character that quietly
+    // stopped being animatable is a bug report and one that says "2 joints,
+    // this build poses 1" is an answer.
+    CHECK(baked.sourceJointCount == 2u);
+
+    // The geometry is still the same geometry: baking moves vertices, it does
+    // not drop them.
+    REQUIRE(baked.mesh.vertices.size() == posed.mesh.vertices.size());
+    REQUIRE(baked.mesh.indices.size() == posed.mesh.indices.size());
+
+    // And it MOVED. The fixture's joints are translated, so a bind pose baked in
+    // is a mesh somewhere its raw vertices are not -- a bake that quietly did
+    // nothing would pass every assertion above.
+    bool moved = false;
+    for (std::size_t index = 0; index < baked.mesh.vertices.size(); ++index) {
+        const Vec3 before = posed.mesh.vertices[index].position;
+        const Vec3 after = baked.mesh.vertices[index].position;
+        if (std::abs(before.x - after.x) > 1e-4f || std::abs(before.y - after.y) > 1e-4f ||
+            std::abs(before.z - after.z) > 1e-4f) {
+            moved = true;
+            break;
+        }
+    }
+    CHECK(moved);
+
+    // Normals come out of the palette scaled -- it carries whatever unit
+    // conversion the export put above the skeleton -- so they are renormalised
+    // rather than divided.
+    for (const auto& vertex : baked.mesh.vertices) {
+        const Vec3 n = vertex.normal;
+        CHECK(near(std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z), 1.0f));
+    }
+}
+
+TEST_CASE_FIXTURE(CatalogFixture, "gltf: no budget means no bake, whatever the rig")
+{
+    // Zero is "no limit", which is what every caller that is not a renderer
+    // wants -- the host reads skeletons to animate them and must never be
+    // handed one that was thrown away.
+    Model model;
+    GltfImportOptions options = unoptimized();
+    options.maxSkinJoints = 0;
+    REQUIRE_FALSE(importGltf(readFixture("skinned_bar.gltf"), dataDirectory(), options, model).has_value());
+
+    CHECK(model.skinned());
+    CHECK_FALSE(model.bakedBindPose());
+}

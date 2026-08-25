@@ -1,7 +1,10 @@
 #include <luaug/app/content_tree.h>
+#include <luaug/core/json.h>
+#include <luaug/platform/file.h>
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <fstream>
 #include <system_error>
 
@@ -369,6 +372,80 @@ std::vector<std::string> ContentTree::filesOfKind(ContentKind kind) const
     return found;
 }
 
+namespace {
+
+// Per cent-encoding, undone. A glTF URI is a URI, so an exporter writes a space
+// as `%20` and a filesystem does not know what that is.
+[[nodiscard]] std::string decodeUri(std::string_view uri)
+{
+    std::string out;
+    out.reserve(uri.size());
+    for (core::usize index = 0; index < uri.size(); ++index) {
+        if (uri[index] == '%' && index + 2 < uri.size()) {
+            const auto hex = [](char c) -> int {
+                if (c >= '0' && c <= '9')
+                    return c - '0';
+                if (c >= 'a' && c <= 'f')
+                    return c - 'a' + 10;
+                if (c >= 'A' && c <= 'F')
+                    return c - 'A' + 10;
+                return -1;
+            };
+            const int high = hex(uri[index + 1]);
+            const int low = hex(uri[index + 2]);
+            if (high >= 0 && low >= 0) {
+                out.push_back(static_cast<char>(high * 16 + low));
+                index += 2;
+                continue;
+            }
+        }
+        out.push_back(uri[index]);
+    }
+    return out;
+}
+
+// The files a `.gltf` names, relative to it, in the order it names them.
+//
+// Read with the engine's own JSON parser rather than by importing the model:
+// this runs when somebody drops a file into a folder, and parsing a fourteen
+// megabyte buffer to find out where its buffer is would be reading the whole
+// model to copy it.
+//
+// A `data:` URI carries its bytes inside the document and names no file, and a
+// URI with a scheme is somebody's remote asset, which this is not going to
+// fetch. Both are skipped rather than reported: neither is missing.
+[[nodiscard]] std::vector<std::string> referencedFiles(const std::filesystem::path& gltf)
+{
+    std::vector<std::string> out;
+    std::string text;
+    if (!platform::readTextFile(gltf, text))
+        return out;
+
+    core::JsonDocument document;
+    if (const core::JsonDocument::ParseResult parsed = document.parse(text, "gltf"); !parsed.ok)
+        return out;
+
+    const auto collect = [&](std::string_view arrayName) {
+        const core::JsonValue array = document.root()[arrayName];
+        if (array.type() != core::JsonType::Array)
+            return;
+        for (core::usize index = 0; index < array.size(); ++index) {
+            const std::string_view uri = array.at(index)["uri"].asString();
+            if (uri.empty() || uri.starts_with("data:") || uri.find("://") != std::string_view::npos)
+                continue;
+            std::string decoded = decodeUri(uri);
+            // The same buffer named twice is one file to copy.
+            if (std::find(out.begin(), out.end(), decoded) == out.end())
+                out.push_back(std::move(decoded));
+        }
+    };
+    collect("buffers");
+    collect("images");
+    return out;
+}
+
+} // namespace
+
 ContentTree::ImportReport ContentTree::import(std::span<const std::filesystem::path> sources)
 {
     ImportReport report;
@@ -414,6 +491,44 @@ ContentTree::ImportReport ContentTree::import(std::span<const std::filesystem::p
             continue;
         }
         report.imported.push_back(name);
+
+        // **And whatever it names.** See the header: a `.gltf` without its
+        // buffer is a file that parses and loads nothing, and the person who
+        // dragged it in chose a model rather than a manifest.
+        // The extension, lowered: a `.GLTF` off a case-insensitive filesystem
+        // is the same file.
+        std::string suffix = source.extension().string();
+        std::transform(suffix.begin(), suffix.end(), suffix.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (suffix != ".gltf")
+            continue;
+
+        for (const std::string& relative : referencedFiles(source)) {
+            const std::filesystem::path companionSource = source.parent_path() / std::filesystem::path(relative);
+            if (!std::filesystem::is_regular_file(companionSource, ec)) {
+                ec.clear();
+                report.missing.push_back(relative);
+                continue;
+            }
+
+            // Into the same relative place, because the URIs inside the file are
+            // relative and rewriting them would be editing somebody's asset.
+            const std::filesystem::path companionTarget = folder / std::filesystem::path(relative);
+            if (std::filesystem::exists(companionTarget, ec)) {
+                ec.clear();
+                report.skipped.push_back(relative);
+                continue;
+            }
+            std::filesystem::create_directories(companionTarget.parent_path(), ec);
+            ec.clear();
+            std::filesystem::copy_file(companionSource, companionTarget, std::filesystem::copy_options::none, ec);
+            if (ec) {
+                ec.clear();
+                report.failed.push_back(relative);
+                continue;
+            }
+            report.companions.push_back(relative);
+        }
     }
 
     if (!report.imported.empty())

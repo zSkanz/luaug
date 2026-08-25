@@ -265,3 +265,102 @@ TEST_CASE("importing a folder is skipped rather than copied recursively")
     CHECK(report.skipped.size() == 1);
     CHECK_FALSE(std::filesystem::exists(scratch.root() / "content" / "a-whole-folder"));
 }
+
+// --- A `.gltf` is a file that names other files -----------------------------
+//
+// Dragging one in without them imports something that parses and loads nothing:
+// the geometry is in a `.bin` beside it and the textures are in a folder beside
+// that. A person reported it as "não sei se é eu que estou importando errado mas
+// a malha não aparece", which is exactly what it looks like from the outside.
+
+TEST_CASE("importing a glTF brings the files it names")
+{
+    Scratch scratch("import-gltf");
+    scratch.folder("content");
+    scratch.folder("downloaded");
+    scratch.folder("downloaded/textures");
+    // The shape a real export has: an external buffer, images in a subfolder,
+    // one image inlined as a data URI, and a per cent-encoded name.
+    scratch.file("downloaded/scene.gltf", R"({
+        "buffers": [{"uri": "scene.bin"}],
+        "images": [
+            {"uri": "textures/body%20diffuse.png"},
+            {"uri": "data:image/png;base64,AAAA"},
+            {"uri": "textures/eye.png"}
+        ]
+    })");
+    scratch.file("downloaded/scene.bin", "binary");
+    scratch.file("downloaded/textures/body diffuse.png", "png");
+    scratch.file("downloaded/textures/eye.png", "png");
+
+    app::ContentTree tree;
+    REQUIRE(tree.open(scratch.root() / "content"));
+    REQUIRE(tree.createFolder("models"));
+    REQUIRE(tree.enter("models"));
+
+    const std::array<std::filesystem::path, 1> sources{scratch.root() / "downloaded" / "scene.gltf"};
+    const app::ContentTree::ImportReport report = tree.import(sources);
+
+    // One file chosen, three brought: the data URI names nothing and is not one
+    // of them.
+    CHECK(report.imported.size() == 1);
+    CHECK(report.companions.size() == 3);
+    CHECK(report.missing.empty());
+    CHECK(report.failed.empty());
+
+    const std::filesystem::path models = scratch.root() / "content" / "models";
+    CHECK(std::filesystem::exists(models / "scene.gltf"));
+    CHECK(std::filesystem::exists(models / "scene.bin"));
+    // **Into the same relative place**, because the URIs inside are relative and
+    // rewriting them would be editing somebody's asset. Per cent-decoded,
+    // because a URI is not a path.
+    CHECK(std::filesystem::exists(models / "textures" / "body diffuse.png"));
+    CHECK(std::filesystem::exists(models / "textures" / "eye.png"));
+}
+
+TEST_CASE("a glTF whose buffer is not beside it says so rather than importing quietly")
+{
+    // The report's own case: the file copies perfectly, the model loads nothing,
+    // and this is the only moment anybody can be told which file to go and find.
+    Scratch scratch("import-gltf-missing");
+    scratch.folder("content");
+    scratch.folder("downloaded");
+    scratch.file("downloaded/scene.gltf", R"({"buffers": [{"uri": "scene.bin"}]})");
+
+    app::ContentTree tree;
+    REQUIRE(tree.open(scratch.root() / "content"));
+
+    const std::array<std::filesystem::path, 1> sources{scratch.root() / "downloaded" / "scene.gltf"};
+    const app::ContentTree::ImportReport report = tree.import(sources);
+
+    CHECK(report.imported.size() == 1);
+    CHECK(report.companions.empty());
+    REQUIRE(report.missing.size() == 1);
+    CHECK(report.missing[0] == "scene.bin");
+    // Nothing FAILED: nothing failed to copy, something was never there to copy,
+    // and telling the two apart is what makes the sentence useful.
+    CHECK(report.failed.empty());
+}
+
+TEST_CASE("a file that names nothing brings nothing")
+{
+    // A `.glb` has its buffers inside it and a `.png` names nothing at all.
+    // Neither should acquire a companion, and nothing here has to know why --
+    // one has no URIs and the other is not read.
+    Scratch scratch("import-plain");
+    scratch.folder("content");
+    scratch.folder("downloaded");
+    scratch.file("downloaded/model.glb", "glTF binary, not really");
+    scratch.file("downloaded/bark.png", "png");
+
+    app::ContentTree tree;
+    REQUIRE(tree.open(scratch.root() / "content"));
+
+    const std::array<std::filesystem::path, 2> sources{scratch.root() / "downloaded" / "model.glb",
+                                                       scratch.root() / "downloaded" / "bark.png"};
+    const app::ContentTree::ImportReport report = tree.import(sources);
+
+    CHECK(report.imported.size() == 2);
+    CHECK(report.companions.empty());
+    CHECK(report.missing.empty());
+}

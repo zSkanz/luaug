@@ -285,6 +285,11 @@ private:
     // condition for generating tangents it does not carry.
     bool materialWantsTangents_ = false;
     std::vector<bool> visitedNodes_;
+    // Every node's world transform, filled by the walk. `readSkin` runs after it
+    // and needs the graph, not the joint chain -- see `Model::restPalette`.
+    std::vector<core::Mat4> nodeWorld_;
+
+    [[nodiscard]] std::optional<core::EngineError> bakeBindPose();
 };
 
 std::optional<core::EngineError> Importer::run()
@@ -292,6 +297,7 @@ std::optional<core::EngineError> Importer::run()
     materialSlots_.assign(asset_.materials.size(), TextureRef::Missing);
     imageSlots_.assign(asset_.images.size(), TextureRef::Missing);
     visitedNodes_.assign(asset_.nodes.size(), false);
+    nodeWorld_.assign(asset_.nodes.size(), core::Mat4{});
 
     if (auto error = collectInstances())
         return error;
@@ -320,6 +326,12 @@ std::optional<core::EngineError> Importer::run()
 
     if (out_.mesh.submeshes.empty())
         return core::makeError(LUAUG_TR("asset.gltf.err.no_mesh"));
+
+    // Before `optimize`, which remaps and reorders vertices: the bake writes
+    // positions, normals and tangents, and doing it afterwards would be doing it
+    // to a different array.
+    if (auto error = bakeBindPose())
+        return error;
 
     optimize();
 
@@ -384,15 +396,112 @@ std::optional<core::EngineError> Importer::visitNode(std::size_t nodeIndex, cons
     // product reads backwards relative to the order the transforms happen in.
     const core::Mat4 nodeLocal = toMat4(fg::getTransformMatrix(node));
     const core::Mat4 combined = parent * nodeLocal;
+    nodeWorld_[nodeIndex] = combined;
 
     if (node.meshIndex.has_value()) {
+        // **A SKINNED mesh node's own transform is not the mesh's**, and glTF
+        // says so in as many words: it MUST be ignored when the node carries a
+        // skin, because the joints' global transforms place every vertex through
+        // the inverse bind matrices. Applying it as well applies the export's
+        // axis swap twice, which is a model lying on its back.
+        //
+        // It looked correct for years because it usually IS: a file whose
+        // skinned mesh node sits at the identity has nothing to apply twice, and
+        // every fixture in this repository is such a file.
+        //
         // `validate` has already established the index is in range.
-        instances_.push_back(MeshInstance{node.meshIndex.value(), combined});
+        instances_.push_back(
+            MeshInstance{node.meshIndex.value(), node.skinIndex.has_value() ? core::Mat4{} : combined});
     }
 
     for (const std::size_t child : node.children) {
         if (auto error = visitNode(child, combined))
             return error;
+    }
+    return std::nullopt;
+}
+
+// **A rig this caller cannot pose is a rig whose bind pose is all it will show.**
+//
+// So the bind pose stops being a palette and becomes the geometry: every vertex
+// is skinned once, here, and the skeleton is thrown away. What is lost is
+// animation, and it was never available -- a 677-joint rig against a 64-matrix
+// palette does not animate badly, it indexes off the end and scatters.
+//
+// The alternative is what the engine did before: draw the raw vertices and let
+// the mesh node's transform stand in for the bind pose, which is right only when
+// the two happen to agree.
+std::optional<core::EngineError> Importer::bakeBindPose()
+{
+    if (options_.maxSkinJoints == 0 || out_.joints.empty() || out_.skin.empty())
+        return std::nullopt;
+    if (out_.joints.size() <= options_.maxSkinJoints)
+        return std::nullopt;
+    if (out_.skin.size() != out_.mesh.vertices.size())
+        return core::makeError(LUAUG_TR("asset.gltf.err.invalid_document"), {}, "skin and vertex counts disagree");
+
+    for (std::size_t index = 0; index < out_.mesh.vertices.size(); ++index) {
+        const SkinVertex& influence = out_.skin[index];
+        Vertex& vertex = out_.mesh.vertices[index];
+
+        core::Vec3 position{};
+        core::Vec3 normal{};
+        core::Vec3 tangent{};
+        f32 total = 0.0f;
+        for (std::size_t lane = 0; lane < 4; ++lane) {
+            const f32 weight = influence.weights[lane];
+            if (weight <= 0.0f)
+                continue;
+            const auto joint = static_cast<std::size_t>(influence.joints[lane] + 0.5f);
+            if (joint >= out_.restPalette.size())
+                continue;
+            const core::Mat4& bone = out_.restPalette[joint];
+            total += weight;
+
+            // The point through the whole matrix, the directions through its
+            // upper 3x3: a normal does not translate, and a palette that
+            // translates one is a lighting bug that follows the model around.
+            const core::Vec3 movedPoint = core::transformPoint(bone, vertex.position);
+            const core::Vec3 movedNormal = core::transformDirection(bone, vertex.normal);
+            const core::Vec3 movedTangent =
+                core::transformDirection(bone, core::Vec3{vertex.tangent[0], vertex.tangent[1], vertex.tangent[2]});
+            position = position + movedPoint * weight;
+            normal = normal + movedNormal * weight;
+            tangent = tangent + movedTangent * weight;
+        }
+
+        // A vertex nothing weights is a vertex the file forgot; it keeps what it
+        // had rather than collapsing to the origin and dragging a triangle
+        // across the model.
+        if (total <= 0.0f)
+            continue;
+
+        vertex.position = position * (1.0f / total);
+        // Renormalised rather than divided: the palette carries the export's
+        // unit conversion, so every direction comes out of it scaled.
+        vertex.normal = core::normalize(normal);
+        const core::Vec3 unitTangent = core::normalize(tangent);
+        vertex.tangent[0] = unitTangent.x;
+        vertex.tangent[1] = unitTangent.y;
+        vertex.tangent[2] = unitTangent.z;
+    }
+
+    // The skeleton goes, and with it the reason to keep a palette or a stream.
+    // `Model::sourceJointCount` is what the loader reports afterwards.
+    out_.skin.clear();
+    out_.joints.clear();
+    out_.restPalette.clear();
+    out_.clips.clear();
+
+    // The bounds were computed from the pre-bake positions by whoever ran first;
+    // `run` expands them after this returns, from the submeshes.
+    for (Submesh& submesh : out_.mesh.submeshes) {
+        submesh.bounds = core::AABB{};
+        for (u32 i = 0; i < submesh.indexCount; ++i) {
+            const u32 vertexIndex = out_.mesh.indices[submesh.firstIndex + i];
+            if (vertexIndex < out_.mesh.vertices.size())
+                core::expand(submesh.bounds, out_.mesh.vertices[vertexIndex].position);
+        }
     }
     return std::nullopt;
 }
@@ -1003,6 +1112,16 @@ std::optional<core::EngineError> Importer::readSkin()
                                                                 inverseBinds[index] = toMat4(value);
                                                         });
     }
+
+    // **The bind pose, from the node graph, because only here is there one.**
+    // One multiply per joint and no assumption about the joint list being closed
+    // under parenthood -- this rig leaves intermediate nodes out of its skin, so
+    // a chain rebuilt from `Joint::parent` returns half the joints as roots and
+    // loses everything above each break.
+    out_.sourceJointCount = static_cast<u32>(nodeOf.size());
+    out_.restPalette.assign(nodeOf.size(), core::Mat4{});
+    for (u32 slot = 0; slot < nodeOf.size(); ++slot)
+        out_.restPalette[sortedOf[slot]] = nodeWorld_[nodeOf[slot]] * inverseBinds[slot];
 
     out_.joints.resize(nodeOf.size());
     for (u32 slot = 0; slot < nodeOf.size(); ++slot) {

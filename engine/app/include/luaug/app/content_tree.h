@@ -159,6 +159,16 @@ public:
         std::vector<std::string> skipped;
         // Could not be read or could not be written.
         std::vector<std::string> failed;
+
+        // Brought along because something imported NAMES them: a `.gltf`'s
+        // buffer and its images. Counted apart from `imported` so the browser
+        // can say "one file, and the six it cannot open without".
+        std::vector<std::string> companions;
+        // Named by a `.gltf` and not found beside it. The model will not load
+        // and this is the only moment anybody can be told why, so it is not
+        // folded into `failed` -- nothing failed to copy, something was never
+        // there to copy.
+        std::vector<std::string> missing;
     };
 
     // **Copies files from anywhere on the machine into the current folder.**
@@ -172,6 +182,16 @@ public:
     // A directory is skipped rather than copied recursively: importing a folder
     // is a different request, and doing it by accident because somebody
     // multi-selected one is not an outcome to design for.
+    // **A `.gltf` is a file that names other files**, and importing it without
+    // them imports nothing that works: the geometry is in a `.bin` beside it and
+    // the textures are in a folder beside that. A person dragging a model in has
+    // chosen the model, not a manifest, so the browser reads what it points at
+    // and brings that too -- into the same relative subfolder the file expects
+    // to find it in, because the URIs inside are relative and rewriting them
+    // would be editing somebody's asset.
+    //
+    // A `.glb` names nothing: it is one file with its buffers inside, and
+    // nothing here has to know that -- it simply has no URIs to follow.
     [[nodiscard]] ImportReport import(std::span<const std::filesystem::path> sources);
 
     // Every file of one kind under the whole root, content-relative and sorted.
