@@ -230,6 +230,16 @@ Hierarchy::Hierarchy()
     weldDesc.detachComponents = [](World& world, core::InstanceId id) { world.welds().remove(id); };
     weldClass = classes.registerClass(weldDesc);
 
+    ClassDescriptor constraintDesc;
+    constraintDesc.name = atoms.intern("Constraint");
+    constraintDesc.super = instanceClass;
+    constraintDesc.defaultName = atoms.intern("Constraint");
+    constraintDesc.attachComponents = [](World& world, core::InstanceId id) {
+        world.constraints().add(id, ConstraintComponent{});
+    };
+    constraintDesc.detachComponents = [](World& world, core::InstanceId id) { world.constraints().remove(id); };
+    constraintClass = classes.registerClass(constraintDesc);
+
     ClassDescriptor modelDesc;
     modelDesc.name = atoms.intern("Model");
     modelDesc.super = instanceClass;

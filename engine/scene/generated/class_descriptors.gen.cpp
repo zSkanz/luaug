@@ -719,6 +719,172 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     attachmentDesc.detachComponents = native::detachAttachmentComponents;
     classes.registerClass(attachmentDesc);
 
+    // --- Constraint ---
+    static std::array<PropertyDesc, 4> constraintProperties;
+    constraintProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("Attachment0"),
+            .type = ValueType::Instance,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "One end of the joint. The part it is on is the body the solver holds.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
+            .get = native::getConstraintAttachment0,
+            .set = native::setConstraintAttachment0,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Attachment1"),
+            .type = ValueType::Instance,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The other end. The two frames are the same place when the constraint is built, which is what \"this is where they are attached\" means.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
+            .get = native::getConstraintAttachment1,
+            .set = native::setConstraintAttachment1,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Enabled"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether the joint holds. A disabled constraint stays in the world holding nothing, rather than being destroyed and rebuilt -- rebuilding would move it to the end of the solve order, and a ragdoll that switched itself off and on would simulate differently afterwards.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getConstraintEnabled,
+            .set = native::setConstraintEnabled,
+        },
+        PropertyDesc{
+            .name = atoms.intern("CollideConnected"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether the two parts still collide with each other.\012\012**False is what a ragdoll needs.** An upper arm and a lower arm overlap at the elbow by construction, and left colliding they shove each other apart every step -- a character that vibrates rather than falls.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getConstraintCollideConnected,
+            .set = native::setConstraintCollideConnected,
+        },
+    }};
+    ClassDescriptor constraintDesc;
+    constraintDesc.name = atoms.intern("Constraint");
+    constraintDesc.super = instanceClass;
+    constraintDesc.flags = ClassFlags::Abstract | ClassFlags::NotCreatable;
+    constraintDesc.defaultName = atoms.intern("Constraint");
+    constraintDesc.doc = "The base of anything the SOLVER holds together. A constraint hands both bodies to the solver and lets it work out where they end up -- a door swings under its own weight, a ragdoll falls.\012\012**This is not a `Weld`.** A weld DRIVES its second part from its first every tick and the solver is never asked, which is what keeps a sword on a hand whatever else is happening. A constraint asks. Use a weld to attach, a constraint to articulate.\012\012**It joins two `Attachment`s, not two parts**, which is what makes the joint frame something you can see and move: where a door hinges is a place on the door and a place on the frame. A constraint cannot reach a `CharacterBody` -- that is swept rather than solved, so there is no body for a joint to hold.";
+    constraintDesc.properties = constraintProperties;
+    constraintDesc.attachComponents = native::attachConstraintComponents;
+    constraintDesc.detachComponents = native::detachConstraintComponents;
+    const ClassId constraintClass = classes.registerClass(constraintDesc);
+
+    // --- BallSocketConstraint ---
+    static std::array<PropertyDesc, 3> ballSocketConstraintProperties;
+    ballSocketConstraintProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("LimitsEnabled"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether the cone and twist below apply. Off is a free ball joint.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getBallSocketConstraintLimitsEnabled,
+            .set = native::setBallSocketConstraintLimitsEnabled,
+        },
+        PropertyDesc{
+            .name = atoms.intern("UpperAngle"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The half-angle of the swing cone in degrees, measured from the joint's own X axis.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getBallSocketConstraintUpperAngle,
+            .set = native::setBallSocketConstraintUpperAngle,
+        },
+        PropertyDesc{
+            .name = atoms.intern("TwistLimit"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How far it may twist about that axis, in degrees, either way.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getBallSocketConstraintTwistLimit,
+            .set = native::setBallSocketConstraintTwistLimit,
+        },
+    }};
+    ClassDescriptor ballSocketConstraintDesc;
+    ballSocketConstraintDesc.name = atoms.intern("BallSocketConstraint");
+    ballSocketConstraintDesc.super = constraintClass;
+    ballSocketConstraintDesc.flags = ClassFlags::None;
+    ballSocketConstraintDesc.defaultName = atoms.intern("BallSocketConstraint");
+    ballSocketConstraintDesc.doc = "A joint free to rotate in every direction about one point, and optionally limited to a cone and a twist.\012\012Unlimited it is a rope's end or a pendulum. Limited it is a shoulder or a hip, which is exactly what a ragdoll is made of -- and the limited form is a different solver joint rather than a free one with corrections bolted on, so it is not exceeded and then pulled back, it is not exceeded.";
+    ballSocketConstraintDesc.properties = ballSocketConstraintProperties;
+    ballSocketConstraintDesc.attachComponents = native::attachBallSocketConstraintComponents;
+    ballSocketConstraintDesc.detachComponents = native::detachBallSocketConstraintComponents;
+    classes.registerClass(ballSocketConstraintDesc);
+
+    // --- HingeConstraint ---
+    static std::array<PropertyDesc, 3> hingeConstraintProperties;
+    hingeConstraintProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("LimitsEnabled"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether the range below applies. Off is a hinge that spins freely.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getHingeConstraintLimitsEnabled,
+            .set = native::setHingeConstraintLimitsEnabled,
+        },
+        PropertyDesc{
+            .name = atoms.intern("LowerAngle"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How far it may turn one way, in degrees.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getHingeConstraintLowerAngle,
+            .set = native::setHingeConstraintLowerAngle,
+        },
+        PropertyDesc{
+            .name = atoms.intern("UpperAngle"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How far it may turn the other, in degrees. A lower above the upper is unlimited.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getHingeConstraintUpperAngle,
+            .set = native::setHingeConstraintUpperAngle,
+        },
+    }};
+    ClassDescriptor hingeConstraintDesc;
+    hingeConstraintDesc.name = atoms.intern("HingeConstraint");
+    hingeConstraintDesc.super = constraintClass;
+    hingeConstraintDesc.flags = ClassFlags::None;
+    hingeConstraintDesc.defaultName = atoms.intern("HingeConstraint");
+    hingeConstraintDesc.doc = "A joint free to rotate about one axis: a door, a lid, an elbow. The axis is the joint frame's own X, so pointing the attachment points the hinge.";
+    hingeConstraintDesc.properties = hingeConstraintProperties;
+    hingeConstraintDesc.attachComponents = native::attachHingeConstraintComponents;
+    hingeConstraintDesc.detachComponents = native::detachHingeConstraintComponents;
+    classes.registerClass(hingeConstraintDesc);
+
+    // --- FixedConstraint ---
+    ClassDescriptor fixedConstraintDesc;
+    fixedConstraintDesc.name = atoms.intern("FixedConstraint");
+    fixedConstraintDesc.super = constraintClass;
+    fixedConstraintDesc.flags = ClassFlags::None;
+    fixedConstraintDesc.defaultName = atoms.intern("FixedConstraint");
+    fixedConstraintDesc.doc = "A joint with no freedom at all: two bodies the solver treats as one rigid assembly.\012\012**This is the one a `Weld` is not.** A weld moves its second part and asks nothing; this hands both to the solver, so a heavy crate fixed to a light one makes a heavy pair and a force applied to either moves both. Use a weld to attach something to a character, and this to build an object out of parts.";
+    fixedConstraintDesc.attachComponents = native::attachFixedConstraintComponents;
+    fixedConstraintDesc.detachComponents = native::detachFixedConstraintComponents;
+    classes.registerClass(fixedConstraintDesc);
+
     // --- Weld ---
     static std::array<PropertyDesc, 5> weldProperties;
     weldProperties = {{

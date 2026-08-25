@@ -450,6 +450,19 @@ void PhysicsSync::applyScene()
         applyBody(id, *part, body);
     });
 
+    // **A SECOND walk, after every body exists**, and in the constraint pool's
+    // own order -- which is creation order, and which the backend solves in.
+    // Folding this into the body walk would mean creating a joint before the
+    // body at its other end had been made; creating that body from here instead
+    // would put body creation order in the CONSTRAINT pool's order, and two
+    // scenes that differ only in the order somebody added joints would then
+    // simulate differently (R10).
+    for (ConstraintRecord& record : m_constraints)
+        record.seen = false;
+
+    m_scene.constraints().forEach(
+        [&](core::InstanceId id, ConstraintComponent& constraint) { applyConstraint(id, constraint); });
+
     retireUnseen();
 }
 
@@ -615,6 +628,18 @@ void PhysicsSync::resolveWeld(core::InstanceId weldId, WeldComponent& weld)
 
 void PhysicsSync::retireUnseen()
 {
+    // **Constraints first, and this is a contract rather than a tidiness.** A
+    // joint holding a body that is gone is a dangling pointer inside the solver
+    // and it is silent -- so the backend drops a body's joints itself, and a
+    // sweep that retired bodies first would then destroy those joints a second
+    // time from here.
+    for (ConstraintRecord& record : m_constraints) {
+        if (record.generation == 0 || record.seen)
+            continue;
+        m_backend.destroyConstraint(m_world, record.handle);
+        record = ConstraintRecord{};
+    }
+
     for (BodyRecord& record : m_bodies) {
         if (record.generation == 0 || record.seen)
             continue;
@@ -630,6 +655,105 @@ void PhysicsSync::retireUnseen()
         m_backend.destroyCharacter(m_world, it->second.handle);
         it = m_characters.erase(it);
     }
+}
+
+// The body an instance has, or an invalid handle. A part outside the world, or
+// one whose body has not been made yet, has none.
+physics::BodyHandle PhysicsSync::bodyHandleOf(core::InstanceId id) const
+{
+    if (!id.valid() || id.index >= m_bodies.size())
+        return {};
+    const BodyRecord& record = m_bodies[id.index];
+    // **`seen` and not just `generation`.** The body walk runs before the
+    // constraint walk, so `seen` is already this tick's answer -- and a body
+    // that left the world still HAS a record until `retireUnseen` runs, so
+    // asking only about the generation would hand a joint a body that is about
+    // to be destroyed under it. The joint would then be marked seen, survive the
+    // sweep, and hold a dangling pointer inside the solver.
+    return record.generation == id.generation && record.seen ? record.handle : physics::BodyHandle{};
+}
+
+void PhysicsSync::applyConstraint(core::InstanceId id, ConstraintComponent& constraint)
+{
+    // The two BODIES, through the parts the attachments sit on. A constraint
+    // joins bodies; the attachments are where on them.
+    const core::InstanceId body0 = m_scene.parentOf(constraint.attachment0);
+    const core::InstanceId body1 = m_scene.parentOf(constraint.attachment1);
+
+    const AttachmentComponent* end0 = m_scene.attachments().find(constraint.attachment0);
+    const AttachmentComponent* end1 = m_scene.attachments().find(constraint.attachment1);
+    const bool usable = end0 != nullptr && end1 != nullptr && body0.valid() && body1.valid() && body0 != body1 &&
+                        inWorld(id) && bodyHandleOf(body0).valid() && bodyHandleOf(body1).valid() &&
+                        // **A `CharacterBody` is swept, not solved** (the M5
+                        // finding): `CharacterVirtual` is not a solver body, so
+                        // there is nothing for a joint to hold.
+                        m_scene.characterBodies().find(body0) == nullptr &&
+                        m_scene.characterBodies().find(body1) == nullptr;
+
+    if (id.index >= m_constraints.size())
+        m_constraints.resize(id.index + 1);
+    ConstraintRecord& record = m_constraints[id.index];
+
+    if (!usable) {
+        // Left unseen, so `retireUnseen` destroys it. A joint whose ends a
+        // script is still assigning is not an error -- it is what every script
+        // that sets two properties on two lines briefly produces.
+        return;
+    }
+
+    // A rebuild is needed when what the joint IS changed. Everything else --
+    // a limit, the collide flag -- is an update the backend can take without
+    // moving the constraint's place in the solve order.
+    const bool rebuild = record.generation != id.generation || record.body0 != body0 || record.body1 != body1 ||
+                         record.kind != constraint.kind;
+
+    physics::ConstraintDesc desc;
+    desc.type = static_cast<physics::ConstraintType>(constraint.kind);
+    desc.first = bodyHandleOf(body0);
+    desc.second = bodyHandleOf(body1);
+    // In each body's OWN space, which is what the seam asks for and what makes a
+    // floating-origin rebase cost nothing.
+    desc.firstFrame = end0->cframe;
+    desc.secondFrame = end1->cframe;
+    desc.collideConnected = constraint.collideConnected;
+    if (constraint.limitsEnabled) {
+        desc.limitLow = constraint.limitLow;
+        desc.limitHigh = constraint.limitHigh;
+        desc.swingLimit = constraint.swingLimit;
+        desc.twistLimit = constraint.twistLimit;
+    }
+    desc.userData = packInstance(id);
+
+    if (rebuild) {
+        if (record.generation != 0)
+            m_backend.destroyConstraint(m_world, record.handle);
+        record = ConstraintRecord{};
+        record.handle = m_backend.createConstraint(m_world, desc);
+        if (!record.handle.valid())
+            return;
+        record.generation = id.generation;
+    }
+    else if (record.collideConnected != constraint.collideConnected || record.limitLow != constraint.limitLow ||
+             record.limitHigh != constraint.limitHigh || record.swingLimit != constraint.swingLimit ||
+             record.twistLimit != constraint.twistLimit || record.limitsEnabled != constraint.limitsEnabled) {
+        m_backend.updateConstraint(m_world, record.handle, desc);
+    }
+
+    if (record.enabled != constraint.enabled) {
+        m_backend.setConstraintEnabled(m_world, record.handle, constraint.enabled);
+        record.enabled = constraint.enabled;
+    }
+
+    record.seen = true;
+    record.body0 = body0;
+    record.body1 = body1;
+    record.kind = constraint.kind;
+    record.collideConnected = constraint.collideConnected;
+    record.limitLow = constraint.limitLow;
+    record.limitHigh = constraint.limitHigh;
+    record.swingLimit = constraint.swingLimit;
+    record.twistLimit = constraint.twistLimit;
+    record.limitsEnabled = constraint.limitsEnabled;
 }
 
 void PhysicsSync::writeBack()

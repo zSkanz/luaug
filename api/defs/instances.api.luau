@@ -717,6 +717,141 @@ local Classes: { Schema.Class } = {
         },
     },
     {
+        -- `NotCreatable` and abstract: a constraint's TYPE is its class, because
+        -- a hinge that could become a slider is two joints wearing one name.
+        Name = "Constraint",
+        Extends = "Instance",
+        Module = "scene",
+        Storage = "Constraint",
+        Tags = { "Abstract", "NotCreatable" } :: { Schema.ClassTag },
+        Doc = "The base of anything the SOLVER holds together. A constraint hands both bodies to the solver "
+            .. "and lets it work out where they end up -- a door swings under its own weight, a ragdoll "
+            .. "falls.\n\n**This is not a `Weld`.** A weld DRIVES its second part from its "
+            .. "first every tick and the solver is never asked, which is what keeps a sword on a hand "
+            .. "whatever else is happening. A constraint asks. Use a weld to attach, a constraint to "
+            .. "articulate.\n\n**It joins two `Attachment`s, not two parts**, which is "
+            .. "what makes the joint frame something you can see and move: where a door hinges is a place "
+            .. "on the door and a place on the frame. A constraint cannot reach a `CharacterBody` -- that is "
+            .. "swept rather than solved, so there is no body for a joint to hold.",
+        Properties = {
+            {
+                Name = "Attachment0",
+                Type = "Attachment?",
+                Doc = "One end of the joint. The part it is on is the body the solver holds.",
+            },
+            {
+                Name = "Attachment1",
+                Type = "Attachment?",
+                Doc = "The other end. The two frames are the same place when the constraint is built, which "
+                    .. 'is what "this is where they are attached" means.',
+            },
+            {
+                Name = "Enabled",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether the joint holds. A disabled constraint stays in the world holding nothing, "
+                    .. "rather than being destroyed and rebuilt -- rebuilding would move it to the end of the "
+                    .. "solve order, and a ragdoll that switched itself off and on would simulate differently "
+                    .. "afterwards.",
+            },
+            {
+                Name = "CollideConnected",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether the two parts still collide with each other.\n\n**False is "
+                    .. "what a ragdoll needs.** An upper arm and a lower arm overlap at the elbow by "
+                    .. "construction, and left colliding they shove each other apart every step -- a "
+                    .. "character that vibrates rather than falls.",
+            },
+        },
+    },
+    {
+        Name = "BallSocketConstraint",
+        Extends = "Constraint",
+        Module = "scene",
+        -- A hook of its own, which does NOT add a second component: it stamps
+        -- the kind onto the one `Constraint` already added. `World::create`
+        -- walks the ancestry root-first, so the base has run by the time this
+        -- does -- which is what lets the type be the class rather than a
+        -- property somebody could write a hinge into.
+        Storage = "BallSocketConstraint",
+        Doc = "A joint free to rotate in every direction about one point, and optionally limited to a cone "
+            .. "and a twist.\n\nUnlimited it is a rope's end or a pendulum. Limited it is a "
+            .. "shoulder or a hip, which is exactly what a ragdoll is made of -- and the limited form is a "
+            .. "different solver joint rather than a free one with corrections bolted on, so it is not "
+            .. "exceeded and then pulled back, it is not exceeded.",
+        Properties = {
+            {
+                Name = "LimitsEnabled",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether the cone and twist below apply. Off is a free ball joint.",
+            },
+            {
+                Name = "UpperAngle",
+                Type = "number",
+                Default = "180",
+                Doc = "The half-angle of the swing cone in degrees, measured from the joint's own X axis.",
+            },
+            {
+                Name = "TwistLimit",
+                Type = "number",
+                Default = "180",
+                Doc = "How far it may twist about that axis, in degrees, either way.",
+            },
+        },
+    },
+    {
+        Name = "HingeConstraint",
+        Extends = "Constraint",
+        Module = "scene",
+        -- A hook of its own, which does NOT add a second component: it stamps
+        -- the kind onto the one `Constraint` already added. `World::create`
+        -- walks the ancestry root-first, so the base has run by the time this
+        -- does -- which is what lets the type be the class rather than a
+        -- property somebody could write a hinge into.
+        Storage = "HingeConstraint",
+        Doc = "A joint free to rotate about one axis: a door, a lid, an elbow. The axis is the joint frame's "
+            .. "own X, so pointing the attachment points the hinge.",
+        Properties = {
+            {
+                Name = "LimitsEnabled",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether the range below applies. Off is a hinge that spins freely.",
+            },
+            {
+                Name = "LowerAngle",
+                Type = "number",
+                Default = "-180",
+                Doc = "How far it may turn one way, in degrees.",
+            },
+            {
+                Name = "UpperAngle",
+                Type = "number",
+                Default = "180",
+                Doc = "How far it may turn the other, in degrees. A lower above the upper is unlimited.",
+            },
+        },
+    },
+    {
+        Name = "FixedConstraint",
+        Extends = "Constraint",
+        Module = "scene",
+        -- A hook of its own, which does NOT add a second component: it stamps
+        -- the kind onto the one `Constraint` already added. `World::create`
+        -- walks the ancestry root-first, so the base has run by the time this
+        -- does -- which is what lets the type be the class rather than a
+        -- property somebody could write a hinge into.
+        Storage = "FixedConstraint",
+        Doc = "A joint with no freedom at all: two bodies the solver treats as one rigid assembly.\n\n"
+            .. "**This is the one a `Weld` is not.** A weld moves its second part and asks nothing; this "
+            .. "hands both to the solver, so a heavy crate fixed to a light one makes a heavy pair and a "
+            .. "force applied to either moves both. Use a weld to attach something to a character, and this "
+            .. "to build an object out of parts.",
+        Properties = {},
+    },
+    {
         Name = "Weld",
         Extends = "Instance",
         Module = "scene",

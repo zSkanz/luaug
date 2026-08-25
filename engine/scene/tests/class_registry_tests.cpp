@@ -30,10 +30,10 @@ TEST_CASE("the fixture hierarchy registers")
     CHECK(schema.partClass != InvalidClass);
     CHECK(schema.modelClass != InvalidClass);
 
-    // Slot 0 is the reserved "no class", so eight classes means nine entries. A
+    // Slot 0 is the reserved "no class", so nine classes means ten entries. A
     // number rather than a list, so adding one to the fixture is a one-line
     // change here and dropping one is a failure.
-    CHECK(schema.classes.classCount() == 9);
+    CHECK(schema.classes.classCount() == 10);
     CHECK(schema.classes.findId(schema.atoms.intern("Part")) == schema.partClass);
     CHECK(schema.classes.findId(schema.atoms.intern("Nothing")) == InvalidClass);
 }

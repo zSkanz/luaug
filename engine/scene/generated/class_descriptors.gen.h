@@ -154,6 +154,42 @@ Value getAttachmentWorldCFrame(const World& world, core::InstanceId id);
 void attachAttachmentComponents(World& world, core::InstanceId id);
 void detachAttachmentComponents(World& world, core::InstanceId id);
 
+// Constraint
+Value getConstraintAttachment0(const World& world, core::InstanceId id);
+bool setConstraintAttachment0(World& world, core::InstanceId id, const Value& value);
+Value getConstraintAttachment1(const World& world, core::InstanceId id);
+bool setConstraintAttachment1(World& world, core::InstanceId id, const Value& value);
+Value getConstraintEnabled(const World& world, core::InstanceId id);
+bool setConstraintEnabled(World& world, core::InstanceId id, const Value& value);
+Value getConstraintCollideConnected(const World& world, core::InstanceId id);
+bool setConstraintCollideConnected(World& world, core::InstanceId id, const Value& value);
+void attachConstraintComponents(World& world, core::InstanceId id);
+void detachConstraintComponents(World& world, core::InstanceId id);
+
+// BallSocketConstraint
+Value getBallSocketConstraintLimitsEnabled(const World& world, core::InstanceId id);
+bool setBallSocketConstraintLimitsEnabled(World& world, core::InstanceId id, const Value& value);
+Value getBallSocketConstraintUpperAngle(const World& world, core::InstanceId id);
+bool setBallSocketConstraintUpperAngle(World& world, core::InstanceId id, const Value& value);
+Value getBallSocketConstraintTwistLimit(const World& world, core::InstanceId id);
+bool setBallSocketConstraintTwistLimit(World& world, core::InstanceId id, const Value& value);
+void attachBallSocketConstraintComponents(World& world, core::InstanceId id);
+void detachBallSocketConstraintComponents(World& world, core::InstanceId id);
+
+// HingeConstraint
+Value getHingeConstraintLimitsEnabled(const World& world, core::InstanceId id);
+bool setHingeConstraintLimitsEnabled(World& world, core::InstanceId id, const Value& value);
+Value getHingeConstraintLowerAngle(const World& world, core::InstanceId id);
+bool setHingeConstraintLowerAngle(World& world, core::InstanceId id, const Value& value);
+Value getHingeConstraintUpperAngle(const World& world, core::InstanceId id);
+bool setHingeConstraintUpperAngle(World& world, core::InstanceId id, const Value& value);
+void attachHingeConstraintComponents(World& world, core::InstanceId id);
+void detachHingeConstraintComponents(World& world, core::InstanceId id);
+
+// FixedConstraint
+void attachFixedConstraintComponents(World& world, core::InstanceId id);
+void detachFixedConstraintComponents(World& world, core::InstanceId id);
+
 // Weld
 Value getWeldPart0(const World& world, core::InstanceId id);
 bool setWeldPart0(World& world, core::InstanceId id, const Value& value);

@@ -724,6 +724,43 @@ declare extern type Bone extends Attachment with
     Transform: CFrame
 end
 
+declare extern type Constraint extends Instance with
+    --- One end of the joint. The part it is on is the body the solver holds.
+    Attachment0: Attachment?
+    --- The other end. The two frames are the same place when the constraint is built, which is what
+    --- "this is where they are attached" means.
+    Attachment1: Attachment?
+    --- Whether the joint holds. A disabled constraint stays in the world holding nothing, rather than
+    --- being destroyed and rebuilt -- rebuilding would move it to the end of the solve order, and a
+    --- ragdoll that switched itself off and on would simulate differently afterwards.
+    Enabled: boolean
+    --- Whether the two parts still collide with each other. **False is what a ragdoll needs.** An upper
+    --- arm and a lower arm overlap at the elbow by construction, and left colliding they shove each
+    --- other apart every step -- a character that vibrates rather than falls.
+    CollideConnected: boolean
+end
+
+declare extern type BallSocketConstraint extends Constraint with
+    --- Whether the cone and twist below apply. Off is a free ball joint.
+    LimitsEnabled: boolean
+    --- The half-angle of the swing cone in degrees, measured from the joint's own X axis.
+    UpperAngle: number
+    --- How far it may twist about that axis, in degrees, either way.
+    TwistLimit: number
+end
+
+declare extern type HingeConstraint extends Constraint with
+    --- Whether the range below applies. Off is a hinge that spins freely.
+    LimitsEnabled: boolean
+    --- How far it may turn one way, in degrees.
+    LowerAngle: number
+    --- How far it may turn the other, in degrees. A lower above the upper is unlimited.
+    UpperAngle: number
+end
+
+declare extern type FixedConstraint extends Constraint with
+end
+
 declare extern type Weld extends Instance with
     --- The anchor: the thing the other one follows. It may itself be simulated, anchored, or a
     --- CharacterBody -- whatever moves it, Part1 goes with it. **A `BasePart` or an `Attachment`.**
@@ -1975,6 +2012,9 @@ declare Instance: {
         & (("MeshPart") -> MeshPart)
         & (("Attachment") -> Attachment)
         & (("Bone") -> Bone)
+        & (("BallSocketConstraint") -> BallSocketConstraint)
+        & (("HingeConstraint") -> HingeConstraint)
+        & (("FixedConstraint") -> FixedConstraint)
         & (("Weld") -> Weld)
         & (("WeldConstraint") -> WeldConstraint)
         & (("CharacterBody") -> CharacterBody)

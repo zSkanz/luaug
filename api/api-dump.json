@@ -80,6 +80,30 @@
       "Events": []
     },
     {
+      "Name": "BallSocketConstraint",
+      "Extends": "Constraint",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "LimitsEnabled",
+          "Type": "boolean",
+          "Default": "false"
+        },
+        {
+          "Name": "TwistLimit",
+          "Type": "number",
+          "Default": "180"
+        },
+        {
+          "Name": "UpperAngle",
+          "Type": "number",
+          "Default": "180"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "BasePart",
       "Extends": "PVInstance",
       "Tags": ["Abstract"],
@@ -327,6 +351,33 @@
       ]
     },
     {
+      "Name": "Constraint",
+      "Extends": "Instance",
+      "Tags": ["Abstract", "NotCreatable"],
+      "Properties": [
+        {
+          "Name": "Attachment0",
+          "Type": "Attachment?"
+        },
+        {
+          "Name": "Attachment1",
+          "Type": "Attachment?"
+        },
+        {
+          "Name": "CollideConnected",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
+          "Name": "Enabled",
+          "Type": "boolean",
+          "Default": "true"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "DataModel",
       "Extends": "Instance",
       "Tags": ["NotCreatable"],
@@ -531,6 +582,14 @@
       ]
     },
     {
+      "Name": "FixedConstraint",
+      "Extends": "Constraint",
+      "Tags": [],
+      "Properties": [],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "Folder",
       "Extends": "Instance",
       "Tags": [],
@@ -543,6 +602,30 @@
       "Extends": "UIObject",
       "Tags": [],
       "Properties": [],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "HingeConstraint",
+      "Extends": "Constraint",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "LimitsEnabled",
+          "Type": "boolean",
+          "Default": "false"
+        },
+        {
+          "Name": "LowerAngle",
+          "Type": "number",
+          "Default": "-180"
+        },
+        {
+          "Name": "UpperAngle",
+          "Type": "number",
+          "Default": "180"
+        }
+      ],
       "Methods": [],
       "Events": []
     },

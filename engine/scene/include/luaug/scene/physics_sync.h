@@ -233,6 +233,38 @@ private:
     // The part an id IS or SITS ON: itself for a part, its parent for an
     // attachment, invalid for anything else.
     [[nodiscard]] core::InstanceId ownerOf(core::InstanceId id) const;
+
+    // One constraint, created or updated. Called from a SECOND pool-order walk
+    // inside `applyScene`, after every body exists -- a joint whose bodies have
+    // not been made yet is a joint that cannot be built, and creating bodies
+    // lazily from here would put body creation order in the constraint pool's
+    // order instead of the rigid-body pool's.
+    [[nodiscard]] physics::BodyHandle bodyHandleOf(core::InstanceId id) const;
+
+    void applyConstraint(core::InstanceId id, ConstraintComponent& constraint);
+
+    // What one constraint looked like when it was last built, so a tick can tell
+    // a change from a no-op without a dirty flag on state the world hashes.
+    struct ConstraintRecord
+    {
+        core::u32 generation = 0;
+        physics::ConstraintHandle handle;
+        bool seen = false;
+        // The two BODIES, not the two attachments: an attachment moving to
+        // another part is a different joint even when the instance is the same.
+        core::InstanceId body0;
+        core::InstanceId body1;
+        i32 kind = 0;
+        bool collideConnected = true;
+        f32 limitLow = 0.0f;
+        f32 limitHigh = 0.0f;
+        f32 swingLimit = 0.0f;
+        f32 twistLimit = 0.0f;
+        bool limitsEnabled = false;
+        bool enabled = true;
+    };
+
+    std::vector<ConstraintRecord> m_constraints;
     void writeBack();
     void writeCharacters();
     void publishContacts();

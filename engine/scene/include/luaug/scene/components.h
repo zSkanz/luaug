@@ -236,6 +236,51 @@ struct AttachmentComponent
     core::CFrameD transform;
 };
 
+// `BallSocketConstraint`, `HingeConstraint` and `FixedConstraint`, in one pool.
+//
+// **A constraint takes two `Attachment`s, not two parts**, and that is what
+// makes the joint frame authorable: where a door hinges is a place on the door
+// and a place on the frame, and both are things you can see and move in the
+// editor. Two parts and a pair of offset `CFrame`s would be the same numbers
+// with nowhere to put them.
+//
+// A `Weld` is not one of these. A weld DRIVES its second part from its first
+// every tick and the solver is never asked; a constraint hands both bodies to
+// the solver and lets it work out where they end up. Welding a MeshPart to a
+// character keeps them together whatever the solver thinks; a hinge lets a door
+// swing under its own weight.
+struct ConstraintComponent
+{
+    core::InstanceId attachment0;
+    core::InstanceId attachment1;
+
+    // `physics::ConstraintType`'s value, stored raw for the reason
+    // `PartComponent` stores a shape that way: the generated accessor then needs
+    // no per-enum C++ type. Set by the class's own hook, not by a property --
+    // a `HingeConstraint` that could become a slider is two classes wearing one
+    // name.
+    i32 kind = 0;
+
+    bool enabled = true;
+
+    // Hinge: the range about the joint's own X axis, in radians. `low > high` is
+    // unlimited, which is the default.
+    f32 limitLow = 1.0f;
+    f32 limitHigh = -1.0f;
+
+    // Ball socket: the half-angle of the swing cone and the twist range. Past
+    // these it stops being a free ball joint and becomes the swing-twist a
+    // shoulder is.
+    f32 swingLimit = 3.14159265f;
+    f32 twistLimit = 3.14159265f;
+    bool limitsEnabled = false;
+
+    // Whether the two bodies still collide with each other. **False is what a
+    // ragdoll needs**: an upper arm and a lower arm overlap at the elbow by
+    // construction, and left colliding they shove each other apart every step.
+    bool collideConnected = true;
+};
+
 struct WeldComponent
 {
     // The anchor and the driven part. Either may be invalid while a script is

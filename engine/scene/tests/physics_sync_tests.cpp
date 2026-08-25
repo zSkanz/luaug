@@ -992,3 +992,255 @@ TEST_CASE("a weld may be anchored to an attachment, and driven only by a part")
     CHECK(mirror.transform(sword).cframe.position.x == doctest::Approx(7.0));
     CHECK(mirror.transform(sword).cframe.position.y == doctest::Approx(2.0));
 }
+
+// --- Constraints --------------------------------------------------------------
+
+namespace {
+
+// A part with an attachment on it, which is the pair every constraint needs.
+struct Jointed
+{
+    core::InstanceId part;
+    core::InstanceId attachment;
+};
+
+[[nodiscard]] Jointed jointedPart(Mirror& mirror, std::string_view name, core::DVec3 at = {})
+{
+    Jointed out;
+    out.part = mirror.part(name, at);
+    out.attachment = mirror.fixture.world.create(mirror.fixture.schema.attachmentClass);
+    REQUIRE(mirror.fixture.world.setParent(out.attachment, out.part) == std::nullopt);
+    return out;
+}
+
+[[nodiscard]] core::InstanceId hinge(Mirror& mirror, const Jointed& a, const Jointed& b)
+{
+    const core::InstanceId id = mirror.fixture.world.create(mirror.fixture.schema.constraintClass);
+    REQUIRE(mirror.fixture.world.setParent(id, mirror.workspace) == std::nullopt);
+    ConstraintComponent& component = *mirror.fixture.world.constraints().find(id);
+    component.kind = static_cast<i32>(physics::ConstraintType::Hinge);
+    component.attachment0 = a.attachment;
+    component.attachment1 = b.attachment;
+    return id;
+}
+
+} // namespace
+
+TEST_CASE("a constraint reaches the backend once, with both bodies")
+{
+    Mirror mirror;
+    const Jointed frame = jointedPart(mirror, "Frame");
+    const Jointed door = jointedPart(mirror, "Door", core::DVec3{1.0, 0.0, 0.0});
+    (void)hinge(mirror, frame, door);
+
+    mirror.step();
+
+    REQUIRE(mirror.backend.constraints.size() == 1);
+    CHECK(mirror.backend.constraints[0].desc.type == physics::ConstraintType::Hinge);
+    // The two BODIES, through the parts the attachments sit on.
+    CHECK(mirror.backend.constraints[0].desc.first == mirror.backend.created[0].handle);
+    CHECK(mirror.backend.constraints[0].desc.second == mirror.backend.created[1].handle);
+
+    // And a second tick creates nothing: the mirror can tell a change from a
+    // no-op without a dirty flag on state the world hashes.
+    mirror.step();
+    CHECK(mirror.backend.constraints.size() == 1);
+}
+
+TEST_CASE("constraints are created after every body, in constraint pool order")
+{
+    // **The reason this is a second walk.** Folding it into the body walk would
+    // create a joint before the body at its other end existed; creating that
+    // body from here instead would put BODY creation order in the constraint
+    // pool's order, and two scenes differing only in the order somebody added
+    // joints would then simulate differently (R10).
+    Mirror mirror;
+    const Jointed a = jointedPart(mirror, "A");
+    const Jointed b = jointedPart(mirror, "B", core::DVec3{1.0, 0.0, 0.0});
+    const Jointed c = jointedPart(mirror, "C", core::DVec3{2.0, 0.0, 0.0});
+    (void)hinge(mirror, a, b);
+    (void)hinge(mirror, b, c);
+
+    mirror.step();
+
+    // Every body, then every constraint.
+    std::size_t lastBody = 0;
+    std::size_t firstConstraint = mirror.backend.calls.size();
+    for (std::size_t index = 0; index < mirror.backend.calls.size(); ++index) {
+        if (mirror.backend.calls[index].first == "createBody")
+            lastBody = index;
+        if (mirror.backend.calls[index].first == "createConstraint" && index < firstConstraint)
+            firstConstraint = index;
+    }
+    CHECK(mirror.backend.constraints.size() == 2);
+    CHECK(lastBody < firstConstraint);
+}
+
+TEST_CASE("a constraint is retired BEFORE the bodies it holds")
+{
+    // A joint holding a body that is gone is a dangling pointer inside the
+    // solver, and it is silent. The backend drops a body's joints itself, so a
+    // sweep that retired bodies first would destroy those joints twice from
+    // here.
+    Mirror mirror;
+    const Jointed a = jointedPart(mirror, "A");
+    const Jointed b = jointedPart(mirror, "B", core::DVec3{1.0, 0.0, 0.0});
+    (void)hinge(mirror, a, b);
+    mirror.step();
+    REQUIRE(mirror.backend.constraints.size() == 1);
+
+    mirror.backend.calls.clear();
+    // Both parts leave the world at once, which is what destroying a model does.
+    REQUIRE(mirror.fixture.world.setParent(a.part, core::InstanceId{}) == std::nullopt);
+    REQUIRE(mirror.fixture.world.setParent(b.part, core::InstanceId{}) == std::nullopt);
+    mirror.step();
+
+    std::size_t destroyedConstraint = mirror.backend.calls.size();
+    std::size_t firstDestroyedBody = mirror.backend.calls.size();
+    for (std::size_t index = 0; index < mirror.backend.calls.size(); ++index) {
+        if (mirror.backend.calls[index].first == "destroyConstraint" && index < destroyedConstraint)
+            destroyedConstraint = index;
+        if (mirror.backend.calls[index].first == "destroyBody" && index < firstDestroyedBody)
+            firstDestroyedBody = index;
+    }
+    CHECK(mirror.backend.constraintsDestroyed.size() == 1);
+    CHECK(destroyedConstraint < firstDestroyedBody);
+}
+
+TEST_CASE("a joint whose ends a script has not finished assigning is not built")
+{
+    // Not an error: it is what every script that sets two properties on two
+    // lines briefly produces.
+    Mirror mirror;
+    const Jointed a = jointedPart(mirror, "A");
+
+    const core::InstanceId id = mirror.fixture.world.create(mirror.fixture.schema.constraintClass);
+    REQUIRE(mirror.fixture.world.setParent(id, mirror.workspace) == std::nullopt);
+    mirror.fixture.world.constraints().find(id)->attachment0 = a.attachment;
+
+    mirror.step();
+    CHECK(mirror.backend.constraints.empty());
+
+    // And it builds the moment the other end arrives.
+    const Jointed b = jointedPart(mirror, "B", core::DVec3{1.0, 0.0, 0.0});
+    mirror.fixture.world.constraints().find(id)->attachment1 = b.attachment;
+    mirror.step();
+    CHECK(mirror.backend.constraints.size() == 1);
+}
+
+TEST_CASE("a joint whose two ends are on one part is refused")
+{
+    Mirror mirror;
+    const Jointed a = jointedPart(mirror, "A");
+    const core::InstanceId second = mirror.fixture.world.create(mirror.fixture.schema.attachmentClass);
+    REQUIRE(mirror.fixture.world.setParent(second, a.part) == std::nullopt);
+
+    const core::InstanceId id = mirror.fixture.world.create(mirror.fixture.schema.constraintClass);
+    REQUIRE(mirror.fixture.world.setParent(id, mirror.workspace) == std::nullopt);
+    ConstraintComponent& component = *mirror.fixture.world.constraints().find(id);
+    component.attachment0 = a.attachment;
+    component.attachment1 = second;
+
+    mirror.step();
+    // One body joined to itself divides by an infinite mass in the solver.
+    CHECK(mirror.backend.constraints.empty());
+}
+
+TEST_CASE("a limit change is an update rather than a rebuild")
+{
+    // Rebuilding would move the constraint to the end of the solve order, and a
+    // door whose limit somebody nudged would simulate differently afterwards.
+    Mirror mirror;
+    const Jointed frame = jointedPart(mirror, "Frame");
+    const Jointed door = jointedPart(mirror, "Door", core::DVec3{1.0, 0.0, 0.0});
+    const core::InstanceId id = hinge(mirror, frame, door);
+    mirror.step();
+    REQUIRE(mirror.backend.constraints.size() == 1);
+
+    ConstraintComponent& component = *mirror.fixture.world.constraints().find(id);
+    component.limitsEnabled = true;
+    component.limitLow = -1.0f;
+    component.limitHigh = 1.0f;
+    mirror.step();
+
+    CHECK(mirror.backend.constraints.size() == 1);
+    CHECK(mirror.backend.constraintsDestroyed.empty());
+    REQUIRE(mirror.backend.constraintsUpdated.size() == 1);
+    CHECK(mirror.backend.constraintsUpdated[0].desc.limitHigh == 1.0f);
+}
+
+TEST_CASE("changing what the joint IS rebuilds it")
+{
+    Mirror mirror;
+    const Jointed a = jointedPart(mirror, "A");
+    const Jointed b = jointedPart(mirror, "B", core::DVec3{1.0, 0.0, 0.0});
+    const core::InstanceId id = hinge(mirror, a, b);
+    mirror.step();
+    REQUIRE(mirror.backend.constraints.size() == 1);
+
+    // A ball socket that gains limits stops being a point joint and becomes a
+    // swing-twist -- a different solver joint, not a point joint with
+    // corrections bolted on.
+    mirror.fixture.world.constraints().find(id)->kind = static_cast<i32>(physics::ConstraintType::SwingTwist);
+    mirror.step();
+
+    CHECK(mirror.backend.constraints.size() == 2);
+    CHECK(mirror.backend.constraintsDestroyed.size() == 1);
+    CHECK(mirror.backend.constraints[1].desc.type == physics::ConstraintType::SwingTwist);
+}
+
+TEST_CASE("disabling a joint does not destroy it")
+{
+    Mirror mirror;
+    const Jointed a = jointedPart(mirror, "A");
+    const Jointed b = jointedPart(mirror, "B", core::DVec3{1.0, 0.0, 0.0});
+    const core::InstanceId id = hinge(mirror, a, b);
+    mirror.step();
+
+    mirror.fixture.world.constraints().find(id)->enabled = false;
+    mirror.step();
+
+    // Its place in the solve order is the one it was created with: a ragdoll
+    // that switched itself off and on would otherwise simulate differently.
+    CHECK(mirror.backend.constraintsDestroyed.empty());
+    REQUIRE(mirror.backend.constraintEnables.size() == 1);
+    CHECK_FALSE(mirror.backend.constraintEnables[0].second);
+}
+
+TEST_CASE("a constraint cannot reach a CharacterBody")
+{
+    // `CharacterVirtual` is swept rather than solved (the M5 finding), so there
+    // is no body for a joint to hold.
+    Mirror mirror;
+    const Jointed a = jointedPart(mirror, "A");
+    const Jointed walker = jointedPart(mirror, "Walker", core::DVec3{1.0, 0.0, 0.0});
+    mirror.fixture.world.characterBodies().add(walker.part, CharacterBodyComponent{});
+
+    const core::InstanceId id = mirror.fixture.world.create(mirror.fixture.schema.constraintClass);
+    REQUIRE(mirror.fixture.world.setParent(id, mirror.workspace) == std::nullopt);
+    ConstraintComponent& component = *mirror.fixture.world.constraints().find(id);
+    component.attachment0 = a.attachment;
+    component.attachment1 = walker.attachment;
+
+    mirror.step();
+    CHECK(mirror.backend.constraints.empty());
+}
+
+TEST_CASE("the joint frames are in each body's own space")
+{
+    // Which is what the seam asks for, and what makes a floating-origin rebase
+    // cost nothing: the bodies move and the frames do not.
+    Mirror mirror;
+    const Jointed frame = jointedPart(mirror, "Frame", core::DVec3{100.0, 0.0, 0.0});
+    const Jointed door = jointedPart(mirror, "Door", core::DVec3{101.0, 0.0, 0.0});
+    mirror.fixture.world.attachments().find(frame.attachment)->cframe.position = core::DVec3{0.5, 0.0, 0.0};
+    mirror.fixture.world.attachments().find(door.attachment)->cframe.position = core::DVec3{-0.5, 0.0, 0.0};
+    (void)hinge(mirror, frame, door);
+
+    mirror.step();
+
+    REQUIRE(mirror.backend.constraints.size() == 1);
+    // Half a metre, not a hundred and a half: local, not world.
+    CHECK(mirror.backend.constraints[0].desc.firstFrame.position.x == doctest::Approx(0.5));
+    CHECK(mirror.backend.constraints[0].desc.secondFrame.position.x == doctest::Approx(-0.5));
+}

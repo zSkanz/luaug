@@ -42,14 +42,18 @@ guided tour.
 | [`AnimationPlayer`](animationplayer.md) | [`Instance`](instance.md) | Plays a skinned mesh's animation clips (§2.2). |
 | [`Attachment`](attachment.md) | [`Instance`](instance.md) | A named place on a part: a socket to weld something to, a joint frame for a constraint, a muzzle to spawn something at. |
 | [`AudioGroup`](audiogroup.md) | [`Instance`](instance.md) | A mixing bus (§2.1, §2.2). |
+| [`BallSocketConstraint`](ballsocketconstraint.md) | [`Constraint`](constraint.md) | A joint free to rotate in every direction about one point, and optionally limited to a cone and a twist. |
 | [`BasePart`](basepart.md) | [`PVInstance`](pvinstance.md) | The abstract base of every solid object in the world: a transform, a size and a look. |
 | [`BaseScript`](basescript.md) | [`Instance`](instance.md) | The abstract base of anything that carries Luau code. |
 | [`Bone`](bone.md) | [`Attachment`](attachment.md) | An attachment that follows a joint of the `MeshPart` it is parented to. |
 | [`Camera`](camera.md) | [`PVInstance`](pvinstance.md) | The viewpoint the world is rendered from. |
 | [`CharacterBody`](characterbody.md) | [`BasePart`](basepart.md) | A capsule that walks: the player, or anything that should climb a ramp and step over a kerb instead of tumbling. |
+| [`Constraint`](constraint.md) | [`Instance`](instance.md) | The base of anything the SOLVER holds together. |
 | [`DataModel`](datamodel.md) | [`Instance`](instance.md) | The root of the instance tree, reached through the `game` global. |
+| [`FixedConstraint`](fixedconstraint.md) | [`Constraint`](constraint.md) | A joint with no freedom at all: two bodies the solver treats as one rigid assembly. |
 | [`Folder`](folder.md) | [`Instance`](instance.md) | A node with no behaviour of its own, for grouping instances; mounting src/scripts also builds one per subdirectory. |
 | [`Frame`](frame.md) | [`UIObject`](uiobject.md) | A rectangle and nothing else: a background, a border of children, and the layout it imposes on them. |
+| [`HingeConstraint`](hingeconstraint.md) | [`Constraint`](constraint.md) | A joint free to rotate about one axis: a door, a lid, an elbow. |
 | [`ImageButton`](imagebutton.md) | [`ImageLabel`](imagelabel.md) | An `ImageLabel` that is meant to be pressed, and the same argument `TextButton` carries: it adds nothing, and it is the class a reader recognizes. |
 | [`ImageLabel`](imagelabel.md) | [`UIObject`](uiobject.md) | A picture in a box (§2.2). |
 | [`InputAction`](inputaction.md) | [`Instance`](instance.md) | A named thing the player can do, decoupled from the input that does it (§2.4, ADR 0029). |

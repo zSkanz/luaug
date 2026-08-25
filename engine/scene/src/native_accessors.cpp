@@ -9,6 +9,7 @@
 // allocation on the read path beyond what a `Value` costs -- because these are
 // the innermost frames of the Instance facade, and architecture risk #1 is the
 // facade's overhead eating the ECS's win.
+#include "luaug/physics/types.h"
 #include "luaug/scene/pivot.h"
 #include "luaug/scene/world.h"
 
@@ -284,6 +285,241 @@ Value getAttachmentWorldCFrame(const World& world, core::InstanceId id)
 {
     const AttachmentComponent* attachment = world.attachments().find(id);
     return attachment == nullptr ? Value{} : Value{attachment->worldCFrame};
+}
+
+// --- Constraint ---------------------------------------------------------------
+
+void attachConstraintComponents(World& world, core::InstanceId id)
+{
+    world.constraints().add(id, ConstraintComponent{});
+}
+
+void detachConstraintComponents(World& world, core::InstanceId id)
+{
+    world.constraints().remove(id);
+}
+
+// The three below add nothing. They stamp the KIND onto the component the base
+// already added, so a constraint's type is its class -- a hinge that could
+// become a slider would be two joints wearing one name.
+//
+// `World::create` walks the ancestry root-first, which is what makes "already
+// added" true. The detach halves do nothing at all: `Constraint`'s removes the
+// component, and removing it twice would be the second call finding nothing.
+
+void attachBallSocketConstraintComponents(World& world, core::InstanceId id)
+{
+    if (ConstraintComponent* constraint = world.constraints().find(id); constraint != nullptr)
+        constraint->kind = static_cast<i32>(physics::ConstraintType::Point);
+}
+
+void detachBallSocketConstraintComponents(World&, core::InstanceId)
+{}
+
+void attachHingeConstraintComponents(World& world, core::InstanceId id)
+{
+    if (ConstraintComponent* constraint = world.constraints().find(id); constraint != nullptr)
+        constraint->kind = static_cast<i32>(physics::ConstraintType::Hinge);
+}
+
+void detachHingeConstraintComponents(World&, core::InstanceId)
+{}
+
+void attachFixedConstraintComponents(World& world, core::InstanceId id)
+{
+    if (ConstraintComponent* constraint = world.constraints().find(id); constraint != nullptr)
+        constraint->kind = static_cast<i32>(physics::ConstraintType::Fixed);
+}
+
+void detachFixedConstraintComponents(World&, core::InstanceId)
+{}
+
+namespace {
+
+// An end of a joint: an `Attachment`, and nothing else. A constraint holds two
+// BODIES and reaches them through the parts its attachments sit on -- naming a
+// part directly would leave the joint frame nowhere to be authored, which is the
+// whole reason this takes attachments.
+[[nodiscard]] bool setConstraintEnd(World& world, core::InstanceId id, const Value& value, bool isFirst)
+{
+    ConstraintComponent* constraint = world.constraints().find(id);
+    if (constraint == nullptr)
+        return false;
+
+    core::InstanceId target;
+    if (const auto* reference = std::get_if<core::InstanceId>(&value); reference != nullptr) {
+        if (!world.alive(*reference) || world.attachments().find(*reference) == nullptr)
+            return false;
+        target = *reference;
+    }
+    else if (valueType(value) != ValueType::Nil) {
+        return false;
+    }
+
+    if (isFirst)
+        constraint->attachment0 = target;
+    else
+        constraint->attachment1 = target;
+    return true;
+}
+
+// Degrees in, radians out. The API speaks degrees for the reason `Orientation`
+// does -- it is what a person types -- and the solver speaks radians.
+[[nodiscard]] bool setAngle(const Value& value, f32& field)
+{
+    const auto* number = std::get_if<f64>(&value);
+    if (number == nullptr || !std::isfinite(*number))
+        return false;
+    field = static_cast<f32>(*number * DegreesToRadians);
+    return true;
+}
+
+} // namespace
+
+Value getConstraintAttachment0(const World& world, core::InstanceId id)
+{
+    const ConstraintComponent* constraint = world.constraints().find(id);
+    if (constraint == nullptr || !constraint->attachment0.valid())
+        return Value{};
+    return Value{constraint->attachment0};
+}
+
+bool setConstraintAttachment0(World& world, core::InstanceId id, const Value& value)
+{
+    return setConstraintEnd(world, id, value, true);
+}
+
+Value getConstraintAttachment1(const World& world, core::InstanceId id)
+{
+    const ConstraintComponent* constraint = world.constraints().find(id);
+    if (constraint == nullptr || !constraint->attachment1.valid())
+        return Value{};
+    return Value{constraint->attachment1};
+}
+
+bool setConstraintAttachment1(World& world, core::InstanceId id, const Value& value)
+{
+    return setConstraintEnd(world, id, value, false);
+}
+
+Value getConstraintEnabled(const World& world, core::InstanceId id)
+{
+    const ConstraintComponent* constraint = world.constraints().find(id);
+    return constraint == nullptr ? Value{} : Value{constraint->enabled};
+}
+
+bool setConstraintEnabled(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* flag = std::get_if<bool>(&value);
+    ConstraintComponent* constraint = world.constraints().find(id);
+    if (flag == nullptr || constraint == nullptr)
+        return false;
+    constraint->enabled = *flag;
+    return true;
+}
+
+Value getConstraintCollideConnected(const World& world, core::InstanceId id)
+{
+    const ConstraintComponent* constraint = world.constraints().find(id);
+    return constraint == nullptr ? Value{} : Value{constraint->collideConnected};
+}
+
+bool setConstraintCollideConnected(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* flag = std::get_if<bool>(&value);
+    ConstraintComponent* constraint = world.constraints().find(id);
+    if (flag == nullptr || constraint == nullptr)
+        return false;
+    constraint->collideConnected = *flag;
+    return true;
+}
+
+// --- BallSocketConstraint -----------------------------------------------------
+
+Value getBallSocketConstraintLimitsEnabled(const World& world, core::InstanceId id)
+{
+    const ConstraintComponent* constraint = world.constraints().find(id);
+    return constraint == nullptr ? Value{} : Value{constraint->limitsEnabled};
+}
+
+bool setBallSocketConstraintLimitsEnabled(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* flag = std::get_if<bool>(&value);
+    ConstraintComponent* constraint = world.constraints().find(id);
+    if (flag == nullptr || constraint == nullptr)
+        return false;
+    constraint->limitsEnabled = *flag;
+    // A limited ball socket IS a swing-twist joint rather than a free one with
+    // corrections bolted on -- so turning limits on changes which solver joint
+    // the mirror builds, and the mirror rebuilds when it does.
+    constraint->kind = static_cast<i32>(*flag ? physics::ConstraintType::SwingTwist : physics::ConstraintType::Point);
+    return true;
+}
+
+Value getBallSocketConstraintUpperAngle(const World& world, core::InstanceId id)
+{
+    const ConstraintComponent* constraint = world.constraints().find(id);
+    return constraint == nullptr ? Value{} : Value{static_cast<f64>(constraint->swingLimit) * RadiansToDegrees};
+}
+
+bool setBallSocketConstraintUpperAngle(World& world, core::InstanceId id, const Value& value)
+{
+    ConstraintComponent* constraint = world.constraints().find(id);
+    return constraint != nullptr && setAngle(value, constraint->swingLimit);
+}
+
+Value getBallSocketConstraintTwistLimit(const World& world, core::InstanceId id)
+{
+    const ConstraintComponent* constraint = world.constraints().find(id);
+    return constraint == nullptr ? Value{} : Value{static_cast<f64>(constraint->twistLimit) * RadiansToDegrees};
+}
+
+bool setBallSocketConstraintTwistLimit(World& world, core::InstanceId id, const Value& value)
+{
+    ConstraintComponent* constraint = world.constraints().find(id);
+    return constraint != nullptr && setAngle(value, constraint->twistLimit);
+}
+
+// --- HingeConstraint ----------------------------------------------------------
+
+Value getHingeConstraintLimitsEnabled(const World& world, core::InstanceId id)
+{
+    const ConstraintComponent* constraint = world.constraints().find(id);
+    return constraint == nullptr ? Value{} : Value{constraint->limitsEnabled};
+}
+
+bool setHingeConstraintLimitsEnabled(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* flag = std::get_if<bool>(&value);
+    ConstraintComponent* constraint = world.constraints().find(id);
+    if (flag == nullptr || constraint == nullptr)
+        return false;
+    constraint->limitsEnabled = *flag;
+    return true;
+}
+
+Value getHingeConstraintLowerAngle(const World& world, core::InstanceId id)
+{
+    const ConstraintComponent* constraint = world.constraints().find(id);
+    return constraint == nullptr ? Value{} : Value{static_cast<f64>(constraint->limitLow) * RadiansToDegrees};
+}
+
+bool setHingeConstraintLowerAngle(World& world, core::InstanceId id, const Value& value)
+{
+    ConstraintComponent* constraint = world.constraints().find(id);
+    return constraint != nullptr && setAngle(value, constraint->limitLow);
+}
+
+Value getHingeConstraintUpperAngle(const World& world, core::InstanceId id)
+{
+    const ConstraintComponent* constraint = world.constraints().find(id);
+    return constraint == nullptr ? Value{} : Value{static_cast<f64>(constraint->limitHigh) * RadiansToDegrees};
+}
+
+bool setHingeConstraintUpperAngle(World& world, core::InstanceId id, const Value& value)
+{
+    ConstraintComponent* constraint = world.constraints().find(id);
+    return constraint != nullptr && setAngle(value, constraint->limitHigh);
 }
 
 // --- Model ------------------------------------------------------------------

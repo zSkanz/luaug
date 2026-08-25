@@ -52,6 +52,9 @@ struct Hierarchy
     // now has behaviour worth asserting in C++ -- an attachment as an anchor,
     // and the resolution order that keeps it from lagging a frame.
     ClassId weldClass = InvalidClass;
+    // One class stands in for the three concrete constraints: they differ only
+    // in the `kind` their own hook stamps, and a test sets that directly.
+    ClassId constraintClass = InvalidClass;
     ClassId modelClass = InvalidClass;
 
     core::NameAtom nameProperty;
