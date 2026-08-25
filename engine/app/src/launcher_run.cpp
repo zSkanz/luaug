@@ -169,6 +169,10 @@ std::optional<core::EngineError> runLauncher(const EngineOptions& options)
             }
         }
 
+        // **A row that left the list leaves the file too**, which is the half
+        // that makes Remove mean anything past the end of the session.
+        (void)applyProjectDecisions(projects, view);
+
         if (!view.open.empty()) {
             const std::filesystem::path project = std::exchange(view.open, {});
             projects.remember(project);

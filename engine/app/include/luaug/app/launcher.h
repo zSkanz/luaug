@@ -139,6 +139,18 @@ struct NewProjectResult
 // The same shape `EditorCommands` has and for the same reason: a panel that
 // acted on its own decisions would be starting a process from inside an ImGui
 // callback, and the loop that owns the window is where that belongs.
+struct LauncherView;
+
+// Applies what the panel decided ABOUT THE LIST and drains it, answering whether
+// the file was written.
+//
+// **A function rather than four lines inside `runLauncher`**, and the reason is
+// D101: a fix whose only evidence is that the call site reads correctly is a fix
+// that can be recorded as done while doing nothing. The loop needs a window, a
+// GPU and somebody clicking; this needs a list and a struct, so the claim "a row
+// that leaves the list leaves the file" is a test rather than a reading.
+[[nodiscard]] bool applyProjectDecisions(ProjectList& projects, LauncherView& view);
+
 struct LauncherView
 {
     // --- What the panel reads.
@@ -160,6 +172,15 @@ struct LauncherView
     // Show the system folder picker.
     bool browse = false;
     bool quit = false;
+    // A row left the list and the file has to be told.
+    //
+    // **Drained by the loop rather than saved where it happened**, which is the
+    // same rule every other decision in this shell follows: the panel is inside
+    // a frame that has not finished drawing, and writing a file there is how a
+    // draw acquires a filesystem error to report. It also meant the list was
+    // only ever written when a project was OPENED -- so forgetting one worked
+    // until you closed the launcher, and then it came back.
+    bool forgot = false;
 
     // The last thing that went wrong or was done, shown under the list. Plain
     // text: the launcher is a developer tool, which is what exempts it from R3

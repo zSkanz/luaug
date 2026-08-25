@@ -209,6 +209,27 @@ TEST_CASE("a project that moved stays in the list, marked and removable")
 
     reloaded.forget(project);
     CHECK(reloaded.entries().empty());
+
+    // **And it stays forgotten**, which is the half this case stopped one line
+    // short of and which is the half a person notices: the list was only ever
+    // written when a project was OPENED, so Remove worked until you closed the
+    // launcher and then every row came back.
+    //
+    // Asked THROUGH the drain the loop runs rather than by calling `save`, which
+    // is the whole point of that function existing: `save` already worked, and
+    // what was missing was anybody calling it. A test that called it itself
+    // would pass against the defect.
+    app::LauncherView view;
+    view.forgot = true;
+    CHECK(app::applyProjectDecisions(reloaded, view));
+    CHECK_FALSE(view.forgot);
+
+    app::ProjectList afterwards;
+    afterwards.load(list.file());
+    CHECK(afterwards.entries().empty());
+
+    // Nothing decided, nothing written.
+    CHECK_FALSE(app::applyProjectDecisions(reloaded, view));
 }
 
 TEST_CASE("a name a project cannot have is refused before anything is written")

@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <system_error>
+#include <utility>
 
 namespace luaug::app {
 namespace {
@@ -190,6 +191,16 @@ void ProjectList::forget(const std::filesystem::path& path)
 {
     const std::filesystem::path key = normalised(path);
     std::erase_if(entries_, [&](const RecentProject& entry) { return entry.path == key; });
+}
+
+bool applyProjectDecisions(ProjectList& projects, LauncherView& view)
+{
+    if (!std::exchange(view.forgot, false))
+        return false;
+    // The row is already out of the list -- the panel did that where the button
+    // was pressed, because a list is not a world and nothing else reads it that
+    // frame. What could not happen there is the write, and this is it.
+    return projects.save();
 }
 
 void ProjectList::refresh()
