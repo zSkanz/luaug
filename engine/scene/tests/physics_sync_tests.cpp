@@ -57,13 +57,62 @@ public:
         const physics::BodyHandle handle{nextBody++, 1};
         created.push_back(Created{handle, desc});
         live.push_back(handle);
+        calls.emplace_back("createBody", handle.index);
         return handle;
     }
 
     void destroyBody(physics::WorldHandle, physics::BodyHandle handle) override
     {
         destroyed.push_back(handle);
+        calls.emplace_back("destroyBody", handle.index);
         live.erase(std::remove(live.begin(), live.end(), handle), live.end());
+    }
+
+    // --- Constraints ----------------------------------------------------------
+    //
+    // Recorded, and recorded into `calls` as well as into their own list: the
+    // contract this mirror has to keep is an ORDER -- constraints retired before
+    // the bodies they hold -- and a per-kind list cannot show an interleaving.
+
+    struct MadeConstraint
+    {
+        physics::ConstraintHandle handle;
+        physics::ConstraintDesc desc;
+    };
+
+    [[nodiscard]] physics::ConstraintHandle createConstraint(physics::WorldHandle,
+                                                             const physics::ConstraintDesc& desc) override
+    {
+        const physics::ConstraintHandle handle{nextConstraint++, 1};
+        constraints.push_back(MadeConstraint{handle, desc});
+        liveConstraints.push_back(handle);
+        calls.emplace_back("createConstraint", handle.index);
+        return handle;
+    }
+
+    void destroyConstraint(physics::WorldHandle, physics::ConstraintHandle handle) override
+    {
+        constraintsDestroyed.push_back(handle);
+        calls.emplace_back("destroyConstraint", handle.index);
+        liveConstraints.erase(std::remove(liveConstraints.begin(), liveConstraints.end(), handle),
+                              liveConstraints.end());
+    }
+
+    void setConstraintEnabled(physics::WorldHandle, physics::ConstraintHandle handle, bool enabled) override
+    {
+        constraintEnables.emplace_back(handle, enabled);
+    }
+
+    void updateConstraint(physics::WorldHandle, physics::ConstraintHandle handle,
+                          const physics::ConstraintDesc& desc) override
+    {
+        constraintsUpdated.push_back(MadeConstraint{handle, desc});
+    }
+
+    [[nodiscard]] physics::ConstraintState constraintState(physics::WorldHandle,
+                                                           physics::ConstraintHandle) const override
+    {
+        return {};
     }
 
     void setBodyTransform(physics::WorldHandle, physics::BodyHandle handle, const core::CFrameD& transform) override
@@ -182,6 +231,7 @@ public:
 
     u32 nextBody = 1;
     u32 nextCharacter = 1;
+    u32 nextConstraint = 1;
     int steps = 0;
     f32 lastDt = 0.0f;
     bool worldDestroyed = false;
@@ -192,6 +242,15 @@ public:
 
     std::vector<Created> created;
     std::vector<Created> rebuilt;
+    std::vector<MadeConstraint> constraints;
+    std::vector<MadeConstraint> constraintsUpdated;
+    std::vector<physics::ConstraintHandle> constraintsDestroyed;
+    std::vector<physics::ConstraintHandle> liveConstraints;
+    std::vector<std::pair<physics::ConstraintHandle, bool>> constraintEnables;
+    // Every lifecycle call in the order it happened, which is the only way to
+    // assert an interleaving -- "constraints retired before bodies" is a claim
+    // about sequence and a per-kind list cannot make it.
+    std::vector<std::pair<std::string, u32>> calls;
     std::vector<physics::BodyHandle> destroyed;
     std::vector<physics::BodyHandle> live;
     std::vector<std::pair<physics::BodyHandle, core::CFrameD>> transforms;

@@ -87,6 +87,42 @@ public:
     // Appends; the caller owns clearing.
     virtual void collectActiveBodies(WorldHandle world, std::vector<ActiveBody>& out) const = 0;
 
+    // --- Constraints ---------------------------------------------------------
+    //
+    // The body lifecycle, mirrored, and with two ordering rules that are part of
+    // the contract rather than of one backend:
+    //
+    //   * **A constraint is destroyed before either body it holds.** A joint
+    //     referencing a body that is gone is a dangling pointer inside the
+    //     solver, and it is silent -- so `destroyBody` drops the constraints on
+    //     that body itself, and a caller sweeping both must retire constraints
+    //     first anyway or it will destroy them twice.
+    //   * **`updateBody` keeps the constraints on the body.** Changing a shape
+    //     or a motion type rebuilds the body underneath; the constraints are
+    //     rebuilt with it, in their original creation order, so a resized limb
+    //     stays attached and the solve order does not change.
+    //
+    // Creation order is the solve order in every backend worth having, so a
+    // caller that needs determinism must create constraints in a stable order
+    // (R10). This interface does not sort them: it cannot know what order the
+    // caller meant.
+
+    // An invalid handle when either body is invalid, when both name the same
+    // body, or when the world is full.
+    [[nodiscard]] virtual ConstraintHandle createConstraint(WorldHandle world, const ConstraintDesc& desc) = 0;
+    virtual void destroyConstraint(WorldHandle world, ConstraintHandle constraint) = 0;
+
+    // A disabled constraint stays in the world and holds nothing, which is what
+    // a ragdoll turning itself off and on again needs -- rebuilding the joints
+    // would change their order and, with it, the simulation.
+    virtual void setConstraintEnabled(WorldHandle world, ConstraintHandle constraint, bool enabled) = 0;
+
+    // Limits, motor and `collideConnected` may all change; the two bodies and
+    // the type may not. A caller that needs those rebuilds.
+    virtual void updateConstraint(WorldHandle world, ConstraintHandle constraint, const ConstraintDesc& desc) = 0;
+
+    [[nodiscard]] virtual ConstraintState constraintState(WorldHandle world, ConstraintHandle constraint) const = 0;
+
     // --- Simulation ----------------------------------------------------------
 
     // One fixed step. `fixedDt` is the sim tick, never a wall-clock delta

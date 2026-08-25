@@ -25,6 +25,7 @@
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyLock.h>
+#include <Jolt/Physics/Body/BodyLockMulti.h>
 #include <Jolt/Physics/Body/BodyManager.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/CastResult.h>
@@ -38,6 +39,12 @@
 #include <Jolt/Physics/Collision/Shape/CylinderShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/Constraints/DistanceConstraint.h>
+#include <Jolt/Physics/Constraints/FixedConstraint.h>
+#include <Jolt/Physics/Constraints/HingeConstraint.h>
+#include <Jolt/Physics/Constraints/PointConstraint.h>
+#include <Jolt/Physics/Constraints/SliderConstraint.h>
+#include <Jolt/Physics/Constraints/SwingTwistConstraint.h>
 #include <Jolt/Physics/PhysicsSettings.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/RegisterTypes.h>
@@ -242,6 +249,20 @@ struct BodyRecord
     MotionType motion = MotionType::Dynamic;
     CollisionGroup group = kDefaultCollisionGroup;
     u64 userData = 0;
+};
+
+// A live joint, plus everything needed to rebuild it: `updateBody` destroys and
+// recreates the Jolt body underneath, which would dangle every constraint on it.
+struct ConstraintRecord
+{
+    JPH::Ref<JPH::TwoBodyConstraint> constraint;
+    u32 generation = 0;
+    bool alive = false;
+    // Kept because a rebuild needs them and because retiring a body has to find
+    // the joints that name it.
+    BodyHandle first;
+    BodyHandle second;
+    ConstraintDesc desc;
 };
 
 struct CharacterRecord
@@ -513,6 +534,65 @@ public:
         record(first, second);
     }
 
+    // **The one place `collideConnected = false` can be implemented.**
+    //
+    // An upper arm and a lower arm overlap at the elbow by construction, and
+    // left colliding they shove each other apart every step -- a ragdoll that
+    // vibrates instead of falling. The exclusion is per PAIR and Jolt's object
+    // layer matrix is per LAYER, so a collision group cannot express it: two
+    // limbs of one character must ignore each other and still collide with the
+    // two limbs of the next.
+    //
+    // Called from Jolt's collision jobs, so it takes the same lock the recorder
+    // does -- and returns early on the common case, which is a world with no
+    // constraints at all.
+    JPH::ValidateResult OnContactValidate(const JPH::Body& first, const JPH::Body& second, JPH::RVec3Arg,
+                                          const JPH::CollideShapeResult&) override
+    {
+        {
+            const std::lock_guard<std::mutex> guard(m_mutex);
+            if (!m_excluded.empty()) {
+                ContactPair pair{first.GetUserData(), second.GetUserData()};
+                if (pair.second < pair.first) {
+                    std::swap(pair.first, pair.second);
+                }
+                if (std::binary_search(m_excluded.begin(), m_excluded.end(), pair)) {
+                    return JPH::ValidateResult::RejectAllContactsForThisBodyPair;
+                }
+            }
+        }
+        return JPH::ValidateResult::AcceptAllContactsForThisBodyPair;
+    }
+
+    // Sorted on insert, so the validate hook is a binary search rather than a
+    // scan -- a ragdoll is a dozen pairs and a crowd of them is hundreds, and
+    // this runs once per candidate pair per step.
+    void exclude(u64 first, u64 second)
+    {
+        ContactPair pair{first, second};
+        if (pair.second < pair.first) {
+            std::swap(pair.first, pair.second);
+        }
+        const std::lock_guard<std::mutex> guard(m_mutex);
+        const auto at = std::lower_bound(m_excluded.begin(), m_excluded.end(), pair);
+        // Not deduplicated: two constraints between one pair are two exclusions,
+        // and removing one must leave the other standing.
+        m_excluded.insert(at, pair);
+    }
+
+    void unexclude(u64 first, u64 second)
+    {
+        ContactPair pair{first, second};
+        if (pair.second < pair.first) {
+            std::swap(pair.first, pair.second);
+        }
+        const std::lock_guard<std::mutex> guard(m_mutex);
+        const auto at = std::lower_bound(m_excluded.begin(), m_excluded.end(), pair);
+        if (at != m_excluded.end() && *at == pair) {
+            m_excluded.erase(at);
+        }
+    }
+
     void clear()
     {
         // No lock: called between steps, from the simulation thread.
@@ -534,6 +614,11 @@ private:
 
     std::mutex m_mutex;
     std::vector<ContactPair> m_pairs;
+    // Sorted, and read under the same lock: the validate hook runs on Jolt's
+    // worker threads while nothing may be writing here, but a constraint created
+    // between steps writes from the simulation thread and the lock is what makes
+    // the two safe against each other.
+    std::vector<ContactPair> m_excluded;
 };
 
 #ifdef JPH_DEBUG_RENDERER
@@ -763,6 +848,11 @@ public:
             bodies.SetLinearAndAngularVelocity(record->id, toJolt(previous.linearVelocity),
                                                toJolt(previous.angularVelocity));
         }
+
+        // The Jolt body underneath is a NEW one, so every constraint on it now
+        // holds a pointer to the destroyed one. Rebuilt in creation order, so a
+        // resized limb stays attached and the solve sequence does not move.
+        rebuildConstraintsOn(handle);
     }
 
     void destroyBody(BodyHandle handle)
@@ -771,6 +861,12 @@ public:
         if (record == nullptr) {
             return;
         }
+
+        // BEFORE the body goes. A joint holding a body that is gone is a
+        // dangling pointer inside the solver, and nothing about it is loud --
+        // the interface states this as a contract because a caller sweeping
+        // both must not be the only thing that remembers.
+        retireConstraintsOn(handle);
 
         // A destroyed part does not fire TouchEnded -- the instance is gone,
         // and a signal on an instance nobody can reach is a signal nobody can
@@ -1239,7 +1335,405 @@ public:
         return record.alive && record.generation == handle.generation ? &record : nullptr;
     }
 
+    // --- Constraints ----------------------------------------------------------
+
+    [[nodiscard]] ConstraintHandle createConstraint(const ConstraintDesc& desc)
+    {
+        // Two bodies, and not the same one twice: Jolt asserts on a self-joint
+        // in a debug build and solves nonsense in a release one.
+        if (resolve(desc.first) == nullptr || resolve(desc.second) == nullptr || desc.first == desc.second) {
+            return {};
+        }
+
+        JPH::Ref<JPH::TwoBodyConstraint> built = buildConstraint(desc);
+        if (built == nullptr) {
+            return {};
+        }
+
+        u32 slot = 0;
+        if (!m_freeConstraints.empty()) {
+            slot = m_freeConstraints.back();
+            m_freeConstraints.pop_back();
+        }
+        else {
+            slot = static_cast<u32>(m_constraints.size());
+            m_constraints.emplace_back();
+        }
+
+        ConstraintRecord& record = m_constraints[slot];
+        record.generation = record.generation + 1 == 0 ? 1 : record.generation + 1;
+        record.alive = true;
+        record.first = desc.first;
+        record.second = desc.second;
+        record.desc = desc;
+        record.constraint = built;
+        m_system.AddConstraint(built);
+        applyExclusion(desc);
+        return ConstraintHandle{slot, record.generation};
+    }
+
+    void destroyConstraint(ConstraintHandle handle)
+    {
+        ConstraintRecord* record = resolve(handle);
+        if (record == nullptr) {
+            return;
+        }
+        retireConstraint(*record);
+        record->alive = false;
+        m_freeConstraints.push_back(handle.index);
+    }
+
+    // A body the solver has put to sleep does not notice that the joint holding
+    // it changed. It stays exactly where it was, for ever, and the symptom is a
+    // constraint that "did not apply" -- which is indistinguishable from a bug
+    // in the rebuild until you look at the activation state.
+    void wakeBoth(const ConstraintRecord& record)
+    {
+        JPH::BodyInterface& bodies = m_system.GetBodyInterface();
+        if (const BodyRecord* first = resolve(record.first); first != nullptr) {
+            bodies.ActivateBody(first->id);
+        }
+        if (const BodyRecord* second = resolve(record.second); second != nullptr) {
+            bodies.ActivateBody(second->id);
+        }
+    }
+
+    void setConstraintEnabled(ConstraintHandle handle, bool enabled)
+    {
+        if (ConstraintRecord* record = resolve(handle); record != nullptr) {
+            // The constraint stays IN the world. Removing and re-adding it would
+            // move it to the end of the solve order, and a ragdoll that toggled
+            // itself off and on would simulate differently afterwards.
+            record->constraint->SetEnabled(enabled);
+            wakeBoth(*record);
+        }
+    }
+
+    void updateConstraint(ConstraintHandle handle, const ConstraintDesc& desc)
+    {
+        ConstraintRecord* record = resolve(handle);
+        if (record == nullptr) {
+            return;
+        }
+        // The two bodies and the type are what a constraint IS. Changing them is
+        // a different joint and the caller rebuilds; swapping them here would
+        // change what the solver holds without anything saying so.
+        ConstraintDesc next = desc;
+        next.type = record->desc.type;
+        next.first = record->first;
+        next.second = record->second;
+
+        JPH::Ref<JPH::TwoBodyConstraint> built = buildConstraint(next);
+        if (built == nullptr) {
+            return;
+        }
+        const bool wasEnabled = record->constraint->GetEnabled();
+        m_system.RemoveConstraint(record->constraint);
+        dropExclusion(record->desc);
+        record->constraint = built;
+        record->desc = next;
+        built->SetEnabled(wasEnabled);
+        m_system.AddConstraint(built);
+        applyExclusion(next);
+        wakeBoth(*record);
+    }
+
+    [[nodiscard]] ConstraintState constraintState(ConstraintHandle handle) const
+    {
+        ConstraintState state;
+        const ConstraintRecord* record = resolve(handle);
+        if (record == nullptr) {
+            return state;
+        }
+        state.enabled = record->constraint->GetEnabled();
+        state.appliedImpulse = appliedImpulseOf(*record);
+        return state;
+    }
+
+    // Every constraint that names this body, destroyed. Called BEFORE the body
+    // is: a joint holding a body that is gone is a dangling pointer inside the
+    // solver, and it is silent.
+    void retireConstraintsOn(BodyHandle body)
+    {
+        for (u32 slot = 0; slot < static_cast<u32>(m_constraints.size()); ++slot) {
+            ConstraintRecord& record = m_constraints[slot];
+            if (!record.alive || (!(record.first == body) && !(record.second == body))) {
+                continue;
+            }
+            retireConstraint(record);
+            record.alive = false;
+            m_freeConstraints.push_back(slot);
+        }
+    }
+
+    // Every constraint on this body, rebuilt against the body that replaced it.
+    //
+    // In SLOT order, which is creation order, so a rebuilt limb solves in the
+    // sequence it always did -- a resize that reordered the solve would change
+    // the simulation, which is the kind of silent divergence R10 is about.
+    void rebuildConstraintsOn(BodyHandle body)
+    {
+        for (u32 slot = 0; slot < static_cast<u32>(m_constraints.size()); ++slot) {
+            ConstraintRecord& record = m_constraints[slot];
+            if (!record.alive || (!(record.first == body) && !(record.second == body))) {
+                continue;
+            }
+            m_system.RemoveConstraint(record.constraint);
+            JPH::Ref<JPH::TwoBodyConstraint> built = buildConstraint(record.desc);
+            if (built == nullptr) {
+                // The body could not be re-joined. Dropped rather than left
+                // pointing at the one that was destroyed.
+                dropExclusion(record.desc);
+                record.constraint = nullptr;
+                record.alive = false;
+                m_freeConstraints.push_back(slot);
+                continue;
+            }
+            record.constraint = built;
+            m_system.AddConstraint(built);
+        }
+    }
+
 private:
+    // The joint frame in WORLD space, from the body's current transform and the
+    // frame the caller gave in that body's own space.
+    //
+    // **This is what sidesteps the centre-of-mass trap.** Jolt's
+    // `LocalToBodyCOM` space is relative to the centre of mass and not to the
+    // body origin, and a hull MeshPart's two are not the same point -- a joint
+    // authored at a shoulder would end up wherever the arm's mass happened to
+    // balance. Handing Jolt world space lets IT do that conversion, which it is
+    // guaranteed to do consistently with its own solver.
+    [[nodiscard]] JPH::RMat44 jointFrame(BodyHandle body, const core::CFrameD& local) const
+    {
+        const core::CFrameD world = bodyState(body).transform * local;
+        return JPH::RMat44::sRotationTranslation(toJolt(world.rotation), toLocal(world.position));
+    }
+
+    [[nodiscard]] JPH::Ref<JPH::TwoBodyConstraint> buildConstraint(const ConstraintDesc& desc)
+    {
+        const BodyRecord* firstRecord = resolve(desc.first);
+        const BodyRecord* secondRecord = resolve(desc.second);
+        if (firstRecord == nullptr || secondRecord == nullptr) {
+            return nullptr;
+        }
+        // **Both frames BEFORE either lock, and that order is load-bearing.**
+        // `jointFrame` reads the body's transform through the LOCKING body
+        // interface, so computing one inside the write locks below is a
+        // recursive lock on a body this thread already holds -- which is not an
+        // error, an assert or a slowdown: the process simply stops, at zero CPU,
+        // with no output. It cost one wedged test run to find.
+        const JPH::RMat44 frameOne = jointFrame(desc.first, desc.firstFrame);
+        const JPH::RMat44 frameTwo = jointFrame(desc.second, desc.secondFrame);
+
+        // **One multi-lock, not two single ones.** Taking two body write locks
+        // in a row is a lock-ordering bug: Jolt's own assertion says so
+        // ("a lock of same or higher priority was already taken, this can create
+        // a deadlock"), and it fired fifty-six times before this was written
+        // that way. `BodyLockMultiWrite` sorts the ids and takes them in the one
+        // order every caller agrees on.
+        const JPH::BodyID ids[2] = {firstRecord->id, secondRecord->id};
+        const JPH::BodyLockMultiWrite lock(m_system.GetBodyLockInterface(), ids, 2);
+        JPH::Body* first = lock.GetBody(0);
+        JPH::Body* second = lock.GetBody(1);
+        if (first == nullptr || second == nullptr) {
+            return nullptr;
+        }
+
+        // X is the joint axis and Y the reference direction a limit is measured
+        // from, in every type below. One frame, read one way, whatever the joint
+        // then does with it.
+        switch (desc.type) {
+        case ConstraintType::Fixed: {
+            JPH::FixedConstraintSettings settings;
+            settings.mSpace = JPH::EConstraintSpace::WorldSpace;
+            // The frames as given rather than "wherever they are now": a weld
+            // authored to hold two parts a metre apart must hold them a metre
+            // apart, and auto-detection would silently substitute their current
+            // relative pose for the one that was asked for.
+            settings.mAutoDetectPoint = false;
+            settings.mPoint1 = frameOne.GetTranslation();
+            settings.mAxisX1 = frameOne.GetAxisX();
+            settings.mAxisY1 = frameOne.GetAxisY();
+            settings.mPoint2 = frameTwo.GetTranslation();
+            settings.mAxisX2 = frameTwo.GetAxisX();
+            settings.mAxisY2 = frameTwo.GetAxisY();
+            return settings.Create(*first, *second);
+        }
+        case ConstraintType::Point: {
+            JPH::PointConstraintSettings settings;
+            settings.mSpace = JPH::EConstraintSpace::WorldSpace;
+            settings.mPoint1 = frameOne.GetTranslation();
+            settings.mPoint2 = frameTwo.GetTranslation();
+            return settings.Create(*first, *second);
+        }
+        case ConstraintType::Hinge: {
+            JPH::HingeConstraintSettings settings;
+            settings.mSpace = JPH::EConstraintSpace::WorldSpace;
+            settings.mPoint1 = frameOne.GetTranslation();
+            settings.mHingeAxis1 = frameOne.GetAxisX();
+            settings.mNormalAxis1 = frameOne.GetAxisY();
+            settings.mPoint2 = frameTwo.GetTranslation();
+            settings.mHingeAxis2 = frameTwo.GetAxisX();
+            settings.mNormalAxis2 = frameTwo.GetAxisY();
+            if (desc.limitLow <= desc.limitHigh) {
+                settings.mLimitsMin = desc.limitLow;
+                settings.mLimitsMax = desc.limitHigh;
+            }
+            applyMotor(settings.mMotorSettings, desc);
+            JPH::Ref<JPH::TwoBodyConstraint> made = settings.Create(*first, *second);
+            driveMotor(static_cast<JPH::HingeConstraint*>(made.GetPtr()), desc);
+            return made;
+        }
+        case ConstraintType::SwingTwist: {
+            JPH::SwingTwistConstraintSettings settings;
+            settings.mSpace = JPH::EConstraintSpace::WorldSpace;
+            settings.mPosition1 = frameOne.GetTranslation();
+            settings.mTwistAxis1 = frameOne.GetAxisX();
+            settings.mPlaneAxis1 = frameOne.GetAxisY();
+            settings.mPosition2 = frameTwo.GetTranslation();
+            settings.mTwistAxis2 = frameTwo.GetAxisX();
+            settings.mPlaneAxis2 = frameTwo.GetAxisY();
+            // One cone rather than an ellipse: a shoulder's two half-angles are
+            // rarely different enough to be worth authoring separately, and the
+            // ellipse is there in Jolt if a profile ever asks for it.
+            settings.mNormalHalfConeAngle = desc.swingLimit;
+            settings.mPlaneHalfConeAngle = desc.swingLimit;
+            settings.mTwistMinAngle = -desc.twistLimit;
+            settings.mTwistMaxAngle = desc.twistLimit;
+            return settings.Create(*first, *second);
+        }
+        case ConstraintType::Slider: {
+            JPH::SliderConstraintSettings settings;
+            settings.mSpace = JPH::EConstraintSpace::WorldSpace;
+            settings.mAutoDetectPoint = false;
+            settings.mPoint1 = frameOne.GetTranslation();
+            settings.mSliderAxis1 = frameOne.GetAxisX();
+            settings.mNormalAxis1 = frameOne.GetAxisY();
+            settings.mPoint2 = frameTwo.GetTranslation();
+            settings.mSliderAxis2 = frameTwo.GetAxisX();
+            settings.mNormalAxis2 = frameTwo.GetAxisY();
+            if (desc.limitLow <= desc.limitHigh) {
+                settings.mLimitsMin = desc.limitLow;
+                settings.mLimitsMax = desc.limitHigh;
+            }
+            applyMotor(settings.mMotorSettings, desc);
+            JPH::Ref<JPH::TwoBodyConstraint> made = settings.Create(*first, *second);
+            driveMotor(static_cast<JPH::SliderConstraint*>(made.GetPtr()), desc);
+            return made;
+        }
+        case ConstraintType::Distance: {
+            JPH::DistanceConstraintSettings settings;
+            settings.mSpace = JPH::EConstraintSpace::WorldSpace;
+            settings.mPoint1 = frameOne.GetTranslation();
+            settings.mPoint2 = frameTwo.GetTranslation();
+            settings.mMinDistance = desc.minDistance;
+            settings.mMaxDistance = desc.maxDistance;
+            return settings.Create(*first, *second);
+        }
+        }
+        return nullptr;
+    }
+
+    // Honoured by Hinge and Slider, which are the two with something to drive.
+    // Ignored by the rest, and the field's own doc says which types read it.
+    static void applyMotor(JPH::MotorSettings& settings, const ConstraintDesc& desc)
+    {
+        if (desc.motor == MotorMode::Off) {
+            return;
+        }
+        settings.SetForceLimit(desc.motorMaxForce);
+        settings.SetTorqueLimit(desc.motorMaxForce);
+    }
+
+    static void setMotorVelocity(JPH::HingeConstraint* c, f32 target) { c->SetTargetAngularVelocity(target); }
+    static void setMotorVelocity(JPH::SliderConstraint* c, f32 target) { c->SetTargetVelocity(target); }
+    static void setMotorPosition(JPH::HingeConstraint* c, f32 target) { c->SetTargetAngle(target); }
+    static void setMotorPosition(JPH::SliderConstraint* c, f32 target) { c->SetTargetPosition(target); }
+
+    template <typename T>
+    static void driveMotor(T* constraint, const ConstraintDesc& desc)
+    {
+        if (constraint == nullptr || desc.motor == MotorMode::Off) {
+            return;
+        }
+        if (desc.motor == MotorMode::Velocity) {
+            constraint->SetMotorState(JPH::EMotorState::Velocity);
+            setMotorVelocity(constraint, desc.motorTarget);
+            return;
+        }
+        constraint->SetMotorState(JPH::EMotorState::Position);
+        setMotorPosition(constraint, desc.motorTarget);
+    }
+
+    // In newton-seconds, and a magnitude rather than a vector: this number is
+    // what a breakable joint is a threshold on, and its direction says nothing a
+    // caller at this seam can use.
+    [[nodiscard]] static f32 appliedImpulseOf(const ConstraintRecord& record)
+    {
+        const JPH::TwoBodyConstraint* constraint = record.constraint.GetPtr();
+        if (constraint == nullptr) {
+            return 0.0f;
+        }
+        switch (record.desc.type) {
+        case ConstraintType::Fixed:
+            return static_cast<const JPH::FixedConstraint*>(constraint)->GetTotalLambdaPosition().Length();
+        case ConstraintType::Point:
+            return static_cast<const JPH::PointConstraint*>(constraint)->GetTotalLambdaPosition().Length();
+        case ConstraintType::Hinge:
+            return static_cast<const JPH::HingeConstraint*>(constraint)->GetTotalLambdaPosition().Length();
+        case ConstraintType::SwingTwist:
+            return static_cast<const JPH::SwingTwistConstraint*>(constraint)->GetTotalLambdaPosition().Length();
+        case ConstraintType::Slider:
+            return static_cast<const JPH::SliderConstraint*>(constraint)->GetTotalLambdaPosition().Length();
+        case ConstraintType::Distance:
+            return std::fabs(static_cast<const JPH::DistanceConstraint*>(constraint)->GetTotalLambdaPosition());
+        }
+        return 0.0f;
+    }
+
+    // Removed from the world, exclusion dropped, reference released. Separate
+    // from `destroyConstraint` because retiring a BODY does the same to every
+    // joint that names it, and doing it twice is a use-after-free.
+    void retireConstraint(ConstraintRecord& record)
+    {
+        if (record.constraint != nullptr) {
+            m_system.RemoveConstraint(record.constraint);
+        }
+        dropExclusion(record.desc);
+        record.constraint = nullptr;
+    }
+
+    [[nodiscard]] ConstraintRecord* resolve(ConstraintHandle handle) noexcept
+    {
+        return const_cast<ConstraintRecord*>(static_cast<const JoltWorld*>(this)->resolve(handle));
+    }
+
+    [[nodiscard]] const ConstraintRecord* resolve(ConstraintHandle handle) const noexcept
+    {
+        if (handle.index >= m_constraints.size()) {
+            return nullptr;
+        }
+        const ConstraintRecord& record = m_constraints[handle.index];
+        return record.alive && record.generation == handle.generation ? &record : nullptr;
+    }
+
+    void applyExclusion(const ConstraintDesc& desc)
+    {
+        if (desc.collideConnected) {
+            return;
+        }
+        m_contacts.exclude(packHandle(desc.first), packHandle(desc.second));
+    }
+
+    void dropExclusion(const ConstraintDesc& desc)
+    {
+        if (desc.collideConnected) {
+            return;
+        }
+        m_contacts.unexclude(packHandle(desc.first), packHandle(desc.second));
+    }
+
     [[nodiscard]] BodyRecord* resolve(BodyHandle handle) noexcept
     {
         return const_cast<BodyRecord*>(static_cast<const JoltWorld*>(this)->resolve(handle));
@@ -1606,6 +2100,12 @@ private:
     std::vector<u32> m_freeBodies;
     std::vector<CharacterRecord> m_characters;
     std::vector<u32> m_freeCharacters;
+    // Slot-indexed and never compacted, exactly as the bodies are: a handle is
+    // an index plus a generation, and Jolt solves in the order constraints were
+    // added, so a caller that creates them in a stable order gets a stable
+    // solve (R10).
+    std::vector<ConstraintRecord> m_constraints;
+    std::vector<u32> m_freeConstraints;
 
     std::vector<ContactPair> m_previousPairs;
     // The character half of the same diff (D028).
@@ -1768,6 +2268,41 @@ public:
         if (JoltWorld* world = resolve(handle); world != nullptr) {
             world->destroyBody(body);
         }
+    }
+
+    // --- Constraints ---------------------------------------------------------
+
+    [[nodiscard]] ConstraintHandle createConstraint(WorldHandle handle, const ConstraintDesc& desc) override
+    {
+        JoltWorld* world = resolve(handle);
+        return world != nullptr ? world->createConstraint(desc) : ConstraintHandle{};
+    }
+
+    void destroyConstraint(WorldHandle handle, ConstraintHandle constraint) override
+    {
+        if (JoltWorld* world = resolve(handle); world != nullptr) {
+            world->destroyConstraint(constraint);
+        }
+    }
+
+    void setConstraintEnabled(WorldHandle handle, ConstraintHandle constraint, bool enabled) override
+    {
+        if (JoltWorld* world = resolve(handle); world != nullptr) {
+            world->setConstraintEnabled(constraint, enabled);
+        }
+    }
+
+    void updateConstraint(WorldHandle handle, ConstraintHandle constraint, const ConstraintDesc& desc) override
+    {
+        if (JoltWorld* world = resolve(handle); world != nullptr) {
+            world->updateConstraint(constraint, desc);
+        }
+    }
+
+    [[nodiscard]] ConstraintState constraintState(WorldHandle handle, ConstraintHandle constraint) const override
+    {
+        const JoltWorld* world = resolve(handle);
+        return world != nullptr ? world->constraintState(constraint) : ConstraintState{};
     }
 
     void setBodyTransform(WorldHandle handle, BodyHandle body, const core::CFrameD& transform) override

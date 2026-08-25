@@ -46,6 +46,7 @@ endif()
 
 luaug_add_module_tests(physics
     SOURCES
+        tests/constraint_tests.cpp
         tests/physics_tests.cpp
     MODULES
         ${luaug_physics_test_modules}

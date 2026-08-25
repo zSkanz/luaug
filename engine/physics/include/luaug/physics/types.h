@@ -107,6 +107,125 @@ struct ShapeDesc
     core::Vec3 pointScale{1.0f, 1.0f, 1.0f};
 };
 
+// --- Constraints -------------------------------------------------------------
+//
+// What holds two bodies together, and how much freedom is left between them.
+//
+// **Ragdoll is what this exists for.** A character that falls is a dozen bodies
+// and a dozen joints, and the joint is where the character stops being a pile of
+// capsules: a shoulder that swings but does not bend backwards is a
+// `SwingTwist`, and it is one constraint rather than a per-frame correction.
+// Doors, wheels and lids come out of the same seam for free.
+
+struct ConstraintHandle
+{
+    u32 index = 0;
+    u32 generation = 0;
+
+    [[nodiscard]] constexpr bool valid() const noexcept { return generation != 0; }
+    [[nodiscard]] constexpr bool operator==(const ConstraintHandle&) const noexcept = default;
+};
+
+enum class ConstraintType : u8
+{
+    // No freedom at all. Two bodies that move as one, which is what a weld is
+    // when the solver rather than the transform hierarchy has to hold it.
+    Fixed,
+    // A ball joint: three rotational degrees, no limits.
+    Point,
+    // One rotational degree about the joint's X axis, with an optional angular
+    // range. A door, a lid, an elbow.
+    Hinge,
+    // **The ragdoll workhorse.** A cone of swing about X plus a twist along it,
+    // which is exactly what a shoulder or a hip is -- and it is cheaper than a
+    // six-degree-of-freedom joint configured to imitate one, which is why that
+    // more general shape stays unexposed.
+    SwingTwist,
+    // One translational degree along the joint's X axis, with an optional range.
+    Slider,
+    // The two frames' origins held at a distance, or within a range of them.
+    Distance,
+};
+
+// The motor a constraint may drive itself with. Off is the default and is what
+// a passive ragdoll uses; a POWERED ragdoll turns it on and blends towards the
+// animated pose in the SOLVER, which is a different thing from blending the
+// palette afterwards and produces a different result.
+enum class MotorMode : u8
+{
+    Off,
+    // Drive towards a target velocity.
+    Velocity,
+    // Drive towards a target position or angle.
+    Position,
+};
+
+// Where a joint sits, what it may still do, and what drives it.
+struct ConstraintDesc
+{
+    ConstraintType type = ConstraintType::Fixed;
+
+    BodyHandle first;
+    BodyHandle second;
+
+    // The joint frame **in each body's own local space**, so a floating-origin
+    // rebase costs nothing: the bodies move and the frames do not. Expressing
+    // it once in world space would mean re-deriving both every time the origin
+    // shifted, and getting one of them wrong is a joint that drifts.
+    //
+    // The two frames are the same physical place when the constraint is built,
+    // which is what "this is where they are attached" means. A backend that
+    // needs one relative to a centre of mass computes it; that is a backend
+    // detail and never the caller's.
+    core::CFrameD firstFrame;
+    core::CFrameD secondFrame;
+
+    // Hinge and Slider: the range about or along the joint's X axis. Radians
+    // for a hinge, metres for a slider. `low > high` means unlimited.
+    f32 limitLow = 1.0f;
+    f32 limitHigh = -1.0f;
+
+    // SwingTwist: the half-angle of the swing cone and the twist range, in
+    // radians. A swing of pi and a twist of pi is unlimited.
+    f32 swingLimit = 3.14159265f;
+    f32 twistLimit = 3.14159265f;
+
+    // Distance: the range the two origins are kept within, in metres. Equal
+    // values are a rigid rod.
+    f32 minDistance = 0.0f;
+    f32 maxDistance = 0.0f;
+
+    MotorMode motor = MotorMode::Off;
+    // What the motor drives towards, in the units its mode implies, and the
+    // most force or torque it may use to get there.
+    f32 motorTarget = 0.0f;
+    f32 motorMaxForce = 0.0f;
+
+    // Whether the two bodies still collide with each other.
+    //
+    // **False is the case a ragdoll needs and the one that is not free.** An
+    // upper arm and a lower arm overlap at the elbow by construction, and left
+    // colliding they push each other apart every step -- a character that
+    // vibrates rather than falls. The exclusion is per PAIR and the object
+    // layer matrix is per LAYER, so it cannot be expressed as a group: the
+    // backend keeps a sorted pair list and refuses the contact.
+    bool collideConnected = true;
+
+    // Opaque to this module, exactly as `BodyDesc::userData` is.
+    u64 userData = 0;
+};
+
+// What a live constraint is doing, for a caller that wants to break one under
+// load or show it in an inspector.
+struct ConstraintState
+{
+    bool enabled = false;
+    // The impulse the solver applied last step to hold the joint together, in
+    // newton-seconds. A joint that is being pulled apart reports a large one,
+    // which is what a breakable joint is a threshold on.
+    f32 appliedImpulse = 0.0f;
+};
+
 // A collision group is an index into the world's collidability matrix.
 // Group 0 is "Default" and always exists.
 using CollisionGroup = u16;
