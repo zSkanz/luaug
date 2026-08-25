@@ -96,6 +96,26 @@ struct OpenScript
     // forget to set it -- which is the defect a bool invites.
     core::u64 savedRevision = 0;
 
+    // The revision seen on the previous frame. **How the pane knows the text is
+    // at rest**: parsing on every keystroke would re-parse a file per character,
+    // and parsing on a timer would need a clock in a panel. One frame after the
+    // last edit is neither.
+    core::u64 idleRevision = 0;
+
+    // --- The find bar --------------------------------------------------------
+    //
+    // State rather than a dialog, because a search survives switching tabs and
+    // coming back -- which is what somebody stepping through matches expects.
+    bool findOpen = false;
+    bool replaceOpen = false;
+    bool matchCase = false;
+    bool wholeWord = false;
+    std::string findText;
+    std::string replaceText;
+    // What the last search matched, so the pane can highlight it and Enter can
+    // step from it rather than from the caret.
+    Range lastMatch;
+
     [[nodiscard]] bool dirty() const noexcept { return document.revision() != savedRevision; }
 };
 

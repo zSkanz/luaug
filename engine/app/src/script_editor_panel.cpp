@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <string>
@@ -136,6 +137,10 @@ void encodeUtf8(unsigned int codepoint, std::string& out)
         out.push_back(static_cast<char>(0x80u | (codepoint & 0x3Fu)));
     }
 }
+
+// Defined with the find bar below, and declared here because a key binding needs
+// it before the bar does.
+void stepMatch(OpenScript& tab, bool forward);
 
 // --- The caret ---------------------------------------------------------------
 
@@ -328,6 +333,20 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
     // one thing wherever somebody presses it.
     if (ImGui::IsKeyPressed(ImGuiKey_S, false))
         out.save = index;
+
+    if (ImGui::IsKeyPressed(ImGuiKey_F, false)) {
+        tab.findOpen = true;
+        // Seeded from the selection, which is what somebody who highlighted a
+        // word and pressed Ctrl+F is asking for.
+        if (tab.caret.hasSelection() && tab.caret.selection().begin.line == tab.caret.selection().end.line)
+            tab.findText = doc.textIn(tab.caret.selection());
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_H, false)) {
+        tab.findOpen = true;
+        tab.replaceOpen = true;
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_G, false))
+        tab.findOpen = true;
 }
 
 // --- Drawing -----------------------------------------------------------------
@@ -420,10 +439,112 @@ void drawDiagnostics(const OpenScript& tab, const PaneMetrics& m, ImDrawList* dr
     }
 }
 
+
+// --- Find, replace and go to ------------------------------------------------
+
+// Copies a `std::string` into an ImGui text field and back, which is the shape
+// every other dialog in this shell already uses: ImGui wants a buffer and the
+// model wants a string, and the conversion belongs at the one place they meet.
+bool stringField(const char* label, const char* hint, std::string& value, float width)
+{
+    char buffer[256]{};
+    const std::size_t count = std::min(value.size(), sizeof(buffer) - 1);
+    std::memcpy(buffer, value.data(), count);
+
+    ImGui::SetNextItemWidth(width);
+    const bool changed = ImGui::InputTextWithHint(label, hint, buffer, sizeof(buffer));
+    if (changed)
+        value.assign(buffer);
+    return changed;
+}
+
+void stepMatch(OpenScript& tab, bool forward)
+{
+    if (tab.findText.empty())
+        return;
+    const ScriptDocument::SearchOptions options{.matchCase = tab.matchCase, .wholeWord = tab.wholeWord};
+    // Stepping from the END of the last match going forward and from its START
+    // going back, so pressing Enter twice does not land on the same hit.
+    const Position from = forward ? tab.caret.selection().end : tab.caret.selection().begin;
+    const Range hit = forward ? tab.document.findNext(tab.findText, from, options)
+                              : tab.document.findPrevious(tab.findText, from, options);
+    if (hit.empty())
+        return;
+    tab.lastMatch = hit;
+    tab.caret.anchor = hit.begin;
+    tab.caret.head = hit.end;
+    tab.caret.desiredColumn = hit.end.column;
+}
+
+void drawFindBar(OpenScript& tab, ScriptEditorCommands& out, std::size_t index)
+{
+    if (!tab.findOpen)
+        return;
+
+    const ThemePalette& p = currentTheme().palette;
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(p.surfaceRaised.r, p.surfaceRaised.g, p.surfaceRaised.b, 1.0f));
+    const float rows = tab.replaceOpen ? 2.0f : 1.0f;
+    if (ImGui::BeginChild("##find", ImVec2(0.0f, ImGui::GetFrameHeightWithSpacing() * rows + 8.0f),
+                          ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding)) {
+        const float field = std::max(140.0f, ImGui::GetContentRegionAvail().x * 0.35f);
+
+        if (stringField("##find-text", "find", tab.findText, field))
+            stepMatch(tab, true);
+        ImGui::SameLine();
+        if (ImGui::Button("<"))
+            stepMatch(tab, false);
+        ImGui::SameLine();
+        if (ImGui::Button(">"))
+            stepMatch(tab, true);
+        ImGui::SameLine();
+        ImGui::Checkbox("Aa", &tab.matchCase);
+        ImGui::SameLine();
+        ImGui::Checkbox("Word", &tab.wholeWord);
+        ImGui::SameLine();
+        // The count, which is the one number a person actually reads off a find
+        // bar -- "is it there at all" before "where".
+        const core::u32 total = tab.document.countMatches(
+            tab.findText, {.matchCase = tab.matchCase, .wholeWord = tab.wholeWord});
+        ImGui::TextDisabled("%u match%s", total, total == 1 ? "" : "es");
+        ImGui::SameLine(ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Close").x -
+                        ImGui::GetStyle().FramePadding.x * 2.0f);
+        if (ImGui::SmallButton("Close")) {
+            tab.findOpen = false;
+            tab.replaceOpen = false;
+        }
+
+        if (tab.replaceOpen) {
+            (void)stringField("##replace-text", "replace with", tab.replaceText, field);
+            ImGui::SameLine();
+            ImGui::BeginDisabled(tab.findText.empty());
+            if (ImGui::Button("Replace all")) {
+                const core::u32 replaced = tab.document.replaceAll(
+                    tab.findText, tab.replaceText, {.matchCase = tab.matchCase, .wholeWord = tab.wholeWord});
+                if (replaced > 0) {
+                    tab.caret = Caret{};
+                    edited(out, index);
+                }
+            }
+            ImGui::EndDisabled();
+        }
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+}
+
 void drawPane(OpenScript& tab, ScriptEditor& editor, ScriptEditorCommands& out, std::size_t index)
 {
     const ThemePalette& p = currentTheme().palette;
     const PaneMetrics m = metricsFor(tab.document);
+
+    drawFindBar(tab, out, index);
+
+    // **Parsed when the text is at rest**, which is one frame after the last
+    // edit: per keystroke would re-parse a file per character, and a timer would
+    // put a clock in a panel.
+    if (tab.document.diagnosticsStale() && tab.document.revision() == tab.idleRevision)
+        tab.document.refreshDiagnostics();
+    tab.idleRevision = tab.document.revision();
 
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(p.surface.r, p.surface.g, p.surface.b, 1.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
