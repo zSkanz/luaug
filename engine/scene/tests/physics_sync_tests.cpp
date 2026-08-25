@@ -1244,3 +1244,187 @@ TEST_CASE("the joint frames are in each body's own space")
     CHECK(mirror.backend.constraints[0].desc.firstFrame.position.x == doctest::Approx(0.5));
     CHECK(mirror.backend.constraints[0].desc.secondFrame.position.x == doctest::Approx(-0.5));
 }
+
+// --- Ragdoll ------------------------------------------------------------------
+
+namespace {
+
+// A ragdoll parented to a mesh, with one limb: a part, and a bone on it naming
+// the joint that limb IS.
+struct Rag
+{
+    core::InstanceId meshPart;
+    core::InstanceId ragdoll;
+    core::InstanceId limb;
+    core::InstanceId bone;
+};
+
+[[nodiscard]] Rag ragdollOn(Mirror& mirror, core::DVec3 characterAt, core::DVec3 limbAt)
+{
+    Rag out;
+    out.meshPart = mirror.part("Character", characterAt);
+    mirror.fixture.world.meshParts().add(out.meshPart, MeshPartComponent{});
+
+    out.ragdoll = mirror.fixture.world.create(mirror.fixture.schema.ragdollClass);
+    REQUIRE(mirror.fixture.world.setParent(out.ragdoll, out.meshPart) == std::nullopt);
+
+    out.limb = mirror.part("Limb", limbAt);
+    REQUIRE(mirror.fixture.world.setParent(out.limb, out.ragdoll) == std::nullopt);
+
+    out.bone = mirror.fixture.world.create(mirror.fixture.schema.attachmentClass);
+    REQUIRE(mirror.fixture.world.setParent(out.bone, out.limb) == std::nullopt);
+    return out;
+}
+
+// Records the overrides it is handed, so a test can say WHICH joint was driven
+// and to where.
+class RecordingSkeleton final : public SkeletonHost
+{
+public:
+    [[nodiscard]] u32 jointCount(core::InstanceId) const override { return 2; }
+    [[nodiscard]] i32 findJoint(core::InstanceId, std::string_view name) const override
+    {
+        return name == "Hand" ? 1 : (name == "Root" ? 0 : -1);
+    }
+    [[nodiscard]] i32 jointParent(core::InstanceId, u32 joint) const override { return joint == 0 ? -1 : 0; }
+    [[nodiscard]] std::string_view jointName(core::InstanceId, u32 joint) const override
+    {
+        return joint == 0 ? "Root" : "Hand";
+    }
+    [[nodiscard]] bool jointModel(core::InstanceId, u32 joint, core::CFrameD& out) const override
+    {
+        if (joint >= 2)
+            return false;
+        out = core::CFrameD{};
+        if (joint == 1)
+            out.position = core::DVec3{0.0, 2.0, 0.0};
+        return true;
+    }
+
+    void setJointOverride(core::InstanceId meshPart, u32 joint, const core::CFrameD& model) override
+    {
+        overrides.push_back({meshPart, joint, model});
+    }
+    void clearJointOverrides(core::InstanceId) override {}
+    void commitOverrides() override
+    {
+        // What the commit SAW, kept after the clear. An empty `overrides` after
+        // a tick is what "nothing drove" and "the commit consumed them" BOTH
+        // look like, and no test can tell those apart without this.
+        committed = overrides;
+        ++commits;
+        overrides.clear();
+    }
+
+    struct Written
+    {
+        core::InstanceId meshPart;
+        u32 joint = 0;
+        core::CFrameD model;
+    };
+    std::vector<Written> overrides;
+    std::vector<Written> committed;
+    int commits = 0;
+};
+
+} // namespace
+
+TEST_CASE("a disabled ragdoll drives nothing")
+{
+    Mirror mirror;
+    RecordingSkeleton skeleton;
+    mirror.sync.setSkeleton(&skeleton);
+
+    const Rag rag = ragdollOn(mirror, {0.0, 0.0, 0.0}, {0.0, 5.0, 0.0});
+    mirror.fixture.world.attachments().find(rag.bone)->jointName = mirror.fixture.world.atoms().intern("Hand");
+
+    mirror.step();
+    // Off is a character animated by clips with some parts sitting there doing
+    // nothing, which is what it has to be -- a ragdoll that drove while disabled
+    // would make building one impossible to author.
+    CHECK(skeleton.committed.empty());
+}
+
+TEST_CASE("an enabled ragdoll writes where its limb ended up, in the mesh's own space")
+{
+    Mirror mirror;
+    RecordingSkeleton skeleton;
+    mirror.sync.setSkeleton(&skeleton);
+
+    // The character at x = 100 and its limb three metres above it. What the pose
+    // wants is the limb relative to the CHARACTER, which is (0, 3, 0) -- not the
+    // world position, and not the character's.
+    const Rag rag = ragdollOn(mirror, {100.0, 0.0, 0.0}, {100.0, 3.0, 0.0});
+    mirror.fixture.world.attachments().find(rag.bone)->jointName = mirror.fixture.world.atoms().intern("Hand");
+    mirror.fixture.world.ragdolls().find(rag.ragdoll)->enabled = true;
+
+    mirror.step();
+
+    REQUIRE(skeleton.committed.size() == 1);
+    CHECK(skeleton.committed[0].meshPart == rag.meshPart);
+    CHECK(skeleton.committed[0].joint == 1);
+    CHECK(skeleton.committed[0].model.position.x == doctest::Approx(0.0));
+    CHECK(skeleton.committed[0].model.position.y == doctest::Approx(3.0));
+}
+
+TEST_CASE("a bone whose joint did not resolve drives nothing")
+{
+    // Better than driving joint zero: a limb whose joint an artist renamed
+    // should do nothing rather than fold the character in half at the root.
+    Mirror mirror;
+    RecordingSkeleton skeleton;
+    mirror.sync.setSkeleton(&skeleton);
+
+    const Rag rag = ragdollOn(mirror, {0.0, 0.0, 0.0}, {0.0, 5.0, 0.0});
+    mirror.fixture.world.attachments().find(rag.bone)->jointName = mirror.fixture.world.atoms().intern("Tail");
+    mirror.fixture.world.ragdolls().find(rag.ragdoll)->enabled = true;
+
+    mirror.step();
+    CHECK(skeleton.committed.empty());
+}
+
+TEST_CASE("a ragdoll drives only the bones under it")
+{
+    // It owns nothing, so what it drives is what is UNDER it -- which is what
+    // makes two ragdolls in one scene two characters rather than one confused
+    // one.
+    Mirror mirror;
+    RecordingSkeleton skeleton;
+    mirror.sync.setSkeleton(&skeleton);
+
+    const Rag rag = ragdollOn(mirror, {0.0, 0.0, 0.0}, {0.0, 3.0, 0.0});
+    mirror.fixture.world.attachments().find(rag.bone)->jointName = mirror.fixture.world.atoms().intern("Hand");
+    mirror.fixture.world.ragdolls().find(rag.ragdoll)->enabled = true;
+
+    // A bone on the character itself, outside the ragdoll. It resolves to a
+    // joint and must not be driven by it.
+    const core::InstanceId loose = mirror.fixture.world.create(mirror.fixture.schema.attachmentClass);
+    REQUIRE(mirror.fixture.world.setParent(loose, rag.meshPart) == std::nullopt);
+    mirror.fixture.world.attachments().find(loose)->jointName = mirror.fixture.world.atoms().intern("Root");
+
+    mirror.step();
+
+    REQUIRE(skeleton.committed.size() == 1);
+    CHECK(skeleton.committed[0].joint == 1);
+}
+
+TEST_CASE("the ragdoll drive runs before the pose is committed")
+{
+    // Which is what makes the joints nobody simulates ride along on the ones
+    // somebody does. Committed first, the overrides would land on a palette
+    // already built and take a frame to appear.
+    Mirror mirror;
+    RecordingSkeleton skeleton;
+    mirror.sync.setSkeleton(&skeleton);
+
+    const Rag rag = ragdollOn(mirror, {0.0, 0.0, 0.0}, {0.0, 3.0, 0.0});
+    mirror.fixture.world.attachments().find(rag.bone)->jointName = mirror.fixture.world.atoms().intern("Hand");
+    mirror.fixture.world.ragdolls().find(rag.ragdoll)->enabled = true;
+
+    mirror.step();
+    // The commit SAW the override, which is the whole claim -- an empty list on
+    // its own would equally mean nothing ever drove.
+    CHECK(skeleton.commits == 1);
+    REQUIRE(skeleton.committed.size() == 1);
+    CHECK(skeleton.overrides.empty());
+}

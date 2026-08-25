@@ -55,6 +55,7 @@ struct Hierarchy
     // One class stands in for the three concrete constraints: they differ only
     // in the `kind` their own hook stamps, and a test sets that directly.
     ClassId constraintClass = InvalidClass;
+    ClassId ragdollClass = InvalidClass;
     ClassId modelClass = InvalidClass;
 
     core::NameAtom nameProperty;

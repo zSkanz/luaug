@@ -852,6 +852,33 @@ local Classes: { Schema.Class } = {
         Properties = {},
     },
     {
+        Name = "Ragdoll",
+        Extends = "Instance",
+        Module = "scene",
+        Storage = "Ragdoll",
+        Doc = "Makes a character's pose come from the simulation instead of from a clip. Parent it to the "
+            .. "`MeshPart` whose skeleton, put the limbs under it, and switch it on.\n\n"
+            .. "**It owns nothing.** A ragdoll is parts, `Bone`s and constraints -- every one of them an "
+            .. "instance you can see, select and move -- and this is the flag that says to drive the pose "
+            .. "from them. A class that owned its own hidden bodies would be a second owner of things the "
+            .. "physics mirror already creates from the tree, and two owners of one body is a rule "
+            .. "broken.\n\nHow the pose is found: every `Bone` under this ragdoll that names "
+            .. "a joint, sitting on a part. The part is where the simulation put that limb and the bone says "
+            .. "which joint it is. Nothing else is declared, which is also why a partial ragdoll works -- "
+            .. "simulate a dozen bones and the fingers ride along on the wrist, because the joints nobody "
+            .. "drives keep their own place relative to their parent.",
+        Properties = {
+            {
+                Name = "Enabled",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether the pose comes from the simulation.\n\nSwitching it off hands "
+                    .. "the character back to whatever clip is playing, from wherever it is standing -- the "
+                    .. "overrides stop being written and the next tick's pose is the animation's again.",
+            },
+        },
+    },
+    {
         Name = "Weld",
         Extends = "Instance",
         Module = "scene",

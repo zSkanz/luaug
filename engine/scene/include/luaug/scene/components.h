@@ -281,6 +281,27 @@ struct ConstraintComponent
     bool collideConnected = true;
 };
 
+// `Ragdoll`: the switch that makes a character's pose come from the simulation
+// instead of from a clip.
+//
+// **It owns nothing.** A ragdoll is parts, `Bone`s and constraints -- all of
+// which are real instances somebody can see, select and move -- and this is the
+// one flag that says "drive the pose from them". That is deliberate: a class
+// that owned its own hidden bodies would be a second owner of things the mirror
+// creates by mark-and-sweep from the tree, and two owners of one body is the
+// mirror rule broken.
+//
+// How the pose is found: every `Bone` under this ragdoll that names a joint, on
+// a part. The part is where the simulation put that limb; the bone says which
+// joint it is. Nothing else has to be declared.
+struct RagdollComponent
+{
+    // Off is a character animated by clips with a set of parts sitting there
+    // doing nothing. On is a character whose every named joint comes from where
+    // its part ended up.
+    bool enabled = false;
+};
+
 struct WeldComponent
 {
     // The anchor and the driven part. Either may be invalid while a script is

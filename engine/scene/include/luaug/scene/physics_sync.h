@@ -219,6 +219,13 @@ private:
     // `resolveWeld`'s recursion exists to prevent.
     void resolveAttachments();
 
+    // Every enabled `Ragdoll`, written back into the pose it is driving.
+    //
+    // After the attachments, because a bone's world transform is what says where
+    // a limb's joint ENDED UP -- and before `commitOverrides`, which is what
+    // makes the joints nobody simulates ride along on the ones somebody does.
+    void driveRagdolls();
+
     // Where a weld's end is: the part's own frame, or the attachment's world
     // frame when one was named.
     //
@@ -232,6 +239,11 @@ private:
 
     // The part an id IS or SITS ON: itself for a part, its parent for an
     // attachment, invalid for anything else.
+    // The rig a `Bone` belongs to: the nearest `MeshPart` above it that has a
+    // skeleton. Itself for a bone on a character, the character for a bone on
+    // one of a ragdoll's limbs.
+    [[nodiscard]] core::InstanceId rigAbove(core::InstanceId id) const;
+
     [[nodiscard]] core::InstanceId ownerOf(core::InstanceId id) const;
 
     // One constraint, created or updated. Called from a SECOND pool-order walk

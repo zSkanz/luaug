@@ -495,6 +495,19 @@ void PhysicsSync::resolveWelds()
 
 // The part an id is or sits on: itself for a part, its parent for an attachment,
 // invalid for anything else.
+core::InstanceId PhysicsSync::rigAbove(core::InstanceId id) const
+{
+    // The nearest `MeshPart` with a skeleton, walking upwards. A handful of
+    // steps: a bone sits on a character or on one of its limbs.
+    for (core::InstanceId cursor = m_scene.parentOf(id); cursor.valid(); cursor = m_scene.parentOf(cursor)) {
+        if (m_scene.meshParts().find(cursor) == nullptr)
+            continue;
+        if (m_skeleton != nullptr && m_skeleton->jointCount(cursor) > 0)
+            return cursor;
+    }
+    return {};
+}
+
 core::InstanceId PhysicsSync::ownerOf(core::InstanceId id) const
 {
     if (m_scene.parts().find(id) != nullptr)
@@ -548,31 +561,76 @@ void PhysicsSync::resolveAttachment(core::InstanceId id)
     // through `ownerOf` before it asks. A settle in this function changed no
     // observable behaviour, so it is not here.
     core::CFrameD base = part->cframe;
-    // A `Bone` follows a JOINT of the part rather than the part itself. The
-    // joint's transform is in the mesh's own space, so composing it with the
-    // part's frame is what puts it in the world -- the same composition anything
-    // parented to a part uses.
-    //
-    // **A joint the rig does not have leaves `base` as the part's own frame.**
-    // That puts a sword on the character rather than at the world origin, which
-    // is the failure a renamed joint should produce.
+    // **The rig a bone belongs to is the nearest skinned `MeshPart` above it**,
+    // which is the owner itself for a bone on a character and the CHARACTER for
+    // a bone on a ragdoll's limb. A limb is a plain `Part` with no rig of its
+    // own; asking it about a joint would make the answer depend on how defensive
+    // the host happens to be, and relying on that is not a contract worth having.
     if (attachment->jointName.id != 0 && m_skeleton != nullptr) {
-        if (attachment->jointIndex < 0) {
-            attachment->jointIndex = m_skeleton->findJoint(owner, m_scene.atoms().text(attachment->jointName));
-        }
-        // The guard is for the CAST, not for the host: `jointModel` refuses an
-        // index it does not have, so a test cannot tell this apart from asking
-        // it with `static_cast<u32>(-1)`. Handing a negative index to a u32
-        // parameter and relying on the callee to notice is not a contract worth
-        // having.
-        if (attachment->jointIndex >= 0) {
-            core::CFrameD joint;
-            if (m_skeleton->jointModel(owner, static_cast<u32>(attachment->jointIndex), joint))
-                base = part->cframe * joint * attachment->transform;
+        const core::InstanceId rig = rigAbove(id);
+        if (rig.valid()) {
+            if (attachment->jointIndex < 0)
+                attachment->jointIndex = m_skeleton->findJoint(rig, m_scene.atoms().text(attachment->jointName));
+
+            // **Resolved against the rig, but FOLLOWED only when the rig is the
+            // owner.** A bone on a character IS the joint and moves with the
+            // animation; a bone on a ragdoll's limb is a LABEL saying which
+            // joint that limb stands for, and it has to stay where the
+            // simulation put the limb -- following the joint would make it chase
+            // the pose it is itself about to write.
+            //
+            // The `>= 0` guard is for the CAST rather than for the host:
+            // `jointModel` refuses an index it does not have, so no test can
+            // tell this apart from asking with `static_cast<u32>(-1)`.
+            if (rig == owner && attachment->jointIndex >= 0) {
+                core::CFrameD joint;
+                if (m_skeleton->jointModel(owner, static_cast<u32>(attachment->jointIndex), joint))
+                    base = part->cframe * joint * attachment->transform;
+            }
         }
     }
 
     attachment->worldCFrame = base * attachment->cframe;
+}
+
+void PhysicsSync::driveRagdolls()
+{
+    if (m_skeleton == nullptr)
+        return;
+
+    // Pool order, which is creation order. It decides nothing about the result
+    // -- a ragdoll's joints are independent of each other's overrides -- but it
+    // decides that two runs walk the same list (R10).
+    m_scene.ragdolls().forEach([&](core::InstanceId id, RagdollComponent& ragdoll) {
+        if (!ragdoll.enabled)
+            return;
+
+        // The mesh whose pose this drives is the thing the ragdoll is parented
+        // to, exactly as an `AnimationPlayer`'s is.
+        const core::InstanceId meshPart = m_scene.parentOf(id);
+        const PartComponent* mesh = m_scene.parts().find(meshPart);
+        if (mesh == nullptr || m_skeleton->jointCount(meshPart) == 0)
+            return;
+
+        // Every `Bone` under the ragdoll that resolved to a joint. The part it
+        // sits on is where the simulation put that limb; the bone says which
+        // joint it is. Nothing else is declared -- which is also why a PARTIAL
+        // ragdoll works: the joints nobody drives keep their own place relative
+        // to their parent when `commitOverrides` re-runs the forward pass.
+        std::vector<core::InstanceId> descendants;
+        m_scene.collectDescendants(id, descendants);
+        for (const core::InstanceId child : descendants) {
+            const AttachmentComponent* bone = m_scene.attachments().find(child);
+            if (bone == nullptr || bone->jointIndex < 0)
+                continue;
+
+            // Into the MESH's own space, because that is the space a pose is in.
+            // The bone's world frame is where the limb ended up; dividing out
+            // the mesh part's own transform is what carries it there.
+            const core::CFrameD model = core::inverse(mesh->cframe) * bone->worldCFrame;
+            m_skeleton->setJointOverride(meshPart, static_cast<u32>(bone->jointIndex), model);
+        }
+    });
 }
 
 void PhysicsSync::resolveAttachments()
@@ -967,6 +1025,7 @@ void PhysicsSync::step(f64 fixedDt)
     // this tick rather than where it was at the start of it.
     resolveWelds();
     resolveAttachments();
+    driveRagdolls();
     // And the pose is committed after everything that could have moved a joint,
     // because `commitOverrides` re-runs the forward pass and anything written
     // afterwards would be a frame behind. Nothing sets an override yet; this is

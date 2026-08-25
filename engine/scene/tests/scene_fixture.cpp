@@ -240,6 +240,16 @@ Hierarchy::Hierarchy()
     constraintDesc.detachComponents = [](World& world, core::InstanceId id) { world.constraints().remove(id); };
     constraintClass = classes.registerClass(constraintDesc);
 
+    ClassDescriptor ragdollDesc;
+    ragdollDesc.name = atoms.intern("Ragdoll");
+    ragdollDesc.super = instanceClass;
+    ragdollDesc.defaultName = atoms.intern("Ragdoll");
+    ragdollDesc.attachComponents = [](World& world, core::InstanceId id) {
+        world.ragdolls().add(id, RagdollComponent{});
+    };
+    ragdollDesc.detachComponents = [](World& world, core::InstanceId id) { world.ragdolls().remove(id); };
+    ragdollClass = classes.registerClass(ragdollDesc);
+
     ClassDescriptor modelDesc;
     modelDesc.name = atoms.intern("Model");
     modelDesc.super = instanceClass;

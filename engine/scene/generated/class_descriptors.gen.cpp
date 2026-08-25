@@ -885,6 +885,32 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     fixedConstraintDesc.detachComponents = native::detachFixedConstraintComponents;
     classes.registerClass(fixedConstraintDesc);
 
+    // --- Ragdoll ---
+    static std::array<PropertyDesc, 1> ragdollProperties;
+    ragdollProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("Enabled"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether the pose comes from the simulation.\012\012Switching it off hands the character back to whatever clip is playing, from wherever it is standing -- the overrides stop being written and the next tick's pose is the animation's again.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getRagdollEnabled,
+            .set = native::setRagdollEnabled,
+        },
+    }};
+    ClassDescriptor ragdollDesc;
+    ragdollDesc.name = atoms.intern("Ragdoll");
+    ragdollDesc.super = instanceClass;
+    ragdollDesc.flags = ClassFlags::None;
+    ragdollDesc.defaultName = atoms.intern("Ragdoll");
+    ragdollDesc.doc = "Makes a character's pose come from the simulation instead of from a clip. Parent it to the `MeshPart` whose skeleton, put the limbs under it, and switch it on.\012\012**It owns nothing.** A ragdoll is parts, `Bone`s and constraints -- every one of them an instance you can see, select and move -- and this is the flag that says to drive the pose from them. A class that owned its own hidden bodies would be a second owner of things the physics mirror already creates from the tree, and two owners of one body is a rule broken.\012\012How the pose is found: every `Bone` under this ragdoll that names a joint, sitting on a part. The part is where the simulation put that limb and the bone says which joint it is. Nothing else is declared, which is also why a partial ragdoll works -- simulate a dozen bones and the fingers ride along on the wrist, because the joints nobody drives keep their own place relative to their parent.";
+    ragdollDesc.properties = ragdollProperties;
+    ragdollDesc.attachComponents = native::attachRagdollComponents;
+    ragdollDesc.detachComponents = native::detachRagdollComponents;
+    classes.registerClass(ragdollDesc);
+
     // --- Weld ---
     static std::array<PropertyDesc, 5> weldProperties;
     weldProperties = {{

@@ -287,6 +287,34 @@ Value getAttachmentWorldCFrame(const World& world, core::InstanceId id)
     return attachment == nullptr ? Value{} : Value{attachment->worldCFrame};
 }
 
+// --- Ragdoll ------------------------------------------------------------------
+
+void attachRagdollComponents(World& world, core::InstanceId id)
+{
+    world.ragdolls().add(id, RagdollComponent{});
+}
+
+void detachRagdollComponents(World& world, core::InstanceId id)
+{
+    world.ragdolls().remove(id);
+}
+
+Value getRagdollEnabled(const World& world, core::InstanceId id)
+{
+    const RagdollComponent* ragdoll = world.ragdolls().find(id);
+    return ragdoll == nullptr ? Value{} : Value{ragdoll->enabled};
+}
+
+bool setRagdollEnabled(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* flag = std::get_if<bool>(&value);
+    RagdollComponent* ragdoll = world.ragdolls().find(id);
+    if (flag == nullptr || ragdoll == nullptr)
+        return false;
+    ragdoll->enabled = *flag;
+    return true;
+}
+
 // --- Constraint ---------------------------------------------------------------
 
 void attachConstraintComponents(World& world, core::InstanceId id)

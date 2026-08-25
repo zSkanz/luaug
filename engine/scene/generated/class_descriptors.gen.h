@@ -190,6 +190,12 @@ void detachHingeConstraintComponents(World& world, core::InstanceId id);
 void attachFixedConstraintComponents(World& world, core::InstanceId id);
 void detachFixedConstraintComponents(World& world, core::InstanceId id);
 
+// Ragdoll
+Value getRagdollEnabled(const World& world, core::InstanceId id);
+bool setRagdollEnabled(World& world, core::InstanceId id, const Value& value);
+void attachRagdollComponents(World& world, core::InstanceId id);
+void detachRagdollComponents(World& world, core::InstanceId id);
+
 // Weld
 Value getWeldPart0(const World& world, core::InstanceId id);
 bool setWeldPart0(World& world, core::InstanceId id, const Value& value);

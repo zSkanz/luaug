@@ -212,6 +212,7 @@ struct NameIndex
     X(WeldComponent, welds)                                                                                            \
     X(AttachmentComponent, attachments)                                                                                \
     X(ConstraintComponent, constraints)                                                                                \
+    X(RagdollComponent, ragdolls)                                                                                      \
     X(WorkspaceComponent, workspaces)                                                                                  \
     X(ModelComponent, models)                                                                                          \
     X(ScriptComponent, scripts)                                                                                        \
@@ -555,6 +556,8 @@ public:
     [[nodiscard]] const ComponentPool<AttachmentComponent>& attachments() const noexcept { return m_attachments; }
     [[nodiscard]] ComponentPool<ConstraintComponent>& constraints() noexcept { return m_constraints; }
     [[nodiscard]] const ComponentPool<ConstraintComponent>& constraints() const noexcept { return m_constraints; }
+    [[nodiscard]] ComponentPool<RagdollComponent>& ragdolls() noexcept { return m_ragdolls; }
+    [[nodiscard]] const ComponentPool<RagdollComponent>& ragdolls() const noexcept { return m_ragdolls; }
     [[nodiscard]] ComponentPool<CharacterBodyComponent>& characterBodies() noexcept { return m_characterBodies; }
     [[nodiscard]] const ComponentPool<CharacterBodyComponent>& characterBodies() const noexcept
     {

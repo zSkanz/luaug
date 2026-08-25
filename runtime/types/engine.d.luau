@@ -761,6 +761,13 @@ end
 declare extern type FixedConstraint extends Constraint with
 end
 
+declare extern type Ragdoll extends Instance with
+    --- Whether the pose comes from the simulation. Switching it off hands the character back to
+    --- whatever clip is playing, from wherever it is standing -- the overrides stop being written and
+    --- the next tick's pose is the animation's again.
+    Enabled: boolean
+end
+
 declare extern type Weld extends Instance with
     --- The anchor: the thing the other one follows. It may itself be simulated, anchored, or a
     --- CharacterBody -- whatever moves it, Part1 goes with it. **A `BasePart` or an `Attachment`.**
@@ -2015,6 +2022,7 @@ declare Instance: {
         & (("BallSocketConstraint") -> BallSocketConstraint)
         & (("HingeConstraint") -> HingeConstraint)
         & (("FixedConstraint") -> FixedConstraint)
+        & (("Ragdoll") -> Ragdoll)
         & (("Weld") -> Weld)
         & (("WeldConstraint") -> WeldConstraint)
         & (("CharacterBody") -> CharacterBody)

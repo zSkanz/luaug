@@ -1478,6 +1478,20 @@
       "Events": []
     },
     {
+      "Name": "Ragdoll",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Enabled",
+          "Type": "boolean",
+          "Default": "false"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "RunService",
       "Extends": "Instance",
       "Tags": ["NotCreatable", "Service"],

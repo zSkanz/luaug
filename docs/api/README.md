@@ -66,6 +66,7 @@ guided tour.
 | [`PVInstance`](pvinstance.md) | [`Instance`](instance.md) | The base of everything with a position and orientation in the world: a pivot to move it by, and an offset saying where that pivot sits. |
 | [`Part`](part.md) | [`BasePart`](basepart.md) | The primitive solid: a part whose geometry is one of a small set of shapes rather than an imported mesh. |
 | [`PointLight`](pointlight.md) | [`Instance`](instance.md) | A light radiating equally in every direction from its parent's position. |
+| [`Ragdoll`](ragdoll.md) | [`Instance`](instance.md) | Makes a character's pose come from the simulation instead of from a clip. |
 | [`ScreenGui`](screengui.md) | [`Instance`](instance.md) | The root of one screen-space UI tree, parented to `UIService` (§2.2). |
 | [`Script`](script.md) | [`BaseScript`](basescript.md) | Luau that RUNS. |
 | [`ScrollFrame`](scrollframe.md) | [`UIObject`](uiobject.md) | A `Frame` whose contents can be larger than it is (§2.2). |
