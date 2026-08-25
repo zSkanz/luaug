@@ -48,8 +48,10 @@ inline constexpr std::string_view ActionVisible = "action.Visible";
 
 // class.*
 inline constexpr std::string_view ClassAnimationPlayer = "class.AnimationPlayer";
+inline constexpr std::string_view ClassAttachment = "class.Attachment";
 inline constexpr std::string_view ClassAudioGroup = "class.AudioGroup";
 inline constexpr std::string_view ClassAudioService = "class.AudioService";
+inline constexpr std::string_view ClassBone = "class.Bone";
 inline constexpr std::string_view ClassCamera = "class.Camera";
 inline constexpr std::string_view ClassCharacterBody = "class.CharacterBody";
 inline constexpr std::string_view ClassDebugService = "class.DebugService";
@@ -64,12 +66,14 @@ inline constexpr std::string_view ClassInputContext = "class.InputContext";
 inline constexpr std::string_view ClassInputService = "class.InputService";
 inline constexpr std::string_view ClassInstance = "class.Instance";
 inline constexpr std::string_view ClassLighting = "class.Lighting";
+inline constexpr std::string_view ClassMaterial = "class.Material";
 inline constexpr std::string_view ClassMeshPart = "class.MeshPart";
 inline constexpr std::string_view ClassModel = "class.Model";
 inline constexpr std::string_view ClassModuleScript = "class.ModuleScript";
 inline constexpr std::string_view ClassPart = "class.Part";
 inline constexpr std::string_view ClassPhysicsService = "class.PhysicsService";
 inline constexpr std::string_view ClassPointLight = "class.PointLight";
+inline constexpr std::string_view ClassRagdoll = "class.Ragdoll";
 inline constexpr std::string_view ClassRunService = "class.RunService";
 inline constexpr std::string_view ClassScreenGui = "class.ScreenGui";
 inline constexpr std::string_view ClassScript = "class.Script";
@@ -92,8 +96,11 @@ inline constexpr std::string_view ClassWeldConstraint = "class.WeldConstraint";
 inline constexpr std::string_view ClassWorkspace = "class.Workspace";
 
 // content.*
+inline constexpr std::string_view ContentAudio = "content.Audio";
 inline constexpr std::string_view ContentChunk = "content.Chunk";
 inline constexpr std::string_view ContentFolder = "content.Folder";
+inline constexpr std::string_view ContentFont = "content.Font";
+inline constexpr std::string_view ContentMaterial = "content.Material";
 inline constexpr std::string_view ContentMesh = "content.Mesh";
 inline constexpr std::string_view ContentOther = "content.Other";
 inline constexpr std::string_view ContentScene = "content.Scene";

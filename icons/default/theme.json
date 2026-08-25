@@ -5,6 +5,122 @@
   "size": 256,
   "tintable": true,
   "fallback": "class.Instance",
+  "defaultRole": "neutral",
+  "overlay": {
+    "scale": 0.4,
+    "haloScale": 1.22,
+    "corner": "bottom-right"
+  },
+  "palette": {
+    "neutral": {
+      "light": "#4F555D",
+      "dark": "#B5B9C0"
+    },
+    "spatial": {
+      "light": "#184E88",
+      "dark": "#A7CAEF"
+    },
+    "physics": {
+      "light": "#823D15",
+      "dark": "#EDB391"
+    },
+    "ui": {
+      "light": "#8031C5",
+      "dark": "#C299E6"
+    },
+    "light": {
+      "light": "#8A6613",
+      "dark": "#B78719"
+    },
+    "audio": {
+      "light": "#B3256C",
+      "dark": "#E581B3"
+    },
+    "input": {
+      "light": "#1E8494",
+      "dark": "#1F8696"
+    },
+    "script": {
+      "light": "#1D744B",
+      "dark": "#2BAD70"
+    },
+    "motion": {
+      "light": "#33631A",
+      "dark": "#66C835"
+    },
+    "system": {
+      "light": "#596DBE",
+      "dark": "#7081C7"
+    },
+    "go": {
+      "light": "#1F7536",
+      "dark": "#2EAF51"
+    },
+    "danger": {
+      "light": "#9B2219",
+      "dark": "#F1AFAA"
+    }
+  },
+  "roles": {
+    "action.Delete": "danger",
+    "action.Pause": "light",
+    "action.Play": "go",
+    "action.Stop": "danger",
+    "class.AnimationPlayer": "motion",
+    "class.Attachment": "physics",
+    "class.AudioGroup": "audio",
+    "class.AudioService": "audio",
+    "class.Bone": "motion",
+    "class.Camera": "spatial",
+    "class.CharacterBody": "physics",
+    "class.DebugService": "script",
+    "class.Frame": "ui",
+    "class.HotReloadService": "script",
+    "class.ImageButton": "ui",
+    "class.ImageLabel": "ui",
+    "class.InputAction": "input",
+    "class.InputBinding": "input",
+    "class.InputContext": "input",
+    "class.InputService": "input",
+    "class.Lighting": "light",
+    "class.Material": "spatial",
+    "class.MeshPart": "spatial",
+    "class.Model": "spatial",
+    "class.ModuleScript": "script",
+    "class.Part": "spatial",
+    "class.PhysicsService": "physics",
+    "class.PointLight": "light",
+    "class.Ragdoll": "physics",
+    "class.RunService": "system",
+    "class.ScreenGui": "ui",
+    "class.Script": "script",
+    "class.ScriptService": "script",
+    "class.ScrollFrame": "ui",
+    "class.Sound": "audio",
+    "class.SpotLight": "light",
+    "class.StreamingService": "system",
+    "class.TagService": "system",
+    "class.TextButton": "ui",
+    "class.TextInput": "ui",
+    "class.TextLabel": "ui",
+    "class.TweenService": "motion",
+    "class.UICorner": "ui",
+    "class.UIListLayout": "ui",
+    "class.UIPadding": "ui",
+    "class.UIService": "ui",
+    "class.Weld": "physics",
+    "class.WeldConstraint": "physics",
+    "class.Workspace": "spatial",
+    "content.Audio": "audio",
+    "content.Chunk": "spatial",
+    "content.Font": "ui",
+    "content.Material": "spatial",
+    "content.Mesh": "spatial",
+    "content.Scene": "spatial",
+    "content.Texture": "spatial",
+    "overlay.Stamp": "neutral",
+    "overlay.StampBase": "neutral"
+  },
   "icons": {
     "action.Add": "action/Add.png",
     "action.Back": "action/Back.png",
@@ -37,8 +153,10 @@
     "action.Up": "action/Up.png",
     "action.Visible": "action/Visible.png",
     "class.AnimationPlayer": "class/AnimationPlayer.png",
+    "class.Attachment": "class/Attachment.png",
     "class.AudioGroup": "class/AudioGroup.png",
     "class.AudioService": "class/AudioService.png",
+    "class.Bone": "class/Bone.png",
     "class.Camera": "class/Camera.png",
     "class.CharacterBody": "class/CharacterBody.png",
     "class.DebugService": "class/DebugService.png",
@@ -53,11 +171,14 @@
     "class.InputService": "class/InputService.png",
     "class.Instance": "class/Instance.png",
     "class.Lighting": "class/Lighting.png",
+    "class.Material": "class/Material.png",
     "class.MeshPart": "class/MeshPart.png",
     "class.Model": "class/Model.png",
+    "class.ModuleScript": "class/ModuleScript.png",
     "class.Part": "class/Part.png",
     "class.PhysicsService": "class/PhysicsService.png",
     "class.PointLight": "class/PointLight.png",
+    "class.Ragdoll": "class/Ragdoll.png",
     "class.RunService": "class/RunService.png",
     "class.ScreenGui": "class/ScreenGui.png",
     "class.Script": "class/Script.png",
@@ -78,11 +199,16 @@
     "class.Weld": "class/Weld.png",
     "class.WeldConstraint": "class/WeldConstraint.png",
     "class.Workspace": "class/Workspace.png",
+    "content.Audio": "content/Audio.png",
     "content.Chunk": "class/StreamingService.png",
     "content.Folder": "class/Folder.png",
+    "content.Font": "content/Font.png",
+    "content.Material": "class/Material.png",
     "content.Mesh": "class/MeshPart.png",
     "content.Other": "content/Other.png",
     "content.Scene": "content/Scene.png",
-    "content.Texture": "class/ImageLabel.png"
+    "content.Texture": "class/ImageLabel.png",
+    "overlay.Stamp": "overlay/Stamp.png",
+    "overlay.StampBase": "overlay/StampBase.png"
   }
 }

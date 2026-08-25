@@ -58,6 +58,74 @@ A theme is any directory containing a `theme.json`:
 is what a `MeshPart` points at. Two names for one file, never two files that are
 the same icon and drift apart the first time one is touched.
 
+## Colour: `palette`, `roles`, and the one rule that governs them
+
+Every icon is tinted, and **the tint says what KIND of thing it is, never which
+thing.** The shape carries the identity; the colour only makes a long tree
+scannable. That distinction is not decorative — it is the same rule that decided
+the engine's own mark, and it is what makes everything below safe.
+
+```json
+"defaultRole": "neutral",
+"palette": { "spatial": { "light": "#184E88", "dark": "#A7CAEF" }, ... },
+"roles":   { "class.Part": "spatial", "action.Delete": "danger", ... }
+```
+
+`roles` names an id's palette key. **An id absent from `roles` takes
+`defaultRole`** — thirty of the seventy-eight are, and they are the toolbar
+verbs, which are chrome. Four verbs are not: `Play`, `Pause`, `Stop`, `Delete`.
+A toolbar of ten colours is a fruit salad; a toolbar where the destructive one is
+red is a tool.
+
+**Ten categories, not seventy-eight colours.** Seventy-eight is noise. Ten is
+something a person learns in a day and then reads without looking, and it is what
+every editor that does this well does.
+
+### Two values per role, and why it is not two decisions
+
+`light` and `dark` are the value on a light panel and on a dark one. A single
+colour cannot serve both: clearing 3:1 against a near-white panel wants luminance
+under 0.175 and clearing it against the dark panel wants over 0.11, and
+everything inside that band is muddy.
+
+They are **solved from one hue**, not picked twice. That is what stops them
+drifting — nobody chooses the second value by eye.
+
+### Every value clears WCAG, and the palette survives colour blindness
+
+The floor anywhere in the palette is **3.88:1**, against the 3:1 WCAG 1.4.11 asks
+of a non-text graphic.
+
+More importantly, the roles are separated by **lightness as well as hue**, and
+which role gets which lightness was chosen by search rather than by eye — the
+objective being to maximise the smallest distance between any two roles across
+normal vision and all three dichromacies at once. Hand-ordering it reached a
+worst-case separation of 8; the search reaches 28.8.
+
+That matters because **no ten hues stay distinct under deuteranopia**, which
+about one man in twelve has. Hue alone would have collapsed `spatial` into `ui`
+and `script` into `spatial`. With the lightness ranks, the palette degrades to a
+legible greyscale instead of to mush.
+
+**Tinting must be switchable off**, and when it is, every icon takes the panel's
+own foreground. The set was drawn and collision-checked in one ink before any
+colour existed, so the uncoloured editor is not a degraded one.
+
+### How a plugin recolours things
+
+`palette` and `roles` are both sparse overlays, exactly like `icons`. A plugin
+that wants one class in its own colour adds a palette key and points that id at
+it:
+
+```json
+"palette": { "myCompany.Rig": { "light": "#7A1F5C", "dark": "#E48CC4" } },
+"roles":   { "class.CharacterBody": "myCompany.Rig" }
+```
+
+No file, no drawing, four lines. And because a role is a *name* rather than a
+hex, a plugin that only wants a different green overrides `palette.script` once
+and every scripting icon moves together.
+
 ## The id namespace
 
 Three groups, and the prefix says which question the icon answers:
@@ -67,6 +135,52 @@ Three groups, and the prefix says which question the icon answers:
 | `class.` | a class the Explorer can show — the name is the class name exactly | 42 |
 | `action.` | something a person clicks: toolbar, panel buttons, tree chevrons | 24 |
 | `content.` | a `ContentKind` from `app/content_tree.h` | 6 |
+| `overlay.` | a badge drawn ON TOP of another icon — see below | 2 |
+
+### `overlay.` — a badge, and it is drawn differently from everything else
+
+An overlay is not an icon in a row. It is a mark in the corner of one, and it is
+the only namespace whose ids are **not** drawn on their own.
+
+```json
+"overlay": { "scale": 0.40, "haloScale": 1.22, "corner": "bottom-right" }
+```
+
+**Two ids, drawn in this order, every time:**
+
+1. `overlay.StampBase` — the badge's outer silhouette, solid, with no interior
+   detail — drawn in **the panel's own background colour** at
+   `scale * haloScale` of the icon's edge. This punches a clean hole in whatever
+   is underneath.
+2. `overlay.Stamp` — the same silhouette with the mark cut out — drawn in the
+   foreground at `scale`, centred in that hole.
+
+**The knockout is not a refinement, it is what makes the badge exist.** Measured
+across the class set at 16 px: **37 of 42 icons already have ink where the badge
+goes** — up to 51% under `class.Workspace` and 49% under `class.Folder`. A bare
+badge lands on a folder's body and disappears.
+
+**The two files share an outer silhouette exactly** — zero pixels of difference,
+because the mark is the base with a hole punched in it rather than a second
+drawing of the same shape. One pixel of disagreement shows as a rim on one side.
+They are produced by a script for that reason: it is a precision requirement, and
+an image model cannot meet one.
+
+**The silhouette is a circle, and that is the load-bearing choice.** Most of the
+class set is rectangular — `Frame`, `TextButton`, `ScreenGui`, `Part`, `Model`,
+`UICorner`. A rounded-square badge in the corner of a rounded rectangle joins the
+family: composited over `class.Folder` it reads as a notch bitten out of the
+corner rather than as a mark placed on top. A circle never does that on any icon
+at any size. **At 7 px the hole inside is two pixels and its shape does not
+survive — only the outline does**, which is why the outline is the decision.
+
+`scale` was chosen by sweeping 0.34 to 0.52 composited over the real icons at
+16 px: below 0.40 the hole closes, above it the badge starts eating the subject.
+
+An overlay takes `defaultRole` like anything else, so it inherits the panel's
+foreground. If a badge ever needs to be told apart from the icon it sits on,
+give it its own palette role — do not tint it by the subject's role, because a
+badge means the same thing everywhere.
 
 `class.` ids are the generated class names, so a lookup is mechanical:
 `"class." + instance.className`. Likewise `content.` maps straight off the
