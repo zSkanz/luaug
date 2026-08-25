@@ -130,6 +130,35 @@ file already contains and the keyword list. **It does not infer types across
 expressions**, and that limit is stated here so nobody reads the absence as a
 bug.
 
+**And the second source is the WORLD, which is the half a type checker would not
+have had.** `Workspace.MainCamera` is not a fact about the `Workspace` class --
+it is a fact about this project's tree, sitting in memory two panels away from
+the tab being typed into. So a dotted path is walked instance by instance from
+the DataModel, and what it resolves to offers its **children** beside its
+members:
+
+| What is typed | What answers |
+|---|---|
+| `Workspace.` , `game.Workspace.` , `Lighting.` | that instance's children, then its class's members |
+| `script.Parent.` | the same, from the instance the tab is editing |
+| `Workspace:WaitForChild("` , `.FindFirstChild("` | its children, by name, inside the quotes |
+| `game:GetService("` | every class flagged `Service` |
+| any other string | **nothing**, which is a state of its own |
+
+The first segment is the only one with rules -- `game` is the root, `script` is
+the tab's instance, and everything else is a child of the root, which is what a
+service is. **There is no list of service names anywhere in this file**, and
+that is the point: a service registered by a module this build has never heard
+of resolves for free.
+
+Children are **one row per name**: six parts called `Ground` insert the same six
+characters, and a member wins a collision because `workspace.Name` is the
+property. A colon offers no children at all, because a child is not callable.
+
+"Any other string offers nothing" is worth its row. Without it, typing a message
+in quotes pops a list of every keyword in the language over it -- which is what
+the first version did.
+
 ## Consequences
 
 **The world hash changes**, exactly as ADR 0050's own did, because mounted

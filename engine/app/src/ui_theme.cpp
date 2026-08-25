@@ -440,6 +440,21 @@ ImFont* codeFont() noexcept
     return g_codeFont;
 }
 
+std::string tabIconPad()
+{
+    // The icon is drawn at the tab's own text height, with one inner spacing
+    // after it -- the same gap every other icon-and-label pair in the shell
+    // uses, so a tab reads like a tree row.
+    const float want = ImGui::GetFontSize() + ImGui::GetStyle().ItemInnerSpacing.x;
+    const float space = ImGui::CalcTextSize(" ").x;
+    if (space <= 0.0f)
+        return std::string(3, ' ');
+    // Rounded UP: a tab one pixel wider than it needs is invisible, and a tab
+    // one pixel narrower puts the icon on top of the first letter.
+    const int count = static_cast<int>(std::ceil(want / space));
+    return std::string(static_cast<std::size_t>(std::clamp(count, 1, 16)), ' ');
+}
+
 bool loadCodeFont()
 {
     if (ImGui::GetCurrentContext() == nullptr)
@@ -499,6 +514,11 @@ bool loadCodeFont()
 ImFont* codeFont() noexcept
 {
     return nullptr;
+}
+
+std::string tabIconPad()
+{
+    return std::string();
 }
 
 #endif

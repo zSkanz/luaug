@@ -1950,6 +1950,12 @@ tab has to edit one thing.
 - **Find, replace and go to line**, and syntax errors underlined where
   `Luau::Parser` puts them -- the first structured diagnostic this engine has
   had.
+- **Autocomplete from the world as well as the API.** A dotted path walks the
+  real tree -- `Workspace.MainCamera`, `game.Workspace.Beacon`, `script.Parent`
+  -- and offers that instance's children beside its class's members; a name
+  inside `WaitForChild("` or `FindFirstChild("` is completed from the same walk,
+  and `GetService("` from the service flag. One row per name, and a string that
+  is nobody's argument offers nothing.
 - **Autocomplete from `ClassRegistry`**, with the IDL's own prose as the hint.
   Not from `Luau.Analysis`, which is deliberately not built.
 - **A debugger**: breakpoints, continue, step over, into and out, the call stack

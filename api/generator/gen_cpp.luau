@@ -637,6 +637,12 @@ local function generate(target: Module)
                     -- the value -- a string -- can never answer it.
                     emit(`            .contentKind = atoms.intern("{property.ContentKind}"),`)
                 end
+                if property.Code == true then
+                    -- Luau text rather than a value, so the grid summarises it
+                    -- instead of drawing it. A fact about the class, for the
+                    -- reason `ContentKind` is one.
+                    emit("            .code = true,")
+                end
                 if property.Observed == true then
                     -- The engine watches this one, so its writes reach the
                     -- change queue with or without a subscriber. Emitted only

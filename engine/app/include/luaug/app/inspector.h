@@ -109,6 +109,14 @@ enum class EditorKind : core::u8
     // far as the engine is concerned, and a picker as far as a person is --
     // which is what `PropertyDesc::contentKind` exists to make possible.
     Content,
+    // **Luau, summarised.** `BaseScript.Source` is a string and the grid drew
+    // every line of it, so inspecting a script meant scrolling past its whole
+    // body to reach the next property. A row is one line high; a script is not.
+    // What this shows is the first line and an ellipsis, and for an empty one
+    // it shows nothing at all -- there is no code, and a blank field inviting
+    // somebody to type a program into a property grid is not the offer to make
+    // when a tab two panels over is a code editor.
+    Code,
     // Displayed and never written. Reparenting from the panel is out of M4's
     // scope, and `Parent` is an Instance property -- so an editable reference
     // widget would be the one feature the brief excluded, arriving by accident.
@@ -118,8 +126,9 @@ enum class EditorKind : core::u8
 
 [[nodiscard]] EditorKind editorFor(scene::ValueType type) noexcept;
 
-// The same question asked of the DESCRIPTOR, which knows two things the type
-// does not: that a string is a `Content`, and which files it may name.
+// The same question asked of the DESCRIPTOR, which knows three things the type
+// does not: that a string is a `Content`, which files it may name, and that a
+// string is Luau.
 //
 // Two overloads rather than one, because the type-only form is what a caller
 // with a bare `ValueType` has -- a datatype's component, an attribute -- and

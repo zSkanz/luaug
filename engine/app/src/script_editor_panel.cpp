@@ -146,6 +146,16 @@ void encodeUtf8(unsigned int codepoint, std::string& out)
 // inside it, and to nothing else.
 ImGuiID g_dragging = 0;
 
+// **Who holds the caret, and what counts as inside it.** A pane keeps ImGui's
+// active id for as long as somebody is typing in it, and ImGui refuses to hover
+// ANY other item while an item is active (`imgui.cpp`, `ItemHoverable`) -- so a
+// click on the Explorer, the Viewport or another tab was swallowed whole, and
+// only the second one did anything. Read by `releaseScriptPaneFocus`, which
+// runs before the shell submits a single window.
+ImGuiID g_paneActiveId = 0;
+ImGuiID g_paneWindowId = 0;
+ImRect g_paneBounds;
+
 // Defined with the find bar below, and declared here because a key binding needs
 // it before the bar does.
 void stepMatch(OpenScript& tab, bool forward);
@@ -243,7 +253,7 @@ void handleTyping(OpenScript& tab, ScriptEditorCommands& out, std::size_t index)
 
 // Recomputes what is on offer. **Called after an edit rather than on a key**, so
 // that backspacing through a word narrows the list instead of dismissing it.
-void refreshCompletions(OpenScript& tab, const scene::World* world)
+void refreshCompletions(OpenScript& tab, const scene::World* world, core::InstanceId root)
 {
     if (world == nullptr) {
         tab.completing = false;
@@ -252,13 +262,18 @@ void refreshCompletions(OpenScript& tab, const scene::World* world)
 
     const CompletionRequest request = completionAt(tab.document, tab.caret.head);
     // Nothing to go on: no subject and fewer than two letters is every name in
-    // the engine, which is a list nobody reads.
-    if (request.subject.empty() && request.prefix.size() < 2) {
+    // the engine, which is a list nobody reads. A caret inside quotes is exempt:
+    // `WaitForChild("` with nothing typed yet is a short list of real names,
+    // which is the moment the list is worth the most.
+    if (request.quoted == CompletionQuoted::No && request.subject.empty() && request.prefix.size() < 2) {
         tab.completing = false;
         return;
     }
 
-    collectCompletions(tab.document, request, world->classes(), world->atoms(), tab.completions);
+    // `script` is THIS tab's instance, which is the one thing about the request
+    // only the tab knows.
+    const CompletionWorld tree{world, root, tab.instance};
+    collectCompletions(tab.document, request, world->classes(), world->atoms(), tree, tab.completions);
     tab.completionReplace = request.replace;
     tab.completing = !tab.completions.empty();
     if (tab.completionIndex >= tab.completions.size())
@@ -275,6 +290,27 @@ void acceptCompletion(OpenScript& tab, ScriptEditorCommands& out, std::size_t in
     tab.caret.desiredColumn = tab.document.cellOf(tab.caret.head.line, tab.caret.head.column);
     tab.completing = false;
     edited(out, index);
+}
+
+// How wide a string is IN THE CODE FACE, in pixels.
+//
+// **Not `ImGui::CalcTextSize`**, which measures in whatever font is current --
+// the interface face, Inter -- while everything below draws with `m.font`,
+// Cousine. The two disagree by enough that a popup sized against Inter and
+// filled with Cousine spills its text out of its own highlight, which is what a
+// human saw and reported.
+//
+// Counting cells rather than asking the font is exact here for the same reason
+// the rest of the pane multiplies: the face is monospace, so a codepoint is one
+// advance and there is nothing to measure.
+[[nodiscard]] float codeWidth(const PaneMetrics& m, std::string_view text)
+{
+    std::size_t cells = 0;
+    for (const char byte : text) {
+        if ((static_cast<unsigned char>(byte) & 0xC0u) != 0x80u)
+            ++cells;
+    }
+    return static_cast<float>(cells) * m.advance;
 }
 
 // The rows, under the caret. Drawn as a child of the code pane rather than as a
@@ -298,13 +334,20 @@ void drawCompletions(OpenScript& tab, const PaneMetrics& m, ImVec2 textOrigin)
 
     float width = 0.0f;
     for (const Completion& completion : tab.completions)
-        width = std::max(width, ImGui::CalcTextSize(completion.label.c_str()).x +
-                                    ImGui::CalcTextSize(completion.detail.c_str()).x);
+        width = std::max(width, codeWidth(m, completion.label) + codeWidth(m, completion.detail));
+    // Two cells of margin on each side and two between the label and the
+    // detail, so the longest row has air rather than exactly fitting.
     width += m.advance * 6.0f;
 
+    // **Kept on screen, which the caret's own position does not guarantee.** A
+    // completion at the right-hand edge of a wide window would otherwise draw
+    // its list off the side of the display.
+    const ImGuiViewport* viewport = ImGui::GetWindowViewport();
+    const float rightLimit = viewport->Pos.x + viewport->Size.x - m.advance;
+
     ImDrawList* draw = ImGui::GetForegroundDrawList();
-    const ImVec2 min(x, y);
-    const ImVec2 max(x + width, y + static_cast<float>(rows) * m.lineHeight);
+    const ImVec2 min(std::min(x, std::max(viewport->Pos.x, rightLimit - width)), y);
+    const ImVec2 max(min.x + width, y + static_cast<float>(rows) * m.lineHeight);
     draw->AddRectFilled(min, max, col(p.surfaceRaised));
     draw->AddRect(min, max, col(p.border));
 
@@ -316,9 +359,9 @@ void drawCompletions(OpenScript& tab, const PaneMetrics& m, ImVec2 textOrigin)
         const float rowY = y + static_cast<float>(row) * m.lineHeight;
         if (at == tab.completionIndex)
             draw->AddRectFilled(ImVec2(min.x, rowY), ImVec2(max.x, rowY + m.lineHeight), col(p.accent, 0.30f));
-        draw->AddText(m.font, ImGui::GetFontSize(), ImVec2(min.x + m.advance * 0.5f, rowY), col(p.text),
+        draw->AddText(m.font, ImGui::GetFontSize(), ImVec2(min.x + m.advance * 2.0f, rowY), col(p.text),
                       completion.label.c_str());
-        const float detailX = max.x - ImGui::CalcTextSize(completion.detail.c_str()).x - m.advance * 0.5f;
+        const float detailX = max.x - codeWidth(m, completion.detail) - m.advance * 2.0f;
         draw->AddText(m.font, ImGui::GetFontSize(), ImVec2(detailX, rowY), col(p.textMuted), completion.detail.c_str());
     }
 
@@ -327,13 +370,13 @@ void drawCompletions(OpenScript& tab, const PaneMetrics& m, ImVec2 textOrigin)
     const Completion& current = tab.completions[tab.completionIndex];
     if (!current.doc.empty()) {
         const float docY = max.y;
-        const float docWidth = std::max(width, 420.0f);
+        const float docWidth = std::max(width, m.advance * 52.0f);
         const ImVec2 docMin(min.x, docY);
         const ImVec2 docMax(min.x + docWidth, docY + m.lineHeight * 2.0f);
         draw->AddRectFilled(docMin, docMax, col(p.surface));
         draw->AddRect(docMin, docMax, col(p.border));
-        draw->AddText(m.font, ImGui::GetFontSize(), ImVec2(docMin.x + m.advance * 0.5f, docY), col(p.textMuted),
-                      current.doc.c_str(), nullptr, docWidth - m.advance);
+        draw->AddText(m.font, ImGui::GetFontSize(), ImVec2(docMin.x + m.advance * 2.0f, docY), col(p.textMuted),
+                      current.doc.c_str(), nullptr, docWidth - m.advance * 4.0f);
     }
 }
 
@@ -687,7 +730,7 @@ void drawFindBar(OpenScript& tab, ScriptEditorCommands& out, std::size_t index)
 }
 
 void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, const scene::World* world,
-              ScriptEditorCommands& out, std::size_t index)
+              core::InstanceId root, ScriptEditorCommands& out, std::size_t index)
 {
     const ThemePalette& p = currentTheme().palette;
     const PaneMetrics m = metricsFor(tab.document);
@@ -771,6 +814,19 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
     if (g_dragging == id && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f))
         tab.caret.head = hitTest(tab.document, m, textOrigin, ImGui::GetIO().MousePos);
 
+    // **Recorded for `releaseScriptPaneFocus`**, which runs before anything else
+    // in the frame and needs to know whose active id this is and what rectangle
+    // counts as inside it. Ids rather than pointers: a window can be destroyed
+    // between two frames and a stale `ImGuiWindow*` would be read.
+    if (active) {
+        g_paneActiveId = id;
+        g_paneWindowId = window->ID;
+        g_paneBounds = bounds;
+    }
+    else if (g_paneActiveId == id) {
+        g_paneActiveId = 0;
+    }
+
     if (active) {
         // What makes the shell's `!IsAnyItemActive()` guards do the right thing
         // without any of them being edited.
@@ -805,7 +861,7 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
         const bool ctrlSpace =
             ImGui::GetIO().KeyCtrl && !ImGui::GetIO().KeyAlt && ImGui::IsKeyPressed(ImGuiKey_Space, false);
         if (tab.document.revision() != before || ctrlSpace)
-            refreshCompletions(tab, world);
+            refreshCompletions(tab, world, root);
         // **Escape lets go of the pane rather than clearing the selection.** One
         // press to leave the code, and the second means what the shell says.
         if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
@@ -1033,8 +1089,25 @@ void drawDebugPanel(ScriptEditor& editor, DebugView& debug, ScriptEditorCommands
     ImGui::End();
 }
 
+void releaseScriptPaneFocus()
+{
+    ImGuiContext& g = *ImGui::GetCurrentContext();
+    if (g_paneActiveId == 0 || g.ActiveId != g_paneActiveId)
+        return;
+    if (!ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+        return;
+
+    const bool inside = g.HoveredWindow != nullptr && g.HoveredWindow->ID == g_paneWindowId &&
+                        g_paneBounds.Contains(ImGui::GetIO().MousePos);
+    if (inside)
+        return;
+
+    ImGui::ClearActiveID();
+    g_paneActiveId = 0;
+}
+
 void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, DebugView& debug, const scene::World* world,
-                      ScriptEditorCommands& out)
+                      core::InstanceId root, ScriptEditorCommands& out)
 {
     const std::optional<std::size_t> focus = editor.takeFocusRequest();
 
@@ -1046,8 +1119,14 @@ void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, DebugView& debug
         // `Title###id` so the label can change -- a rename, a dirty marker --
         // while the id ImGui docks by stays the same. Keyed on the instance,
         // which is what the tab IS.
-        char name[192]{};
-        (void)std::snprintf(name, sizeof(name), "%s###script-%u", tab->title.c_str(), tab->instance.index);
+        //
+        // The leading spaces are the room the shell paints this script's class
+        // icon into, and they are before the `###` for the reason `tabIconPad`
+        // gives: everything that identifies a window reads from the far side of
+        // it.
+        char name[224]{};
+        (void)std::snprintf(name, sizeof(name), "%s%s###script-%u", tabIconPad().c_str(), tab->title.c_str(),
+                            tab->instance.index);
 
         // Beside the Viewport on first appearance, and wherever somebody moved
         // it afterwards -- `FirstUseEver` is what lets the saved layout win.
@@ -1062,7 +1141,7 @@ void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, DebugView& debug
         if (ImGui::Begin(name, &open, flags)) {
             if (ImGui::IsWindowAppearing() || ImGui::IsWindowFocused())
                 editor.setActive(index);
-            drawPane(*tab, editor, debug, world, out, index);
+            drawPane(*tab, editor, debug, world, root, out, index);
         }
         ImGui::End();
 
@@ -1086,7 +1165,11 @@ namespace luaug::app {
 
 // ADR 0011: a shipping build has no ImGui, so the pane has no body. The
 // signature stays so the frame loop calls it without an #ifdef.
-void drawScriptEditor(ScriptEditor&, core::u32, DebugView&, const scene::World*, ScriptEditorCommands&)
+void drawScriptEditor(ScriptEditor&, core::u32, DebugView&, const scene::World*, core::InstanceId,
+                      ScriptEditorCommands&)
+{}
+
+void releaseScriptPaneFocus()
 {}
 
 void drawDebugPanel(ScriptEditor&, DebugView&, ScriptEditorCommands&, bool&)

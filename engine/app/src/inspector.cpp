@@ -190,6 +190,9 @@ EditorKind editorFor(const scene::PropertyDesc& descriptor) noexcept
     // bytes. `contentKind` is set by the IDL for exactly these properties.
     if (descriptor.type == scene::ValueType::String && descriptor.contentKind.valid())
         return EditorKind::Content;
+    // And the same for code, which is a string in exactly the way a URI is one.
+    if (descriptor.type == scene::ValueType::String && descriptor.code)
+        return EditorKind::Code;
     return editorFor(descriptor.type);
 }
 
@@ -198,8 +201,8 @@ bool editable(const scene::PropertyDesc& descriptor) noexcept
     if (descriptor.readOnly || descriptor.set == nullptr)
         return false;
 
-    const EditorKind kind = editorFor(descriptor.type);
-    return kind != EditorKind::ReadOnlyText && kind != EditorKind::InstanceRef;
+    const EditorKind kind = editorFor(descriptor);
+    return kind != EditorKind::ReadOnlyText && kind != EditorKind::InstanceRef && kind != EditorKind::Code;
 }
 
 scene::EnumId enumDomainOf(const scene::EnumRegistry& enums, const scene::PropertyDesc& descriptor) noexcept

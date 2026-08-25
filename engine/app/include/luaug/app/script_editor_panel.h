@@ -10,6 +10,7 @@
 // asks for -- the caller carries no `#ifdef`.
 #pragma once
 
+#include "luaug/core/id.h"
 #include "luaug/core/types.h"
 
 #include <cstddef>
@@ -110,8 +111,28 @@ struct ScriptEditorCommands
 // middle of the screen. Zero docks nothing, which is what a shell with no
 // dockspace wants. `ImGuiID` is an unsigned int; taking it as one is what keeps
 // this header free of ImGui.
+// `root` is the DataModel -- what `game` names -- and it is here because
+// autocomplete walks a dotted path through the real tree: `Workspace.MainCamera`
+// is a fact about this project, not about the `Workspace` class.
 void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, DebugView& debug, const scene::World* world,
-                      ScriptEditorCommands& out);
+                      core::InstanceId root, ScriptEditorCommands& out);
+
+// **Gives the caret up when the mouse goes somewhere else, and it has to run
+// before any panel is submitted.**
+//
+// The code pane holds ImGui's active id for as long as somebody is typing in it
+// -- that is what a caret is, and what makes the shell's `!IsAnyItemActive()`
+// guards keep their shortcuts off the letters being typed. The cost is that
+// ImGui refuses to hover any other item while an item is active, so the first
+// click on the Explorer, the Viewport, the Properties grid or another tab did
+// nothing at all and only the second one landed.
+//
+// Releasing it inside the pane's own draw would be too late: whichever panel
+// was submitted earlier in the frame has already been asked whether it was
+// clicked, and answered no. So the release happens at the top of the frame,
+// where it is true for everybody -- which is the same reason ImGui itself
+// resolves the hovered window before the first `Begin`.
+void releaseScriptPaneFocus();
 
 // The stack, the variables and the transport. A panel of its own rather than a
 // strip inside the code pane, because it is worth looking at while looking at

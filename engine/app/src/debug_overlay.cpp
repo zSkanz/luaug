@@ -7,6 +7,7 @@
 
 #include "luaug/app/backends.h"
 #include "luaug/app/icons.h"
+#include "luaug/app/script_editor.h"
 #include "luaug/app/ui_theme.h"
 #include "luaug/core/build_info.h"
 #include "luaug/core/i18n.h"
@@ -1627,6 +1628,36 @@ void drawEditor(scene::World& world, Inspector& inspector, std::span<const core:
             commit(scene::Value{value});
         break;
     }
+    case EditorKind::Code: {
+        // **A row is one line high and a script is not.** The grid drew every
+        // line of `Source`, so an instance with a fifty-line script in it made
+        // the Properties panel fifty rows tall and buried whatever came after.
+        //
+        // Nothing at all when there is no code, which is what "nothing to see"
+        // looks like -- and an empty field inviting somebody to type a program
+        // into a property grid is not the offer to make when double-clicking
+        // the instance opens a code editor two panels over.
+        const std::string& text = mixed ? std::string() : std::get<std::string>(shared.value);
+        if (mixed) {
+            ImGui::TextDisabled("mixed");
+            break;
+        }
+        if (text.empty())
+            break;
+
+        // The first line, and an ellipsis for everything below it. The first
+        // line of a Luau file is nearly always `--!strict` or the top of the
+        // comment that says what the file is, which is exactly the glance a
+        // property grid is for.
+        const std::size_t breakAt = text.find('\n');
+        std::string preview = text.substr(0, std::min(breakAt, static_cast<std::size_t>(120)));
+        while (!preview.empty() && (preview.back() == '\r' || preview.back() == ' '))
+            preview.pop_back();
+        if (breakAt != std::string::npos || preview.size() < text.size())
+            preview += "  ...";
+        ImGui::TextDisabled("%s", preview.c_str());
+        break;
+    }
     case EditorKind::Text: {
         const std::string& text = std::get<std::string>(shared.value);
         char buffer[256]{};
@@ -2569,7 +2600,11 @@ void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& co
                   const IconAtlas* icons)
 {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-    const bool visible = ImGui::Begin("Viewport", &open);
+    // **Room for the camera**, painted over the gap by `drawTabIcons`. Before
+    // the `###`, so this is still the window called `Viewport` to the dock
+    // builder and to every `layout.ini` anybody has saved.
+    const std::string label = tabIconPad() + "Viewport###Viewport";
+    const bool visible = ImGui::Begin(label.c_str(), &open);
     ImGui::PopStyleVar();
 
     if (visible) {
@@ -3866,12 +3901,101 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
 // The editor's furniture. The panels inside it are the overlay's own, which is
 // the whole argument of ADR 0046: what an editor mostly is, this engine already
 // had.
+// **The class icons on the tabs of the central node** -- a camera on the
+// Viewport, a script's own icon on each open script.
+//
+// Painted over the tab bar rather than submitted into it, because ImGui's tab
+// bar takes a string: `BeginTabItem` measures a label and draws it, and there is
+// no per-tab draw callback and no icon font in this build. So a tab that wants
+// a picture reserves the room in its own label with `tabIconPad()` and this
+// fills the gap in afterwards.
+//
+// Into the HOST WINDOW's draw list and not the foreground one, so a floating
+// panel dragged over the strip covers the icons the way it covers the tabs
+// underneath them. The clip rect is pushed by hand because the window has
+// already been ended, and a scrolled tab bar must not paint an icon over its
+// own scroll arrows.
+//
+// Reads the tab bar's layout from THIS frame, which is why the call site is the
+// last thing `drawEditorShell` does.
+void drawTabIcons(ImGuiID dockspace, const IconAtlas* icons, const scene::World* world, const ScriptEditor* scripts)
+{
+    if (icons == nullptr || !icons->ready() || g_device == nullptr)
+        return;
+
+    ImGuiDockNode* node = ImGui::DockBuilderGetCentralNode(dockspace);
+    if (node == nullptr || node->TabBar == nullptr || node->HostWindow == nullptr)
+        return;
+
+    SDL_GPUTexture* native = rhi::nativeTexture(*g_device, icons->texture());
+    if (native == nullptr)
+        return;
+
+    const ImGuiTabBar& bar = *node->TabBar;
+    const float size = ImGui::GetFontSize();
+    ImDrawList* draw = node->HostWindow->DrawList;
+    draw->PushClipRect(bar.BarRect.Min, bar.BarRect.Max, true);
+
+    for (const ImGuiTabItem& item : bar.Tabs) {
+        if (item.Window == nullptr)
+            continue;
+
+        const std::string_view name = item.Window->Name;
+        std::string id;
+        if (name.ends_with("###Viewport")) {
+            // The camera, because that is what a viewport IS -- and it is the
+            // icon the Explorer already draws on the one in the tree, which is
+            // the whole reason to reuse it rather than draw a second picture of
+            // the same idea.
+            id = std::string(icons::ClassCamera);
+        }
+        else if (scripts != nullptr && world != nullptr) {
+            for (const OpenScript& tab : scripts->tabs()) {
+                char suffix[48]{};
+                (void)std::snprintf(suffix, sizeof(suffix), "###script-%u", tab.instance.index);
+                if (!name.ends_with(suffix))
+                    continue;
+                // Its own class, so a `ModuleScript` tab and a `Script` tab are
+                // told apart at a glance -- which is the question somebody with
+                // six tabs open actually has.
+                if (world->alive(tab.instance))
+                    id = classIconId(*world, tab.instance);
+                break;
+            }
+        }
+        if (id.empty())
+            continue;
+
+        const IconSprite sprite = icons->find(id, static_cast<core::u32>(size + 0.5f));
+        if (!sprite.valid)
+            continue;
+
+        const float x = bar.BarRect.Min.x + item.Offset - bar.ScrollingAnim + ImGui::GetStyle().FramePadding.x;
+        const float y = bar.BarRect.Min.y + (bar.BarRect.GetHeight() - size) * 0.5f;
+        const ImVec4 tint = iconTint(icons, id);
+        draw->AddImage(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)), ImVec2(x, y),
+                       ImVec2(x + size, y + size), ImVec2(sprite.u0, sprite.v0), ImVec2(sprite.u1, sprite.v1),
+                       ImGui::GetColorU32(tint));
+    }
+
+    draw->PopClipRect();
+}
+
 void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,
                      script::ScriptRuntime* runtime, Editor* editor, rhi::TextureHandle viewport, bool& laidOut,
                      EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs, IconAtlas* icons,
                      ScriptEditor* scripts, ScriptEditorCommands& scriptCommands, DebugView& debug,
                      audio::AudioSystem* audio, bool furniture)
 {
+    // **First, before a single window is submitted.** A code pane that owns the
+    // active id makes every other item in the frame unhoverable, so this is
+    // where a click that landed somewhere else takes the caret back -- see
+    // `releaseScriptPaneFocus`. Ahead of the early return too: F3 hides the
+    // furniture, and a pane still holding the caret behind it would swallow the
+    // clicks meant for the world.
+    if (scripts != nullptr)
+        releaseScriptPaneFocus();
+
     // **F3 down: the world and nothing else.** Returning before the dockspace
     // rather than hiding each panel, because a dockspace with no windows in it
     // is still a dockspace and would draw its own background over the picture.
@@ -3939,7 +4063,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // for and what a hand-rolled tab bar would have refused.
     if (scripts != nullptr) {
         const ImGuiDockNode* central = ImGui::DockBuilderGetCentralNode(dockspace);
-        drawScriptEditor(*scripts, central != nullptr ? static_cast<core::u32>(central->ID) : 0u, debug, world,
+        drawScriptEditor(*scripts, central != nullptr ? static_cast<core::u32>(central->ID) : 0u, debug, world, root,
                          scriptCommands);
         if (panels.debug)
             drawDebugPanel(*scripts, debug, scriptCommands, panels.debug);
@@ -4169,6 +4293,11 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         if (editor != nullptr)
             editor->setLayoutRevision(Editor::CurrentLayoutRevision);
     }
+
+    // **Last, because it paints over a strip that has already been laid out.**
+    // Every window in the central node has been submitted by now, so the tab bar
+    // knows where each tab is; before this point it does not.
+    drawTabIcons(dockspace, icons, world, scripts);
 }
 
 // --- the streaming map ------------------------------------------------------
@@ -4369,8 +4498,18 @@ void drawLauncherProjects(LauncherView& view)
             ImGui::PushID(entry.path.string().c_str());
 
             const ImVec2 origin = ImGui::GetCursorPos();
+            const float rowWidth = ImGui::GetContentRegionAvail().x;
             // The whole row is the target, so opening a project is a click
             // anywhere on it rather than a hunt for a button.
+            //
+            // **`AllowOverlap` is what lets the Remove button be pressed at
+            // all.** Without it the selectable owns every pixel it covers, and
+            // an item submitted on top of it later is drawn and never hovered --
+            // so Remove looked like a button, and the click went to the row
+            // underneath and reported that the project was missing. Which is
+            // exactly what a person deleting a folder and then trying to tidy
+            // the list gets: the same message, over and over, from a button.
+            ImGui::SetNextItemAllowOverlap();
             if (ImGui::Selectable("##row", false, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(0.0f, rowHeight))) {
                 if (entry.missing)
                     view.message = entry.path.string() + " is not there any more.";
@@ -4378,9 +4517,15 @@ void drawLauncherProjects(LauncherView& view)
                     view.open = entry.path;
             }
 
-            const bool hovered = ImGui::IsItemHovered();
             const ImVec2 rowMin = ImGui::GetItemRectMin();
             const ImVec2 rowMax = ImGui::GetItemRectMax();
+            // **Asked of the RECTANGLE and not of the selectable**, because with
+            // the overlap allowed the selectable stops reporting hover the
+            // moment the pointer reaches the button on top of it -- and a
+            // button that vanishes when you point at it cannot be clicked by
+            // anybody. The rectangle is true for the row and everything drawn
+            // over it, which is what "the pointer is on this row" means.
+            const bool hovered = ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(rowMin, rowMax);
             ImDrawList* draw = ImGui::GetWindowDrawList();
             // **A bar on the left rather than a tint across the row.** A square
             // list has no shape of its own to mark, and a filled row competes
@@ -4410,19 +4555,38 @@ void drawLauncherProjects(LauncherView& view)
                 ImGui::TextDisabled("%s", entry.path.string().c_str());
             }
 
-            if (hovered) {
-                const float buttonWidth = ImGui::CalcTextSize("Remove").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-                ImGui::SameLine(ImGui::GetContentRegionAvail().x - buttonWidth);
-                ImGui::SetCursorPosY(origin.y + (rowHeight - ImGui::GetFrameHeight()) * 0.5f);
-                if (ImGui::SmallButton("Remove"))
-                    forget = entry.path;
-            }
+            // **Emitted every row, every frame, and drawn at nothing when the
+            // pointer is elsewhere.** A button that comes into being on the
+            // frame a row becomes hovered is a button whose first press the
+            // thing underneath has already taken -- the same defect the
+            // Explorer's plus sign had, from the other side. Alpha is a drawing
+            // property and not a hit-testing one, so the press lands the first
+            // time; and the only rows where it is invisible are rows the
+            // pointer is not on, which are the rows nobody can press it on.
+            const float buttonWidth = ImGui::CalcTextSize("Remove").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+            ImGui::SetCursorPos(ImVec2(origin.x + rowWidth - buttonWidth - ImGui::GetStyle().FramePadding.x,
+                                       origin.y + (rowHeight - ImGui::GetFrameHeight()) * 0.5f));
+            if (!hovered)
+                ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.0f);
+            if (ImGui::SmallButton("Remove"))
+                forget = entry.path;
+            if (!hovered)
+                ImGui::PopStyleVar();
+            // Said on the button rather than only in the row's own text: a
+            // person tidying a list of seven wants to know this one leaves and
+            // nothing on disk is touched.
+            ImGui::SetItemTooltip("%s", entry.missing ? "forget this project -- the folder is already gone"
+                                                      : "forget this project -- the folder stays where it is");
 
             ImGui::SetCursorPos(ImVec2(origin.x, origin.y + rowHeight));
             ImGui::PopID();
         }
-        if (!forget.empty())
+        if (!forget.empty()) {
             projects.forget(forget);
+            view.message = forget.string() + " was removed from the list. The folder was not touched.";
+            // The loop writes the file. See `LauncherView::forgot`.
+            view.forgot = true;
+        }
     }
     ImGui::EndChild();
 }

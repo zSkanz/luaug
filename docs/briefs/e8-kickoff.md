@@ -23,7 +23,8 @@ beside the world.
 - [x] Tabs in the central dock node, siblings of the Viewport, draggable out.
 - [x] Luau colour from Luau's own lexer, incremental.
 - [x] Find, replace, go to line, and syntax errors underlined.
-- [x] Autocomplete from `ClassRegistry`, with the IDL's prose.
+- [x] Autocomplete from `ClassRegistry`, with the IDL's prose -- and from the
+      WORLD: a path walks the real tree, and `WaitForChild("` names real children.
 - [x] A debugger: breakpoints, continue, step over/into/out, stack and locals.
 - [x] Ctrl+S writes where the instance came from, and the editor reloads.
 - [x] Eight syntax tokens in the theme, measured.
@@ -134,6 +135,37 @@ because `luaug dev` starts with the overlay hidden anyway.
 **The lesson is the shape rather than the bug.** A fix that has to put six
 unrelated things back is not a fix, it is a receipt for the wrong operation.
 
+**Finding 11 -- completion from the API alone answers the question nobody was
+asking.** The list knew every class the engine ships and not one thing in the
+project open in front of it, so `Workspace.` offered `ClassName` and never
+`MainCamera`. The names somebody reaches for are the names in their own
+Explorer, and the Explorer is a pointer away. A path is now walked instance by
+instance from the DataModel -- which also means there is **no list of service
+names in the completion code at all**: a service is a child of the root, so one
+registered by a module this build has never seen resolves for free.
+
+**Finding 12 -- a popup measured in one font and drawn in another leaks, and
+every ASCII string hides it by a different amount.** `ImGui::CalcTextSize`
+measures in the CURRENT font, which is Inter; the code pane draws with
+`m.font`, which is Cousine. Reported as "the text spills out of the blue". The
+pane multiplies cells by one advance everywhere else for exactly this reason,
+and the popup was the one place that had asked ImGui instead.
+
+**Finding 13 -- a widget that holds ImGui's active id makes every other item in
+the frame unhoverable.** `ItemHoverable` returns false while another item is
+active (`imgui.cpp:5157`), so the first click on the Explorer, the Viewport, the
+Properties grid or another tab did nothing and only the second one landed. It
+cannot be fixed inside the pane's own draw -- whichever panel was submitted
+earlier has already been asked whether it was clicked, and answered no -- so the
+release happens at the top of the frame, before a single window is submitted.
+
+**Finding 14 -- a property row is one line high and a script is not.** The grid
+drew every line of `Source`, so selecting a script made the Properties panel as
+tall as the file. Fixed by giving the IDL a `Code` flag rather than by testing
+whether the string has a newline in it: which properties are code is a fact
+about the CLASS, and `PropertyDesc::contentKind` had already made that argument
+in its own comment for the same reason.
+
 ## Attempted / abandoned
 
 **Resuming through the deferred queue.** Recommended by the design pass so the
@@ -157,6 +189,7 @@ Filled 2026-08-24, before human review.
 | The debugger stops, reads and resumes, headless | **Green.** Eight cases in `debugger_tests.cpp`, including **the tick keeps advancing while a script is parked** — the claim a blocking debugger would fail while looking identical everywhere else. |
 | Completion answers from the reflection tables | **Green.** Eleven cases, including inherited members, the IDL's prose, case-insensitive filtering, and the absence it deliberately has. |
 | Eight syntax tokens clear 4.5:1 | **Green.** Sixteen assertions (8 tokens × 2 themes) against the code pane's ground, by the same `contrastRatio` the interface tokens use. |
+| Completion answers from the TREE | **Green.** Twelve more cases: a path through the world, the whole chain walked from `game`, `script.Parent`, a name inside `WaitForChild("`, `GetService("` offering only services, a colon offering no children, one row per name over four instances, and a plain string offering nothing. |
 | A save writes a file and disturbs nothing | **Green, by a person and by a picture.** The editor after Ctrl+S is pixel-identical to the editor before it: same caret, same selection, same tabs, same tree. Verified by driving the real window twice and comparing. |
 | A person writes a script in it | **Partly, and honestly.** The pictures below are the editor open on a real project with a script in a tab, coloured, with a breakpoint armed and the Debug panel showing it. **What is not pictured is a stop**: the debugger's behaviour rests on the eight headless cases, and a photograph of it stopped with the locals showing needs somebody to press play. |
 | `scripts/localgate.ps1` green on every stage | *(filled below)* |

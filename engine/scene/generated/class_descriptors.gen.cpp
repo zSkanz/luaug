@@ -364,6 +364,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
         PropertyDesc{
             .name = atoms.intern("Source"),
             .type = ValueType::String,
+            .code = true,
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,

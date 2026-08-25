@@ -295,4 +295,24 @@ void applyTheme(const Theme& theme, core::f32 scale);
 // putting SDL in a header.
 [[nodiscard]] ImFont* codeFont() noexcept;
 
+// **Spaces to put at the head of a dock tab's label, so an icon can be drawn
+// over them.**
+//
+// ImGui's tab bar takes a string and measures it; there is no hook for a
+// picture, and there is no icon font in this build. So a tab that wants one
+// reserves the room in its own label and the shell paints the icon into the gap
+// afterwards -- which is why this is a width in SPACES rather than in pixels:
+// the reservation has to be made in the units the tab bar measures.
+//
+// Computed from the current font rather than fixed, because the answer changes
+// with the interface scale and a hard-coded three spaces is right at exactly
+// one of them.
+//
+// **Put it before the `###`**, never after: `ImHashStr` restarts its hash at
+// `###` (`imgui.cpp:2578`), so `"   Viewport###Viewport"` is the same window as
+// `"Viewport"` to the dock builder, to a saved `layout.ini`, and to
+// `SetWindowFocus`. Padding the id instead would silently orphan every
+// arrangement anybody has saved.
+[[nodiscard]] std::string tabIconPad();
+
 } // namespace luaug::app

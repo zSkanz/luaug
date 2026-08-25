@@ -122,6 +122,22 @@ export type Property = {
     --- anything, which is the honest answer for one that genuinely does.
     ContentKind: string?,
 
+    --- **Whether this string is CODE**, and therefore something a person edits
+    --- somewhere other than a one-line field.
+    ---
+    --- `BaseScript.Source` is the property this exists for. It is a `string` and
+    --- has to be -- it is Luau text, the VM compiles it, a scene saves it -- and
+    --- the property grid drew every line of it, which turned inspecting a script
+    --- into scrolling past its whole body to reach the next property.
+    ---
+    --- The class knows and the value never can, which is the same argument
+    --- `ContentKind` makes one field up: a string with newlines in it might be a
+    --- script or might be an address, and guessing from the bytes would make the
+    --- grid change its mind about a property the first time somebody pressed
+    --- Enter. Absent means an ordinary string, which is what every other
+    --- property in this file is.
+    Code: boolean?,
+
     --- Whether a change to this property is enqueued even when nothing has
     --- subscribed to it.
     ---

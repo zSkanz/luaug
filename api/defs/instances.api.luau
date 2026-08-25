@@ -323,6 +323,7 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Source",
                 Type = "string",
+                Code = true,
                 Default = '""',
                 Doc = "The Luau this instance carries. It is data on the instance rather than a path to a file, "
                     .. "which is what makes a script something you can create, copy, put inside a prefab and save "

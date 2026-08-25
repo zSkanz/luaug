@@ -111,6 +111,15 @@ struct PropertyDesc
     // the second one.
     core::NameAtom contentKind{};
 
+    // **This string is CODE**, and a person edits it somewhere other than a
+    // one-line field. Set by the IDL for `BaseScript.Source` and nothing else.
+    //
+    // A fact about the class for the reason `contentKind` is one: a string with
+    // newlines in it might be Luau or might be an address, and a grid that
+    // decided from the bytes would change its mind about a property the first
+    // time somebody pressed Enter.
+    bool code = false;
+
     // Whether a change to this property reaches the change queue even when
     // nothing has subscribed to it.
     //

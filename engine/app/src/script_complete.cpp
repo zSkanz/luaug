@@ -2,10 +2,12 @@
 
 #include "luaug/core/name_atom.h"
 #include "luaug/scene/class_registry.h"
+#include "luaug/scene/world.h"
 
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <span>
 
 namespace luaug::app {
 namespace {
@@ -132,6 +134,162 @@ void collectMembers(const scene::ClassRegistry& classes, const core::AtomTable& 
     return classes.findId(atoms.lookup(subject));
 }
 
+// The methods whose FIRST argument is the name of a child. Two, and both are on
+// `Instance`, so this list is short because the API is -- not because it was
+// trimmed. `GetService` is handled apart: its argument is a class, not a child.
+[[nodiscard]] bool namesAChild(std::string_view method) noexcept
+{
+    return method == "WaitForChild" || method == "FindFirstChild";
+}
+
+// Where an unterminated string starts on this line, or npos.
+//
+// Walked forward from the start of the line rather than backward from the
+// caret, because backward cannot tell an opening quote from a closing one --
+// `print("a", "b` has three quotes before the caret and the caret is inside the
+// third. Forward with a state bit cannot get it wrong.
+//
+// Comments are not considered: a caret inside a comment is answered by whatever
+// the comment happens to contain, and offering a child's name to somebody
+// writing prose costs one Escape.
+[[nodiscard]] std::size_t openQuoteBefore(std::string_view line, u32 caret) noexcept
+{
+    std::size_t open = std::string_view::npos;
+    char quote = 0;
+    for (u32 index = 0; index < caret && index < line.size(); ++index) {
+        const char c = line[index];
+        if (quote != 0) {
+            if (c == '\\') {
+                ++index;
+                continue;
+            }
+            if (c == quote)
+                quote = 0;
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            quote = c;
+            open = index;
+        }
+    }
+    return quote != 0 ? open : std::string_view::npos;
+}
+
+// Reads `a.b.c` leftwards from `end`, which is one past the last byte of the
+// last name. Fills `path` outermost-first and answers where the chain started.
+[[nodiscard]] u32 readPath(std::string_view line, u32 end, std::vector<std::string>& path)
+{
+    u32 at = end;
+    while (true) {
+        u32 start = at;
+        while (start > 0 && isWordByte(line[start - 1]))
+            --start;
+        if (start == at)
+            break;
+        path.insert(path.begin(), std::string(line.substr(start, at - start)));
+        // Only a `.` or a `:` continues a chain, and only when a name is on the
+        // far side of it: `a.b` continues, `).b` does not, because whatever the
+        // call returned is a value and this file does not infer values.
+        if (start == 0 || (line[start - 1] != '.' && line[start - 1] != ':'))
+            return start;
+        at = start - 1;
+    }
+    return at;
+}
+
+// What a resolved path names, walking the tree from `game`.
+//
+// **The first segment is the only one with rules**, and there are four: `game`
+// is the root, `workspace` and any service's own name is a child of the root,
+// and `script` is the instance being edited. Everything after that is a plain
+// `FindFirstChild`, plus `Parent`, which is the one property people write in
+// the middle of a path often enough that leaving it out would be noticed.
+[[nodiscard]] core::InstanceId resolvePath(const CompletionWorld& tree, const core::AtomTable& atoms,
+                                           std::span<const std::string> path)
+{
+    if (tree.world == nullptr || path.empty())
+        return core::InstanceId{};
+
+    const scene::World& world = *tree.world;
+    core::InstanceId at;
+    if (path[0] == "game")
+        at = tree.root;
+    else if (path[0] == "script")
+        at = tree.self;
+    else if (path[0] == "workspace")
+        at = world.findFirstChild(tree.root, atoms.lookup("Workspace"));
+    else
+        at = world.findFirstChild(tree.root, atoms.lookup(path[0]));
+
+    for (std::size_t index = 1; index < path.size() && at.valid(); ++index) {
+        at = path[index] == "Parent" ? world.parentOf(at) : world.findFirstChild(at, atoms.lookup(path[index]));
+    }
+    return at.valid() && world.alive(at) ? at : core::InstanceId{};
+}
+
+// Every child of `parent`, as rows. Skips a name a member already took, because
+// `workspace.Name` is the property and offering the child would be offering
+// something the VM will not hand back.
+void collectChildren(const CompletionWorld& tree, const core::AtomTable& atoms, core::InstanceId parent,
+                     const CompletionRequest& request, std::vector<Completion>& out)
+{
+    if (tree.world == nullptr || !parent.valid())
+        return;
+
+    const scene::World& world = *tree.world;
+    for (core::InstanceId child = world.firstChild(parent); child.valid(); child = world.nextSibling(child)) {
+        const std::string_view name = atoms.text(world.name(child));
+        if (name.empty())
+            continue;
+        // **One row per NAME, not per instance.** A member wins the collision --
+        // `workspace.Name` is the property, and offering the child would be
+        // offering something the VM will not hand back. And six parts all
+        // called `Ground` are six rows that insert the same six characters,
+        // which is a list nobody can choose from and a scroll bar for nothing.
+        const auto taken = [name](const Completion& row) { return row.label == name; };
+        if (std::find_if(out.begin(), out.end(), taken) != out.end())
+            continue;
+
+        const scene::ClassDescriptor* descriptor = world.classes().find(world.classOf(child));
+        std::string className(descriptor != nullptr ? atoms.text(descriptor->name) : std::string_view("Instance"));
+        push(out, request, std::string(name), std::move(className),
+             descriptor != nullptr && descriptor->doc != nullptr ? descriptor->doc : "", CompletionKind::Instance);
+    }
+}
+
+// Every class flagged as a service, which is what `GetService("` accepts.
+void collectServices(const scene::ClassRegistry& classes, const core::AtomTable& atoms,
+                     const CompletionRequest& request, std::vector<Completion>& out)
+{
+    for (scene::ClassId id = 1; id < static_cast<scene::ClassId>(classes.classCount()); ++id) {
+        const scene::ClassDescriptor* descriptor = classes.find(id);
+        if (descriptor == nullptr || !hasFlag(descriptor->flags, scene::ClassFlags::Service))
+            continue;
+        push(out, request, std::string(atoms.text(descriptor->name)), "service",
+             descriptor->doc != nullptr ? descriptor->doc : "", CompletionKind::Service);
+    }
+}
+
+// Sorted by kind and then by name, so the same prefix always produces the same
+// list in the same order -- which is what lets somebody learn where a row will
+// be instead of reading the whole thing every time.
+//
+// **`Instance` sorts first**, and that is the ordering decision worth stating:
+// somebody typing `Workspace.` is far more often reaching for something in
+// their own tree than for `ClassName`, and the members are still one keystroke
+// of filtering away.
+void sortCompletions(std::vector<Completion>& out)
+{
+    const auto rank = [](CompletionKind kind) {
+        return kind == CompletionKind::Instance ? 0 : static_cast<int>(kind) + 1;
+    };
+    std::sort(out.begin(), out.end(), [&rank](const Completion& a, const Completion& b) {
+        if (a.kind != b.kind)
+            return rank(a.kind) < rank(b.kind);
+        return a.label < b.label;
+    });
+}
+
 } // namespace
 
 CompletionRequest completionAt(const ScriptDocument& document, Position caret)
@@ -139,6 +297,49 @@ CompletionRequest completionAt(const ScriptDocument& document, Position caret)
     CompletionRequest request;
     const Position here = document.clamp(caret);
     const std::string_view line = document.line(here.line);
+
+    // **A caret inside quotes is a different question**, and it is asked first
+    // because everything below reads the bytes as code. `WaitForChild("Ma` is
+    // somebody naming a child, and the only thing that can answer is the tree.
+    const std::size_t quote = openQuoteBefore(line, here.column);
+    if (quote != std::string_view::npos) {
+        const auto open = static_cast<u32>(quote);
+        request.prefix = std::string(line.substr(open + 1, here.column - open - 1));
+        request.replace = Range{Position{here.line, open + 1}, here};
+
+        // Back over `(` to the method's own name. Anything else in between and
+        // this is an ordinary string, which has no completion at all.
+        request.quoted = CompletionQuoted::Other;
+        u32 at = open;
+        while (at > 0 && line[at - 1] == ' ')
+            --at;
+        if (at == 0 || line[at - 1] != '(')
+            return request;
+        --at;
+        while (at > 0 && line[at - 1] == ' ')
+            --at;
+
+        u32 nameStart = at;
+        while (nameStart > 0 && isWordByte(line[nameStart - 1]))
+            --nameStart;
+        const std::string_view method = line.substr(nameStart, at - nameStart);
+        if (method == "GetService") {
+            request.quoted = CompletionQuoted::Service;
+            return request;
+        }
+        if (!namesAChild(method))
+            return request;
+
+        // The chain the call hangs off. `nameStart - 1` is its `.` or `:`.
+        if (nameStart == 0 || (line[nameStart - 1] != '.' && line[nameStart - 1] != ':'))
+            return request;
+        (void)readPath(line, nameStart - 1, request.path);
+        if (request.path.empty())
+            return request;
+        request.subject = request.path.back();
+        request.quoted = CompletionQuoted::Child;
+        return request;
+    }
 
     u32 start = here.column;
     while (start > 0 && isWordByte(line[start - 1]))
@@ -155,23 +356,52 @@ CompletionRequest completionAt(const ScriptDocument& document, Position caret)
         return request;
     request.method = joiner == ':';
 
-    u32 subjectEnd = start - 1;
-    u32 subjectStart = subjectEnd;
-    while (subjectStart > 0 && isWordByte(line[subjectStart - 1]))
-        --subjectStart;
-    request.subject = std::string(line.substr(subjectStart, subjectEnd - subjectStart));
+    // **The whole chain and not just the name before the dot.** `Camera` on its
+    // own names nothing -- the same name under two parents is two instances --
+    // so a path is resolvable only from where it starts.
+    (void)readPath(line, start - 1, request.path);
+    if (!request.path.empty())
+        request.subject = request.path.back();
     return request;
 }
 
 void collectCompletions(const ScriptDocument& document, const CompletionRequest& request,
-                        const scene::ClassRegistry& classes, const core::AtomTable& atoms, std::vector<Completion>& out)
+                        const scene::ClassRegistry& classes, const core::AtomTable& atoms, const CompletionWorld& tree,
+                        std::vector<Completion>& out)
 {
     out.clear();
 
+    // **Inside quotes there is exactly one right answer and it is not a class
+    // member.** `GetService("` takes a service; `WaitForChild("` takes the name
+    // of a child, which only the tree knows.
+    if (request.quoted == CompletionQuoted::Service) {
+        collectServices(classes, atoms, request, out);
+        sortCompletions(out);
+        return;
+    }
+    if (request.quoted == CompletionQuoted::Child) {
+        collectChildren(tree, atoms, resolvePath(tree, atoms, request.path), request, out);
+        sortCompletions(out);
+        return;
+    }
+    if (request.quoted == CompletionQuoted::Other)
+        return;
+
     if (!request.subject.empty()) {
-        const scene::ClassId id = classOfSubject(classes, atoms, request.subject);
+        // **The instance first, its class second.** A resolved path knows both
+        // -- what the thing IS and what is inside it -- and a class name alone
+        // knows only the first. `classOfSubject` is the fallback for a local
+        // that happens to be spelled like a service, which is how somebody
+        // reaches one after `local Lighting = game:GetService("Lighting")`.
+        const core::InstanceId at = resolvePath(tree, atoms, request.path);
+        const scene::ClassId id = at.valid() && tree.world != nullptr ? tree.world->classOf(at)
+                                                                      : classOfSubject(classes, atoms, request.subject);
         if (id != scene::InvalidClass)
             collectMembers(classes, atoms, id, request, out);
+        // A colon is a call, and a child is not one -- so children are offered
+        // after a dot and not after a colon.
+        if (!request.method)
+            collectChildren(tree, atoms, at, request, out);
         // A subject nothing recognises offers nothing rather than offering the
         // whole world: a list that is always the same is a list people learn to
         // dismiss.
@@ -217,14 +447,7 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
         }
     }
 
-    // Sorted by kind and then by name, so the same prefix always produces the
-    // same list in the same order -- which is what lets somebody learn where a
-    // row will be instead of reading the whole thing every time.
-    std::sort(out.begin(), out.end(), [](const Completion& a, const Completion& b) {
-        if (a.kind != b.kind)
-            return static_cast<core::u8>(a.kind) < static_cast<core::u8>(b.kind);
-        return a.label < b.label;
-    });
+    sortCompletions(out);
 }
 
 } // namespace luaug::app
