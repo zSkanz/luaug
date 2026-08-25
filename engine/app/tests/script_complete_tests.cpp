@@ -493,3 +493,80 @@ TEST_CASE("a local whose assignment is commented does not derail the walk")
     const std::string source = "local W = game:GetService(\"Workspace\") -- the world\nW.";
     CHECK(has(at(fixture, tree, source), "Baseplate"));
 }
+
+TEST_CASE("Luau's own libraries are offered, and from the pin rather than a guess")
+{
+    Reflection fixture;
+
+    const std::vector<Completion> maths = at(fixture, "local x = math.");
+    CHECK(has(maths, "floor"));
+    CHECK(has(maths, "clamp"));
+    // A constant is not a function, and the right-hand column says which. That
+    // distinction is the reason `stdlib.h` carries a type at all.
+    const Completion* pi = find(maths, "pi");
+    REQUIRE(pi != nullptr);
+    CHECK(pi->detail == "number");
+    CHECK(pi->kind == CompletionKind::Library);
+
+    CHECK(has(at(fixture, "string."), "format"));
+    CHECK(has(at(fixture, "table.cr"), "create"));
+    CHECK(has(at(fixture, "buffer.readf"), "readf32"));
+    CHECK(has(at(fixture, "coroutine."), "yield"));
+    CHECK(has(at(fixture, "utf8."), "charpattern"));
+    CHECK(has(at(fixture, "bit32.b"), "band"));
+    CHECK(has(at(fixture, "vector."), "magnitude"));
+    CHECK(has(at(fixture, "debug."), "traceback"));
+
+    // **The engine's own scheduler, which is not Luau's** and therefore not in
+    // the list the VM is checked against.
+    CHECK(has(at(fixture, "task."), "wait"));
+}
+
+TEST_CASE("os is this engine's os and not the one Luau ships")
+{
+    Reflection fixture;
+
+    const std::vector<Completion> rows = at(fixture, "os.");
+    CHECK(has(rows, "clock"));
+    CHECK(has(rows, "time"));
+    CHECK(has(rows, "date"));
+    // Taken off by `removeUnsafeGlobals`. Offering it would be offering
+    // something no script in this engine can call.
+    CHECK_FALSE(has(rows, "difftime"));
+    CHECK(rows.size() == 3);
+}
+
+TEST_CASE("the free globals include Luau's, not only the engine's")
+{
+    Reflection fixture;
+
+    CHECK(has(at(fixture, "typeo"), "typeof"));
+    CHECK(has(at(fixture, "pca"), "pcall"));
+    CHECK(has(at(fixture, "asse"), "assert"));
+    CHECK(has(at(fixture, "setmet"), "setmetatable"));
+    // The engine's, beside them.
+    CHECK(has(at(fixture, "wor"), "workspace"));
+    CHECK(has(at(fixture, "pri"), "print"));
+    // And the library tables themselves, so a prefix finds the namespace.
+    CHECK(has(at(fixture, "mat"), "math"));
+
+    // **Absent because the sandbox removes them** (`sandbox.cpp`). A completion
+    // that offered `getfenv` would be offering a name that is nil, and worse:
+    // mentioning either of those two disables `safeenv` for the whole module.
+    CHECK_FALSE(has(at(fixture, "getf"), "getfenv"));
+    CHECK_FALSE(has(at(fixture, "loads"), "loadstring"));
+    CHECK_FALSE(has(at(fixture, "spa"), "spawn"));
+}
+
+TEST_CASE("a library is answered with no world at all")
+{
+    // The half that has nothing to do with a project: `math.` is `math.`
+    // whether or not anything is open, and the earlier cases prove it by using
+    // the world-free `at` overload throughout.
+    Reflection fixture;
+    Tree tree(fixture);
+    CHECK(has(at(fixture, tree, "math.fl"), "floor"));
+    // And a colon is not how a library is reached, so it offers nothing rather
+    // than pretending `math` is an object.
+    CHECK(at(fixture, tree, "math:fl").empty());
+}

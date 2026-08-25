@@ -1,9 +1,11 @@
 #include "luaug/script/sandbox.h"
+#include "luaug/script/stdlib.h"
 
 #include <lua.h>
 #include <luacode.h>
 #include <lualib.h>
 
+#include <algorithm>
 #include <doctest/doctest.h>
 #include <ostream>
 #include <string>
@@ -36,6 +38,52 @@ struct SandboxedVm
 
     SandboxedVm(const SandboxedVm&) = delete;
     SandboxedVm& operator=(const SandboxedVm&) = delete;
+
+    // The keys of a global table, as the VM has them. Sorted, so the caller can
+    // compare two lists rather than two orders -- `pairs` makes no promise about
+    // the second, and R10 would forbid relying on it if it did.
+    [[nodiscard]] std::vector<std::string> keysOf(const std::string& table)
+    {
+        const std::string source = "local out = {} for k in pairs(" + table +
+                                   ") do table.insert(out, k) end table.sort(out) return table.concat(out, \",\")";
+        const std::string joined = evaluateString(source);
+
+        std::vector<std::string> keys;
+        std::size_t at = 0;
+        while (at <= joined.size() && !joined.empty()) {
+            const std::size_t comma = joined.find(',', at);
+            keys.push_back(joined.substr(at, comma == std::string::npos ? std::string::npos : comma - at));
+            if (comma == std::string::npos)
+                break;
+            at = comma + 1;
+        }
+        return keys;
+    }
+
+    // Runs a chunk whose result is a string. Shares the loader below rather than
+    // duplicating it, because there is exactly one way to run a chunk here and
+    // two would drift.
+    [[nodiscard]] std::string evaluateString(const std::string& source)
+    {
+        size_t size = 0;
+        lua_CompileOptions options{};
+        char* bytecode = luau_compile(source.data(), source.size(), &options, &size);
+        REQUIRE(bytecode != nullptr);
+
+        lua_State* thread = lua_newthread(state);
+        luaL_sandboxthread(thread);
+
+        const int loaded = luau_load(thread, "@test", bytecode, size, 0);
+        std::free(bytecode);
+        REQUIRE(loaded == LUA_OK);
+
+        const int status = lua_resume(thread, nullptr, 0);
+        REQUIRE(status == LUA_OK);
+        REQUIRE(lua_isstring(thread, -1));
+        std::string result = lua_tostring(thread, -1);
+        lua_pop(state, 1);
+        return result;
+    }
 
     // Runs a chunk and returns its single boolean result. Everything below
     // asserts from INSIDE the VM: checking the C++ list against itself would
@@ -197,4 +245,48 @@ TEST_CASE("the sandbox freezes what it is supposed to freeze")
     // The string metatable, which `luaL_sandbox` does handle -- the one thing
     // its name promises that it actually delivers.
     CHECK(vm.raises("getmetatable(\"\").__index = {}"));
+}
+
+// **The list the editor offers, checked against the VM that has to answer for
+// it** (`stdlib.h`). Both directions, because either one alone is half a test:
+// a name this claims and the VM lacks is a completion that inserts something
+// broken, and a name the VM has and this lacks is a completion that silently
+// stopped keeping up with the pin.
+TEST_CASE("every name the standard-library list claims is really there")
+{
+    SandboxedVm vm;
+
+    for (const StdName& global : stdGlobals()) {
+        CAPTURE(std::string(global.name));
+        CHECK(vm.evaluate("type(" + std::string(global.name) + ") == \"" + std::string(global.type) + "\""));
+    }
+
+    for (const StdLibrary& library : stdLibraries()) {
+        CAPTURE(std::string(library.name));
+        CHECK(vm.evaluate("type(" + std::string(library.name) + ") == \"table\""));
+        for (const StdName& member : library.members) {
+            const std::string path = std::string(library.name) + "." + std::string(member.name);
+            CAPTURE(path);
+            CHECK(vm.evaluate("type(" + path + ") == \"" + std::string(member.type) + "\""));
+        }
+    }
+}
+
+TEST_CASE("the standard-library list has everything the VM has")
+{
+    // The direction that catches a Luau bump. Gaining `math.fma` would leave the
+    // editor a version behind and nothing would say so -- unless this fails,
+    // which is the whole reason a written list is allowed to exist at all.
+    SandboxedVm vm;
+
+    for (const StdLibrary& library : stdLibraries()) {
+        const std::vector<std::string> keys = vm.keysOf(std::string(library.name));
+        REQUIRE_FALSE(keys.empty());
+        for (const std::string& key : keys) {
+            CAPTURE(std::string(library.name) + "." + key);
+            const bool listed = std::any_of(library.members.begin(), library.members.end(),
+                                            [&key](const StdName& member) { return member.name == key; });
+            CHECK(listed);
+        }
+    }
 }

@@ -3,6 +3,7 @@
 #include "luaug/core/name_atom.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/world.h"
+#include "luaug/script/stdlib.h"
 
 #include <algorithm>
 #include <array>
@@ -47,11 +48,22 @@ constexpr std::array<std::string_view, 21> kKeywords{
     "local", "nil",   "not", "or",   "repeat", "return", "then",  "true", "until",    "while",
 };
 
-// The names a script starts with. Not read from anywhere because they are not
-// declared anywhere -- the sandbox installs them, and a list nobody generated is
-// a list that has to be written down once.
-constexpr std::array<std::string_view, 10> kGlobals{
-    "game", "workspace", "script", "Instance", "Vector3", "CFrame", "Color3", "Enum", "task", "require",
+// **What the ENGINE puts in front of a script**, as opposed to what Luau does.
+// Every one of these is a `lua_setglobal` or a `luaL_register` in
+// `engine/script/src/` -- the world globals, the datatype namespaces, and the
+// three functions the runtime installs. Luau's own globals are not here: they
+// come from `script::stdGlobals()`, which is checked against the VM.
+constexpr std::array<std::string_view, 21> kEngineGlobals{
+    "game",     "workspace", "script",    "print",  "warn",          "require", "task",
+    "Instance", "Enum",      "Vector3",   "CFrame", "Color3",        "Vector2", "UDim",
+    "UDim2",    "Rect",      "TweenInfo", "Signal", "RaycastParams", "Random",  "Content",
+};
+
+// `task` is the engine's library rather than Luau's, so it is not in
+// `stdLibraries()` and its five names are written here beside the global that
+// names it. Verified by the conformance specs, which call every one of them.
+constexpr std::array<std::string_view, 5> kTaskMembers{
+    "spawn", "defer", "delay", "wait", "cancel",
 };
 
 void push(std::vector<Completion>& out, const CompletionRequest& request, std::string label, std::string detail,
@@ -501,6 +513,26 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
     if (request.quoted == CompletionQuoted::Other)
         return;
 
+    // **A Luau library is not a class and has no instance**, so it is answered
+    // before either is looked for. `math.` is `math.`, in every project, whether
+    // or not a world is open.
+    if (request.joined && !request.method && request.path.size() == 1) {
+        if (request.path[0] == "task") {
+            for (const std::string_view member : kTaskMembers)
+                push(out, request, std::string(member), "function", "", CompletionKind::Library);
+            sortCompletions(out);
+            return;
+        }
+        for (const script::StdLibrary& library : script::stdLibraries()) {
+            if (library.name != request.path[0])
+                continue;
+            for (const script::StdName& member : library.members)
+                push(out, request, std::string(member.name), std::string(member.type), "", CompletionKind::Library);
+            sortCompletions(out);
+            return;
+        }
+    }
+
     if (request.joined) {
         // **The instance first, its class second.** A resolved path knows both
         // -- what the thing IS and what is inside it -- and a class name alone
@@ -525,8 +557,17 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
     else {
         for (const std::string_view keyword : kKeywords)
             push(out, request, std::string(keyword), "keyword", "", CompletionKind::Keyword);
-        for (const std::string_view global : kGlobals)
+        for (const std::string_view global : kEngineGlobals)
             push(out, request, std::string(global), "global", "", CompletionKind::Global);
+        // Luau's own: `typeof`, `pcall`, `assert`, `_VERSION` -- the names
+        // somebody types most and the ones an engine-only list would have left
+        // out entirely.
+        for (const script::StdName& global : script::stdGlobals())
+            push(out, request, std::string(global.name), std::string(global.type), "", CompletionKind::Global);
+        // And the library tables themselves, so `mat` finds `math`.
+        push(out, request, "task", "library", "", CompletionKind::Library);
+        for (const script::StdLibrary& library : script::stdLibraries())
+            push(out, request, std::string(library.name), "library", "", CompletionKind::Library);
 
         // Every class the engine ships, so `Instance.new("Par` finds `Part` --
         // and so does somebody typing a service's name.

@@ -169,6 +169,30 @@ stays on the right side of it.
 its own: `t:GetChildren().` used to fall through to the keyword list, and a list
 of every reserved word in the language under a dot is never the answer.
 
+**And Luau's own surface is offered too** -- `typeof`, `pcall`, `assert`,
+`math.floor`, `string.format`, `table.create`, `buffer.readf32`, all of it.
+That list lives in `engine/script/include/luaug/script/stdlib.h`, beside the
+sandbox rather than beside the editor, because **it is a fact about the VM**:
+the script module owns the sandbox, a test there can boot one, and `engine/app`
+already depends on it.
+
+**It is written down, and that needs an argument.**
+`api/defs/libraries.api.luau` refuses to declare Luau's libraries in as many
+words -- "re-declaring them would make this file a second source of truth for
+something the pin already fixes" -- and the same is true here, with one
+difference: the editor has to OFFER these names and cannot boot a VM to answer a
+keystroke. So the drift is caught rather than prevented. `sandbox_tests.cpp`
+stands a real sandboxed VM up and checks the list against it **in both
+directions**: every name exists with the type it claims, and every key of every
+library table is named. Bumping the Luau pin and gaining a function fails a test
+instead of quietly leaving the editor a version behind.
+
+**The list is this engine's surface, not stock Luau's.** `os` carries three
+names because `removeUnsafeGlobals` takes `difftime` off; `getfenv`, `setfenv`,
+`newproxy` and `loadstring` are not offered because they are not there. That is
+the whole reason the list is checked against THIS sandbox rather than against
+Luau's documentation.
+
 Children are **one row per name**: six parts called `Ground` insert the same six
 characters, and a member wins a collision because `workspace.Name` is the
 property. A colon offers no children at all, because a child is not callable.

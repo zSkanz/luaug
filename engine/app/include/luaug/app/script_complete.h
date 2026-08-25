@@ -13,6 +13,17 @@
 // to a class and lists its members through the hierarchy, plus the identifiers
 // the file already contains and the keywords.
 //
+// **And Luau's own surface is offered too**, from `script::stdGlobals` and
+// `script::stdLibraries` -- `typeof`, `pcall`, `math.floor`, `string.format`,
+// `table.create`, `buffer.readf32`, all of it. That list lives beside the
+// sandbox rather than here because it is a fact about the VM, and it is checked
+// against a real sandboxed VM in both directions so that bumping the Luau pin
+// fails a test instead of quietly leaving this a version behind.
+//
+// **It is this engine's surface, not stock Luau's**: `os` carries three names
+// because `removeUnsafeGlobals` takes `difftime` off, and `getfenv`, `setfenv`
+// and `newproxy` are not offered because they are not there.
+//
 // **And the WORLD is the other half of it**, which is the half a type checker
 // would not have. `Workspace.MainCamera` is not a fact about the `Workspace`
 // class -- it is a fact about this project's tree, sitting in memory two panels
@@ -62,6 +73,10 @@ enum class CompletionKind : core::u8
     Class,
     Service,
     Global,
+    // A member of one of Luau's own libraries, or of the library table itself.
+    // Its own kind rather than `Method`, because `math.floor` is not reached
+    // off an object and the casing rule (ADR 0034) is what says so.
+    Library,
     // **A child of the resolved instance**, by the name it has in the tree
     // right now. The one kind of row nothing but a live world can produce.
     Instance,

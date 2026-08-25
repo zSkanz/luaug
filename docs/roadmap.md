@@ -1958,6 +1958,13 @@ tab has to edit one thing.
   something (`game:GetService("AudioService").`) or a local somebody assigned
   earlier. One row per name, and a string that is nobody's argument offers
   nothing.
+- **Luau's own surface, from the pin.** `typeof`, `pcall`, `assert`,
+  `math.floor`, `string.format`, `table.create`, `buffer.readf32`, and the
+  library names themselves. Written down in `engine/script` because it is a fact
+  about the VM, and checked against a real sandboxed VM in both directions -- so
+  a Luau bump fails a test rather than leaving the editor a version behind. It
+  is THIS engine's surface: `os` has three names, and `getfenv` is not offered
+  because it is not there.
 - **The gestures a code pane is expected to have.** Ctrl and the wheel zoom the
   text, with the percentage and `Ctrl+0` shown in the corner for as long as it
   has just changed -- a zoom with no readout is a state somebody can get into

@@ -189,6 +189,19 @@ the click -- reported as "double-clicking in the middle of `require` selects up
 to the `u`". A drag now knows what it is extending BY, and a word-wise drag
 grows a word at a time in either direction.
 
+**Finding 17 -- writing a list from the library's own source is not the same as
+reading it from the VM, and the test found both ways it can differ.** The
+standard-library surface was transcribed from
+`third_party/luau/VM/src/l*lib.cpp` rather than remembered, which felt
+authoritative and was wrong twice. `math`'s constants -- `e`, `nan`, `phi`,
+`sqrt2`, `tau` -- are set with `lua_setfield` rather than listed in the
+registration table, so reading the table missed five names. And
+`buffer.readinteger` / `writeinteger` appear in that file inside a block this pin
+does not build, so a careful read of the source would have offered two functions
+no script can call. **A list checked against the artefact rather than against its
+source is the only kind worth writing**, and the check runs in both directions
+so a Luau bump fails rather than quietly ages the editor.
+
 **Finding 16 -- `rebuilt.empty()` cannot tell "nothing yet" from "a blank
 line".** Moving a line into the empty last line of a file swallowed the final
 newline, because the join skipped the separator it had already decided not to
@@ -219,6 +232,7 @@ Filled 2026-08-24, before human review.
 | Completion answers from the reflection tables | **Green.** Eleven cases, including inherited members, the IDL's prose, case-insensitive filtering, and the absence it deliberately has. |
 | Eight syntax tokens clear 4.5:1 | **Green.** Sixteen assertions (8 tokens × 2 themes) against the code pane's ground, by the same `contrastRatio` the interface tokens use. |
 | A line moves and one undo takes it back | **Green.** Four cases in `script_document_tests.cpp`: a swap in both directions, a block that keeps its order, the top and bottom answering false rather than doing nothing, and the blank last line of a file surviving a move into it. |
+| The standard library is offered, and it is OURS | **Green, and checked against a real VM.** `sandbox_tests.cpp` boots a sandboxed VM and checks `stdlib.h` both ways: 205 names exist with the type they claim, and every key of all ten library tables is named. Plus four cases in `script_complete_tests.cpp`, including `os` having exactly three members and `getfenv`, `loadstring` and `spawn` being absent because the sandbox removes them. |
 | Completion answers from the TREE | **Green.** Twelve more cases: a path through the world, the whole chain walked from `game`, `script.Parent`, a name inside `WaitForChild("`, `GetService("` offering only services, a colon offering no children, one row per name over four instances, and a plain string offering nothing. |
 | A save writes a file and disturbs nothing | **Green, by a person and by a picture.** The editor after Ctrl+S is pixel-identical to the editor before it: same caret, same selection, same tabs, same tree. Verified by driving the real window twice and comparing. |
 | A person writes a script in it | **Partly, and honestly.** The pictures below are the editor open on a real project with a script in a tab, coloured, with a breakpoint armed and the Debug panel showing it. **What is not pictured is a stop**: the debugger's behaviour rests on the eight headless cases, and a photograph of it stopped with the locals showing needs somebody to press play. |
