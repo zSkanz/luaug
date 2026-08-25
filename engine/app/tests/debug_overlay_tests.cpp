@@ -288,6 +288,46 @@ TEST_CASE("on a real device, F3 flips the panel")
             CHECK(atlas.find(luaug::app::icons::OverlayStampBase, 16u).valid);
             // The theme's own numbers, read rather than assumed.
             CHECK(static_cast<double>(atlas.overlay().scale) == doctest::Approx(0.40));
+
+            // --- Falling back UP the hierarchy ----------------------------
+            //
+            // **A leaf class does not owe the art set a drawing.** A project
+            // that writes `MyDoor extends Part` should see a part, not the
+            // generic instance -- which is the icon for "I have no idea what
+            // this is", and the tree does have an idea.
+            {
+                luaug::core::AtomTable atoms;
+                luaug::scene::ClassRegistry classes;
+                const luaug::scene::ClassId partClass =
+                    classes.registerClass({.name = atoms.intern("Part"), .defaultName = atoms.intern("Part")});
+                const luaug::scene::ClassId doorClass = classes.registerClass(
+                    {.name = atoms.intern("MyDoor"), .super = partClass, .defaultName = atoms.intern("MyDoor")});
+                // Nothing in between draws either, so the walk has to pass
+                // through a class the theme has never heard of.
+                const luaug::scene::ClassId trapClass =
+                    classes.registerClass({.name = atoms.intern("MyTrapDoor"),
+                                           .super = doorClass,
+                                           .defaultName = atoms.intern("MyTrapDoor")});
+
+                CHECK(luaug::app::classIconFor(&atlas, classes, atoms, partClass) == "class.Part");
+                CHECK(luaug::app::classIconFor(&atlas, classes, atoms, doorClass) == "class.Part");
+                CHECK(luaug::app::classIconFor(&atlas, classes, atoms, trapClass) == "class.Part");
+
+                // A class with nothing drawn anywhere above it lands on the
+                // generic instance, which is the honest end of the walk.
+                const luaug::scene::ClassId loneClass =
+                    classes.registerClass({.name = atoms.intern("MyThing"), .defaultName = atoms.intern("MyThing")});
+                CHECK(luaug::app::classIconFor(&atlas, classes, atoms, loneClass) == luaug::app::icons::ClassInstance);
+
+                // From a NAME, which is what a stamp file carries. A name this
+                // build has no class for keeps its own id: a theme may draw a
+                // class a plugin adds, and the atlas falls back if it does not.
+                CHECK(luaug::app::classIconFor(&atlas, &classes, &atoms, "MyDoor") == "class.Part");
+                CHECK(luaug::app::classIconFor(&atlas, &classes, &atoms, "NotAClassHere") == "class.NotAClassHere");
+                // And with no registry at all -- the F3 overlay over a running
+                // game hands one panel a world and another none.
+                CHECK(luaug::app::classIconFor(&atlas, nullptr, nullptr, "Part") == "class.Part");
+            }
             // --- The palette ---------------------------------------------
             //
             // The tint says what KIND of thing an icon is and never which

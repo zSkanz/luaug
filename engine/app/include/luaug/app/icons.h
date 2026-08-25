@@ -3,6 +3,7 @@
 #include "luaug/core/math.h"
 #include "luaug/core/types.h"
 #include "luaug/rhi/types.h"
+#include "luaug/scene/class_registry.h"
 
 #include <filesystem>
 #include <optional>
@@ -259,5 +260,32 @@ private:
     rhi::TextureHandle m_texture;
     u32 m_atlasSize = 0;
 };
+
+// The icon id for a class, falling back UP the class hierarchy before falling
+// back to `Instance`.
+//
+// **A leaf class should not owe the art set a drawing.** `HingeConstraint`,
+// `BallSocketConstraint` and `FixedConstraint` are three ways of saying
+// "constraint" and the set has drawn none of them, so all three came out as the
+// generic instance -- which is the icon for "I have no idea what this is", and
+// the tree did have an idea. Walking up answers `Constraint` for all three the
+// day one of them is drawn, and answers `Part` for a project's own class that
+// extends one, which is what somebody who wrote `MyDoor extends Part` expects.
+//
+// It is the rule the content browser already follows from the other direction --
+// a stamp wears the icon of the instance it is a file of -- said once, where
+// both can reach it.
+//
+// Here rather than beside the panel that draws, because it is a MAPPING between
+// two vocabularies and neither of them is ImGui: given a class, which drawing.
+// A test can ask it without a window.
+[[nodiscard]] std::string classIconFor(const IconAtlas* icons, const scene::ClassRegistry& classes,
+                                       const core::AtomTable& atoms, scene::ClassId classId);
+
+// The same, from a class NAME, which is what a stamp file carries: the browser
+// reads the root class out of it and never sees an instance. A name this build
+// has no class for answers `class.<name>`, so a theme may still draw it.
+[[nodiscard]] std::string classIconFor(const IconAtlas* icons, const scene::ClassRegistry* classes,
+                                       const core::AtomTable* atoms, std::string_view className);
 
 } // namespace luaug::app

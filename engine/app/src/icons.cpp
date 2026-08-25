@@ -13,6 +13,8 @@
 #include <cstring>
 #include <optional>
 
+#include "icon_ids.gen.h"
+
 namespace luaug::app {
 namespace {
 
@@ -504,6 +506,45 @@ IconSprite IconAtlas::find(std::string_view id, u32 size) const
         return {};
 
     return it->second.sprites[level];
+}
+
+std::string classIconFor(const IconAtlas* icons, const scene::ClassRegistry& classes, const core::AtomTable& atoms,
+                         scene::ClassId classId)
+{
+    for (scene::ClassId cursor = classId; cursor != scene::InvalidClass;) {
+        const scene::ClassDescriptor* descriptor = classes.find(cursor);
+        if (descriptor == nullptr)
+            break;
+        std::string candidate = "class." + std::string(atoms.text(descriptor->name));
+        // **`has`, not "draw it and see whether it worked".** The atlas falls
+        // back on its own, so a draw that succeeded says nothing about WHICH
+        // icon it drew -- and the whole question here is which one.
+        if (icons != nullptr && icons->has(candidate))
+            return candidate;
+        cursor = descriptor->super;
+    }
+    return std::string(icons::ClassInstance);
+}
+
+std::string classIconFor(const IconAtlas* icons, const scene::ClassRegistry* classes, const core::AtomTable* atoms,
+                         std::string_view className)
+{
+    if (className.empty())
+        return std::string(icons::ClassInstance);
+    if (classes == nullptr || atoms == nullptr)
+        return "class." + std::string(className);
+
+    // `lookup`, not `intern`: this asks about a class the world already knows,
+    // and interning a name from a stamp file this build has no class for would
+    // grow the atom table once per row per frame.
+    const scene::ClassId found = classes->findId(atoms->lookup(className));
+    if (found == scene::InvalidClass) {
+        // A class this build does not have. The name is still the honest id --
+        // a theme may well draw a class a plugin adds -- and the atlas falls
+        // back if it does not.
+        return "class." + std::string(className);
+    }
+    return classIconFor(icons, *classes, *atoms, found);
 }
 
 } // namespace luaug::app

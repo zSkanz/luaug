@@ -427,23 +427,6 @@ bool iconButton(const IconAtlas* icons, std::string_view id, float size, const c
     return pressed;
 }
 
-// The icon for an instance, which is mechanical: the class's own name with a
-// prefix. A class this build's theme has never heard of falls back, which is
-// what makes a project's own class draw as a generic instance rather than as a
-// hole.
-[[nodiscard]] std::string classIconId(std::string_view className)
-{
-    return "class." + std::string(className);
-}
-
-[[nodiscard]] std::string classIconId(const scene::World& world, core::InstanceId id)
-{
-    const scene::ClassDescriptor* descriptor = world.classes().find(world.classOf(id));
-    if (descriptor == nullptr)
-        return std::string(icons::ClassInstance);
-    return classIconId(world.atoms().text(descriptor->name));
-}
-
 // One step of the content browser's path, as a control that looks like the text
 // it is.
 //
@@ -841,7 +824,7 @@ struct ContentDrag
             // False means there is no atlas at all, which is a build
             // with no icons rather than a class with none, and then
             // the name simply stands where it always did.
-            if (drawIcon(icons, classIconId(candidateName), itemIcon))
+            if (drawIcon(icons, classIconFor(icons, &world.classes(), &world.atoms(), candidateName), itemIcon))
                 ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
             else
                 ImGui::SetCursorPos(itemOrigin);
@@ -1416,7 +1399,8 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 // an ImGui item and has to be placed against the icon's own box
                 // rather than against whatever the cursor is after it.
                 const ImVec2 iconOrigin = ImGui::GetCursorScreenPos();
-                if (drawIcon(icons, classIconId(world, row.id), iconSize, Editor::folderColor(world, row.id))) {
+                if (drawIcon(icons, classIconFor(icons, world.classes(), world.atoms(), world.classOf(row.id)),
+                             iconSize, Editor::folderColor(world, row.id))) {
                     // **The badge goes on the stamp's ROOT and nowhere else.**
                     // Every part of a stamped house is inside a stamped
                     // subtree, and badging all forty of them is noise -- the
@@ -1871,7 +1855,7 @@ void drawInstanceRef(scene::World& world, core::InstanceId root, Inspector& insp
 
         const float rowIcon = ImGui::GetTextLineHeight();
         ImGui::SetCursorPos(origin);
-        if (drawIcon(icons, classIconId(world, candidate), rowIcon))
+        if (drawIcon(icons, classIconFor(icons, world.classes(), world.atoms(), world.classOf(candidate)), rowIcon))
             ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
         else
             ImGui::SetCursorPos(origin);
@@ -1906,7 +1890,7 @@ void drawInstanceRef(scene::World& world, core::InstanceId root, Inspector& insp
             const float rowIcon = ImGui::GetTextLineHeight();
             ImGui::SetCursorPos(origin);
             const ImVec2 iconOrigin = ImGui::GetCursorScreenPos();
-            if (drawIcon(icons, classIconId(entry.rootClass), rowIcon)) {
+            if (drawIcon(icons, classIconFor(icons, &world.classes(), &world.atoms(), entry.rootClass), rowIcon)) {
                 // The same badge the browser and the Explorer wear, for the same
                 // one idea: this row is a file one comes from.
                 drawIconBadge(icons, iconOrigin, rowIcon);
@@ -3279,10 +3263,14 @@ void buildDefaultLayout(ImGuiID dockspace)
 // own icon is the fallback for a stamp whose root this build could not read or
 // has no drawing for; the badge on top is what says "a file one comes from"
 // rather than "the instance itself".
-bool drawContentIcon(const IconAtlas* icons, const ContentEntry& entry, float size, std::optional<core::Color3> tint)
+bool drawContentIcon(const IconAtlas* icons, const scene::World* world, const ContentEntry& entry, float size,
+                     std::optional<core::Color3> tint)
 {
     if (entry.kind == ContentKind::Stamp && !entry.rootClass.empty() &&
-        drawIcon(icons, "class." + entry.rootClass, size, tint)) {
+        drawIcon(icons,
+                 classIconFor(icons, world != nullptr ? &world->classes() : nullptr,
+                              world != nullptr ? &world->atoms() : nullptr, entry.rootClass),
+                 size, tint)) {
         return true;
     }
     return drawIcon(icons, contentKindIcon(entry.kind), size, tint);
@@ -3893,7 +3881,7 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                         ImGui::SetCursorPos(ImVec2(centreX, entryOrigin.y + ImGui::GetStyle().ItemInnerSpacing.y));
                         const ImVec2 iconOrigin = ImGui::GetCursorScreenPos();
                         if (!drawContentThumbnail(tree, entry, entryIcon) &&
-                            drawContentIcon(icons, entry, entryIcon, tint) && entry.kind == ContentKind::Stamp) {
+                            drawContentIcon(icons, world, entry, entryIcon, tint) && entry.kind == ContentKind::Stamp) {
                             drawIconBadge(icons, iconOrigin, entryIcon);
                         }
 
@@ -3915,7 +3903,7 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                         if (drawContentThumbnail(tree, entry, entryIcon)) {
                             entryX += entryIcon + ImGui::GetStyle().ItemInnerSpacing.x;
                         }
-                        else if (drawContentIcon(icons, entry, entryIcon, tint)) {
+                        else if (drawContentIcon(icons, world, entry, entryIcon, tint)) {
                             // **The same badge the Explorer puts on a stamped
                             // instance**, on the file it stamps from. One mark
                             // for one idea: a person who has learned it in the
@@ -4679,7 +4667,7 @@ void drawTabIcons(ImGuiID dockspace, const IconAtlas* icons, const scene::World*
                 // told apart at a glance -- which is the question somebody with
                 // six tabs open actually has.
                 if (world->alive(tab.instance))
-                    id = classIconId(*world, tab.instance);
+                    id = classIconFor(icons, world->classes(), world->atoms(), world->classOf(tab.instance));
                 break;
             }
         }
