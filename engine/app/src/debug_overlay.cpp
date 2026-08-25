@@ -8,6 +8,7 @@
 #include "luaug/app/backends.h"
 #include "luaug/app/icons.h"
 #include "luaug/app/script_editor.h"
+#include "luaug/app/thumbnails.h"
 #include "luaug/app/ui_theme.h"
 #include "luaug/core/build_info.h"
 #include "luaug/core/i18n.h"
@@ -67,6 +68,12 @@ namespace {
 // Main-thread only, like everything else that touches SDL's event queue.
 platform::Window* g_window = nullptr;
 const rhi::IDevice* g_device = nullptr;
+
+// The content browser pictures of pictures, owned by the frame loop -- which is
+// where a command list lives and therefore where the decoding has to happen --
+// and pointed at from here for the same reason `g_device` is: the row that wants
+// one is drawn several call frames below anything holding an overlay.
+ThumbnailCache* g_thumbnails = nullptr;
 
 // What this person chose to look at the engine through (ADR 0056), and what the
 // display said when the window opened.
@@ -2959,10 +2966,9 @@ void buildDefaultLayout(ImGuiID dockspace)
     case ContentKind::Texture:
         return icons::ContentTexture;
     case ContentKind::Audio:
+        return icons::ContentAudio;
     case ContentKind::Font:
-        // No drawing of their own yet, and the generic file is the honest
-        // fallback rather than borrowing a mesh's or a texture's.
-        return icons::ContentOther;
+        return icons::ContentFont;
     case ContentKind::Chunk:
         return icons::ContentChunk;
     case ContentKind::Other:
@@ -2987,6 +2993,64 @@ bool drawContentIcon(const IconAtlas* icons, const ContentEntry& entry, float si
         return true;
     }
     return drawIcon(icons, contentKindIcon(entry.kind), size, tint);
+}
+
+// **A picture row shows the picture.** An icon can say "this is an image"; the
+// file name already said that. Which image it is, is the question somebody
+// scrolling a folder of textures is actually asking, and only the image answers
+// it.
+//
+// Returns false when there is no thumbnail yet -- a first frame, a file still in
+// the decode queue, a file that is not really a picture -- and the caller draws
+// the kind icon, which is what the row looked like before this existed.
+bool drawContentThumbnail(const ContentTree& tree, const ContentEntry& entry, float size)
+{
+    if (g_thumbnails == nullptr || g_device == nullptr || entry.kind != ContentKind::Texture)
+        return false;
+
+    const ThumbnailCache::Thumbnail thumbnail = g_thumbnails->request(tree.absolute(entry));
+    if (!thumbnail.valid())
+        return false;
+
+    SDL_GPUTexture* native = rhi::nativeTexture(*g_device, thumbnail.texture);
+    if (native == nullptr)
+        return false;
+
+    // **Fitted, never stretched, and centred in the box the icon would have
+    // filled.** A 16:9 texture squashed into a square is a thumbnail of a
+    // different picture, and a row whose face is a different height from its
+    // neighbours is a list that looks broken.
+    const float longer = static_cast<float>(std::max(thumbnail.width, thumbnail.height));
+    const float scale = longer > 0.0f ? size / longer : 0.0f;
+    const ImVec2 drawn(static_cast<float>(thumbnail.width) * scale, static_cast<float>(thumbnail.height) * scale);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const ImVec2 min(origin.x + (size - drawn.x) * 0.5f, origin.y + (size - drawn.y) * 0.5f);
+    const ImVec2 max(min.x + drawn.x, min.y + drawn.y);
+
+    // The checkerboard behind it, which is not decoration either: a texture with
+    // an alpha channel drawn straight onto the panel is a texture whose cut-out
+    // parts are indistinguishable from its dark parts. Every tool that shows
+    // images draws this, and it is the only way "transparent" reads as anything
+    // other than "black".
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    const float cell = std::max(4.0f, size * 0.25f);
+    const ImU32 pale = ImGui::ColorConvertFloat4ToU32(ImVec4(0.55f, 0.55f, 0.57f, 1.0f));
+    const ImU32 dark = ImGui::ColorConvertFloat4ToU32(ImVec4(0.38f, 0.38f, 0.40f, 1.0f));
+    draw->AddRectFilled(min, max, pale);
+    draw->PushClipRect(min, max, true);
+    for (int row = 0; min.y + static_cast<float>(row) * cell < max.y; ++row) {
+        for (int column = (row & 1); min.x + static_cast<float>(column) * cell < max.x; column += 2) {
+            const ImVec2 cellMin(min.x + static_cast<float>(column) * cell, min.y + static_cast<float>(row) * cell);
+            draw->AddRectFilled(cellMin, ImVec2(cellMin.x + cell, cellMin.y + cell), dark);
+        }
+    }
+    draw->PopClipRect();
+    draw->AddImage(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)), min, max);
+
+    // The box, not the picture: the caller laid out a square and the next thing
+    // it places has to start after that square whichever shape landed in it.
+    ImGui::Dummy(ImVec2(size, size));
+    return true;
 }
 
 [[nodiscard]] const char* contentKindLabel(ContentKind kind) noexcept
@@ -3533,8 +3597,10 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                         const float centreX = entryOrigin.x + (layout.cell.x - entryIcon) * 0.5f;
                         ImGui::SetCursorPos(ImVec2(centreX, entryOrigin.y + ImGui::GetStyle().ItemInnerSpacing.y));
                         const ImVec2 iconOrigin = ImGui::GetCursorScreenPos();
-                        if (drawContentIcon(icons, entry, entryIcon, tint) && entry.kind == ContentKind::Stamp)
+                        if (!drawContentThumbnail(tree, entry, entryIcon) &&
+                            drawContentIcon(icons, entry, entryIcon, tint) && entry.kind == ContentKind::Stamp) {
                             drawIconBadge(icons, iconOrigin, entryIcon);
+                        }
 
                         const std::string label = elideToWidth(shown, layout.cell.x);
                         const float textX =
@@ -3551,7 +3617,10 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                         float entryX = entryOrigin.x;
                         ImGui::SetCursorPos(ImVec2(entryX, entryOrigin.y + (entryHeight - entryIcon) * 0.5f));
                         const ImVec2 iconOrigin = ImGui::GetCursorScreenPos();
-                        if (drawContentIcon(icons, entry, entryIcon, tint)) {
+                        if (drawContentThumbnail(tree, entry, entryIcon)) {
+                            entryX += entryIcon + ImGui::GetStyle().ItemInnerSpacing.x;
+                        }
+                        else if (drawContentIcon(icons, entry, entryIcon, tint)) {
                             // **The same badge the Explorer puts on a stamped
                             // instance**, on the file it stamps from. One mark
                             // for one idea: a person who has learned it in the
@@ -5357,6 +5426,12 @@ DebugOverlay::~DebugOverlay()
 
     g_window = nullptr;
     g_device = nullptr;
+    g_thumbnails = nullptr;
+}
+
+void DebugOverlay::setThumbnails(ThumbnailCache* thumbnails) noexcept
+{
+    g_thumbnails = thumbnails;
 }
 
 void DebugOverlay::handleEvents(std::span<const platform::Event> events)
@@ -5511,6 +5586,12 @@ DebugOverlay::DebugOverlay(platform::Window&, rhi::IDevice&, Shell, std::string)
 DebugOverlay::~DebugOverlay() = default;
 
 void DebugOverlay::handleEvents(std::span<const platform::Event>)
+{}
+
+// A shipping build has no content browser, so there is nothing to show a
+// picture in. The frame loop still owns a cache and still offers it, which is
+// what keeps that loop free of an #ifdef.
+void DebugOverlay::setThumbnails(ThumbnailCache*) noexcept
 {}
 
 void DebugOverlay::render(rhi::ICmdList&, rhi::TextureHandle, const Frame&)

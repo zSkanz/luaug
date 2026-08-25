@@ -35,6 +35,7 @@ luaug_add_module(app
         src/editor.cpp
         src/content_tree.cpp
         src/icons.cpp
+        src/thumbnails.cpp
         src/dev_control.cpp
     DEPS
         asset
@@ -198,6 +199,7 @@ luaug_add_module_tests(app
         tests/two_worlds_tests.cpp
         tests/project_config_tests.cpp
         tests/ui_theme_tests.cpp
+        tests/thumbnail_tests.cpp
         tests/script_document_tests.cpp
         tests/script_editor_tests.cpp
         tests/script_complete_tests.cpp
@@ -208,6 +210,13 @@ if(LUAUG_BUILD_TESTS)
     # prove every key the host raises exists in i18n/en.json.
     target_compile_definitions(luaug_app_tests PRIVATE
         LUAUG_TEST_CATALOG="${CMAKE_SOURCE_DIR}/i18n/en.json")
+
+    # One real encoded picture, so the thumbnail cache can be asserted end to
+    # end -- read, decoded, resampled, uploaded -- rather than only on the paths
+    # that fail. Borrowed from `asset` rather than copied: two copies of one
+    # fixture is two things to keep in step for no gain.
+    target_compile_definitions(luaug_app_tests PRIVATE
+        LUAUG_TEST_IMAGE="${CMAKE_SOURCE_DIR}/engine/asset/tests/data/checker.png")
 
     # Gate: --version must report the pin and the ABI constants (ADR 0031).
     # Asserted on the real binary rather than in-process, so it also proves the

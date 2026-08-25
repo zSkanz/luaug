@@ -23,6 +23,7 @@
 #include "luaug/app/screenshot.h"
 #include "luaug/app/soak.h"
 #include "luaug/app/streaming_host.h"
+#include "luaug/app/thumbnails.h"
 #include "luaug/app/ui_text.h"
 #include "luaug/app/world_host.h"
 #include "luaug/asset/content.h"
@@ -493,6 +494,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // that has a command list -- uploading a texture is one, so this cannot be
     // done before the loop.
     IconAtlas iconAtlas;
+    // The content browser pictures of pictures. Owned here rather than by the
+    // overlay because decoding one needs a command list, and this is the loop
+    // that has one -- the browser asks while it draws and this answers between
+    // frames.
+    ThumbnailCache thumbnails;
     // What was last written to `.luaug/editor.json`, so the write happens on a
     // change rather than every frame.
     std::string rememberedScene;
@@ -2366,12 +2372,27 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // -- which a golden records faithfully and a person notices as a
             // flicker they cannot reproduce.
             meshCache.beginFrame(*device);
-            if (renderer != nullptr && renderer->valid())
-                meshLoader.syncPrimitives(*device, *cmd, host->world(), meshCache, meshLibrary);
-            if (renderer != nullptr && renderer->valid())
-                (void)meshLoader.syncTextures(*device, *cmd, host->world(), textureLibrary);
-            if (renderer != nullptr && renderer->valid())
-                if (meshLoader.sync(*device, *cmd, host->world(), host->workspace(), meshCache, meshLibrary) > 0 &&
+
+            // **Every world that can be drawn, not just the game's** (D099).
+            // The editor has two -- the game's, and the stage a stamp opens onto
+            // -- and `extract` below already knows that. The loader did not: it
+            // read `host->world()` and nothing else, so a `MeshPart` or a
+            // `Material` that existed only on the stage had no mesh uploaded and
+            // no map loaded, and the stamp being edited drew as untextured
+            // geometry. The material preview is where this is most visible,
+            // because a material with four maps and none of them loaded is a
+            // grey ball, which looks exactly like a material that does not work.
+            //
+            // Both, rather than "whichever is on screen", because the libraries
+            // are shared and keyed by content: loading the game's meshes while a
+            // stamp is open is what makes closing the stamp instant instead of a
+            // frame of missing geometry.
+            const auto loadFor = [&](scene::World& world, core::InstanceId workspace) {
+                if (renderer == nullptr || !renderer->valid())
+                    return;
+                meshLoader.syncPrimitives(*device, *cmd, world, meshCache, meshLibrary);
+                (void)meshLoader.syncTextures(*device, *cmd, world, textureLibrary);
+                if (meshLoader.sync(*device, *cmd, world, workspace, meshCache, meshLibrary) > 0 &&
                     host->physics() != nullptr) {
                     // A mesh finished loading, so the physics mirror can be told
                     // what it collides as. Pushed from here because this is the
@@ -2383,6 +2404,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                             host->physics()->setCollisionPoints(content, entry.positions);
                     });
                 }
+            };
+            loadFor(host->world(), host->workspace());
+            if (Editor::Stage* const openStage = stageOf(); openStage != nullptr)
+                loadFor(openStage->world(), openStage->workspace());
 
             // Extraction happens once, at a known moment, from a world that is
             // between ticks (ADR 0027). Rendering never walks the ECS.
@@ -2581,6 +2606,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 else
                     core::logText(core::LogLevel::Warn, iconAtlas.status());
             }
+            // What the browser asked for while it drew LAST frame, answered
+            // here, where a copy is legal -- so a row that showed its icon on
+            // the frame it appeared shows the picture on the next one. A shell
+            // with no browser never asks, and this walks an empty list.
+            if (options.editor)
+                thumbnails.flush(*device, *cmd);
             if (uiRenderer.valid())
                 // The atlas first: `buildUiGeometry` has already written UVs
                 // into it, and uploading after the draw would show this frame's
@@ -2687,6 +2718,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 if (options.editor) {
                     overlay->setEditorTarget(&editor, viewportTarget.texture());
                     overlay->setIcons(&iconAtlas);
+                    overlay->setThumbnails(&thumbnails);
                     overlay->setScriptEditor(&scripts);
                 }
                 overlay->render(*cmd, options.editor && present.valid() ? present : target, frame);
@@ -2852,6 +2884,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     uiRenderer.destroy(*device);
     debugRenderer.destroy(*device);
     iconAtlas.destroy(*device);
+    thumbnails.destroy(*device);
     if (offscreen.valid())
         device->destroy(offscreen);
     if (window != nullptr)

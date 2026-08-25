@@ -43,6 +43,7 @@ class AudioSystem;
 
 namespace luaug::app {
 class IconAtlas;
+class ThumbnailCache;
 class ScriptEditor;
 class StreamingHost;
 } // namespace luaug::app
@@ -185,6 +186,14 @@ public:
     // not a broken one: the atlas is built on the first frame that has a
     // command list, and every panel falls back to text until it is.
     void setIcons(IconAtlas* icons) noexcept { icons_ = icons; }
+
+    // Where the content browser gets a picture of a picture, or null for a
+    // shell that has no GPU to put one on. Null is legal and draws the icon.
+    //
+    // **Owned by the frame loop, not by this.** Decoding and uploading need a
+    // live command list, and this class is handed one nowhere -- so the browser
+    // asks while it draws and the loop answers between frames.
+    void setThumbnails(ThumbnailCache* thumbnails) noexcept;
 
     // What the shell asked for while it drew, taken by the frame loop and reset.
     // Draining rather than reading, so a command cannot be acted on twice
