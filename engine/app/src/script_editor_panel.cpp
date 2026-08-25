@@ -139,6 +139,13 @@ void encodeUtf8(unsigned int codepoint, std::string& out)
     }
 }
 
+// **Which pane a drag belongs to, if any.** A pane keeps ImGui's active id while
+// the caret is in it, so without this it extended its selection on any drag
+// anywhere -- clicking a tab at the bottom of the window selected everything
+// between the caret and the tab. A drag belongs to the pane whose press started
+// inside it, and to nothing else.
+ImGuiID g_dragging = 0;
+
 // Defined with the find bar below, and declared here because a key binding needs
 // it before the bar does.
 void stepMatch(OpenScript& tab, bool forward);
@@ -731,22 +738,32 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
     const bool hovered = ImGui::ItemHoverable(bounds, id, 0);
     bool active = ImGui::GetActiveID() == id;
 
+    // The gutter is a different target from the text: clicking a line number
+    // arms a breakpoint and must not move the caret, which is what every editor
+    // does and what stops a breakpoint from throwing away a selection.
+    const bool overGutter = hovered && ImGui::GetIO().MousePos.x < origin.x + ImGui::GetScrollX() + m.gutter;
+
     if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         ImGui::SetActiveID(id, window);
         ImGui::SetFocusID(id, window);
         ImGui::FocusWindow(window);
         active = true;
-        const Position at = hitTest(tab.document, m, textOrigin, ImGui::GetIO().MousePos);
-        if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-            const Range word = tab.document.wordAt(at);
-            tab.caret.anchor = word.begin;
-            tab.caret.head = word.end;
-        }
-        else {
-            placeCaret(tab, at, ImGui::GetIO().KeyShift);
+        if (!overGutter) {
+            g_dragging = id;
+            const Position at = hitTest(tab.document, m, textOrigin, ImGui::GetIO().MousePos);
+            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                const Range word = tab.document.wordAt(at);
+                tab.caret.anchor = word.begin;
+                tab.caret.head = word.end;
+            }
+            else {
+                placeCaret(tab, at, ImGui::GetIO().KeyShift);
+            }
         }
     }
-    if (active && ImGui::IsMouseDown(ImGuiMouseButton_Left) && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f))
+    if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) && g_dragging == id)
+        g_dragging = 0;
+    if (g_dragging == id && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f))
         tab.caret.head = hitTest(tab.document, m, textOrigin, ImGui::GetIO().MousePos);
 
     if (active) {
@@ -853,14 +870,32 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
         }
     }
 
+    // **The view follows the caret, and only when the caret moved.** Ctrl+End in
+    // a long file otherwise put the caret at the bottom of a document still
+    // showing its first page.
+    if (!(tab.caret.head == tab.shownCaret)) {
+        tab.shownCaret = tab.caret.head;
+        const float caretTop = static_cast<float>(tab.caret.head.line) * m.lineHeight;
+        if (caretTop < scroll)
+            ImGui::SetScrollY(caretTop);
+        else if (caretTop + m.lineHeight > scroll + paneHeight)
+            ImGui::SetScrollY(caretTop + m.lineHeight - paneHeight);
+
+        const float caretX =
+            static_cast<float>(tab.document.cellOf(tab.caret.head.line, tab.caret.head.column)) * m.advance;
+        const float scrollX = ImGui::GetScrollX();
+        if (caretX < scrollX)
+            ImGui::SetScrollX(std::max(0.0f, caretX - m.advance * 4.0f));
+        else if (caretX + m.gutter + m.advance > scrollX + paneWidth)
+            ImGui::SetScrollX(caretX + m.gutter + m.advance - paneWidth);
+    }
+
     drawCompletions(tab, m, textOrigin);
 
     // A gutter click arms or disarms a breakpoint. Recorded rather than acted
     // on: the debugger has to be told, and it lives a frame away.
-    if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-        ImGui::GetIO().MousePos.x < origin.x + ImGui::GetScrollX() + m.gutter) {
+    if (overGutter && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
         out.toggleBreakpointLine = hitTest(tab.document, m, textOrigin, ImGui::GetIO().MousePos).line;
-    }
 
     ImGui::EndChild();
 }
@@ -869,6 +904,16 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
 
 void drawDebugPanel(ScriptEditor& editor, DebugView& debug, ScriptEditorCommands& out, bool& open)
 {
+    // **Beside the Console, even in a layout written before this panel
+    // existed.** `buildDefaultLayout` docks it for a fresh arrangement, but a
+    // saved `.ini` has no entry for a window that did not exist when it was
+    // written -- so the panel appeared floating over the Explorer. Asking the
+    // Console where it lives puts this in the same node without throwing away
+    // an arrangement somebody chose.
+    if (const ImGuiWindow* console = ImGui::FindWindowByName("Console"); console != nullptr && console->DockId != 0) {
+        ImGui::SetNextWindowDockID(console->DockId, ImGuiCond_FirstUseEver);
+    }
+
     if (!ImGui::Begin("Debug", &open)) {
         ImGui::End();
         return;

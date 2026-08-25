@@ -5,6 +5,56 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
+- **E8 — The Script Editor — BUILT, awaiting review, 2026-08-24.** Opened on the
+  human's word immediately after E7, with the bar given as Roblox Studio and the
+  debugger named out loud.
+  [ADR 0057](docs/decisions/0057-a-script-is-an-instance-and-the-editor-edits-one-thing.md)
+  settles it, [`docs/roadmap.md` § E8](docs/roadmap.md#e8--the-script-editor-xl)
+  is the scope, and [`docs/briefs/e8-kickoff.md`](docs/briefs/e8-kickoff.md)
+  carries the gate and ten findings.
+
+  **You can write Luau inside the engine.** Any number of scripts as tabs beside
+  the Viewport and draggable out; Luau colour from Luau's own lexer; find,
+  replace and go-to-line; syntax errors underlined where the parser puts them;
+  autocomplete from the reflection tables with the IDL's own prose; and a
+  debugger that stops, reads the locals, steps and continues.
+
+  **The model was half-built and finishing it was the first step rather than a
+  detour.** ADR 0050 decided a script's source is a property of the instance;
+  the mount never wrote it and `startScripts` never read it. Files that ran
+  without a `Source`, and instances with a `Source` that never ran. The human
+  settled it in one sentence -- *the only way to run a script in the game is by
+  instance* -- and a tab cannot edit "the script" while there are two of them.
+  The world hash moved, as ADR 0050's own change had; traces re-recorded on both
+  tiers.
+
+  **A hit breakpoint parks the SCRIPT, not the engine**, and a headless test
+  asserts exactly that -- which is the claim a blocking debugger would fail
+  while looking identical in every other assertion. What stops is the
+  simulation: `allowedTicks` answers zero while something is parked, in the same
+  function that already refuses ticks to a paused world, because ADR 0025's
+  guarantee is indexed by ticks and a world that advanced would make the script
+  resume late and diverge.
+
+  **Three things about `LOP_BREAK` the design had to learn from tests**, none of
+  them guessable from the header: the deferred queue does not resume a parked
+  thread, `LOP_BREAK` re-executes on resume so Continue parked on the same line
+  forever, and the single-step hook fires before anything has moved.
+
+  **And the defect a person found that no test written in English could.** "It
+  puts extra spaces when I type á": a column is BYTES, a monospace cell is a
+  CODEPOINT, and the pane placed every run at `byteColumn * advance`. Two bytes
+  for one glyph meant a gap after every accented letter and a caret one cell off.
+  Every ASCII assertion passed either way.
+
+  **A limit five milestones have repeated is narrower than it reads.** E1 found
+  that "SDL does not accept injected input", and that is true of ImGui-level
+  injection and **false of real Win32 input**: `SetCursorPos` + `mouse_event` +
+  `SendKeys` drives this editor exactly as a person does, and three defects were
+  found that way. It does not replace a person -- it cannot judge whether a
+  colour is pleasant -- but "there is no automated path to a click inside the
+  editor" should stop being repeated.
+
 - **E7 — The Look — BUILT, awaiting review, 2026-08-24.** Opened on the human's
   word while E6 was still warm, and it is the first milestone in this phase that
   is about the shell rather than about what the shell does.
@@ -377,6 +427,36 @@ Every other `Inert` property M6 shipped was made real by M7 or M7.5, and
 Entries for the planning session and for M0 through M4 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
+
+- **2026-08-24 (session 23, Claude Opus): E7 and E8 built.** E7 in one pass, E8
+  across the rest of the session with the human playing it as it was built --
+  which is where five of E8's ten findings came from.
+
+  **Did (E8):** `ScriptDocument` with incremental lexing off Luau's own lexer;
+  `ScriptEditor` for the tabs and the breakpoints; the code pane, drawn by hand
+  because `InputTextMultiline` can carry no per-token colour; find and replace;
+  diagnostics from `Luau::Parser`; completion from `ClassRegistry`; the debugger
+  in `engine/script` with eight headless cases; and the model change that makes
+  an instance the only thing that runs.
+
+  **Learned, and the tests found it rather than a reading:** a hand-drawn text
+  widget gets no characters until it asks the platform for them, and nothing in
+  the API is named to suggest it -- SDL delivers no text until
+  `SDL_StartTextInput`, and the only thing that calls it is a widget setting
+  `PlatformImeData.WantTextInput` for itself. Every arrow key worked, the caret
+  moved, and not one character ever arrived.
+
+  **Learned again, from the person using it:** a save must put back everything a
+  reload throws away, and there were four things -- the panels, the tabs, the
+  Explorer selection, and which rows were expanded. All four come back by CHUNK
+  NAME, which means the same thing in the new world where an instance id does
+  not. One of them, `overlayVisible` being world state, had been a defect in the
+  dev server's reload since M3 and nobody had noticed, because `luaug dev` starts
+  with the overlay hidden anyway.
+
+  **Next:** open `examples/06-scene` in the editor, put a breakpoint on a line
+  with code, press play, and say whether the debugger stopping is what was asked
+  for -- E8's gate ends at a person, as E5's, E6's and E7's do.
 
 - **2026-08-24 (session 23, Claude Opus): E7 built in one pass.** Opened on the
   human's word with a brief of three words and one shape -- clean, simple,

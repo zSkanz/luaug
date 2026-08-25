@@ -441,7 +441,17 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // executable: two projects open in turn should not fight over one
         // arrangement of panels.
         //
-        // **`.v2` because ADR 0056 renamed every panel.** ImGui keys a saved
+        // **`.v3` because E8 added a panel** (ADR 0057), and `.v2` because
+        // ADR 0056 renamed every one of them.
+        //
+        // ImGui keys a saved layout by window NAME, so a file written before a
+        // window existed has no entry for it -- and the window then appears
+        // floating in the middle of the screen rather than docked where the
+        // default layout puts it. Asking the Console where it lives covers the
+        // panel arriving mid-session; a new file is what covers the arrangement
+        // that was already written. Both are needed, and the second is one line.
+        //
+        // The older half: ImGui keys a saved
         // layout by window NAME, so a file written against `explorer` docks
         // nothing at all once the window is called `Explorer` -- and the shell's
         // "nobody has arranged this yet" test sees a split node with windows in
@@ -449,7 +459,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // one arrangement; the alternative is a first launch with every panel
         // floating and no obvious way back.
         const std::filesystem::path layout =
-            options.editor ? options.scriptPath / ".luaug" / "editor-layout.v2.ini" : std::filesystem::path{};
+            options.editor ? options.scriptPath / ".luaug" / "editor-layout.v3.ini" : std::filesystem::path{};
         overlay.emplace(*window, *device, options.editor ? Shell::Editor : Shell::Overlay,
                         options.editor ? layout.string() : std::string{});
     }

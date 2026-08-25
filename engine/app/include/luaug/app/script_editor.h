@@ -92,6 +92,12 @@ struct OpenScript
     // else reads it.
     core::f32 scroll = 0.0f;
 
+    // The caret position the pane last scrolled to. **How it knows the caret
+    // moved**, which is the only moment a pane should move the view: scrolling
+    // every frame would fight the scrollbar, and never scrolling leaves somebody
+    // arrowing down into a document they cannot see.
+    Position shownCaret{~0u, 0};
+
     // The revision the text had when it was last written out. **Dirty is a
     // comparison rather than a flag**, so there is no way to change the text and
     // forget to set it -- which is the defect a bool invites.

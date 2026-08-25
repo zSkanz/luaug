@@ -1266,6 +1266,7 @@ size were normal.
 | E5 | The World You Build | L | A world authored in `Workspace` becomes a streamed world on its own — no generator script, nothing sorted by hand. `Model.StreamingMode` makes the model the unit rather than the part; cells are chosen by size as well as position on the `layer` that has existed unused since M7. **Settled: ADR 0053.** Placed here rather than in phase 2 because it is an authoring capability and E3's stamps are its neighbour |
 | E6 | The Launcher | M | `luaug-host` with no project opens a project browser instead of printing a usage error: recent projects, a new one from a template, a folder picker, and the editor started on what you chose. **Settled: ADR 0055.** Specified below, in progress |
 | E7 | The Look | M | The shell stops looking like the debug overlay it grew out of: one theme as data rather than `StyleColorsDark` plus nine literals, Inter instead of a 13 px bitmap face, square everywhere, a palette measured against WCAG rather than argued about, and a launcher laid out for somebody arriving rather than for whoever wired it. **Settled: ADR 0056.** Specified below, in progress |
+| E8 | The Script Editor | XL | You can write Luau inside the engine: any number of scripts as tabs beside the Viewport, Luau colour from the engine's own lexer, find and replace, errors underlined where the parser puts them, autocomplete from the reflection tables, and a **working debugger** -- breakpoints, stepping, the call stack and the locals, with the script parked and the frame loop still drawing. **Settled: ADR 0057.** Specified below, in progress |
 
 **What moved into E1 and why it was right.** Undo was E2's, and E1 grew delete
 and duplicate — the two actions that make its absence dangerous. The content
@@ -1909,4 +1910,90 @@ changes what a panel DOES.
 - **The typeface actually reaches the window.** A screenshot in Inter rather than
   in ProggyClean, and the fallback said out loud in the log when the content is
   not staged.
+- **`scripts/localgate.ps1` is green on every stage.**
+
+
+### E8 — The Script Editor (XL)
+
+**Settled by
+[ADR 0057](decisions/0057-a-script-is-an-instance-and-the-editor-edits-one-thing.md).**
+Opened 2026-08-24, on the human's word, immediately after E7. Six editor
+milestones had built an Explorer, a Viewport, a Properties grid, a Content
+browser and a Console, and none of them had built a place to put code -- the
+Properties panel drew `Script.Source` through a 256-byte buffer and refused to
+edit anything longer, so the one property carrying a game's behaviour was the one
+the editor could not touch.
+
+**The quality bar was given as Roblox Studio, and the debugger was named
+explicitly.** So was the shape: several scripts open at once, as tabs where the
+Viewport is, and draggable out to sit beside the world.
+
+**And the model underneath was half-built.** ADR 0050 decided a script's source
+is a property of the instance; the mount never wrote it and `startScripts` never
+read it. Files that ran without a `Source`, and instances with a `Source` that
+never ran. The human settled it in one sentence -- *the only way to run a script
+in the game is by instance* -- and that is what E8 implements first, because a
+tab has to edit one thing.
+
+#### Scope
+
+- **An instance is the only thing that runs.** `startScripts` walks the world in
+  document order and starts every enabled `Script` from its own `Source`; the
+  mount reads the files under `src/scripts` and puts their text into the
+  instances it creates.
+- **A code pane drawn by hand**, because `InputTextMultiline` renders in one
+  colour with no per-token hook, has no length guard on its multiline path, and
+  keeps a single `ImGuiInputTextState` for the whole context.
+- **Tabs in the central dock node**, siblings of the Viewport, draggable out.
+- **Luau colour from Luau's own lexer**, incremental: an edit re-lexes the lines
+  whose incoming state changed and not one more.
+- **Find, replace and go to line**, and syntax errors underlined where
+  `Luau::Parser` puts them -- the first structured diagnostic this engine has
+  had.
+- **Autocomplete from `ClassRegistry`**, with the IDL's own prose as the hint.
+  Not from `Luau.Analysis`, which is deliberately not built.
+- **A debugger**: breakpoints, continue, step over, into and out, the call stack
+  and the locals. The script parks on `LUA_BREAK` and the frame loop keeps
+  drawing; `allowedTicks` answers zero so no tick begins while it is stopped.
+- **Ctrl+S writes where the instance came from** -- its file, or the scene -- and
+  the editor gains the reload path `luaug edit` has never had.
+- **Eight syntax tokens in the theme**, measured against the code pane's ground.
+
+#### NOT in scope
+
+Type inference: a local holding an instance is not resolved, and that is
+asserted as an absence rather than left to be reported as a defect. Editing a
+variable from the debug panel (`lua_setlocal`), which is a divergence generator.
+A protocol for an external debugger. Multi-cursor, folding and a minimap: the
+pane is built so they are additions rather than rewrites, and none is promised.
+Native codegen, which would silently take breakpoints and locals away -- the
+engine links `Luau.CodeGen` and never calls it, and that is now a debugger
+invariant written where whoever enables it will read it.
+
+#### Gate (definition of done)
+
+- **A script that is an instance runs.** A `Script` the scene brought runs, a
+  disabled one does not, a `ModuleScript` still only runs when required, and a
+  mounted script carries its file in its own `Source` -- four cases in
+  `world_host_tests.cpp`, with the determinism traces re-recorded on both tiers.
+- **An edit costs the lines it reached, asserted as an equality.** Typing one
+  character in a 200-line file and in a 20,000-line one both re-lex exactly one
+  line; opening `--[[` at the top of a 500-line file re-lexes 500, once, and the
+  next keystroke inside it re-lexes one.
+- **A cell is a codepoint and a column is bytes**, asserted over a two-byte and
+  a four-byte codepoint, both directions. This is the defect a person typing
+  Portuguese found and every ASCII test passed through.
+- **The debugger stops, reads and resumes, with no window.** A breakpoint set
+  before the world runs is bound when the chunk loads; one on a comment lands on
+  the next line with code and says which; the locals read back by name;
+  continue finishes the script; a step stops on the next line; detach forgets a
+  parked thread; and **the engine keeps running while a script is parked**.
+- **Completion answers from the reflection tables**, including inherited members
+  and the IDL's prose, and answers nothing for a local it cannot resolve.
+- **Eight syntax tokens clear 4.5:1** against the code pane's ground in both
+  themes, by the same `contrastRatio` the interface tokens use.
+- **A person writes a script in it.** Open two scripts as tabs, type in both,
+  break a line and see the mark, set a breakpoint, press play, watch it stop
+  with the locals showing, step, continue, save, and see the world reload.
+  Screenshots in the gate record, in both themes.
 - **`scripts/localgate.ps1` is green on every stage.**
