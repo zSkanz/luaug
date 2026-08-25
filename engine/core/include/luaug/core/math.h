@@ -309,6 +309,18 @@ struct CFrameD
 // one operation it will be built out of.
 [[nodiscard]] Mat4 toRenderMatrix(const CFrameD& cf, DVec3 origin) noexcept;
 
+// The other direction: a `Mat4` read back as a rigid frame.
+//
+// **Orthonormalised, and that is the whole reason this is not four assignments.**
+// The matrices it is given are not ours -- a skinning palette's joint matrix is
+// whatever an exporter baked, and exporters bake scale into a bind pose all the
+// time. A socket welded to a joint must be rigid or everything hanging off it
+// inherits that scale, so the basis is squared up on the way out and any scale
+// in it is dropped rather than carried.
+//
+// `origin` is added back, the mirror of what `toRenderMatrix` subtracted.
+[[nodiscard]] CFrameD cframeFromMatrix(const Mat4& m, DVec3 origin = {}) noexcept;
+
 // --- Bounds and culling ------------------------------------------------------
 //
 // Both live in the f32 space `render::extract` produces -- camera-relative, so

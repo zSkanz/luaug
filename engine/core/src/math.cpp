@@ -446,6 +446,22 @@ Mat4 toRenderMatrix(const CFrameD& cf, DVec3 origin) noexcept
     return result;
 }
 
+CFrameD cframeFromMatrix(const Mat4& m, DVec3 origin) noexcept
+{
+    CFrameD out;
+    // `Mat4` and `Mat3` are both column-major with the same `m[c][r]` layout, so
+    // the rotation is the upper 3x3 read straight across and column 3 is the
+    // translation.
+    Mat3 basis;
+    for (int c = 0; c < 3; ++c)
+        for (int r = 0; r < 3; ++r)
+            basis.m[c][r] = m.m[c][r];
+    out.rotation = orthonormalize(basis);
+    out.position = DVec3{static_cast<f64>(m.m[3][0]) + origin.x, static_cast<f64>(m.m[3][1]) + origin.y,
+                         static_cast<f64>(m.m[3][2]) + origin.z};
+    return out;
+}
+
 // --- Bounds and culling ------------------------------------------------------
 
 AABB AABB::fromCenterSize(Vec3 center, Vec3 size) noexcept

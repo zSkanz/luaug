@@ -1,5 +1,6 @@
 #include "luaug/script/instance_binding.h"
 
+#include "luaug/scene/pivot.h"
 #include "luaug/scene/scene_file.h"
 #include "luaug/scene/world.h"
 #include "luaug/script/datatypes.h"
@@ -571,102 +572,13 @@ int methodGetTags(lua_State* L)
 //     asks whether it can -- which needs `PVInstance` to be a real class, and is
 //     why it is one.
 
-[[nodiscard]] core::CFrameD pivotOffsetOf(const World& w, core::InstanceId id) noexcept
-{
-    const scene::PVComponent* pv = w.pvInstances().find(id);
-    return pv == nullptr ? core::CFrameD{} : pv->pivotOffset;
-}
-
-// The axis-aligned box enclosing every part under `id`, in world space. Shared
-// with `GetExtentsSize`, which is the point: the model's fallback pivot is the
-// centre of the box that call reports, rather than a second definition of
-// "middle" that happens to agree when every part is the same size.
-[[nodiscard]] bool worldExtents(World& w, core::InstanceId id, core::DVec3& minimum, core::DVec3& maximum)
-{
-    std::vector<core::InstanceId> descendants;
-    w.collectDescendants(id, descendants);
-
-    bool any = false;
-    for (const core::InstanceId descendant : descendants) {
-        const scene::PartComponent* part = w.parts().find(descendant);
-        if (part == nullptr)
-            continue;
-
-        // The standard OBB-to-AABB bound; see `methodGetExtentsSize` for the
-        // column-major indexing note.
-        const core::Mat3& r = part->cframe.rotation;
-        const f64 half[3] = {
-            static_cast<f64>(part->size.x) * 0.5,
-            static_cast<f64>(part->size.y) * 0.5,
-            static_cast<f64>(part->size.z) * 0.5,
-        };
-        f64 extents[3] = {0.0, 0.0, 0.0};
-        for (int axis = 0; axis < 3; ++axis) {
-            for (int local = 0; local < 3; ++local)
-                extents[axis] += std::fabs(static_cast<f64>(r.m[local][axis])) * half[local];
-        }
-
-        const core::DVec3 centre = part->cframe.position;
-        const core::DVec3 low{centre.x - extents[0], centre.y - extents[1], centre.z - extents[2]};
-        const core::DVec3 high{centre.x + extents[0], centre.y + extents[1], centre.z + extents[2]};
-        if (!any) {
-            minimum = low;
-            maximum = high;
-            any = true;
-            continue;
-        }
-        minimum = core::DVec3{std::min(minimum.x, low.x), std::min(minimum.y, low.y), std::min(minimum.z, low.z)};
-        maximum = core::DVec3{std::max(maximum.x, high.x), std::max(maximum.y, high.y), std::max(maximum.z, high.z)};
-    }
-    return any;
-}
-
-// The transform a pivot is measured from, before `PivotOffset` is applied.
-//
-// A `BasePart` and a `Camera` each have one of their own. A `Model` has no
-// transform, so it borrows its primary part's when there is one and falls back
-// to the centre of its extents box when there is not -- unrotated, because a
-// group of parts has no orientation to inherit.
-[[nodiscard]] core::CFrameD pivotBase(World& w, core::InstanceId id)
-{
-    if (const scene::ModelComponent* model = w.models().find(id); model != nullptr) {
-        if (w.alive(model->primaryPart)) {
-            if (const scene::PartComponent* part = w.parts().find(model->primaryPart)) {
-                // The primary part's OWN pivot, offset included: a model whose
-                // primary part hinges about its edge hinges about that edge too,
-                // which is the property that makes assigning a primary part mean
-                // something beyond "pick a position".
-                return part->cframe * pivotOffsetOf(w, model->primaryPart);
-            }
-        }
-
-        core::DVec3 minimum;
-        core::DVec3 maximum;
-        core::CFrameD pivot;
-        // An identity fallback would move a model built far from the origin by
-        // its whole distance the first time anything pivoted it.
-        if (worldExtents(w, id, minimum, maximum)) {
-            pivot.position = core::DVec3{(minimum.x + maximum.x) * 0.5, (minimum.y + maximum.y) * 0.5,
-                                         (minimum.z + maximum.z) * 0.5};
-        }
-        return pivot;
-    }
-
-    if (const scene::PartComponent* part = w.parts().find(id); part != nullptr)
-        return part->cframe;
-    if (const scene::CameraComponent* camera = w.cameras().find(id); camera != nullptr)
-        return camera->cframe;
-    return {};
-}
-
-[[nodiscard]] core::CFrameD pivotOf(World& w, core::InstanceId id)
-{
-    // A Model's base already carries its primary part's offset, so applying the
-    // model's own on top of it would compose two. It does not: `PivotOffset` on
-    // a Model shifts the model's pivot away from wherever the base put it, which
-    // is the same sentence as for a part.
-    return pivotBase(w, id) * pivotOffsetOf(w, id);
-}
+// The four of these moved to `engine/scene/src/pivot.cpp` so that everything
+// below `script` can ask where a model's middle is -- `Model.Scale` scales about
+// it, and an editor gizmo stands on it. See `luaug/scene/pivot.h`.
+using scene::pivotBase;
+using scene::pivotOf;
+using scene::pivotOffsetOf;
+using scene::worldExtents;
 
 int methodGetPivot(lua_State* L)
 {

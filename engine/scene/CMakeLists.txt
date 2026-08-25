@@ -25,6 +25,7 @@ luaug_add_module(scene
         src/json_slice.cpp
         src/native_accessors.cpp
         src/partition.cpp
+        src/pivot.cpp
         src/physics_sync.cpp
         src/streaming_glue.cpp
         generated/class_descriptors.gen.cpp

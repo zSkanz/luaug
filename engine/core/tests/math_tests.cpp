@@ -1172,3 +1172,56 @@ TEST_CASE("Mat4 inverse: M times its inverse is the identity, for the matrices t
     const Mat4 result = inverse(flattened);
     CHECK(isIdentity(result));
 }
+
+TEST_CASE("cframeFromMatrix reads back what toRenderMatrix wrote")
+{
+    const CFrameD frame{DVec3{3.0, -4.0, 5.0}, rotationY(0.7f) * rotationX(-0.3f)};
+    const DVec3 origin{1000.0, 0.0, -2000.0};
+
+    const CFrameD back = cframeFromMatrix(toRenderMatrix(frame, origin), origin);
+
+    CHECK(nearD(back.position, frame.position));
+    CHECK(near(back.rotation, frame.rotation));
+}
+
+TEST_CASE("cframeFromMatrix drops the scale an exporter baked in")
+{
+    // **This is the reason it orthonormalises rather than copying nine floats.**
+    // A skinning palette's joint matrix is whatever an exporter wrote, and
+    // exporters bake unit conversions into a bind pose constantly -- the horse
+    // that prompted this carried a 0.01. A socket welded to a joint has to be
+    // rigid, or every part hanging off it inherits that scale.
+    Mat4 scaled;
+    for (int axis = 0; axis < 3; ++axis)
+        scaled.m[axis][axis] = 0.01f;
+    scaled.m[3][0] = 2.0f;
+    scaled.m[3][1] = 3.0f;
+
+    const CFrameD out = cframeFromMatrix(scaled);
+
+    // The basis is unit length on every axis, whatever went in.
+    for (int c = 0; c < 3; ++c) {
+        const Vec3 axis{out.rotation.m[c][0], out.rotation.m[c][1], out.rotation.m[c][2]};
+        CHECK(near(length(axis), 1.0f));
+    }
+    // And the translation is untouched: it is a position, not a direction.
+    CHECK(nearD(out.position, DVec3{2.0, 3.0, 0.0}));
+}
+
+TEST_CASE("cframeFromMatrix answers with a usable frame for a collapsed basis")
+{
+    // A joint whose matrix has collapsed is a broken file, and the answer is the
+    // identity rather than a NaN that poisons every transform downstream of it
+    // -- the same rule `orthonormalize` already states for its own degenerate
+    // input.
+    Mat4 collapsed;
+    for (int c = 0; c < 3; ++c)
+        for (int r = 0; r < 3; ++r)
+            collapsed.m[c][r] = 0.0f;
+    collapsed.m[3][1] = 9.0f;
+
+    const CFrameD out = cframeFromMatrix(collapsed);
+
+    CHECK(out.rotation == Mat3{});
+    CHECK(nearD(out.position, DVec3{0.0, 9.0, 0.0}));
+}
