@@ -229,6 +229,17 @@ struct Model
     std::vector<MaterialDef> materials;
     std::vector<Image> images;
 
+    // One name per `mesh.submeshes`, from the node the primitive came from.
+    //
+    // **Parallel rather than a field on `Submesh`**, because `Submesh` is POD
+    // that goes into a GPU-adjacent format and a `std::string` in it would make
+    // the compiled mesh's record a thing with a heap allocation in it. Empty for
+    // an importer that does not name its pieces.
+    //
+    // This is what a split is named by: one primitive becomes one `MeshPart`,
+    // and the name it wears is the one its author gave the node.
+    std::vector<std::string> submeshNames;
+
     // Empty for a static mesh, and empty is the common case. When it is not,
     // `skin` has one entry per vertex of `mesh` -- the two are parallel by
     // construction, and the loader refuses a file where they are not.

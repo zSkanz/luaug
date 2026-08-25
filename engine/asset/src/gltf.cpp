@@ -46,6 +46,11 @@ struct MeshInstance
     std::size_t meshIndex = 0;
     // The node's world transform, already accumulated down the tree.
     core::Mat4 transform;
+    // What the artist called this piece. Taken from the NODE rather than from
+    // the mesh, because a file that instances one mesh at three nodes has three
+    // pieces with three names and one shared geometry -- and it is the node
+    // names an author recognises in an outliner.
+    std::string name;
 };
 
 // One primitive's attributes, in the file's own vertex order, before they are
@@ -319,8 +324,14 @@ std::optional<core::EngineError> Importer::run()
     for (const MeshInstance& instance : instances_) {
         const fg::Mesh& mesh = asset_.meshes[instance.meshIndex];
         for (const fg::Primitive& primitive : mesh.primitives) {
+            const std::size_t before = out_.mesh.submeshes.size();
             if (auto error = appendPrimitive(primitive, instance.transform))
                 return error;
+            // One name per submesh the primitive actually produced, so the two
+            // arrays cannot drift -- a primitive that appended nothing appends
+            // no name either.
+            for (std::size_t added = before; added < out_.mesh.submeshes.size(); ++added)
+                out_.submeshNames.push_back(instance.name);
         }
     }
 
@@ -410,8 +421,14 @@ std::optional<core::EngineError> Importer::visitNode(std::size_t nodeIndex, cons
         // every fixture in this repository is such a file.
         //
         // `validate` has already established the index is in range.
-        instances_.push_back(
-            MeshInstance{node.meshIndex.value(), node.skinIndex.has_value() ? core::Mat4{} : combined});
+        // The node's name, or the mesh's when the node has none -- an exporter
+        // that names one and not the other is common, and an unnamed piece falls
+        // back to an ordinal at split time rather than here.
+        std::string name(node.name);
+        if (name.empty() && node.meshIndex.value() < asset_.meshes.size())
+            name = std::string(asset_.meshes[node.meshIndex.value()].name);
+        instances_.push_back(MeshInstance{node.meshIndex.value(), node.skinIndex.has_value() ? core::Mat4{} : combined,
+                                          std::move(name)});
     }
 
     for (const std::size_t child : node.children) {

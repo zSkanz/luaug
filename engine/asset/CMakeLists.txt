@@ -18,6 +18,7 @@ luaug_add_module(asset
         src/gltf.cpp
         src/material.cpp
         src/mesh_format.cpp
+        src/model_split.cpp
         src/pack.cpp
         src/primitives.cpp
         src/streaming.cpp
@@ -54,6 +55,7 @@ luaug_add_module_tests(asset
         tests/gltf_tests.cpp
         tests/material_tests.cpp
         tests/mesh_format_tests.cpp
+        tests/model_split_tests.cpp
         tests/pack_tests.cpp
         tests/primitive_tests.cpp
         tests/streaming_tests.cpp
