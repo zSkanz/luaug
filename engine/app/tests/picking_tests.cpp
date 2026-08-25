@@ -219,8 +219,11 @@ TEST_CASE("picking a world returns the nearest part, and empty space returns not
     // asserting that alongside what it means to assert.
     app::testing::Fixture fixture;
     scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId root = fixture.widget(world, "Root");
     const core::InstanceId near = fixture.widget(world, "Near");
     const core::InstanceId far = fixture.widget(world, "Far");
+    REQUIRE(world.setParent(near, root) == std::nullopt);
+    REQUIRE(world.setParent(far, root) == std::nullopt);
 
     scene::PartComponent nearPart;
     nearPart.cframe = boxAt({0.0, 0.0, -5.0});
@@ -233,19 +236,83 @@ TEST_CASE("picking a world returns the nearest part, and empty space returns not
     world.parts().add(far, farPart);
 
     const PickRay forward{{0.0, 0.0, 0.0}, {0.0f, 0.0f, -1.0f}};
-    const auto hit = app::pickNearest(world, forward);
+    const auto hit = app::pickNearest(world, root, forward);
     REQUIRE(hit.has_value());
     CHECK(hit->instance == near);
 
     const PickRay away{{0.0, 0.0, 0.0}, {0.0f, 1.0f, 0.0f}};
-    CHECK_FALSE(app::pickNearest(world, away).has_value());
+    CHECK_FALSE(app::pickNearest(world, root, away).has_value());
+}
+
+TEST_CASE("a part that is not in the world cannot be picked")
+{
+    // **The defect a person sees as "selecting an invisible box".** Picking
+    // walked the whole part pool, which is not the set on screen: an instance
+    // that is in the pools but not under the root is drawn by nothing and was
+    // still clickable, so a click produced a selection outline around empty
+    // space with a `Parent` of nil in the inspector.
+    //
+    // It compounds, too. `clearScene` walks the root's children to decide what
+    // to remove, so an orphan survives every scene load and accumulates.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId onScreen = fixture.widget(world, "OnScreen");
+    const core::InstanceId orphan = fixture.widget(world, "Orphan");
+    REQUIRE(world.setParent(onScreen, root) == std::nullopt);
+
+    scene::PartComponent behind;
+    behind.cframe = boxAt({0.0, 0.0, -50.0});
+    behind.size = {2.0f, 2.0f, 2.0f};
+    world.parts().add(onScreen, behind);
+
+    // The orphan is NEARER, so a pick that considered it would prefer it -- and
+    // that is exactly what happened.
+    scene::PartComponent stray;
+    stray.cframe = boxAt({0.0, 0.0, -5.0});
+    stray.size = {2.0f, 2.0f, 2.0f};
+    world.parts().add(orphan, stray);
+
+    const PickRay forward{{0.0, 0.0, 0.0}, {0.0f, 0.0f, -1.0f}};
+    const auto hit = app::pickNearest(world, root, forward);
+    REQUIRE(hit.has_value());
+    CHECK(hit->instance == onScreen);
+
+    // And with nothing else in the way it is a miss rather than a hit on the
+    // orphan: clicking empty space deselects, which is what the person wanted.
+    world.parts().remove(onScreen);
+    CHECK_FALSE(app::pickNearest(world, root, forward).has_value());
+}
+
+TEST_CASE("a part under a DIFFERENT root cannot be picked")
+{
+    // Two worlds' worth of instances live in one `World` while a stamp is open
+    // for editing, and the viewport draws one root. A click has to land in the
+    // half that is on screen.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId shown = fixture.widget(world, "Shown");
+    const core::InstanceId elsewhere = fixture.widget(world, "Elsewhere");
+    const core::InstanceId hidden = fixture.widget(world, "Hidden");
+    REQUIRE(world.setParent(hidden, elsewhere) == std::nullopt);
+
+    scene::PartComponent part;
+    part.cframe = boxAt({0.0, 0.0, -5.0});
+    part.size = {2.0f, 2.0f, 2.0f};
+    world.parts().add(hidden, part);
+
+    const PickRay forward{{0.0, 0.0, 0.0}, {0.0f, 0.0f, -1.0f}};
+    CHECK_FALSE(app::pickNearest(world, shown, forward).has_value());
+    CHECK(app::pickNearest(world, elsewhere, forward).has_value());
 }
 
 TEST_CASE("a transparent part is pickable, because an editor must be able to select what it cannot see")
 {
     app::testing::Fixture fixture;
     scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId root = fixture.widget(world, "Root");
     const core::InstanceId ghost = fixture.widget(world, "Ghost");
+    REQUIRE(world.setParent(ghost, root) == std::nullopt);
 
     scene::PartComponent part;
     part.cframe = boxAt({0.0, 0.0, -5.0});
@@ -254,7 +321,7 @@ TEST_CASE("a transparent part is pickable, because an editor must be able to sel
     world.parts().add(ghost, part);
 
     const PickRay forward{{0.0, 0.0, 0.0}, {0.0f, 0.0f, -1.0f}};
-    const auto hit = app::pickNearest(world, forward);
+    const auto hit = app::pickNearest(world, root, forward);
     REQUIRE(hit.has_value());
     CHECK(hit->instance == ghost);
 }

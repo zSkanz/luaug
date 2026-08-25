@@ -48,10 +48,20 @@ void aimEditor(Editor& editor)
                      core::DVec3{0.0, 0.0, 0.0});
 }
 
-core::InstanceId partAt(app::testing::Fixture& fixture, scene::World& world, std::string_view name,
-                        core::DVec3 position, core::Vec3 size)
+// The root every part in these cases hangs from, and the one every pick is
+// aimed at. Picking is filtered by it now -- what can be picked is what could be
+// drawn -- so a fixture that left its parts unparented would be testing a
+// configuration a viewport never shows.
+core::InstanceId sceneRoot(app::testing::Fixture& fixture, scene::World& world)
+{
+    return fixture.widget(world, "Root");
+}
+
+core::InstanceId partAt(app::testing::Fixture& fixture, scene::World& world, core::InstanceId root,
+                        std::string_view name, core::DVec3 position, core::Vec3 size)
 {
     const core::InstanceId id = fixture.widget(world, name);
+    (void)world.setParent(id, root);
     scene::PartComponent part;
     part.cframe = core::CFrameD{position, core::Mat3{}};
     part.size = size;
@@ -64,7 +74,8 @@ TEST_CASE("a click in the middle of the viewport selects what is in front of the
 {
     app::testing::Fixture fixture;
     scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
-    const core::InstanceId target = partAt(fixture, world, "Target", {0.0, 0.0, -20.0}, {4.0f, 4.0f, 4.0f});
+    const core::InstanceId root = sceneRoot(fixture, world);
+    const core::InstanceId target = partAt(fixture, world, root, "Target", {0.0, 0.0, -20.0}, {4.0f, 4.0f, 4.0f});
 
     Editor editor;
     Inspector inspector;
@@ -73,7 +84,7 @@ TEST_CASE("a click in the middle of the viewport selects what is in front of the
     editor.requestPick({400.0f, 300.0f});
     CHECK(editor.pickPending());
 
-    const auto hit = editor.resolvePick(world, inspector);
+    const auto hit = editor.resolvePick(world, root, inspector);
     REQUIRE(hit.has_value());
     CHECK(hit->instance == target);
     CHECK(inspector.selection() == target);
@@ -88,14 +99,15 @@ TEST_CASE("the viewport's window offset does not displace the ray a second time"
     // centre of the screen stops working.
     app::testing::Fixture fixture;
     scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
-    const core::InstanceId ahead = partAt(fixture, world, "Ahead", {0.0, 0.0, -20.0}, {1.0f, 1.0f, 1.0f});
+    const core::InstanceId root = sceneRoot(fixture, world);
+    const core::InstanceId ahead = partAt(fixture, world, root, "Ahead", {0.0, 0.0, -20.0}, {1.0f, 1.0f, 1.0f});
 
     Editor editor;
     Inspector inspector;
     aimEditor(editor);
 
     editor.requestPick({400.0f, 300.0f});
-    const auto hit = editor.resolvePick(world, inspector);
+    const auto hit = editor.resolvePick(world, root, inspector);
 
     REQUIRE(hit.has_value());
     CHECK(hit->instance == ahead);
@@ -105,19 +117,20 @@ TEST_CASE("clicking empty space clears the selection")
 {
     app::testing::Fixture fixture;
     scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
-    const core::InstanceId target = partAt(fixture, world, "Target", {0.0, 0.0, -20.0}, {4.0f, 4.0f, 4.0f});
+    const core::InstanceId root = sceneRoot(fixture, world);
+    const core::InstanceId target = partAt(fixture, world, root, "Target", {0.0, 0.0, -20.0}, {4.0f, 4.0f, 4.0f});
 
     Editor editor;
     Inspector inspector;
     aimEditor(editor);
 
     editor.requestPick({400.0f, 300.0f});
-    editor.resolvePick(world, inspector);
+    editor.resolvePick(world, root, inspector);
     REQUIRE(inspector.selection() == target);
 
     // The top-left corner, where nothing is.
     editor.requestPick({2.0f, 2.0f});
-    const auto miss = editor.resolvePick(world, inspector);
+    const auto miss = editor.resolvePick(world, root, inspector);
 
     CHECK_FALSE(miss.has_value());
     CHECK_FALSE(inspector.selection().valid());
@@ -127,7 +140,8 @@ TEST_CASE("a pick before anything has been rendered does nothing rather than gue
 {
     app::testing::Fixture fixture;
     scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
-    const core::InstanceId target = partAt(fixture, world, "Target", {0.0, 0.0, -20.0}, {4.0f, 4.0f, 4.0f});
+    const core::InstanceId root = sceneRoot(fixture, world);
+    const core::InstanceId target = partAt(fixture, world, root, "Target", {0.0, 0.0, -20.0}, {4.0f, 4.0f, 4.0f});
 
     Editor editor;
     Inspector inspector;
@@ -136,7 +150,7 @@ TEST_CASE("a pick before anything has been rendered does nothing rather than gue
     REQUIRE_FALSE(editor.hasCamera());
 
     editor.requestPick({400.0f, 300.0f});
-    const auto hit = editor.resolvePick(world, inspector);
+    const auto hit = editor.resolvePick(world, root, inspector);
 
     CHECK_FALSE(hit.has_value());
     // Deliberately still selected: with no image to have clicked on, clearing
@@ -148,14 +162,15 @@ TEST_CASE("resolving with nothing pending is not a pick")
 {
     app::testing::Fixture fixture;
     scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
-    const core::InstanceId target = partAt(fixture, world, "Target", {0.0, 0.0, -20.0}, {4.0f, 4.0f, 4.0f});
+    const core::InstanceId root = sceneRoot(fixture, world);
+    const core::InstanceId target = partAt(fixture, world, root, "Target", {0.0, 0.0, -20.0}, {4.0f, 4.0f, 4.0f});
 
     Editor editor;
     Inspector inspector;
     inspector.select(target);
     aimEditor(editor);
 
-    CHECK_FALSE(editor.resolvePick(world, inspector).has_value());
+    CHECK_FALSE(editor.resolvePick(world, root, inspector).has_value());
     CHECK(inspector.selection() == target);
 }
 
@@ -166,20 +181,21 @@ TEST_CASE("a click nearer the top of the viewport picks the higher of two parts"
     // centre and inverted everywhere else.
     app::testing::Fixture fixture;
     scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
-    const core::InstanceId high = partAt(fixture, world, "High", {0.0, 4.0, -20.0}, {3.0f, 3.0f, 3.0f});
-    const core::InstanceId low = partAt(fixture, world, "Low", {0.0, -4.0, -20.0}, {3.0f, 3.0f, 3.0f});
+    const core::InstanceId root = sceneRoot(fixture, world);
+    const core::InstanceId high = partAt(fixture, world, root, "High", {0.0, 4.0, -20.0}, {3.0f, 3.0f, 3.0f});
+    const core::InstanceId low = partAt(fixture, world, root, "Low", {0.0, -4.0, -20.0}, {3.0f, 3.0f, 3.0f});
 
     Editor editor;
     Inspector inspector;
     aimEditor(editor);
 
     editor.requestPick({400.0f, 180.0f});
-    const auto upper = editor.resolvePick(world, inspector);
+    const auto upper = editor.resolvePick(world, root, inspector);
     REQUIRE(upper.has_value());
     CHECK(upper->instance == high);
 
     editor.requestPick({400.0f, 420.0f});
-    const auto lower = editor.resolvePick(world, inspector);
+    const auto lower = editor.resolvePick(world, root, inspector);
     REQUIRE(lower.has_value());
     CHECK(lower->instance == low);
 }
@@ -2155,9 +2171,10 @@ TEST_CASE("the bounds of a selection are the union of what is in it")
 {
     app::testing::Fixture fixture;
     scene::World world(fixture.classes, fixture.enums, fixture.atoms, 7u);
+    const core::InstanceId root = sceneRoot(fixture, world);
 
-    const core::InstanceId a = partAt(fixture, world, "A", {-10.0, 0.0, 0.0}, {2.0f, 2.0f, 2.0f});
-    const core::InstanceId b = partAt(fixture, world, "B", {10.0, 0.0, 0.0}, {2.0f, 2.0f, 2.0f});
+    const core::InstanceId a = partAt(fixture, world, root, "A", {-10.0, 0.0, 0.0}, {2.0f, 2.0f, 2.0f});
+    const core::InstanceId b = partAt(fixture, world, root, "B", {10.0, 0.0, 0.0}, {2.0f, 2.0f, 2.0f});
 
     const std::array<core::InstanceId, 2> both{a, b};
     core::DVec3 centre;
@@ -2176,9 +2193,10 @@ TEST_CASE("framing a model frames the model, not its pivot")
     // position and no size of its own.
     app::testing::Fixture fixture;
     scene::World world(fixture.classes, fixture.enums, fixture.atoms, 8u);
+    const core::InstanceId root = sceneRoot(fixture, world);
 
     const core::InstanceId group = fixture.widget(world, "Group");
-    const core::InstanceId child = partAt(fixture, world, "Child", {50.0, 0.0, 0.0}, {4.0f, 4.0f, 4.0f});
+    const core::InstanceId child = partAt(fixture, world, root, "Child", {50.0, 0.0, 0.0}, {4.0f, 4.0f, 4.0f});
     REQUIRE_FALSE(world.setParent(child, group).has_value());
 
     const std::array<core::InstanceId, 1> selection{group};

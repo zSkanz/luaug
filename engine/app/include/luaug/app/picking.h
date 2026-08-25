@@ -100,7 +100,19 @@ struct PickHit
 // discovered: a milestone that adds shape-exact picking will find this comment,
 // and until one does, being able to select a mesh at all is worth more than
 // being unable to miss it.
-[[nodiscard]] std::optional<PickHit> pickNearest(const scene::World& world, const PickRay& ray) noexcept;
+// **`root` is the same root the renderer draws from, and passing it is not
+// optional.** Picking used to walk the whole part pool, which is not the same
+// set as the one on screen: an instance that is in the world's pools but not
+// under the root is never drawn -- and was still pickable, so a click landed on
+// an outline around nothing. A part orphaned by anything at all becomes
+// permanently clickable and permanently invisible, and `clearScene` cannot
+// reach it to remove it either, because that walks the root's children too.
+//
+// The rule is one sentence: **you can pick what could be drawn.** Transparent
+// and non-colliding stay pickable, for the reasons above; not-in-the-world does
+// not, because it is not a thing the person is looking at.
+[[nodiscard]] std::optional<PickHit> pickNearest(const scene::World& world, core::InstanceId root,
+                                                 const PickRay& ray) noexcept;
 
 // --- The manipulators -------------------------------------------------------
 //

@@ -2173,7 +2173,8 @@ void submitGizmo(const GizmoFrame& frame, GizmoMode mode, std::optional<GizmoHan
     draw.wireBox(centre, Vec3{middle, middle, middle}, centreColour);
 }
 
-std::optional<PickHit> Editor::resolvePick(const scene::World& world, Inspector& inspector) noexcept
+std::optional<PickHit> Editor::resolvePick(const scene::World& world, core::InstanceId root,
+                                           Inspector& inspector) noexcept
 {
     if (!m_pending.has_value())
         return std::nullopt;
@@ -2187,7 +2188,7 @@ std::optional<PickHit> Editor::resolvePick(const scene::World& world, Inspector&
     if (!m_hasCamera)
         return std::nullopt;
 
-    const std::optional<PickHit> hit = pickNearest(world, rayThrough(request.pixel));
+    const std::optional<PickHit> hit = pickNearest(world, root, rayThrough(request.pixel));
 
     // **Ctrl adds and removes; a plain click replaces.** The same gesture the
     // Explorer's rows use, because it is the same question asked of a different

@@ -1641,7 +1641,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
             const core::InstanceId wasSelected = inspector.selection();
             if (!gizmoTook)
-                editor.resolvePick(authored(), inspector);
+                // The root the VIEWPORT is drawing, so a click can only land
+                // on something that is on screen -- the stage's workspace while
+                // a stamp is open, the host's otherwise.
+                editor.resolvePick(authored(), stageOf() != nullptr ? stageOf()->workspace() : host->workspace(),
+                                   inspector);
 
             // An editor says what you picked. It is the cheapest confirmation
             // that a click landed on the thing under the cursor rather than on

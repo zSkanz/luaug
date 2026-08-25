@@ -111,11 +111,33 @@ std::optional<f32> intersectBox(const PickRay& ray, const CFrameD& cframe, Vec3 
     return enter < 0.0f ? 0.0f : enter;
 }
 
-std::optional<PickHit> pickNearest(const scene::World& world, const PickRay& ray) noexcept
+namespace {
+
+// The same walk `render::extract` makes, and it has to be the same one: what is
+// pickable is what could be drawn.
+[[nodiscard]] bool inWorld(const scene::World& world, core::InstanceId id, core::InstanceId root) noexcept
+{
+    for (core::InstanceId cursor = id; cursor.valid(); cursor = world.parentOf(cursor)) {
+        if (cursor == root)
+            return true;
+    }
+    return false;
+}
+
+} // namespace
+
+std::optional<PickHit> pickNearest(const scene::World& world, core::InstanceId root, const PickRay& ray) noexcept
 {
     std::optional<PickHit> best;
 
     world.parts().forEach([&](core::InstanceId id, const scene::PartComponent& part) {
+        // Not under the root means not on screen. The pool holds every part the
+        // world has ever been told about, and an orphan is drawn by nothing and
+        // was pickable by this -- which reads as a click selecting an outline
+        // around empty space.
+        if (!inWorld(world, id, root))
+            return;
+
         const std::optional<f32> distance = intersectBox(ray, part.cframe, part.size);
         if (!distance.has_value())
             return;

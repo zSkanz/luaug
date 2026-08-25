@@ -1285,7 +1285,10 @@ public:
     // empty space -- which clears the selection, because clicking nothing in a
     // 3D editor means nothing, and leaving the last thing selected is how a
     // person edits the object they thought they had deselected.
-    std::optional<PickHit> resolvePick(const scene::World& world, Inspector& inspector) noexcept;
+    // `root` is the world root the viewport is DRAWING -- the stage's workspace
+    // while a stamp is open, the host's otherwise. It has to be the renderer's,
+    // or a click can land on something the renderer never put on screen.
+    std::optional<PickHit> resolvePick(const scene::World& world, core::InstanceId root, Inspector& inspector) noexcept;
 
     // --- The editor's own camera ---------------------------------------------
     //
