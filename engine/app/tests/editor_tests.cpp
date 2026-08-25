@@ -19,6 +19,7 @@
 #include <cmath>
 #include <doctest/doctest.h>
 #include <filesystem>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -2336,4 +2337,75 @@ TEST_CASE("a close request is a question, and it is answered rather than repeate
     // close does not re-open the dialog on the next frame.
     editor.clearCloseRequest();
     CHECK_FALSE(editor.closeRequested());
+}
+
+// --- Loading a scene has to retire the one it replaced ------------------------
+
+TEST_CASE("loading a scene retires the one it replaced")
+{
+    // **Reported as a click selecting an invisible box.** `readScene` clears
+    // the world with `destroy`, which unlinks and marks -- and the record stops
+    // resolving in `retireDestroyed`, which runs at the end of a signal drain.
+    // A paused world runs no drains, so every instance of the previous scene
+    // stayed in the pools: unparented, drawn by nothing, and accumulating one
+    // whole scene per load. In a real world they keep their `PartComponent`
+    // too, which is what made them pickable.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId workspace = world.create(fixture.workspaceClass);
+    world.setName(workspace, fixture.atoms.intern("Workspace"));
+    // `workspaceOf` finds it through the COMPONENT, not the name -- the fixture's
+    // class carries no hook, so the test supplies what a real `Workspace` has.
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+
+    Editor editor;
+    Inspector inspector;
+
+    const std::filesystem::path scratch =
+        std::filesystem::temp_directory_path() / "luaug-editor-tests" / "scene-retire";
+    std::error_code ec;
+    std::filesystem::remove_all(scratch, ec);
+    std::filesystem::create_directories(scratch, ec);
+
+    const auto writeScene = [&scratch](std::string_view file, std::string_view child) {
+        std::ofstream out(scratch / std::filesystem::path(file), std::ios::binary);
+        out << R"({"format":"luaug-scene","version":1,"root":{"name":"Workspace","class":"Workspace","children":[)"
+            << R"({"name":")" << child << R"(","class":"Widget"}]}})";
+    };
+    writeScene("a.scene.json", "FromA");
+    writeScene("b.scene.json", "FromB");
+
+    REQUIRE(editor.load(world, scratch / "a.scene.json", inspector));
+    const core::InstanceId fromA = world.findFirstChild(workspace, fixture.atoms.intern("FromA"));
+    REQUIRE(fromA.valid());
+
+    REQUIRE(editor.load(world, scratch / "b.scene.json", inspector));
+
+    // The first scene's instance no longer resolves. Without the retire it
+    // answered `alive` for ever -- and a world loaded five times held five
+    // scenes' worth of them.
+    CHECK_FALSE(world.alive(fromA));
+    CHECK(world.findFirstChild(workspace, fixture.atoms.intern("FromB")).valid());
+    // And nothing of the old scene is left hanging off the workspace.
+    CHECK_FALSE(world.findFirstChild(workspace, fixture.atoms.intern("FromA")).valid());
+
+    std::filesystem::remove_all(scratch, ec);
+}
+
+TEST_CASE("a new scene retires the one it replaced too")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId workspace = world.create(fixture.workspaceClass);
+    world.setName(workspace, fixture.atoms.intern("Workspace"));
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+
+    const core::InstanceId doomed = fixture.widget(world, "Doomed");
+    REQUIRE(world.setParent(doomed, workspace) == std::nullopt);
+
+    Editor editor;
+    Inspector inspector;
+    editor.newScene(world, inspector);
+
+    CHECK_FALSE(world.alive(doomed));
 }

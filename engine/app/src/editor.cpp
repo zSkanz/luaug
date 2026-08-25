@@ -205,6 +205,17 @@ bool Editor::load(scene::World& world, const std::filesystem::path& path, Inspec
         return false;
     }
 
+    // **The scene this replaced has to be RETIRED, not only destroyed.**
+    // `readScene` clears the world with `destroy`, which unlinks and marks --
+    // and the record stops resolving in `retireDestroyed`, which runs at the end
+    // of a signal drain. A paused world runs no drains, so without this every
+    // instance of the previous scene stays in the component pools for ever:
+    // unparented, drawn by nothing, and accumulating one whole scene per load.
+    //
+    // The same argument `deleteInstance` makes, and the same place to make it:
+    // nothing else will while the editor is editing.
+    world.retireDestroyed();
+
     // Everything the file named was created just now, so nothing selected
     // before it still means what it meant.
     inspector.select(core::InstanceId{});
@@ -1424,6 +1435,9 @@ bool Editor::renameInstance(scene::World& world, core::InstanceId id, core::Inst
 void Editor::newScene(scene::World& world, Inspector& inspector)
 {
     scene::clearScene(world);
+    // See `load`: `clearScene` destroys, and a paused world never drains, so
+    // without this the old scene lives on in the pools as unparented husks.
+    world.retireDestroyed();
 
     // Undoing into a world that no longer exists is not undoing.
     m_history.clear();
