@@ -27,6 +27,7 @@
 #include "luaug/core/types.h"
 #include "luaug/physics/physics.h"
 #include "luaug/scene/components.h"
+#include "luaug/scene/skeleton_host.h"
 
 #include <unordered_map>
 #include <utility>
@@ -50,6 +51,15 @@ public:
     // invalid id means nothing in this world has a body, which is the shape of
     // the defect that cost M4 a milestone, so the host tests that it resolved.
     void setWorkspace(core::InstanceId workspace) noexcept { m_workspace = workspace; }
+
+    // Where a joint pose is committed each tick.
+    //
+    // Null in every world with no skeleton, which is most of them, and injected
+    // by `app` for the same reason the physics backend is: `scene` may not learn
+    // what a palette is, and `render` may not learn what a body is. The mirror
+    // holds it because the mirror is what knows WHEN in a tick a pose may be
+    // committed -- after everything that could still move a joint.
+    void setSkeleton(SkeletonHost* skeleton) noexcept { m_skeleton = skeleton; }
 
     // The points a `MeshPart` with a hull fidelity collides as, keyed by the
     // content id its `MeshContent` names.
@@ -136,6 +146,8 @@ private:
     // of distinct collision meshes, and a flat array has an order that an
     // unordered container does not (R10).
     std::vector<std::pair<core::NameAtom, std::vector<core::Vec3>>> m_collisionPoints;
+
+    SkeletonHost* m_skeleton = nullptr;
 
     // What the mirror last pushed down for one instance, so that a tick can
     // tell a script's write from its own writeback without either side

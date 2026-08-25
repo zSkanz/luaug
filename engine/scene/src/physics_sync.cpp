@@ -741,6 +741,12 @@ void PhysicsSync::step(f64 fixedDt)
     // After the writeback, so a driven part follows where its anchor ENDED UP
     // this tick rather than where it was at the start of it.
     resolveWelds();
+    // And the pose is committed after everything that could have moved a joint,
+    // because `commitOverrides` re-runs the forward pass and anything written
+    // afterwards would be a frame behind. Nothing sets an override yet; this is
+    // where a ragdoll's writes land when one exists.
+    if (m_skeleton != nullptr)
+        m_skeleton->commitOverrides();
     publishContacts();
     const auto end = std::chrono::steady_clock::now();
 

@@ -481,3 +481,291 @@ TEST_CASE("the skeleton library answers by content and is sorted, not hashed")
     library.clear();
     CHECK(library.find(first) == nullptr);
 }
+
+// --- scene::SkeletonHost -----------------------------------------------------
+
+// A three-joint chain -- root, arm one unit up, hand one unit above that -- so
+// that a joint can be overridden with a joint BELOW it that is not, which is the
+// case the forward pass exists for.
+render::SkeletonLibrary::Entry threeJointChain()
+{
+    render::SkeletonLibrary::Entry entry = twoJointSkeleton();
+    asset::Joint hand;
+    hand.name = "hand";
+    hand.parent = 1;
+    hand.localBind.position = core::DVec3{0.0, 1.0, 0.0};
+    hand.inverseBind.m[3][1] = -2.0f;
+    entry.joints.push_back(hand);
+    return entry;
+}
+
+TEST_CASE("a skeleton answers what it is made of")
+{
+    Fixture fixture;
+    (void)fixture.rig(threeJointChain());
+    render::AnimationSystem animation(fixture.world, fixture.skeletons);
+    scene::SkeletonHost& host = animation;
+
+    CHECK(host.jointCount(fixture.mesh) == 3);
+    CHECK(host.findJoint(fixture.mesh, "hand") == 2);
+    CHECK(host.findJoint(fixture.mesh, "root") == 0);
+    // A name nothing carries is -1 rather than 0, because 0 is a real joint --
+    // and a `Bone` that silently resolved to the root would put a sword at a
+    // character's feet.
+    CHECK(host.findJoint(fixture.mesh, "tail") == -1);
+    CHECK(host.jointName(fixture.mesh, 1) == "child");
+    CHECK(host.jointParent(fixture.mesh, 2) == 1);
+    CHECK(host.jointParent(fixture.mesh, 0) == -1);
+
+    // A mesh with no rig at all, which is most of them.
+    const core::InstanceId plain = fixture.world.create(fixture.meshPartClass);
+    CHECK(host.jointCount(plain) == 0);
+    CHECK(host.findJoint(plain, "root") == -1);
+}
+
+TEST_CASE("a joint answers where it is even with nothing playing")
+{
+    // **The whole reason `jointModel` is a call and not a peek at the palette.**
+    // A character standing still has no pose at all, and a socket welded to its
+    // hand still has to be somewhere -- at the hand, in the rest chain.
+    Fixture fixture;
+    (void)fixture.rig(threeJointChain());
+    render::AnimationSystem animation(fixture.world, fixture.skeletons);
+    scene::SkeletonHost& host = animation;
+
+    core::CFrameD at;
+    REQUIRE(host.jointModel(fixture.mesh, 2, at));
+    // Two units up: one for the arm and one for the hand above it.
+    CHECK(at.position.y == doctest::Approx(2.0));
+    CHECK(at.position.x == doctest::Approx(0.0));
+
+    REQUIRE(host.jointModel(fixture.mesh, 0, at));
+    CHECK(at.position.y == doctest::Approx(0.0));
+
+    CHECK_FALSE(host.jointModel(fixture.mesh, 7, at));
+}
+
+TEST_CASE("a joint answers where the clip put it once one is playing")
+{
+    Fixture fixture;
+    const core::InstanceId player = fixture.rig(threeJointChain());
+    render::SkeletonLibrary::Entry posed = threeJointChain();
+    posed.clips.push_back(slideClip("slide"));
+    fixture.skeletons.set(fixture.content, posed);
+
+    render::AnimationSystem animation(fixture.world, fixture.skeletons);
+    const scene::TrackId track = animation.createTrack(player, "slide");
+    animation.play(track, 0.0f, 1.0f, 1.0f);
+    // Half a second into a clip that slides the child from y = 1 to y = 3.
+    animation.sample(0.5);
+
+    core::CFrameD at;
+    REQUIRE(animation.jointModel(fixture.mesh, 1, at));
+    CHECK(at.position.y == doctest::Approx(2.0).epsilon(0.01));
+    // And the hand rode along, one unit above wherever the arm ended up.
+    REQUIRE(animation.jointModel(fixture.mesh, 2, at));
+    CHECK(at.position.y == doctest::Approx(3.0).epsilon(0.01));
+}
+
+TEST_CASE("an override moves the joints below it")
+{
+    // A ragdoll simulates a dozen bones and a hand has twenty. The ones it does
+    // NOT simulate take their parent's new transform and their own unchanged
+    // local -- which is what makes them ride along rather than stay where the
+    // clip left them.
+    Fixture fixture;
+    (void)fixture.rig(threeJointChain());
+    render::AnimationSystem animation(fixture.world, fixture.skeletons);
+    scene::SkeletonHost& host = animation;
+
+    core::CFrameD moved;
+    moved.position = core::DVec3{5.0, 1.0, 0.0};
+    host.setJointOverride(fixture.mesh, 1, moved);
+    host.commitOverrides();
+
+    core::CFrameD at;
+    REQUIRE(host.jointModel(fixture.mesh, 1, at));
+    CHECK(at.position.x == doctest::Approx(5.0));
+    // The hand was never overridden and followed anyway.
+    REQUIRE(host.jointModel(fixture.mesh, 2, at));
+    CHECK(at.position.x == doctest::Approx(5.0));
+    CHECK(at.position.y == doctest::Approx(2.0));
+    // And the root above it did not move, because an override reaches down and
+    // not up.
+    REQUIRE(host.jointModel(fixture.mesh, 0, at));
+    CHECK(at.position.x == doctest::Approx(0.0));
+}
+
+TEST_CASE("going limp keeps the pose the animation left, joint by joint")
+{
+    // **The repair that is invisible until a ragdoll takes over a character
+    // that was moving.** A mesh whose tracks stop contributing used to have its
+    // pose ERASED -- and `commitOverrides` then rebuilds from the REST chain,
+    // so every joint the ragdoll does not simulate snaps out of the animation
+    // it was in and into bind pose, on the exact frame the character goes limp.
+    //
+    // Here the clip has slid the child to y = 3 and the hand rides one above it.
+    // The ragdoll then drives the CHILD and leaves the hand alone: the hand must
+    // keep the local the clip gave it, not the rest one.
+    Fixture fixture;
+    const core::InstanceId player = fixture.rig(threeJointChain());
+    render::SkeletonLibrary::Entry posed = threeJointChain();
+    // The hand is bent out along X by the clip, which the rest chain does not do.
+    asset::AnimationChannel bend;
+    bend.joint = 2;
+    bend.target = asset::AnimationChannel::Target::Translation;
+    bend.stride = 3;
+    bend.times = {0.0f, 1.0f};
+    bend.values = {3.0f, 1.0f, 0.0f, 3.0f, 1.0f, 0.0f};
+    asset::AnimationClip clip = slideClip("slide");
+    clip.channels.push_back(bend);
+    posed.clips.push_back(clip);
+    fixture.skeletons.set(fixture.content, posed);
+
+    render::AnimationSystem animation(fixture.world, fixture.skeletons);
+    scene::SkeletonHost& host = animation;
+    const scene::TrackId track = animation.createTrack(player, "slide");
+    animation.play(track, 0.0f, 1.0f, 1.0f);
+    animation.sample(1.0);
+
+    core::CFrameD handWhilePlaying;
+    REQUIRE(host.jointModel(fixture.mesh, 2, handWhilePlaying));
+    // Bent three units out along X by the clip.
+    CHECK(handWhilePlaying.position.x == doctest::Approx(3.0).epsilon(0.01));
+
+    // The character goes limp: the clip stops contributing, and the ragdoll
+    // starts driving the joint above the hand in the same tick.
+    animation.stop(track, 0.0f);
+    core::CFrameD driven;
+    driven.position = core::DVec3{0.0, 6.0, 0.0};
+    host.setJointOverride(fixture.mesh, 1, driven);
+    animation.sample(1.0 / 60.0);
+    host.commitOverrides();
+
+    core::CFrameD hand;
+    REQUIRE(host.jointModel(fixture.mesh, 2, hand));
+    // It followed the driven joint up...
+    CHECK(hand.position.y == doctest::Approx(7.0).epsilon(0.01));
+    // ...and it is STILL BENT, which is the whole point. Rebuilt from rest it
+    // would be at x = 0, straight, and the character's hand would snap open.
+    CHECK(hand.position.x == doctest::Approx(3.0).epsilon(0.01));
+}
+
+TEST_CASE("an override survives a tick in which no clip contributes")
+{
+    // **The repair that is invisible until a ragdoll goes limp.** A mesh with
+    // nothing playing used to have its pose ERASED -- and a mesh with no track
+    // was never even visited -- so a ragdoll driving a character with no
+    // animation had nowhere to write and the character snapped to bind pose on
+    // exactly the frame it must not.
+    Fixture fixture;
+    (void)fixture.rig(threeJointChain());
+    render::AnimationSystem animation(fixture.world, fixture.skeletons);
+    scene::SkeletonHost& host = animation;
+
+    core::CFrameD moved;
+    moved.position = core::DVec3{0.0, 9.0, 0.0};
+    host.setJointOverride(fixture.mesh, 1, moved);
+    host.commitOverrides();
+
+    // A tick with no track at all. The pose must still be there afterwards.
+    animation.sample(1.0 / 60.0);
+
+    REQUIRE(animation.pose(fixture.mesh) != nullptr);
+    core::CFrameD at;
+    REQUIRE(host.jointModel(fixture.mesh, 1, at));
+    CHECK(at.position.y == doctest::Approx(9.0));
+}
+
+TEST_CASE("overrides last one tick and no longer")
+{
+    // An override that outlived the tick that set it is a ragdoll still driving
+    // a character nobody is simulating.
+    Fixture fixture;
+    (void)fixture.rig(threeJointChain());
+    render::AnimationSystem animation(fixture.world, fixture.skeletons);
+    scene::SkeletonHost& host = animation;
+
+    core::CFrameD moved;
+    moved.position = core::DVec3{4.0, 1.0, 0.0};
+    host.setJointOverride(fixture.mesh, 1, moved);
+    host.commitOverrides();
+
+    core::CFrameD at;
+    REQUIRE(host.jointModel(fixture.mesh, 1, at));
+    CHECK(at.position.x == doctest::Approx(4.0));
+
+    // A second commit with nothing set changes nothing: the palette holds the
+    // last committed pose rather than being rebuilt from an override that is
+    // gone.
+    host.commitOverrides();
+    REQUIRE(host.jointModel(fixture.mesh, 1, at));
+    CHECK(at.position.x == doctest::Approx(4.0));
+}
+
+TEST_CASE("clearing an override takes the mesh out of the drive entirely")
+{
+    Fixture fixture;
+    (void)fixture.rig(threeJointChain());
+    render::AnimationSystem animation(fixture.world, fixture.skeletons);
+    scene::SkeletonHost& host = animation;
+
+    core::CFrameD moved;
+    moved.position = core::DVec3{4.0, 1.0, 0.0};
+    host.setJointOverride(fixture.mesh, 1, moved);
+    host.clearJointOverrides(fixture.mesh);
+    host.commitOverrides();
+
+    // Never committed, so there is no pose -- and a null pose means bind pose,
+    // which is the honest answer for a mesh nothing is driving.
+    CHECK(animation.pose(fixture.mesh) == nullptr);
+    core::CFrameD at;
+    REQUIRE(host.jointModel(fixture.mesh, 1, at));
+    CHECK(at.position.x == doctest::Approx(0.0));
+}
+
+TEST_CASE("an override on a joint the rig does not have is refused")
+{
+    Fixture fixture;
+    (void)fixture.rig(threeJointChain());
+    render::AnimationSystem animation(fixture.world, fixture.skeletons);
+    scene::SkeletonHost& host = animation;
+
+    host.setJointOverride(fixture.mesh, 9, core::CFrameD{});
+    host.commitOverrides();
+    // Nothing was driven, so nothing was built.
+    CHECK(animation.pose(fixture.mesh) == nullptr);
+}
+
+TEST_CASE("the pose keeps the model transforms it used to throw away")
+{
+    Fixture fixture;
+    const core::InstanceId player = fixture.rig(threeJointChain());
+    render::SkeletonLibrary::Entry posed = threeJointChain();
+    posed.clips.push_back(slideClip("slide"));
+    fixture.skeletons.set(fixture.content, posed);
+
+    render::AnimationSystem animation(fixture.world, fixture.skeletons);
+    const scene::TrackId track = animation.createTrack(player, "slide");
+    animation.play(track, 0.0f, 1.0f, 1.0f);
+    animation.sample(0.5);
+
+    const render::Pose* pose = animation.pose(fixture.mesh);
+    REQUIRE(pose != nullptr);
+    REQUIRE(pose->model.size() == 3);
+    REQUIRE(pose->local.size() == 3);
+    REQUIRE(pose->palette.size() == 3);
+
+    // `model` is joint space to MODEL space, and `palette` is that with
+    // `inverseBind` folded in -- two different matrices, and confusing them is
+    // what puts a socket at the origin.
+    // Compared at f32. `doctest::Approx` takes a double, and letting a matrix
+    // entry promote into it is a `-Wdouble-promotion` error under Clang.
+    const auto nearF = [](f32 value, f32 expected) { return std::fabs(value - expected) < 0.01f; };
+    CHECK(nearF(pose->model[1].m[3][1], 2.0f));
+    CHECK(nearF(pose->palette[1].m[3][1], 1.0f));
+    // `local` is relative to the parent: the child slid to two units above a
+    // root that did not move.
+    CHECK(nearF(pose->local[1].m[3][1], 2.0f));
+    CHECK(nearF(pose->local[2].m[3][1], 1.0f));
+}

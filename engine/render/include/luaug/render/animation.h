@@ -22,6 +22,7 @@
 #include "luaug/core/math.h"
 #include "luaug/core/name_atom.h"
 #include "luaug/scene/animation_host.h"
+#include "luaug/scene/skeleton_host.h"
 
 #include <span>
 #include <string>
@@ -81,9 +82,29 @@ private:
 struct Pose
 {
     std::vector<core::Mat4> palette;
+
+    // The same joints before `inverseBind` was folded in: joint space to MODEL
+    // space, which is what anything other than a vertex shader wants. A socket
+    // on a hand needs where the hand IS, and the palette says where it moved
+    // FROM its bind pose -- two different matrices, and the second is useless
+    // for the question.
+    //
+    // Free to keep: `rebuildPose` computes it into a scratch and threw it away.
+    std::vector<core::Mat4> model;
+
+    // Each joint relative to its parent, this tick.
+    //
+    // Kept so that an OVERRIDE is cheap: replacing one joint's model transform
+    // and re-running the forward pass needs every other joint's local, and
+    // recovering it from `model` would be an inverse per joint per tick.
+    std::vector<core::Mat4> local;
 };
 
-class AnimationSystem final : public scene::AnimationHost
+// **Two hosts, one implementation**, and they are separate interfaces on
+// purpose: `AnimationHost` is about tracks and weights and names no joint,
+// while `SkeletonHost` is about joints and names no track. A caller that wants
+// a socket on a hand should not have to link the thing that plays clips.
+class AnimationSystem final : public scene::AnimationHost, public scene::SkeletonHost
 {
 public:
     // The world and the library are references the system keeps: it is created
@@ -101,6 +122,17 @@ public:
     void sample(f64 fixedDt) override;
     [[nodiscard]] std::span<const scene::TrackId> drainEnded() override;
     void retire(const scene::World& world) override;
+
+    // --- scene::SkeletonHost ------------------------------------------------
+
+    [[nodiscard]] core::u32 jointCount(core::InstanceId meshPart) const override;
+    [[nodiscard]] core::i32 findJoint(core::InstanceId meshPart, std::string_view name) const override;
+    [[nodiscard]] core::i32 jointParent(core::InstanceId meshPart, core::u32 joint) const override;
+    [[nodiscard]] std::string_view jointName(core::InstanceId meshPart, core::u32 joint) const override;
+    [[nodiscard]] bool jointModel(core::InstanceId meshPart, core::u32 joint, core::CFrameD& out) const override;
+    void setJointOverride(core::InstanceId meshPart, core::u32 joint, const core::CFrameD& model) override;
+    void clearJointOverrides(core::InstanceId meshPart) override;
+    void commitOverrides() override;
 
     // The pose of one `MeshPart`, or null for a mesh with no skeleton or nothing
     // driving it. Read by the renderer; null means "draw it in bind pose", which
@@ -150,6 +182,31 @@ private:
 
     void rebuildPose(core::InstanceId meshPart, const SkeletonLibrary::Entry& skeleton);
 
+    // The skeleton a `MeshPart` renders, or null. One lookup, written once.
+    [[nodiscard]] const SkeletonLibrary::Entry* skeletonOf(core::InstanceId meshPart) const;
+
+    // A joint's model transform with no pose at all: the rest chain, walked
+    // parents-first. What a character standing in bind pose answers.
+    [[nodiscard]] static core::Mat4 restModelOf(const SkeletonLibrary::Entry& skeleton, core::u32 joint);
+
+    // One mesh's overrides for this tick. Sorted by joint, so applying them is a
+    // merge against the forward pass rather than a lookup per joint -- and so
+    // that two overrides of one joint resolve the same way every time (R10).
+    struct Override
+    {
+        core::u32 joint = 0;
+        core::Mat4 model;
+    };
+
+    struct OverrideSet
+    {
+        core::InstanceId meshPart;
+        std::vector<Override> joints;
+    };
+
+    [[nodiscard]] OverrideSet* overridesFor(core::InstanceId meshPart) noexcept;
+    [[nodiscard]] const OverrideSet* overridesFor(core::InstanceId meshPart) const noexcept;
+
     const scene::World* world_ = nullptr;
     const SkeletonLibrary* skeletons_ = nullptr;
 
@@ -180,6 +237,11 @@ private:
     std::vector<f32> weightR_;
     std::vector<f32> weightS_;
     std::vector<core::Mat4> model_;
+
+    // A vector rather than a map, and sorted by instance: a scene has a handful
+    // of ragdolls, and R10 forbids an unordered container's iteration order
+    // reaching observable output -- which a pose most certainly is.
+    std::vector<OverrideSet> overrides_;
 };
 
 } // namespace luaug::render

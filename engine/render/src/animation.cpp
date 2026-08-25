@@ -83,6 +83,14 @@ void sampleChannel(const asset::AnimationChannel& channel, f32 time, f32* out) n
 // rather than composed from three matrix multiplies, because it is the inner
 // loop of the pose and the multiplies would be forty-eight of the sixty-four
 // products doing nothing.
+// A rigid transform as a matrix. `toRenderMatrix` with no origin to subtract,
+// which is what a JOINT wants: a bind pose is measured from the mesh's own
+// origin and has nothing to do with where in the world the mesh stands.
+[[nodiscard]] Mat4 toMatrix(const core::CFrameD& frame) noexcept
+{
+    return core::toRenderMatrix(frame, core::DVec3{});
+}
+
 [[nodiscard]] Mat4 composeTrs(const DVec3& translation, const f32* quaternion, Vec3 scale) noexcept
 {
     const Mat3 rotation = core::fromQuaternion(quaternion[0], quaternion[1], quaternion[2], quaternion[3]);
@@ -314,6 +322,12 @@ void AnimationSystem::sample(f64 fixedDt)
         note(track.meshPart);
     }
 
+    // A mesh with overrides and no track is deliberately NOT collected here.
+    // It was, at first, on the reasoning that a limp ragdoll has no track and
+    // so would never be visited -- but there is nothing to rebuild for it:
+    // `commitOverrides` builds a pose from the rest chain when it finds none,
+    // and a mesh no clip drives has no clip to rebuild from. Adding the visit
+    // changed no observable behaviour, so it is not here.
     for (const core::InstanceId meshPart : meshes_) {
         const scene::MeshPartComponent* mesh = world_->meshParts().find(meshPart);
         if (mesh == nullptr)
@@ -403,13 +417,28 @@ void AnimationSystem::rebuildPose(core::InstanceId meshPart, const SkeletonLibra
         // Nothing drives this player any more. Its pose is taken away rather
         // than left holding the last thing that did -- a null pose means "bind
         // pose", and a stale palette would freeze the character mid-stride.
-        poses_.erase(keyOf(meshPart));
+        //
+        // **Unless something is overriding it**, and then the pose is left
+        // exactly as it is. Not merely un-erased: falling through would rebuild
+        // it from accumulators that are all zero weight, which IS the rest pose
+        // -- the first version of this did that and lost the very thing it was
+        // written to keep. What it keeps is the LOCALS. A ragdoll simulates a
+        // dozen bones; the fingers it does not simulate ride on their own local
+        // from this pose, so rebuilding from rest snaps every unsimulated joint
+        // out of the animation it was in on the exact frame the character goes
+        // limp -- a hand that springs open as the body drops.
+        if (overridesFor(meshPart) == nullptr)
+            poses_.erase(keyOf(meshPart));
         return;
     }
 
-    model_.assign(jointCount, Mat4{});
     Pose& pose = poses_[keyOf(meshPart)];
     pose.palette.assign(jointCount, Mat4{});
+    // Kept rather than thrown away. `model` is what a socket asks for and
+    // `local` is what an override needs to re-run the forward pass -- both were
+    // already being computed into a scratch that ended at the closing brace.
+    pose.model.assign(jointCount, Mat4{});
+    pose.local.assign(jointCount, Mat4{});
 
     f32 restRotation[4]{};
     for (usize joint = 0; joint < jointCount; ++joint) {
@@ -450,12 +479,192 @@ void AnimationSystem::rebuildPose(core::InstanceId meshPart, const SkeletonLibra
         }
 
         const Mat4 local = composeTrs(translation, quaternion, boneScale);
+        pose.local[joint] = local;
         // One forward pass, parents first -- which the loader guarantees by
         // sorting the joints (asset/model.h). A graph walk per frame would be
         // the alternative, and this is the whole reason it is not needed.
-        model_[joint] = bone.parent == asset::Joint::NoParent ? local : model_[bone.parent] * local;
-        pose.palette[joint] = model_[joint] * bone.inverseBind;
+        pose.model[joint] = bone.parent == asset::Joint::NoParent ? local : pose.model[bone.parent] * local;
+        pose.palette[joint] = pose.model[joint] * bone.inverseBind;
     }
+}
+
+// --- scene::SkeletonHost -----------------------------------------------------
+
+const SkeletonLibrary::Entry* AnimationSystem::skeletonOf(core::InstanceId meshPart) const
+{
+    if (world_ == nullptr || skeletons_ == nullptr)
+        return nullptr;
+    const scene::MeshPartComponent* mesh = world_->meshParts().find(meshPart);
+    if (mesh == nullptr)
+        return nullptr;
+    const SkeletonLibrary::Entry* entry = skeletons_->find(mesh->meshContent);
+    return entry != nullptr && !entry->joints.empty() ? entry : nullptr;
+}
+
+Mat4 AnimationSystem::restModelOf(const SkeletonLibrary::Entry& skeleton, core::u32 joint)
+{
+    // Walked from the joint UP rather than from the roots down: this answers
+    // one question about one joint, and building the whole chain to reach a
+    // wrist would be the rest of the skeleton's worth of work for nothing.
+    Mat4 out = toMatrix(skeleton.joints[joint].localBind);
+    for (core::u32 walk = skeleton.joints[joint].parent; walk != asset::Joint::NoParent;
+         walk = skeleton.joints[walk].parent) {
+        out = toMatrix(skeleton.joints[walk].localBind) * out;
+    }
+    return out;
+}
+
+core::u32 AnimationSystem::jointCount(core::InstanceId meshPart) const
+{
+    const SkeletonLibrary::Entry* entry = skeletonOf(meshPart);
+    return entry == nullptr ? 0u : static_cast<core::u32>(entry->joints.size());
+}
+
+core::i32 AnimationSystem::findJoint(core::InstanceId meshPart, std::string_view name) const
+{
+    const SkeletonLibrary::Entry* entry = skeletonOf(meshPart);
+    if (entry == nullptr)
+        return -1;
+    for (usize index = 0; index < entry->joints.size(); ++index) {
+        if (entry->joints[index].name == name)
+            return static_cast<core::i32>(index);
+    }
+    // A linear scan, because a rig has tens of joints and a `Bone` resolves its
+    // name once and then holds the index.
+    return -1;
+}
+
+core::i32 AnimationSystem::jointParent(core::InstanceId meshPart, core::u32 joint) const
+{
+    const SkeletonLibrary::Entry* entry = skeletonOf(meshPart);
+    if (entry == nullptr || joint >= entry->joints.size())
+        return -1;
+    const core::u32 parent = entry->joints[joint].parent;
+    return parent == asset::Joint::NoParent ? -1 : static_cast<core::i32>(parent);
+}
+
+std::string_view AnimationSystem::jointName(core::InstanceId meshPart, core::u32 joint) const
+{
+    const SkeletonLibrary::Entry* entry = skeletonOf(meshPart);
+    if (entry == nullptr || joint >= entry->joints.size())
+        return {};
+    return entry->joints[joint].name;
+}
+
+bool AnimationSystem::jointModel(core::InstanceId meshPart, core::u32 joint, core::CFrameD& out) const
+{
+    const SkeletonLibrary::Entry* entry = skeletonOf(meshPart);
+    if (entry == nullptr || joint >= entry->joints.size())
+        return false;
+
+    // The posed transform when there is a pose, and the REST chain when there is
+    // not -- a character standing still has no pose at all, and a socket on its
+    // hand still has to be somewhere.
+    const auto found = poses_.find(keyOf(meshPart));
+    const Mat4 model = found != poses_.end() && joint < found->second.model.size() ? found->second.model[joint]
+                                                                                   : restModelOf(*entry, joint);
+    // Orthonormalised on the way out: an exporter is free to bake scale into a
+    // bind pose and often does, and a socket welded to a joint has to be rigid
+    // or every part hanging off it inherits that scale (`core::cframeFromMatrix`).
+    out = core::cframeFromMatrix(model);
+    return true;
+}
+
+AnimationSystem::OverrideSet* AnimationSystem::overridesFor(core::InstanceId meshPart) noexcept
+{
+    return const_cast<OverrideSet*>(static_cast<const AnimationSystem*>(this)->overridesFor(meshPart));
+}
+
+const AnimationSystem::OverrideSet* AnimationSystem::overridesFor(core::InstanceId meshPart) const noexcept
+{
+    for (const OverrideSet& set : overrides_) {
+        if (set.meshPart == meshPart)
+            return &set;
+    }
+    return nullptr;
+}
+
+void AnimationSystem::setJointOverride(core::InstanceId meshPart, core::u32 joint, const core::CFrameD& model)
+{
+    if (jointCount(meshPart) <= joint)
+        return;
+
+    OverrideSet* set = overridesFor(meshPart);
+    if (set == nullptr) {
+        // Appended in the order meshes were first driven, which is an order the
+        // caller controls and can therefore make deterministic. A map keyed on
+        // the instance would put the iteration order in the hash (R10).
+        overrides_.push_back(OverrideSet{meshPart, {}});
+        set = &overrides_.back();
+    }
+
+    const Mat4 matrix = toMatrix(model);
+    const auto at = std::lower_bound(set->joints.begin(), set->joints.end(), joint,
+                                     [](const Override& entry, core::u32 key) { return entry.joint < key; });
+    if (at != set->joints.end() && at->joint == joint) {
+        // The last writer wins, and it wins the same way every time -- which is
+        // what makes two things reaching for one joint a bug the author can see
+        // rather than a bug that depends on iteration order.
+        at->model = matrix;
+        return;
+    }
+    set->joints.insert(at, Override{joint, matrix});
+}
+
+void AnimationSystem::clearJointOverrides(core::InstanceId meshPart)
+{
+    for (usize index = 0; index < overrides_.size(); ++index) {
+        if (overrides_[index].meshPart != meshPart)
+            continue;
+        overrides_.erase(overrides_.begin() + static_cast<std::ptrdiff_t>(index));
+        return;
+    }
+}
+
+void AnimationSystem::commitOverrides()
+{
+    for (const OverrideSet& set : overrides_) {
+        const SkeletonLibrary::Entry* entry = skeletonOf(set.meshPart);
+        if (entry == nullptr || set.joints.empty())
+            continue;
+
+        const usize jointCount = entry->joints.size();
+        Pose& pose = poses_[keyOf(set.meshPart)];
+        if (pose.model.size() != jointCount) {
+            // No pose this tick: the mesh has a rig and nothing playing, which
+            // is exactly a limp ragdoll. Built from rest so the joints the
+            // override does NOT name are still somewhere sensible.
+            pose.palette.assign(jointCount, Mat4{});
+            pose.model.assign(jointCount, Mat4{});
+            pose.local.assign(jointCount, Mat4{});
+            for (usize joint = 0; joint < jointCount; ++joint)
+                pose.local[joint] = toMatrix(entry->joints[joint].localBind);
+        }
+
+        // **One forward pass with substitutions**, and this is the whole reason
+        // an override is not just a write into the palette. A ragdoll simulates
+        // a dozen bones; a hand has twenty. The fingers are not overridden, so
+        // they take their parent's new model transform and their own unchanged
+        // local -- which is what makes them ride along on the wrist instead of
+        // staying where the clip left them.
+        usize next = 0;
+        for (usize joint = 0; joint < jointCount; ++joint) {
+            if (next < set.joints.size() && set.joints[next].joint == joint) {
+                pose.model[joint] = set.joints[next].model;
+                ++next;
+            }
+            else {
+                const core::u32 parent = entry->joints[joint].parent;
+                pose.model[joint] =
+                    parent == asset::Joint::NoParent ? pose.local[joint] : pose.model[parent] * pose.local[joint];
+            }
+            pose.palette[joint] = pose.model[joint] * entry->joints[joint].inverseBind;
+        }
+    }
+
+    // Cleared, always. An override that outlived the tick that set it is a
+    // ragdoll that keeps driving a character nobody is simulating any more.
+    overrides_.clear();
 }
 
 std::span<const scene::TrackId> AnimationSystem::drainEnded()
