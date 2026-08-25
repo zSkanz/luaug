@@ -1165,12 +1165,29 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // and a reload replaces the world -- none of which may happen
                 // inside the callback that noticed the click.
                 if (editorCommands.openScript.valid()) {
-                    scene::World& w = host->world();
+                    // **`authored()` and not the scene's world.** The Explorer
+                    // draws the open stamp's tree while there is one, so the id
+                    // that arrives here is a handle into THAT world -- and an id
+                    // read against the other one answers about whatever instance
+                    // shares the slot. That is a name from the wrong instance, a
+                    // `Source` from the wrong instance, and edits written into
+                    // it, which is exactly what was reported.
+                    scene::World& w = authored();
+                    const bool inStamp = editor.stampSession().open();
                     const core::InstanceId id = editorCommands.openScript;
                     const std::optional<scene::Value> source = w.getProperty(id, w.atoms().intern("Source"));
                     const auto* text = source.has_value() ? std::get_if<std::string>(&source.value()) : nullptr;
-                    scripts.open(id, script::scriptChunkName(host->runtime().state(), id),
-                                 std::string(script::mountedPathOf(host->runtime().state(), id)),
+
+                    // A stamp's script is in no VM and came from no file: its
+                    // chunk name is its place in the STAMP's tree, and there is
+                    // no mounted path to look up. `scriptChunkName` would ask
+                    // the runtime, whose world this is not.
+                    const std::string chunk =
+                        inStamp ? script::treePathOf(w, id) : script::scriptChunkName(host->runtime().state(), id);
+                    const std::string file =
+                        inStamp ? std::string{} : std::string(script::mountedPathOf(host->runtime().state(), id));
+
+                    scripts.open(id, inStamp ? ScriptOrigin::Stamp : ScriptOrigin::Scene, chunk, file,
                                  std::string(w.atoms().text(w.name(id))), text != nullptr ? *text : std::string{});
                 }
 
@@ -1182,10 +1199,18 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // thing that runs" buys.
                 for (const std::size_t index : scriptCommands.edited) {
                     const OpenScript* tab = scripts.at(index);
-                    if (tab == nullptr || !host->world().alive(tab->instance))
+                    if (tab == nullptr)
                         continue;
-                    (void)host->world().setProperty(tab->instance, host->world().atoms().intern("Source"),
-                                                    scene::Value{tab->document.text()});
+                    // **The world the tab came from**, which is the whole of
+                    // `ScriptOrigin`: writing a stamp's script into the scene's
+                    // world would put somebody's code on an unrelated instance.
+                    Editor::Stage* const stage = stageOf();
+                    if (tab->origin == ScriptOrigin::Stamp && stage == nullptr)
+                        continue;
+                    scene::World& w = tab->origin == ScriptOrigin::Stamp ? stage->world() : host->world();
+                    if (!w.alive(tab->instance))
+                        continue;
+                    (void)w.setProperty(tab->instance, w.atoms().intern("Source"), scene::Value{tab->document.text()});
                     editor.touch();
                 }
 
@@ -1232,7 +1257,16 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 if (scriptCommands.save.has_value()) {
                     const std::size_t index = *scriptCommands.save;
                     if (const OpenScript* tab = scripts.at(index); tab != nullptr) {
-                        if (tab->file.empty()) {
+                        if (tab->origin == ScriptOrigin::Stamp) {
+                            // **A stamp's script is saved by saving the STAMP**,
+                            // which is the file that holds it. Falling through
+                            // to the scene wrote the project's scene instead and
+                            // left the script exactly where it was -- reported as
+                            // "sometimes it does not save".
+                            if (editor.saveStamp(host->world(), host->runtime().dataModel()))
+                                scripts.markSaved(index);
+                        }
+                        else if (tab->file.empty()) {
                             // It lives in the scene, so saving it is saving the
                             // scene -- the `Source` is already in the world.
                             if (editor.saveOpenScene(host->world()))
@@ -1610,6 +1644,35 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // otherwise be two files written from inside an input handler.
                 if (editor.takePreferencesDirty())
                     editor.rememberState(options.scriptPath / ".luaug");
+
+                // **A tab whose instance is gone closes.** Deleting a script in
+                // the Explorer left its editor open on a document that could no
+                // longer be saved anywhere -- there is no instance to write
+                // `Source` to and no file behind it either.
+                //
+                // Asked once a frame and after every command that can destroy
+                // one, rather than wired to the delete: an instance also goes
+                // when a scene is loaded, when a stamp session opens, and when
+                // an undo takes a create back. One question at one place answers
+                // all of them, and a list of the ways would have missed the next
+                // one somebody adds.
+                //
+                // `ScriptEditor::forgetDestroyed` has existed and been tested
+                // since this editor was built and nothing ever called it, which
+                // is the shape D087 recorded: code that is right and unreachable
+                // fails the moment something finally reaches for it.
+                Editor::Stage* const openStage = stageOf();
+                if (const std::size_t orphaned =
+                        scripts.forgetDestroyed(host->world(), openStage != nullptr ? &openStage->world() : nullptr);
+                    orphaned > 0) {
+                    // Said out loud, because a tab vanishing is a thing that
+                    // happened TO somebody -- and if it was dirty, the text went
+                    // with the instance it belonged to.
+                    editor.report(orphaned == 1
+                                      ? "Closed a script tab; its instance was deleted"
+                                      : std::to_string(orphaned) + " script tabs closed; their instances were deleted",
+                                  false);
+                }
             }
 
             // **The manipulator gets the pointer first.** A press that lands on

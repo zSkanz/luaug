@@ -8,10 +8,10 @@
 
 namespace luaug::app {
 
-OpenScript& ScriptEditor::open(core::InstanceId instance, std::string chunk, std::string file, std::string title,
-                               std::string_view source)
+OpenScript& ScriptEditor::open(core::InstanceId instance, ScriptOrigin origin, std::string chunk, std::string file,
+                               std::string title, std::string_view source)
 {
-    if (const std::optional<std::size_t> found = indexOf(instance); found.has_value()) {
+    if (const std::optional<std::size_t> found = indexOf(instance, origin); found.has_value()) {
         // Already open: this is a focus, not a load. Re-seeding the text here
         // would throw away whatever somebody has been typing, which is the one
         // thing a second double-click must not do.
@@ -28,6 +28,7 @@ OpenScript& ScriptEditor::open(core::InstanceId instance, std::string chunk, std
 
     OpenScript tab;
     tab.instance = instance;
+    tab.origin = origin;
     tab.chunk = std::move(chunk);
     tab.file = std::move(file);
     tab.title = std::move(title);
@@ -99,10 +100,10 @@ bool ScriptEditor::setZoom(core::f32 value) noexcept
     return true;
 }
 
-std::optional<std::size_t> ScriptEditor::indexOf(core::InstanceId instance) const noexcept
+std::optional<std::size_t> ScriptEditor::indexOf(core::InstanceId instance, ScriptOrigin origin) const noexcept
 {
     for (std::size_t index = 0; index < m_tabs.size(); ++index) {
-        if (m_tabs[index].instance == instance)
+        if (m_tabs[index].instance == instance && m_tabs[index].origin == origin)
             return index;
     }
     return std::nullopt;
@@ -125,11 +126,15 @@ void ScriptEditor::markSaved(std::size_t index) noexcept
         tab->savedRevision = tab->document.revision();
 }
 
-std::size_t ScriptEditor::forgetDestroyed(const scene::World& world)
+std::size_t ScriptEditor::forgetDestroyed(const scene::World& scene, const scene::World* stamp)
 {
     std::size_t closed = 0;
     for (std::size_t index = m_tabs.size(); index > 0; --index) {
-        if (world.alive(m_tabs[index - 1].instance))
+        const OpenScript& tab = m_tabs[index - 1];
+        // Each tab against its OWN world. A stamp tab with no session open has
+        // nowhere left to be edited, which is as gone as a deleted instance.
+        const scene::World* home = tab.origin == ScriptOrigin::Scene ? &scene : stamp;
+        if (home != nullptr && home->alive(tab.instance))
             continue;
         (void)close(index - 1);
         ++closed;

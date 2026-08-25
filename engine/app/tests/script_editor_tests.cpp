@@ -51,7 +51,8 @@ TEST_CASE("opening the same instance twice is one tab, and does not lose typing"
     TwoScripts fixture;
     ScriptEditor editor;
 
-    editor.open(fixture.first, "src/scripts/a.luau", "src/scripts/a.luau", "a", "local x = 1");
+    editor.open(fixture.first, app::ScriptOrigin::Scene, "src/scripts/a.luau", "src/scripts/a.luau", "a",
+                "local x = 1");
     CHECK(editor.count() == 1);
 
     app::OpenScript* tab = editor.active();
@@ -59,7 +60,8 @@ TEST_CASE("opening the same instance twice is one tab, and does not lose typing"
     tab->document.insert(Position{0, 11}, " -- edited");
 
     // Double-clicking it again in the Explorer is a focus, not a load.
-    editor.open(fixture.first, "src/scripts/a.luau", "src/scripts/a.luau", "a", "local x = 1");
+    editor.open(fixture.first, app::ScriptOrigin::Scene, "src/scripts/a.luau", "src/scripts/a.luau", "a",
+                "local x = 1");
     CHECK(editor.count() == 1);
     CHECK(editor.active()->document.text() == "local x = 1 -- edited");
 }
@@ -69,20 +71,20 @@ TEST_CASE("a second script is a second tab, and the newest is in front")
     TwoScripts fixture;
     ScriptEditor editor;
 
-    editor.open(fixture.first, "a", "", "a", "");
-    editor.open(fixture.second, "b", "", "b", "");
+    editor.open(fixture.first, app::ScriptOrigin::Scene, "a", "", "a", "");
+    editor.open(fixture.second, app::ScriptOrigin::Scene, "b", "", "b", "");
     CHECK(editor.count() == 2);
     CHECK(editor.activeIndex() == 1);
-    CHECK(editor.indexOf(fixture.first).value() == 0);
-    CHECK(editor.indexOf(fixture.second).value() == 1);
+    CHECK(editor.indexOf(fixture.first, app::ScriptOrigin::Scene).value() == 0);
+    CHECK(editor.indexOf(fixture.second, app::ScriptOrigin::Scene).value() == 1);
 }
 
 TEST_CASE("closing a tab leaves the eye where it already was")
 {
     TwoScripts fixture;
     ScriptEditor editor;
-    editor.open(fixture.first, "a", "", "a", "");
-    editor.open(fixture.second, "b", "", "b", "");
+    editor.open(fixture.first, app::ScriptOrigin::Scene, "a", "", "a", "");
+    editor.open(fixture.second, app::ScriptOrigin::Scene, "b", "", "b", "");
 
     // Closing the one in front falls back to the one on its left.
     CHECK(editor.close(1));
@@ -102,7 +104,8 @@ TEST_CASE("dirty is a comparison, so it cannot be forgotten")
 {
     TwoScripts fixture;
     ScriptEditor editor;
-    app::OpenScript& tab = editor.open(fixture.first, "a", "src/scripts/a.luau", "a", "local x = 1");
+    app::OpenScript& tab =
+        editor.open(fixture.first, app::ScriptOrigin::Scene, "a", "src/scripts/a.luau", "a", "local x = 1");
 
     CHECK_FALSE(tab.dirty());
     CHECK_FALSE(editor.anyDirty());
@@ -126,8 +129,8 @@ TEST_CASE("a tab whose instance is gone closes itself")
 {
     TwoScripts fixture;
     ScriptEditor editor;
-    editor.open(fixture.first, "a", "", "a", "");
-    editor.open(fixture.second, "b", "", "b", "");
+    editor.open(fixture.first, app::ScriptOrigin::Scene, "a", "", "a", "");
+    editor.open(fixture.second, app::ScriptOrigin::Scene, "b", "", "b", "");
 
     fixture.world.destroy(fixture.first);
     fixture.world.retireDestroyed();
@@ -135,7 +138,7 @@ TEST_CASE("a tab whose instance is gone closes itself")
     // A script deleted from the Explorer, or every instance replaced by a hot
     // reload: a tab holding an id nothing answers to would draw a document
     // nobody could save.
-    CHECK(editor.forgetDestroyed(fixture.world) == 1);
+    CHECK(editor.forgetDestroyed(fixture.world, nullptr) == 1);
     CHECK(editor.count() == 1);
     CHECK(editor.active()->title == "b");
 }
@@ -187,12 +190,12 @@ TEST_CASE("opening a script that is already open asks for its tab to be shown")
     TwoScripts fixture;
     ScriptEditor editor;
 
-    editor.open(fixture.first, "a", "", "a", "local x = 1");
+    editor.open(fixture.first, app::ScriptOrigin::Scene, "a", "", "a", "local x = 1");
     // Drained by the panel on the frame it draws.
     CHECK(editor.takeFocusRequest().value() == 0);
     CHECK_FALSE(editor.takeFocusRequest().has_value());
 
-    editor.open(fixture.second, "b", "", "b", "");
+    editor.open(fixture.second, app::ScriptOrigin::Scene, "b", "", "b", "");
     CHECK(editor.takeFocusRequest().value() == 1);
 
     // **The case this exists for.** Somebody looking at the Viewport
@@ -200,14 +203,73 @@ TEST_CASE("opening a script that is already open asks for its tab to be shown")
     // is active, and without this nothing on the screen would move, because
     // which dock sibling is in front is ImGui's state rather than ours.
     editor.setActive(1);
-    editor.open(fixture.first, "a", "", "a", "ignored");
+    editor.open(fixture.first, app::ScriptOrigin::Scene, "a", "", "a", "ignored");
     CHECK(editor.activeIndex() == 0);
     CHECK(editor.takeFocusRequest().value() == 0);
     // And it is still a focus rather than a load.
     CHECK(editor.at(0)->document.text() == "local x = 1");
 
     // A close cannot leave a request pointing at an index that has moved.
-    editor.open(fixture.second, "b", "", "b", "");
+    editor.open(fixture.second, app::ScriptOrigin::Scene, "b", "", "b", "");
     CHECK(editor.close(1));
     CHECK_FALSE(editor.takeFocusRequest().has_value());
+}
+
+TEST_CASE("two worlds hand out the same ids, and a tab knows which one it came from")
+{
+    // **The case that makes `ScriptOrigin` exist.** A stamp is edited in a world
+    // of its own (ADR 0049), and two `World`s allocate from their own slotmaps:
+    // the first instance in each has the same handle. A tab keyed on the id
+    // alone therefore answered about whichever world it was asked -- the wrong
+    // name, the wrong `Source`, and typing written into an unrelated instance.
+    TwoScripts scene;
+    TwoScripts stamp;
+    REQUIRE(scene.first == stamp.first);
+
+    ScriptEditor editor;
+    editor.open(scene.first, app::ScriptOrigin::Scene, "Workspace.A", "", "A", "-- scene");
+    editor.open(stamp.first, app::ScriptOrigin::Stamp, "Rig.B", "", "B", "-- stamp");
+
+    // Two tabs, not one focus of the same tab.
+    CHECK(editor.count() == 2);
+    REQUIRE(editor.indexOf(scene.first, app::ScriptOrigin::Scene).has_value());
+    REQUIRE(editor.indexOf(stamp.first, app::ScriptOrigin::Stamp).has_value());
+    CHECK(editor.indexOf(scene.first, app::ScriptOrigin::Scene) !=
+          editor.indexOf(stamp.first, app::ScriptOrigin::Stamp));
+    CHECK(editor.at(*editor.indexOf(stamp.first, app::ScriptOrigin::Stamp))->document.text() == "-- stamp");
+}
+
+TEST_CASE("a tab is closed by the world it belongs to and by no other")
+{
+    TwoScripts scene;
+    TwoScripts stamp;
+
+    ScriptEditor editor;
+    editor.open(scene.first, app::ScriptOrigin::Scene, "Workspace.A", "", "A", "");
+    editor.open(stamp.first, app::ScriptOrigin::Stamp, "Rig.B", "", "B", "");
+
+    // Destroying the scene's instance must not take the stamp's tab with it,
+    // even though the two ids are equal.
+    REQUIRE(scene.world.destroy(scene.first));
+    scene.world.retireDestroyed();
+    CHECK(editor.forgetDestroyed(scene.world, &stamp.world) == 1);
+    CHECK(editor.count() == 1);
+    CHECK(editor.at(0)->origin == app::ScriptOrigin::Stamp);
+}
+
+TEST_CASE("closing the stamp session closes the tabs that lived in it")
+{
+    // A stamp tab has nowhere left to be edited once the session is gone, which
+    // is as gone as a deleted instance -- and leaving it open would leave a
+    // document pointing into a world that no longer exists.
+    TwoScripts scene;
+    TwoScripts stamp;
+
+    ScriptEditor editor;
+    editor.open(scene.first, app::ScriptOrigin::Scene, "Workspace.A", "", "A", "");
+    editor.open(stamp.first, app::ScriptOrigin::Stamp, "Rig.B", "", "B", "");
+
+    CHECK(editor.forgetDestroyed(scene.world, nullptr) == 1);
+    REQUIRE(editor.count() == 1);
+    CHECK(editor.at(0)->origin == app::ScriptOrigin::Scene);
 }

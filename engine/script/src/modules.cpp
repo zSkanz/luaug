@@ -527,13 +527,7 @@ std::vector<core::InstanceId> mountScripts(lua_State* L, std::span<const Mounted
     return made;
 }
 
-namespace {
-
-// What an error message calls a script that did not come from a file: its place
-// in the tree, which is the only name it has. `Workspace.Rig.Walk` reads the way
-// somebody would say it out loud, and it is what they will look for in the
-// Explorer.
-[[nodiscard]] std::string treePathOf(const scene::World& w, core::InstanceId id)
+std::string treePathOf(const scene::World& w, core::InstanceId id)
 {
     std::vector<std::string_view> parts;
     for (core::InstanceId walk = id; walk.valid(); walk = w.parentOf(walk))
@@ -548,8 +542,6 @@ namespace {
     }
     return out;
 }
-
-} // namespace
 
 std::string_view mountedPathOf(lua_State* L, core::InstanceId instance)
 {

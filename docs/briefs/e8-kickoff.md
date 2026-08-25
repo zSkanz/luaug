@@ -208,6 +208,22 @@ newline, because the join skipped the separator it had already decided not to
 write. Counted rather than asked of the string. Every file ends in a blank line,
 so this is the common case rather than the corner one.
 
+**Finding 18 -- an `InstanceId` is a handle into ONE world, and this editor has
+two.** A stamp is edited in a world of its own (ADR 0049), and two `World`s
+allocate from their own slotmaps -- so the first instance in each has the same
+handle. Every part of the script editor read `host->world()`, so a script opened
+from a stamp's Explorer showed a name from the wrong instance, read a `Source`
+from the wrong instance, and wrote every keystroke into it. The tab now records
+which world it came from, and the fixture that proves it starts by asserting the
+two ids are equal -- because a test where they happen to differ proves nothing.
+
+**Finding 19 -- `forgetDestroyed` was written, tested, and never called.**
+Deleting a script left its tab open on a document with nowhere to be saved. The
+unit was right; nothing reached for it. That is D087's shape a second time, and
+the fix is one call at the safe point rather than a hook on the delete -- an
+instance also goes when a scene loads, when a stamp opens, and when an undo
+takes a create back.
+
 ## Attempted / abandoned
 
 **Resuming through the deferred queue.** Recommended by the design pass so the

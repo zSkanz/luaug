@@ -163,6 +163,16 @@ public:
 // copy of the source could not have answered.
 [[nodiscard]] std::string_view mountedPathOf(lua_State* L, core::InstanceId instance);
 
+// What a script that did not come from a file is called: its place in the tree.
+// `Workspace.Rig.Walk` reads the way somebody would say it out loud, and it is
+// what they will look for in the Explorer.
+//
+// **Takes a world rather than a `lua_State`**, which is what makes it usable on
+// a world no VM has ever seen -- the one an open stamp is edited in (ADR 0049).
+// `scriptChunkName` is this plus the mount lookup, and needs the VM for that
+// half alone.
+[[nodiscard]] std::string treePathOf(const scene::World& world, core::InstanceId instance);
+
 // Installs the `require` global. Runs during boot, before the sandbox.
 void registerRequire(lua_State* L);
 

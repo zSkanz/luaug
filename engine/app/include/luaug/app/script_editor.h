@@ -69,10 +69,33 @@ struct Breakpoint
     core::u32 boundLine = 0;
 };
 
+// **Which world a tab's instance lives in.**
+//
+// An `InstanceId` is a handle into ONE world's slotmap, and this editor has two:
+// the scene's, and the separate world an open stamp is edited in (ADR 0049). An
+// id from one asked of the other answers about whatever instance happens to
+// occupy that slot -- so a tab that did not record where it came from showed the
+// wrong name, read the wrong `Source`, and wrote what somebody typed into a
+// different instance entirely.
+//
+// An enum rather than a `World*` on purpose: a stage's world is destroyed when
+// the stamp is closed, and a stale pointer compared against a fresh allocation
+// that reused the address is a worse version of the same bug.
+enum class ScriptOrigin : core::u8
+{
+    // The project's own world -- what the Explorer shows with no stamp open.
+    Scene,
+    // The world the open stamp is edited in. A tab of this kind has nowhere to
+    // live once that session closes, and closes with it.
+    Stamp,
+};
+
 // One tab.
 struct OpenScript
 {
     core::InstanceId instance;
+    // See `ScriptOrigin`. Read before every use of `instance`.
+    ScriptOrigin origin = ScriptOrigin::Scene;
     // What the chunk is called: the file's project-relative path when the script
     // was mounted from one, its place in the tree otherwise. The key breakpoints
     // and the debugger both use.
@@ -147,8 +170,8 @@ public:
     //
     // `source` seeds a NEW tab only. Re-opening does not overwrite what somebody
     // has been typing.
-    OpenScript& open(core::InstanceId instance, std::string chunk, std::string file, std::string title,
-                     std::string_view source);
+    OpenScript& open(core::InstanceId instance, ScriptOrigin origin, std::string chunk, std::string file,
+                     std::string title, std::string_view source);
 
     // Closes the tab at `index`. The next tab to be in front is the one to its
     // left, which is what leaves the eye where it already was.
@@ -163,7 +186,10 @@ public:
     [[nodiscard]] std::size_t activeIndex() const noexcept { return m_active; }
     void setActive(std::size_t index) noexcept;
 
-    [[nodiscard]] std::optional<std::size_t> indexOf(core::InstanceId instance) const noexcept;
+    // **Keyed on the world as well as the id**, because the two worlds hand out
+    // the same handles: slot 7 exists in both, and matching on the id alone
+    // would focus a scene tab when somebody opened a stamp's script.
+    [[nodiscard]] std::optional<std::size_t> indexOf(core::InstanceId instance, ScriptOrigin origin) const noexcept;
 
     // **How big the code is drawn, as a multiple of the interface's own size.**
     //
@@ -211,7 +237,12 @@ public:
     // Explorer, and a hot reload replaces every instance in the world -- so a
     // tab holding an id nothing answers to would draw a document nobody could
     // save. Returns how many it closed.
-    std::size_t forgetDestroyed(const scene::World& world);
+    //
+    // Both worlds, because each tab is asked about its OWN: a `Stamp` tab is
+    // dead the moment there is no open stamp, and asking the scene about its id
+    // would answer about a different instance that happens to share the slot.
+    // `stamp` is null when no stamp session is open.
+    std::size_t forgetDestroyed(const scene::World& scene, const scene::World* stamp);
 
     // --- Breakpoints ---------------------------------------------------------
     //
