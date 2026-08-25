@@ -45,6 +45,7 @@
 #include "luaug/core/id.h"
 #include "luaug/core/types.h"
 
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -77,6 +78,8 @@ enum class CompletionKind : core::u8
     // Its own kind rather than `Method`, because `math.floor` is not reached
     // off an object and the casing rule (ADR 0034) is what says so.
     Library,
+    // A name a required module hands back, read from that module's own source.
+    Module,
     // **A child of the resolved instance**, by the name it has in the tree
     // right now. The one kind of row nothing but a live world can produce.
     Instance,
@@ -177,6 +180,15 @@ struct CompletionWorld
 void collectCompletions(const ScriptDocument& document, const CompletionRequest& request,
                         const scene::ClassRegistry& classes, const core::AtomTable& atoms, const CompletionWorld& tree,
                         std::vector<Completion>& out);
+
+// **What the ENGINE puts in front of a script**, as opposed to what Luau does:
+// the world globals, the datatype namespaces, and the functions the runtime
+// installs. Luau's own are `script::stdGlobals()`.
+//
+// One list with two readers, and the second is the reason it is exported: the
+// unknown-global lint has to know exactly the same set the completion offers,
+// or it underlines names the editor itself just suggested.
+[[nodiscard]] std::span<const std::string_view> engineGlobals() noexcept;
 
 // How many rows the popup shows before it scrolls. A list somebody has to scan
 // is a list they stop reading, and eight is what fits under a line of code

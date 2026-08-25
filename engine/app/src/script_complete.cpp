@@ -308,14 +308,33 @@ void collectMembers(const scene::ClassRegistry& classes, const core::AtomTable& 
 // evaluates anything, follows a function, or decides what an expression is
 // worth. It reads an assignment the way a person scrolling up would, which is
 // the limit ADR 0057 draws and the reason this stays honest.
-void expandLocals(const ScriptDocument& document, std::vector<std::string>& path)
+// Whether `value` is exactly `require(<something>)`, and if so what the
+// something is. Read textually, the way everything else here is.
+[[nodiscard]] bool unwrapRequire(std::string_view& value)
 {
+    constexpr std::string_view Call = "require";
+    if (!value.starts_with(Call))
+        return false;
+    std::string_view rest = value.substr(Call.size());
+    while (!rest.empty() && rest.front() == ' ')
+        rest.remove_prefix(1);
+    if (rest.size() < 2 || rest.front() != '(' || rest.back() != ')')
+        return false;
+    value = rest.substr(1, rest.size() - 2);
+    return true;
+}
+
+// True when the head of `path` was a local assigned a `require`. The path is
+// rewritten to what was required either way.
+bool expandLocals(const ScriptDocument& document, std::vector<std::string>& path)
+{
+    bool required = false;
     // Three hops, which is more than any real file needs and a hard stop on a
     // pair of locals that name each other.
     for (int hop = 0; hop < 3 && !path.empty(); ++hop) {
         const std::string& head = path.front();
         if (head == "game" || head == "script" || head == "workspace")
-            return;
+            return required;
 
         std::vector<std::string> assigned;
         for (u32 index = 0; index < document.lineCount() && assigned.empty(); ++index) {
@@ -336,18 +355,28 @@ void expandLocals(const ScriptDocument& document, std::vector<std::string>& path
             const std::size_t comment = value.find("--");
             if (comment != std::string_view::npos)
                 value = value.substr(0, comment);
+            // Both ends. The space after `=` is always there, and leaving it
+            // made `require(` fail to match its own name.
+            while (!value.empty() && value.front() == ' ')
+                value.remove_prefix(1);
             while (!value.empty() && value.back() == ' ')
                 value.remove_suffix(1);
             if (value.empty())
                 continue;
+            // **`local M = require(x)` is `x`, plus a note.** The path that
+            // comes out names the MODULE INSTANCE; the note is what says `M` is
+            // its returned value rather than the instance itself, which is the
+            // difference between offering `Source` and offering `foo`.
+            required = unwrapRequire(value) || required;
             (void)readPath(value, static_cast<u32>(value.size()), assigned);
         }
 
         if (assigned.empty())
-            return;
+            return required;
         path.erase(path.begin());
         path.insert(path.begin(), assigned.begin(), assigned.end());
     }
+    return required;
 }
 
 // Every child of `parent`, as rows. Skips a name a member already took, because
@@ -414,6 +443,11 @@ void sortCompletions(std::vector<Completion>& out)
 }
 
 } // namespace
+
+std::span<const std::string_view> engineGlobals() noexcept
+{
+    return kEngineGlobals;
+}
 
 CompletionRequest completionAt(const ScriptDocument& document, Position caret)
 {
@@ -505,7 +539,7 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
     }
     if (request.quoted == CompletionQuoted::Child) {
         std::vector<std::string> path = request.path;
-        expandLocals(document, path);
+        (void)expandLocals(document, path);
         collectChildren(tree, atoms, resolvePath(tree, atoms, path), request, out);
         sortCompletions(out);
         return;
@@ -540,8 +574,27 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
         // that happens to be spelled like a service, which is how somebody
         // reaches one after `local Lighting = game:GetService("Lighting")`.
         std::vector<std::string> path = request.path;
-        expandLocals(document, path);
+        const bool required = expandLocals(document, path);
         const core::InstanceId at = resolvePath(tree, atoms, path);
+
+        // **A required module is what it RETURNS, not the instance it lives
+        // in.** `local M = require(script.Util)` then `M.` wants `M`'s own
+        // names -- offering `Source` and `Parent` there would be offering the
+        // ModuleScript, which is not what `M` is.
+        if (required && at.valid() && tree.world != nullptr && !request.method) {
+            const std::optional<scene::Value> source = tree.world->getProperty(at, atoms.lookup("Source"));
+            const auto* text = source.has_value() ? std::get_if<std::string>(&*source) : nullptr;
+            if (text != nullptr) {
+                std::vector<ModuleMember> members;
+                moduleMembers(*text, members);
+                for (ModuleMember& member : members)
+                    push(out, request, std::move(member.name), std::move(member.detail), "", CompletionKind::Module);
+            }
+            // Nothing else: a module's table has no class and no children, and
+            // adding either would be describing the wrong object.
+            sortCompletions(out);
+            return;
+        }
         const scene::ClassId id = at.valid() && tree.world != nullptr ? tree.world->classOf(at)
                                                                       : classOfSubject(classes, atoms, request.subject);
         if (id != scene::InvalidClass)

@@ -731,17 +731,32 @@ void drawDiagnostics(const OpenScript& tab, const PaneMetrics& m, ImDrawList* dr
                      u32 last)
 {
     const ImU32 colour = col(currentTheme().palette.danger);
+    const ImU32 warned = col(currentTheme().palette.warning, 0.75f);
     for (const Diagnostic& diagnostic : tab.document.diagnostics()) {
         if (diagnostic.at.line < first || diagnostic.at.line > last)
             continue;
         const float y = textOrigin.y + static_cast<float>(diagnostic.at.line + 1) * m.lineHeight - 2.0f;
         const float x0 = textOrigin.x +
                          static_cast<float>(tab.document.cellOf(diagnostic.at.line, diagnostic.at.column)) * m.advance;
-        const float x1 = std::max(
-            x0 + m.advance, textOrigin.x + static_cast<float>(tab.document.cellCount(diagnostic.at.line)) * m.advance);
+        // **The extent the diagnostic knows about**, which for a lint is the
+        // name it is talking about. A parse error reports where the parser gave
+        // up rather than how much is wrong, so it says nothing and gets the
+        // rest of the line.
+        const float x1 =
+            diagnostic.length > 0
+                ? textOrigin.x + static_cast<float>(tab.document.cellOf(diagnostic.at.line,
+                                                                        diagnostic.at.column + diagnostic.length)) *
+                                     m.advance
+                : std::max(x0 + m.advance,
+                           textOrigin.x + static_cast<float>(tab.document.cellCount(diagnostic.at.line)) * m.advance);
+        // **A warning is not a quieter error.** An error means this will not
+        // compile; a warning means it will and probably should not have to.
+        // Drawing them the same colour is how a panel teaches somebody to
+        // ignore both.
+        const ImU32 mark = diagnostic.severity == Severity::Warning ? warned : colour;
         // A straight underline rather than a wave: at one physical pixel a wave
         // is a dotted line that reads as a rendering fault.
-        draw->AddLine(ImVec2(x0, y), ImVec2(x1, y), colour, 1.0f);
+        draw->AddLine(ImVec2(x0, y), ImVec2(x1, y), mark, 1.0f);
     }
 }
 

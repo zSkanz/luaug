@@ -53,6 +53,8 @@ struct Tree
     core::InstanceId workspace;
     core::InstanceId baseplate;
     core::InstanceId tags;
+    core::InstanceId util;
+    core::InstanceId literal;
 
     // **Only classes `scene` registers.** `Camera` and `Lighting` come from
     // `render`, which this fixture does not build -- and a tree made of classes
@@ -69,6 +71,20 @@ struct Tree
         // `Ground` is what an author actually builds.
         (void)make(fixture, "Part", "Ground", workspace);
         (void)make(fixture, "Part", "Ground", workspace);
+
+        // A module in each of the two shapes almost every module ever written
+        // takes. `Util` is the commoner one and the harder one to read.
+        util = make(fixture, "ModuleScript", "Util", workspace);
+        world.setProperty(util, fixture.atoms.intern("Source"),
+                          scene::Value{std::string("local M = {}\n"
+                                                   "M.Version = 1\n"
+                                                   "function M.clamp(x) return x end\n"
+                                                   "function M:reset() end\n"
+                                                   "return M\n")});
+
+        literal = make(fixture, "ModuleScript", "Config", workspace);
+        world.setProperty(literal, fixture.atoms.intern("Source"),
+                          scene::Value{std::string("return { Speed = 4, name = \"a\", start = function() end }\n")});
     }
 
     core::InstanceId make(Reflection& fixture, std::string_view className, std::string_view name,
@@ -374,10 +390,10 @@ TEST_CASE("an empty pair of quotes is the moment the list is worth the most")
     // Two children, nothing typed. Nothing about the class could ever answer
     // this, which is the whole argument for reading the world.
     const std::vector<Completion> rows = at(fixture, tree, "Workspace:WaitForChild(\"");
-    // Three children by name and four by instance: the two called `Ground`
-    // insert the same five characters, so they are one row. A list somebody
-    // cannot choose between is a list that wastes their time.
-    CHECK(rows.size() == 3);
+    // Five children by name and six by instance: the two called `Ground` insert
+    // the same six characters, so they are one row. A list somebody cannot
+    // choose between is a list that wastes their time.
+    CHECK(rows.size() == 5);
     CHECK(has(rows, "Baseplate"));
     CHECK(has(rows, "Level"));
     CHECK(has(rows, "Ground"));
@@ -569,4 +585,68 @@ TEST_CASE("a library is answered with no world at all")
     // And a colon is not how a library is reached, so it offers nothing rather
     // than pretending `math` is an object.
     CHECK(at(fixture, tree, "math:fl").empty());
+}
+
+TEST_CASE("a required module completes to what it hands back")
+{
+    Reflection fixture;
+    Tree tree(fixture);
+
+    // The shape most modules take: a local filled in and returned.
+    const std::string real = "local U = require(script.Parent.Util)\nU.";
+    const std::vector<Completion> rows = at(fixture, tree, real, tree.baseplate);
+    CHECK(has(rows, "Version"));
+    CHECK(has(rows, "clamp"));
+    CHECK(has(rows, "reset"));
+
+    const Completion* clamp = find(rows, "clamp");
+    REQUIRE(clamp != nullptr);
+    CHECK(clamp->detail == "function");
+    CHECK(clamp->kind == CompletionKind::Module);
+
+    const Completion* version = find(rows, "Version");
+    REQUIRE(version != nullptr);
+    CHECK(version->detail == "number");
+
+    // **What it is NOT.** `U` is the table the module returned, so offering the
+    // ModuleScript's own properties there would be describing a different
+    // object entirely.
+    CHECK_FALSE(has(rows, "Source"));
+    CHECK_FALSE(has(rows, "Parent"));
+}
+
+TEST_CASE("a module that returns a table written out completes the same way")
+{
+    Reflection fixture;
+    Tree tree(fixture);
+
+    const std::vector<Completion> rows =
+        at(fixture, tree, "local C = require(script.Parent.Config)\nC.", tree.baseplate);
+    REQUIRE(has(rows, "Speed"));
+    REQUIRE(has(rows, "name"));
+    REQUIRE(has(rows, "start"));
+    CHECK(find(rows, "Speed")->detail == "number");
+    CHECK(find(rows, "name")->detail == "string");
+    CHECK(find(rows, "start")->detail == "function");
+}
+
+TEST_CASE("the instance itself still completes as an instance")
+{
+    // Without the `require`, `script.Parent.Util` is a ModuleScript and nothing
+    // else -- so it gets the class's members, which is the honest answer.
+    Reflection fixture;
+    Tree tree(fixture);
+
+    const std::vector<Completion> rows = at(fixture, tree, "local M = script.Parent.Util\nM.", tree.baseplate);
+    CHECK(has(rows, "Source"));
+    CHECK_FALSE(has(rows, "clamp"));
+}
+
+TEST_CASE("a module this cannot read answers nothing rather than guessing")
+{
+    Reflection fixture;
+    Tree tree(fixture);
+
+    // A require of something that is not a module in this tree.
+    CHECK(at(fixture, tree, "local X = require(script.Parent.NoSuchModule)\nX.", tree.baseplate).empty());
 }

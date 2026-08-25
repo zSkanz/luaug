@@ -141,10 +141,28 @@ struct LineState
 };
 
 // One parse error, where Luau reported it.
+// **How loudly a diagnostic is drawn.**
+//
+// A warning is not a smaller error and must not look like one: an error means
+// this file will not compile, and a warning means it will and probably should
+// not have to. Drawing them the same is how a panel trains somebody to ignore
+// both.
+enum class Severity : core::u8
+{
+    Error,
+    Warning,
+};
+
 struct Diagnostic
 {
     Position at;
+    // How far the mark runs, in BYTES on that line. Zero means "to the end of
+    // the line", which is the honest extent for a parse error -- the parser
+    // reports where it gave up, not how much is wrong. A lint knows exactly
+    // which name it is talking about and says so.
+    core::u32 length = 0;
     std::string message;
+    Severity severity = Severity::Error;
 };
 
 // **Refused rather than truncated.** A document past either bound is reported as
@@ -392,5 +410,29 @@ private:
 // (`Ast/src/Parser.cpp:227-247`) -- so a half-typed file still says where it
 // went wrong. Without `LUAUG_LUAU_COMPILER` it answers nothing at all.
 void parseDiagnostics(const std::string& text, std::vector<Diagnostic>& out);
+
+// One name a module hands back, and what kind of thing it is.
+struct ModuleMember
+{
+    std::string name;
+    // `function`, or the shape of the value -- whatever fits the right-hand
+    // column of a completion row.
+    std::string detail;
+};
+
+// **What `require` of this source would give you**, read from the module's own
+// text.
+//
+// This is what makes `local M = require(...)` followed by `M.` mean something.
+// It is a walk over the AST the parser already builds and NOT type inference:
+// it finds the `return` at the end of the file and reads what is being returned
+// -- a table written out, or a local that the file filled in with
+// `function M.foo()` and `M.bar = ...`. Those two shapes are what almost every
+// module ever written looks like, and anything else answers nothing rather than
+// guessing.
+//
+// Empty when the source does not parse, for the reason the lints stop there: a
+// half-typed module has a partial tree and would offer half-typed names.
+void moduleMembers(const std::string& source, std::vector<ModuleMember>& out);
 
 } // namespace luaug::app

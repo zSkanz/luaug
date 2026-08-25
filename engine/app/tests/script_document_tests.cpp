@@ -13,9 +13,12 @@
 // merely small passes while the defect is still there.
 #include "luaug/app/script_document.h"
 
+#include <algorithm>
 #include <doctest/doctest.h>
 #include <ostream>
 #include <string>
+#include <string_view>
+#include <vector>
 
 using namespace luaug;
 using app::Position;
@@ -470,4 +473,96 @@ TEST_CASE("a moved line keeps a trailing blank line where it was")
 
     REQUIRE(document.moveLines(1, 1, 1));
     CHECK(document.text() == "a\n\nb");
+}
+
+namespace {
+
+[[nodiscard]] std::vector<app::Diagnostic> lintsOf(std::string_view source)
+{
+    app::ScriptDocument document(source);
+    document.refreshDiagnostics();
+    std::vector<app::Diagnostic> out;
+    for (const app::Diagnostic& diagnostic : document.diagnostics()) {
+        if (diagnostic.severity == app::Severity::Warning)
+            out.push_back(diagnostic);
+    }
+    return out;
+}
+
+[[nodiscard]] bool mentions(const std::vector<app::Diagnostic>& list, std::string_view needle)
+{
+    return std::any_of(list.begin(), list.end(), [needle](const app::Diagnostic& diagnostic) {
+        return diagnostic.message.find(needle) != std::string::npos;
+    });
+}
+
+} // namespace
+
+TEST_CASE("a name nothing declares is reported, and the sandbox is why it can be")
+{
+    // **No false positives to apologise for.** `sealGlobals` freezes the globals
+    // table (R4), so a name that is not in the sandbox's surface will be nil at
+    // runtime -- this is a fact rather than a style note.
+    const std::vector<app::Diagnostic> lints = lintsOf("local x = someHelper(1)\nprint(x)");
+    REQUIRE(lints.size() == 1);
+    CHECK(mentions(lints, "someHelper"));
+    CHECK(lints.front().at.line == 0);
+    // The NAME and not the rest of the line: a mark that runs to the end of the
+    // line points at the line, and the word is the whole message.
+    CHECK(lints.front().length == 10);
+}
+
+TEST_CASE("everything the sandbox really has is left alone")
+{
+    // The list this reads is the one the completion offers, which is the list
+    // checked against a real VM. Underlining a name the editor itself just
+    // suggested is the failure mode worth a case of its own.
+    CHECK(lintsOf("print(typeof(math.floor(1.5)))").empty());
+    CHECK(lintsOf("local t = table.create(4)\nprint(#t)").empty());
+    CHECK(lintsOf("print(game, workspace, script, task)").empty());
+    CHECK(lintsOf("local ok = pcall(function() end)\nprint(ok, _VERSION)").empty());
+    CHECK(lintsOf("print(Vector3.new(1, 2, 3), CFrame.identity, Enum.PartShape.Ball)").empty());
+}
+
+TEST_CASE("a local nobody reads is reported")
+{
+    const std::vector<app::Diagnostic> lints = lintsOf("local unusedThing = 1\nprint(2)");
+    REQUIRE(lints.size() == 1);
+    CHECK(mentions(lints, "unusedThing"));
+
+    // Read four hundred lines later is still read, which is why the walk
+    // finishes before it decides.
+    CHECK(lintsOf("local later = 1\nlocal function f() return later end\nprint(f())").empty());
+
+    // `local function` is a declaration too.
+    CHECK(mentions(lintsOf("local function helper() end\nprint(1)"), "helper"));
+}
+
+TEST_CASE("the lints stay out of the way where staying out of the way is the point")
+{
+    // **An underscore is how somebody says "I know".** Warning through it would
+    // leave them no way to say it.
+    CHECK(lintsOf("local _ignored = 1\nprint(2)").empty());
+
+    // A parameter and a loop variable are unused constantly and on purpose.
+    CHECK(lintsOf("local function f(a, b) return 1 end\nprint(f(1, 2))").empty());
+    CHECK(lintsOf("for i = 1, 3 do print(0) end").empty());
+    CHECK(lintsOf("for k, v in pairs({}) do print(0) end").empty());
+}
+
+TEST_CASE("a file that does not parse is not linted")
+{
+    // **The rule that decides whether warnings are worth having.** A half-typed
+    // file has a partial tree, and linting it would put a warning under every
+    // name somebody is in the middle of writing -- which is the fastest way to
+    // make a person turn warnings off for good.
+    app::ScriptDocument document("local value = \nprint(");
+    document.refreshDiagnostics();
+
+    bool sawError = false;
+    for (const app::Diagnostic& diagnostic : document.diagnostics()) {
+        CHECK(diagnostic.severity == app::Severity::Error);
+        sawError = true;
+    }
+    CHECK(sawError);
 }
