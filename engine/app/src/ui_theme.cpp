@@ -153,6 +153,16 @@ ThemeMetrics themeMetrics() noexcept
     return ThemeMetrics{};
 }
 
+namespace {
+// Points into `kThemes`, which is static storage, so this can never dangle.
+const Theme* g_current = nullptr;
+} // namespace
+
+const Theme& currentTheme() noexcept
+{
+    return g_current != nullptr ? *g_current : kThemes[0];
+}
+
 f32 contrastRatio(Color3 a, Color3 b) noexcept
 {
     const f32 first = relativeLuminance(a);
@@ -258,6 +268,10 @@ void applyTheme(const Theme& theme, f32 scale)
 {
     if (ImGui::GetCurrentContext() == nullptr)
         return;
+
+    // Remembered before anything is written, so `currentTheme()` is right even
+    // for a caller that draws in the same frame the theme changed.
+    g_current = &theme;
 
     const ThemePalette& p = theme.palette;
     const ThemeMetrics metrics = themeMetrics();
@@ -467,8 +481,10 @@ bool loadUiFont()
 // renderer, and a test that could only run in a dev build is a test that stops
 // running the day somebody checks the shipping profile.
 
-void applyTheme(const Theme&, f32)
-{}
+void applyTheme(const Theme& theme, f32)
+{
+    g_current = &theme;
+}
 
 bool loadUiFont()
 {

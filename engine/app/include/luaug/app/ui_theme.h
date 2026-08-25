@@ -188,6 +188,16 @@ struct Theme
 
 [[nodiscard]] ThemeMetrics themeMetrics() noexcept;
 
+// The theme `applyTheme` last applied, or the default when none has been.
+//
+// **So that a second panel does not need a second copy of the answer.** Before
+// the script editor there was one drawing translation unit and it kept the
+// chosen appearance in a file-local global; a second one asking "what colour is
+// a keyword" would either thread a `Theme` through every call or keep its own
+// idea of which is current, and the second of those goes wrong the first time
+// somebody changes theme with two panels open.
+[[nodiscard]] const Theme& currentTheme() noexcept;
+
 // WCAG 2.1 contrast between two colours, in the range [1, 21]. Symmetric.
 //
 // Here rather than in a test so that the number a theme is judged by and the

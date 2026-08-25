@@ -9,11 +9,11 @@
 #include "luaug/scene/enum_registry.h"
 #include "luaug/scene/world.h"
 
-#include "class_descriptors.gen.h"
-
 #include <doctest/doctest.h>
 #include <ostream>
 #include <string>
+
+#include "class_descriptors.gen.h"
 
 using namespace luaug;
 using app::Position;

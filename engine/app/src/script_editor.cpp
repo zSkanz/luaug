@@ -148,9 +148,9 @@ bool ScriptEditor::toggleBreakpoint(std::string_view chunk, core::u32 line)
 
 void ScriptEditor::clearBreakpoints(std::string_view chunk)
 {
-    m_breakpoints.erase(
-        std::remove_if(m_breakpoints.begin(), m_breakpoints.end(), [&](const Breakpoint& bp) { return bp.chunk == chunk; }),
-        m_breakpoints.end());
+    m_breakpoints.erase(std::remove_if(m_breakpoints.begin(), m_breakpoints.end(),
+                                       [&](const Breakpoint& bp) { return bp.chunk == chunk; }),
+                        m_breakpoints.end());
 }
 
 bool ScriptEditor::hasBreakpoint(std::string_view chunk, core::u32 line) const noexcept

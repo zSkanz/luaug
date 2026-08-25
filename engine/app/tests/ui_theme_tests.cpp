@@ -114,16 +114,15 @@ TEST_CASE("every syntax token is legible on the code pane's own ground")
             const char* name;
             core::Color3 color;
         } tokens[]{
-            {"keyword", syntax.keyword},   {"identifier", syntax.identifier},
-            {"number", syntax.number},     {"string", syntax.string},
-            {"comment", syntax.comment},   {"operatorToken", syntax.operatorToken},
+            {"keyword", syntax.keyword},     {"identifier", syntax.identifier}, {"number", syntax.number},
+            {"string", syntax.string},       {"comment", syntax.comment},       {"operatorToken", syntax.operatorToken},
             {"attribute", syntax.attribute}, {"errorToken", syntax.errorToken},
         };
 
         for (const auto& token : tokens) {
             const core::f32 ratio = app::contrastRatio(token.color, p.surface);
-            INFO(std::string(theme.id) << " / syntax." << std::string(token.name) << " = "
-                                       << static_cast<double>(ratio) << ":1");
+            INFO(std::string(theme.id) << " / syntax." << std::string(token.name) << " = " << static_cast<double>(ratio)
+                                       << ":1");
             CHECK(ratio >= app::kMinimumContrast);
         }
     }

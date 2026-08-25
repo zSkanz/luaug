@@ -23,6 +23,7 @@ luaug_add_module(app
         src/script_document.cpp
         src/script_syntax.cpp
         src/script_editor.cpp
+        src/script_editor_panel.cpp
         src/streaming_host.cpp
         src/debug_overlay.cpp
         src/inspector.cpp

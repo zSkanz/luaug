@@ -319,8 +319,7 @@ Position ScriptDocument::erase(Range range)
     std::string removed = textIn(span);
     const Position caretBefore = range.begin;
     applyEdit(span, {});
-    record(Edit{.begin = span.begin, .removed = std::move(removed), .inserted = {}, .caretBefore = caretBefore},
-           false);
+    record(Edit{.begin = span.begin, .removed = std::move(removed), .inserted = {}, .caretBefore = caretBefore}, false);
     return span.begin;
 }
 
@@ -334,10 +333,7 @@ Position ScriptDocument::replace(Range range, std::string_view text)
     std::string removed = textIn(span);
     const Position caretBefore = range.begin;
     const Position after = applyEdit(span, normalized);
-    record(Edit{.begin = span.begin,
-                .removed = std::move(removed),
-                .inserted = normalized,
-                .caretBefore = caretBefore},
+    record(Edit{.begin = span.begin, .removed = std::move(removed), .inserted = normalized, .caretBefore = caretBefore},
            false);
     return after;
 }

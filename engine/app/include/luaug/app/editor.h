@@ -298,6 +298,10 @@ struct EditorCommands
     std::string saveAs;
     // A scene the browser asked to open, relative to the content root.
     std::string openScene;
+    // A `Script` or `ModuleScript` to open a tab on (ADR 0057). The loop reads
+    // its `Source` and works out which file it came from, neither of which a
+    // tree row knows.
+    core::InstanceId openScript;
     // A folder the browser asked to make, in its current directory.
     std::string createFolder;
     // **A new entry script, by NAME, written under the project's `src/scripts`.**
@@ -457,7 +461,7 @@ struct EditorCommands
                !openStamp.empty() || saveStamp || closeStamp || createClass != scene::InvalidClass || deleteSelection ||
                duplicateSelection || reparentTo.valid() || renameInstance.valid() || !saveAs.empty() ||
                !openScene.empty() || !createFolder.empty() || !deleteContent.empty() || !renameContent.empty() ||
-               importAssets || importParent.valid();
+               importAssets || importParent.valid() || openScript.valid();
     }
 };
 

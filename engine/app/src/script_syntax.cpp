@@ -24,6 +24,14 @@
 namespace luaug::app {
 namespace {
 
+void pushToken(std::vector<Token>& out, core::u32 column, core::u32 end, TokenKind kind)
+{
+    if (end > column)
+        out.push_back(Token{.column = column, .length = end - column, .kind = kind});
+}
+
+#if LUAUG_LUAU_COMPILER
+
 // A long bracket opener at `at`: `[`, some `=`, `[`, optionally preceded by the
 // `--` that makes it a comment. Returns how many bytes the opener spans and its
 // level, or nothing when this is not one.
@@ -78,14 +86,6 @@ struct LongOpen
     }
     return std::string_view::npos;
 }
-
-void pushToken(std::vector<Token>& out, core::u32 column, core::u32 end, TokenKind kind)
-{
-    if (end > column)
-        out.push_back(Token{.column = column, .length = end - column, .kind = kind});
-}
-
-#if LUAUG_LUAU_COMPILER
 
 // **One allocator and one name table for the whole process**, and that is safe
 // rather than lucky: `setReadNames(false)` routes identifier lookup through
