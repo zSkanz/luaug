@@ -1,6 +1,8 @@
 #include "luaug/script/debugger.h"
 
+#include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
+#include "luaug/core/text_key.h"
 #include "luaug/script/binding.h"
 #include "luaug/script/signals.h"
 
@@ -143,8 +145,7 @@ void Debugger::onBreak(lua_State* co, BreakReason reason)
     if (m_skipArmed && reason == BreakReason::Breakpoint) {
         lua_Debug where{};
         const bool sameLine = lua_getinfo(co, 0, "l", &where) != 0 &&
-                              static_cast<u32>(where.currentline) == m_skipLine &&
-                              chunkOf(co, 0) == m_skipChunk;
+                              static_cast<u32>(where.currentline) == m_skipLine && chunkOf(co, 0) == m_skipChunk;
         m_skipArmed = false;
         if (sameLine)
             return;
@@ -157,8 +158,7 @@ void Debugger::onBreak(lua_State* co, BreakReason reason)
     // breakpoint into a runtime error in their game would be worse than a
     // breakpoint that did not stop.
     if (lua_isyieldable(co) == 0) {
-        core::logText(core::LogLevel::Warn,
-                      "A breakpoint was reached inside a call the VM cannot pause across; it did not stop.");
+        core::log(core::LogLevel::Warn, LUAUG_TR("script.warn.breakpoint_not_yieldable"));
         return;
     }
 
@@ -343,9 +343,8 @@ void Debugger::resume(lua_State* L)
         // its own reference by the time this returns.
         if (status != LUA_OK && status != LUA_YIELD && status != LUA_BREAK) {
             const char* message = lua_tostring(co, -1);
-            core::logText(core::LogLevel::Error,
-                          std::string("A script resumed from a breakpoint failed: ") +
-                              (message != nullptr ? message : "unknown error"));
+            core::logText(core::LogLevel::Error, std::string("A script resumed from a breakpoint failed: ") +
+                                                     (message != nullptr ? message : "unknown error"));
         }
     }
 

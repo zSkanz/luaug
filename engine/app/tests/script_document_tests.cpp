@@ -397,7 +397,8 @@ TEST_CASE("every cell round-trips to the column it came from")
     // A four-byte codepoint beside a two-byte one, because the arithmetic that
     // works for one and not the other is exactly the arithmetic somebody writes
     // by hand.
-    ScriptDocument document("a\xc3\xa9z\xf0\x9f\x8e\xb2" "b");
+    ScriptDocument document("a\xc3\xa9z\xf0\x9f\x8e\xb2"
+                            "b");
     for (core::u32 cell = 0; cell <= document.cellCount(0); ++cell) {
         const core::u32 column = document.columnOfCell(0, cell);
         INFO("cell " << cell << " -> column " << column);

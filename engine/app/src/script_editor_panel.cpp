@@ -27,6 +27,7 @@
 
 #include "luaug/app/script_editor.h"
 #include "luaug/app/ui_theme.h"
+#include "luaug/scene/world.h"
 
 #if LUAUG_DEBUG_UI
 
@@ -211,8 +212,7 @@ void insertText(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, s
     // byte column is what keeps a click on an accented word landing on the
     // letter under the pointer.
     const float cell = std::round((point.x - textOrigin.x) / m.advance);
-    return document.clamp(
-        Position{line, document.columnOfCell(line, static_cast<u32>(std::max(0.0f, cell)))});
+    return document.clamp(Position{line, document.columnOfCell(line, static_cast<u32>(std::max(0.0f, cell)))});
 }
 
 void handleTyping(OpenScript& tab, ScriptEditorCommands& out, std::size_t index)
@@ -234,6 +234,102 @@ void handleTyping(OpenScript& tab, ScriptEditorCommands& out, std::size_t index)
         insertText(tab, out, index, typed);
 }
 
+// Recomputes what is on offer. **Called after an edit rather than on a key**, so
+// that backspacing through a word narrows the list instead of dismissing it.
+void refreshCompletions(OpenScript& tab, const scene::World* world)
+{
+    if (world == nullptr) {
+        tab.completing = false;
+        return;
+    }
+
+    const CompletionRequest request = completionAt(tab.document, tab.caret.head);
+    // Nothing to go on: no subject and fewer than two letters is every name in
+    // the engine, which is a list nobody reads.
+    if (request.subject.empty() && request.prefix.size() < 2) {
+        tab.completing = false;
+        return;
+    }
+
+    collectCompletions(tab.document, request, world->classes(), world->atoms(), tab.completions);
+    tab.completionReplace = request.replace;
+    tab.completing = !tab.completions.empty();
+    if (tab.completionIndex >= tab.completions.size())
+        tab.completionIndex = 0;
+}
+
+void acceptCompletion(OpenScript& tab, ScriptEditorCommands& out, std::size_t index)
+{
+    if (!tab.completing || tab.completionIndex >= tab.completions.size())
+        return;
+    const std::string& label = tab.completions[tab.completionIndex].label;
+    tab.caret.head = tab.document.replace(tab.completionReplace, label);
+    tab.caret.anchor = tab.caret.head;
+    tab.caret.desiredColumn = tab.document.cellOf(tab.caret.head.line, tab.caret.head.column);
+    tab.completing = false;
+    edited(out, index);
+}
+
+// The rows, under the caret. Drawn as a child of the code pane rather than as a
+// popup, because an ImGui popup steals the keyboard and the pane needs to keep
+// receiving the letters that narrow the list.
+void drawCompletions(OpenScript& tab, const PaneMetrics& m, ImVec2 textOrigin)
+{
+    if (!tab.completing || tab.completions.empty())
+        return;
+
+    const ThemePalette& p = currentTheme().palette;
+    const float x = textOrigin.x + static_cast<float>(tab.document.cellOf(tab.completionReplace.begin.line,
+                                                                          tab.completionReplace.begin.column)) *
+                                       m.advance;
+    const float y = textOrigin.y + static_cast<float>(tab.caret.head.line + 1) * m.lineHeight;
+
+    const std::size_t rows = std::min<std::size_t>(tab.completions.size(), kMaxCompletionRows);
+    // The first row shown, so an index past the eighth scrolls the window rather
+    // than walking off the bottom of it.
+    const std::size_t firstRow = tab.completionIndex >= rows ? tab.completionIndex - rows + 1 : 0;
+
+    float width = 0.0f;
+    for (const Completion& completion : tab.completions)
+        width = std::max(width, ImGui::CalcTextSize(completion.label.c_str()).x +
+                                    ImGui::CalcTextSize(completion.detail.c_str()).x);
+    width += m.advance * 6.0f;
+
+    ImDrawList* draw = ImGui::GetForegroundDrawList();
+    const ImVec2 min(x, y);
+    const ImVec2 max(x + width, y + static_cast<float>(rows) * m.lineHeight);
+    draw->AddRectFilled(min, max, col(p.surfaceRaised));
+    draw->AddRect(min, max, col(p.border));
+
+    for (std::size_t row = 0; row < rows; ++row) {
+        const std::size_t at = firstRow + row;
+        if (at >= tab.completions.size())
+            break;
+        const Completion& completion = tab.completions[at];
+        const float rowY = y + static_cast<float>(row) * m.lineHeight;
+        if (at == tab.completionIndex)
+            draw->AddRectFilled(ImVec2(min.x, rowY), ImVec2(max.x, rowY + m.lineHeight), col(p.accent, 0.30f));
+        draw->AddText(m.font, ImGui::GetFontSize(), ImVec2(min.x + m.advance * 0.5f, rowY), col(p.text),
+                      completion.label.c_str());
+        const float detailX = max.x - ImGui::CalcTextSize(completion.detail.c_str()).x - m.advance * 0.5f;
+        draw->AddText(m.font, ImGui::GetFontSize(), ImVec2(detailX, rowY), col(p.textMuted), completion.detail.c_str());
+    }
+
+    // The prose for the highlighted row, under the list. The whole reason this
+    // is worth more than a list of names.
+    const Completion& current = tab.completions[tab.completionIndex];
+    if (!current.doc.empty()) {
+        const float docY = max.y;
+        const float docWidth = std::max(width, 420.0f);
+        const ImVec2 docMin(min.x, docY);
+        const ImVec2 docMax(min.x + docWidth, docY + m.lineHeight * 2.0f);
+        draw->AddRectFilled(docMin, docMax, col(p.surface));
+        draw->AddRect(docMin, docMax, col(p.border));
+        draw->AddText(m.font, ImGui::GetFontSize(), ImVec2(docMin.x + m.advance * 0.5f, docY), col(p.textMuted),
+                      current.doc.c_str(), nullptr, docWidth - m.advance);
+    }
+}
+
 void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, const PaneMetrics& m, float paneHeight)
 {
     ImGuiIO& io = ImGui::GetIO();
@@ -245,6 +341,29 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
     // shortcut never has Alt held, so this one condition is the whole fix.
     const bool ctrl = io.KeyCtrl && !io.KeyAlt;
     ScriptDocument& doc = tab.document;
+
+    // **While the list is up it owns the keys that move through it.** Anything
+    // else would make Enter insert a newline under a highlighted row, which is
+    // the one thing nobody means by it.
+    if (tab.completing) {
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+            tab.completing = false;
+            return;
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true)) {
+            tab.completionIndex = (tab.completionIndex + 1) % tab.completions.size();
+            return;
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true)) {
+            tab.completionIndex = tab.completionIndex == 0 ? tab.completions.size() - 1 : tab.completionIndex - 1;
+            return;
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false) ||
+            ImGui::IsKeyPressed(ImGuiKey_Tab, false)) {
+            acceptCompletion(tab, out, index);
+            return;
+        }
+    }
 
     if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true))
         placeCaret(tab, doc.prevColumn(tab.caret.head), shift);
@@ -374,8 +493,7 @@ void drawGutter(const OpenScript& tab, const ScriptEditor& editor, const DebugVi
     // numbers. Luau reports lines from one and a document counts them from
     // zero, which is the whole of the conversion here.
     if (debug.parked && debug.chunk == tab.chunk && debug.line == line + 1) {
-        draw->AddRectFilled(ImVec2(origin.x, y), ImVec2(origin.x + m.gutter, y + m.lineHeight),
-                            col(p.warning, 0.35f));
+        draw->AddRectFilled(ImVec2(origin.x, y), ImVec2(origin.x + m.gutter, y + m.lineHeight), col(p.warning, 0.35f));
     }
 
     char number[16]{};
@@ -443,8 +561,8 @@ void drawSelection(const OpenScript& tab, const PaneMetrics& m, ImDrawList* draw
         const u32 from = tab.document.cellOf(line, line == span.begin.line ? span.begin.column : 0u);
         // A line in the middle of a selection is highlighted one cell past its
         // end, so a multi-line selection reads as covering the newline it holds.
-        const u32 to = line == span.end.line ? tab.document.cellOf(line, span.end.column)
-                                             : tab.document.cellCount(line) + 1u;
+        const u32 to =
+            line == span.end.line ? tab.document.cellOf(line, span.end.column) : tab.document.cellCount(line) + 1u;
         const float y = textOrigin.y + static_cast<float>(line) * m.lineHeight;
         draw->AddRectFilled(ImVec2(textOrigin.x + static_cast<float>(from) * m.advance, y),
                             ImVec2(textOrigin.x + static_cast<float>(to) * m.advance, y + m.lineHeight), colour);
@@ -459,9 +577,8 @@ void drawDiagnostics(const OpenScript& tab, const PaneMetrics& m, ImDrawList* dr
         if (diagnostic.at.line < first || diagnostic.at.line > last)
             continue;
         const float y = textOrigin.y + static_cast<float>(diagnostic.at.line + 1) * m.lineHeight - 2.0f;
-        const float x0 =
-            textOrigin.x +
-            static_cast<float>(tab.document.cellOf(diagnostic.at.line, diagnostic.at.column)) * m.advance;
+        const float x0 = textOrigin.x +
+                         static_cast<float>(tab.document.cellOf(diagnostic.at.line, diagnostic.at.column)) * m.advance;
         const float x1 = std::max(
             x0 + m.advance, textOrigin.x + static_cast<float>(tab.document.cellCount(diagnostic.at.line)) * m.advance);
         // A straight underline rather than a wave: at one physical pixel a wave
@@ -562,8 +679,8 @@ void drawFindBar(OpenScript& tab, ScriptEditorCommands& out, std::size_t index)
     ImGui::PopStyleColor();
 }
 
-void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, ScriptEditorCommands& out,
-              std::size_t index)
+void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, const scene::World* world,
+              ScriptEditorCommands& out, std::size_t index)
 {
     const ThemePalette& p = currentTheme().palette;
     const PaneMetrics m = metricsFor(tab.document);
@@ -656,8 +773,17 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, Scr
         ime.InputLineHeight = m.lineHeight;
         ime.ViewportId = window->Viewport->ID;
 
+        const core::u64 before = tab.document.revision();
         handleTyping(tab, out, index);
         handleKeys(tab, out, index, m, paneHeight);
+
+        // **Offered after the text moved, not on a key.** Backspacing through a
+        // word then narrows the list instead of dismissing it, and typing a `.`
+        // opens it without anybody asking.
+        const bool ctrlSpace =
+            ImGui::GetIO().KeyCtrl && !ImGui::GetIO().KeyAlt && ImGui::IsKeyPressed(ImGuiKey_Space, false);
+        if (tab.document.revision() != before || ctrlSpace)
+            refreshCompletions(tab, world);
         // **Escape lets go of the pane rather than clearing the selection.** One
         // press to leave the code, and the second means what the shell says.
         if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
@@ -701,10 +827,10 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, Scr
 
     if (debug.parked && debug.chunk == tab.chunk && debug.line > 0) {
         const float stopY = textOrigin.y + static_cast<float>(debug.line - 1) * m.lineHeight;
-        draw->AddRectFilled(ImVec2(origin.x + m.gutter, stopY),
-                            ImVec2(origin.x + ImGui::GetScrollX() + std::max(paneWidth, extent.x),
-                                   stopY + m.lineHeight),
-                            col(p.warning, 0.22f));
+        draw->AddRectFilled(
+            ImVec2(origin.x + m.gutter, stopY),
+            ImVec2(origin.x + ImGui::GetScrollX() + std::max(paneWidth, extent.x), stopY + m.lineHeight),
+            col(p.warning, 0.22f));
     }
 
     drawSelection(tab, m, draw, textOrigin, first, last);
@@ -726,6 +852,8 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, Scr
             draw->AddLine(ImVec2(x, caretY), ImVec2(x, caretY + m.lineHeight), col(p.accent), 1.5f);
         }
     }
+
+    drawCompletions(tab, m, textOrigin);
 
     // A gutter click arms or disarms a breakpoint. Recorded rather than acted
     // on: the debugger has to be told, and it lives a frame away.
@@ -769,7 +897,8 @@ void drawDebugPanel(ScriptEditor& editor, DebugView& debug, ScriptEditorCommands
 
     ImGui::SameLine();
     if (debug.parked)
-        ImGui::TextColored(ImVec4(p.warning.r, p.warning.g, p.warning.b, 1.0f), "stopped in %s at line %u", debug.chunk.c_str(), debug.line);
+        ImGui::TextColored(ImVec4(p.warning.r, p.warning.g, p.warning.b, 1.0f), "stopped in %s at line %u",
+                           debug.chunk.c_str(), debug.line);
     else
         ImGui::TextDisabled("running");
 
@@ -816,8 +945,8 @@ void drawDebugPanel(ScriptEditor& editor, DebugView& debug, ScriptEditorCommands
     for (std::size_t index = 0; index < debug.frames.size(); ++index) {
         const DebugFrameView& frame = debug.frames[index];
         char label[256]{};
-        (void)std::snprintf(label, sizeof(label), "%s  %s:%u##frame-%zu", frame.function.c_str(),
-                            frame.chunk.c_str(), frame.line, index);
+        (void)std::snprintf(label, sizeof(label), "%s  %s:%u##frame-%zu", frame.function.c_str(), frame.chunk.c_str(),
+                            frame.line, index);
         if (ImGui::Selectable(label, index == debug.selectedFrame))
             debug.selectedFrame = index;
     }
@@ -854,7 +983,8 @@ void drawDebugPanel(ScriptEditor& editor, DebugView& debug, ScriptEditorCommands
     ImGui::End();
 }
 
-void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, DebugView& debug, ScriptEditorCommands& out)
+void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, DebugView& debug, const scene::World* world,
+                      ScriptEditorCommands& out)
 {
     const std::optional<std::size_t> focus = editor.takeFocusRequest();
 
@@ -882,7 +1012,7 @@ void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, DebugView& debug
         if (ImGui::Begin(name, &open, flags)) {
             if (ImGui::IsWindowAppearing() || ImGui::IsWindowFocused())
                 editor.setActive(index);
-            drawPane(*tab, editor, debug, out, index);
+            drawPane(*tab, editor, debug, world, out, index);
         }
         ImGui::End();
 
@@ -906,7 +1036,7 @@ namespace luaug::app {
 
 // ADR 0011: a shipping build has no ImGui, so the pane has no body. The
 // signature stays so the frame loop calls it without an #ifdef.
-void drawScriptEditor(ScriptEditor&, core::u32, DebugView&, ScriptEditorCommands&)
+void drawScriptEditor(ScriptEditor&, core::u32, DebugView&, const scene::World*, ScriptEditorCommands&)
 {}
 
 void drawDebugPanel(ScriptEditor&, DebugView&, ScriptEditorCommands&, bool&)

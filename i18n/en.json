@@ -276,6 +276,8 @@
   "script.err.vm_create_failed": "Could not create the Luau virtual machine.",
   "script.err.vm_not_booted": "The script runtime has not been started.",
   "script.err.syntax": "Could not compile {source}: {message}",
+  "script.err.resume_failed": "A script resumed from a breakpoint failed: {message}",
+  "script.warn.breakpoint_not_yieldable": "A breakpoint was reached inside a call the VM cannot pause across, so it did not stop there.",
   "script.err.no_compiler": "This build has no Luau compiler and cannot run Luau source; it loads precompiled bytecode only.",
   "script.err.runtime": "Error while running {source}: {message}",
   "script.err.unknown_member": "{typeName} has no member named \"{member}\".",

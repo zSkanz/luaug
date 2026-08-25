@@ -66,6 +66,7 @@ inline constexpr std::string_view ClassInstance = "class.Instance";
 inline constexpr std::string_view ClassLighting = "class.Lighting";
 inline constexpr std::string_view ClassMeshPart = "class.MeshPart";
 inline constexpr std::string_view ClassModel = "class.Model";
+inline constexpr std::string_view ClassModuleScript = "class.ModuleScript";
 inline constexpr std::string_view ClassPart = "class.Part";
 inline constexpr std::string_view ClassPhysicsService = "class.PhysicsService";
 inline constexpr std::string_view ClassPointLight = "class.PointLight";

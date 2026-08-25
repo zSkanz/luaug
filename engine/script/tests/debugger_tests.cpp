@@ -51,10 +51,8 @@ marker.Parent = game:GetService("Workspace")
 )";
 
 // Whether the script got all the way to the end.
-constexpr std::string_view kFinished =
-    R"(assert(game:GetService("Workspace"):FindFirstChild("result4") ~= nil))";
-constexpr std::string_view kNotFinished =
-    R"(assert(game:GetService("Workspace"):FindFirstChild("result4") == nil))";
+constexpr std::string_view kFinished = R"(assert(game:GetService("Workspace"):FindFirstChild("result4") ~= nil))";
+constexpr std::string_view kNotFinished = R"(assert(game:GetService("Workspace"):FindFirstChild("result4") == nil))";
 
 // Mounts one script and starts it, which is the real path: `mountScripts` puts
 // the text into the instance's `Source` and `startScripts` walks the world and

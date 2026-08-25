@@ -17,6 +17,10 @@
 #include <string>
 #include <vector>
 
+namespace luaug::scene {
+class World;
+}
+
 namespace luaug::app {
 
 class ScriptEditor;
@@ -111,7 +115,8 @@ struct ScriptEditorCommands
 // middle of the screen. Zero docks nothing, which is what a shell with no
 // dockspace wants. `ImGuiID` is an unsigned int; taking it as one is what keeps
 // this header free of ImGui.
-void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, DebugView& debug, ScriptEditorCommands& out);
+void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, DebugView& debug, const scene::World* world,
+                      ScriptEditorCommands& out);
 
 // The stack, the variables and the transport. A panel of its own rather than a
 // strip inside the code pane, because it is worth looking at while looking at

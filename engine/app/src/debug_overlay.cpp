@@ -501,6 +501,8 @@ std::vector<core::InstanceId> g_ancestors;
 // rather than in ImGui's own tree state, because a clipped row's widget never
 // runs and therefore has no state to hold.
 std::unordered_set<core::u32> g_open;
+// Set by `preserveExplorerOnNextWorld`, consumed by the next identity change.
+bool g_keepExpansionOnce = false;
 std::unordered_set<core::u32> g_openKnown;
 // Which world the two sets above describe. They are keyed by instance INDEX and
 // indices are recycled, so carrying them across a world would let a new instance
@@ -673,9 +675,14 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
     // tree took back more than the edit it was asked to.
     if (g_explorerWorld != inspector.worldIdentity()) {
         g_explorerWorld = inspector.worldIdentity();
-        g_open.clear();
-        g_openKnown.clear();
-        explorerFilter.fill(0);
+        // Unless the world that arrived is the same one rebuilt -- see
+        // `DebugOverlay::preserveExplorerOnNextWorld`.
+        if (!g_keepExpansionOnce) {
+            g_open.clear();
+            g_openKnown.clear();
+            explorerFilter.fill(0);
+        }
+        g_keepExpansionOnce = false;
     }
 
     // **Something was just made, moved or copied: open the way to it.** Before
@@ -3932,7 +3939,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // for and what a hand-rolled tab bar would have refused.
     if (scripts != nullptr) {
         const ImGuiDockNode* central = ImGui::DockBuilderGetCentralNode(dockspace);
-        drawScriptEditor(*scripts, central != nullptr ? static_cast<core::u32>(central->ID) : 0u, debug,
+        drawScriptEditor(*scripts, central != nullptr ? static_cast<core::u32>(central->ID) : 0u, debug, world,
                          scriptCommands);
         if (panels.debug)
             drawDebugPanel(*scripts, debug, scriptCommands, panels.debug);
@@ -4933,6 +4940,11 @@ void DebugOverlay::render(rhi::ICmdList& cmd, rhi::TextureHandle target, const F
     cmd.popDebugGroup();
 }
 
+void DebugOverlay::preserveExplorerOnNextWorld() noexcept
+{
+    g_keepExpansionOnce = true;
+}
+
 void DebugOverlay::captureLog()
 {
     ConsoleLog& log = console();
@@ -4978,6 +4990,9 @@ void DebugOverlay::render(rhi::ICmdList&, rhi::TextureHandle, const Frame&)
 // live in the half of this file that ImGui compiles. Leaving the process log
 // sink alone is the whole behaviour -- the log FILE keeps every line, which is
 // where a shipping build's log was always going to be read from.
+void DebugOverlay::preserveExplorerOnNextWorld() noexcept
+{}
+
 void DebugOverlay::captureLog()
 {}
 

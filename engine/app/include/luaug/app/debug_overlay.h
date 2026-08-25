@@ -155,6 +155,17 @@ public:
     // into.
     void setScriptEditor(ScriptEditor* scripts) noexcept { scripts_ = scripts; }
 
+    // **The next world is the same world rebuilt, so keep the Explorer as it
+    // is.** The tree throws away which rows were expanded whenever the world
+    // changes identity, and it is right to: opening a different scene makes
+    // every id mean something else. A hot reload is the exception -- the project
+    // is rebuilt from the same source in the same order, so row N is still row N
+    // -- and without this, saving a script collapsed the whole tree and cleared
+    // the search box, which is what the human reported.
+    //
+    // One-shot, so it cannot leak into a world change that really is one.
+    void preserveExplorerOnNextWorld() noexcept;
+
     // What the Debug panel draws, written by the frame loop at the safe point
     // from the VM's own snapshot. A copy rather than a pointer into
     // `engine/script`, because a reload destroys what a pointer would name.

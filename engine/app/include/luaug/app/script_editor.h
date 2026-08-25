@@ -12,6 +12,7 @@
 // picking bug ends up only reproducible by clicking.
 #pragma once
 
+#include "luaug/app/script_complete.h"
 #include "luaug/app/script_document.h"
 #include "luaug/core/id.h"
 #include "luaug/core/types.h"
@@ -115,6 +116,17 @@ struct OpenScript
     // What the last search matched, so the pane can highlight it and Enter can
     // step from it rather than from the caret.
     Range lastMatch;
+
+    // --- Completion ----------------------------------------------------------
+    //
+    // On the tab rather than in the panel because it survives a frame in which
+    // nothing was typed -- and because two tabs may each be half-way through a
+    // word.
+    bool completing = false;
+    std::vector<Completion> completions;
+    std::size_t completionIndex = 0;
+    // What accepting a row replaces: the partial word, and nothing else.
+    Range completionReplace;
 
     [[nodiscard]] bool dirty() const noexcept { return document.revision() != savedRevision; }
 };

@@ -1721,6 +1721,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // `lua_State`, and keeping the reference would be a dangling one.
             host->runtime().debugger().detach(host->runtime().state());
             editor.setDebuggerParked(false);
+            // The tree is about to be handed a world with a new identity, and it
+            // is the same project rebuilt rather than a different one.
+            overlay->preserveExplorerOnNextWorld();
 
             const ReloadReport reloaded = reloadWorld(host, worldOptions);
             if (reloaded.ok) {
@@ -1806,6 +1809,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     // blunter reason: the world it held has been destroyed.
                     inspector.onWorldChanged();
                     if (overlay.has_value()) {
+                        overlay->preserveExplorerOnNextWorld();
                         // The same rule the editor's own reload states: the
                         // overlay's visibility belongs to whoever is looking,
                         // not to the world, and a fresh `EngineState` would
