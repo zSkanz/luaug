@@ -169,10 +169,137 @@ void MeshLoader::destroy(rhi::IDevice& device)
     failed_.clear();
 }
 
+// **The deferred half of `syncTextures`** (D118). See the header for the
+// measurement: a 1024-square PNG costs 14 to 36 ms to decode, and the
+// synchronous path loads every missing map it finds in one frame with no budget
+// at all -- so pointing a part at a four-map material froze the frame after the
+// write for a tenth of a second.
+//
+// Three stages, and only the last one is on the frame, because only the frame
+// has a command list. The same shape `StreamingHost::pump` and the content
+// browser's thumbnails use, for the same reason.
+core::u32 MeshLoader::pumpTextures(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world,
+                                   TextureLibrary& library)
+{
+    u32 loaded = 0;
+
+    // **Completions land during `pumpIo` and nowhere else** (`async_io.h`), so
+    // this pumps rather than assuming somebody else did. `StreamingHost::pump`
+    // and the content browser's thumbnails each pump their own for the same
+    // reason: the service is a drain, draining it twice costs nothing, and a
+    // subsystem that only worked when another one happened to be running is a
+    // subsystem that works on the flagship and not on a fresh project.
+    platform::pumpIo();
+
+    const auto markFailed = [&](core::NameAtom urn) {
+        const auto position = std::lower_bound(failed_.begin(), failed_.end(), urn,
+                                               [](core::NameAtom a, core::NameAtom b) { return a.id < b.id; });
+        if (position == failed_.end() || position->id != urn.id)
+            failed_.insert(position, urn);
+    };
+
+    for (usize index = 0; index < pendingTextures_.size();) {
+        PendingTexture& pending = pendingTextures_[index];
+        const auto drop = [&] {
+            pendingTextures_.erase(pendingTextures_.begin() + static_cast<std::ptrdiff_t>(index));
+        };
+
+        if (pending.read.valid()) {
+            const platform::IoStatus status = platform::ioStatus(pending.read);
+            if (status == platform::IoStatus::Pending) {
+                ++index;
+                continue;
+            }
+
+            pending.bytes = std::make_unique<std::vector<std::byte>>();
+            const bool got =
+                status == platform::IoStatus::Ready && platform::takeIoResult(pending.read, *pending.bytes);
+            pending.read = {};
+            if (!got || pending.bytes->empty()) {
+                // A material without its texture still draws, in its own
+                // numbers. A material refused for a missing map would take the
+                // surface with it.
+                const std::array<core::I18nArg, 1> args{
+                    core::I18nArg{"path", std::string(world.atoms().text(pending.urn))}};
+                core::log(core::LogLevel::Warn, LUAUG_TR("render.err.material_texture_missing"), args);
+                markFailed(pending.urn);
+                drop();
+                continue;
+            }
+
+            // **The pointers the job writes through outlive this vector
+            // growing**, which is why both are on the heap: another map asked
+            // for between now and the job finishing would reallocate
+            // `pendingTextures_`, and a job holding an element's address would
+            // be writing into freed memory.
+            pending.image = std::make_unique<asset::Image>();
+            std::vector<std::byte>* source = pending.bytes.get();
+            asset::Image* target = pending.image.get();
+            bool* decoded = &pending.decoded;
+            pending.decode =
+                jobs::schedule("texture-decode", jobs::Domain::AssetIo, [source, target, decoded]() noexcept {
+                    *decoded = !asset::decodeImage(*source, *target).has_value();
+                    // The encoded bytes are the biggest allocation in the
+                    // pipeline and nothing needs them again.
+                    source->clear();
+                    source->shrink_to_fit();
+                });
+            if (!pending.decode.valid()) {
+                markFailed(pending.urn);
+                drop();
+                continue;
+            }
+            ++index;
+            continue;
+        }
+
+        if (!jobs::finished(pending.decode)) {
+            ++index;
+            continue;
+        }
+
+        if (!pending.decoded) {
+            const std::array<core::I18nArg, 1> args{
+                core::I18nArg{"path", std::string(world.atoms().text(pending.urn))}};
+            core::log(core::LogLevel::Warn, LUAUG_TR("render.err.material_texture_missing"), args);
+            markFailed(pending.urn);
+            drop();
+            continue;
+        }
+
+        const rhi::TextureHandle handle = uploadImage(device, cmd, *pending.image, "material");
+        if (!handle.valid()) {
+            markFailed(pending.urn);
+            drop();
+            continue;
+        }
+        textures_.push_back(handle);
+        library.set(pending.urn, handle);
+        ++loaded;
+        drop();
+    }
+
+    return loaded;
+}
+
+// Whether this URN is already on its way in. Linear over a list bounded by
+// `MaxTexturesInFlight`, which is a handful.
+bool MeshLoader::textureInFlight(core::NameAtom urn) const noexcept
+{
+    for (const PendingTexture& pending : pendingTextures_) {
+        if (pending.urn == urn)
+            return true;
+    }
+    return false;
+}
+
 core::u32 MeshLoader::syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world,
                                    TextureLibrary& library)
 {
-    core::u32 loaded = 0;
+    // Completions first, so a read that finished during the frame is uploaded in
+    // the same one and the slot it frees is available to whatever the walk below
+    // asks for. `StreamingHost::pump` orders its own pipeline the same way.
+    core::u32 loaded = deferredTextures_ ? pumpTextures(device, cmd, world, library) : 0u;
 
     const auto load = [&](core::NameAtom urn) {
         if (urn.id == 0 || library.find(urn).valid())
@@ -194,6 +321,29 @@ core::u32 MeshLoader::syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, con
         const asset::ResolvedContent resolved = mounts_ != nullptr ? mounts_->resolve(text) : asset::ResolvedContent{};
         const std::filesystem::path path =
             resolved.source == asset::ResolvedContent::Source::Loose ? resolved.path : resolve(contentRoot_, text);
+
+        if (deferredTextures_) {
+            // Queued rather than read, and only up to a bound: a world whose
+            // materials name four hundred maps must not open four hundred files
+            // and hold four hundred decoded images at once.
+            if (textureInFlight(urn) || pendingTextures_.size() >= MaxTexturesInFlight)
+                return;
+            PendingTexture pending;
+            pending.urn = urn;
+            // `Normal`, above a thumbnail and below a chunk the camera is about
+            // to reach: this is a surface somebody is looking at right now.
+            pending.read = platform::readFileAsync(path, platform::IoPriority::Normal);
+            if (pending.read.valid()) {
+                pendingTextures_.push_back(std::move(pending));
+                return;
+            }
+            // **No IO service, or its pool is full: fall through and read it
+            // here.** Deferring is a way of doing this work, not a permission to
+            // skip it -- a build where `initIo` failed must still show its
+            // textures, and a frame that costs a decode is better than a
+            // material that is white forever. The synchronous path below is the
+            // one this mode is an optimisation OF.
+        }
 
         std::vector<std::byte> bytes;
         asset::Image image;

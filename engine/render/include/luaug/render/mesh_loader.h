@@ -19,12 +19,15 @@
 #include "luaug/asset/content.h"
 #include "luaug/asset/texture.h"
 #include "luaug/core/id.h"
+#include "luaug/jobs/jobs.h"
+#include "luaug/platform/async_io.h"
 #include "luaug/render/animation.h"
 #include "luaug/render/mesh_cache.h"
 #include "luaug/render/render_world.h"
 #include "luaug/rhi/device.h"
 
 #include <filesystem>
+#include <memory>
 
 namespace luaug::scene {
 class World;
@@ -81,6 +84,40 @@ public:
     core::u32 syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world,
                            TextureLibrary& library);
 
+    // **Whether a texture may be read and decoded off the frame.**
+    //
+    // Measured on ordinary 1024-square PNGs out of a texture pack: 14 to 36 ms
+    // to decode, each. `syncTextures` loads every missing map it finds in one
+    // frame and has no budget at all, so pointing a part at a material with
+    // four maps costs a hundred milliseconds on the frame after the write. That
+    // is a freeze on exactly the frame somebody changed something, which is how
+    // an editor that measures fine comes to feel like it reloads the world
+    // every time you touch it. A 4K source is sixteen times worse.
+    //
+    // Deferred, the read goes to `platform::readFileAsync`, the decode goes to
+    // the job pool, and only the upload happens on the frame -- the same three
+    // stages the streaming host and the browser's thumbnails already use, and
+    // for the same measurement.
+    //
+    // **Off by default, and that default is what keeps every golden
+    // byte-identical.** A capture records the frame it was told to record, and a
+    // texture that arrives two frames later is a different picture; the same is
+    // true of a screenshot gate and of any headless run whose output is
+    // compared. Those all want the loader finished before the frame is. An
+    // interactive shell wants the opposite, and says so.
+    void setDeferredTextures(bool deferred) noexcept { deferredTextures_ = deferred; }
+
+    // How many textures are being read or decoded right now. Zero in the
+    // synchronous mode, always.
+    [[nodiscard]] core::usize texturesInFlight() const noexcept { return pendingTextures_.size(); }
+
+    // How many maps may be on their way in at once. Bounded because a world
+    // whose materials name four hundred textures must not open four hundred
+    // files and hold four hundred decoded images at the same time -- and because
+    // the pictures somebody is looking at now are worth more than the ones two
+    // rooms away, which a queue of four hundred cannot express.
+    static constexpr core::usize MaxTexturesInFlight = 4;
+
     // Builds and uploads the five `Enum.PartShape` solids and registers them in
     // `library` under their reserved URNs (`primitiveContent`). Idempotent: the
     // second call does nothing, which is what makes it safe to put at the top of
@@ -99,10 +136,30 @@ public:
     void destroy(rhi::IDevice& device);
 
 private:
+    // The three stages of a deferred load, run once a frame from `syncTextures`.
+    core::u32 pumpTextures(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world,
+                           TextureLibrary& library);
+    [[nodiscard]] bool textureInFlight(core::NameAtom urn) const noexcept;
+
     std::filesystem::path contentRoot_;
     const asset::ContentMounts* mounts_ = nullptr;
     asset::TranscodeOptions transcode_;
     bool primitivesUploaded_ = false;
+    bool deferredTextures_ = false;
+
+    // One texture on its way in. Held by pointer because a decode job writes
+    // into it: the vector grows as more maps are asked for, and a job holding an
+    // element's address would be writing into freed memory after a reallocation.
+    struct PendingTexture
+    {
+        core::NameAtom urn;
+        platform::IoRequest read;
+        jobs::JobHandle decode;
+        std::unique_ptr<asset::Image> image;
+        std::unique_ptr<std::vector<std::byte>> bytes;
+        bool decoded = false;
+    };
+    std::vector<PendingTexture> pendingTextures_;
     // Content URNs that failed to load, so a broken file costs one attempt and
     // one message rather than one of each per frame forever. Sorted, for the
     // same reason `MeshLibrary` is: R10 forbids an unordered container's order

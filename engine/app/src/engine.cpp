@@ -678,6 +678,19 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         }
     }
     meshLoader.setContentMounts(&contentMounts);
+    // **The editor reads its textures off the frame; everything else does not**
+    // (D118). A decode is 14 to 36 ms for an ordinary 1024-square PNG, and the
+    // synchronous path loads every missing map it finds in one frame -- so
+    // giving a part a four-map material froze the frame after the write for a
+    // tenth of a second, which is how a tool that measures fine comes to feel
+    // like it reloads the world whenever you touch it.
+    //
+    // Not turned on for a headless run, a capture or a screenshot, and that is
+    // the decision rather than an oversight: those record the frame they were
+    // told to record, and a texture arriving two frames later is a different
+    // picture. They want the loader finished before the frame is. An editor
+    // wants the frame finished before the loader is.
+    meshLoader.setDeferredTextures(options.editor && !options.headless);
     // The same mounts the meshes come from, so `TextLabel.Font` can name a face
     // out of the project the same way `MeshPart.MeshContent` names a model.
     uiText.setMounts(&contentMounts);

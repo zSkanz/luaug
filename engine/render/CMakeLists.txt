@@ -71,4 +71,14 @@ luaug_add_module_tests(render
         tests/settings_tests.cpp
         tests/shadow_tests.cpp
         tests/animation_tests.cpp
+        tests/mesh_loader_tests.cpp
 )
+
+if(LUAUG_BUILD_TESTS)
+    # One real encoded picture, so the loader can be asserted end to end -- read,
+    # decoded, uploaded -- rather than only on the paths that fail. Borrowed from
+    # `asset` rather than copied: two copies of one fixture is two things to keep
+    # in step for no gain.
+    target_compile_definitions(luaug_render_tests PRIVATE
+        LUAUG_RENDER_TEST_IMAGE="${CMAKE_SOURCE_DIR}/engine/asset/tests/data/checker.png")
+endif()
