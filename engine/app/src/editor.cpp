@@ -48,11 +48,10 @@ bool ViewportTarget::resize(rhi::IDevice& device, core::u32 width, core::u32 hei
         return true;
 
     // The texture being replaced may still be in flight from the frame that was
-    // just submitted, so the old one cannot simply be released. See the header
-    // for why the stall is the right trade here and nowhere else.
+    // just submitted, so it is put aside rather than freed. See the header: the
+    // alternative was a full device stall on every frame of a splitter drag.
     if (m_texture.valid()) {
-        device.waitIdle();
-        device.destroy(m_texture);
+        m_retired.push_back(Retired{m_texture, RetirementFrames});
         m_texture = {};
     }
 
@@ -78,12 +77,38 @@ bool ViewportTarget::resize(rhi::IDevice& device, core::u32 width, core::u32 hei
     return true;
 }
 
+void ViewportTarget::retire(rhi::IDevice& device)
+{
+    // Walked backwards so an erase cannot move an entry past the cursor. The
+    // list is at most three long, so this is not where the frame goes.
+    for (core::usize index = m_retired.size(); index > 0; --index) {
+        Retired& entry = m_retired[index - 1];
+        if (entry.framesLeft > 0) {
+            --entry.framesLeft;
+            continue;
+        }
+        if (entry.texture.valid())
+            device.destroy(entry.texture);
+        m_retired.erase(m_retired.begin() + static_cast<std::ptrdiff_t>(index - 1));
+    }
+}
+
 void ViewportTarget::destroy()
 {
-    if (m_device != nullptr && m_texture.valid()) {
+    // **The one place the stall belongs.** Shutting down is not a frame, there
+    // is no next one for a retirement queue to be drained by, and every handle
+    // here has to be gone before the device is -- so this waits for the GPU to
+    // finish with all of them and frees them together.
+    if (m_device != nullptr && (m_texture.valid() || !m_retired.empty())) {
         m_device->waitIdle();
-        m_device->destroy(m_texture);
+        if (m_texture.valid())
+            m_device->destroy(m_texture);
+        for (const Retired& entry : m_retired) {
+            if (entry.texture.valid())
+                m_device->destroy(entry.texture);
+        }
     }
+    m_retired.clear();
     m_texture = {};
     m_width = 0;
     m_height = 0;

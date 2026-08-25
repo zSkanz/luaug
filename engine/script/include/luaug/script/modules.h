@@ -263,10 +263,14 @@ void adoptMountedEntries(lua_State* L, std::vector<ModuleRegistry::Entry> entrie
 [[nodiscard]] core::InstanceId scriptOfFunction(lua_State* L, int index);
 
 // Whether a resumption belonging to this script must be dropped: it names a
-// live `Script` whose `Enabled` is false.
+// `Script` that has been destroyed, or a live one whose `Enabled` is false.
 //
 // **Invalid is never suppressed.** A thread with no owning script is the
 // engine's own, and a rule about scripts must not reach one.
+//
+// **Destroyed always is** (D097). Not in the world means not running, which is
+// what the class documents and what `Enabled = false` already did for the
+// weaker case.
 [[nodiscard]] bool resumptionSuppressed(lua_State* L, core::InstanceId script);
 
 // How many entry scripts were mounted. The conformance runner reports it, and a

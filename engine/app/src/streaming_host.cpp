@@ -196,18 +196,40 @@ std::vector<asset::StreamingFocus> StreamingHost::collectFoci() const
     }
 
     const scene::EngineState& state = m_world->engineState();
-    for (const core::InstanceId id : m_world->streamingFoci()) {
+
+    // The size classes (ADR 0053). Layer 0 is detail and IS the load/min pair
+    // below, which is what makes a world of cells that are all layer 0 behave
+    // exactly as it did. A zero here means "follow that pair", and the same
+    // smaller-of-the-two rule applies for the same reason.
+    const auto layerPair = [](f64 minRadius, f64 loadRadius) {
+        asset::StreamingLayerRadii radii;
+        radii.loadRadius = loadRadius;
+        radii.minRadius = loadRadius > 0.0 ? std::min(minRadius, loadRadius) : minRadius;
+        return radii;
+    };
+
+    // One focus, or nothing when the id names something with no position. Lifted
+    // out of the loop so the camera fallback below is the same rule and not a
+    // second copy of it.
+    const auto focusAt = [&](core::InstanceId id, asset::StreamingFocus& out) {
         if (!m_world->alive(id)) {
-            continue;
+            return false;
         }
-        asset::StreamingFocus focus;
         if (const scene::PartComponent* part = m_world->parts().find(id); part != nullptr) {
-            focus.position = part->cframe.position;
+            out.position = part->cframe.position;
         }
         else if (const scene::CameraComponent* camera = m_world->cameras().find(id); camera != nullptr) {
-            focus.position = camera->cframe.position;
+            out.position = camera->cframe.position;
         }
         else {
+            return false;
+        }
+        return true;
+    };
+
+    for (const core::InstanceId id : m_world->streamingFoci()) {
+        asset::StreamingFocus focus;
+        if (!focusAt(id, focus)) {
             continue;
         }
         focus.loadRadius = state.streamingLoadRadius;
@@ -217,19 +239,46 @@ std::vector<asset::StreamingFocus> StreamingHost::collectFoci() const
         // statement order is a trap.
         focus.minRadius = std::min(state.streamingMinRadius, state.streamingLoadRadius);
 
-        // The size classes (ADR 0053). Layer 0 is detail and IS the pair above,
-        // which is what makes a world of cells that are all layer 0 behave
-        // exactly as it did. A zero here means "follow that pair", and the same
-        // smaller-of-the-two rule applies for the same reason.
-        const auto layerPair = [](f64 minRadius, f64 loadRadius) {
-            asset::StreamingLayerRadii radii;
-            radii.loadRadius = loadRadius;
-            radii.minRadius = loadRadius > 0.0 ? std::min(minRadius, loadRadius) : minRadius;
-            return radii;
-        };
         focus.layers[1] = layerPair(state.streamingStructureMinRadius, state.streamingStructureLoadRadius);
         focus.layers[2] = layerPair(state.streamingTerrainMinRadius, state.streamingTerrainLoadRadius);
         foci.push_back(focus);
+    }
+
+    // **A world with no registered focus streams around the camera** (D098).
+    //
+    // Nothing populates `streamingFoci` but `StreamingService:AddFocus`, and
+    // `partitionProject` runs for every non-editor run with a scene and has no
+    // floor -- so a project somebody has just made, with a camera and two parts
+    // in it, gets a streaming grid and never loads a single cell of it. The
+    // world is empty and both halves report success: the log says the scene was
+    // partitioned, and the world says nothing at all.
+    //
+    // The fallback is narrowed to exactly that case rather than making the
+    // camera a focus always. A game that registers its own foci is untouched --
+    // this list is not empty for it -- so nothing that works today changes, and
+    // the only worlds that gain a focus are the ones that had none and were
+    // therefore showing nothing. "Show me the world" is what a person means by
+    // pointing a camera at it, and it is what the editor already assumes.
+    if (foci.empty()) {
+        // Found by walking up from the stream root rather than held as a member:
+        // the root is already the identity this host is keyed on, and the
+        // `Workspace` above it is the one whose camera is the one being looked
+        // through.
+        const scene::WorkspaceComponent* workspace = nullptr;
+        for (core::InstanceId cursor = m_streamRoot; cursor.valid(); cursor = m_world->parentOf(cursor)) {
+            workspace = m_world->workspaces().find(cursor);
+            if (workspace != nullptr)
+                break;
+        }
+
+        asset::StreamingFocus focus;
+        if (workspace != nullptr && focusAt(workspace->currentCamera, focus)) {
+            focus.loadRadius = state.streamingLoadRadius;
+            focus.minRadius = std::min(state.streamingMinRadius, state.streamingLoadRadius);
+            focus.layers[1] = layerPair(state.streamingStructureMinRadius, state.streamingStructureLoadRadius);
+            focus.layers[2] = layerPair(state.streamingTerrainMinRadius, state.streamingTerrainLoadRadius);
+            foci.push_back(focus);
+        }
     }
     return foci;
 }

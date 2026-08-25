@@ -73,6 +73,16 @@ public:
     void setWorld(scene::World* world, core::InstanceId streamRoot);
     void setPhysics(scene::PhysicsSync* physics) noexcept { m_physics = physics; }
 
+    // Where the world is being watched from this frame: every focus a script
+    // registered, or the current camera when it registered none (D098).
+    //
+    // Public because it is the RULE and not a step. A world with no focus loads
+    // no cell, and a project that has just been made registers none -- so the
+    // difference between "there is a world here" and "there is nothing here at
+    // all" is this function's answer, and that is worth asserting directly
+    // rather than through a frame nobody can run in a test.
+    [[nodiscard]] std::vector<asset::StreamingFocus> collectFoci() const;
+
     [[nodiscard]] bool active() const noexcept { return m_active; }
 
     // One frame. Reads the service's knobs and focus set out of the world,
@@ -112,7 +122,6 @@ public:
 private:
     void installCallbacks();
     void beginRead(asset::ChunkId id, const asset::ChunkIndexEntry& entry);
-    [[nodiscard]] std::vector<asset::StreamingFocus> collectFoci() const;
 
     asset::StreamingManager m_manager;
     std::unique_ptr<scene::StreamingGlue> m_glue;

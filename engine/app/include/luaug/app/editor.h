@@ -88,13 +88,22 @@ public:
     // treat as "draw no viewport this frame" rather than as fatal: a panel
     // dragged to nothing is a normal thing for a person to do.
     //
-    // **Call this before `beginFrame`.** Recreating waits for the device to go
-    // idle first, because the texture being replaced may still be in flight
-    // from the frame just submitted. That stall is real and it is paid while
-    // somebody drags a splitter, which is the one moment nobody is measuring
-    // frame time; the alternative is a use-after-free that reproduces on one
-    // driver.
+    // **The replaced texture is RETIRED rather than destroyed** (D117). It may
+    // still be in flight from the frame just submitted, and the two ways to be
+    // safe about that are to wait for the device to go idle or to keep it alive
+    // for as long as a frame can be. This used to wait -- and a resize happens
+    // on every frame of a splitter drag or a window resize, so the editor
+    // stalled the whole GPU sixty times a second for exactly as long as
+    // somebody was dragging. That is the one moment nobody measures frame time
+    // and the one moment they are looking hardest at how the tool feels.
+    //
+    // `MeshCache::beginFrame` already retires its ring buffers this way and for
+    // the same reason, down to the two frames of slack.
     bool resize(rhi::IDevice& device, core::u32 width, core::u32 height);
+
+    // Ages the retirement queue by one frame and frees what has outlived any
+    // command list that could still name it. Call once per frame that renders.
+    void retire(rhi::IDevice& device);
 
     void destroy();
 
@@ -103,11 +112,26 @@ public:
     [[nodiscard]] core::u32 height() const noexcept { return m_height; }
     [[nodiscard]] bool valid() const noexcept { return m_texture.valid(); }
 
+    // How many frames a replaced texture is kept before it is freed. Two, for
+    // `MeshCache`'s reason: a handle drawn with before a swap is legal for the
+    // rest of that frame, and the GPU may still be executing those commands
+    // when the next frame begins.
+    static constexpr core::u32 RetirementFrames = 2;
+
 private:
+    struct Retired
+    {
+        rhi::TextureHandle texture;
+        core::u32 framesLeft = 0;
+    };
+
     rhi::IDevice* m_device = nullptr;
     rhi::TextureHandle m_texture;
     core::u32 m_width = 0;
     core::u32 m_height = 0;
+    // Small and bounded in practice: a drag replaces the target once a frame
+    // and each entry lives two, so this holds at most three.
+    std::vector<Retired> m_retired;
 };
 
 // A click waiting to be turned into a selection.

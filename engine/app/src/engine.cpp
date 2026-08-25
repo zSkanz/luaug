@@ -2381,8 +2381,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // -- which a golden records faithfully and a person notices as a
             // flicker they cannot reproduce.
             meshCache.beginFrame(*device);
+            // Frees the viewport targets a resize replaced, once they are old
+            // enough that no command list still in flight can name one. Beside
+            // the mesh cache's own retirement because it is the same rule.
+            viewportTarget.retire(*device);
 
-            // **Every world that can be drawn, not just the game's** (D099).
+            // **Every world that can be drawn, not just the game's** (D115).
             // The editor has two -- the game's, and the stage a stamp opens onto
             // -- and `extract` below already knows that. The loader did not: it
             // read `host->world()` and nothing else, so a `MeshPart` or a

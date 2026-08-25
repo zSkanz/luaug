@@ -235,4 +235,96 @@ describe("Script.Enabled", function()
             expect(made()):ToBe("Survivor")
         end)
     end)
+
+    describe("destroyed", function()
+        --- **A destroyed script is stopped** (D097), and this block is the whole
+        --- of that decision.
+        ---
+        --- It was found as a leak between cases: a `Script` whose `Heartbeat`
+        --- handler made a part was destroyed by `afterEach` and went on making
+        --- parts inside every later case's sandbox. Nothing could ever have
+        --- stopped it -- there was no instance left to disable.
+        ---
+        --- The decision is narrow on purpose and it is the same shape as
+        --- `Enabled`: destroying decides whether this script's threads are
+        --- resumed, and nothing else. It does not disconnect, and it does not
+        --- undo what the script built. Whether a connection dies with the thing
+        --- its closure captured is the question this repository has twice
+        --- declined to answer, and `Destroy` is no better a place to answer it
+        --- than a property setter was.
+        it("stops a connection being invoked", function()
+            -- Its own target, for the reason the disable case gives: the handler
+            -- needs somewhere to write that this case can take away, so a
+            -- failure cannot leak into a later one the way the original did.
+            local ticks = Instance.new("Folder")
+            ticks.Name = "ScriptDestroyedTicks"
+            ticks.Parent = workspace
+
+            local function ticked(): number
+                return #ticks:GetChildren()
+            end
+
+            local script = sleeping(
+                "Ticker",
+                [[
+					local RunService = game:GetService("RunService")
+					RunService.Heartbeat:Connect(function()
+						local p = Instance.new("Part")
+						p.Name = "Tick"
+						p.Parent = workspace:FindFirstChild("ScriptDestroyedTicks")
+					end)
+				]]
+            )
+
+            script.Enabled = true
+            task.wait()
+            task.wait()
+            local whileAlive = ticked()
+            expect(whileAlive > 0):ToBe(true)
+
+            script:Destroy()
+            task.wait()
+            task.wait()
+            task.wait()
+            expect(ticked()):ToBe(whileAlive)
+
+            ticks:Destroy()
+        end)
+
+        it("drops a task.delay that comes due after the destroy", function()
+            local script = sleeping(
+                "Late",
+                [[
+					task.delay(0.1, function()
+						local p = Instance.new("Part")
+						p.Name = "TooLate"
+						p.Parent = workspace:FindFirstChild("ScriptEnabledSpec")
+					end)
+				]]
+            )
+
+            script.Enabled = true
+            task.wait()
+            script:Destroy()
+
+            for _ = 1, 30 do
+                task.wait()
+            end
+            expect(made()):ToBe("")
+        end)
+
+        it("leaves what the script built where it is", function()
+            -- The same sentence the disable case makes, and it has to hold for
+            -- the stronger operation too: a part a script made before it died is
+            -- a part, not a script.
+            local script = sleeping("Builder", makes("Survivor"))
+            script.Enabled = true
+            task.wait()
+            expect(made()):ToBe("Survivor")
+
+            script:Destroy()
+            task.wait()
+            expect(made()):ToBe("Survivor")
+        end)
+    end)
 end)

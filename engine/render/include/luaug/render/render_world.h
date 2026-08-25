@@ -162,7 +162,7 @@ struct RenderMaterial
 
     // The four maps, and the four flags that say they are there.
     //
-    // **One verb, because they are one fact stated twice** (D100). The shader
+    // **One verb, because they are one fact stated twice** (D116). The shader
     // never branches on whether a map is bound -- every slot always has a
     // texture, a 1x1 stand-in when the material has none -- so `textureFlags`
     // is what decides whether the sample is used at all: it multiplies the

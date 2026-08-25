@@ -344,6 +344,7 @@ struct Fixture
     scene::ClassId workspaceClass = scene::InvalidClass;
     scene::ClassId partClass = scene::InvalidClass;
     scene::ClassId materialClass = scene::InvalidClass;
+    scene::ClassId cameraClass = scene::InvalidClass;
     scene::ClassId pointLightClass = scene::InvalidClass;
     scene::ClassId lightingClass = scene::InvalidClass;
     // The content tree's root is a `Folder`, because that is what it is: a
@@ -553,6 +554,15 @@ struct Fixture
             .attachComponents = [](scene::World& w,
                                    core::InstanceId id) { w.materials().add(id, scene::MaterialComponent{}); },
             .detachComponents = [](scene::World& w, core::InstanceId id) { w.materials().remove(id); },
+        });
+        // The world is watched from a camera when nothing else registers a
+        // focus (D098), so a fixture that cannot make one cannot assert it.
+        cameraClass = classes.registerClass({
+            .name = atoms.intern("Camera"),
+            .defaultName = atoms.intern("Camera"),
+            .attachComponents = [](scene::World& w,
+                                   core::InstanceId id) { w.cameras().add(id, scene::CameraComponent{}); },
+            .detachComponents = [](scene::World& w, core::InstanceId id) { w.cameras().remove(id); },
         });
         pointLightClass = classes.registerClass({
             .name = atoms.intern("PointLight"),

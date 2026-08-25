@@ -196,6 +196,7 @@ luaug_add_module_tests(app
         tests/content_tree_tests.cpp
         tests/partition_cache_tests.cpp
         tests/soak_tests.cpp
+        tests/streaming_host_tests.cpp
         tests/two_worlds_tests.cpp
         tests/project_config_tests.cpp
         tests/ui_theme_tests.cpp

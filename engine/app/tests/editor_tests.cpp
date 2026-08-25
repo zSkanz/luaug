@@ -10,12 +10,15 @@
 #include "luaug/core/math.h"
 #include "luaug/platform/file.h"
 #include "luaug/render/debug_draw.h"
+#include "luaug/rhi/backends.h"
+#include "luaug/rhi/capture.h"
 #include "luaug/scene/components.h"
 #include "luaug/scene/enum_registry.h"
 #include "luaug/scene/world.h"
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <doctest/doctest.h>
 #include <filesystem>
@@ -3155,4 +3158,149 @@ TEST_CASE("clicking nothing asks for no row")
     editor.requestPick({2.0f, 2.0f});
     CHECK_FALSE(editor.resolvePick(world, root, inspector).has_value());
     CHECK_FALSE(inspector.takeReveal().valid());
+}
+
+// --- What one edit costs -----------------------------------------------------
+
+// Skipped unless asked for, because it reports a wall clock and a gate that
+// asserted on one would go red whenever the machine was busy. Run it with
+// `luaug_app_tests --test-case="*what one edit costs*" -nt --no-skip`.
+//
+// It exists because the editor takes a FULL SNAPSHOT of the world before every
+// edit, and "is that a problem" is a question about a number rather than about
+// the design.
+TEST_CASE("what one edit costs, in snapshots" * doctest::skip())
+{
+    app::testing::Fixture fixture;
+
+    for (const core::usize count : {100u, 1000u, 10000u, 30000u}) {
+        scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+        const core::InstanceId workspace = world.create(fixture.workspaceClass);
+        world.setName(workspace, fixture.atoms.intern("Workspace"));
+        world.workspaces().add(workspace, scene::WorkspaceComponent{});
+
+        for (core::usize index = 0; index < count; ++index) {
+            const core::InstanceId part = world.create(fixture.partClass);
+            world.setName(part, fixture.atoms.intern("Part"));
+            (void)world.setParent(part, workspace);
+        }
+
+        app::UndoStack history;
+        const auto started = std::chrono::steady_clock::now();
+        constexpr int Repeats = 20;
+        for (int repeat = 0; repeat < Repeats; ++repeat)
+            history.record(world, "Edit", 0);
+        const auto elapsed = std::chrono::steady_clock::now() - started;
+        const double ms =
+            std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(elapsed).count() / Repeats;
+
+        MESSAGE("instances=" << count << " snapshot=" << ms << " ms");
+    }
+}
+
+// --- The viewport target -----------------------------------------------------
+
+namespace {
+
+// The capture device records every call as a line of JSON, which is what makes
+// "was this texture freed yet" a question a test can ask at all -- the null
+// device forgets, and a real one cannot be interrogated.
+[[nodiscard]] core::usize countLines(std::string_view stream, std::string_view needle)
+{
+    core::usize found = 0;
+    for (std::size_t at = stream.find(needle); at != std::string_view::npos; at = stream.find(needle, at + 1))
+        ++found;
+    return found;
+}
+
+} // namespace
+
+TEST_CASE("resizing the viewport does not free the texture the GPU may still be reading")
+{
+    // **A resize happens on every frame of a splitter drag.** This used to wait
+    // for the whole device to go idle before freeing the old target, so dragging
+    // a panel edge stalled the GPU sixty times a second -- for exactly as long
+    // as somebody was dragging, which is the moment they are looking hardest at
+    // how the tool feels.
+    //
+    // Retiring instead is only correct if the old texture really does outlive
+    // the frames that could still name it, so that is what this asserts.
+    const rhi::DeviceResult device = rhi::createCaptureDevice({.backend = rhi::BackendId::Capture});
+    REQUIRE(device != nullptr);
+
+    app::ViewportTarget target;
+    REQUIRE(target.resize(*device, 800, 600));
+    const rhi::TextureHandle first = target.texture();
+    REQUIRE(first.valid());
+
+    rhi::resetCapture(*device);
+
+    // One pixel wider, which is what a drag produces.
+    REQUIRE(target.resize(*device, 801, 600));
+    CHECK(target.texture().valid());
+    CHECK(target.texture() != first);
+    // Nothing freed on the frame of the swap: the frame just submitted may still
+    // be reading it.
+    CHECK(countLines(rhi::captureStream(*device), "\"destroy\"") == 0);
+
+    // And nothing freed on the next frame either -- one frame of slack is not
+    // enough, because a handle drawn with before the swap is legal for the rest
+    // of that frame and the GPU may still be executing it when the next begins.
+    for (core::u32 frame = 0; frame < app::ViewportTarget::RetirementFrames; ++frame) {
+        target.retire(*device);
+        CHECK(countLines(rhi::captureStream(*device), "\"destroy\"") == 0);
+    }
+
+    // Then it goes, and it goes exactly once.
+    target.retire(*device);
+    CHECK(countLines(rhi::captureStream(*device), "\"destroy\"") == 1);
+
+    target.retire(*device);
+    CHECK(countLines(rhi::captureStream(*device), "\"destroy\"") == 1);
+}
+
+TEST_CASE("a drag of many frames never holds more than a few targets")
+{
+    // The queue is bounded by the slack, not by how long somebody drags. A leak
+    // here would be one texture per frame of a resize, which on a slow drag of a
+    // 4K panel is gigabytes.
+    const rhi::DeviceResult device = rhi::createCaptureDevice({.backend = rhi::BackendId::Capture});
+    REQUIRE(device != nullptr);
+
+    app::ViewportTarget target;
+    REQUIRE(target.resize(*device, 400, 400));
+    rhi::resetCapture(*device);
+
+    constexpr core::u32 Frames = 120;
+    for (core::u32 frame = 0; frame < Frames; ++frame) {
+        target.retire(*device);
+        REQUIRE(target.resize(*device, 400 + frame + 1, 400));
+    }
+
+    // Every target but the live one and the ones still inside the slack has been
+    // freed by now -- so the number freed trails the number made by a small
+    // constant rather than by the length of the drag.
+    const core::usize freed = countLines(rhi::captureStream(*device), "\"destroy\"");
+    CHECK(freed >= Frames - (app::ViewportTarget::RetirementFrames + 2));
+    CHECK(freed <= Frames);
+}
+
+TEST_CASE("a resize to the same size is not a resize")
+{
+    // Asked every frame the editor draws, and answered by comparison. Without
+    // this the retirement queue would churn a texture a frame while nothing was
+    // moving at all.
+    const rhi::DeviceResult device = rhi::createCaptureDevice({.backend = rhi::BackendId::Capture});
+    REQUIRE(device != nullptr);
+
+    app::ViewportTarget target;
+    REQUIRE(target.resize(*device, 640, 360));
+    rhi::resetCapture(*device);
+
+    for (int frame = 0; frame < 10; ++frame) {
+        REQUIRE(target.resize(*device, 640, 360));
+        target.retire(*device);
+    }
+    CHECK(countLines(rhi::captureStream(*device), "\"createTexture\"") == 0);
+    CHECK(countLines(rhi::captureStream(*device), "\"destroy\"") == 0);
 }

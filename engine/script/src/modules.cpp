@@ -696,8 +696,26 @@ bool resumptionSuppressed(lua_State* L, core::InstanceId script)
     if (!script.valid())
         return false;
     scene::World& w = world(L);
-    if (!w.alive(script))
-        return false;
+    // **A destroyed script is stopped** (D097). The `Script` class already
+    // documents this -- "one that is not in the world does not run, which is the
+    // whole difference between storing a script and using it" -- and the
+    // sentence was false in one direction: a destroyed script is not in the
+    // world and its threads went on being resumed, forever, with nothing left
+    // that could ever stop them.
+    //
+    // Decided rather than inherited, and it decides only this: `Enabled = false`
+    // already suppresses resumption, and it would be incoherent for the weaker
+    // operation to stop a script and the stronger one not to. What the script
+    // already built stays, exactly as rule 2 says for `Enabled` -- a part it
+    // made before it died is a part, not a script.
+    //
+    // Asked before the class, because a retired instance has none to ask. The
+    // `script` global is set by the engine when it starts one, so an id that is
+    // valid, dead and reached this function named a script that used to exist.
+    // Destroyed-but-not-retired counts: `World::destroy` unlinks and marks, and
+    // a paused world may not drain for many frames.
+    if (!w.alive(script) || w.destroyed(script))
+        return true;
     if (w.classOf(script) != w.classes().findId(w.atoms().lookup("Script")))
         return false;
     const std::optional<scene::Value> value = w.getProperty(script, w.atoms().intern("Enabled"));
