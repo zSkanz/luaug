@@ -153,6 +153,16 @@ private:
         // already been destroyed, when asking the tree is no longer possible.
         core::InstanceId meshPart;
         core::NameAtom content;
+
+        // **The instance the player is parented to, when that is not a
+        // `MeshPart`.** A character is a body, a shirt and a pair of trousers --
+        // several skinned meshes wearing the same skeleton -- and one clip has
+        // to drive all of them. Parent the player to the `Model` and this is the
+        // model; every skinned mesh under it is driven by this track.
+        //
+        // Invalid for a player parented straight to a mesh, which is the older
+        // and still-supported shape: that track drives that mesh and no other.
+        core::InstanceId driveRoot;
         // Index into the entry's `clips`, or `NoClip`.
         u32 clip = NoClip;
         f64 time = 0.0;
@@ -184,6 +194,37 @@ private:
 
     // The skeleton a `MeshPart` renders, or null. One lookup, written once.
     [[nodiscard]] const SkeletonLibrary::Entry* skeletonOf(core::InstanceId meshPart) const;
+
+    // Whether this track drives this mesh: it is the track's own mesh, or the
+    // mesh is a skinned descendant of the track's drive root.
+    // The first skinned mesh under `root` that carries clips, in tree order.
+    // Where a player parented to a `Model` takes its animation data from.
+    [[nodiscard]] core::InstanceId clipSourceUnder(core::InstanceId root) const;
+
+    [[nodiscard]] bool drives(const Track& track, core::InstanceId meshPart) const;
+
+    // How the CLIP's joint indices map onto another rig's, by name.
+    //
+    // **By name and never by index.** A body and a shirt exported as two files
+    // wear the same skeleton in the sense that matters -- the same joints, named
+    // the same -- and in no other: an exporter is free to order them differently,
+    // and applying a clip through the wrong index twists a sleeve in a way that
+    // looks like a broken animation rather than like a mismatched rig.
+    //
+    // Cached per (from, to) content pair, because a crowd of a hundred
+    // characters is two rigs and one map -- and computed once, since a rig does
+    // not change under its own URN.
+    struct JointMap
+    {
+        core::NameAtom from;
+        core::NameAtom to;
+        // `slots[i]` is the joint in `to` that joint `i` of `from` is, or -1.
+        std::vector<core::i32> slots;
+    };
+
+    // The identity is returned as null: a clip applied to its own rig needs no
+    // map, which is every character that is one mesh.
+    [[nodiscard]] const JointMap* jointMapFor(core::NameAtom from, core::NameAtom to) const;
 
     // A joint's model transform with no pose at all: the rest chain, walked
     // parents-first. What a character standing in bind pose answers.
@@ -242,6 +283,10 @@ private:
     // of ragdolls, and R10 forbids an unordered container's iteration order
     // reaching observable output -- which a pose most certainly is.
     std::vector<OverrideSet> overrides_;
+
+    // Mutable because it is a memo: asking for a map is a read, and building one
+    // the first time is what makes the second read free.
+    mutable std::vector<JointMap> jointMaps_;
 };
 
 } // namespace luaug::render

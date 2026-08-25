@@ -2052,9 +2052,19 @@ local Classes: { Schema.Class } = {
         Name = "AnimationPlayer",
         Extends = "Instance",
         Module = "render",
-        Doc = "Plays a skinned mesh's animation clips (§2.2). **Parent it to the `MeshPart` whose skeleton the "
-            .. "clips belong to** -- that is where it looks for them, and an `AnimationPlayer` parented "
-            .. "anywhere else finds nothing rather than guessing.\n\nIt stores nothing: the tracks are the "
+        Doc = "Plays a skinned mesh's animation clips (§2.2).\n\n**Parent it to the `Model` "
+            .. "whose character it is, and it drives every skinned `MeshPart` under that model.** A "
+            .. "character is a body, a shirt and a pair of trousers -- several meshes wearing the same "
+            .. "skeleton -- and one clip has to move all of them. Only one of the pieces needs to carry "
+            .. "the animation; the clip is taken from the first that does, in tree order.\n\n"
+            .. "**The joints are matched by NAME across the pieces, never by index.** Two files exported "
+            .. "separately wear the same skeleton in the sense that matters -- the same joints, named "
+            .. "the same -- and in no other: an exporter is free to order them differently, and a clip "
+            .. "applied through the wrong index twists a sleeve in a way that looks like a broken "
+            .. "animation rather than a mismatched rig. A joint one piece does not have is skipped, so a "
+            .. "shirt with no fingers keeps its own sleeve.\n\nParenting it straight to a "
+            .. "`MeshPart` still works and drives exactly that mesh, which is what a character made of "
+            .. "one piece wants.\n\nIt stores nothing: the tracks are the "
             .. "state, and each one is a handle a script holds rather than a child in the tree. Sampling "
             .. "happens at `PreAnimation` on the SimClock, so a clip's position at a given tick is the same "
             .. "in a replay as it was live.\n\nv1 is clip playback and linear blending -- no state machines, "

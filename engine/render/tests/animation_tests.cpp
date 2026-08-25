@@ -769,3 +769,158 @@ TEST_CASE("the pose keeps the model transforms it used to throw away")
     CHECK(nearF(pose->local[1].m[3][1], 2.0f));
     CHECK(nearF(pose->local[2].m[3][1], 1.0f));
 }
+
+// --- One player over several meshes -------------------------------------------
+
+namespace {
+
+// The same two-joint skeleton, with the joints in the OTHER order -- which is
+// what two files exported separately look like. Matching by index would drive
+// the child with the root's channel and twist the sleeve.
+render::SkeletonLibrary::Entry shirtSkeleton()
+{
+    render::SkeletonLibrary::Entry entry;
+
+    asset::Joint child;
+    child.name = "child";
+    child.parent = asset::Joint::NoParent;
+    child.localBind.position = core::DVec3{0.0, 1.0, 0.0};
+    child.inverseBind.m[3][1] = -1.0f;
+    entry.joints.push_back(child);
+
+    asset::Joint root;
+    root.name = "root";
+    root.parent = asset::Joint::NoParent;
+    entry.joints.push_back(root);
+
+    return entry;
+}
+
+} // namespace
+
+TEST_CASE("one player over a Model drives every skinned mesh under it")
+{
+    // **A character is a body, a shirt and a pair of trousers.** Several skinned
+    // meshes wearing the same skeleton, and one clip has to move all of them --
+    // parented to the `Model` rather than to any one piece.
+    Fixture fixture;
+
+    render::SkeletonLibrary::Entry body = twoJointSkeleton();
+    body.clips.push_back(slideClip("slide"));
+    const core::NameAtom bodyContent = fixture.atoms.intern("asset://models/body.glb");
+    const core::NameAtom shirtContent = fixture.atoms.intern("asset://models/shirt.glb");
+    fixture.skeletons.set(bodyContent, body);
+    // The shirt has NO clips of its own, which is the point: only one piece
+    // needs to carry the animation.
+    fixture.skeletons.set(shirtContent, shirtSkeleton());
+
+    const core::InstanceId model = fixture.world.create(fixture.instanceClass);
+    const core::InstanceId bodyMesh = fixture.world.create(fixture.meshPartClass);
+    fixture.world.meshParts().find(bodyMesh)->meshContent = bodyContent;
+    REQUIRE(fixture.world.setParent(bodyMesh, model) == std::nullopt);
+    const core::InstanceId shirtMesh = fixture.world.create(fixture.meshPartClass);
+    fixture.world.meshParts().find(shirtMesh)->meshContent = shirtContent;
+    REQUIRE(fixture.world.setParent(shirtMesh, model) == std::nullopt);
+
+    // Parented to the MODEL, not to a mesh.
+    const core::InstanceId player = fixture.world.create(fixture.instanceClass);
+    REQUIRE(fixture.world.setParent(player, model) == std::nullopt);
+
+    render::AnimationSystem animation(fixture.world, fixture.skeletons);
+    const scene::TrackId track = animation.createTrack(player, "slide");
+    REQUIRE(track != 0);
+    animation.play(track, 0.0f, 1.0f, 1.0f);
+    animation.sample(0.5);
+
+    // The body moved: the clip slides its `child` from y = 1 to y = 3, so half a
+    // second in it is at 2.
+    core::CFrameD at;
+    REQUIRE(animation.jointModel(bodyMesh, 1, at));
+    CHECK(at.position.y == doctest::Approx(2.0).epsilon(0.01));
+
+    // **And the shirt moved with it**, through the joint called `child` -- which
+    // is index 0 in its file rather than index 1. Matched by index it would have
+    // been the root that moved, and the sleeve would twist.
+    REQUIRE(animation.jointModel(shirtMesh, 0, at));
+    CHECK(at.position.y == doctest::Approx(2.0).epsilon(0.01));
+    // The shirt's own root did not move, which is what says the remap landed on
+    // the right joint rather than on all of them.
+    REQUIRE(animation.jointModel(shirtMesh, 1, at));
+    CHECK(at.position.y == doctest::Approx(0.0).epsilon(0.01));
+}
+
+TEST_CASE("a joint the other rig does not have is skipped rather than guessed")
+{
+    // A shirt with no fingers keeps its own sleeve rather than inheriting a
+    // finger's rotation.
+    Fixture fixture;
+    render::SkeletonLibrary::Entry body = twoJointSkeleton();
+    body.clips.push_back(slideClip("slide"));
+    const core::NameAtom bodyContent = fixture.atoms.intern("asset://models/body.glb");
+    const core::NameAtom hatContent = fixture.atoms.intern("asset://models/hat.glb");
+    fixture.skeletons.set(bodyContent, body);
+
+    // One joint, and not the one the clip drives.
+    render::SkeletonLibrary::Entry hat;
+    asset::Joint only;
+    only.name = "root";
+    only.parent = asset::Joint::NoParent;
+    hat.joints.push_back(only);
+    fixture.skeletons.set(hatContent, hat);
+
+    const core::InstanceId model = fixture.world.create(fixture.instanceClass);
+    const core::InstanceId bodyMesh = fixture.world.create(fixture.meshPartClass);
+    fixture.world.meshParts().find(bodyMesh)->meshContent = bodyContent;
+    REQUIRE(fixture.world.setParent(bodyMesh, model) == std::nullopt);
+    const core::InstanceId hatMesh = fixture.world.create(fixture.meshPartClass);
+    fixture.world.meshParts().find(hatMesh)->meshContent = hatContent;
+    REQUIRE(fixture.world.setParent(hatMesh, model) == std::nullopt);
+
+    const core::InstanceId player = fixture.world.create(fixture.instanceClass);
+    REQUIRE(fixture.world.setParent(player, model) == std::nullopt);
+
+    render::AnimationSystem animation(fixture.world, fixture.skeletons);
+    const scene::TrackId track = animation.createTrack(player, "slide");
+    animation.play(track, 0.0f, 1.0f, 1.0f);
+    animation.sample(0.5);
+
+    core::CFrameD at;
+    REQUIRE(animation.jointModel(hatMesh, 0, at));
+    CHECK(at.position.y == doctest::Approx(0.0).epsilon(0.01));
+}
+
+TEST_CASE("a player parented straight to a mesh still drives only that mesh")
+{
+    // The older shape, and the one a character made of one mesh uses. Widening
+    // the rule must not widen it past what somebody asked for.
+    Fixture fixture;
+    render::SkeletonLibrary::Entry body = twoJointSkeleton();
+    body.clips.push_back(slideClip("slide"));
+    const core::NameAtom bodyContent = fixture.atoms.intern("asset://models/body.glb");
+    const core::NameAtom shirtContent = fixture.atoms.intern("asset://models/shirt.glb");
+    fixture.skeletons.set(bodyContent, body);
+    fixture.skeletons.set(shirtContent, shirtSkeleton());
+
+    const core::InstanceId model = fixture.world.create(fixture.instanceClass);
+    const core::InstanceId bodyMesh = fixture.world.create(fixture.meshPartClass);
+    fixture.world.meshParts().find(bodyMesh)->meshContent = bodyContent;
+    REQUIRE(fixture.world.setParent(bodyMesh, model) == std::nullopt);
+    const core::InstanceId shirtMesh = fixture.world.create(fixture.meshPartClass);
+    fixture.world.meshParts().find(shirtMesh)->meshContent = shirtContent;
+    REQUIRE(fixture.world.setParent(shirtMesh, model) == std::nullopt);
+
+    // Parented to the BODY.
+    const core::InstanceId player = fixture.world.create(fixture.instanceClass);
+    REQUIRE(fixture.world.setParent(player, bodyMesh) == std::nullopt);
+
+    render::AnimationSystem animation(fixture.world, fixture.skeletons);
+    const scene::TrackId track = animation.createTrack(player, "slide");
+    animation.play(track, 0.0f, 1.0f, 1.0f);
+    animation.sample(0.5);
+
+    core::CFrameD at;
+    REQUIRE(animation.jointModel(bodyMesh, 1, at));
+    CHECK(at.position.y == doctest::Approx(2.0).epsilon(0.01));
+    // The shirt is untouched: it has no pose at all.
+    CHECK(animation.pose(shirtMesh) == nullptr);
+}

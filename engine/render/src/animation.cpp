@@ -156,10 +156,23 @@ scene::TrackId AnimationSystem::createTrack(core::InstanceId player, std::string
     Track track;
     track.player = player;
 
-    // The skeleton comes from the player's PARENT, which is the `MeshPart` that
-    // names the content. An `AnimationPlayer` parented anywhere else finds
-    // nothing, which is what its own doc promises.
+    // The skeleton comes from the player's PARENT when that parent is a
+    // `MeshPart` -- the older shape, and the one a character made of one mesh
+    // uses.
+    //
+    // **When it is not, the parent is a drive root and every skinned mesh under
+    // it is driven by this one track.** A character is a body, a shirt and a
+    // pair of trousers: several skinned meshes wearing the same skeleton, which
+    // one clip has to move together. Parent the player to the `Model`.
+    //
+    // The clip is sourced from the FIRST skinned mesh under the root that has
+    // one, in tree order -- so it does not matter which of the pieces the artist
+    // exported the animation with, and it is the same choice on every machine.
     track.meshPart = world_->parentOf(player);
+    if (world_->meshParts().find(track.meshPart) == nullptr && track.meshPart.valid()) {
+        track.driveRoot = track.meshPart;
+        track.meshPart = clipSourceUnder(track.driveRoot);
+    }
     if (const scene::MeshPartComponent* mesh = world_->meshParts().find(track.meshPart); mesh != nullptr) {
         track.content = mesh->meshContent;
         if (const SkeletonLibrary::Entry* entry = skeletons_->find(track.content); entry != nullptr) {
@@ -322,6 +335,28 @@ void AnimationSystem::sample(f64 fixedDt)
         note(track.meshPart);
     }
 
+    // **Every mesh a drive root covers, not just the one the clip came from.**
+    // `note(track.meshPart)` above collects the mesh the track was MADE against,
+    // which for a player parented to a `Model` is whichever piece carried the
+    // animation. The shirt is driven by the same track and would otherwise never
+    // have its pose rebuilt -- a body that walks and a shirt that stands still.
+    for (usize index = 1; index < tracks_.size(); ++index) {
+        const Track& track = tracks_[index];
+        if (!track.alive || !track.driveRoot.valid() || track.clip == NoClip)
+            continue;
+        std::vector<core::InstanceId> descendants;
+        world_->collectDescendants(track.driveRoot, descendants);
+        for (const core::InstanceId id : descendants) {
+            const scene::MeshPartComponent* mesh = world_->meshParts().find(id);
+            if (mesh == nullptr)
+                continue;
+            if (const SkeletonLibrary::Entry* entry = skeletons_->find(mesh->meshContent);
+                entry != nullptr && !entry->joints.empty()) {
+                note(id);
+            }
+        }
+    }
+
     // A mesh with overrides and no track is deliberately NOT collected here.
     // It was, at first, on the reasoning that a limp ragdoll has no track and
     // so would never be visited -- but there is nothing to rebuild for it:
@@ -342,6 +377,11 @@ void AnimationSystem::rebuildPose(core::InstanceId meshPart, const SkeletonLibra
     const usize jointCount = skeleton.joints.size();
     if (jointCount == 0)
         return;
+
+    // Which rig this is, so a clip arriving from ANOTHER one can be remapped
+    // onto it by joint name.
+    const scene::MeshPartComponent* meshComponent = world_->meshParts().find(meshPart);
+    const core::NameAtom content = meshComponent != nullptr ? meshComponent->meshContent : core::NameAtom{};
 
     // Accumulators, one currency per component. A weighted average per joint
     // rather than per track, because a joint no clip drives has to keep its rest
@@ -364,19 +404,47 @@ void AnimationSystem::rebuildPose(core::InstanceId meshPart, const SkeletonLibra
         const Track& track = tracks_[index];
         if (!track.alive || !(track.playing || track.holding) || track.clip == NoClip)
             continue;
-        // Every track made against THIS mesh. Two players under one mesh are two
-        // sources blending into one pose, which is what they look like on
-        // screen.
-        if (track.meshPart != meshPart)
+        // Every track made against THIS mesh, and every track whose drive root
+        // this mesh is under. Two players under one mesh are two sources
+        // blending into one pose, which is what they look like on screen; one
+        // player over a body and a shirt is one source moving both.
+        if (!drives(track, meshPart))
             continue;
         if (track.weight <= 0.0f)
             continue;
+
+        // **The clip comes from the track's OWN rig, not from this mesh's.** A
+        // shirt exported without the animation has no clips of its own, and the
+        // whole point of one player over several meshes is that only one of them
+        // needs to carry it.
+        const SkeletonLibrary::Entry* source = skeletons_->find(track.content);
+        if (source == nullptr || track.clip >= source->clips.size())
+            continue;
         contributed = true;
 
-        const asset::AnimationClip& clip = skeleton.clips[track.clip];
+        // Null when the clip is being applied to the rig it came from, which is
+        // every character made of one mesh -- and then the channel's own index
+        // is used, exactly as before.
+        const JointMap* const map = jointMapFor(track.content, content);
+
+        const asset::AnimationClip& clip = source->clips[track.clip];
         const auto time = static_cast<f32>(track.time);
 
-        for (const asset::AnimationChannel& channel : clip.channels) {
+        for (const asset::AnimationChannel& sourceChannel : clip.channels) {
+            asset::AnimationChannel channelStorage;
+            const asset::AnimationChannel* resolved = &sourceChannel;
+            if (map != nullptr) {
+                if (sourceChannel.joint >= map->slots.size() || map->slots[sourceChannel.joint] < 0) {
+                    // A joint this rig does not have. Skipped rather than
+                    // guessed: a shirt with no fingers should keep its own
+                    // sleeve, not inherit a finger's rotation.
+                    continue;
+                }
+                channelStorage = sourceChannel;
+                channelStorage.joint = static_cast<u32>(map->slots[sourceChannel.joint]);
+                resolved = &channelStorage;
+            }
+            const asset::AnimationChannel& channel = *resolved;
             if (channel.joint >= jointCount || channel.times.empty())
                 continue;
             sampleChannel(channel, time, sample);
@@ -486,6 +554,86 @@ void AnimationSystem::rebuildPose(core::InstanceId meshPart, const SkeletonLibra
         pose.model[joint] = bone.parent == asset::Joint::NoParent ? local : pose.model[bone.parent] * local;
         pose.palette[joint] = pose.model[joint] * bone.inverseBind;
     }
+}
+
+// The first skinned mesh under `root` that carries clips, in tree order.
+//
+// Tree order rather than pool order, because it is the order a person sees in
+// the Explorer -- and because it is what a scene file's own order produces, so
+// the answer does not change when an unrelated instance is created.
+core::InstanceId AnimationSystem::clipSourceUnder(core::InstanceId root) const
+{
+    if (world_ == nullptr || skeletons_ == nullptr)
+        return {};
+
+    std::vector<core::InstanceId> descendants;
+    world_->collectDescendants(root, descendants);
+    core::InstanceId firstSkinned;
+    for (const core::InstanceId id : descendants) {
+        const scene::MeshPartComponent* mesh = world_->meshParts().find(id);
+        if (mesh == nullptr)
+            continue;
+        const SkeletonLibrary::Entry* entry = skeletons_->find(mesh->meshContent);
+        if (entry == nullptr || entry->joints.empty())
+            continue;
+        if (!firstSkinned.valid())
+            firstSkinned = id;
+        if (!entry->clips.empty())
+            return id;
+    }
+    // Nothing under it has clips yet -- the meshes may still be loading. The
+    // first skinned one is the honest answer: the track is made against that
+    // rig, and `createTrack` reports no clip, which is what its own doc says
+    // happens for a name the file does not have.
+    return firstSkinned;
+}
+
+bool AnimationSystem::drives(const Track& track, core::InstanceId meshPart) const
+{
+    if (track.meshPart == meshPart)
+        return true;
+    if (!track.driveRoot.valid() || world_ == nullptr)
+        return false;
+    // Under the root the player was parented to. Walked upwards, because a
+    // character is a handful of meshes and this is once per mesh per tick.
+    for (core::InstanceId cursor = meshPart; cursor.valid(); cursor = world_->parentOf(cursor)) {
+        if (cursor == track.driveRoot)
+            return true;
+    }
+    return false;
+}
+
+const AnimationSystem::JointMap* AnimationSystem::jointMapFor(core::NameAtom from, core::NameAtom to) const
+{
+    // A clip applied to its own rig needs no map, which is every character made
+    // of one mesh.
+    if (from == to || skeletons_ == nullptr)
+        return nullptr;
+
+    for (const JointMap& map : jointMaps_) {
+        if (map.from == from && map.to == to)
+            return &map;
+    }
+
+    const SkeletonLibrary::Entry* source = skeletons_->find(from);
+    const SkeletonLibrary::Entry* target = skeletons_->find(to);
+    if (source == nullptr || target == nullptr)
+        return nullptr;
+
+    JointMap made;
+    made.from = from;
+    made.to = to;
+    made.slots.assign(source->joints.size(), -1);
+    for (usize index = 0; index < source->joints.size(); ++index) {
+        for (usize other = 0; other < target->joints.size(); ++other) {
+            if (source->joints[index].name == target->joints[other].name) {
+                made.slots[index] = static_cast<core::i32>(other);
+                break;
+            }
+        }
+    }
+    jointMaps_.push_back(std::move(made));
+    return &jointMaps_.back();
 }
 
 // --- scene::SkeletonHost -----------------------------------------------------
