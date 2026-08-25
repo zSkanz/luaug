@@ -2,10 +2,12 @@
 
 #include "luaug/core/i18n.h"
 #include "luaug/core/json.h"
+#include "luaug/core/log.h"
 #include "luaug/core/text_key.h"
 #include "luaug/platform/file.h"
 
 #include <algorithm>
+#include <functional>
 
 namespace luaug::asset {
 namespace {
@@ -30,6 +32,53 @@ using core::I18nArg;
         return AssetKind::Raw;
     }
     return AssetKind::Unknown;
+}
+
+// The manifest both compiled mount kinds carry: `luaug-content-manifest`, a
+// list of `{urn, hash, kind}`. `onEntry` decides what to do with a row, which
+// is the one place a pack and an object store differ -- a pack checks its TOC
+// holds the blob, a store does not.
+[[nodiscard]] std::optional<core::EngineError> readManifest(
+    const std::filesystem::path& manifestPath,
+    const std::function<std::optional<core::EngineError>(std::string_view, const core::ContentHash&, AssetKind)>&
+        onEntry)
+{
+    std::string text;
+    if (!platform::readTextFile(manifestPath, text)) {
+        const I18nArg args[] = {{"content", manifestPath.string()}};
+        return core::makeError(LUAUG_TR("asset.manifest.err.open_failed"), args);
+    }
+
+    core::JsonDocument document;
+    const core::JsonDocument::ParseResult parsed = document.parse(text, manifestPath.string());
+    if (!parsed.ok) {
+        const I18nArg args[] = {{"detail", parsed.diagnostic}};
+        return core::makeError(LUAUG_TR("asset.manifest.err.malformed"), args);
+    }
+
+    const core::JsonValue root = document.root();
+    if (root["format"].asString() != "luaug-content-manifest") {
+        const I18nArg args[] = {{"detail", "not a LuauG content manifest"}};
+        return core::makeError(LUAUG_TR("asset.manifest.err.malformed"), args);
+    }
+
+    const core::JsonValue assets = root["assets"];
+    for (usize i = 0; i < assets.size(); ++i) {
+        const core::JsonValue entry = assets.at(i);
+        const std::string_view urn = entry["urn"].asString();
+        const std::string_view hex = entry["hash"].asString();
+
+        core::ContentHash hash;
+        if (!isValidUrn(urn) || !core::parseHex(hex, hash)) {
+            const I18nArg args[] = {{"detail", std::string(urn)}};
+            return core::makeError(LUAUG_TR("asset.manifest.err.malformed"), args);
+        }
+
+        if (auto error = onEntry(urn, hash, kindFromName(entry["kind"].asString())); error.has_value()) {
+            return error;
+        }
+    }
+    return std::nullopt;
 }
 
 } // namespace
@@ -73,6 +122,7 @@ std::string_view urnPath(std::string_view urn)
 void ContentMounts::mountDirectory(std::filesystem::path root)
 {
     Mount mount;
+    mount.kind = MountKind::Directory;
     mount.directory = std::move(root);
     m_mounts.push_back(std::move(mount));
 }
@@ -88,58 +138,94 @@ std::optional<core::EngineError> ContentMounts::mountPack(const std::filesystem:
     }
 
     Mount mount;
+    mount.kind = MountKind::Pack;
     mount.pack = std::make_unique<Pack>();
     if (auto error = openPackFile(pack, *mount.pack)) {
         return error;
     }
 
-    std::string text;
-    if (!platform::readTextFile(manifestPath, text)) {
-        const I18nArg args[] = {{"content", manifestPath.string()}};
-        return core::makeError(LUAUG_TR("asset.manifest.err.open_failed"), args);
-    }
+    if (auto error = readManifest(manifestPath,
+                                  [&mount](std::string_view urn, const core::ContentHash& hash,
+                                           AssetKind kind) -> std::optional<core::EngineError> {
+                                      const PackEntry* const found = mount.pack->find(hash);
+                                      if (found == nullptr) {
+                                          // Refused at mount rather than at first use. A game that
+                                          // starts and then cannot find its world is worse than one
+                                          // that says why it will not start.
+                                          const I18nArg args[] = {{"content", std::string(urn)}};
+                                          return core::makeError(LUAUG_TR("asset.manifest.err.missing_blob"), args);
+                                      }
 
-    core::JsonDocument document;
-    const core::JsonDocument::ParseResult parsed = document.parse(text, manifestPath.string());
-    if (!parsed.ok) {
-        const I18nArg args[] = {{"detail", parsed.diagnostic}};
-        return core::makeError(LUAUG_TR("asset.manifest.err.malformed"), args);
-    }
-
-    const core::JsonValue root = document.root();
-    if (root["format"].asString() != "luaug-content-manifest") {
-        const I18nArg args[] = {{"detail", "not a LuauG content manifest"}};
-        return core::makeError(LUAUG_TR("asset.manifest.err.malformed"), args);
-    }
-
-    const core::JsonValue assets = root["assets"];
-    for (usize i = 0; i < assets.size(); ++i) {
-        const core::JsonValue entry = assets.at(i);
-        const std::string_view urn = entry["urn"].asString();
-        const std::string_view hex = entry["hash"].asString();
-
-        core::ContentHash hash;
-        if (!isValidUrn(urn) || !core::parseHex(hex, hash)) {
-            const I18nArg args[] = {{"detail", std::string(urn)}};
-            return core::makeError(LUAUG_TR("asset.manifest.err.malformed"), args);
-        }
-
-        const PackEntry* const found = mount.pack->find(hash);
-        if (found == nullptr) {
-            // Refused at mount rather than at first use. A game that starts and
-            // then cannot find its world is worse than one that says why it
-            // will not start.
-            const I18nArg args[] = {{"content", std::string(urn)}};
-            return core::makeError(LUAUG_TR("asset.manifest.err.missing_blob"), args);
-        }
-
-        PackEntry record = *found;
-        record.kind = kindFromName(entry["kind"].asString());
-        mount.byUrn.emplace(std::string(urn), record);
+                                      PackEntry record = *found;
+                                      record.kind = kind;
+                                      mount.byUrn.emplace(std::string(urn), record);
+                                      return std::nullopt;
+                                  });
+        error.has_value()) {
+        return error;
     }
 
     m_mounts.push_back(std::move(mount));
     return std::nullopt;
+}
+
+std::optional<core::EngineError> ContentMounts::mountObjects(std::filesystem::path objects,
+                                                             const std::filesystem::path& index)
+{
+    Mount mount;
+    mount.kind = MountKind::Objects;
+    mount.objects = std::move(objects);
+
+    // No blob check. See the header: this store is repaired by re-importing,
+    // and one stale row must not take a whole project offline.
+    if (auto error = readManifest(index,
+                                  [&mount](std::string_view urn, const core::ContentHash& hash,
+                                           AssetKind kind) -> std::optional<core::EngineError> {
+                                      PackEntry record;
+                                      record.hash = hash;
+                                      record.kind = kind;
+                                      // `offset` and the sizes stay zero: they describe a position
+                                      // inside an archive, and there is no archive. The size a
+                                      // caller sees is the span `blob` hands back, which is the
+                                      // file's own length.
+                                      mount.byUrn.emplace(std::string(urn), record);
+                                      return std::nullopt;
+                                  });
+        error.has_value()) {
+        return error;
+    }
+
+    m_mounts.push_back(std::move(mount));
+    return std::nullopt;
+}
+
+std::filesystem::path ContentMounts::objectPath(const std::filesystem::path& objects, const core::ContentHash& hash)
+{
+    const std::string hex = hash.toHex();
+    std::filesystem::path path = objects;
+    path /= hex.substr(0, 2);
+    path /= hex;
+    return path;
+}
+
+std::span<const std::byte> ContentMounts::objectBytes(const Mount& mount, const core::ContentHash& hash) const
+{
+    if (const auto cached = mount.loaded.find(hash); cached != mount.loaded.end()) {
+        return cached->second;
+    }
+
+    const std::filesystem::path path = objectPath(mount.objects, hash);
+    std::vector<std::byte> bytes;
+    if (!platform::readFile(path, bytes)) {
+        const I18nArg args[] = {{"content", path.string()}};
+        core::logText(core::LogLevel::Warn,
+                      core::makeError(LUAUG_TR("asset.objects.err.missing_object"), args).message);
+        // Remembered as empty, so the next lookup neither re-opens the file nor
+        // re-warns -- a mesh asked for once per frame would otherwise fill the
+        // log with one line per frame for as long as the project is open.
+        bytes.clear();
+    }
+    return mount.loaded.emplace(hash, std::move(bytes)).first->second;
 }
 
 void ContentMounts::clear()
@@ -158,13 +244,14 @@ ResolvedContent ContentMounts::resolve(std::string_view urn) const
     // Reverse order: a later mount wins, so a project overrides engine content
     // by mounting after it.
     for (auto mount = m_mounts.rbegin(); mount != m_mounts.rend(); ++mount) {
-        if (mount->pack != nullptr) {
+        if (mount->kind != MountKind::Directory) {
             const auto entry = mount->byUrn.find(std::string(urn));
             if (entry != mount->byUrn.end()) {
                 result.source = ResolvedContent::Source::Pack;
                 result.kind = entry->second.kind;
                 result.hash = entry->second.hash;
-                result.bytes = mount->pack->blob(entry->second.hash);
+                result.bytes = mount->kind == MountKind::Pack ? mount->pack->blob(entry->second.hash)
+                                                              : objectBytes(*mount, entry->second.hash);
                 return result;
             }
             continue;
@@ -195,7 +282,17 @@ ResolvedContent ContentMounts::resolve(std::string_view urn) const
 std::span<const std::byte> ContentMounts::blob(const core::ContentHash& hash) const
 {
     for (auto mount = m_mounts.rbegin(); mount != m_mounts.rend(); ++mount) {
-        if (mount->pack == nullptr) {
+        if (mount->kind == MountKind::Objects) {
+            const std::span<const std::byte> bytes = objectBytes(*mount, hash);
+            if (!bytes.empty()) {
+                return bytes;
+            }
+            // An empty answer here falls through to the next mount rather than
+            // ending the search: this store holds whatever was last imported,
+            // and a blob it is missing may still be in a pack underneath it.
+            continue;
+        }
+        if (mount->kind != MountKind::Pack) {
             continue;
         }
         const std::span<const std::byte> bytes = mount->pack->blob(hash);

@@ -106,6 +106,39 @@ struct Fixture
         write(root / (name + ".manifest.json"), manifest);
         return packPath;
     }
+
+    // Writes an object store -- one file per blob under `objects/<aa>/<hex>`,
+    // plus the index -- and returns the objects directory. `skip` names a URN
+    // whose row is written but whose file is not, which is the case a pack
+    // refuses at mount and this store is required not to.
+    [[nodiscard]] std::filesystem::path writeObjects(const std::string& name,
+                                                     const std::vector<std::pair<std::string, std::string>>& assets,
+                                                     const std::string& skip = {}) const
+    {
+        const std::filesystem::path objects = root / name / "objects";
+        std::string index = "{\"format\":\"luaug-content-manifest\",\"version\":1,\"assets\":[";
+        bool first = true;
+        for (const auto& [urn, contents] : assets) {
+            const ContentHash hash = hashText(contents);
+            if (!first) {
+                index += ",";
+            }
+            first = false;
+            index += "{\"urn\":\"" + urn + "\",\"hash\":\"" + hash.toHex() + "\",\"kind\":\"raw\"}";
+            if (urn != skip) {
+                write(ContentMounts::objectPath(objects, hash), contents);
+            }
+        }
+        index += "]}\n";
+
+        write(root / name / "index.json", index);
+        return objects;
+    }
+
+    [[nodiscard]] std::filesystem::path objectIndex(const std::string& name) const
+    {
+        return root / name / "index.json";
+    }
 };
 
 } // namespace
@@ -294,4 +327,123 @@ TEST_CASE("clearing drops every mount")
     CHECK_FALSE(mounts.contains("asset://a.txt"));
     CHECK_FALSE(mounts.contains("asset://b.txt"));
     CHECK(mounts.packedUrns().empty());
+}
+
+TEST_CASE("an object store resolves like a pack, out of one file per blob")
+{
+    seedRealCatalog();
+    const Fixture fixture;
+    const std::filesystem::path objects =
+        fixture.writeObjects("import", {{"asset://models/horse.gltf#Body", "the body mesh"},
+                                        {"asset://models/horse.gltf#Mane", "the mane mesh"}});
+
+    ContentMounts mounts;
+    REQUIRE_FALSE(mounts.mountObjects(objects, fixture.objectIndex("import")).has_value());
+
+    // `Source::Pack`, not a third source. Everything above this layer sees
+    // "compiled bytes, named by hash" and needs no branch for where they sat.
+    const ResolvedContent found = mounts.resolve("asset://models/horse.gltf#Body");
+    REQUIRE(found.found());
+    CHECK(found.source == ResolvedContent::Source::Pack);
+    CHECK(found.kind == AssetKind::Raw);
+    CHECK(textOf(found.bytes) == "the body mesh");
+    CHECK(found.hash == hashText("the body mesh"));
+
+    // By hash too, which is how a compiled mesh names its textures.
+    CHECK(textOf(mounts.blob(hashText("the mane mesh"))) == "the mane mesh");
+    CHECK(mounts.blob(hashText("never imported")).empty());
+
+    const std::vector<std::string> urns = mounts.packedUrns();
+    REQUIRE(urns.size() == 2);
+    CHECK(urns[0] == "asset://models/horse.gltf#Body");
+    CHECK(urns[1] == "asset://models/horse.gltf#Mane");
+}
+
+TEST_CASE("a missing object does not refuse the mount, unlike a pack")
+{
+    seedRealCatalog();
+    const Fixture fixture;
+    const std::filesystem::path objects = fixture.writeObjects(
+        "import", {{"asset://gone.txt", "never written"}, {"asset://here.txt", "written"}}, "asset://gone.txt");
+
+    ContentMounts mounts;
+    // The whole difference from `mountPack`, which refuses. This store is
+    // repaired by re-importing, and one stale row must not take a project
+    // offline.
+    REQUIRE_FALSE(mounts.mountObjects(objects, fixture.objectIndex("import")).has_value());
+
+    const ResolvedContent gone = mounts.resolve("asset://gone.txt");
+    CHECK(gone.found());
+    CHECK(gone.bytes.empty());
+    // Twice, because the second lookup must come out of the remembered miss
+    // rather than re-opening the file and re-warning once per frame.
+    CHECK(mounts.resolve("asset://gone.txt").bytes.empty());
+
+    CHECK(textOf(mounts.resolve("asset://here.txt").bytes) == "written");
+}
+
+TEST_CASE("a blob the object store lacks is still found in a pack under it")
+{
+    seedRealCatalog();
+    const Fixture fixture;
+    const std::filesystem::path pack = fixture.writePack("shipped", {{"asset://old.txt", "from the pack"}});
+    const std::filesystem::path objects = fixture.writeObjects("import", {{"asset://new.txt", "from the store"}});
+
+    ContentMounts mounts;
+    REQUIRE_FALSE(mounts.mountPack(pack).has_value());
+    REQUIRE_FALSE(mounts.mountObjects(objects, fixture.objectIndex("import")).has_value());
+
+    // The store is searched first and does not have it, so the search CONTINUES
+    // rather than answering empty -- a compiled mesh names its textures by hash,
+    // and a re-imported mesh sharing a texture with a shipped one must still
+    // find it.
+    CHECK(textOf(mounts.blob(hashText("from the pack"))) == "from the pack");
+    CHECK(textOf(mounts.blob(hashText("from the store"))) == "from the store");
+}
+
+TEST_CASE("an object store mounted after a directory wins, and after a pack too")
+{
+    seedRealCatalog();
+    const Fixture fixture;
+    Fixture::write(fixture.root / "loose" / "shared.txt", "from the directory");
+    const std::filesystem::path pack = fixture.writePack("shipped", {{"asset://shared.txt", "from the pack"}});
+    const std::filesystem::path objects = fixture.writeObjects("import", {{"asset://shared.txt", "from the store"}});
+
+    ContentMounts mounts;
+    mounts.mountDirectory(fixture.root / "loose");
+    REQUIRE_FALSE(mounts.mountObjects(objects, fixture.objectIndex("import")).has_value());
+    CHECK(textOf(mounts.resolve("asset://shared.txt").bytes) == "from the store");
+
+    // And the shipped pack outranks it in turn, because it is mounted last:
+    // the object store is the editor's cache, not an override of what shipped.
+    REQUIRE_FALSE(mounts.mountPack(pack).has_value());
+    CHECK(textOf(mounts.resolve("asset://shared.txt").bytes) == "from the pack");
+}
+
+TEST_CASE("an object store's index is checked the same way a pack manifest is")
+{
+    seedRealCatalog();
+    const Fixture fixture;
+    Fixture::write(fixture.root / "import" / "index.json", "{\"format\":\"something else\",\"assets\":[]}");
+    ContentMounts mounts;
+    CHECK(mounts.mountObjects(fixture.root / "import" / "objects", fixture.objectIndex("import")).has_value());
+
+    // And an index that is not there at all is an error rather than an empty
+    // mount, so a project whose cache was deleted says so.
+    CHECK(mounts.mountObjects(fixture.root / "nothing" / "objects", fixture.objectIndex("nothing")).has_value());
+    CHECK(mounts.mountCount() == 0);
+}
+
+TEST_CASE("an object path fans out one level, by the first two hex digits")
+{
+    const ContentHash hash = hashText("anything");
+    const std::string hex = hash.toHex();
+    const std::filesystem::path path = ContentMounts::objectPath("root", hash);
+
+    // Tens of thousands of files in one directory is where filesystems and file
+    // browsers both stop coping, and the fan-out is by the NAME's own prefix so
+    // that the path is a pure function of the hash.
+    CHECK(path.filename().string() == hex);
+    CHECK(path.parent_path().filename().string() == hex.substr(0, 2));
+    CHECK(path.parent_path().parent_path() == std::filesystem::path("root"));
 }

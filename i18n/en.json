@@ -133,6 +133,7 @@
   "asset.manifest.err.open_failed": "Could not read the content manifest {content}.",
   "asset.manifest.err.malformed": "The content manifest is malformed: {detail}.",
   "asset.manifest.err.missing_blob": "The content manifest names {content}, but the pack beside it does not hold it.",
+  "asset.objects.err.missing_object": "The compiled object {content} is not there. Re-import the asset that produced it.",
   "app.warn.project_config": "The project file could not be read, so the engine's own defaults are in effect: {reason}",
   "app.warn.pointer_lock_refused": "The window refused to hold the pointer, so turning the camera will stop at the edge of the screen.",
   "app.info.pointer_lock": "Pointer {state}.",
