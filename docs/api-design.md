@@ -831,11 +831,22 @@ modules**, no client/server folders yet.
 - **Lifecycle:** engine init → load `luaug.toml` + asset manifest → build the
   DataModel + mount scripts → start each Script on its own coroutine via
   `task.defer` in deterministic path-sorted order → first frame.
+  **Mounting and starting are two steps, and the editor does only the first**
+  (ADR 0058): a project opened in `luaug edit` shows its scripts and does not
+  run them, play starts them, and stop tears the VM down so a second play is the
+  same as the first. Every other host -- a game, `luaug dev`, headless, the
+  conformance runner, a replay -- starts them at boot as written above.
   `game.Loaded: Signal` fires after all entry scripts have had their first
   resumption; `game:BindToClose(fn)` (with a capped timeout) and
   `game:Shutdown()` for exit.
-- **The `script` global** = the running `Script` instance (Name/Parent/
-  attributes work; use attributes for per-script config).
+- **The `script` global** = the instance the code being run IS. In a `Script`
+  that is the running Script; **inside a `ModuleScript` it is that
+  ModuleScript**, which is what makes a module a place you can put things --
+  `script:FindFirstChild("Inner")` asks the module's own children. A module that
+  is not an instance at all (`@luaug/…`) has `script = nil` rather than the
+  requirer's, because handing it somebody else's is the same mistake in a
+  quieter place. Name/Parent/attributes work; use attributes for per-script
+  config.
 - **Module caching & errors:** standard Luau Require semantics — one
   evaluation per module per VM, cyclic requires per spec, a module that errors
   propagates to its requirer and the failure is cached. An error in one

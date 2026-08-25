@@ -119,12 +119,41 @@ namespace {
 // its own globals table (api-design.md §3). It must NOT yield: a module is
 // evaluated once and its result cached, and a half-evaluated module in the cache
 // is a module every later requirer would get wrong.
+//
+// `self` is the instance the module IS, or an invalid id for a module that is
+// not an instance at all -- see the `script` binding below.
 [[nodiscard]] bool evaluateModule(lua_State* L, std::string_view source, std::string_view chunkName,
-                                  std::string& outError)
+                                  core::InstanceId self, std::string& outError)
 {
     lua_State* co = lua_newthread(L);
     const int rooted = lua_gettop(L);
     luaL_sandboxthread(co);
+
+    // **`script` inside a module is the MODULE**, which is what makes a module
+    // a place you can put things: `script:FindFirstChild("Inner")` has to ask
+    // the module's own children, and until this it asked the REQUIRER's.
+    //
+    // `luaL_sandboxthread` gives the thread a fresh globals table whose
+    // `__index` is the creating thread's, so a module inherited whatever
+    // `script` the script that required it had. Nested modules therefore looked
+    // for their own children under somebody else's instance and found nothing,
+    // which is the defect this fixes and which reads as a module that "cannot
+    // be required" from the outside.
+    //
+    // **Nil rather than inherited when there is no instance.** An engine module
+    // (`@luaug/testing`) is not a script and has none; handing it the
+    // requirer's would be the same lie in a quieter place.
+    //
+    // **Set BEFORE the load**, and that is not a preference:
+    // `luaL_sandboxthread` marks the new globals table safeenv, which makes the
+    // compiler's import fast path resolve globals at load time -- so a `script`
+    // assigned afterwards is invisible to every `script.X` in the chunk. The
+    // same ordering `startScripts` documents, for the same reason.
+    if (self.valid())
+        pushInstance(co, self);
+    else
+        lua_pushnil(co);
+    lua_setglobal(co, "script");
 
     if (!loadChunk(co, source, chunkName, outError)) {
         lua_remove(L, rooted);
@@ -190,8 +219,10 @@ int requireRegistered(lua_State* L, ModuleRegistry::Registered& module, std::str
         return 1;
     }
 
+    // No instance: an engine module is C++ or a string this binary carries, and
+    // there is nothing in the world that IS it.
     std::string error;
-    const bool ok = evaluateModule(L, module.source, module.name, error);
+    const bool ok = evaluateModule(L, module.source, module.name, core::InstanceId{}, error);
     module.loading = false;
 
     if (!ok) {
@@ -255,7 +286,7 @@ int requireInstance(lua_State* L, core::InstanceId id, std::string_view from)
     const std::string* text = source.has_value() ? std::get_if<std::string>(&*source) : nullptr;
 
     std::string error;
-    const bool ok = text != nullptr && evaluateModule(L, *text, name, error);
+    const bool ok = text != nullptr && evaluateModule(L, *text, name, id, error);
     modules.treeModules[slot].loading = false;
 
     if (!ok) {
@@ -339,8 +370,21 @@ int scriptRequire(lua_State* L)
     modules.modules.push_back(ModuleRegistry::Module{path, -1, true, false, {}});
     modules.byPath.emplace(path, index);
 
+    // **The instance the mount made for this file**, when there is one. A file
+    // under `src/scripts` is both a path and an instance (ADR 0050), and the
+    // two have to agree about what `script` means inside it -- otherwise the
+    // same module body behaves differently depending on which way it was
+    // reached. A path the mount never saw has no instance and gets nil.
+    core::InstanceId self;
+    for (const ModuleRegistry::Entry& entry : modules.entries) {
+        if (entry.path == path) {
+            self = entry.instance;
+            break;
+        }
+    }
+
     std::string error;
-    const bool ok = evaluateModule(L, source, path, error);
+    const bool ok = evaluateModule(L, source, path, self, error);
     modules.modules[index].loading = false;
 
     if (!ok) {

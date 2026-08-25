@@ -136,6 +136,57 @@ describe("the module model", function()
         expect((require :: any)(module)):ToBe(required)
     end)
 
+    it("requires a module that is a child of a Script", function()
+        -- **The shape every project has.** A script keeps its own helpers
+        -- beside it, reaches them through `script.Name`, and never has to know
+        -- where in the tree it was mounted.
+        local module = Instance.new("ModuleScript")
+        module.Name = "Nested"
+        module.Source = "return { answer = 7 }"
+        module.Parent = script
+
+        local required = (require :: any)(script:FindFirstChild("Nested"))
+        expect(typeof(required)):ToBe("table")
+        expect(required.answer):ToBe(7)
+    end)
+
+    it("requires a module that is a child of another module", function()
+        -- **`script` inside a module is the MODULE** (D111). It used to be
+        -- whatever required it -- `luaL_sandboxthread` chains the new globals
+        -- table to the creating thread's -- so a nested module looked for its
+        -- own children under somebody else's instance and found none.
+        local outer = Instance.new("ModuleScript")
+        outer.Name = "Outer"
+        outer.Parent = script
+
+        local inner = Instance.new("ModuleScript")
+        inner.Name = "Inner"
+        inner.Source = "return { depth = 2 }"
+        inner.Parent = outer
+
+        -- The outer one reaches its own child the same way a Script does, which
+        -- is what makes a module a place to put things rather than a leaf.
+        outer.Source = "return { inner = require(script:FindFirstChild('Inner')) }"
+
+        local required = (require :: any)(outer)
+        expect(required.inner.depth):ToBe(2)
+    end)
+
+    it("requires a module that is inside a Folder", function()
+        local folder = Instance.new("Folder")
+        folder.Name = "Lib"
+        folder.Parent = script
+
+        local module = Instance.new("ModuleScript")
+        module.Name = "Helper"
+        module.Source = "return { from = 'folder' }"
+        module.Parent = folder
+
+        local lib = script:FindFirstChild("Lib") :: Instance
+        local required = (require :: any)(lib:FindFirstChild("Helper"))
+        expect(required.from):ToBe("folder")
+    end)
+
     it("refuses require of a Script, because a Script runs", function()
         local runner = Instance.new("Script")
         runner.Source = "return 1"
