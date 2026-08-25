@@ -124,7 +124,17 @@ public:
 
     [[nodiscard]] const std::vector<ContentEntry>& entries() const noexcept { return m_entries; }
     // Relative to the root, empty at the root itself.
-    [[nodiscard]] const std::string& currentFolder() const noexcept { return m_relative; }
+    // **By value, and that is a fix rather than a style.** It used to return a
+    // reference into the tree, and `enter`/`leave` ASSIGN to the string it
+    // referred to -- so a caller that held it across a navigation was reading a
+    // string that had changed length underneath it. The breadcrumb did exactly
+    // that and died on `substr` past the end, with no message: an uncaught
+    // `std::out_of_range` takes the process, and a window that vanishes is the
+    // only thing anybody sees.
+    //
+    // One string copy per call, on a path. Nothing here is on a frame path that
+    // would notice.
+    [[nodiscard]] std::string currentFolder() const { return m_relative; }
     [[nodiscard]] const std::filesystem::path& root() const noexcept { return m_root; }
     [[nodiscard]] bool atRoot() const noexcept { return m_relative.empty(); }
 

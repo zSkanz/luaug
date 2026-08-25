@@ -470,3 +470,93 @@ TEST_CASE("duplicating a folder brings everything under it")
     CHECK(std::filesystem::exists(scratch.root() / "content" / "props 2" / "crate.gltf"));
     CHECK(std::filesystem::exists(scratch.root() / "content" / "props 2" / "textures" / "crate.png"));
 }
+
+TEST_CASE("walking back up a breadcrumb does not read past the path it shortened")
+{
+    // **Reported as: three folders deep, click the path to go back, the window
+    // closes with nothing in the console.** That is what an uncaught
+    // `std::out_of_range` looks like from outside.
+    //
+    // The breadcrumb held `currentFolder()` -- a REFERENCE into the tree -- and
+    // `leave()` assigns to that very string. Clicking a crumb navigated in the
+    // middle of the loop, so the next step read `substr(begin, ...)` with a
+    // `begin` measured against the old, longer path. Three deep is the shallowest
+    // depth that reaches a second step after a click.
+    //
+    // ImGui cannot be driven headlessly, so this is the loop's ARITHMETIC over
+    // the real tree: the same reads, in the same order, with the same navigation
+    // in the middle.
+    Scratch scratch("breadcrumb-depth");
+    scratch.folder("content/a/b/c");
+    scratch.file("content/a/b/c/one.png", "p");
+    scratch.file("content/a/b/c/two.png", "p");
+
+    app::ContentTree tree;
+    REQUIRE(tree.open(scratch.root() / "content"));
+    REQUIRE(tree.enter("a"));
+    REQUIRE(tree.enter("b"));
+    REQUIRE(tree.enter("c"));
+    REQUIRE(tree.currentFolder() == "a/b/c");
+
+    // The loop, as the panel runs it.
+    const std::string relative = tree.currentFolder();
+    int depth = relative.empty() ? 0 : 1;
+    for (const char c : relative)
+        depth += c == '/' ? 1 : 0;
+    REQUIRE(depth == 3);
+
+    int climb = 0;
+    std::size_t begin = 0;
+    for (int step = 0; step < depth; ++step) {
+        const std::size_t slash = relative.find('/', begin);
+        // The read that used to throw once the tree had been shortened.
+        const std::string segment =
+            relative.substr(begin, slash == std::string::npos ? std::string::npos : slash - begin);
+        const std::string here = slash == std::string::npos ? relative : relative.substr(0, slash);
+        begin = slash == std::string::npos ? relative.size() : slash + 1;
+
+        if (step == 0) {
+            CHECK(segment == "a");
+            CHECK(here == "a");
+            // The click: recorded, not acted on.
+            climb = depth - step - 1;
+        }
+        if (step == 1)
+            CHECK(segment == "b");
+        if (step == 2)
+            CHECK(segment == "c");
+    }
+
+    for (int up = 0; up < climb; ++up)
+        REQUIRE(tree.leave());
+
+    CHECK(tree.currentFolder() == "a");
+    // And the folder it arrived at is real: `b` is in it, and the PNGs are not.
+    bool sawB = false;
+    for (const app::ContentEntry& entry : tree.entries())
+        sawB = sawB || entry.name == "b";
+    CHECK(sawB);
+}
+
+TEST_CASE("the current folder survives the navigation that changes it")
+{
+    // The root cause, stated as its own case: `currentFolder()` used to hand out
+    // a reference to the string `enter` and `leave` assign to. Anything that
+    // held it across a navigation was reading a string that had changed length
+    // underneath it.
+    Scratch scratch("breadcrumb-lifetime");
+    scratch.folder("content/a/b/c");
+
+    app::ContentTree tree;
+    REQUIRE(tree.open(scratch.root() / "content"));
+    REQUIRE(tree.enter("a"));
+    REQUIRE(tree.enter("b"));
+
+    const std::string held = tree.currentFolder();
+    REQUIRE(tree.leave());
+    REQUIRE(tree.leave());
+
+    // Still the path it was taken at, whatever the tree did afterwards.
+    CHECK(held == "a/b");
+    CHECK(tree.currentFolder().empty());
+}

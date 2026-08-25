@@ -3172,7 +3172,12 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
     }
 
     {
-        const std::string& relative = tree.currentFolder();
+        // A COPY, and navigation deferred to after the loop. Both are load
+        // bearing: the copy because `leave` assigns to the tree's own path, and
+        // the deferral because a chain that shortened halfway through would go
+        // on drawing crumbs for a folder it had already left.
+        const std::string relative = tree.currentFolder();
+        int climb = 0;
         // Counted first, because a step's job is "go up (depth - me - 1)
         // times" and it has to know how deep the chain is to say that.
         int depth = relative.empty() ? 0 : 1;
@@ -3209,11 +3214,13 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                 ImGui::TextUnformatted(segment.c_str());
             }
             else if (crumbButton(segment.c_str())) {
-                for (int up = 0; up < depth - step - 1; ++up)
-                    (void)tree.leave();
+                climb = depth - step - 1;
             }
             ImGui::PopID();
         }
+
+        for (int up = 0; up < climb; ++up)
+            (void)tree.leave();
     }
 
     // **What you are looking for, in the folder you are in.**
