@@ -1522,16 +1522,29 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // may have been re-read between the click and here -- and an
                 // index into a list that moved is how a delete hits the row
                 // below the one somebody chose.
-                if (!editorCommands.deleteContent.empty() || !editorCommands.renameContent.empty()) {
-                    const std::string& wanted = editorCommands.deleteContent.empty() ? editorCommands.renameContent
-                                                                                     : editorCommands.deleteContent;
+                if (!editorCommands.deleteContent.empty() || !editorCommands.renameContent.empty() ||
+                    !editorCommands.duplicateContent.empty()) {
+                    const std::string& wanted = !editorCommands.deleteContent.empty() ? editorCommands.deleteContent
+                                                : !editorCommands.duplicateContent.empty()
+                                                    ? editorCommands.duplicateContent
+                                                    : editorCommands.renameContent;
                     for (const ContentEntry& entry : editor.content().entries()) {
                         if (entry.path != wanted)
                             continue;
-                        if (!editorCommands.deleteContent.empty())
+                        if (!editorCommands.deleteContent.empty()) {
                             (void)editor.content().remove(entry);
-                        else
+                        }
+                        else if (!editorCommands.duplicateContent.empty()) {
+                            // Named in the status line rather than only counted:
+                            // a duplicate is called something, and the next
+                            // thing a person does is find it.
+                            const std::string made = editor.content().duplicate(entry);
+                            editor.report(made.empty() ? "could not duplicate " + entry.name : "duplicated to " + made,
+                                          made.empty());
+                        }
+                        else {
                             (void)editor.content().rename(entry, editorCommands.renameContentTo);
+                        }
                         break;
                     }
                 }

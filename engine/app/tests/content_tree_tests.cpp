@@ -364,3 +364,109 @@ TEST_CASE("a file that names nothing brings nothing")
     CHECK(report.companions.empty());
     CHECK(report.missing.empty());
 }
+
+TEST_CASE("duplicating keeps a compound extension whole")
+{
+    // **The case a naive split at the last dot gets wrong.** A duplicate of
+    // `stone.material.json` called `stone.material 2.json` is a file the browser
+    // no longer recognises as a material -- which is the whole reason the split
+    // asks the KIND what the suffix is.
+    Scratch scratch("duplicate-compound");
+    scratch.folder("content");
+    scratch.file("content/stone.material.json", "{\"format\":\"luaug-material\"}");
+    scratch.file("content/main.scene.json", "{}");
+
+    app::ContentTree tree;
+    REQUIRE(tree.open(scratch.root() / "content"));
+
+    const app::ContentEntry* material = nullptr;
+    for (const app::ContentEntry& entry : tree.entries()) {
+        if (entry.name == "stone.material.json")
+            material = &entry;
+    }
+    REQUIRE(material != nullptr);
+
+    const std::string made = tree.duplicate(*material);
+    CHECK(made == "stone 2.material.json");
+    CHECK(std::filesystem::exists(scratch.root() / "content" / "stone 2.material.json"));
+    // And it is still a material as far as the browser is concerned, which is
+    // the half a wrong split silently loses.
+    CHECK(app::contentKindOf(made) == ContentKind::Material);
+    // The original is untouched: everything already pointed at it keeps working,
+    // which is why a material is a file rather than a property.
+    CHECK(std::filesystem::exists(scratch.root() / "content" / "stone.material.json"));
+}
+
+TEST_CASE("duplicating twice numbers upwards, and fills a gap")
+{
+    Scratch scratch("duplicate-numbers");
+    scratch.folder("content");
+    scratch.file("content/stone.material.json", "a");
+
+    app::ContentTree tree;
+    REQUIRE(tree.open(scratch.root() / "content"));
+
+    const auto findByName = [&tree](std::string_view name) -> const app::ContentEntry* {
+        for (const app::ContentEntry& entry : tree.entries()) {
+            if (entry.name == name)
+                return &entry;
+        }
+        return nullptr;
+    };
+
+    REQUIRE(findByName("stone.material.json") != nullptr);
+    CHECK(tree.duplicate(*findByName("stone.material.json")) == "stone 2.material.json");
+    REQUIRE(findByName("stone.material.json") != nullptr);
+    CHECK(tree.duplicate(*findByName("stone.material.json")) == "stone 3.material.json");
+
+    // Delete the middle one and the next duplicate takes its place. "First
+    // free" rather than a counter that only climbs, which is what somebody
+    // expects after tidying up.
+    std::error_code ec;
+    std::filesystem::remove(scratch.root() / "content" / "stone 2.material.json", ec);
+    REQUIRE(tree.refresh());
+    REQUIRE(findByName("stone.material.json") != nullptr);
+    CHECK(tree.duplicate(*findByName("stone.material.json")) == "stone 2.material.json");
+}
+
+TEST_CASE("duplicating a plain file keeps its own extension")
+{
+    Scratch scratch("duplicate-plain");
+    scratch.folder("content");
+    scratch.file("content/rock.gltf", "{}");
+
+    app::ContentTree tree;
+    REQUIRE(tree.open(scratch.root() / "content"));
+
+    const app::ContentEntry* mesh = nullptr;
+    for (const app::ContentEntry& entry : tree.entries()) {
+        if (entry.name == "rock.gltf")
+            mesh = &entry;
+    }
+    REQUIRE(mesh != nullptr);
+    CHECK(tree.duplicate(*mesh) == "rock 2.gltf");
+}
+
+TEST_CASE("duplicating a folder brings everything under it")
+{
+    Scratch scratch("duplicate-folder");
+    scratch.folder("content");
+    scratch.file("content/props/crate.gltf", "{}");
+    scratch.file("content/props/textures/crate.png", "p");
+
+    app::ContentTree tree;
+    REQUIRE(tree.open(scratch.root() / "content"));
+
+    const app::ContentEntry* folder = nullptr;
+    for (const app::ContentEntry& entry : tree.entries()) {
+        if (entry.kind == ContentKind::Folder && entry.name == "props")
+            folder = &entry;
+    }
+    REQUIRE(folder != nullptr);
+
+    CHECK(tree.duplicate(*folder) == "props 2");
+    // A folder means what is in it. Copying the folder and not its contents is
+    // an empty folder wearing a familiar name.
+    CHECK(std::filesystem::exists(scratch.root() / "content" / "props 2" / "crate.gltf"));
+    CHECK(std::filesystem::exists(scratch.root() / "content" / "props 2" / "textures" / "crate.png"));
+}

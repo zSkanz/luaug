@@ -151,6 +151,24 @@ public:
     // first.
     bool remove(const ContentEntry& entry);
 
+    // Copies an entry beside itself and re-reads, returning the new file's name
+    // or empty on failure.
+    //
+    // **This is how a material is made from a material** -- start from the one
+    // that is nearly right, change what is not, and the original keeps working
+    // for everything already pointed at it. It is not special-cased to
+    // materials: duplicating a scene, a stamp or a mesh is the same operation
+    // and is useful for the same reason.
+    //
+    // The copy is named `<stem> 2`, then `<stem> 3`, first free. A space rather
+    // than an underscore because this name is for a PERSON -- unlike
+    // `splitByPrimitive`'s `_2`, which becomes a URN fragment -- and the
+    // extension is kept whole, so a duplicate of `stone.material.json` is
+    // `stone 2.material.json` and not `stone.material 2.json`.
+    //
+    // A folder is copied with everything under it.
+    [[nodiscard]] std::string duplicate(const ContentEntry& entry);
+
     // What one import did.
     struct ImportReport
     {

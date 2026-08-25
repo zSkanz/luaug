@@ -426,6 +426,9 @@ struct EditorCommands
 
     // Content-relative. Delete removes a folder with everything in it.
     std::string deleteContent;
+    // A content-relative path to copy beside itself. How a material is made
+    // from a material, and how anything else in the browser is copied.
+    std::string duplicateContent;
     std::string renameContent;
     std::string renameContentTo;
 
@@ -464,8 +467,8 @@ struct EditorCommands
                stampSubject.valid() || !stampFolder.empty() || !placeStamp.empty() || breakStamp.valid() ||
                !openStamp.empty() || saveStamp || closeStamp || createClass != scene::InvalidClass || deleteSelection ||
                duplicateSelection || reparentTo.valid() || renameInstance.valid() || !saveAs.empty() ||
-               !openScene.empty() || !createFolder.empty() || !deleteContent.empty() || !renameContent.empty() ||
-               importAssets || importParent.valid() || openScript.valid();
+               !openScene.empty() || !createFolder.empty() || !deleteContent.empty() || !duplicateContent.empty() ||
+               !renameContent.empty() || importAssets || importParent.valid() || openScript.valid();
     }
 };
 

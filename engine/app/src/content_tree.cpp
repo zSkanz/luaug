@@ -318,6 +318,59 @@ bool ContentTree::rename(const ContentEntry& entry, std::string_view newName)
     return refresh();
 }
 
+std::string ContentTree::duplicate(const ContentEntry& entry)
+{
+    if (m_root.empty())
+        return {};
+
+    std::filesystem::path folder = m_root;
+    if (!m_relative.empty())
+        folder /= std::filesystem::path(m_relative);
+
+    // The stem and the suffix, split by what the KIND says rather than at the
+    // last dot: `stone.material.json` has a two-part extension, and a duplicate
+    // called `stone.material 2.json` is a file the browser no longer recognises
+    // as a material.
+    const std::string stem = stemOf(entry);
+    std::string suffix;
+    if (const std::string_view extension = extensionFor(entry.kind); !extension.empty())
+        suffix = std::string(extension);
+    else if (entry.kind != ContentKind::Folder) {
+        if (const std::string::size_type dot = entry.name.rfind('.'); dot != std::string::npos)
+            suffix = entry.name.substr(dot);
+    }
+
+    std::error_code ec;
+    std::string target;
+    // First free, from two. A person duplicating three times gets 2, 3 and 4,
+    // and one who deleted the 3 gets it back -- which is what "first free"
+    // means and is less surprising than a counter that only ever climbs.
+    for (int index = 2; index < 1000; ++index) {
+        std::string candidate = stem + " " + std::to_string(index) + suffix;
+        if (!std::filesystem::exists(folder / std::filesystem::path(candidate), ec)) {
+            target = std::move(candidate);
+            break;
+        }
+    }
+    if (target.empty())
+        return {};
+
+    const std::filesystem::path source = folder / std::filesystem::path(entry.name);
+    const std::filesystem::path destination = folder / std::filesystem::path(target);
+    if (entry.kind == ContentKind::Folder) {
+        std::filesystem::copy(source, destination, std::filesystem::copy_options::recursive, ec);
+    }
+    else {
+        std::filesystem::copy_file(source, destination, ec);
+    }
+    if (ec)
+        return {};
+
+    if (!refresh())
+        return {};
+    return target;
+}
+
 bool ContentTree::remove(const ContentEntry& entry)
 {
     if (m_root.empty())

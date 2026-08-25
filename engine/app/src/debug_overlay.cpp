@@ -3426,6 +3426,17 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                             dialogs.renameSeed = ContentTree::stemOf(entry);
                             dialogs.renameContent = true;
                         }
+                        // **How a material is made from a material.** Start
+                        // from the one that is nearly right, change what is
+                        // not, and everything already pointed at the original
+                        // keeps working -- which is the whole reason a material
+                        // is a file rather than a property.
+                        //
+                        // Not special-cased to materials: a scene, a stamp and
+                        // a folder duplicate the same way and for the same
+                        // reason.
+                        if (ImGui::MenuItem("Duplicate", "Ctrl+D"))
+                            commands.duplicateContent = entry.path;
                         ImGui::Separator();
                         // Here as well as on the folder's own menu: a person who
                         // right-clicks lands on whatever was under the pointer,
