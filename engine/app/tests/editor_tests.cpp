@@ -2744,3 +2744,108 @@ TEST_CASE("a mutation belongs to the document that was open when it happened")
     CHECK_FALSE(other.sceneDirty());
     CHECK(other.hasUnsavedWork());
 }
+
+TEST_CASE("the reported sequence, driven the way the frame loop drives it")
+{
+    // **The closest thing to doing it by hand.** There is no input-injection
+    // harness -- the ImGui shell cannot render headlessly -- so this drives the
+    // same `Editor` calls in the same order the command drain does, INCLUDING
+    // the `touch()` that marks a document dirty. The earlier cases called the
+    // verbs directly and skipped that, which is why they passed against the
+    // defect: the bug was never in the verbs, it was in what the frame did after
+    // them.
+    //
+    // The sequence: convert the Spinner to a stamp, open the stamp, add a script
+    // inside it, save the stamp, then ask for a new scene.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId workspace = world.create(fixture.workspaceClass);
+    world.setName(workspace, fixture.atoms.intern("Workspace"));
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+
+    const std::filesystem::path scratch =
+        std::filesystem::temp_directory_path() / "luaug-editor-tests" / "stamp-frames";
+    std::error_code ec;
+    std::filesystem::remove_all(scratch, ec);
+    std::filesystem::create_directories(scratch, ec);
+
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(scratch);
+
+    // **Nested, exactly as the starter template has it**: the Spinner is a
+    // child of a `Level` model rather than of the Workspace. It is the one
+    // concrete difference between the report and a hand-built world, so it is
+    // the shape the case uses.
+    const core::InstanceId level = fixture.widget(world, "Level");
+    REQUIRE(world.setParent(level, workspace) == std::nullopt);
+    const core::InstanceId subject = fixture.widget(world, "Spinner");
+    REQUIRE(world.setParent(subject, level) == std::nullopt);
+
+    // Saved first, so the scene starts clean -- which is the state the loss
+    // needs, and the state a person is in after opening a project.
+    REQUIRE(editor.save(world, scratch / "main.scene.json"));
+    REQUIRE_FALSE(editor.hasUnsavedWork());
+
+    // --- Frame: convert to a stamp. `mutatesWorld()` is true for
+    // `stampSubject`, so the loop calls `touch()` -- with the document that was
+    // open when the frame began.
+    {
+        const bool stampedBefore = editor.stampSession().open();
+        REQUIRE(editor.createStamp(world, subject, workspace, "spinner"));
+        editor.touchAs(stampedBefore);
+    }
+    // The mark is in memory and NOT on disk. The scene has to know.
+    CHECK(world.stampOf(subject).valid());
+    CHECK(editor.hasUnsavedWork());
+
+    // --- Frame: open the stamp for editing.
+    {
+        const bool stampedBefore = editor.stampSession().open();
+        REQUIRE(editor.openStamp("spinner", fixture.classes, fixture.enums, fixture.atoms, inspector));
+        editor.touchAs(stampedBefore);
+    }
+
+    // --- Frame: add a script INSIDE the stamp. That is a stage edit.
+    {
+        const core::InstanceId stageRoot = editor.stampSession().root;
+        const core::InstanceId script = fixture.widget(editor.stage()->world(), "Spin");
+        REQUIRE(editor.stage()->world().setParent(script, stageRoot) == std::nullopt);
+        editor.touchAs(editor.stampSession().open());
+    }
+
+    // --- Frame: save the stamp. Every live instance follows it.
+    {
+        const bool stampedBefore = editor.stampSession().open();
+        REQUIRE(editor.saveStamp(world, workspace));
+        editor.touchAs(stampedBefore);
+    }
+    CHECK(world.findFirstChild(subject, fixture.atoms.intern("Spin")).valid());
+
+    // --- Frame: close the stamp without saving the stage again.
+    editor.closeStamp(world, workspace, inspector, false);
+
+    // **This is the whole bug.** `File > New Scene` asks `hasUnsavedWork()` and
+    // clears without a word when the answer is no. The scene holds a stamp mark
+    // and a rebuilt instance that exist nowhere on disk, so the answer must be
+    // yes -- and it was no.
+    CHECK(editor.hasUnsavedWork());
+    CHECK(editor.sceneDirty());
+
+    // And the whole point, end to end: saved and reopened, it is still a stamp.
+    REQUIRE(editor.save(world, scratch / "main.scene.json"));
+    scene::World reopened(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId reopenedWorkspace = reopened.create(fixture.workspaceClass);
+    reopened.setName(reopenedWorkspace, fixture.atoms.intern("Workspace"));
+    reopened.workspaces().add(reopenedWorkspace, scene::WorkspaceComponent{});
+    REQUIRE(editor.load(reopened, scratch / "main.scene.json", inspector));
+
+    const core::InstanceId backLevel = reopened.findFirstChild(reopenedWorkspace, fixture.atoms.intern("Level"));
+    REQUIRE(backLevel.valid());
+    const core::InstanceId back = reopened.findFirstChild(backLevel, fixture.atoms.intern("Spinner"));
+    REQUIRE(back.valid());
+    CHECK(reopened.stampOf(back).valid());
+    CHECK(reopened.findFirstChild(back, fixture.atoms.intern("Spin")).valid());
+
+    std::filesystem::remove_all(scratch, ec);
+}
