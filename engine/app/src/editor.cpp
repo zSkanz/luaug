@@ -1445,6 +1445,82 @@ bool Editor::instantiateStamp(scene::World& world, std::string_view name, core::
     return true;
 }
 
+bool Editor::assignStampTo(scene::World& world, core::InstanceId root, core::InstanceId parent, std::string_view path,
+                           std::string_view property, std::span<const core::InstanceId> targets)
+{
+    if (targets.empty() || property.empty())
+        return false;
+
+    const std::string relative = normalizeStampPath(path);
+    const core::NameAtom mark = world.atoms().intern(relative);
+    const core::NameAtom field = world.atoms().intern(property);
+
+    // **Recorded before anything, including the search**, so the placement and
+    // every write it enables are one press of ctrl-Z. Two steps would mean
+    // undoing a drop left a material in the world that nothing points at.
+    m_history.record(world, "Assign");
+
+    // The one already in the world wins. Document order, so which one is found
+    // is a fact about the tree rather than about pool layout -- and so two runs
+    // of the same gesture on the same scene agree.
+    core::InstanceId subject;
+    static thread_local std::vector<TreeRow> rows;
+    collectTree(world, root, rows);
+    for (const TreeRow& row : rows) {
+        if (world.stampOf(row.id) == mark && !world.destroyed(row.id)) {
+            subject = row.id;
+            break;
+        }
+    }
+
+    if (!subject.valid()) {
+        std::string text;
+        if (!platform::readTextFile(m_content.root() / std::filesystem::path(relative), text)) {
+            (void)m_history.undo(world);
+            m_status = EditorStatus{"that stamp is not there any more", true};
+            return false;
+        }
+
+        scene::SceneIoReport report;
+        subject = scene::readStamp(world, text, parent, relative, &report);
+        if (!subject.valid()) {
+            (void)m_history.undo(world);
+            m_status = EditorStatus{"that stamp could not be read", true};
+            return false;
+        }
+    }
+
+    // **Not selected and not revealed.** Somebody dropping a material on a part
+    // is looking at the part; replacing their selection with the thing they
+    // dragged would take away what they were working on. Placing a stamp INTO
+    // the world is a different gesture and does select, which is why this does
+    // not share `instantiateStamp`.
+    core::usize written = 0;
+    for (const core::InstanceId target : targets) {
+        if (!world.alive(target) || world.destroyed(target))
+            continue;
+        // `Unchanged` counts: a part that already pointed at this material was
+        // asked for the same thing and got it. Treating it as a failure would
+        // make dropping one material on two parts report a refusal because one
+        // of them was already right.
+        const scene::World::SetResult wrote = world.setProperty(target, field, scene::Value{subject});
+        if (wrote == scene::World::SetResult::Changed || wrote == scene::World::SetResult::Unchanged)
+            ++written;
+    }
+
+    if (written == 0) {
+        // The class does not take it, or the setter refused the class of what
+        // was dropped. Nothing changed, so nothing is left on the stack.
+        (void)m_history.undo(world);
+        m_status = EditorStatus{"nothing selected takes that", true};
+        return false;
+    }
+
+    m_sceneDirty = true;
+    m_status = EditorStatus{"assigned " + relative, false};
+    return true;
+}
+
 bool Editor::reparent(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId newParent,
                       core::InstanceId root, Inspector& inspector)
 {
@@ -2376,8 +2452,12 @@ std::optional<PickHit> Editor::resolvePick(const scene::World& world, core::Inst
         // Ctrl on empty space keeps what is selected. Deselecting everything is
         // what a plain click means, and a modifier that means "add" cannot also
         // mean "clear".
-        if (hit.has_value())
+        if (hit.has_value()) {
             inspector.toggle(hit->instance);
+            // Revealed whether the toggle added or removed it: either way the
+            // row somebody just acted on is the one they want to see.
+            inspector.reveal(hit->instance);
+        }
         return hit;
     }
 
@@ -2385,6 +2465,13 @@ std::optional<PickHit> Editor::resolvePick(const scene::World& world, core::Inst
     // selected is how somebody edits the object they believed they had let go
     // of.
     inspector.select(hit.has_value() ? hit->instance : core::InstanceId{});
+    // **And the tree goes to it.** Clicking a part in the viewport and then
+    // hunting for its row through four closed folders is the editor knowing
+    // where something is and not saying. The reveal opens the way down and the
+    // Explorer scrolls the row into view, which is what every tool with a
+    // viewport and a tree does.
+    if (hit.has_value())
+        inspector.reveal(hit->instance);
     return hit;
 }
 

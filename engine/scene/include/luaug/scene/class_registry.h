@@ -111,6 +111,24 @@ struct PropertyDesc
     // the second one.
     core::NameAtom contentKind{};
 
+    // For an `Instance` property, which CLASS it may name -- `Material`,
+    // `Attachment` -- and an empty atom when it may name any (`Weld.Part0`) or
+    // is not a reference at all.
+    //
+    // The third of these, and the same argument as the two above: which
+    // instances a property may point at is a fact about the class, and the value
+    // -- one id -- can never answer it. A property that has none cannot be asked
+    // at all.
+    //
+    // The editor's picker is the caller, and without this it had nothing to
+    // build a list from: an instance reference was shown as text with a `go`
+    // button and could not be SET, so `BasePart.Material` was a property the
+    // property grid could only read. Offering every instance in the world would
+    // be the file-dialog-with-extra-steps `contentKind` exists to avoid, and
+    // offering a `Part` where a `Material` belongs is a write the setter refuses
+    // -- a list making a promise the world will not keep.
+    core::NameAtom instanceClass{};
+
     // **This string is CODE**, and a person edits it somewhere other than a
     // one-line field. Set by the IDL for `BaseScript.Source` and nothing else.
     //

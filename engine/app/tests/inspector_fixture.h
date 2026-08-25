@@ -14,6 +14,7 @@
 #include "luaug/core/math.h"
 #include "luaug/core/name_atom.h"
 #include "luaug/scene/class_registry.h"
+#include "luaug/scene/components.h"
 #include "luaug/scene/enum_registry.h"
 #include "luaug/scene/value.h"
 #include "luaug/scene/world.h"
@@ -82,6 +83,36 @@ inline std::unordered_map<core::u32, Bag> g_bags;
 inline scene::Value getNilReference(const scene::World&, core::InstanceId)
 {
     return scene::Value{};
+}
+
+// `BasePart.Material`, over the real component -- the same field the shipped
+// accessor writes, so what a test asserts here is what a part actually carries.
+//
+// **The class check is the setter and not the picker.** A list that offers only
+// materials is a convenience; refusing a `Part` where a `Material` belongs is
+// the rule, and a UI is not where a rule lives.
+inline scene::Value getPartMaterial(const scene::World& world, core::InstanceId id)
+{
+    const scene::PartComponent* part = world.parts().find(id);
+    return part != nullptr && part->material.valid() ? scene::Value{part->material} : scene::Value{};
+}
+
+inline bool setPartMaterial(scene::World& world, core::InstanceId id, const scene::Value& value)
+{
+    scene::PartComponent* part = world.parts().find(id);
+    if (part == nullptr)
+        return false;
+    if (std::holds_alternative<std::monostate>(value)) {
+        part->material = core::InstanceId{};
+        return true;
+    }
+    const core::InstanceId* named = std::get_if<core::InstanceId>(&value);
+    if (named == nullptr)
+        return false;
+    if (named->valid() && world.materials().find(*named) == nullptr)
+        return false;
+    part->material = *named;
+    return true;
 }
 
 inline scene::Value getFlag(const scene::World&, core::InstanceId id)
@@ -496,9 +527,23 @@ struct Fixture
         // than invented per case, because a preview that could not find `Part`
         // silently builds nothing -- which reads as "the feature is off" and is
         // exactly what a test must be able to tell apart.
+        // **`Material` is declared here, with the class it may name**, because
+        // the property is what the reference picker and the material drop are
+        // about -- and a fixture `Part` that merely has a component but no
+        // property would let both pass while the real class refused every write.
+        partProperties = {
+            scene::PropertyDesc{
+                .name = atoms.intern("Material"),
+                .type = scene::ValueType::Instance,
+                .instanceClass = atoms.intern("Material"),
+                .get = &getPartMaterial,
+                .set = &setPartMaterial,
+            },
+        };
         partClass = classes.registerClass({
             .name = atoms.intern("Part"),
             .defaultName = atoms.intern("Part"),
+            .properties = partProperties,
             .attachComponents = [](scene::World& w, core::InstanceId id) { w.parts().add(id, scene::PartComponent{}); },
             .detachComponents = [](scene::World& w, core::InstanceId id) { w.parts().remove(id); },
         });
@@ -550,6 +595,7 @@ private:
     std::vector<scene::PropertyDesc> thingProperties;
     std::vector<scene::PropertyDesc> widgetProperties;
     std::vector<scene::PropertyDesc> gadgetProperties;
+    std::vector<scene::PropertyDesc> partProperties;
 };
 
 } // namespace luaug::app::testing

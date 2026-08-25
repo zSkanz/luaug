@@ -452,6 +452,19 @@ struct EditorCommands
     std::string renameContent;
     std::string renameContentTo;
 
+    // A stamp dropped onto an instance-reference property: the file, and which
+    // property to point at it. The selection is the target, read at the drain
+    // like every other batch verb.
+    //
+    // **A command rather than a write, because a reference needs an INSTANCE and
+    // a file is not one.** Dropping `Wooden.stamp` on a part's `Material` has to
+    // put a `Material` in the world before anything can point at it -- and it
+    // has to reuse the one already there if the same file has been dropped
+    // before, or ten parts sharing one material would be ten materials that
+    // merely look alike and stop agreeing the first time one is edited.
+    std::string assignStampPath;
+    std::string assignStampProperty;
+
     // Step back, or forward again.
     bool undo = false;
     bool redo = false;
@@ -488,8 +501,8 @@ struct EditorCommands
                !openStamp.empty() || saveStamp || closeStamp || createClass != scene::InvalidClass || deleteSelection ||
                duplicateSelection || reparentTo.valid() || renameInstance.valid() || !saveAs.empty() ||
                !openScene.empty() || !createFolder.empty() || !deleteContent.empty() || !duplicateContent.empty() ||
-               newStampClass != scene::InvalidClass || !renameContent.empty() || importAssets || importParent.valid() ||
-               openScript.valid();
+               newStampClass != scene::InvalidClass || !renameContent.empty() || !assignStampPath.empty() ||
+               importAssets || importParent.valid() || openScript.valid();
     }
 };
 
@@ -528,6 +541,10 @@ public:
 
     [[nodiscard]] bool canUndo() const noexcept { return !m_undo.empty(); }
     [[nodiscard]] bool canRedo() const noexcept { return !m_redo.empty(); }
+    // How many steps are on the stack. For a test asserting that a verb which
+    // refused left nothing behind -- a step that undoes nothing eats a press of
+    // ctrl-Z, and `canUndo` cannot tell one step from two.
+    [[nodiscard]] core::usize depth() const noexcept { return m_undo.size(); }
     // What undoing would undo, for a menu item that says so rather than saying
     // "Undo" and leaving somebody to find out.
     [[nodiscard]] std::string_view undoLabel() const noexcept;
@@ -1039,6 +1056,26 @@ public:
     // link, and a starting point you are about to rebuild does not.
     bool instantiateStamp(scene::World& world, std::string_view name, core::InstanceId parent, core::InstanceId root,
                           Inspector& inspector, bool linked = true);
+
+    // Points `property` on every instance in `targets` at the stamp named by
+    // `path`, placing one under `parent` if the world has none yet. One undo
+    // step for the whole gesture.
+    //
+    // **A reference needs an instance and a file is not one.** Dragging
+    // `Wooden.stamp` onto a part's `Material` means "this part looks like that
+    // file", and the only thing a part can point at is a `Material` in the
+    // world -- so one has to be there before the write can happen.
+    //
+    // **The one already in the world wins, and that is the whole point.**
+    // Placing a fresh copy per drop would give ten parts ten materials that
+    // merely look alike, and they would stop looking alike the first time
+    // anybody edited one. Sharing is what a material IS.
+    //
+    // False when the file is unreadable or nothing accepted the write, with
+    // `status()` saying which; the undo step is taken back rather than left,
+    // because a step that undoes nothing eats a press of ctrl-Z.
+    bool assignStampTo(scene::World& world, core::InstanceId root, core::InstanceId parent, std::string_view path,
+                       std::string_view property, std::span<const core::InstanceId> targets);
 
     // **Takes the mark off**, so the instance becomes an ordinary subtree that
     // serialises in full and no longer follows the file.

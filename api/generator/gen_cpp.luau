@@ -227,6 +227,26 @@ local function valueTypeOf(typeName: string): string?
     return nil
 end
 
+--- The class an instance-reference type names, or `nil` when it names none.
+---
+--- `"Material?"` answers `Material`; a bare `"Instance"` answers `nil`, because
+--- "any instance" is not a constraint and a picker that filtered by it would
+--- offer the same list with an extra step. Anything that is not a reference
+--- answers `nil` too.
+---
+--- The same shape and the same argument as `enumNameOf` below: which instances
+--- a property may name is a fact about the CLASS, and the value -- one id -- can
+--- never answer it. Without this an editor showing a reference has nothing to
+--- build a list from, which is why `BasePart.Material` was read-only in the
+--- property grid: there was no way to say what could go in it.
+local function instanceClassOf(typeName: string): string?
+    local bare = string.match(typeName, "^(.-)%?$") or typeName
+    if bare == "Instance" or ClassNames[bare] == nil then
+        return nil
+    end
+    return bare
+end
+
 --- The enum an `Enum.X` type names, or `nil` for any other type. The same
 --- pattern `valueTypeOf` matches, kept separate because one answers *which*
 --- `ValueType` and this one answers *which enum* -- and `PropertyDesc` now
@@ -630,6 +650,10 @@ local function generate(target: Module)
                 emit(`            .type = {scope}ValueType::{valueType},`)
                 if enumName ~= nil then
                     emit(`            .enumName = atoms.intern("{enumName}"),`)
+                end
+                local instanceClass = if valueType == "Instance" then instanceClassOf(property.Type) else nil
+                if instanceClass ~= nil then
+                    emit(`            .instanceClass = atoms.intern("{instanceClass}"),`)
                 end
                 if property.ContentKind ~= nil then
                     -- The same shape and the same argument as `enumName`: which

@@ -165,6 +165,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::PropertyDesc{
             .name = atoms.intern("Group"),
             .type = scene::ValueType::Instance,
+            .instanceClass = atoms.intern("AudioGroup"),
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,

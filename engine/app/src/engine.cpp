@@ -1496,6 +1496,15 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     (void)editor.instantiateStamp(authored(), editorCommands.placeStamp, parent, authoredRoot(),
                                                   inspector, editorCommands.placeStampLinked);
                 }
+                if (!editorCommands.assignStampPath.empty()) {
+                    // Under the workspace when one has to be placed: a
+                    // `Material` is not scenery and has nowhere else obvious to
+                    // live, and the person who dropped it will want to find it
+                    // to edit it.
+                    (void)editor.assignStampTo(
+                        authored(), authoredRoot(), stageOf() != nullptr ? stageOf()->workspace() : host->workspace(),
+                        editorCommands.assignStampPath, editorCommands.assignStampProperty, inspector.selectionSet());
+                }
                 if (editorCommands.breakStamp.valid())
                     (void)editor.breakStamp(authored(), editorCommands.breakStamp);
 

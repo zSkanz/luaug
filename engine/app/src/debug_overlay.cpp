@@ -505,6 +505,10 @@ std::vector<TreeRow> g_searchRows;
 std::unordered_set<core::u32> g_searchHits;
 // The way down to something just created, moved or copied. See the reveal below.
 std::vector<core::InstanceId> g_ancestors;
+// And the row itself, so the list can be scrolled to it once it is laid out.
+// Opening the way down is half the answer: a row four hundred deep in a tree is
+// on screen only in the sense that nothing is hiding it.
+core::InstanceId g_scrollTo;
 // Which instances are expanded, and which have been seen at all. Held here
 // rather than in ImGui's own tree state, because a clipped row's widget never
 // runs and therefore has no state to hold.
@@ -584,6 +588,13 @@ constexpr const char* kContentDragPayload = "luaug.content";
 struct ContentDrag
 {
     char path[240]{};
+    // The class of the instance the stamp is a file OF, so a drop target can
+    // decide whether it wants this one BEFORE it lights up. A field that
+    // highlighted for any stamp and then refused a `Part` where a `Material`
+    // belongs is the broken promise the Explorer's own drop rule exists to
+    // avoid -- and the browser already knows the answer, because it draws the
+    // row with that class's icon.
+    char rootClass[48]{};
 };
 
 // The instance tree, virtualised.
@@ -924,6 +935,7 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             g_open.insert(ancestor.index);
             g_openKnown.insert(ancestor.index);
         }
+        g_scrollTo = wanted;
     }
 
     // **One walk, and it does not enter what nobody can see** (ADR 0054). This
@@ -1061,6 +1073,30 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
     // what makes a line reaching a child scrolled half off the bottom still
     // reach it.
     const ImVec2 listTop = ImGui::GetCursorScreenPos();
+
+    // **Scrolled to, and only when it is not already on screen.** The rows sit
+    // at an exact pitch, so the row a reveal asked for can be found and scrolled
+    // to without the clipper having drawn it -- which matters, because the whole
+    // case is a row the clipper is skipping.
+    //
+    // The "already visible" test is what stops this being a jerk rather than a
+    // help: clicking a part in the viewport whose row is right there should move
+    // nothing, and a `SetScrollHereY` every time would yank the list under
+    // somebody every click.
+    if (g_scrollTo.valid()) {
+        const core::InstanceId wanted = g_scrollTo;
+        g_scrollTo = core::InstanceId{};
+        for (std::size_t index = 0; index < g_visible.size(); ++index) {
+            if (g_visible[index].id != wanted)
+                continue;
+            const float rowTop = ImGui::GetCursorPosY() + static_cast<float>(index) * rowHeight;
+            const float viewTop = ImGui::GetScrollY();
+            const float viewHeight = ImGui::GetContentRegionAvail().y;
+            if (rowTop < viewTop || rowTop + rowHeight > viewTop + viewHeight)
+                ImGui::SetScrollY(rowTop - (viewHeight - rowHeight) * 0.5f);
+            break;
+        }
+    }
 
     ImGuiListClipper clipper;
     clipper.Begin(static_cast<int>(g_visible.size()), rowHeight);
@@ -1636,13 +1672,213 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
     return ContentKind::Other;
 }
 
+// Whether `id` is something `descriptor` may point at.
+//
+// An empty `instanceClass` means the property named no class -- `Weld.Part0` is
+// declared `Instance?` on purpose -- and then anything alive will do.
+[[nodiscard]] bool acceptsInstance(const scene::World& world, const scene::PropertyDesc& descriptor,
+                                   core::InstanceId id)
+{
+    if (!id.valid() || !world.alive(id) || world.destroyed(id))
+        return false;
+    if (!descriptor.instanceClass.valid())
+        return true;
+    const scene::ClassId want = world.classes().findId(descriptor.instanceClass);
+    return want != scene::InvalidClass && world.classes().isA(world.classOf(id), want);
+}
+
+// The same question about a stamp, answered from the class its FILE is rooted
+// at -- which the browser put in the drag payload precisely so a target could
+// decide before it lights up.
+[[nodiscard]] bool acceptsStampClass(scene::World& world, const scene::PropertyDesc& descriptor,
+                                     std::string_view rootClass)
+{
+    if (rootClass.empty())
+        return false;
+    if (!descriptor.instanceClass.valid())
+        return true;
+    const scene::ClassId dropped = world.classes().findId(world.atoms().intern(rootClass));
+    const scene::ClassId want = world.classes().findId(descriptor.instanceClass);
+    return dropped != scene::InvalidClass && want != scene::InvalidClass && world.classes().isA(dropped, want);
+}
+
+// What the reference picker is offering. Held here rather than rebuilt per
+// frame for the reason the add menu class list is: the popup stays open for as
+// long as somebody is reading it, and filling it is a walk of the whole tree.
+std::vector<core::InstanceId> g_refCandidates;
+std::array<char, 64> g_refFilter{};
+
+// **A reference is a value somebody sets, not a fact they read.**
+//
+// This drew the name and a `go` button and returned, so every instance-valued
+// property in the engine was read-only in the property grid -- `BasePart.Material`
+// among them, which is a property whose entire purpose is to be set. Nothing
+// could have offered a list before `PropertyDesc::instanceClass` existed:
+// without it the only honest options were every instance in the world, or none.
+//
+// Three ways in, because they are three situations and each is the obvious one
+// from where somebody is standing:
+//
+//   * the picker, for "it is in this scene somewhere";
+//   * a drag from the Explorer, for "it is that one, right there";
+//   * a drag from the content browser, for "it is that FILE" -- which places the
+//     instance when the world has none and reuses the one it has when it does.
+//
+// Drawn before the panel disabled block and before the absent-value guard: a nil
+// reference is the state this is most often used FROM, and a guard returning
+// early on `monostate` is exactly why an unset `Material` showed the word "nil"
+// and nothing to click.
+void drawInstanceRef(scene::World& world, core::InstanceId root, Inspector& inspector,
+                     std::span<const core::InstanceId> targets, const scene::PropertyDesc& descriptor,
+                     const SharedValue& shared, bool mixed, const IconAtlas* icons, EditorCommands* commands)
+{
+    core::InstanceId reference;
+    if (!mixed && std::holds_alternative<core::InstanceId>(shared.value))
+        reference = std::get<core::InstanceId>(shared.value);
+    const bool live = reference.valid() && world.alive(reference);
+
+    const std::string text = mixed  ? std::string("mixed")
+                             : live ? std::string(world.atoms().text(world.name(reference)))
+                                    : std::string("none");
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const bool locked = !editable(descriptor);
+    // Room for `go` when there is somewhere to go and none when there is not: a
+    // field reserving it always would be a field with a permanent gap.
+    const float goWidth =
+        live ? ImGui::CalcTextSize("go").x + style.FramePadding.x * 2.0f + style.ItemInnerSpacing.x : 0.0f;
+
+    ImGui::BeginDisabled(locked);
+    if (ImGui::Button(text.c_str(), ImVec2(-(goWidth + 1.0f), 0.0f)))
+        ImGui::OpenPopup("pick-instance");
+    ImGui::EndDisabled();
+
+    // A disabled item is not hovered and therefore is not a drop target at all,
+    // which is the behaviour wanted: a read-only field that lit up for a drag
+    // would promise a write it cannot make.
+    if (!locked && ImGui::BeginDragDropTarget()) {
+        const ImGuiPayload* peek = ImGui::GetDragDropPayload();
+        if (peek != nullptr && peek->IsDataType(kInstanceDragPayload)) {
+            const core::InstanceId dragged = static_cast<const InstanceDrag*>(peek->Data)->id;
+            // Asked BEFORE accepting, so the field highlights only where the
+            // drop would do something. The Explorer row uses the same rule and
+            // it is the same promise: a target that lights and then refuses is
+            // worse than one that never lit.
+            if (acceptsInstance(world, descriptor, dragged) &&
+                ImGui::AcceptDragDropPayload(kInstanceDragPayload) != nullptr) {
+                for (const core::InstanceId target : targets) {
+                    if (world.alive(target))
+                        inspector.enqueue(target, descriptor.name, scene::Value{dragged});
+                }
+            }
+        }
+        if (commands != nullptr && peek != nullptr && peek->IsDataType(kContentDragPayload)) {
+            const auto* drag = static_cast<const ContentDrag*>(peek->Data);
+            if (acceptsStampClass(world, descriptor, drag->rootClass) &&
+                ImGui::AcceptDragDropPayload(kContentDragPayload) != nullptr) {
+                commands->assignStampPath = drag->path;
+                commands->assignStampProperty = std::string(world.atoms().text(descriptor.name));
+            }
+        }
+        ImGui::EndDragDropTarget();
+    }
+
+    // No `go` on a mixed reference: there is no one instance to go to, and
+    // jumping to whichever member happened to be first would replace the
+    // selection with something nobody pointed at.
+    if (live) {
+        ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
+        if (ImGui::SmallButton("go"))
+            inspector.select(reference);
+    }
+
+    if (!ImGui::BeginPopup("pick-instance"))
+        return;
+
+    // Collected on the frame the popup opens and read from then on. Filling it
+    // walks the whole tree, and doing that every frame a list is being read is
+    // thirty thousand instances paid to draw twenty rows -- the cost ADR 0054
+    // took out of the Explorer.
+    if (ImGui::IsWindowAppearing()) {
+        g_refFilter.fill(0);
+        g_refCandidates.clear();
+        static thread_local std::vector<TreeRow> rows;
+        collectTree(world, root, rows);
+        for (const TreeRow& row : rows) {
+            if (acceptsInstance(world, descriptor, row.id))
+                g_refCandidates.push_back(row.id);
+        }
+        ImGui::SetKeyboardFocusHere();
+    }
+
+    ImGui::SetNextItemWidth(240.0f);
+    (void)ImGui::InputTextWithHint("##filter", "search", g_refFilter.data(), g_refFilter.size());
+    const std::string_view needle(g_refFilter.data());
+
+    // **Clearing is always on the list, and first.** Every reference in the IDL
+    // is optional, and a picker with no way back to nothing would make setting
+    // one a decision nobody could take back except by undoing.
+    if (ImGui::Selectable("none")) {
+        for (const core::InstanceId target : targets) {
+            if (world.alive(target))
+                inspector.enqueue(target, descriptor.name, scene::Value{core::InstanceId{}});
+        }
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::Separator();
+
+    if (g_refCandidates.empty()) {
+        // A real answer rather than an empty box: a scene with no `Material` in
+        // it has nothing to point a `Material` at, and saying which class is
+        // missing is what tells somebody to go and make one.
+        const std::string_view wanted = descriptor.instanceClass.valid() ? world.atoms().text(descriptor.instanceClass)
+                                                                         : std::string_view("Instance");
+        ImGui::TextDisabled("no %.*s in this scene", static_cast<int>(wanted.size()), wanted.data());
+        ImGui::EndPopup();
+        return;
+    }
+
+    ImGui::BeginChild("candidates", ImVec2(240.0f, 200.0f));
+    for (const core::InstanceId candidate : g_refCandidates) {
+        if (!world.alive(candidate) || world.destroyed(candidate))
+            continue;
+        const std::string_view name = world.atoms().text(world.name(candidate));
+        if (!needle.empty() && !containsFold(name, needle))
+            continue;
+
+        ImGui::PushID(static_cast<int>(candidate.index));
+        const ImVec2 origin = ImGui::GetCursorPos();
+        const bool chosen = ImGui::Selectable("##candidate", candidate == reference);
+
+        const float rowIcon = ImGui::GetTextLineHeight();
+        ImGui::SetCursorPos(origin);
+        if (drawIcon(icons, classIconId(world, candidate), rowIcon))
+            ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
+        else
+            ImGui::SetCursorPos(origin);
+        ImGui::TextUnformatted(name.data(), name.data() + name.size());
+
+        if (chosen) {
+            for (const core::InstanceId target : targets) {
+                if (world.alive(target))
+                    inspector.enqueue(target, descriptor.name, scene::Value{candidate});
+            }
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
+    ImGui::EndPopup();
+}
+
 // `tree` is the content browser's, and null wherever there is none -- the F3
 // overlay over a running game has an inspector and no project. The `Content`
 // editor then keeps its text field and its drop target and offers an empty list,
 // which is the honest state rather than a hidden control.
-void drawEditor(scene::World& world, Inspector& inspector, std::span<const core::InstanceId> targets,
-                const scene::PropertyDesc& descriptor, const SharedValue& shared, ContentTree* tree,
-                const IconAtlas* icons, audio::AudioSystem* audio)
+void drawEditor(scene::World& world, core::InstanceId root, Inspector& inspector,
+                std::span<const core::InstanceId> targets, const scene::PropertyDesc& descriptor,
+                const SharedValue& shared, ContentTree* tree, const IconAtlas* icons, audio::AudioSystem* audio,
+                EditorCommands* commands)
 {
     if (shared.state == SharedState::Unreadable) {
         // The class declares the property and the world cannot read it: a null
@@ -1675,6 +1911,18 @@ void drawEditor(scene::World& world, Inspector& inspector, std::span<const core:
     // forty instances is a value for all forty.
     const bool mixed = shared.state == SharedState::Mixed;
 
+    // **The reference is drawn before the absent-value guard below**, and that
+    // ordering is the whole of what made an unset one uneditable: a nil
+    // reference IS `monostate`, so the guard returned with the word "nil" on
+    // screen and no control -- on exactly the field somebody had come to set.
+    if (editorFor(descriptor) == EditorKind::InstanceRef) {
+        ImGui::PushID(static_cast<int>(descriptor.name.id));
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        drawInstanceRef(world, root, inspector, targets, descriptor, shared, mixed, icons, commands);
+        ImGui::PopID();
+        return;
+    }
+
     // `editorFor` answers from the DECLARED type, and the variant holds what the
     // property actually has right now. Those disagree whenever a value is absent
     // -- `scene::Value`'s own comment names the two cases, an unset attribute and
@@ -1696,25 +1944,6 @@ void drawEditor(scene::World& world, Inspector& inspector, std::span<const core:
         descriptor.contentKind.valid() ? world.atoms().text(descriptor.contentKind) : std::string_view{};
     ImGui::PushID(static_cast<int>(descriptor.name.id));
     ImGui::SetNextItemWidth(-FLT_MIN);
-
-    // Handled before the disabled block, because its one interaction is a
-    // selection rather than a write -- following a reference is how you reach
-    // an instance the tree has collapsed away.
-    if (kind == EditorKind::InstanceRef) {
-        const core::InstanceId reference = std::get<core::InstanceId>(shared.value);
-        const std::string text = mixed ? std::string("mixed") : formatValue(world, shared.value);
-        ImGui::TextUnformatted(text.c_str());
-        // No `go` on a mixed reference: there is no one instance to go to, and
-        // jumping to whichever member happened to be first would replace the
-        // selection with something nobody pointed at.
-        if (!mixed && reference.valid() && world.alive(reference)) {
-            ImGui::SameLine();
-            if (ImGui::SmallButton("go"))
-                inspector.select(reference);
-        }
-        ImGui::PopID();
-        return;
-    }
 
     // `readOnly` is honoured HERE and not only by the setter: a field that
     // takes a drag the world then refuses is a UI making a claim it cannot
@@ -2054,6 +2283,9 @@ void drawEditor(scene::World& world, Inspector& inspector, std::span<const core:
     // the value belongs in the column that holds every other name in this panel.
     case EditorKind::UDim:
     case EditorKind::UDim2:
+    // `InstanceRef` never reaches here -- it returns above, before the guard
+    // that an absent value would have tripped -- and it is named so this switch
+    // stays exhaustive under `-Werror`.
     case EditorKind::InstanceRef:
     case EditorKind::ReadOnlyText: {
         // The floor every `ValueType` falls back to, so that one with no editor
@@ -2076,8 +2308,9 @@ void drawEditor(scene::World& world, Inspector& inspector, std::span<const core:
 // frame, and its state between frames has nowhere else to live.
 core::u64 g_propertyGesture = 0;
 
-void drawProperties(scene::World& world, Inspector& inspector, ContentTree* tree = nullptr,
-                    const IconAtlas* icons = nullptr, audio::AudioSystem* audio = nullptr)
+void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspector, ContentTree* tree = nullptr,
+                    const IconAtlas* icons = nullptr, audio::AudioSystem* audio = nullptr,
+                    EditorCommands* commands = nullptr)
 {
     // **The whole selection, not the primary.** A grid pointed at one instance
     // while three are highlighted is the editor disagreeing with itself, and it
@@ -2176,7 +2409,7 @@ void drawProperties(scene::World& world, Inspector& inspector, ContentTree* tree
             }
 
             ImGui::TableSetColumnIndex(1);
-            drawEditor(world, inspector, targets, *descriptor, shared, tree, icons, audio);
+            drawEditor(world, root, inspector, targets, *descriptor, shared, tree, icons, audio, commands);
 
             // The rows a composite is actually edited in. Disabled with the
             // same rule the widget above uses, because they are the same
@@ -3509,6 +3742,8 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                         ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoHoldToOpenOthers)) {
                         ContentDrag payload;
                         (void)std::snprintf(payload.path, sizeof(payload.path), "%s", entry.path.c_str());
+                        (void)std::snprintf(payload.rootClass, sizeof(payload.rootClass), "%s",
+                                            entry.rootClass.c_str());
                         ImGui::SetDragDropPayload(kContentDragPayload, &payload, sizeof(payload));
                         ImGui::TextUnformatted(ContentTree::displayNameOf(entry).c_str());
                         ImGui::EndDragDropSource();
@@ -4494,17 +4729,22 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
             drawDebugPanel(*scripts, debug, scriptCommands, panels.debug);
     }
 
+    // **While a stamp is open the tree is the STAMP's**, root row and all: no
+    // services, no scene, nothing but what is in the file. That is the whole of
+    // "a separate environment" as far as the Explorer is concerned, and the
+    // viewport already shows the same thing because opening cleared the scene
+    // out of the world.
+    //
+    // Out here rather than inside the Explorer block because the Properties
+    // panel needs the same answer: a reference picker offering what is in the
+    // SCENE while somebody is editing a stamp would be offering instances that
+    // are not there.
+    const bool editingStamp = editor != nullptr && editor->stampSession().open();
+    const core::InstanceId treeRoot = editingStamp ? editor->stampSession().root : root;
+
     if (panels.explorer) {
         if (ImGui::Begin("Explorer", &panels.explorer)) {
             if (world != nullptr && inspector != nullptr) {
-                // **While a stamp is open the tree is the STAMP's**, root row
-                // and all: no services, no scene, nothing but what is in the
-                // file. That is the whole of "a separate environment" as far as
-                // the Explorer is concerned, and the viewport already shows the
-                // same thing because opening cleared the scene out of the world.
-                const bool editingStamp = editor != nullptr && editor->stampSession().open();
-                const core::InstanceId treeRoot = editingStamp ? editor->stampSession().root : root;
-
                 // **Two trees, and the tabs are what says they are two.** The
                 // scene is what this world holds; `Content` is what the PROJECT
                 // holds, global to every scene in it (ADR 0052). Instance
@@ -4521,7 +4761,8 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     if (panels.properties) {
         if (ImGui::Begin("Properties", &panels.properties)) {
             if (world != nullptr && inspector != nullptr) {
-                drawProperties(*world, *inspector, editor != nullptr ? &editor->content() : nullptr, icons, audio);
+                drawProperties(*world, treeRoot, *inspector, editor != nullptr ? &editor->content() : nullptr, icons,
+                               audio, editor != nullptr ? &commands : nullptr);
                 // **The write log is a DEBUG panel and the editor is not one.**
                 // It stays in the F3 overlay, where showing the machinery is the
                 // whole point; here it was a collapsing header that appeared
@@ -5275,7 +5516,7 @@ void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, I
             ImGui::EndChild();
 
             ImGui::SeparatorText("Properties");
-            drawProperties(*world, *inspector);
+            drawProperties(*world, root, *inspector);
             drawWriteLog(*world, *inspector);
         }
 

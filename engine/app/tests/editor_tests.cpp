@@ -2951,3 +2951,208 @@ TEST_CASE("the preview never reaches the stamp file")
     CHECK(text.find("Preview") == std::string::npos);
     CHECK(text.find("PreviewFloor") == std::string::npos);
 }
+
+// --- Dropping a material onto a part -----------------------------------------
+
+TEST_CASE("a material dropped on a part is placed once and shared by everything after")
+{
+    // Reported as "I have an ordinary part and there is no way to give it a
+    // material". Half of the answer is the property grid; this is the other
+    // half, and the half with a decision in it: a reference needs an INSTANCE
+    // and what the browser holds is a file, so something has to put one in the
+    // world -- and it must not put a second one there next time.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId workspace = world.create(fixture.workspaceClass);
+    world.setName(workspace, fixture.atoms.intern("Workspace"));
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+
+    const std::filesystem::path scratch = std::filesystem::temp_directory_path() / "luaug-editor-tests" / "assign";
+    std::error_code ec;
+    std::filesystem::remove_all(scratch, ec);
+    std::filesystem::create_directories(scratch, ec);
+
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(scratch);
+
+    // A material in the world, stamped -- which is what "a material in the
+    // content browser" means.
+    const core::InstanceId authored = world.create(fixture.materialClass);
+    world.setName(authored, fixture.atoms.intern("Wooden"));
+    world.materials().add(authored, scene::MaterialComponent{});
+    REQUIRE(world.setParent(authored, workspace) == std::nullopt);
+    REQUIRE(editor.createStamp(world, authored, workspace, "wooden"));
+
+    const core::InstanceId one = world.create(fixture.partClass);
+    world.setName(one, fixture.atoms.intern("One"));
+    world.parts().add(one, scene::PartComponent{});
+    REQUIRE(world.setParent(one, workspace) == std::nullopt);
+
+    const core::InstanceId two = world.create(fixture.partClass);
+    world.setName(two, fixture.atoms.intern("Two"));
+    world.parts().add(two, scene::PartComponent{});
+    REQUIRE(world.setParent(two, workspace) == std::nullopt);
+
+    const core::InstanceId targetsOne[] = {one};
+    REQUIRE(editor.assignStampTo(world, workspace, workspace, "wooden", "Material", targetsOne));
+
+    const scene::PartComponent* first = world.parts().find(one);
+    REQUIRE(first != nullptr);
+    CHECK(first->material == authored);
+
+    // **The second drop reuses the first material rather than placing another.**
+    // Two materials that merely look alike stop looking alike the first time
+    // anybody edits one, and nobody dropping the same file twice meant that.
+    const core::InstanceId targetsTwo[] = {two};
+    REQUIRE(editor.assignStampTo(world, workspace, workspace, "wooden", "Material", targetsTwo));
+    CHECK(world.parts().find(two)->material == authored);
+
+    core::usize materials = 0;
+    world.materials().forEach([&](core::InstanceId, const scene::MaterialComponent&) { ++materials; });
+    CHECK(materials == 1);
+}
+
+TEST_CASE("a material dropped where the world has none places one")
+{
+    // The other order, and the one somebody hits first: the file exists because
+    // they imported it, and nothing in this scene has ever used it.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId workspace = world.create(fixture.workspaceClass);
+    world.setName(workspace, fixture.atoms.intern("Workspace"));
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+
+    const std::filesystem::path scratch = std::filesystem::temp_directory_path() / "luaug-editor-tests" / "assign-new";
+    std::error_code ec;
+    std::filesystem::remove_all(scratch, ec);
+    std::filesystem::create_directories(scratch, ec);
+
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(scratch);
+
+    const core::InstanceId authored = world.create(fixture.materialClass);
+    world.setName(authored, fixture.atoms.intern("Wooden"));
+    world.materials().add(authored, scene::MaterialComponent{});
+    REQUIRE(world.setParent(authored, workspace) == std::nullopt);
+    REQUIRE(editor.createStamp(world, authored, workspace, "wooden"));
+    // Taken back out, so the file is all that is left -- a project reopened.
+    REQUIRE(world.destroy(authored));
+    world.retireDestroyed();
+
+    const core::InstanceId part = world.create(fixture.partClass);
+    world.setName(part, fixture.atoms.intern("One"));
+    world.parts().add(part, scene::PartComponent{});
+    REQUIRE(world.setParent(part, workspace) == std::nullopt);
+
+    const core::InstanceId targets[] = {part};
+    REQUIRE(editor.assignStampTo(world, workspace, workspace, "wooden", "Material", targets));
+
+    const scene::PartComponent* stored = world.parts().find(part);
+    REQUIRE(stored != nullptr);
+    REQUIRE(stored->material.valid());
+    // Placed, linked, and pointed at -- and still an instance of the file, so
+    // editing the file reaches it.
+    CHECK(world.alive(stored->material));
+    CHECK(world.stampOf(stored->material).valid());
+}
+
+TEST_CASE("a drop the world refuses leaves no undo step behind")
+{
+    // A step that undoes nothing eats a press of ctrl-Z, which is worse than
+    // the refusal it was covering for. The `Thing` class has no `Material`, so
+    // every write is refused and the placement has to come back out with them.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId workspace = world.create(fixture.workspaceClass);
+    world.setName(workspace, fixture.atoms.intern("Workspace"));
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+
+    const std::filesystem::path scratch = std::filesystem::temp_directory_path() / "luaug-editor-tests" / "assign-no";
+    std::error_code ec;
+    std::filesystem::remove_all(scratch, ec);
+    std::filesystem::create_directories(scratch, ec);
+
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(scratch);
+
+    const core::InstanceId authored = world.create(fixture.materialClass);
+    world.setName(authored, fixture.atoms.intern("Wooden"));
+    world.materials().add(authored, scene::MaterialComponent{});
+    REQUIRE(world.setParent(authored, workspace) == std::nullopt);
+    REQUIRE(editor.createStamp(world, authored, workspace, "wooden"));
+
+    const core::InstanceId nothing = fixture.widget(world, "NotAPart");
+    REQUIRE(world.setParent(nothing, workspace) == std::nullopt);
+
+    const core::usize before = editor.history().depth();
+    const core::InstanceId targets[] = {nothing};
+    CHECK_FALSE(editor.assignStampTo(world, workspace, workspace, "wooden", "Material", targets));
+    CHECK(editor.history().depth() == before);
+}
+
+TEST_CASE("picking in the viewport asks the tree to show the row")
+{
+    // Reported as "select a part in the viewport and the Explorer does not
+    // follow". The tree opening the way down is what makes a row four folders
+    // deep reachable at all; the panel scrolls to it from the same request.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId root = sceneRoot(fixture, world);
+    const core::InstanceId target = partAt(fixture, world, root, "Target", {0.0, 0.0, -20.0}, {4.0f, 4.0f, 4.0f});
+
+    Editor editor;
+    Inspector inspector;
+    aimEditor(editor);
+
+    editor.requestPick({400.0f, 300.0f});
+    REQUIRE(editor.resolvePick(world, root, inspector).has_value());
+
+    CHECK(inspector.selection() == target);
+    CHECK(inspector.takeReveal() == target);
+}
+
+TEST_CASE("ctrl-picking asks for the row too, whether it added or removed")
+{
+    // Both halves of a toggle are somebody acting on that row, and the row they
+    // acted on is the one they want to see. Revealing only on add would make
+    // ctrl-clicking the fourth part of a selection scroll the tree and
+    // ctrl-clicking it again not.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId root = sceneRoot(fixture, world);
+    const core::InstanceId target = partAt(fixture, world, root, "Target", {0.0, 0.0, -20.0}, {4.0f, 4.0f, 4.0f});
+
+    Editor editor;
+    Inspector inspector;
+    aimEditor(editor);
+
+    editor.requestPick({400.0f, 300.0f}, true);
+    REQUIRE(editor.resolvePick(world, root, inspector).has_value());
+    CHECK(inspector.takeReveal() == target);
+
+    editor.requestPick({400.0f, 300.0f}, true);
+    REQUIRE(editor.resolvePick(world, root, inspector).has_value());
+    CHECK_FALSE(inspector.isSelected(target));
+    CHECK(inspector.takeReveal() == target);
+}
+
+TEST_CASE("clicking nothing asks for no row")
+{
+    // A miss clears the selection, and scrolling the tree somewhere on a click
+    // that selected nothing would be the panel moving for no reason.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId root = sceneRoot(fixture, world);
+    (void)partAt(fixture, world, root, "Target", {0.0, 0.0, -20.0}, {4.0f, 4.0f, 4.0f});
+
+    Editor editor;
+    Inspector inspector;
+    aimEditor(editor);
+
+    editor.requestPick({2.0f, 2.0f});
+    CHECK_FALSE(editor.resolvePick(world, root, inspector).has_value());
+    CHECK_FALSE(inspector.takeReveal().valid());
+}

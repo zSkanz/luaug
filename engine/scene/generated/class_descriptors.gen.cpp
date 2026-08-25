@@ -316,6 +316,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
         PropertyDesc{
             .name = atoms.intern("PrimaryPart"),
             .type = ValueType::Instance,
+            .instanceClass = atoms.intern("BasePart"),
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
@@ -502,6 +503,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
         PropertyDesc{
             .name = atoms.intern("Material"),
             .type = ValueType::Instance,
+            .instanceClass = atoms.intern("Material"),
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
@@ -724,6 +726,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
         PropertyDesc{
             .name = atoms.intern("Attachment0"),
             .type = ValueType::Instance,
+            .instanceClass = atoms.intern("Attachment"),
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
@@ -735,6 +738,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
         PropertyDesc{
             .name = atoms.intern("Attachment1"),
             .type = ValueType::Instance,
+            .instanceClass = atoms.intern("Attachment"),
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
@@ -927,6 +931,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
         PropertyDesc{
             .name = atoms.intern("Part1"),
             .type = ValueType::Instance,
+            .instanceClass = atoms.intern("BasePart"),
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
@@ -986,6 +991,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
         PropertyDesc{
             .name = atoms.intern("Part0"),
             .type = ValueType::Instance,
+            .instanceClass = atoms.intern("BasePart"),
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
@@ -997,6 +1003,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
         PropertyDesc{
             .name = atoms.intern("Part1"),
             .type = ValueType::Instance,
+            .instanceClass = atoms.intern("BasePart"),
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
@@ -1235,6 +1242,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
         PropertyDesc{
             .name = atoms.intern("CurrentCamera"),
             .type = ValueType::Instance,
+            .instanceClass = atoms.intern("Camera"),
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
