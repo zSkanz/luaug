@@ -242,10 +242,8 @@ namespace {
     const auto mapOf = [&](core::NameAtom urn) -> rhi::TextureHandle {
         return textures == nullptr || urn.id == 0 ? rhi::TextureHandle{} : textures->find(urn);
     };
-    out.baseColor = mapOf(material->colorMap);
-    out.normal = mapOf(material->normalMap);
-    out.metallicRoughness = mapOf(material->metallicRoughnessMap);
-    out.emissive = mapOf(material->emissiveMap);
+    out.setMaps(mapOf(material->colorMap), mapOf(material->normalMap), mapOf(material->metallicRoughnessMap),
+                mapOf(material->emissiveMap));
     return true;
 }
 

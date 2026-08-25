@@ -1038,6 +1038,99 @@ TEST_CASE("two parts differing only in tint are two bind sets")
     CHECK(snapshot.materials.size() == 1);
 }
 
+TEST_CASE("a Material instance actually uses the maps it was given")
+{
+    // **The case whose absence let a whole feature be dead.** Every material
+    // test above checks a NUMBER -- a base colour, a tint, a metalness -- and a
+    // number arrives through the uniforms whether or not the texture flags say
+    // anything. So `materialOf` could assign four handles, leave all four flags
+    // at zero, and pass every one of them, while the shader multiplied each
+    // sample by zero and drew the factor alone.
+    //
+    // From the outside that is a material that ignores its diffuse map, which is
+    // exactly how it was reported.
+    Fixture fixture;
+    fixture.registerRenderClasses();
+    const core::InstanceId workspace = fixture.world.create(fixture.workspaceClass);
+    (void)fixture.cameraLookingDownNegativeZ(workspace);
+
+    const core::NameAtom diffuse = fixture.atoms.intern("asset://textures/wood.png");
+    const core::NameAtom rough = fixture.atoms.intern("asset://textures/wood_arm.png");
+
+    const core::InstanceId material = fixture.world.create(fixture.instanceClass);
+    scene::MaterialComponent block;
+    block.colorMap = diffuse;
+    block.metallicRoughnessMap = rough;
+    fixture.world.materials().add(material, block);
+
+    const core::InstanceId id = fixture.world.create(fixture.partClass);
+    (void)fixture.world.setParent(id, workspace);
+    fixture.world.parts().find(id)->cframe.position = core::DVec3{0.0, 0.0, -10.0};
+    fixture.world.parts().find(id)->material = material;
+
+    render::MeshLibrary meshes;
+    registerBlock(fixture, meshes);
+
+    render::TextureLibrary textures;
+    textures.set(diffuse, rhi::TextureHandle{7});
+    textures.set(rough, rhi::TextureHandle{8});
+
+    render::RenderWorld snapshot;
+    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, snapshot,
+                    nullptr, {}, &textures);
+
+    REQUIRE(snapshot.materials.size() == 1);
+    const render::RenderMaterial& drawn = snapshot.materials[0];
+
+    // Bound...
+    CHECK(drawn.baseColor.valid());
+    CHECK(drawn.metallicRoughness.valid());
+    // ...and switched on, which is the half that was missing. The shader reads
+    // `lerp(factor, sample, flag)`, so a zero here is a bound texture nothing
+    // looks at.
+    CHECK(nearF(drawn.uniforms.textureFlags[0], 1.0f));
+    CHECK(nearF(drawn.uniforms.textureFlags[2], 1.0f));
+
+    // And the two the material did not name stay off, because a stand-in
+    // sampled at full strength would tint every surface by a 1x1 white.
+    CHECK_FALSE(drawn.normal.valid());
+    CHECK(nearF(drawn.uniforms.textureFlags[1], 0.0f));
+    CHECK(nearF(drawn.uniforms.textureFlags[3], 0.0f));
+}
+
+TEST_CASE("a map the library has not loaded yet is off, not bound")
+{
+    // A texture still being read draws untextured rather than not at all, and
+    // "untextured" has to mean the flag is down: an invalid handle with the flag
+    // up would sample whatever stand-in the renderer binds and call it the map.
+    Fixture fixture;
+    fixture.registerRenderClasses();
+    const core::InstanceId workspace = fixture.world.create(fixture.workspaceClass);
+    (void)fixture.cameraLookingDownNegativeZ(workspace);
+
+    const core::InstanceId material = fixture.world.create(fixture.instanceClass);
+    scene::MaterialComponent block;
+    block.colorMap = fixture.atoms.intern("asset://textures/not-loaded-yet.png");
+    fixture.world.materials().add(material, block);
+
+    const core::InstanceId id = fixture.world.create(fixture.partClass);
+    (void)fixture.world.setParent(id, workspace);
+    fixture.world.parts().find(id)->cframe.position = core::DVec3{0.0, 0.0, -10.0};
+    fixture.world.parts().find(id)->material = material;
+
+    render::MeshLibrary meshes;
+    registerBlock(fixture, meshes);
+    render::TextureLibrary textures;
+
+    render::RenderWorld snapshot;
+    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, snapshot,
+                    nullptr, {}, &textures);
+
+    REQUIRE(snapshot.materials.size() == 1);
+    CHECK_FALSE(snapshot.materials[0].baseColor.valid());
+    CHECK(nearF(snapshot.materials[0].uniforms.textureFlags[0], 0.0f));
+}
+
 TEST_CASE("a MeshPart's material replaces the block its file described")
 {
     Fixture fixture;

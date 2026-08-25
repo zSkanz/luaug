@@ -145,15 +145,8 @@ void fillEntry(MeshLibrary::Entry& entry, const core::AABB& bounds, std::span<co
         material.uniforms.metallicRoughnessNormalCutoff[3] =
             source.alphaMode == asset::AlphaMode::Mask ? source.alphaCutoff : 0.0f;
 
-        material.baseColor = textureOf(source.baseColor);
-        material.normal = textureOf(source.normal);
-        material.metallicRoughness = textureOf(source.metallicRoughness);
-        material.emissive = textureOf(source.emissive);
-
-        material.uniforms.textureFlags[0] = material.baseColor.valid() ? 1.0f : 0.0f;
-        material.uniforms.textureFlags[1] = material.normal.valid() ? 1.0f : 0.0f;
-        material.uniforms.textureFlags[2] = material.metallicRoughness.valid() ? 1.0f : 0.0f;
-        material.uniforms.textureFlags[3] = material.emissive.valid() ? 1.0f : 0.0f;
+        material.setMaps(textureOf(source.baseColor), textureOf(source.normal), textureOf(source.metallicRoughness),
+                         textureOf(source.emissive));
 
         entry.materials.push_back(material);
     }

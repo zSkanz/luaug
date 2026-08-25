@@ -159,6 +159,35 @@ struct RenderMaterial
     rhi::TextureHandle normal{};
     rhi::TextureHandle metallicRoughness{};
     rhi::TextureHandle emissive{};
+
+    // The four maps, and the four flags that say they are there.
+    //
+    // **One verb, because they are one fact stated twice** (D100). The shader
+    // never branches on whether a map is bound -- every slot always has a
+    // texture, a 1x1 stand-in when the material has none -- so `textureFlags`
+    // is what decides whether the sample is used at all: it multiplies the
+    // difference between "the map" and "the factor". A handle set without its
+    // flag is therefore a texture that is bound, sampled, and then multiplied
+    // by zero, which draws EXACTLY like a material whose map was never set.
+    //
+    // That is not hypothetical. `materialOf` assigned the four handles and left
+    // the flags at their zero default, so every `Material` instance in this
+    // engine ignored every map it was given -- reported as a preview sphere
+    // that would not take a diffuse. The glTF path a few lines away had always
+    // written both, which is why meshes from files looked right and made the
+    // difference impossible to see from the symptom.
+    void setMaps(rhi::TextureHandle base, rhi::TextureHandle normalMap, rhi::TextureHandle metallicRoughnessMap,
+                 rhi::TextureHandle emissiveMap) noexcept
+    {
+        baseColor = base;
+        normal = normalMap;
+        metallicRoughness = metallicRoughnessMap;
+        emissive = emissiveMap;
+        uniforms.textureFlags[0] = baseColor.valid() ? 1.0f : 0.0f;
+        uniforms.textureFlags[1] = normal.valid() ? 1.0f : 0.0f;
+        uniforms.textureFlags[2] = metallicRoughness.valid() ? 1.0f : 0.0f;
+        uniforms.textureFlags[3] = emissive.valid() ? 1.0f : 0.0f;
+    }
 };
 
 // One draw: a mesh section with a transform and a material.
