@@ -1955,8 +1955,9 @@ tab has to edit one thing.
 - **A debugger**: breakpoints, continue, step over, into and out, the call stack
   and the locals. The script parks on `LUA_BREAK` and the frame loop keeps
   drawing; `allowedTicks` answers zero so no tick begins while it is stopped.
-- **Ctrl+S writes where the instance came from** -- its file, or the scene -- and
-  the editor gains the reload path `luaug edit` has never had.
+- **Ctrl+S writes where the instance came from** -- its file, or the scene --
+  and does nothing else. It does not reload: play is what compiles `Source`
+  (ADR 0058), so in the editor there is no running chunk to refresh.
 - **Eight syntax tokens in the theme**, measured against the code pane's ground.
 
 #### NOT in scope

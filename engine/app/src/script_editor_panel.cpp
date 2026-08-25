@@ -761,7 +761,12 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
             }
         }
     }
-    if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) && g_dragging == id)
+    // **Cleared whenever the button is not down, rather than on the release
+    // event.** Anything that eats a frame -- a modal, a window the compositor
+    // stopped delivering to, a long load -- can hide the release, and a pane
+    // that missed it drags forever, extending its selection at whatever the
+    // pointer touches next. Asking about the state cannot miss an edge.
+    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left) && g_dragging == id)
         g_dragging = 0;
     if (g_dragging == id && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f))
         tab.caret.head = hitTest(tab.document, m, textOrigin, ImGui::GetIO().MousePos);

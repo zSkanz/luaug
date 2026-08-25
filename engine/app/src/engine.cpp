@@ -473,9 +473,6 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // breakpoint on a chunk, and `reloadWorld` replaces every instance in the
     // world while the chunk names stay what they were.
     ScriptEditor scripts;
-    // Raised by a script save and acted on where a world may legally be
-    // swapped, which is not where the panel's commands are drained.
-    bool scriptReloadAsked = false;
     // What this person had last time: their content-folder colours, and the
     // scene they were looking at (the scene is read separately below, because
     // the boot has to know it before an `Editor` exists).
@@ -1093,9 +1090,6 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // from the same world.
             if (overlay.has_value()) {
                 const EditorCommands editorCommands = overlay->takeCommands();
-                // Set by a script save, acted on further down beside the dev
-                // server's reload -- see the comment there.
-                scriptReloadAsked = false;
                 if (editorCommands.play.has_value()) {
                     if (*editorCommands.play) {
                         const bool wasEditing = editing(editor.runState());
@@ -1108,8 +1102,21 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                         // Deferred rather than resumed, exactly as boot defers
                         // them, so the first resumption lands in this frame's
                         // drain and `game.Loaded` is raised after all of them.
-                        if (wasEditing && !editing(editor.runState()))
+                        if (wasEditing && !editing(editor.runState())) {
                             script::startScripts(host->runtime().state());
+                            // **Armed against the chunks play just loaded.**
+                            // `startScripts` binds each chunk as it loads, so a
+                            // breakpoint set while editing is applied there --
+                            // and this covers the rest: a chunk whose breakpoint
+                            // was added after it was bound, and the boundLine the
+                            // VM answers with, which is the only thing that knows
+                            // whether the line has code on it.
+                            for (const Breakpoint& bp : scripts.breakpoints()) {
+                                const core::u32 bound = host->runtime().debugger().setBreakpoint(
+                                    host->runtime().state(), bp.chunk, bp.line + 1);
+                                scripts.setBoundLine(bp.chunk, bp.line, bound);
+                            }
+                        }
                     }
                     else {
                         editor.stop(host->world(), inspector);
@@ -1126,6 +1133,15 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                         // load-bearing: the new runtime binds to the tree as it
                         // stands, so it adopts the DataModel and finds the
                         // services the restore put back.
+                        // **Before the VM goes**, because a parked coroutine
+                        // cannot survive the `lua_State` it lives in and the
+                        // chunk references are patched into protos that are
+                        // about to be freed. The breakpoints themselves are kept
+                        // -- they are keyed on chunk names, which mean the same
+                        // thing in the runtime that replaces this one.
+                        host->runtime().debugger().detach(host->runtime().state());
+                        editor.setDebuggerParked(false);
+
                         if (std::optional<core::EngineError> restart = host->restartRuntime(); restart.has_value()) {
                             core::logText(core::LogLevel::Error, restart->message);
                         }
@@ -1220,11 +1236,23 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                         }
                         else if (platform::writeTextFile(options.scriptPath / tab->file, tab->document.text())) {
                             scripts.markSaved(index);
-                            // The file on disk and the world now agree, and the
-                            // world is what runs -- so a reload is what makes
-                            // the running VM agree too.
-                            scriptCommands.reload = true;
                         }
+                        // **And nothing else happens, which is the whole of it.**
+                        //
+                        // The first version rebuilt the world here, and every
+                        // symptom that followed was a symptom of that: the panels
+                        // vanished, the tabs closed, the caret jumped to line one,
+                        // the Explorer collapsed, and the screen flashed. Each was
+                        // patched in turn and the patches were the tell -- saving a
+                        // text file should not destroy a world.
+                        //
+                        // It never needed to. The pane writes `Source` on the
+                        // instance as somebody types, so the world already holds
+                        // the new text; and ADR 0058 makes PLAY what starts a
+                        // script, compiling `Source` at that moment. There is no
+                        // running chunk to refresh, because in the editor there is
+                        // no running chunk. Ctrl+S is about the FILE surviving the
+                        // editor being closed, and that is a `writeTextFile`.
                     }
                 }
 
@@ -1282,11 +1310,6 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     }
                 }
 
-                // Not acted on here. A reload destroys the `WorldHost` this
-                // block is still reading from, so it waits for the one place a
-                // world may be swapped -- the same place the dev server's does.
-                if (scriptCommands.reload)
-                    scriptReloadAsked = true;
                 if (!editorCommands.openScene.empty()) {
                     // Out of play mode first. Loading a scene while playing
                     // would leave the snapshot describing a world that no longer
@@ -1698,107 +1721,6 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // gated on it. Saving a script writes the file and then rebuilds the
         // world from source, which is the loop somebody editing code expects and
         // the one the dev server has given `luaug dev` since M3.
-        if (scriptReloadAsked) {
-            scriptReloadAsked = false;
-            if (editor.inPlayMode())
-                editor.stop(host->world(), inspector);
-
-            // **What was open, by CHUNK.** Every instance is about to be a
-            // different one, so an id is worth nothing across this -- but a
-            // chunk name means the same thing in the new world, which is why
-            // breakpoints are keyed on it and why the tabs can be too.
-            struct Reopen
-            {
-                std::string chunk;
-                std::string file;
-                std::string title;
-            };
-            std::vector<Reopen> reopen;
-            for (const OpenScript& tab : scripts.tabs())
-                reopen.push_back(Reopen{tab.chunk, tab.file, tab.title});
-            const std::size_t wasActive = scripts.activeIndex();
-            // **What was selected, as a chunk name rather than as an id.** The
-            // Explorer selection is cleared by `onWorldChanged` and the instance
-            // it named is about to stop existing, so somebody who pressed Ctrl+S
-            // would come back to a tree with nothing highlighted -- which is
-            // what the human reported. A chunk name survives the reload.
-            std::string selectedChunk;
-            if (inspector.selection().valid()) {
-                selectedChunk = script::scriptChunkName(host->runtime().state(), inspector.selection());
-            }
-
-            // **Before the VM dies.** A parked coroutine cannot survive its own
-            // `lua_State`, and keeping the reference would be a dangling one.
-            host->runtime().debugger().detach(host->runtime().state());
-            editor.setDebuggerParked(false);
-            // The tree is about to be handed a world with a new identity, and it
-            // is the same project rebuilt rather than a different one.
-            overlay->preserveExplorerOnNextWorld();
-
-            const ReloadReport reloaded = reloadWorld(host, worldOptions);
-            if (reloaded.ok) {
-                inspector.onWorldChanged();
-                overlay->setInspectionTarget(&host->world(), host->runtime().dataModel(), &inspector);
-                overlay->setScriptTarget(&host->runtime());
-
-                // **The overlay's visibility is the EDITOR's state, not the
-                // world's** -- and a reload brings a fresh `EngineState` whose
-                // `overlayVisible` is false. Without this the panels vanish the
-                // moment somebody saves a script and the editor is left as a
-                // bare viewport with no menu bar (reported by the human while
-                // this milestone was being built). The property still exists for
-                // a script to read; it is seeded from what is on screen rather
-                // than the other way round.
-                host->world().engineState().overlayVisible = overlayVisible;
-
-                // Tabs are re-opened against the new instances rather than
-                // closed. Somebody who pressed Ctrl+S was in the middle of
-                // writing that file, and having it shut is the last thing they
-                // asked for.
-                scripts.closeAll();
-                scene::World& fresh = host->world();
-                std::vector<core::InstanceId> everything;
-                fresh.collectDescendants(host->runtime().dataModel(), everything);
-                for (const Reopen& want : reopen) {
-                    for (const core::InstanceId id : everything) {
-                        if (script::scriptChunkName(host->runtime().state(), id) != want.chunk)
-                            continue;
-                        const std::optional<scene::Value> source =
-                            fresh.getProperty(id, fresh.atoms().intern("Source"));
-                        const auto* text = source.has_value() ? std::get_if<std::string>(&source.value()) : nullptr;
-                        scripts.open(id, want.chunk, want.file, want.title, text != nullptr ? *text : std::string{});
-                        break;
-                    }
-                }
-                if (wasActive < scripts.count())
-                    scripts.setActive(wasActive);
-
-                // And the selection, put back on whatever the new world calls
-                // by the same name.
-                if (!selectedChunk.empty()) {
-                    for (const core::InstanceId id : everything) {
-                        if (script::scriptChunkName(host->runtime().state(), id) != selectedChunk)
-                            continue;
-                        inspector.select(id);
-                        break;
-                    }
-                }
-                // Anything whose chunk is gone from the new world -- a file
-                // deleted between saves -- has no tab now, which is the honest
-                // outcome rather than a document nobody can save.
-                (void)scripts.forgetDestroyed(fresh);
-
-                // The breakpoints are keyed on chunk names, which mean the same
-                // thing in the new world -- so they are re-armed rather than
-                // lost, and whatever the VM says they bound to is written back.
-                for (const Breakpoint& bp : scripts.breakpoints()) {
-                    const core::u32 bound =
-                        host->runtime().debugger().setBreakpoint(host->runtime().state(), bp.chunk, bp.line + 1);
-                    scripts.setBoundLine(bp.chunk, bp.line, bound);
-                }
-            }
-        }
-
         // The only place a reload happens, and for the same reason: a world
         // swapped mid-tick would break within-run determinism, which is the
         // rule architecture.md §4 states (and the reason the connection hands
@@ -1820,10 +1742,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     inspector.onWorldChanged();
                     if (overlay.has_value()) {
                         overlay->preserveExplorerOnNextWorld();
-                        // The same rule the editor's own reload states: the
-                        // overlay's visibility belongs to whoever is looking,
-                        // not to the world, and a fresh `EngineState` would
-                        // otherwise close the panel on every hot reload.
+                        // **The overlay's visibility belongs to whoever is
+                        // looking, not to the world.** A reload brings a fresh
+                        // `EngineState` whose `overlayVisible` is false, so
+                        // without this the panels vanish on every hot reload and
+                        // the editor is left as a bare viewport with no menu
+                        // bar. A defect the dev server has had since M3, found
+                        // while E8 briefly made the editor reload too.
                         host->world().engineState().overlayVisible = overlayVisible;
                         overlay->setInspectionTarget(&host->world(), host->runtime().dataModel(), &inspector);
                         // And the VM, for the same blunt reason: the runtime the

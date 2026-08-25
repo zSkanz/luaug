@@ -79,11 +79,6 @@ struct ScriptEditorCommands
     std::optional<std::size_t> close;
     bool saveAll = false;
 
-    // **The world should be rebuilt from source.** The editor's own reload,
-    // which `luaug edit` has never had because it is started without
-    // `--dev-control` and the only call site was gated on it.
-    bool reload = false;
-
     // Tabs whose text moved this frame, so the loop can put it into the
     // instance's `Source` at the safe point. Indices rather than pointers,
     // because a tab can close between the draw and the drain.
@@ -99,7 +94,7 @@ struct ScriptEditorCommands
 
     [[nodiscard]] bool any() const noexcept
     {
-        return save.has_value() || close.has_value() || saveAll || reload || !edited.empty() ||
+        return save.has_value() || close.has_value() || saveAll || !edited.empty() ||
                toggleBreakpointLine.has_value() || step != DebugStep::None;
     }
 };

@@ -57,21 +57,38 @@ Every edit goes through the Inspector's pending-write path at the frame's safe
 point, never a direct component write — ADR 0046's second consequence, unchanged.
 What differs is where **Ctrl+S** puts it:
 
-| The instance came from | Ctrl+S writes | Then |
-|---|---|---|
-| a file under `src/scripts` | that `.luau` | reloads the world |
-| the scene, or `Instance.new` in the editor | the open `.scene.json` | nothing else |
+| The instance came from | Ctrl+S writes |
+|---|---|
+| a file under `src/scripts` | that `.luau` |
+| the scene, or `Instance.new` in the editor | the open `.scene.json` |
 
 The mapping already exists: `ModuleRegistry::Entry{path, source, instance}`
 (`modules.cpp:458`).
 
-### 3. The editor gets its own reload
+**And Ctrl+S does nothing else, which is a correction to this ADR rather than a
+detail of it.** The first version rebuilt the world after writing the file, so
+that a running VM would pick the change up. Every symptom that followed was a
+symptom of that: the panels vanished, the tabs closed, the caret jumped to line
+one, the Explorer collapsed, and the screen flashed. Each was patched in turn,
+and the patches were the tell — **saving a text file must not destroy a world.**
 
-`reloadWorld` is complete (`engine/app/include/luaug/app/reload.h`) and
-unreachable from an editor session: `luaug edit` never passes `--dev-control`
-(`tools/cli/commands/edit.luau:35-40`), and the only call site is gated on it
-(`engine/app/src/engine.cpp:1438`). It becomes an `EditorCommands` field drained
-at the same safe point as `play` and `save`, calling the same function.
+It never needed to. The pane writes `Source` on the instance as somebody types,
+so the world already holds the new text; and
+[ADR 0058](0058-a-script-runs-when-you-press-play.md) makes PLAY what starts a
+script, compiling `Source` at that moment. In the editor there is no running
+chunk to refresh. Ctrl+S is about the FILE surviving the editor being closed, and
+that is a `writeTextFile`.
+
+### 3. The editor does not reload, and that is the answer rather than the gap
+
+`reloadWorld` is complete and unreachable from an editor session: `luaug edit`
+never passes `--dev-control`, and the only call site is gated on it. This ADR
+first proposed giving the editor its own path to it. **That was wrong**, and the
+paragraph above says why: with play compiling `Source`, an editor session has
+nothing to reload.
+
+The hot-reload path stays exactly where it was, serving `luaug dev` — a game
+running outside the editor, where a file change does have to reach a live VM.
 
 ### 4. Syntax colour is theme data, and the code face is Cousine
 
@@ -138,6 +155,13 @@ the whole context (`imgui_internal.h:1273`) — so N open documents cannot each
 keep a cursor. Vendoring a third-party editor widget would be a new dependency
 under R5, and none of them know Luau, while `Luau.Ast` is already linked into
 every profile that has an editor.
+
+**A save is cheap, and the first design made it the most expensive thing in the
+editor.** Writing a file is a syscall; rebuilding a world is destroying a VM, a
+physics world, every instance and every panel pointer, and then putting six
+kinds of editor state back by hand. The second was chosen because it looked like
+the safe answer to "what if something is running", and the honest answer to that
+question is that in the editor nothing is.
 
 **The debugger costs less than it looks.** The VM has had `lua_breakpoint`,
 `lua_singlestep` and the `lua_Callbacks` debug hooks since it was vendored

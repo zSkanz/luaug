@@ -112,14 +112,27 @@ two-byte and a four-byte codepoint.
 Polish keyboard types half its punctuation, and read as a Ctrl chord it made
 AltGr+something silently mean Select All, Paste or Save. One condition.
 
-**Finding 10 — a save must put back everything a reload throws away, and there
-were four things.** The panels (`overlayVisible` is world state and a fresh
-`EngineState` says false — so saving a script left the editor as a bare viewport
-with no menu bar); the open tabs; the Explorer selection; and which rows of the
-tree were expanded. All four are restored by **chunk name**, which means the same
-thing in the new world where an instance id does not. The `overlayVisible` half
-was a defect the dev server had had since M3 and nobody had noticed, because
-`luaug dev` starts with the overlay hidden anyway.
+**Finding 10 — six patches in a row were one wrong decision, and the patches
+were the tell.** Ctrl+S rebuilt the world so a running VM would pick the change
+up. Then, one report at a time: the panels vanished, the tabs closed, the caret
+jumped to line one, the Explorer collapsed, the selection was lost, and the
+screen flashed. Each was fixed — by putting the panels back, re-opening the tabs
+by chunk name, restoring the caret, keeping the expansion, re-selecting.
+
+**Every one of those fixes was compensation for something that should not have
+happened.** Saving a text file must not destroy a world, and it never needed to:
+the pane writes `Source` as somebody types, so the world already holds the text,
+and ADR 0058 makes play compile `Source` at the moment it starts a script. In
+the editor there is no running chunk to refresh.
+
+Ctrl+S is now a `writeTextFile` and nothing else, and five of the six patches
+were deleted with the reload that made them necessary. The sixth was real and
+kept: `overlayVisible` is world state, so a fresh `EngineState` closes the
+panels — a defect the dev server has had since M3, which nobody had noticed
+because `luaug dev` starts with the overlay hidden anyway.
+
+**The lesson is the shape rather than the bug.** A fix that has to put six
+unrelated things back is not a fix, it is a receipt for the wrong operation.
 
 ## Attempted / abandoned
 
@@ -144,6 +157,7 @@ Filled 2026-08-24, before human review.
 | The debugger stops, reads and resumes, headless | **Green.** Eight cases in `debugger_tests.cpp`, including **the tick keeps advancing while a script is parked** — the claim a blocking debugger would fail while looking identical everywhere else. |
 | Completion answers from the reflection tables | **Green.** Eleven cases, including inherited members, the IDL's prose, case-insensitive filtering, and the absence it deliberately has. |
 | Eight syntax tokens clear 4.5:1 | **Green.** Sixteen assertions (8 tokens × 2 themes) against the code pane's ground, by the same `contrastRatio` the interface tokens use. |
+| A save writes a file and disturbs nothing | **Green, by a person and by a picture.** The editor after Ctrl+S is pixel-identical to the editor before it: same caret, same selection, same tabs, same tree. Verified by driving the real window twice and comparing. |
 | A person writes a script in it | **Partly, and honestly.** The pictures below are the editor open on a real project with a script in a tab, coloured, with a breakpoint armed and the Debug panel showing it. **What is not pictured is a stop**: the debugger's behaviour rests on the eight headless cases, and a photograph of it stopped with the locals showing needs somebody to press play. |
 | `scripts/localgate.ps1` green on every stage | *(filled below)* |
 
