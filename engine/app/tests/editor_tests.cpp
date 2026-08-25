@@ -2409,3 +2409,92 @@ TEST_CASE("a new scene retires the one it replaced too")
 
     CHECK_FALSE(world.alive(doomed));
 }
+
+// --- The stamp link has to survive a save and a load --------------------------
+
+TEST_CASE("an instance converted to a stamp is still linked after a save and a load")
+{
+    // Reported as "convert something to a stamp, open another scene, and the
+    // first stamp loses the link". The whole round trip, because the link is
+    // written as a MARK plus what differs -- and a writer that stopped
+    // recognising the instance would write it in full and unlinked, silently.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId workspace = world.create(fixture.workspaceClass);
+    world.setName(workspace, fixture.atoms.intern("Workspace"));
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+
+    const std::filesystem::path scratch = std::filesystem::temp_directory_path() / "luaug-editor-tests" / "stamp-link";
+    std::error_code ec;
+    std::filesystem::remove_all(scratch, ec);
+    std::filesystem::create_directories(scratch, ec);
+
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(scratch);
+
+    // Something with a child, which is what a stamp is for.
+    const core::InstanceId subject = fixture.widget(world, "Spinner");
+    REQUIRE(world.setParent(subject, workspace) == std::nullopt);
+    const core::InstanceId inner = fixture.widget(world, "Blade");
+    REQUIRE(world.setParent(inner, subject) == std::nullopt);
+
+    REQUIRE(editor.createStamp(world, subject, workspace, "spinner"));
+    const core::NameAtom mark = world.stampOf(subject);
+    REQUIRE(mark.valid());
+
+    REQUIRE(editor.save(world, scratch / "a.scene.json"));
+
+    // Load it back into a fresh world, exactly as opening the scene again does.
+    scene::World reopened(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId reopenedWorkspace = reopened.create(fixture.workspaceClass);
+    reopened.setName(reopenedWorkspace, fixture.atoms.intern("Workspace"));
+    reopened.workspaces().add(reopenedWorkspace, scene::WorkspaceComponent{});
+    REQUIRE(editor.load(reopened, scratch / "a.scene.json", inspector));
+
+    const core::InstanceId back = reopened.findFirstChild(reopenedWorkspace, fixture.atoms.intern("Spinner"));
+    REQUIRE(back.valid());
+    // **Still an instance of the stamp.** An unlinked one is a copy that
+    // nothing that happens to the file ever reaches again, and the person who
+    // made it has no way to tell from looking.
+    CHECK(reopened.stampOf(back).valid());
+    CHECK(reopened.atoms().text(reopened.stampOf(back)) == "stamps/spinner.stamp.json");
+    // And its subtree came back with it.
+    CHECK(reopened.findFirstChild(back, fixture.atoms.intern("Blade")).valid());
+
+    std::filesystem::remove_all(scratch, ec);
+}
+
+TEST_CASE("placing a second instance of a stamp does not unlink the first")
+{
+    // The other half of the report: convert, then drag the same stamp in again,
+    // and the FIRST one is what loses its link.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId workspace = world.create(fixture.workspaceClass);
+    world.setName(workspace, fixture.atoms.intern("Workspace"));
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+
+    const std::filesystem::path scratch =
+        std::filesystem::temp_directory_path() / "luaug-editor-tests" / "stamp-second";
+    std::error_code ec;
+    std::filesystem::remove_all(scratch, ec);
+    std::filesystem::create_directories(scratch, ec);
+
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(scratch);
+
+    const core::InstanceId subject = fixture.widget(world, "Spinner");
+    REQUIRE(world.setParent(subject, workspace) == std::nullopt);
+    REQUIRE(editor.createStamp(world, subject, workspace, "spinner"));
+    REQUIRE(world.stampOf(subject).valid());
+
+    REQUIRE(editor.instantiateStamp(world, "spinner", workspace, workspace, inspector, true));
+
+    // Both linked. The second placement is a new instance of the same file and
+    // says nothing about the first.
+    CHECK(world.stampOf(subject).valid());
+
+    std::filesystem::remove_all(scratch, ec);
+}
