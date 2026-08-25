@@ -2849,3 +2849,105 @@ TEST_CASE("the reported sequence, driven the way the frame loop drives it")
 
     std::filesystem::remove_all(scratch, ec);
 }
+
+// --- The material preview -----------------------------------------------------
+
+TEST_CASE("selecting a material in a stamp builds a preview, and deselecting takes it away")
+{
+    // **A material is a thing you look AT.** Roughness, metalness and a normal
+    // map are all about how light moves across a curvature, so a flat swatch
+    // shows the base colour and nothing else -- which is why every engine with a
+    // material preview draws a sphere, and why this does.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId workspace = world.create(fixture.workspaceClass);
+    world.setName(workspace, fixture.atoms.intern("Workspace"));
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+
+    const std::filesystem::path scratch =
+        std::filesystem::temp_directory_path() / "luaug-editor-tests" / "material-preview";
+    std::error_code ec;
+    std::filesystem::remove_all(scratch, ec);
+    std::filesystem::create_directories(scratch, ec);
+
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(scratch);
+
+    // A stamp of a `Material`, made the way the browser makes one.
+    const scene::ClassId materialClass = fixture.classes.findId(fixture.atoms.intern("Material"));
+    REQUIRE(materialClass != scene::InvalidClass);
+    REQUIRE_FALSE(editor.createStampOfClass(world, workspace, materialClass, "stone").empty());
+
+    REQUIRE(editor.openStamp("stone", fixture.classes, fixture.enums, fixture.atoms, inspector));
+    REQUIRE(editor.stage() != nullptr);
+    const core::InstanceId root = editor.stampSession().root;
+    REQUIRE(editor.stage()->world().materials().find(root) != nullptr);
+
+    // Opening a stamp selects its root, which here is the material.
+    editor.syncMaterialPreview(inspector);
+
+    const auto findByName = [&](std::string_view name) {
+        return editor.stage()->world().findFirstChild(editor.stage()->workspace(),
+                                                      editor.stage()->world().atoms().intern(name));
+    };
+    const core::InstanceId sphere = findByName("Preview");
+    REQUIRE(sphere.valid());
+    // A ball, pointed at the material being edited.
+    CHECK(editor.stage()->world().parts().find(sphere)->shape == 1);
+    CHECK(editor.stage()->world().parts().find(sphere)->material == root);
+    // **A floor under it**, because a metal sphere in an empty room is a black
+    // circle: metal shows what is around it, and there is nothing around it.
+    CHECK(findByName("PreviewFloor").valid());
+
+    // **Generated, which is what keeps it out of the file.** A stamp is written
+    // from its root down and these are siblings of it -- but a person looking at
+    // the Explorer should still be told these are not theirs.
+    CHECK(editor.stage()->world().generated(sphere));
+
+    // Selecting something that is not a material takes it away: the preview
+    // answers "what does this material look like", and that is a question about
+    // a material.
+    inspector.select(core::InstanceId{});
+    editor.syncMaterialPreview(inspector);
+    CHECK_FALSE(findByName("Preview").valid());
+    CHECK_FALSE(findByName("PreviewFloor").valid());
+
+    std::filesystem::remove_all(scratch, ec);
+}
+
+TEST_CASE("the preview never reaches the stamp file")
+{
+    // The thing that would be worst: a sphere and a floor written into every
+    // material somebody edited, appearing in the world wherever it was placed.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId workspace = world.create(fixture.workspaceClass);
+    world.setName(workspace, fixture.atoms.intern("Workspace"));
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+
+    const std::filesystem::path scratch =
+        std::filesystem::temp_directory_path() / "luaug-editor-tests" / "material-preview-file";
+    std::error_code ec;
+    std::filesystem::remove_all(scratch, ec);
+    std::filesystem::create_directories(scratch, ec);
+
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(scratch);
+    const scene::ClassId materialClass = fixture.classes.findId(fixture.atoms.intern("Material"));
+    REQUIRE_FALSE(editor.createStampOfClass(world, workspace, materialClass, "stone").empty());
+    REQUIRE(editor.openStamp("stone", fixture.classes, fixture.enums, fixture.atoms, inspector));
+    editor.syncMaterialPreview(inspector);
+    REQUIRE(editor.stage()
+                ->world()
+                .findFirstChild(editor.stage()->workspace(), editor.stage()->world().atoms().intern("Preview"))
+                .valid());
+
+    REQUIRE(editor.saveStamp(world, workspace));
+
+    std::string text;
+    REQUIRE(platform::readTextFile(scratch / "stamps" / "stone.stamp.json", text));
+    CHECK(text.find("Preview") == std::string::npos);
+    CHECK(text.find("PreviewFloor") == std::string::npos);
+}

@@ -1713,6 +1713,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 overlay->setInspectionTarget(&shown, shownRoot, &inspector);
             }
 
+            // **The material preview follows the selection**, and it is kept
+            // here rather than inside a verb because selecting is not a verb:
+            // it happens by clicking a row, by clicking the viewport, by
+            // opening a stamp, and by an undo. One place that asks "what is
+            // selected now" beats four that remember to say.
+            editor.syncMaterialPreview(inspector);
+
             const bool gizmoTook = editor.driveGizmo(authored(), inspector);
             // A drag moves parts without ever producing a command, so the one
             // place that knows it happened is here.

@@ -878,6 +878,13 @@ public:
         core::InstanceId m_lighting;
     };
 
+    // The preview sphere and its stage dressing, or invalid when nothing is
+    // being previewed. Rebuilt when the selection moves to a different material.
+    core::InstanceId m_previewSphere;
+    core::InstanceId m_previewFloor;
+    core::InstanceId m_previewLight;
+    core::InstanceId m_previewOf;
+
     // The stage, or nullptr when no stamp is open. The frame loop points the
     // panels, the picker and the renderer at this world instead of the game's
     // while it exists -- which is the whole of "a separate environment".
@@ -923,6 +930,25 @@ public:
     };
 
     [[nodiscard]] const StampSession& stampSession() const noexcept { return m_stamp; }
+
+    // Keeps the stage's material preview pointed at whatever the person has
+    // selected, and takes it away when nothing they have selected is a material.
+    //
+    // **A sphere, a floor and a light -- built out of ordinary instances.** A
+    // material is a thing you look AT, and every engine that has one shows it on
+    // a curved surface for the reason a flat swatch cannot: roughness,
+    // metalness and a normal map are all about how light moves ACROSS a
+    // curvature, and a square of colour shows none of them.
+    //
+    // Ordinary instances rather than a preview render path, because the stage
+    // already has a world, a camera and a renderer: a second path would be a
+    // second set of lighting rules that drift from the ones a game sees, and
+    // then the preview stops predicting what the material looks like -- which is
+    // the only thing it is for.
+    //
+    // They are marked GENERATED, which is what keeps them out of the file: a
+    // stamp is written from its root down, and these are siblings of it.
+    void syncMaterialPreview(const Inspector& inspector);
 
     // Opens a stamp onto a stage of its own. Refused while playing: a stamp is
     // authored, and a world that is ticking is not one somebody is authoring.

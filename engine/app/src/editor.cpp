@@ -1110,6 +1110,98 @@ bool Editor::openStamp(std::string_view path, scene::ClassRegistry& classes, sce
     return true;
 }
 
+void Editor::syncMaterialPreview(const Inspector& inspector)
+{
+    if (m_stage == nullptr) {
+        // The stage went away and took its world with it, so there is nothing to
+        // take down -- the ids named instances in a `World` that no longer
+        // exists, and forgetting them IS the cleanup.
+        m_previewSphere = {};
+        m_previewFloor = {};
+        m_previewLight = {};
+        m_previewOf = {};
+        return;
+    }
+
+    scene::World& world = m_stage->world();
+
+    // What is selected, and only if it is a material. Selecting a `Part` inside
+    // a stamp that also contains a material should show the part being edited,
+    // not a sphere -- the preview answers "what does this material look like",
+    // and that is a question about a material.
+    core::InstanceId subject = inspector.selection();
+    if (subject.valid() && world.materials().find(subject) == nullptr)
+        subject = {};
+
+    if (subject == m_previewOf)
+        return;
+
+    // Taken down rather than hidden: a stage with a preview in it that nobody
+    // asked for is a stage with something in it nobody put there.
+    for (core::InstanceId* held : {&m_previewSphere, &m_previewFloor, &m_previewLight}) {
+        if (held->valid())
+            (void)world.destroy(*held);
+        *held = {};
+    }
+    // The stage runs no drains, exactly as the editor's own world does not --
+    // see `Editor::load`. Without this the taken-down preview would keep
+    // resolving, and rebuilding it would leave the old sphere in the pools.
+    world.retireDestroyed();
+
+    m_previewOf = subject;
+    if (!subject.valid())
+        return;
+
+    const scene::ClassId partClass = world.classes().findId(world.atoms().intern("Part"));
+    if (partClass == scene::InvalidClass)
+        return;
+
+    // **A sphere, because a flat swatch shows none of what a material is.**
+    // Roughness, metalness and a normal map are all about how light moves across
+    // a curvature; a square of colour shows the base colour and nothing else.
+    // Every engine with a material preview draws a curved surface for this
+    // reason and not as a house style.
+    m_previewSphere = world.create(partClass);
+    world.setName(m_previewSphere, world.atoms().intern("Preview"));
+    (void)world.setParent(m_previewSphere, m_stage->workspace());
+    world.setGenerated(m_previewSphere, true);
+    if (scene::PartComponent* sphere = world.parts().find(m_previewSphere); sphere != nullptr) {
+        sphere->shape = 1; // Ball
+        sphere->size = core::Vec3{2.0f, 2.0f, 2.0f};
+        sphere->cframe.position = core::DVec3{0.0, 1.2, 0.0};
+        sphere->material = subject;
+    }
+
+    // **A floor under it**, which is not decoration: a metal sphere in an empty
+    // room is a black circle, because metal shows what is around it and there is
+    // nothing around it. The floor is what a rough metal reads as metal against.
+    m_previewFloor = world.create(partClass);
+    world.setName(m_previewFloor, world.atoms().intern("PreviewFloor"));
+    (void)world.setParent(m_previewFloor, m_stage->workspace());
+    world.setGenerated(m_previewFloor, true);
+    if (scene::PartComponent* floor = world.parts().find(m_previewFloor); floor != nullptr) {
+        floor->size = core::Vec3{12.0f, 0.4f, 12.0f};
+        floor->cframe.position = core::DVec3{0.0, -0.2, 0.0};
+        floor->color = core::Color3{0.35f, 0.35f, 0.38f};
+    }
+
+    // And a light off to one side rather than straight on. A light behind the
+    // camera flattens everything it touches -- the highlight lands in the middle
+    // of the sphere and roughness stops being readable, which is the one thing
+    // somebody is squinting at.
+    const scene::ClassId lightClass = world.classes().findId(world.atoms().intern("PointLight"));
+    if (lightClass != scene::InvalidClass) {
+        m_previewLight = world.create(lightClass);
+        world.setName(m_previewLight, world.atoms().intern("PreviewLight"));
+        (void)world.setParent(m_previewLight, m_previewSphere);
+        world.setGenerated(m_previewLight, true);
+        if (scene::PointLightComponent* light = world.pointLights().find(m_previewLight); light != nullptr) {
+            light->brightness = 6.0f;
+            light->range = 20.0f;
+        }
+    }
+}
+
 bool Editor::saveStamp(scene::World& game, core::InstanceId gameRoot)
 {
     if (!m_stamp.open() || m_stage == nullptr || !m_stage->world().alive(m_stamp.root)) {

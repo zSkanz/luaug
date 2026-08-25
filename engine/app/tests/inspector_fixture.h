@@ -311,6 +311,9 @@ struct Fixture
     // without them cannot stand one up. No components and no properties:
     // what the stage needs from these is that they exist.
     scene::ClassId workspaceClass = scene::InvalidClass;
+    scene::ClassId partClass = scene::InvalidClass;
+    scene::ClassId materialClass = scene::InvalidClass;
+    scene::ClassId pointLightClass = scene::InvalidClass;
     scene::ClassId lightingClass = scene::InvalidClass;
     // The content tree's root is a `Folder`, because that is what it is: a
     // place to put things (ADR 0052).
@@ -488,6 +491,30 @@ struct Fixture
         workspaceClass = classes.registerClass({
             .name = atoms.intern("Workspace"),
             .defaultName = atoms.intern("Workspace"),
+        });
+        // The three the material preview is built out of. Registered here rather
+        // than invented per case, because a preview that could not find `Part`
+        // silently builds nothing -- which reads as "the feature is off" and is
+        // exactly what a test must be able to tell apart.
+        partClass = classes.registerClass({
+            .name = atoms.intern("Part"),
+            .defaultName = atoms.intern("Part"),
+            .attachComponents = [](scene::World& w, core::InstanceId id) { w.parts().add(id, scene::PartComponent{}); },
+            .detachComponents = [](scene::World& w, core::InstanceId id) { w.parts().remove(id); },
+        });
+        materialClass = classes.registerClass({
+            .name = atoms.intern("Material"),
+            .defaultName = atoms.intern("Material"),
+            .attachComponents = [](scene::World& w,
+                                   core::InstanceId id) { w.materials().add(id, scene::MaterialComponent{}); },
+            .detachComponents = [](scene::World& w, core::InstanceId id) { w.materials().remove(id); },
+        });
+        pointLightClass = classes.registerClass({
+            .name = atoms.intern("PointLight"),
+            .defaultName = atoms.intern("PointLight"),
+            .attachComponents = [](scene::World& w,
+                                   core::InstanceId id) { w.pointLights().add(id, scene::PointLightComponent{}); },
+            .detachComponents = [](scene::World& w, core::InstanceId id) { w.pointLights().remove(id); },
         });
         lightingClass = classes.registerClass({
             .name = atoms.intern("Lighting"),
