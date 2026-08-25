@@ -651,3 +651,26 @@ TEST_CASE("a project with no content answers with nothing rather than failing")
     ContentTree unopened;
     CHECK(unopened.collectStamps().empty());
 }
+
+TEST_CASE("a property picker is offered the project, not the build output")
+{
+    // `filesOfKind` is what a `Content` property's picker lists, and it walked
+    // everything under the root -- `.luaug` included. That directory holds the
+    // pack, the chunk directory and the import cache, so a texture that had been
+    // compiled would appear twice in the list with the same name and only one of
+    // them would be the file anybody edits.
+    Scratch scratch("files-of-kind");
+    scratch.file("textures/brick.png", "x");
+    scratch.file("textures/deep/tile.png", "x");
+    scratch.file(".luaug/import/objects/brick.png", "x");
+    scratch.file(".hidden/other.png", "x");
+    scratch.file("textures/notes.txt", "x");
+
+    ContentTree tree;
+    REQUIRE(tree.open(scratch.root()));
+
+    const std::vector<std::string> found = tree.filesOfKind(ContentKind::Texture);
+    REQUIRE(found.size() == 2);
+    CHECK(found[0] == "textures/brick.png");
+    CHECK(found[1] == "textures/deep/tile.png");
+}

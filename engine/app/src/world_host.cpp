@@ -523,8 +523,16 @@ std::optional<core::EngineError> WorldHost::mountProject(const std::filesystem::
 
         const std::filesystem::path scriptsRoot = m_root / "src" / "scripts";
         if (std::filesystem::is_directory(scriptsRoot, ec)) {
-            for (const auto& entry : std::filesystem::recursive_directory_iterator(scriptsRoot, ec)) {
-                if (!entry.is_regular_file() || entry.path().extension() != ".luau")
+            // **`increment(ec)`, not the range-for.** The error-code CONSTRUCTOR
+            // only makes the first step non-throwing; `operator++` still throws,
+            // so a `src/scripts` holding a junction or a directory this process
+            // cannot enter would throw `filesystem_error` out of boot -- and a
+            // process that dies during mount dies with no message about what it
+            // was mounting.
+            for (std::filesystem::recursive_directory_iterator it(scriptsRoot, ec), end; it != end && !ec;
+                 it.increment(ec)) {
+                const std::filesystem::directory_entry& entry = *it;
+                if (!entry.is_regular_file(ec) || entry.path().extension() != ".luau")
                     continue;
                 std::string source;
                 if (!readFile(entry.path(), source))
@@ -589,8 +597,11 @@ std::optional<core::EngineError> WorldHost::mountConformance(const std::filesyst
     m_aliases.clear();
 
     std::vector<script::MountedScript> entries;
-    for (const auto& entry : std::filesystem::recursive_directory_iterator(root, ec)) {
-        if (!entry.is_regular_file() || !entry.path().filename().string().ends_with(".spec.luau"))
+    // The same rule as the mount above, and for the same reason: an iterator
+    // whose constructor took an error code still throws on the way forward.
+    for (std::filesystem::recursive_directory_iterator it(root, ec), end; it != end && !ec; it.increment(ec)) {
+        const std::filesystem::directory_entry& entry = *it;
+        if (!entry.is_regular_file(ec) || !entry.path().filename().string().ends_with(".spec.luau"))
             continue;
         std::string source;
         if (!readFile(entry.path(), source))

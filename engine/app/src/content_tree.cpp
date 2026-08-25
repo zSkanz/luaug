@@ -454,17 +454,28 @@ std::vector<std::string> ContentTree::filesOfKind(ContentKind kind) const
     if (m_root.empty() || !std::filesystem::is_directory(m_root, ec))
         return found;
 
-    for (const std::filesystem::directory_entry& entry : std::filesystem::recursive_directory_iterator(m_root, ec)) {
-        if (ec)
-            break;
-        if (!entry.is_regular_file(ec))
+    // **`increment(ec)`, not the range-for.** The error-code CONSTRUCTOR only
+    // makes the first step non-throwing; `operator++` still throws, so a content
+    // folder holding a junction or a directory this process cannot enter would
+    // throw `filesystem_error` out of a draw call and take the window with it.
+    // That is the shape of the breadcrumb crash, one function over.
+    for (std::filesystem::recursive_directory_iterator it(m_root, ec), end; it != end && !ec; it.increment(ec)) {
+        const std::string name = it->path().filename().string();
+        if (name.empty() || name.front() == '.') {
+            // **Dot-folders are skipped WHOLE.** `.luaug` is the build output --
+            // the pack, the chunk directory, the import cache -- and offering a
+            // compiled copy of a texture beside the texture is worse than
+            // offering neither: they look the same in a list and only one of
+            // them is the file somebody edits.
+            if (it->is_directory(ec))
+                it.disable_recursion_pending();
             continue;
-        const std::string name = entry.path().filename().string();
-        if (contentKindOf(name) != kind)
+        }
+        if (it->is_directory(ec) || contentKindOf(name) != kind)
             continue;
         // Generic, because this becomes half of an `asset://` URI and those are
         // forward-slashed on every tier.
-        found.push_back(entry.path().lexically_relative(m_root).generic_string());
+        found.push_back(it->path().lexically_relative(m_root).generic_string());
     }
 
     std::sort(found.begin(), found.end());
