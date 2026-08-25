@@ -181,3 +181,33 @@ TEST_CASE("a bound line is where the VM really put the breakpoint")
     CHECK(editor.breakpoints()[0].line == 7);
     CHECK(editor.breakpoints()[0].boundLine == 9);
 }
+
+TEST_CASE("opening a script that is already open asks for its tab to be shown")
+{
+    TwoScripts fixture;
+    ScriptEditor editor;
+
+    editor.open(fixture.first, "a", "", "a", "local x = 1");
+    // Drained by the panel on the frame it draws.
+    CHECK(editor.takeFocusRequest().value() == 0);
+    CHECK_FALSE(editor.takeFocusRequest().has_value());
+
+    editor.open(fixture.second, "b", "", "b", "");
+    CHECK(editor.takeFocusRequest().value() == 1);
+
+    // **The case this exists for.** Somebody looking at the Viewport
+    // double-clicks a script that is already open: the model already agrees it
+    // is active, and without this nothing on the screen would move, because
+    // which dock sibling is in front is ImGui's state rather than ours.
+    editor.setActive(1);
+    editor.open(fixture.first, "a", "", "a", "ignored");
+    CHECK(editor.activeIndex() == 0);
+    CHECK(editor.takeFocusRequest().value() == 0);
+    // And it is still a focus rather than a load.
+    CHECK(editor.at(0)->document.text() == "local x = 1");
+
+    // A close cannot leave a request pointing at an index that has moved.
+    editor.open(fixture.second, "b", "", "b", "");
+    CHECK(editor.close(1));
+    CHECK_FALSE(editor.takeFocusRequest().has_value());
+}

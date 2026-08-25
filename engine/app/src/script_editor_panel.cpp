@@ -693,6 +693,8 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, ScriptEditorCommands& out, 
 
 void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, ScriptEditorCommands& out)
 {
+    const std::optional<std::size_t> focus = editor.takeFocusRequest();
+
     for (std::size_t index = 0; index < editor.count(); ++index) {
         OpenScript* tab = editor.at(index);
         if (tab == nullptr)
@@ -720,6 +722,13 @@ void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, ScriptEditorComm
             drawPane(*tab, editor, out, index);
         }
         ImGui::End();
+
+        // **After `End`, because focusing a window ImGui has not seen this frame
+        // does nothing** -- the same rule `drawEditorShell` already follows for
+        // the panel it opens on. A tab that is docked behind the Viewport comes
+        // to the front; one that is a floating window is raised.
+        if (focus.has_value() && *focus == index)
+            ImGui::SetWindowFocus(name);
 
         if (!open)
             out.close = index;

@@ -15,6 +15,9 @@ OpenScript& ScriptEditor::open(core::InstanceId instance, std::string chunk, std
         // would throw away whatever somebody has been typing, which is the one
         // thing a second double-click must not do.
         m_active = *found;
+        // Asked for even though the tab already exists -- that is the whole
+        // point. Opening what is already open is a request to LOOK at it.
+        m_focusRequest = *found;
         OpenScript& existing = m_tabs[*found];
         existing.chunk = std::move(chunk);
         existing.file = std::move(file);
@@ -32,6 +35,7 @@ OpenScript& ScriptEditor::open(core::InstanceId instance, std::string chunk, std
 
     m_tabs.push_back(std::move(tab));
     m_active = m_tabs.size() - 1;
+    m_focusRequest = m_active;
     return m_tabs.back();
 }
 
@@ -41,6 +45,8 @@ bool ScriptEditor::close(std::size_t index)
         return false;
 
     m_tabs.erase(m_tabs.begin() + static_cast<std::ptrdiff_t>(index));
+    // An index into a vector that just shrank means something else now.
+    m_focusRequest.reset();
     if (m_tabs.empty()) {
         m_active = 0;
         return true;

@@ -147,6 +147,24 @@ public:
 
     [[nodiscard]] std::optional<std::size_t> indexOf(core::InstanceId instance) const noexcept;
 
+    // **Which tab should be brought to the front, once.**
+    //
+    // Setting `m_active` is not enough and it is worth saying why: the tabs are
+    // dock siblings, so which one is IN FRONT is ImGui's state and not this
+    // class's. Somebody looking at the Viewport who double-clicks a script that
+    // is already open would otherwise see nothing happen at all -- the model
+    // would agree the script was active and the screen would still be showing
+    // the world.
+    //
+    // Drained rather than read, so the focus is taken on the frame it was asked
+    // for and never fights somebody who has since clicked another tab.
+    [[nodiscard]] std::optional<std::size_t> takeFocusRequest() noexcept
+    {
+        const std::optional<std::size_t> taken = m_focusRequest;
+        m_focusRequest.reset();
+        return taken;
+    }
+
     [[nodiscard]] bool anyDirty() const noexcept;
     [[nodiscard]] std::size_t dirtyCount() const noexcept;
 
@@ -180,6 +198,7 @@ public:
 private:
     std::vector<OpenScript> m_tabs;
     std::size_t m_active = 0;
+    std::optional<std::size_t> m_focusRequest;
     // Sorted by (chunk, line), so the order the debugger walks them is a
     // property of what they are rather than of when they were clicked (R10).
     std::vector<Breakpoint> m_breakpoints;
