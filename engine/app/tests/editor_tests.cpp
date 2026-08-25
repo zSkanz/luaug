@@ -3169,6 +3169,95 @@ TEST_CASE("clicking nothing asks for no row")
 // It exists because the editor takes a FULL SNAPSHOT of the world before every
 // edit, and "is that a problem" is a question about a number rather than about
 // the design.
+TEST_CASE("the whole material workflow survives a save and a reopen")
+{
+    // **One case over every piece this session touched**, because they were
+    // changed separately and are used together: make a material as a stamp,
+    // point a part at it by dropping the file, save the scene, open it again in
+    // a fresh world, and expect the part to still be wearing the material with
+    // its maps intact.
+    //
+    // Each half is covered on its own above and none of that says the halves
+    // meet. A reference that serialises as a path, a stamp that serialises as a
+    // mark plus what differs, and a material whose maps are `Content` strings
+    // are three different serialisers agreeing about one instance.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId workspace = world.create(fixture.workspaceClass);
+    world.setName(workspace, fixture.atoms.intern("Workspace"));
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+
+    const std::filesystem::path scratch = std::filesystem::temp_directory_path() / "luaug-editor-tests" / "mat-flow";
+    std::error_code ec;
+    std::filesystem::remove_all(scratch, ec);
+    std::filesystem::create_directories(scratch, ec);
+
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(scratch);
+
+    // Made the way the browser makes one: an instance in the world and a file to
+    // reuse it from, in one step.
+    const std::string stamp = editor.createStampOfClass(world, workspace, fixture.materialClass, "wooden");
+    REQUIRE_FALSE(stamp.empty());
+
+    // Found through the pool rather than by name: what `createStampOfClass`
+    // calls the instance is the class's default name, and this case is about the
+    // material rather than about what it is called.
+    core::InstanceId authored;
+    world.materials().forEach([&](core::InstanceId id, const scene::MaterialComponent&) {
+        if (!authored.valid())
+            authored = id;
+    });
+    REQUIRE(authored.valid());
+    world.setName(authored, fixture.atoms.intern("Wooden"));
+    scene::MaterialComponent* block = world.materials().find(authored);
+    REQUIRE(block != nullptr);
+    block->colorMap = world.atoms().intern("asset://textures/wood_diff.png");
+    block->roughness = 0.7f;
+
+    const core::InstanceId part = world.create(fixture.partClass);
+    world.setName(part, fixture.atoms.intern("Crate"));
+    world.parts().add(part, scene::PartComponent{});
+    REQUIRE(world.setParent(part, workspace) == std::nullopt);
+
+    // Dropped on the part's `Material` field, which is the gesture the report
+    // asked for: "I have an ordinary part and there is no way to give it a
+    // material".
+    const core::InstanceId targets[] = {part};
+    REQUIRE(editor.assignStampTo(world, workspace, workspace, "wooden", "Material", targets));
+    REQUIRE(world.parts().find(part)->material == authored);
+
+    REQUIRE(editor.save(world, scratch / "main.scene.json"));
+
+    // A fresh world, exactly as reopening the project builds one.
+    scene::World reopened(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId reopenedWorkspace = reopened.create(fixture.workspaceClass);
+    reopened.setName(reopenedWorkspace, fixture.atoms.intern("Workspace"));
+    reopened.workspaces().add(reopenedWorkspace, scene::WorkspaceComponent{});
+    REQUIRE(editor.load(reopened, scratch / "main.scene.json", inspector));
+
+    const core::InstanceId loadedPart = reopened.findFirstChild(reopenedWorkspace, fixture.atoms.intern("Crate"));
+    REQUIRE(loadedPart.valid());
+    const scene::PartComponent* stored = reopened.parts().find(loadedPart);
+    REQUIRE(stored != nullptr);
+
+    // **Still pointing at a material**, and at one that is really there. A
+    // reference that came back as a dead id is the shape of D100, and it draws
+    // as an untextured part rather than as an error.
+    REQUIRE(stored->material.valid());
+    REQUIRE(reopened.alive(stored->material));
+    const scene::MaterialComponent* loadedBlock = reopened.materials().find(stored->material);
+    REQUIRE(loadedBlock != nullptr);
+
+    // And still carrying its maps, which is the half a `Content` property owns.
+    CHECK(reopened.atoms().text(loadedBlock->colorMap) == "asset://textures/wood_diff.png");
+    CHECK(loadedBlock->roughness == doctest::Approx(0.7));
+
+    // Still an instance of the file, so editing the stamp reaches it.
+    CHECK(reopened.stampOf(stored->material).valid());
+}
+
 TEST_CASE("what one edit costs, in snapshots" * doctest::skip())
 {
     app::testing::Fixture fixture;

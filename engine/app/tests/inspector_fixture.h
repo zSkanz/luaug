@@ -115,6 +115,45 @@ inline bool setPartMaterial(scene::World& world, core::InstanceId id, const scen
     return true;
 }
 
+// `Material.ColorMap` and `Material.Roughness`, over the real component.
+//
+// **A fixture class with a component and no properties can be pointed at and
+// cannot be SAVED**, because a serialiser walks descriptors and not fields --
+// which is a thing a test can only find out by round-tripping one. These two are
+// enough to make that round trip mean something: one `Content` string and one
+// number, which is the shape every other field on a material has.
+inline scene::Value getMaterialColorMap(const scene::World& world, core::InstanceId id)
+{
+    const scene::MaterialComponent* material = world.materials().find(id);
+    return scene::Value{std::string(material != nullptr ? world.atoms().text(material->colorMap) : std::string_view{})};
+}
+
+inline bool setMaterialColorMap(scene::World& world, core::InstanceId id, const scene::Value& value)
+{
+    scene::MaterialComponent* material = world.materials().find(id);
+    const auto* text = std::get_if<std::string>(&value);
+    if (material == nullptr || text == nullptr)
+        return false;
+    material->colorMap = text->empty() ? core::NameAtom{} : world.atoms().intern(*text);
+    return true;
+}
+
+inline scene::Value getMaterialRoughness(const scene::World& world, core::InstanceId id)
+{
+    const scene::MaterialComponent* material = world.materials().find(id);
+    return scene::Value{material != nullptr ? static_cast<core::f64>(material->roughness) : 0.0};
+}
+
+inline bool setMaterialRoughness(scene::World& world, core::InstanceId id, const scene::Value& value)
+{
+    scene::MaterialComponent* material = world.materials().find(id);
+    const auto* number = std::get_if<core::f64>(&value);
+    if (material == nullptr || number == nullptr)
+        return false;
+    material->roughness = static_cast<core::f32>(*number);
+    return true;
+}
+
 inline scene::Value getFlag(const scene::World&, core::InstanceId id)
 {
     return scene::Value{bagOf(id).flag};
@@ -548,9 +587,25 @@ struct Fixture
             .attachComponents = [](scene::World& w, core::InstanceId id) { w.parts().add(id, scene::PartComponent{}); },
             .detachComponents = [](scene::World& w, core::InstanceId id) { w.parts().remove(id); },
         });
+        materialProperties = {
+            scene::PropertyDesc{
+                .name = atoms.intern("ColorMap"),
+                .type = scene::ValueType::String,
+                .contentKind = atoms.intern("Texture"),
+                .get = &getMaterialColorMap,
+                .set = &setMaterialColorMap,
+            },
+            scene::PropertyDesc{
+                .name = atoms.intern("Roughness"),
+                .type = scene::ValueType::Number,
+                .get = &getMaterialRoughness,
+                .set = &setMaterialRoughness,
+            },
+        };
         materialClass = classes.registerClass({
             .name = atoms.intern("Material"),
             .defaultName = atoms.intern("Material"),
+            .properties = materialProperties,
             .attachComponents = [](scene::World& w,
                                    core::InstanceId id) { w.materials().add(id, scene::MaterialComponent{}); },
             .detachComponents = [](scene::World& w, core::InstanceId id) { w.materials().remove(id); },
@@ -606,6 +661,7 @@ private:
     std::vector<scene::PropertyDesc> widgetProperties;
     std::vector<scene::PropertyDesc> gadgetProperties;
     std::vector<scene::PropertyDesc> partProperties;
+    std::vector<scene::PropertyDesc> materialProperties;
 };
 
 } // namespace luaug::app::testing
