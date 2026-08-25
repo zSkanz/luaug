@@ -428,6 +428,78 @@ Entries for the planning session and for M0 through M4 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
 
+- **2026-08-25 (session 24, Claude Opus): the editor audited, and "everything
+  reloads" turned out to be a measurement.** Thirteen commits, behind a green
+  six-stage gate throughout.
+
+  **The report was "anything I do in the engine looks like everything reloads --
+  I change a property and it seems to reload".** Nothing about it was
+  reproducible by reading, so it was measured instead, and the first two
+  suspects were ruled out that way rather than argued away: an undo snapshot of
+  a 30,000-instance world costs 0.81 ms, and a headless idle editor frame costs
+  0.037 ms. The windowed numbers that had looked bad were vsync.
+
+  **It was `MeshLoader::syncTextures`, which reads, decodes and uploads every
+  missing map it finds in one frame, on the frame thread, with no budget at
+  all.** An ordinary 1024-square PNG out of the reporter's own texture pack
+  costs 14 to 36 ms to decode. A three-map material therefore froze the frame
+  after the write for a tenth of a second, and a 4K source is sixteen times
+  worse. Confirmed by A/B on their project: the same scene, 269 ms on the load
+  frame synchronously and 179 ms deferred, the 90 ms being exactly the three
+  decodes. It is a three-stage pipeline now -- `readFileAsync`, the job pool as
+  `Domain::AssetIo`, and the upload on the frame because only the frame has a
+  command list -- **off by default**, because a capture records the frame it was
+  told to and a texture arriving two frames later is a different picture.
+
+  **The same measurement found two more.** The content browser's thumbnails were
+  built with a per-frame budget that could not work (a decode cannot be split,
+  so a floor of one per frame IS one dropped frame per thumbnail) and were given
+  the same pipeline. And the icon atlas decoded eighty-eight PNGs serially on
+  the first frame that has a command list: 131 ms of a 280 ms opening frame,
+  now 12 ms through `jobs::parallelFor`, with packing kept serial so the atlas
+  is byte-identical however many cores ran it.
+
+  **A material ignored every map it was ever given, and no test could see it.**
+  The shader never branches on whether a map is bound -- every slot always has a
+  1x1 stand-in -- so `textureFlags` decides whether the sample counts.
+  `materialOf` set the four handles and left the four flags at zero. Forty lines
+  away, the glTF path wrote both, which is why meshes from files always looked
+  right. Every material case in the render tests checks a NUMBER, and a number
+  arrives through the uniforms whether the flags say anything or not: nothing
+  had ever handed a `Material` a texture. The maps and the flags are one verb
+  now, because stating a fact twice is what let one copy go stale.
+
+  **Two open register rows were decided rather than deferred**, on the standing
+  instruction to take decisions. A destroyed `Script` is stopped (D097): the
+  class documentation already said "one that is not in the world does not run",
+  and it was false in one direction. A world that registers no focus is watched
+  from its camera (D098), narrowed to exactly that case so no project that works
+  today changes.
+
+  **Learned: read the logs the gate leaves behind.** `luaug.log` in the
+  repository root held four `Jolt reported a broken assumption` lines beside
+  200 ms frames, in a stage that was passing. `Update`'s return value was
+  discarded, so the only report was Jolt's own assert -- which names no error
+  and does not exist in a build with asserts off. Reading it turned "an error
+  occurred" into "the manifold cache is full", and that named the cause: the
+  hot-reload fixture creates five hundred `Part`s and positions them from a
+  `Heartbeat`, so until the first one ran all five hundred were stacked at the
+  origin. Its own comment had claimed "each with a name, a colour and a
+  position" for as long as it had existed.
+
+  **Learned again, the hard way, at 45eb9451:** the deferred texture path landed
+  without waiting for its own decode jobs at teardown. A job writing into memory
+  `destroy` was freeing -- reproducing on a fast machine and never on a slow
+  one, during shutdown, where the stack points at nothing. `ThumbnailCache` had
+  been written with that from the start; the discipline arriving late one file
+  over is the reason it got a commit of its own rather than a quiet amend.
+
+  **Next:** two callers still read and decode on the frame thread and are named
+  in D118 -- `MeshLoader::sync`, left synchronous on purpose because a mesh
+  arriving late is collision arriving late, and `UiText::loadPendingImages`,
+  where the `ui-*.png` goldens depend on the timing. E9's steps 12, 14 and 15
+  are still the plan.
+
 - **2026-08-24 (session 23, Claude Opus): E7 and E8 built.** E7 in one pass, E8
   across the rest of the session with the human playing it as it was built --
   which is where five of E8's ten findings came from.
