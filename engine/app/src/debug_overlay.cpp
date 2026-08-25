@@ -1603,6 +1603,8 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
         return ContentKind::Audio;
     if (name == "Font")
         return ContentKind::Font;
+    if (name == "Material")
+        return ContentKind::Material;
     return ContentKind::Other;
 }
 
@@ -2937,6 +2939,7 @@ void buildDefaultLayout(ImGuiID dockspace)
         return icons::ContentTexture;
     case ContentKind::Audio:
     case ContentKind::Font:
+    case ContentKind::Material:
         // No drawing of their own yet, and the generic file is the honest
         // fallback rather than borrowing a mesh's or a texture's.
         return icons::ContentOther;
@@ -2983,6 +2986,8 @@ bool drawContentIcon(const IconAtlas* icons, const ContentEntry& entry, float si
         return "audio";
     case ContentKind::Font:
         return "font";
+    case ContentKind::Material:
+        return "material";
     case ContentKind::Chunk:
         return "chunk";
     case ContentKind::Other:

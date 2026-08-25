@@ -1,4 +1,5 @@
 #include <luaug/app/content_tree.h>
+#include <luaug/asset/material.h>
 #include <luaug/core/json.h>
 #include <luaug/platform/file.h>
 
@@ -83,6 +84,8 @@ ContentKind contentKindOf(std::string_view fileName) noexcept
         return ContentKind::Scene;
     if (endsWith(name, ".chunk.json"))
         return ContentKind::Chunk;
+    if (endsWith(name, asset::MaterialExtension))
+        return ContentKind::Material;
 
     static constexpr std::array<std::string_view, 4> kMeshes{".glb", ".gltf", ".fbx", ".obj"};
     for (const std::string_view extension : kMeshes) {
@@ -232,6 +235,8 @@ namespace {
         return kStampExtension;
     case ContentKind::Chunk:
         return ".chunk.json";
+    case ContentKind::Material:
+        return asset::MaterialExtension;
     case ContentKind::Folder:
     case ContentKind::Mesh:
     case ContentKind::Texture:

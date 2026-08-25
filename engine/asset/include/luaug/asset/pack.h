@@ -61,6 +61,11 @@ enum class AssetKind : u32
     // Anything the pipeline copies through untouched: a font file, a shader
     // blob, a catalog.
     Raw = 5,
+    // A compiled material: the parameter block plus the hashes of the textures
+    // it samples. Its own kind rather than `Raw` so that a mesh asking for a
+    // material and getting a font fails at the index (`content.h`), which is
+    // the whole reason this enum is in the table of contents.
+    Material = 6,
 };
 
 // Stable, lowercase, and written into the content manifest -- so it is a name

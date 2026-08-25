@@ -70,6 +70,8 @@ const char* assetKindName(AssetKind kind) noexcept
         return "chunk";
     case AssetKind::Raw:
         return "raw";
+    case AssetKind::Material:
+        return "material";
     case AssetKind::Unknown:
         break;
     }

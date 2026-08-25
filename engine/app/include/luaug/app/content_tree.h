@@ -48,6 +48,11 @@ enum class ContentKind
     // property name" -- a question nothing asked before.
     Audio,
     Font,
+    // A material file (`asset/material.h`): the parameter block a `MeshPart`
+    // may be pointed at. A kind of its own for the same reason `Audio` is --
+    // `MaterialContent`'s picker has to answer "which files may this property
+    // name", and "every `.json` in the project" is not that answer.
+    Material,
     Chunk,
     Other,
 };

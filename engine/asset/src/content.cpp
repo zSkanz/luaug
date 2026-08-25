@@ -31,6 +31,9 @@ using core::I18nArg;
     if (name == "raw") {
         return AssetKind::Raw;
     }
+    if (name == "material") {
+        return AssetKind::Material;
+    }
     return AssetKind::Unknown;
 }
 
