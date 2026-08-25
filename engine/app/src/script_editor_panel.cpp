@@ -231,7 +231,12 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
 {
     ImGuiIO& io = ImGui::GetIO();
     const bool shift = io.KeyShift;
-    const bool ctrl = io.KeyCtrl;
+    // **AltGr is Ctrl+Alt on Windows, and it is how a Brazilian, German or
+    // Polish keyboard types half its punctuation.** Reading it as a Ctrl chord
+    // makes AltGr+something silently mean Select All, Paste, Undo or Save --
+    // characters that refuse to type and edits nobody asked for. A real Ctrl
+    // shortcut never has Alt held, so this one condition is the whole fix.
+    const bool ctrl = io.KeyCtrl && !io.KeyAlt;
     ScriptDocument& doc = tab.document;
 
     if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true))
@@ -439,7 +444,6 @@ void drawDiagnostics(const OpenScript& tab, const PaneMetrics& m, ImDrawList* dr
     }
 }
 
-
 // --- Find, replace and go to ------------------------------------------------
 
 // Copies a `std::string` into an ImGui text field and back, which is the shape
@@ -503,8 +507,8 @@ void drawFindBar(OpenScript& tab, ScriptEditorCommands& out, std::size_t index)
         ImGui::SameLine();
         // The count, which is the one number a person actually reads off a find
         // bar -- "is it there at all" before "where".
-        const core::u32 total = tab.document.countMatches(
-            tab.findText, {.matchCase = tab.matchCase, .wholeWord = tab.wholeWord});
+        const core::u32 total =
+            tab.document.countMatches(tab.findText, {.matchCase = tab.matchCase, .wholeWord = tab.wholeWord});
         ImGui::TextDisabled("%u match%s", total, total == 1 ? "" : "es");
         ImGui::SameLine(ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Close").x -
                         ImGui::GetStyle().FramePadding.x * 2.0f);
@@ -572,10 +576,12 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, ScriptEditorCommands& out, 
     const ImGuiID id = ImGui::GetID("##surface");
     const ImRect bounds(origin, ImVec2(origin.x + extent.x, origin.y + extent.y));
     ImGui::ItemSize(extent);
-    if (!ImGui::ItemAdd(bounds, id)) {
-        ImGui::EndChild();
-        return;
-    }
+    // **`ItemAdd` answers false when the rectangle is clipped, and returning
+    // there would drop the active id** -- ImGui keeps an item active only while
+    // something re-submits its id each frame. The pane would lose the caret
+    // mid-scroll and the shell's own shortcuts would start firing on the keys
+    // being typed into it. Submitted either way; only the drawing is skipped.
+    const bool visible = ImGui::ItemAdd(bounds, id);
 
     ImGuiWindow* window = ImGui::GetCurrentWindow();
     const bool hovered = ImGui::ItemHoverable(bounds, id, 0);
@@ -644,6 +650,11 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, ScriptEditorCommands& out, 
     const auto last = std::min(lineCount - 1, first + static_cast<u32>(paneHeight / m.lineHeight) + 1u);
 
     ImDrawList* draw = ImGui::GetWindowDrawList();
+
+    if (!visible) {
+        ImGui::EndChild();
+        return;
+    }
 
     // The gutter's own ground, so the line numbers do not swim over the code
     // when it is scrolled sideways.

@@ -30,6 +30,8 @@ struct lua_State;
 
 namespace luaug::script {
 
+class Debugger;
+
 class ScriptRuntime
 {
 public:
@@ -184,6 +186,12 @@ public:
     [[nodiscard]] MethodCoverage methodCoverage() const noexcept;
 
     [[nodiscard]] lua_State* state() const noexcept;
+
+    // The debugger against this VM (ADR 0057). Always present and always
+    // installed; whether it does anything is what `LUAUG_SCRIPT_DEBUG` decides,
+    // and a caller never asks.
+    [[nodiscard]] Debugger& debugger() noexcept;
+    [[nodiscard]] const Debugger& debugger() const noexcept;
 
     // The DataModel `game` names. Invalid until `boot` runs; the host needs it
     // to find `Workspace`, which is the root `render::extract` reads from.

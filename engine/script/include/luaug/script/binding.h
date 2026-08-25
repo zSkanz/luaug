@@ -194,6 +194,8 @@ using MemberTable = std::vector<MemberEntry>;
 // `lua_State`, so it can reach this the same way every other binding does, and
 // the "exactly one game VM" limitation an earlier draft wrote down was a
 // property of that draft rather than of the VM.
+class Debugger;
+
 struct VmContext
 {
     scene::World* world = nullptr;
@@ -205,6 +207,9 @@ struct VmContext
     TaskScheduler* tasks = nullptr;
     ServiceState* services = nullptr;
     ModuleRegistry* modules = nullptr;
+    // Null in a build with no debugger, and in every profile that compiles it
+    // out. Every caller checks, which is what keeps `#ifdef` out of the hooks.
+    Debugger* debugger = nullptr;
 
     // Where `Instance.stamp` reads a prefab from (ADR 0051). Supplied by the
     // host, which knows where `content/` is; `script` is L5 and has no

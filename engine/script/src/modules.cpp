@@ -1,6 +1,7 @@
 #include "luaug/script/modules.h"
 
 #include "luaug/scene/world.h"
+#include "luaug/script/debugger.h"
 #include "luaug/script/instance_binding.h"
 #include "luaug/script/services.h"
 #include "luaug/script/signals.h"
@@ -131,7 +132,18 @@ namespace {
     }
 
     const int status = lua_resume(co, nullptr, 0);
-    if (status == LUA_YIELD || status == LUA_BREAK) {
+    // **A break is not a yield**, and saying so is the difference between a
+    // breakpoint inside a `ModuleScript` working and reporting a false error
+    // about a module that did nothing wrong. The thread is parked and the
+    // debugger holds the only reference to it; the require that started this
+    // fails, which is honest -- a module stopped in a debugger has no value to
+    // hand back yet.
+    if (status == LUA_BREAK) {
+        outError = "module stopped at a breakpoint";
+        lua_remove(L, rooted);
+        return false;
+    }
+    if (status == LUA_YIELD) {
         outError = "module yielded during evaluation";
         lua_remove(L, rooted);
         return false;
@@ -568,6 +580,14 @@ bool startScript(lua_State* L, core::InstanceId instance)
         lua_remove(L, rooted);
         return false;
     }
+
+    // **The chunk's own closure, remembered before it is consumed** (ADR 0057).
+    // `lua_breakpoint` needs a function, `luaG_breakpoint` recurses into every
+    // nested proto from it, and the resume below is what takes this one off the
+    // stack -- so a breakpoint bound any later would have to recompile to find a
+    // function, and would patch a `Proto` nothing is executing.
+    if (Debugger* debugger = context(L).debugger; debugger != nullptr)
+        debugger->bindChunk(L, co, chunkName, -1);
 
     // Deferred rather than resumed here, so every entry script's first
     // resumption happens inside a drain and in the order they were mounted.

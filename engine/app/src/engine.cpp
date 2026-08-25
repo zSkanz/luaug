@@ -1620,6 +1620,15 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             for (const OpenScript& tab : scripts.tabs())
                 reopen.push_back(Reopen{tab.chunk, tab.file, tab.title});
             const std::size_t wasActive = scripts.activeIndex();
+            // **What was selected, as a chunk name rather than as an id.** The
+            // Explorer selection is cleared by `onWorldChanged` and the instance
+            // it named is about to stop existing, so somebody who pressed Ctrl+S
+            // would come back to a tree with nothing highlighted -- which is
+            // what the human reported. A chunk name survives the reload.
+            std::string selectedChunk;
+            if (inspector.selection().valid()) {
+                selectedChunk = script::scriptChunkName(host->runtime().state(), inspector.selection());
+            }
 
             const ReloadReport reloaded = reloadWorld(host, worldOptions);
             if (reloaded.ok) {
@@ -1658,6 +1667,17 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 }
                 if (wasActive < scripts.count())
                     scripts.setActive(wasActive);
+
+                // And the selection, put back on whatever the new world calls
+                // by the same name.
+                if (!selectedChunk.empty()) {
+                    for (const core::InstanceId id : everything) {
+                        if (script::scriptChunkName(host->runtime().state(), id) != selectedChunk)
+                            continue;
+                        inspector.select(id);
+                        break;
+                    }
+                }
                 // Anything whose chunk is gone from the new world -- a file
                 // deleted between saves -- has no tab now, which is the honest
                 // outcome rather than a document nobody can save.

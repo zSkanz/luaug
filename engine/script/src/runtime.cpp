@@ -4,6 +4,7 @@
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
 #include "luaug/script/datatypes.h"
+#include "luaug/script/debugger.h"
 #include "luaug/script/input_events.h"
 #include "luaug/script/instance_binding.h"
 #include "luaug/script/modules.h"
@@ -147,6 +148,11 @@ struct ScriptRuntime::Impl
     // is never a documented no-op, which is the failure `DebugService` taught
     // us to design out (M2 Finding 15).
     ReloadState ownReload;
+
+    // Owned here for the same reason everything above it is: this is the object
+    // whose lifetime brackets the `lua_State`, and the debugger holds registry
+    // references that die with it.
+    Debugger debugger;
 };
 
 ScriptRuntime::ScriptRuntime(scene::World& world) : m_world(world), m_impl(std::make_unique<Impl>())
@@ -189,6 +195,11 @@ std::optional<core::EngineError> ScriptRuntime::boot(core::InstanceId adoptDataM
     // silently stops using its atom -- slower, still correct, and invisible.
     lua_callbacks(L)->userdata = &m_impl->context;
     lua_callbacks(L)->useratom = internAtom;
+
+    // Beside the other two, and before anything loads: the hooks are read by
+    // the VM at every `BREAK` instruction, so they have to be there before a
+    // chunk with one in it can run.
+    m_impl->debugger.install(L);
 
     // Interned through the atom table rather than through the VM, because these
     // are compared against an engine `NameAtom` and not against a Luau one.
@@ -540,6 +551,16 @@ u32 ScriptRuntime::deferredDepth() const noexcept
 core::InstanceId ScriptRuntime::dataModel() const noexcept
 {
     return m_impl->services.dataModel;
+}
+
+Debugger& ScriptRuntime::debugger() noexcept
+{
+    return m_impl->debugger;
+}
+
+const Debugger& ScriptRuntime::debugger() const noexcept
+{
+    return m_impl->debugger;
 }
 
 lua_State* ScriptRuntime::state() const noexcept
