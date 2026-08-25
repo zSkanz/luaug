@@ -209,6 +209,30 @@ private:
     // One weld, and everything it hangs from, resolved once. Returns the
     // driven part's new transform.
     void resolveWeld(core::InstanceId weldId, WeldComponent& weld);
+
+    // Every `Attachment` and `Bone`, given its world transform.
+    //
+    // **Interleaved with weld resolution rather than a pass after it**, and
+    // through the same memo recursion: a bone's world transform depends on its
+    // `MeshPart`'s own `CFrame`, which may itself be driven by a weld. Two
+    // separate passes would reintroduce exactly the one-frame lag
+    // `resolveWeld`'s recursion exists to prevent.
+    void resolveAttachments();
+
+    // Where a weld's end is: the part's own frame, or the attachment's world
+    // frame when one was named.
+    //
+    // One helper, so `resolveWeld` has ONE formula either way -- exactly as
+    // `c1` already gives it one formula for `Weld` and `WeldConstraint`.
+    // Invalid when the id is neither.
+    [[nodiscard]] bool anchorFrame(core::InstanceId id, core::CFrameD& out);
+
+    // One attachment, and whatever it depends on first.
+    void resolveAttachment(core::InstanceId id);
+
+    // The part an id IS or SITS ON: itself for a part, its parent for an
+    // attachment, invalid for anything else.
+    [[nodiscard]] core::InstanceId ownerOf(core::InstanceId id) const;
     void writeBack();
     void writeCharacters();
     void publishContacts();
@@ -250,6 +274,7 @@ private:
     // to C -- resolves each link once and in dependency order rather than in
     // whatever order the pool happens to hold them (R10).
     std::vector<core::InstanceId> m_resolvedWelds;
+    std::vector<core::InstanceId> m_resolvedAttachments;
     // The parts an active weld drives, rebuilt each tick before the bodies are
     // applied. A driven part is kinematic; a released one goes back to being
     // whatever `Anchored` says.

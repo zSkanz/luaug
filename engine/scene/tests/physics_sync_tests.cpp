@@ -748,3 +748,247 @@ TEST_CASE("a hull too degenerate to be one falls back to the box")
     REQUIRE(mirror.backend.created.size() == 1);
     CHECK(mirror.backend.created[0].desc.shape.type == physics::ShapeType::Box);
 }
+
+// --- Attachment and Bone -----------------------------------------------------
+
+namespace {
+
+// A `SkeletonHost` that answers about one rig, so the mirror's bone path can be
+// exercised without a renderer, a mesh file or a GPU.
+class FakeSkeleton final : public SkeletonHost
+{
+public:
+    [[nodiscard]] u32 jointCount(core::InstanceId) const override { return 2; }
+
+    [[nodiscard]] i32 findJoint(core::InstanceId, std::string_view name) const override
+    {
+        ++lookups;
+        if (name == "Root")
+            return 0;
+        if (name == "Hand")
+            return 1;
+        return -1;
+    }
+
+    [[nodiscard]] i32 jointParent(core::InstanceId, u32 joint) const override { return joint == 0 ? -1 : 0; }
+
+    [[nodiscard]] std::string_view jointName(core::InstanceId, u32 joint) const override
+    {
+        return joint == 0 ? "Root" : "Hand";
+    }
+
+    [[nodiscard]] bool jointModel(core::InstanceId, u32 joint, core::CFrameD& out) const override
+    {
+        if (joint >= 2)
+            return false;
+        // The hand is two metres up the mesh's own Y, the root at its origin.
+        out = core::CFrameD{};
+        if (joint == 1)
+            out.position = core::DVec3{0.0, 2.0, 0.0};
+        return true;
+    }
+
+    void setJointOverride(core::InstanceId, u32, const core::CFrameD&) override {}
+    void clearJointOverrides(core::InstanceId) override {}
+    void commitOverrides() override { ++commits; }
+
+    mutable int lookups = 0;
+    int commits = 0;
+};
+
+} // namespace
+
+TEST_CASE("an attachment follows the part it is on")
+{
+    Mirror mirror;
+    const core::InstanceId part = mirror.part("Anchor", core::DVec3{10.0, 0.0, 0.0});
+
+    const core::InstanceId socket = mirror.fixture.world.create(mirror.fixture.schema.attachmentClass);
+    REQUIRE(mirror.fixture.world.setParent(socket, part) == std::nullopt);
+    mirror.fixture.world.attachments().find(socket)->cframe.position = core::DVec3{0.0, 1.0, 0.0};
+
+    mirror.step();
+
+    const AttachmentComponent* resolved = mirror.fixture.world.attachments().find(socket);
+    REQUIRE(resolved != nullptr);
+    CHECK(resolved->worldCFrame.position.x == doctest::Approx(10.0));
+    CHECK(resolved->worldCFrame.position.y == doctest::Approx(1.0));
+
+    // And it follows: move the part, step, and the socket is where the part put
+    // it rather than where it was.
+    mirror.transform(part).cframe.position = core::DVec3{20.0, 5.0, 0.0};
+    mirror.step();
+    CHECK(mirror.fixture.world.attachments().find(socket)->worldCFrame.position.x == doctest::Approx(20.0));
+    CHECK(mirror.fixture.world.attachments().find(socket)->worldCFrame.position.y == doctest::Approx(6.0));
+}
+
+TEST_CASE("an attachment on a WELDED part is not one frame behind it")
+{
+    // The reason attachment resolution is interleaved with weld resolution
+    // through the same memo rather than run as a pass after it.
+    Mirror mirror;
+    const core::InstanceId anchor = mirror.part("Anchor", core::DVec3{0.0, 0.0, 0.0});
+    const core::InstanceId driven = mirror.part("Driven", core::DVec3{0.0, 0.0, 0.0});
+
+    const core::InstanceId weld = mirror.fixture.world.create(mirror.fixture.schema.weldClass);
+    REQUIRE(mirror.fixture.world.setParent(weld, mirror.workspace) == std::nullopt);
+    WeldComponent& component = *mirror.fixture.world.welds().find(weld);
+    component.part0 = anchor;
+    component.part1 = driven;
+    component.c0.position = core::DVec3{5.0, 0.0, 0.0};
+
+    const core::InstanceId socket = mirror.fixture.world.create(mirror.fixture.schema.attachmentClass);
+    REQUIRE(mirror.fixture.world.setParent(socket, driven) == std::nullopt);
+
+    mirror.transform(anchor).cframe.position = core::DVec3{100.0, 0.0, 0.0};
+    mirror.step();
+
+    // The weld put the driven part at 105 this tick, and the socket is there --
+    // not at wherever the part was before the weld ran.
+    CHECK(mirror.transform(driven).cframe.position.x == doctest::Approx(105.0));
+    CHECK(mirror.fixture.world.attachments().find(socket)->worldCFrame.position.x == doctest::Approx(105.0));
+}
+
+TEST_CASE("a bone follows its joint, and an unknown one follows the part")
+{
+    Mirror mirror;
+    FakeSkeleton skeleton;
+    mirror.sync.setSkeleton(&skeleton);
+
+    const core::InstanceId character = mirror.part("Character", core::DVec3{0.0, 0.0, 50.0});
+    mirror.fixture.world.meshParts().add(character, MeshPartComponent{});
+
+    const core::InstanceId hand = mirror.fixture.world.create(mirror.fixture.schema.attachmentClass);
+    REQUIRE(mirror.fixture.world.setParent(hand, character) == std::nullopt);
+    mirror.fixture.world.attachments().find(hand)->jointName = mirror.fixture.world.atoms().intern("Hand");
+
+    const core::InstanceId nowhere = mirror.fixture.world.create(mirror.fixture.schema.attachmentClass);
+    REQUIRE(mirror.fixture.world.setParent(nowhere, character) == std::nullopt);
+    mirror.fixture.world.attachments().find(nowhere)->jointName = mirror.fixture.world.atoms().intern("Tail");
+
+    mirror.step();
+
+    // The hand joint is two up the mesh's own Y, and the mesh is at z = 50.
+    const AttachmentComponent* resolvedHand = mirror.fixture.world.attachments().find(hand);
+    CHECK(resolvedHand->jointIndex == 1);
+    CHECK(resolvedHand->worldCFrame.position.y == doctest::Approx(2.0));
+    CHECK(resolvedHand->worldCFrame.position.z == doctest::Approx(50.0));
+
+    // **A joint the rig does not have puts the bone on the character**, not at
+    // the world origin. The failure a renamed joint should produce is a sword in
+    // the wrong place, not a sword in another country.
+    const AttachmentComponent* resolvedNowhere = mirror.fixture.world.attachments().find(nowhere);
+    CHECK(resolvedNowhere->jointIndex == -1);
+    CHECK(resolvedNowhere->worldCFrame.position.z == doctest::Approx(50.0));
+    CHECK(resolvedNowhere->worldCFrame.position.y == doctest::Approx(0.0));
+}
+
+TEST_CASE("a bone resolves its joint name once and then holds the index")
+{
+    // A name is looked up against the rig; an index survives the rig reloading.
+    // Looking the name up every tick would be a string compare per bone per
+    // frame for an answer that does not change.
+    Mirror mirror;
+    FakeSkeleton skeleton;
+    mirror.sync.setSkeleton(&skeleton);
+
+    const core::InstanceId character = mirror.part("Character");
+    mirror.fixture.world.meshParts().add(character, MeshPartComponent{});
+    const core::InstanceId hand = mirror.fixture.world.create(mirror.fixture.schema.attachmentClass);
+    REQUIRE(mirror.fixture.world.setParent(hand, character) == std::nullopt);
+    mirror.fixture.world.attachments().find(hand)->jointName = mirror.fixture.world.atoms().intern("Hand");
+
+    mirror.step();
+    const int afterFirst = skeleton.lookups;
+    CHECK(afterFirst == 1);
+    mirror.step();
+    mirror.step();
+    CHECK(skeleton.lookups == afterFirst);
+}
+
+TEST_CASE("the pose is committed once per tick, after everything that moves a joint")
+{
+    Mirror mirror;
+    FakeSkeleton skeleton;
+    mirror.sync.setSkeleton(&skeleton);
+
+    mirror.step();
+    CHECK(skeleton.commits == 1);
+    mirror.step();
+    CHECK(skeleton.commits == 2);
+}
+
+TEST_CASE("a sword welded to the hand of a welded character settles in one tick")
+{
+    // **The chain the anchor path exists for**, and the one that a naive
+    // implementation gets one frame wrong: the sword is welded to a bone, the
+    // bone is on a character, and the character is itself welded to a moving
+    // platform. All three have to settle in the tick the platform moved, not
+    // one behind it.
+    //
+    // The weld pool is walked in creation order, and the SWORD's weld is
+    // created first here on purpose -- so it is reached before the character's
+    // and has to pull that one forward itself.
+    Mirror mirror;
+    FakeSkeleton skeleton;
+    mirror.sync.setSkeleton(&skeleton);
+
+    const core::InstanceId platform = mirror.part("Platform");
+    const core::InstanceId character = mirror.part("Character");
+    mirror.fixture.world.meshParts().add(character, MeshPartComponent{});
+    const core::InstanceId sword = mirror.part("Sword");
+
+    const core::InstanceId hand = mirror.fixture.world.create(mirror.fixture.schema.attachmentClass);
+    REQUIRE(mirror.fixture.world.setParent(hand, character) == std::nullopt);
+    mirror.fixture.world.attachments().find(hand)->jointName = mirror.fixture.world.atoms().intern("Hand");
+
+    const core::InstanceId swordWeld = mirror.fixture.world.create(mirror.fixture.schema.weldClass);
+    REQUIRE(mirror.fixture.world.setParent(swordWeld, mirror.workspace) == std::nullopt);
+    WeldComponent& toHand = *mirror.fixture.world.welds().find(swordWeld);
+    toHand.part0 = hand;
+    toHand.part1 = sword;
+
+    const core::InstanceId characterWeld = mirror.fixture.world.create(mirror.fixture.schema.weldClass);
+    REQUIRE(mirror.fixture.world.setParent(characterWeld, mirror.workspace) == std::nullopt);
+    WeldComponent& toPlatform = *mirror.fixture.world.welds().find(characterWeld);
+    toPlatform.part0 = platform;
+    toPlatform.part1 = character;
+
+    mirror.transform(platform).cframe.position = core::DVec3{300.0, 0.0, 0.0};
+    mirror.step();
+
+    // One tick: the platform is at 300, the character went with it, and the
+    // sword is at the character's hand two metres up.
+    CHECK(mirror.transform(character).cframe.position.x == doctest::Approx(300.0));
+    CHECK(mirror.transform(sword).cframe.position.x == doctest::Approx(300.0));
+    CHECK(mirror.transform(sword).cframe.position.y == doctest::Approx(2.0));
+}
+
+TEST_CASE("a weld may be anchored to an attachment, and driven only by a part")
+{
+    // What welds a sword to a hand: the attachment is a `Bone`, the bone follows
+    // a joint, and the sword follows the bone.
+    Mirror mirror;
+    FakeSkeleton skeleton;
+    mirror.sync.setSkeleton(&skeleton);
+
+    const core::InstanceId character = mirror.part("Character", core::DVec3{7.0, 0.0, 0.0});
+    mirror.fixture.world.meshParts().add(character, MeshPartComponent{});
+    const core::InstanceId hand = mirror.fixture.world.create(mirror.fixture.schema.attachmentClass);
+    REQUIRE(mirror.fixture.world.setParent(hand, character) == std::nullopt);
+    mirror.fixture.world.attachments().find(hand)->jointName = mirror.fixture.world.atoms().intern("Hand");
+
+    const core::InstanceId sword = mirror.part("Sword");
+    const core::InstanceId weld = mirror.fixture.world.create(mirror.fixture.schema.weldClass);
+    REQUIRE(mirror.fixture.world.setParent(weld, mirror.workspace) == std::nullopt);
+    WeldComponent& component = *mirror.fixture.world.welds().find(weld);
+    component.part0 = hand;
+    component.part1 = sword;
+
+    mirror.step();
+
+    // The hand joint is two up the mesh's Y and the character is at x = 7, so
+    // that is where the sword is.
+    CHECK(mirror.transform(sword).cframe.position.x == doctest::Approx(7.0));
+    CHECK(mirror.transform(sword).cframe.position.y == doctest::Approx(2.0));
+}

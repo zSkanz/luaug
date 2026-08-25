@@ -86,6 +86,13 @@ bool setMeshPartMeshSize(scene::World& world, core::InstanceId id, const scene::
 void attachMeshPartComponents(scene::World& world, core::InstanceId id);
 void detachMeshPartComponents(scene::World& world, core::InstanceId id);
 
+// Bone
+scene::Value getBoneJointName(const scene::World& world, core::InstanceId id);
+bool setBoneJointName(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getBoneJointIndex(const scene::World& world, core::InstanceId id);
+scene::Value getBoneTransform(const scene::World& world, core::InstanceId id);
+bool setBoneTransform(scene::World& world, core::InstanceId id, const scene::Value& value);
+
 // Camera
 scene::Value getCameraCFrame(const scene::World& world, core::InstanceId id);
 bool setCameraCFrame(scene::World& world, core::InstanceId id, const scene::Value& value);

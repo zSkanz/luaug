@@ -44,6 +44,14 @@ struct Hierarchy
     ClassId basePartClass = InvalidClass;
     ClassId partClass = InvalidClass;
     ClassId meshPartClass = InvalidClass;
+    // `Attachment` and `Bone` share one component, so the fixture registers one
+    // class and the bone half is a `JointName` written into it -- which is what
+    // the real hierarchy does too.
+    ClassId attachmentClass = InvalidClass;
+    // Welds were only ever exercised through the conformance specs. The mirror
+    // now has behaviour worth asserting in C++ -- an attachment as an anchor,
+    // and the resolution order that keeps it from lagging a frame.
+    ClassId weldClass = InvalidClass;
     ClassId modelClass = InvalidClass;
 
     core::NameAtom nameProperty;

@@ -179,6 +179,56 @@ bool setMeshPartMeshSize(scene::World& world, core::InstanceId id, const Value& 
     return true;
 }
 
+// --- Bone ---------------------------------------------------------------------
+//
+// **No storage hook.** `Bone` inherits `Attachment`'s component, and declaring
+// one here would attach a second -- `World::create` calls every hook down the
+// ancestry (the same reason `Script` does not declare one beside `BaseScript`'s).
+
+Value getBoneJointName(const scene::World& world, core::InstanceId id)
+{
+    const scene::AttachmentComponent* bone = world.attachments().find(id);
+    if (bone == nullptr)
+        return Value{};
+    return std::string(world.atoms().text(bone->jointName));
+}
+
+bool setBoneJointName(scene::World& world, core::InstanceId id, const Value& value)
+{
+    const auto* text = std::get_if<std::string>(&value);
+    scene::AttachmentComponent* bone = world.attachments().find(id);
+    if (text == nullptr || bone == nullptr)
+        return false;
+    bone->jointName = world.atoms().intern(*text);
+    // Re-resolved by the tick rather than here: this module cannot see the
+    // skeleton library, and a name written before a mesh has loaded has nothing
+    // to resolve against anyway.
+    bone->jointIndex = -1;
+    return true;
+}
+
+Value getBoneJointIndex(const scene::World& world, core::InstanceId id)
+{
+    const scene::AttachmentComponent* bone = world.attachments().find(id);
+    return bone == nullptr ? Value{} : Value{static_cast<f64>(bone->jointIndex)};
+}
+
+Value getBoneTransform(const scene::World& world, core::InstanceId id)
+{
+    const scene::AttachmentComponent* bone = world.attachments().find(id);
+    return bone == nullptr ? Value{} : Value{bone->transform};
+}
+
+bool setBoneTransform(scene::World& world, core::InstanceId id, const Value& value)
+{
+    const auto* frame = std::get_if<core::CFrameD>(&value);
+    scene::AttachmentComponent* bone = world.attachments().find(id);
+    if (frame == nullptr || bone == nullptr)
+        return false;
+    bone->transform = *frame;
+    return true;
+}
+
 void attachMeshPartComponents(scene::World& world, core::InstanceId id)
 {
     world.meshParts().add(id, scene::MeshPartComponent{});

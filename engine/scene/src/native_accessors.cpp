@@ -252,6 +252,40 @@ void detachWorkspaceComponents(World& world, core::InstanceId id)
     world.workspaces().remove(id);
 }
 
+// --- Attachment ---------------------------------------------------------------
+
+void attachAttachmentComponents(World& world, core::InstanceId id)
+{
+    world.attachments().add(id, AttachmentComponent{});
+}
+
+void detachAttachmentComponents(World& world, core::InstanceId id)
+{
+    world.attachments().remove(id);
+}
+
+Value getAttachmentCFrame(const World& world, core::InstanceId id)
+{
+    const AttachmentComponent* attachment = world.attachments().find(id);
+    return attachment == nullptr ? Value{} : Value{attachment->cframe};
+}
+
+bool setAttachmentCFrame(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* frame = std::get_if<core::CFrameD>(&value);
+    AttachmentComponent* attachment = world.attachments().find(id);
+    if (frame == nullptr || attachment == nullptr)
+        return false;
+    attachment->cframe = *frame;
+    return true;
+}
+
+Value getAttachmentWorldCFrame(const World& world, core::InstanceId id)
+{
+    const AttachmentComponent* attachment = world.attachments().find(id);
+    return attachment == nullptr ? Value{} : Value{attachment->worldCFrame};
+}
+
 // --- Model ------------------------------------------------------------------
 
 Value getModelPrimaryPart(const World& world, core::InstanceId id)
@@ -908,14 +942,32 @@ Value getCharacterBodyState(const World& world, core::InstanceId id)
         return false;
     }
 
+    // **`Part0` may be an `Attachment`; `Part1` may not.** A weld MOVES its
+    // driven end, and an attachment has nothing of its own to move -- it is a
+    // place on a part. Naming one there would be a write that silently did
+    // nothing every tick.
+    if (part.valid()) {
+        const bool isPart = world.parts().find(part) != nullptr;
+        const bool isAttachment = world.attachments().find(part) != nullptr;
+        if (!isPart && !(isPart0 && isAttachment))
+            return false;
+    }
+
     const core::InstanceId part0 = isPart0 ? part : weld->part0;
     const core::InstanceId part1 = isPart0 ? weld->part1 : part;
 
+    // The cycle check walks PARTS, so an attachment stands in for the part it is
+    // on. Checking the attachment's own id instead would find no cycle ever --
+    // an attachment is never anybody's `Part1`, so the walk would stop at the
+    // first step and a genuine loop through a socket would be accepted.
+    const core::InstanceId anchor0 =
+        part0.valid() && world.parts().find(part0) == nullptr ? world.parentOf(part0) : part0;
+
     // A part welded to itself is the shortest cycle there is, and the one a
     // script writes by assigning the same variable twice.
-    if (part0.valid() && part0 == part1)
+    if (anchor0.valid() && anchor0 == part1)
         return false;
-    if (part0.valid() && part1.valid() && weldReaches(world, part0, part1, id))
+    if (anchor0.valid() && part1.valid() && weldReaches(world, anchor0, part1, id))
         return false;
 
     if (isPart0)

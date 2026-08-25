@@ -648,6 +648,75 @@ local Classes: { Schema.Class } = {
         } :: { Schema.Property },
     },
     {
+        Name = "Bone",
+        Extends = "Attachment",
+        Module = "render",
+        -- No `Storage`: it inherits `Attachment`'s. `World::create` calls every
+        -- hook down the ancestry, so declaring one here would attach a second
+        -- `AttachmentComponent` -- the same reason `Script` does not declare one
+        -- beside `BaseScript`'s.
+        Doc = "An attachment that follows a joint of the `MeshPart` it is parented to. Weld a sword to a "
+            .. "character's hand, hang a light off a lamp's swinging arm, or read where a foot is for a "
+            .. "footstep -- and it moves with the animation, because it IS the joint.\n\n"
+            .. "**Created on demand rather than one per joint.** A rig has tens of bones and a crowd has "
+            .. "thousands; instantiating every one would put them all in the world hash and the change queue "
+            .. "to answer a question about three of them. Make the ones you need.\n\nA "
+            .. "bone whose `JointName` the rig does not have follows the mesh part itself, which puts it on "
+            .. "the character rather than at the world origin -- the failure a renamed joint should produce "
+            .. "is a sword in the wrong place, not a sword in another country.",
+        Properties = {
+            {
+                Name = "JointName",
+                Type = "string",
+                Doc = "The joint in the parent `MeshPart`'s skeleton this follows, as the file names it.",
+            },
+            {
+                Name = "JointIndex",
+                Type = "number",
+                ReadOnly = true,
+                Default = "-1",
+                Doc = "Where that name resolved to, or -1 for a name the rig does not have. Re-resolved when "
+                    .. "the mesh reloads, so an index survives a file changing under it.",
+            },
+            {
+                Name = "Transform",
+                Type = "CFrame",
+                Doc = "An offset applied on top of the animated pose, in the joint's own space.\n\n"
+                    .. "This is the writable half of procedural animation: bend an arm towards a target, turn "
+                    .. "a head to look at something, kick a gun up on a shot. It composes with whatever the "
+                    .. "clip is doing rather than replacing it, and the identity is a bone nobody drives.",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "Attachment",
+        Extends = "Instance",
+        Module = "scene",
+        Storage = "Attachment",
+        Doc = "A named place on a part: a socket to weld something to, a joint frame for a constraint, a "
+            .. "muzzle to spawn something at. It has no body and is not simulated -- what it costs is one "
+            .. "transform per tick, and a world with none pays nothing.\n\nIt is not on "
+            .. "`PVInstance`, deliberately: an attachment is a thing you make and name, and giving every part "
+            .. 'an invisible one would make "where is this attached" ambiguous in exactly the cases it '
+            .. "needs to be clear.",
+        Properties = {
+            {
+                Name = "CFrame",
+                Type = "CFrame",
+                Doc = "Where this sits relative to the part it is parented to.",
+            },
+            {
+                Name = "WorldCFrame",
+                Type = "CFrame",
+                ReadOnly = true,
+                Doc = "Where that lands in the world, recomputed each tick.\n\nRead-only "
+                    .. "because a world transform that could be assigned would be a second source of truth "
+                    .. "about the same place: the part moves, and whatever was written here would be either "
+                    .. "overwritten or wrong.",
+            },
+        },
+    },
+    {
         Name = "Weld",
         Extends = "Instance",
         Module = "scene",
@@ -662,15 +731,21 @@ local Classes: { Schema.Class } = {
         Properties = {
             {
                 Name = "Part0",
-                Type = "BasePart?",
-                Doc = "The anchor: the part the other one follows. It may itself be simulated, anchored, or a "
-                    .. "CharacterBody -- whatever moves it, Part1 goes with it.",
+                Type = "Instance?",
+                Doc = "The anchor: the thing the other one follows. It may itself be simulated, anchored, or a "
+                    .. "CharacterBody -- whatever moves it, Part1 goes with it.\n\n"
+                    .. "**A `BasePart` or an `Attachment`.** Naming an attachment is what welds a sword to a "
+                    .. "character's hand: the attachment is a `Bone`, the bone follows a joint, and the sword "
+                    .. "follows the bone. Anything else is refused.",
             },
             {
                 Name = "Part1",
                 Type = "BasePart?",
                 Doc = "The driven part. While the weld is active it is moved by the weld and by nothing else: "
-                    .. "gravity does not reach it, and writing its CFrame is overwritten at the next tick.",
+                    .. "gravity does not reach it, and writing its CFrame is overwritten at the next tick.\n\n"
+                    .. "**A part, never an attachment**, unlike `Part0`: a weld MOVES its driven end, and an "
+                    .. "attachment has nothing of its own to move -- it is a place ON a part. Naming one here "
+                    .. "would be a write that silently did nothing every tick.",
             },
             {
                 Name = "C0",

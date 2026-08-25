@@ -471,12 +471,103 @@ bool PhysicsSync::isDriven(core::InstanceId id) const
 void PhysicsSync::resolveWelds()
 {
     m_resolvedWelds.clear();
+    m_resolvedAttachments.clear();
     m_drivenParts.clear();
 
     // Slot order, which is a pure function of the operation sequence. It decides
     // nothing about the result, because dependency order does -- what it decides
     // is that two runs walk the same list.
     m_scene.welds().forEach([&](core::InstanceId weldId, WeldComponent& weld) { resolveWeld(weldId, weld); });
+}
+
+// The part an id is or sits on: itself for a part, its parent for an attachment,
+// invalid for anything else.
+core::InstanceId PhysicsSync::ownerOf(core::InstanceId id) const
+{
+    if (m_scene.parts().find(id) != nullptr)
+        return id;
+    if (m_scene.attachments().find(id) != nullptr)
+        return m_scene.parentOf(id);
+    return {};
+}
+
+bool PhysicsSync::anchorFrame(core::InstanceId id, core::CFrameD& out)
+{
+    if (const PartComponent* part = m_scene.parts().find(id); part != nullptr) {
+        out = part->cframe;
+        return true;
+    }
+    if (const AttachmentComponent* attachment = m_scene.attachments().find(id); attachment != nullptr) {
+        // Resolved first, so an attachment used as an anchor is where it ends up
+        // this tick rather than where it was last one -- the same rule the weld
+        // chain follows.
+        resolveAttachment(id);
+        out = attachment->worldCFrame;
+        return true;
+    }
+    return false;
+}
+
+void PhysicsSync::resolveAttachment(core::InstanceId id)
+{
+    if (std::find(m_resolvedAttachments.begin(), m_resolvedAttachments.end(), id) != m_resolvedAttachments.end())
+        return;
+    m_resolvedAttachments.push_back(id);
+
+    AttachmentComponent* attachment = m_scene.attachments().find(id);
+    if (attachment == nullptr)
+        return;
+
+    const core::InstanceId owner = m_scene.parentOf(id);
+    const PartComponent* part = m_scene.parts().find(owner);
+    if (part == nullptr) {
+        // Parented to something that is not a part -- while a script is still
+        // assigning, or by mistake. Its own frame is the honest answer: it is
+        // where it says it is, relative to nothing.
+        attachment->worldCFrame = attachment->cframe;
+        return;
+    }
+
+    // No weld settle here, and that is checked rather than assumed. `step` runs
+    // `resolveWelds()` before `resolveAttachments()`, so every weld is already
+    // done by the time this walk starts -- and the one path that reaches an
+    // attachment EARLY, a weld anchored to one, settles the owner itself
+    // through `ownerOf` before it asks. A settle in this function changed no
+    // observable behaviour, so it is not here.
+    core::CFrameD base = part->cframe;
+    // A `Bone` follows a JOINT of the part rather than the part itself. The
+    // joint's transform is in the mesh's own space, so composing it with the
+    // part's frame is what puts it in the world -- the same composition anything
+    // parented to a part uses.
+    //
+    // **A joint the rig does not have leaves `base` as the part's own frame.**
+    // That puts a sword on the character rather than at the world origin, which
+    // is the failure a renamed joint should produce.
+    if (attachment->jointName.id != 0 && m_skeleton != nullptr) {
+        if (attachment->jointIndex < 0) {
+            attachment->jointIndex = m_skeleton->findJoint(owner, m_scene.atoms().text(attachment->jointName));
+        }
+        // The guard is for the CAST, not for the host: `jointModel` refuses an
+        // index it does not have, so a test cannot tell this apart from asking
+        // it with `static_cast<u32>(-1)`. Handing a negative index to a u32
+        // parameter and relying on the callee to notice is not a contract worth
+        // having.
+        if (attachment->jointIndex >= 0) {
+            core::CFrameD joint;
+            if (m_skeleton->jointModel(owner, static_cast<u32>(attachment->jointIndex), joint))
+                base = part->cframe * joint * attachment->transform;
+        }
+    }
+
+    attachment->worldCFrame = base * attachment->cframe;
+}
+
+void PhysicsSync::resolveAttachments()
+{
+    // Pool order, which is creation order. It decides nothing about the RESULT
+    // -- the recursion above settles dependencies whatever order they are
+    // reached in -- but it decides that two runs walk the same list (R10).
+    m_scene.attachments().forEach([&](core::InstanceId id, AttachmentComponent&) { resolveAttachment(id); });
 }
 
 void PhysicsSync::resolveWeld(core::InstanceId weldId, WeldComponent& weld)
@@ -488,27 +579,37 @@ void PhysicsSync::resolveWeld(core::InstanceId weldId, WeldComponent& weld)
     if (!weld.enabled || !m_scene.alive(weld.part0) || !m_scene.alive(weld.part1))
         return;
 
-    PartComponent* anchor = m_scene.parts().find(weld.part0);
+    // **The DRIVEN end must be a part.** A weld moves something, and an
+    // attachment has nothing of its own to move -- it is a place on a part.
     PartComponent* driven = m_scene.parts().find(weld.part1);
-    if (anchor == nullptr || driven == nullptr)
+    if (driven == nullptr)
         return;
 
     // The anchor may itself be driven by another weld. Resolve that one first,
     // so a chain settles in one pass instead of lagging one link per tick.
+    //
+    // An anchor that is an ATTACHMENT resolves through the part it is on, which
+    // is what makes "weld a sword to the hand of a character that is itself
+    // welded to a platform" settle in the same single pass.
+    const core::InstanceId anchorPart = ownerOf(weld.part0);
     m_scene.welds().forEach([&](core::InstanceId otherId, WeldComponent& other) {
-        if (otherId != weldId && other.enabled && other.part1 == weld.part0)
+        if (otherId != weldId && other.enabled && other.part1 == anchorPart)
             resolveWeld(otherId, other);
     });
+
+    core::CFrameD anchorFrameValue;
+    if (!anchorFrame(weld.part0, anchorFrameValue))
+        return;
 
     // A constraint reads the relationship off the world the first time it holds;
     // a weld was told it. `C1` is what carries it either way, so the resolver
     // has one formula.
     if (weld.captures && !weld.captured) {
-        weld.c1 = core::inverse(driven->cframe) * (anchor->cframe * weld.c0);
+        weld.c1 = core::inverse(driven->cframe) * (anchorFrameValue * weld.c0);
         weld.captured = true;
     }
 
-    driven->cframe = (anchor->cframe * weld.c0) * core::inverse(weld.c1);
+    driven->cframe = (anchorFrameValue * weld.c0) * core::inverse(weld.c1);
     m_drivenParts.push_back(weld.part1);
 }
 
@@ -741,6 +842,7 @@ void PhysicsSync::step(f64 fixedDt)
     // After the writeback, so a driven part follows where its anchor ENDED UP
     // this tick rather than where it was at the start of it.
     resolveWelds();
+    resolveAttachments();
     // And the pose is committed after everything that could have moved a joint,
     // because `commitOverrides` re-runs the forward pass and anything written
     // afterwards would be a frame behind. Nothing sets an override yet; this is

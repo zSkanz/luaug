@@ -702,12 +702,39 @@ declare extern type MeshPart extends BasePart with
     MeshSize: vector
 end
 
+declare extern type Attachment extends Instance with
+    --- Where this sits relative to the part it is parented to.
+    CFrame: CFrame
+    --- Where that lands in the world, recomputed each tick. Read-only because a world transform that
+    --- could be assigned would be a second source of truth about the same place: the part moves, and
+    --- whatever was written here would be either overwritten or wrong.
+    read WorldCFrame: CFrame
+end
+
+declare extern type Bone extends Attachment with
+    --- The joint in the parent `MeshPart`'s skeleton this follows, as the file names it.
+    JointName: string
+    --- Where that name resolved to, or -1 for a name the rig does not have. Re-resolved when the mesh
+    --- reloads, so an index survives a file changing under it.
+    read JointIndex: number
+    --- An offset applied on top of the animated pose, in the joint's own space. This is the writable
+    --- half of procedural animation: bend an arm towards a target, turn a head to look at something,
+    --- kick a gun up on a shot. It composes with whatever the clip is doing rather than replacing it,
+    --- and the identity is a bone nobody drives.
+    Transform: CFrame
+end
+
 declare extern type Weld extends Instance with
-    --- The anchor: the part the other one follows. It may itself be simulated, anchored, or a
-    --- CharacterBody -- whatever moves it, Part1 goes with it.
-    Part0: BasePart?
+    --- The anchor: the thing the other one follows. It may itself be simulated, anchored, or a
+    --- CharacterBody -- whatever moves it, Part1 goes with it. **A `BasePart` or an `Attachment`.**
+    --- Naming an attachment is what welds a sword to a character's hand: the attachment is a `Bone`,
+    --- the bone follows a joint, and the sword follows the bone. Anything else is refused.
+    Part0: Instance?
     --- The driven part. While the weld is active it is moved by the weld and by nothing else: gravity
-    --- does not reach it, and writing its CFrame is overwritten at the next tick.
+    --- does not reach it, and writing its CFrame is overwritten at the next tick. **A part, never an
+    --- attachment**, unlike `Part0`: a weld MOVES its driven end, and an attachment has nothing of its
+    --- own to move -- it is a place ON a part. Naming one here would be a write that silently did
+    --- nothing every tick.
     Part1: BasePart?
     --- The attachment on Part0. The weld holds `Part0.CFrame * C0` equal to `Part1.CFrame * C1`, which
     --- is the one sentence that says where both offsets go.
@@ -1946,6 +1973,8 @@ declare Instance: {
         & (("ModuleScript") -> ModuleScript)
         & (("Part") -> Part)
         & (("MeshPart") -> MeshPart)
+        & (("Attachment") -> Attachment)
+        & (("Bone") -> Bone)
         & (("Weld") -> Weld)
         & (("WeldConstraint") -> WeldConstraint)
         & (("CharacterBody") -> CharacterBody)

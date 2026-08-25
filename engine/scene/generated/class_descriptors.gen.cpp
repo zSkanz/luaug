@@ -682,6 +682,43 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     partDesc.properties = partProperties;
     classes.registerClass(partDesc);
 
+    // --- Attachment ---
+    static std::array<PropertyDesc, 2> attachmentProperties;
+    attachmentProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("CFrame"),
+            .type = ValueType::CFrame,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Where this sits relative to the part it is parented to.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_cframe"),
+            .get = native::getAttachmentCFrame,
+            .set = native::setAttachmentCFrame,
+        },
+        PropertyDesc{
+            .name = atoms.intern("WorldCFrame"),
+            .type = ValueType::CFrame,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = true,
+            .inert = false,
+            .doc = "Where that lands in the world, recomputed each tick.\012\012Read-only because a world transform that could be assigned would be a second source of truth about the same place: the part moves, and whatever was written here would be either overwritten or wrong.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_cframe"),
+            .get = native::getAttachmentWorldCFrame,
+            .set = nullptr,
+        },
+    }};
+    ClassDescriptor attachmentDesc;
+    attachmentDesc.name = atoms.intern("Attachment");
+    attachmentDesc.super = instanceClass;
+    attachmentDesc.flags = ClassFlags::None;
+    attachmentDesc.defaultName = atoms.intern("Attachment");
+    attachmentDesc.doc = "A named place on a part: a socket to weld something to, a joint frame for a constraint, a muzzle to spawn something at. It has no body and is not simulated -- what it costs is one transform per tick, and a world with none pays nothing.\012\012It is not on `PVInstance`, deliberately: an attachment is a thing you make and name, and giving every part an invisible one would make \"where is this attached\" ambiguous in exactly the cases it needs to be clear.";
+    attachmentDesc.properties = attachmentProperties;
+    attachmentDesc.attachComponents = native::attachAttachmentComponents;
+    attachmentDesc.detachComponents = native::detachAttachmentComponents;
+    classes.registerClass(attachmentDesc);
+
     // --- Weld ---
     static std::array<PropertyDesc, 5> weldProperties;
     weldProperties = {{
@@ -691,7 +728,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .doc = "The anchor: the part the other one follows. It may itself be simulated, anchored, or a CharacterBody -- whatever moves it, Part1 goes with it.",
+            .doc = "The anchor: the thing the other one follows. It may itself be simulated, anchored, or a CharacterBody -- whatever moves it, Part1 goes with it.\012\012**A `BasePart` or an `Attachment`.** Naming an attachment is what welds a sword to a character's hand: the attachment is a `Bone`, the bone follows a joint, and the sword follows the bone. Anything else is refused.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
             .get = native::getWeldPart0,
             .set = native::setWeldPart0,
@@ -702,7 +739,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .doc = "The driven part. While the weld is active it is moved by the weld and by nothing else: gravity does not reach it, and writing its CFrame is overwritten at the next tick.",
+            .doc = "The driven part. While the weld is active it is moved by the weld and by nothing else: gravity does not reach it, and writing its CFrame is overwritten at the next tick.\012\012**A part, never an attachment**, unlike `Part0`: a weld MOVES its driven end, and an attachment has nothing of its own to move -- it is a place ON a part. Naming one here would be a write that silently did nothing every tick.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
             .get = native::getWeldPart1,
             .set = native::setWeldPart1,

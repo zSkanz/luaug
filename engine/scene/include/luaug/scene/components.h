@@ -197,6 +197,45 @@ struct CharacterBodyComponent
 // joins bodies, so a constraint could never reach a character. The driven part
 // stops being independently simulated and follows its anchor; the solver is not
 // involved.
+// `Attachment` and `Bone`, in one pool.
+//
+// **One component for two classes**, exactly as one `WeldComponent` serves
+// `Weld` and `WeldConstraint` -- and for the same reason: two pools would need a
+// defined resolution order relative to each other, which is a determinism
+// problem invented for nothing.
+//
+// An attachment is a named place ON something: on a part, for a socket a weld or
+// a constraint can hold; on a mesh part's joint, for a sword in a hand. It has
+// no body, is not simulated, and costs one entry in a `forEach` that a world
+// with none never runs.
+struct AttachmentComponent
+{
+    // Where it sits relative to whatever it is parented to. Authored.
+    core::CFrameD cframe;
+
+    // Where that lands in the world. **Derived, recomputed every tick**, and
+    // never written by a script: a world transform that could be assigned would
+    // be a second source of truth about the same place.
+    core::CFrameD worldCFrame;
+
+    // `Bone` only: the joint in the parent `MeshPart`'s skeleton this follows.
+    // Empty on a plain `Attachment`, which follows its parent part instead.
+    core::NameAtom jointName;
+
+    // Where that name resolved to, or -1. Derived, and re-resolved when the rig
+    // reloads -- an index survives a file change where a pointer would not.
+    //
+    // **-1 falls back to the parent part's own transform**, not to the origin. A
+    // bone whose joint an artist renamed puts a sword at the character's feet if
+    // it resolves to zero and on the character if it resolves to nothing.
+    i32 jointIndex = -1;
+
+    // `Bone` only: a local-space offset applied on TOP of the animated pose.
+    // This is the writable half of procedural animation -- inverse kinematics, a
+    // look-at, a recoil -- and it is the identity for a bone nobody drives.
+    core::CFrameD transform;
+};
+
 struct WeldComponent
 {
     // The anchor and the driven part. Either may be invalid while a script is

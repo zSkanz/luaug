@@ -22,6 +22,24 @@
       "Events": []
     },
     {
+      "Name": "Attachment",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "CFrame",
+          "Type": "CFrame"
+        },
+        {
+          "Name": "WorldCFrame",
+          "Type": "CFrame",
+          "ReadOnly": true
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "AudioGroup",
       "Extends": "Instance",
       "Tags": [],
@@ -188,6 +206,29 @@
           "Name": "Source",
           "Type": "string",
           "Default": "\"\""
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "Bone",
+      "Extends": "Attachment",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "JointIndex",
+          "Type": "number",
+          "ReadOnly": true,
+          "Default": "-1"
+        },
+        {
+          "Name": "JointName",
+          "Type": "string"
+        },
+        {
+          "Name": "Transform",
+          "Type": "CFrame"
         }
       ],
       "Methods": [],
@@ -2132,7 +2173,7 @@
         },
         {
           "Name": "Part0",
-          "Type": "BasePart?"
+          "Type": "Instance?"
         },
         {
           "Name": "Part1",

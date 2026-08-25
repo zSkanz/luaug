@@ -147,6 +147,13 @@ void detachPartComponents(World& world, core::InstanceId id);
 Value getPartShape(const World& world, core::InstanceId id);
 bool setPartShape(World& world, core::InstanceId id, const Value& value);
 
+// Attachment
+Value getAttachmentCFrame(const World& world, core::InstanceId id);
+bool setAttachmentCFrame(World& world, core::InstanceId id, const Value& value);
+Value getAttachmentWorldCFrame(const World& world, core::InstanceId id);
+void attachAttachmentComponents(World& world, core::InstanceId id);
+void detachAttachmentComponents(World& world, core::InstanceId id);
+
 // Weld
 Value getWeldPart0(const World& world, core::InstanceId id);
 bool setWeldPart0(World& world, core::InstanceId id, const Value& value);

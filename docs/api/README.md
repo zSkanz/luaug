@@ -40,9 +40,11 @@ guided tour.
 | Class | Inherits | Summary |
 |---|---|---|
 | [`AnimationPlayer`](animationplayer.md) | [`Instance`](instance.md) | Plays a skinned mesh's animation clips (§2.2). |
+| [`Attachment`](attachment.md) | [`Instance`](instance.md) | A named place on a part: a socket to weld something to, a joint frame for a constraint, a muzzle to spawn something at. |
 | [`AudioGroup`](audiogroup.md) | [`Instance`](instance.md) | A mixing bus (§2.1, §2.2). |
 | [`BasePart`](basepart.md) | [`PVInstance`](pvinstance.md) | The abstract base of every solid object in the world: a transform, a size and a look. |
 | [`BaseScript`](basescript.md) | [`Instance`](instance.md) | The abstract base of anything that carries Luau code. |
+| [`Bone`](bone.md) | [`Attachment`](attachment.md) | An attachment that follows a joint of the `MeshPart` it is parented to. |
 | [`Camera`](camera.md) | [`PVInstance`](pvinstance.md) | The viewpoint the world is rendered from. |
 | [`CharacterBody`](characterbody.md) | [`BasePart`](basepart.md) | A capsule that walks: the player, or anything that should climb a ramp and step over a kerb instead of tumbling. |
 | [`DataModel`](datamodel.md) | [`Instance`](instance.md) | The root of the instance tree, reached through the `game` global. |

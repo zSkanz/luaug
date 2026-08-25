@@ -43,6 +43,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     // the module that holds its `ClassId`. That module's `registerClasses`
     // must already have run -- engine/app/src/world_host.cpp orders them.
     const scene::ClassId basePartClass = classes.findId(atoms.intern("BasePart"));
+    const scene::ClassId attachmentClass = classes.findId(atoms.intern("Attachment"));
     const scene::ClassId pVInstanceClass = classes.findId(atoms.intern("PVInstance"));
     const scene::ClassId instanceClass = classes.findId(atoms.intern("Instance"));
 
@@ -95,6 +96,52 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     meshPartDesc.attachComponents = native::attachMeshPartComponents;
     meshPartDesc.detachComponents = native::detachMeshPartComponents;
     classes.registerClass(meshPartDesc);
+
+    // --- Bone ---
+    static std::array<scene::PropertyDesc, 3> boneProperties;
+    boneProperties = {{
+        scene::PropertyDesc{
+            .name = atoms.intern("JointName"),
+            .type = scene::ValueType::String,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The joint in the parent `MeshPart`'s skeleton this follows, as the file names it.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getBoneJointName,
+            .set = native::setBoneJointName,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("JointIndex"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = true,
+            .inert = false,
+            .doc = "Where that name resolved to, or -1 for a name the rig does not have. Re-resolved when the mesh reloads, so an index survives a file changing under it.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getBoneJointIndex,
+            .set = nullptr,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Transform"),
+            .type = scene::ValueType::CFrame,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "An offset applied on top of the animated pose, in the joint's own space.\012\012This is the writable half of procedural animation: bend an arm towards a target, turn a head to look at something, kick a gun up on a shot. It composes with whatever the clip is doing rather than replacing it, and the identity is a bone nobody drives.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_cframe"),
+            .get = native::getBoneTransform,
+            .set = native::setBoneTransform,
+        },
+    }};
+    scene::ClassDescriptor boneDesc;
+    boneDesc.name = atoms.intern("Bone");
+    boneDesc.super = attachmentClass;
+    boneDesc.flags = scene::ClassFlags::None;
+    boneDesc.defaultName = atoms.intern("Bone");
+    boneDesc.doc = "An attachment that follows a joint of the `MeshPart` it is parented to. Weld a sword to a character's hand, hang a light off a lamp's swinging arm, or read where a foot is for a footstep -- and it moves with the animation, because it IS the joint.\012\012**Created on demand rather than one per joint.** A rig has tens of bones and a crowd has thousands; instantiating every one would put them all in the world hash and the change queue to answer a question about three of them. Make the ones you need.\012\012A bone whose `JointName` the rig does not have follows the mesh part itself, which puts it on the character rather than at the world origin -- the failure a renamed joint should produce is a sword in the wrong place, not a sword in another country.";
+    boneDesc.properties = boneProperties;
+    classes.registerClass(boneDesc);
 
     // --- Camera ---
     static std::array<scene::PropertyDesc, 4> cameraProperties;

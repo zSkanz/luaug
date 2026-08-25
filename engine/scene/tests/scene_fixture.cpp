@@ -212,6 +212,24 @@ Hierarchy::Hierarchy()
     meshPartDesc.detachComponents = detachMeshPart;
     meshPartClass = classes.registerClass(meshPartDesc);
 
+    ClassDescriptor attachmentDesc;
+    attachmentDesc.name = atoms.intern("Attachment");
+    attachmentDesc.super = instanceClass;
+    attachmentDesc.defaultName = atoms.intern("Attachment");
+    attachmentDesc.attachComponents = [](World& world, core::InstanceId id) {
+        world.attachments().add(id, AttachmentComponent{});
+    };
+    attachmentDesc.detachComponents = [](World& world, core::InstanceId id) { world.attachments().remove(id); };
+    attachmentClass = classes.registerClass(attachmentDesc);
+
+    ClassDescriptor weldDesc;
+    weldDesc.name = atoms.intern("Weld");
+    weldDesc.super = instanceClass;
+    weldDesc.defaultName = atoms.intern("Weld");
+    weldDesc.attachComponents = [](World& world, core::InstanceId id) { world.welds().add(id, WeldComponent{}); };
+    weldDesc.detachComponents = [](World& world, core::InstanceId id) { world.welds().remove(id); };
+    weldClass = classes.registerClass(weldDesc);
+
     ClassDescriptor modelDesc;
     modelDesc.name = atoms.intern("Model");
     modelDesc.super = instanceClass;
