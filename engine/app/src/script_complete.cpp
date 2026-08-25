@@ -175,21 +175,78 @@ void collectMembers(const scene::ClassRegistry& classes, const core::AtomTable& 
     return quote != 0 ? open : std::string_view::npos;
 }
 
+// **A call that NAMES something is a step in a path**, and there are three of
+// them: `GetService("X")`, `WaitForChild("X")` and `FindFirstChild("X")`. Each
+// one answers the instance its own argument names, so `X` is the step.
+//
+// Reads leftwards from `end`, which is one past the closing bracket. Answers
+// where the call started and fills `segment`, or `end` unchanged when what is
+// there is not one of these.
+[[nodiscard]] u32 readNamingCall(std::string_view line, u32 end, std::string& segment)
+{
+    if (end == 0 || line[end - 1] != ')')
+        return end;
+
+    u32 at = end - 1;
+    while (at > 0 && line[at - 1] == ' ')
+        --at;
+    // A single string literal and nothing else. A call with an expression in it
+    // is a call this file cannot read, and guessing would be worse than
+    // stopping.
+    if (at == 0 || (line[at - 1] != '"' && line[at - 1] != '\''))
+        return end;
+    const char quote = line[at - 1];
+    --at;
+
+    const u32 textEnd = at;
+    while (at > 0 && line[at - 1] != quote)
+        --at;
+    if (at == 0)
+        return end;
+    const u32 textStart = at;
+    --at;
+
+    while (at > 0 && line[at - 1] == ' ')
+        --at;
+    if (at == 0 || line[at - 1] != '(')
+        return end;
+    --at;
+    while (at > 0 && line[at - 1] == ' ')
+        --at;
+
+    u32 nameStart = at;
+    while (nameStart > 0 && isWordByte(line[nameStart - 1]))
+        --nameStart;
+    const std::string_view method = line.substr(nameStart, at - nameStart);
+    if (method != "GetService" && !namesAChild(method))
+        return end;
+
+    segment = std::string(line.substr(textStart, textEnd - textStart));
+    return nameStart;
+}
+
 // Reads `a.b.c` leftwards from `end`, which is one past the last byte of the
-// last name. Fills `path` outermost-first and answers where the chain started.
+// last step. Fills `path` outermost-first and answers where the chain started.
 [[nodiscard]] u32 readPath(std::string_view line, u32 end, std::vector<std::string>& path)
 {
     u32 at = end;
     while (true) {
-        u32 start = at;
-        while (start > 0 && isWordByte(line[start - 1]))
-            --start;
-        if (start == at)
-            break;
-        path.insert(path.begin(), std::string(line.substr(start, at - start)));
-        // Only a `.` or a `:` continues a chain, and only when a name is on the
-        // far side of it: `a.b` continues, `).b` does not, because whatever the
-        // call returned is a value and this file does not infer values.
+        std::string called;
+        const u32 callStart = readNamingCall(line, at, called);
+        u32 start = callStart;
+        if (callStart != at) {
+            path.insert(path.begin(), std::move(called));
+        }
+        else {
+            while (start > 0 && isWordByte(line[start - 1]))
+                --start;
+            if (start == at)
+                break;
+            path.insert(path.begin(), std::string(line.substr(start, at - start)));
+        }
+        // Only a `.` or a `:` continues a chain: `a.b` continues, `+ b` does
+        // not, because whatever is on the far side is an expression and this
+        // file does not read expressions.
         if (start == 0 || (line[start - 1] != '.' && line[start - 1] != ':'))
             return start;
         at = start - 1;
@@ -225,6 +282,60 @@ void collectMembers(const scene::ClassRegistry& classes, const core::AtomTable& 
         at = path[index] == "Parent" ? world.parentOf(at) : world.findFirstChild(at, atoms.lookup(path[index]));
     }
     return at.valid() && world.alive(at) ? at : core::InstanceId{};
+}
+
+// **What a `local` was assigned, when it was assigned a path.**
+//
+// `local RunService = game:GetService("RunService")` is the first line of most
+// Luau files ever written, and without this every one of them completes nothing
+// from the line after it. Read textually and not inferred: this looks for one
+// shape, `local NAME = <path>`, and splices that path in front of the one being
+// resolved.
+//
+// **That is not type inference and the difference is the point.** Nothing here
+// evaluates anything, follows a function, or decides what an expression is
+// worth. It reads an assignment the way a person scrolling up would, which is
+// the limit ADR 0057 draws and the reason this stays honest.
+void expandLocals(const ScriptDocument& document, std::vector<std::string>& path)
+{
+    // Three hops, which is more than any real file needs and a hard stop on a
+    // pair of locals that name each other.
+    for (int hop = 0; hop < 3 && !path.empty(); ++hop) {
+        const std::string& head = path.front();
+        if (head == "game" || head == "script" || head == "workspace")
+            return;
+
+        std::vector<std::string> assigned;
+        for (u32 index = 0; index < document.lineCount() && assigned.empty(); ++index) {
+            const std::string_view line = document.line(index);
+            const std::size_t equals = line.find('=');
+            if (equals == std::string_view::npos || !line.starts_with("local "))
+                continue;
+
+            std::string_view name = line.substr(6, equals - 6);
+            while (!name.empty() && name.back() == ' ')
+                name.remove_suffix(1);
+            if (name != head)
+                continue;
+
+            // Everything after the `=`, trailing spaces and comment trimmed by
+            // reading the path leftwards from the end of the value.
+            std::string_view value = line.substr(equals + 1);
+            const std::size_t comment = value.find("--");
+            if (comment != std::string_view::npos)
+                value = value.substr(0, comment);
+            while (!value.empty() && value.back() == ' ')
+                value.remove_suffix(1);
+            if (value.empty())
+                continue;
+            (void)readPath(value, static_cast<u32>(value.size()), assigned);
+        }
+
+        if (assigned.empty())
+            return;
+        path.erase(path.begin());
+        path.insert(path.begin(), assigned.begin(), assigned.end());
+    }
 }
 
 // Every child of `parent`, as rows. Skips a name a member already took, because
@@ -355,6 +466,7 @@ CompletionRequest completionAt(const ScriptDocument& document, Position caret)
     if (joiner != '.' && joiner != ':')
         return request;
     request.method = joiner == ':';
+    request.joined = true;
 
     // **The whole chain and not just the name before the dot.** `Camera` on its
     // own names nothing -- the same name under two parents is two instances --
@@ -380,20 +492,24 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
         return;
     }
     if (request.quoted == CompletionQuoted::Child) {
-        collectChildren(tree, atoms, resolvePath(tree, atoms, request.path), request, out);
+        std::vector<std::string> path = request.path;
+        expandLocals(document, path);
+        collectChildren(tree, atoms, resolvePath(tree, atoms, path), request, out);
         sortCompletions(out);
         return;
     }
     if (request.quoted == CompletionQuoted::Other)
         return;
 
-    if (!request.subject.empty()) {
+    if (request.joined) {
         // **The instance first, its class second.** A resolved path knows both
         // -- what the thing IS and what is inside it -- and a class name alone
         // knows only the first. `classOfSubject` is the fallback for a local
         // that happens to be spelled like a service, which is how somebody
         // reaches one after `local Lighting = game:GetService("Lighting")`.
-        const core::InstanceId at = resolvePath(tree, atoms, request.path);
+        std::vector<std::string> path = request.path;
+        expandLocals(document, path);
+        const core::InstanceId at = resolvePath(tree, atoms, path);
         const scene::ClassId id = at.valid() && tree.world != nullptr ? tree.world->classOf(at)
                                                                       : classOfSubject(classes, atoms, request.subject);
         if (id != scene::InvalidClass)
@@ -404,7 +520,7 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
             collectChildren(tree, atoms, at, request, out);
         // A subject nothing recognises offers nothing rather than offering the
         // whole world: a list that is always the same is a list people learn to
-        // dismiss.
+        // dismiss, and a list of keywords under a dot is never right.
     }
     else {
         for (const std::string_view keyword : kKeywords)

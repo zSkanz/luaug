@@ -184,6 +184,47 @@ Position ScriptDocument::prevColumn(Position at) const noexcept
     return from;
 }
 
+bool ScriptDocument::moveLines(u32 first, u32 last, int delta)
+{
+    if (delta == 0 || first > last || last >= lineCount())
+        return false;
+    if (delta < 0 && first == 0)
+        return false;
+    if (delta > 0 && last + 1 >= lineCount())
+        return false;
+
+    // The block and the single line it swaps with, rewritten in the other
+    // order.
+    const u32 from = delta < 0 ? first - 1 : first;
+    const u32 to = delta < 0 ? last : last + 1;
+
+    std::string rebuilt;
+    // **Counted rather than asked of the string**, because an empty line is a
+    // line: `rebuilt.empty()` cannot tell "nothing appended yet" from "appended
+    // a blank line", and the blank last line of a file is the common case. With
+    // the string asked, moving a line into it swallowed the final newline.
+    bool wroteAny = false;
+    const auto append = [this, &rebuilt, &wroteAny](u32 index) {
+        if (wroteAny)
+            rebuilt.push_back('\n');
+        wroteAny = true;
+        rebuilt.append(line(index));
+    };
+    if (delta < 0) {
+        for (u32 index = first; index <= last; ++index)
+            append(index);
+        append(first - 1);
+    }
+    else {
+        append(last + 1);
+        for (u32 index = first; index <= last; ++index)
+            append(index);
+    }
+
+    (void)replace(Range{Position{from, 0}, Position{to, lineLength(to)}}, rebuilt);
+    return true;
+}
+
 Range ScriptDocument::wordAt(Position at) const noexcept
 {
     const Position here = clamp(at);

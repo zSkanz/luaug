@@ -207,6 +207,16 @@ public:
     // is and what one iteration of replace-all is.
     Position replace(Range range, std::string_view text);
 
+    // **Moves the lines `first` through `last` one row up or down**, trading
+    // places with the line they run into. False when there is nowhere to go,
+    // which is the top and the bottom.
+    //
+    // Here rather than in the panel because it is an edit and not a drawing --
+    // the split this file exists for. It is also ONE `replace` over both blocks
+    // rather than a delete and an insert, so Ctrl+Z takes the whole move back:
+    // a move somebody has to undo twice is a move that will eat a line.
+    bool moveLines(core::u32 first, core::u32 last, int delta);
+
     [[nodiscard]] std::string textIn(Range range) const;
 
     // --- Undo ----------------------------------------------------------------

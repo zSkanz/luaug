@@ -3,6 +3,7 @@
 #include "luaug/scene/world.h"
 
 #include <algorithm>
+#include <cmath>
 #include <tuple>
 
 namespace luaug::app {
@@ -84,6 +85,18 @@ void ScriptEditor::setActive(std::size_t index) noexcept
 {
     if (index < m_tabs.size())
         m_active = index;
+}
+
+bool ScriptEditor::setZoom(core::f32 value) noexcept
+{
+    // Snapped to whole percents, so a wheel notch always changes the readout by
+    // a number somebody can repeat. A zoom of 1.1999998 is the same picture as
+    // 1.2 and a different string.
+    const core::f32 clamped = std::round(std::clamp(value, MinZoom, MaxZoom) * 100.0f) / 100.0f;
+    if (clamped == m_zoom)
+        return false;
+    m_zoom = clamped;
+    return true;
 }
 
 std::optional<std::size_t> ScriptEditor::indexOf(core::InstanceId instance) const noexcept

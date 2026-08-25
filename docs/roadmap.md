@@ -1954,8 +1954,16 @@ tab has to edit one thing.
   real tree -- `Workspace.MainCamera`, `game.Workspace.Beacon`, `script.Parent`
   -- and offers that instance's children beside its class's members; a name
   inside `WaitForChild("` or `FindFirstChild("` is completed from the same walk,
-  and `GetService("` from the service flag. One row per name, and a string that
-  is nobody's argument offers nothing.
+  and `GetService("` from the service flag. A step may be a call that names
+  something (`game:GetService("AudioService").`) or a local somebody assigned
+  earlier. One row per name, and a string that is nobody's argument offers
+  nothing.
+- **The gestures a code pane is expected to have.** Ctrl and the wheel zoom the
+  text, with the percentage and `Ctrl+0` shown in the corner for as long as it
+  has just changed -- a zoom with no readout is a state somebody can get into
+  and not out of. A double-click takes the whole word and dragging from it
+  extends a word at a time. Alt+Up and Alt+Down move the selected lines, in one
+  undo.
 - **Autocomplete from `ClassRegistry`**, with the IDL's own prose as the hint.
   Not from `Luau.Analysis`, which is deliberately not built.
 - **A debugger**: breakpoints, continue, step over, into and out, the call stack

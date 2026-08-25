@@ -93,17 +93,21 @@ struct PaneMetrics
     float gutter = 0.0f;
 };
 
-[[nodiscard]] PaneMetrics metricsFor(const ScriptDocument& document)
+[[nodiscard]] PaneMetrics metricsFor(const ScriptDocument& document, float zoom)
 {
     PaneMetrics m;
     const ImGuiStyle& style = ImGui::GetStyle();
     m.font = codeFont() != nullptr ? codeFont() : ImGui::GetFont();
-    m.size = style.FontSizeBase;
-    m.lineHeight = std::floor(ImGui::GetFontSize() * 1.35f);
-    ImFontBaked* baked = m.font->GetFontBaked(ImGui::GetFontSize());
-    m.advance = baked != nullptr ? baked->GetCharAdvance('0') : ImGui::GetFontSize() * 0.5f;
+    // **The size the CODE is drawn at**, which is the interface's own size times
+    // whatever somebody has zoomed to. Rounded to a whole pixel: ImGui bakes a
+    // face per size, and a fractional one bakes a new atlas on every notch of a
+    // wheel that is still turning.
+    m.size = std::round(ImGui::GetFontSize() * zoom);
+    m.lineHeight = std::floor(m.size * 1.35f);
+    ImFontBaked* baked = m.font->GetFontBaked(m.size);
+    m.advance = baked != nullptr ? baked->GetCharAdvance('0') : m.size * 0.5f;
     if (m.advance <= 0.0f)
-        m.advance = ImGui::GetFontSize() * 0.5f;
+        m.advance = m.size * 0.5f;
 
     // Wide enough for the largest line number this document will ever show, so
     // the code does not shift sideways when the file passes a power of ten.
@@ -146,12 +150,35 @@ void encodeUtf8(unsigned int codepoint, std::string& out)
 // inside it, and to nothing else.
 ImGuiID g_dragging = 0;
 
+// **What a drag EXTENDS BY.** A double-click selects a word and then holds the
+// button down, and `IsMouseDragging` with a zero threshold answers true for as
+// long as it is held -- so the very next frame put the caret back under the
+// pointer and the selection collapsed to whatever was left of the word. Reported
+// as "double-clicking in the middle of `require` selects up to the `u`", which
+// is exactly what that looks like.
+//
+// So a drag knows what it is extending by, and a word-wise drag grows a word at
+// a time in either direction, which is what every editor does and what makes the
+// gesture worth having.
+bool g_dragByWord = false;
+Range g_dragWord;
+
 // **Who holds the caret, and what counts as inside it.** A pane keeps ImGui's
 // active id for as long as somebody is typing in it, and ImGui refuses to hover
 // ANY other item while an item is active (`imgui.cpp`, `ItemHoverable`) -- so a
 // click on the Explorer, the Viewport or another tab was swallowed whole, and
 // only the second one did anything. Read by `releaseScriptPaneFocus`, which
 // runs before the shell submits a single window.
+// **How long the zoom readout has been up.** A number in the corner of the code
+// is clutter once it has been read, and a zoom nobody can see the value of is a
+// state somebody can get into and not out of -- so it appears on a change and
+// leaves on its own.
+//
+// Seeded past the end so nothing shows on the first frame. `io.DeltaTime` and
+// not a clock: this is interface timing, which R10 does not govern and which no
+// hash ever sees.
+float g_zoomShownFor = 1e9f;
+
 ImGuiID g_paneActiveId = 0;
 ImGuiID g_paneWindowId = 0;
 ImRect g_paneBounds;
@@ -313,6 +340,44 @@ void acceptCompletion(OpenScript& tab, ScriptEditorCommands& out, std::size_t in
     return static_cast<float>(cells) * m.advance;
 }
 
+// **The zoom, top-right, for as long as it has just changed.**
+//
+// In the pane's own corner rather than in a status bar, because it is about the
+// text under it -- and it says the percentage rather than drawing a slider,
+// since the whole job is telling somebody the number they need in order to type
+// their way back to it.
+void drawZoomReadout(const ScriptEditor& editor, const PaneMetrics& m)
+{
+    constexpr float Seconds = 1.6f;
+    constexpr float Fade = 0.4f;
+    if (g_zoomShownFor >= Seconds)
+        return;
+    g_zoomShownFor += ImGui::GetIO().DeltaTime;
+
+    const float left = Seconds - g_zoomShownFor;
+    const float alpha = std::min(1.0f, left / Fade);
+
+    char label[32]{};
+    (void)std::snprintf(label, sizeof(label), "%d%%   Ctrl+0", static_cast<int>(std::round(editor.zoom() * 100.0f)));
+
+    const ThemePalette& p = currentTheme().palette;
+    const ImVec2 size = ImGui::CalcTextSize(label);
+    const ImVec2 pad(ImGui::GetStyle().FramePadding.x * 2.0f, ImGui::GetStyle().FramePadding.y);
+    // The pane's visible corner, not the document's -- a scrolled window must
+    // not put this off the top of the screen.
+    const ImVec2 corner(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - size.x - pad.x * 2.0f -
+                            ImGui::GetStyle().ScrollbarSize,
+                        ImGui::GetWindowPos().y + pad.y);
+
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilled(corner, ImVec2(corner.x + size.x + pad.x * 2.0f, corner.y + size.y + pad.y * 2.0f),
+                        col(p.surfaceRaised, alpha));
+    draw->AddRect(corner, ImVec2(corner.x + size.x + pad.x * 2.0f, corner.y + size.y + pad.y * 2.0f),
+                  col(p.border, alpha));
+    draw->AddText(ImVec2(corner.x + pad.x, corner.y + pad.y), col(p.text, alpha), label);
+    (void)m;
+}
+
 // The rows, under the caret. Drawn as a child of the code pane rather than as a
 // popup, because an ImGui popup steals the keyboard and the pane needs to keep
 // receiving the letters that narrow the list.
@@ -359,10 +424,9 @@ void drawCompletions(OpenScript& tab, const PaneMetrics& m, ImVec2 textOrigin)
         const float rowY = y + static_cast<float>(row) * m.lineHeight;
         if (at == tab.completionIndex)
             draw->AddRectFilled(ImVec2(min.x, rowY), ImVec2(max.x, rowY + m.lineHeight), col(p.accent, 0.30f));
-        draw->AddText(m.font, ImGui::GetFontSize(), ImVec2(min.x + m.advance * 2.0f, rowY), col(p.text),
-                      completion.label.c_str());
+        draw->AddText(m.font, m.size, ImVec2(min.x + m.advance * 2.0f, rowY), col(p.text), completion.label.c_str());
         const float detailX = max.x - codeWidth(m, completion.detail) - m.advance * 2.0f;
-        draw->AddText(m.font, ImGui::GetFontSize(), ImVec2(detailX, rowY), col(p.textMuted), completion.detail.c_str());
+        draw->AddText(m.font, m.size, ImVec2(detailX, rowY), col(p.textMuted), completion.detail.c_str());
     }
 
     // The prose for the highlighted row, under the list. The whole reason this
@@ -375,9 +439,39 @@ void drawCompletions(OpenScript& tab, const PaneMetrics& m, ImVec2 textOrigin)
         const ImVec2 docMax(min.x + docWidth, docY + m.lineHeight * 2.0f);
         draw->AddRectFilled(docMin, docMax, col(p.surface));
         draw->AddRect(docMin, docMax, col(p.border));
-        draw->AddText(m.font, ImGui::GetFontSize(), ImVec2(docMin.x + m.advance * 2.0f, docY), col(p.textMuted),
-                      current.doc.c_str(), nullptr, docWidth - m.advance * 4.0f);
+        draw->AddText(m.font, m.size, ImVec2(docMin.x + m.advance * 2.0f, docY), col(p.textMuted), current.doc.c_str(),
+                      nullptr, docWidth - m.advance * 4.0f);
     }
+}
+
+// Alt+Up and Alt+Down. The TEXT half is `ScriptDocument::moveLines`, which is
+// where it can be tested; what is left here is the caret, and the caret is the
+// half that makes the gesture repeatable -- a selection that does not travel
+// with its own text can only be moved once.
+void moveLines(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, int delta)
+{
+    ScriptDocument& doc = tab.document;
+    const Range span = tab.caret.selection();
+    const u32 first = span.begin.line;
+    // A selection that ends at column zero has not reached that line: dragging
+    // down to the start of line 9 highlights through line 8, and moving 9 with
+    // it would move a line nothing is pointing at.
+    const u32 last = span.end.line > first && span.end.column == 0 ? span.end.line - 1 : span.end.line;
+
+    if (!doc.moveLines(first, last, delta))
+        return;
+
+    const auto shift = [delta](Position at) {
+        return Position{static_cast<u32>(static_cast<int>(at.line) + delta), at.column};
+    };
+    tab.caret.anchor = doc.clamp(shift(tab.caret.anchor));
+    tab.caret.head = doc.clamp(shift(tab.caret.head));
+    tab.caret.desiredColumn = tab.caret.head.column;
+    // Forces the pane to scroll to wherever the caret landed, which is what
+    // makes holding the chord walk a line off the bottom of the view and take
+    // the view with it.
+    tab.shownCaret = Position{~0u, 0};
+    out.edited.push_back(index);
 }
 
 void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, const PaneMetrics& m, float paneHeight)
@@ -411,6 +505,20 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
         if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false) ||
             ImGui::IsKeyPressed(ImGuiKey_Tab, false)) {
             acceptCompletion(tab, out, index);
+            return;
+        }
+    }
+
+    // **Before the plain arrows**, which would otherwise move the caret as well
+    // as the line. Alt and not Ctrl+Alt: AltGr is Ctrl+Alt, and a Brazilian
+    // keyboard would move a line every time somebody typed a bracket.
+    if (io.KeyAlt && !io.KeyCtrl && !shift) {
+        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true)) {
+            moveLines(tab, out, index, -1);
+            return;
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true)) {
+            moveLines(tab, out, index, 1);
             return;
         }
     }
@@ -549,7 +657,7 @@ void drawGutter(const OpenScript& tab, const ScriptEditor& editor, const DebugVi
     char number[16]{};
     (void)std::snprintf(number, sizeof(number), "%u", line + 1);
     const float width = ImGui::CalcTextSize(number).x;
-    draw->AddText(m.font, ImGui::GetFontSize(), ImVec2(origin.x + m.gutter - m.advance - width, y),
+    draw->AddText(m.font, m.size, ImVec2(origin.x + m.gutter - m.advance - width, y),
                   col(current ? p.text : p.textMuted), number);
 
     if (editor.hasBreakpoint(tab.chunk, line)) {
@@ -583,8 +691,8 @@ void drawLine(const OpenScript& tab, const PaneMetrics& m, ImDrawList* draw, ImV
         const u32 cell = tab.document.cellOf(line, from);
         if (cell >= lastVisibleCell)
             return;
-        draw->AddText(m.font, ImGui::GetFontSize(), ImVec2(textOrigin.x + static_cast<float>(cell) * m.advance, y),
-                      colour, text.data() + from, text.data() + to);
+        draw->AddText(m.font, m.size, ImVec2(textOrigin.x + static_cast<float>(cell) * m.advance, y), colour,
+                      text.data() + from, text.data() + to);
     };
 
     const ImU32 plain = col(theme.palette.text);
@@ -733,7 +841,7 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
               core::InstanceId root, ScriptEditorCommands& out, std::size_t index)
 {
     const ThemePalette& p = currentTheme().palette;
-    const PaneMetrics m = metricsFor(tab.document);
+    const PaneMetrics m = metricsFor(tab.document, editor.zoom());
 
     drawFindBar(tab, out, index);
 
@@ -798,9 +906,12 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
                 const Range word = tab.document.wordAt(at);
                 tab.caret.anchor = word.begin;
                 tab.caret.head = word.end;
+                g_dragByWord = true;
+                g_dragWord = word;
             }
             else {
                 placeCaret(tab, at, ImGui::GetIO().KeyShift);
+                g_dragByWord = false;
             }
         }
     }
@@ -809,10 +920,32 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
     // stopped delivering to, a long load -- can hide the release, and a pane
     // that missed it drags forever, extending its selection at whatever the
     // pointer touches next. Asking about the state cannot miss an edge.
-    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left) && g_dragging == id)
+    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left) && g_dragging == id) {
         g_dragging = 0;
-    if (g_dragging == id && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f))
-        tab.caret.head = hitTest(tab.document, m, textOrigin, ImGui::GetIO().MousePos);
+        g_dragByWord = false;
+    }
+    if (g_dragging == id && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f)) {
+        const Position at = hitTest(tab.document, m, textOrigin, ImGui::GetIO().MousePos);
+        if (!g_dragByWord) {
+            tab.caret.head = at;
+        }
+        else if (at < g_dragWord.begin) {
+            // Backwards: the far end of the word that was double-clicked stays
+            // put, and the near end runs to the START of whatever is under the
+            // pointer. A selection that ended mid-word would be the same defect
+            // the double-click had.
+            tab.caret.anchor = g_dragWord.end;
+            tab.caret.head = tab.document.wordAt(at).begin;
+        }
+        else {
+            tab.caret.anchor = g_dragWord.begin;
+            const Range word = tab.document.wordAt(at);
+            // `wordAt` answers an empty range on a byte that is not part of a
+            // word -- a space, a bracket -- and there the pointer's own place is
+            // the honest end.
+            tab.caret.head = at < word.end ? word.end : at;
+        }
+    }
 
     // **Recorded for `releaseScriptPaneFocus`**, which runs before anything else
     // in the frame and needs to know whose active id this is and what rectangle
@@ -827,7 +960,34 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
         g_paneActiveId = 0;
     }
 
+    // **Ctrl and the wheel, which is what every editor does.** Read from the
+    // hover rather than from the focus, because a wheel belongs to whatever is
+    // under the pointer -- and the shell's own guards never see it, since the
+    // pane is not an ImGui input item.
+    //
+    // The window must be told not to scroll as well, which is what `SetKeyOwner`
+    // on the modifier does: without it a zoom also scrolls the code out from
+    // under itself.
+    if (hovered && ImGui::GetIO().KeyCtrl) {
+        const float wheel = ImGui::GetIO().MouseWheel;
+        if (wheel != 0.0f) {
+            // A notch is a tenth, which is coarse enough to get somewhere and
+            // fine enough to stop where you meant to.
+            if (editor.setZoom(editor.zoom() + (wheel > 0.0f ? 0.1f : -0.1f)))
+                g_zoomShownFor = 0.0f;
+            ImGui::SetKeyOwner(ImGuiMod_Ctrl, id);
+            ImGui::GetIO().MouseWheel = 0.0f;
+        }
+    }
+
     if (active) {
+        // **Ctrl+0 is the way back**, and the readout in the corner is what
+        // tells somebody there is one.
+        if (ImGui::GetIO().KeyCtrl && !ImGui::GetIO().KeyAlt && ImGui::IsKeyPressed(ImGuiKey_0, false)) {
+            if (editor.setZoom(1.0f))
+                g_zoomShownFor = 0.0f;
+        }
+
         // What makes the shell's `!IsAnyItemActive()` guards do the right thing
         // without any of them being edited.
         ImGui::SetActiveIdUsingAllKeyboardKeys();
@@ -951,6 +1111,7 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
             ImGui::SetScrollX(caretX + m.gutter + m.advance - paneWidth);
     }
 
+    drawZoomReadout(editor, m);
     drawCompletions(tab, m, textOrigin);
 
     // A gutter click arms or disarms a breakpoint. Recorded rather than acted

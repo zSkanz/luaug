@@ -110,6 +110,14 @@ struct CompletionRequest
     // Whether it was a colon, which is what tells a method from a property.
     bool method = false;
 
+    // **The caret hangs off a `.` or a `:`.**
+    //
+    // Separate from `subject` being non-empty, and that is the point: a chain
+    // this cannot read -- `game:GetService(name).`, `t:GetChildren().` -- leaves
+    // `subject` empty while somebody is plainly reaching into SOMETHING. Offering
+    // the keywords there would put the whole language under a dot.
+    bool joined = false;
+
     // **The whole chain, outermost first**: `game.Workspace.Camera.` reads as
     // `{"game", "Workspace", "Camera"}`. Empty when there is no `.` or `:` in
     // front of the caret at all.

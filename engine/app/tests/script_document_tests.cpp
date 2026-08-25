@@ -415,3 +415,59 @@ TEST_CASE("an ASCII line is its own cell count, which is why this was invisible"
     for (core::u32 column = 0; column <= document.lineLength(0); ++column)
         CHECK(document.cellOf(0, column) == column);
 }
+
+TEST_CASE("a line trades places with the one below it")
+{
+    app::ScriptDocument document("one\ntwo\nthree");
+
+    REQUIRE(document.moveLines(0, 0, 1));
+    CHECK(document.text() == "two\none\nthree");
+
+    REQUIRE(document.moveLines(1, 1, 1));
+    CHECK(document.text() == "two\nthree\none");
+
+    // The bottom is the bottom. Answering false rather than doing nothing is
+    // what lets the caller leave the caret alone.
+    CHECK_FALSE(document.moveLines(2, 2, 1));
+    CHECK_FALSE(document.moveLines(0, 0, -1));
+    CHECK(document.text() == "two\nthree\none");
+}
+
+TEST_CASE("a block of lines moves together and keeps its order")
+{
+    app::ScriptDocument document("a\nb\nc\nd\ne");
+
+    REQUIRE(document.moveLines(1, 2, 1));
+    CHECK(document.text() == "a\nd\nb\nc\ne");
+
+    REQUIRE(document.moveLines(2, 3, -1));
+    CHECK(document.text() == "a\nb\nc\nd\ne");
+}
+
+TEST_CASE("moving a line is one undo")
+{
+    // **The whole reason it is one `replace`.** A move somebody has to press
+    // Ctrl+Z twice to take back is a move that will eat the line underneath it
+    // the first time somebody is not watching.
+    app::ScriptDocument document("first\nsecond");
+    const std::string before = document.text();
+
+    REQUIRE(document.moveLines(0, 0, 1));
+    CHECK(document.text() == "second\nfirst");
+
+    app::Position caret{};
+    CHECK(document.undo(caret));
+    CHECK(document.text() == before);
+}
+
+TEST_CASE("a moved line keeps a trailing blank line where it was")
+{
+    // The last line of a file is usually empty, and a block moved into it must
+    // not swallow it: the file would lose its final newline, which every tool
+    // downstream would then rewrite.
+    app::ScriptDocument document("a\nb\n");
+    REQUIRE(document.lineCount() == 3);
+
+    REQUIRE(document.moveLines(1, 1, 1));
+    CHECK(document.text() == "a\n\nb");
+}

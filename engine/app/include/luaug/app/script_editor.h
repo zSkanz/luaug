@@ -165,6 +165,22 @@ public:
 
     [[nodiscard]] std::optional<std::size_t> indexOf(core::InstanceId instance) const noexcept;
 
+    // **How big the code is drawn, as a multiple of the interface's own size.**
+    //
+    // One number for the whole editor rather than one per tab: somebody who
+    // makes the text bigger has made a decision about their eyes, and a second
+    // tab that ignored it would be asking them to make it again.
+    //
+    // Clamped to a range a person can come back from -- and the reason the
+    // panel shows the percentage at all. A zoom with no readout is a state
+    // somebody can get into and not out of.
+    [[nodiscard]] core::f32 zoom() const noexcept { return m_zoom; }
+    static constexpr core::f32 MinZoom = 0.5f;
+    static constexpr core::f32 MaxZoom = 3.0f;
+    // Answers whether the number actually moved, which is what decides if the
+    // readout is worth showing.
+    bool setZoom(core::f32 value) noexcept;
+
     // **Which tab should be brought to the front, once.**
     //
     // Setting `m_active` is not enough and it is worth saying why: the tabs are
@@ -220,6 +236,7 @@ private:
     // Sorted by (chunk, line), so the order the debugger walks them is a
     // property of what they are rather than of when they were clicked (R10).
     std::vector<Breakpoint> m_breakpoints;
+    core::f32 m_zoom = 1.0f;
 };
 
 } // namespace luaug::app

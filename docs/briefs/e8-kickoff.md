@@ -166,6 +166,19 @@ whether the string has a newline in it: which properties are code is a fact
 about the CLASS, and `PropertyDesc::contentKind` had already made that argument
 in its own comment for the same reason.
 
+**Finding 15 -- `IsMouseDragging` with a zero threshold is true for as long as
+the button is down.** So a double-click selected the word and the very next
+frame put the caret back under the pointer, leaving the half of the word left of
+the click -- reported as "double-clicking in the middle of `require` selects up
+to the `u`". A drag now knows what it is extending BY, and a word-wise drag
+grows a word at a time in either direction.
+
+**Finding 16 -- `rebuilt.empty()` cannot tell "nothing yet" from "a blank
+line".** Moving a line into the empty last line of a file swallowed the final
+newline, because the join skipped the separator it had already decided not to
+write. Counted rather than asked of the string. Every file ends in a blank line,
+so this is the common case rather than the corner one.
+
 ## Attempted / abandoned
 
 **Resuming through the deferred queue.** Recommended by the design pass so the
@@ -189,6 +202,7 @@ Filled 2026-08-24, before human review.
 | The debugger stops, reads and resumes, headless | **Green.** Eight cases in `debugger_tests.cpp`, including **the tick keeps advancing while a script is parked** — the claim a blocking debugger would fail while looking identical everywhere else. |
 | Completion answers from the reflection tables | **Green.** Eleven cases, including inherited members, the IDL's prose, case-insensitive filtering, and the absence it deliberately has. |
 | Eight syntax tokens clear 4.5:1 | **Green.** Sixteen assertions (8 tokens × 2 themes) against the code pane's ground, by the same `contrastRatio` the interface tokens use. |
+| A line moves and one undo takes it back | **Green.** Four cases in `script_document_tests.cpp`: a swap in both directions, a block that keeps its order, the top and bottom answering false rather than doing nothing, and the blank last line of a file surviving a move into it. |
 | Completion answers from the TREE | **Green.** Twelve more cases: a path through the world, the whole chain walked from `game`, `script.Parent`, a name inside `WaitForChild("`, `GetService("` offering only services, a colon offering no children, one row per name over four instances, and a plain string offering nothing. |
 | A save writes a file and disturbs nothing | **Green, by a person and by a picture.** The editor after Ctrl+S is pixel-identical to the editor before it: same caret, same selection, same tabs, same tree. Verified by driving the real window twice and comparing. |
 | A person writes a script in it | **Partly, and honestly.** The pictures below are the editor open on a real project with a script in a tab, coloured, with a breakpoint armed and the Debug panel showing it. **What is not pictured is a stop**: the debugger's behaviour rests on the eight headless cases, and a photograph of it stopped with the locals showing needs somebody to press play. |

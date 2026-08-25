@@ -434,3 +434,62 @@ TEST_CASE("an ordinary string is not a completion site")
     CHECK(request.quoted == app::CompletionQuoted::Other);
     CHECK(at(fixture, tree, source).empty());
 }
+
+TEST_CASE("a call that names something is a step in a path")
+{
+    Reflection fixture;
+    Tree tree(fixture);
+
+    // The shape at the top of most Luau files ever written, and without this
+    // every one of them completes nothing from the line after it.
+    CHECK(has(at(fixture, tree, "game:GetService(\"Workspace\")."), "Baseplate"));
+    CHECK(has(at(fixture, tree, "game:GetService(\"Workspace\")."), "Name"));
+
+    // And the same for the two that name a child.
+    CHECK(has(at(fixture, tree, "Workspace:WaitForChild(\"Level\")."), "Name"));
+    CHECK(has(at(fixture, tree, "game.Workspace:FindFirstChild(\"Baseplate\")."), "Size"));
+
+    ScriptDocument document("game:GetService(\"Workspace\").");
+    const CompletionRequest request = app::completionAt(document, Position{0, document.lineLength(0)});
+    REQUIRE(request.path.size() == 2);
+    CHECK(request.path[0] == "game");
+    CHECK(request.path[1] == "Workspace");
+}
+
+TEST_CASE("a call this file cannot read stops the path rather than guessing")
+{
+    Reflection fixture;
+    Tree tree(fixture);
+
+    // An expression inside the brackets is an expression, and reading one would
+    // be the type inference ADR 0057 says this does not do.
+    CHECK(at(fixture, tree, "game:GetService(name).").empty());
+    CHECK(at(fixture, tree, "Workspace:GetChildren().").empty());
+}
+
+TEST_CASE("a local assigned a path completes from what it was assigned")
+{
+    Reflection fixture;
+    Tree tree(fixture);
+
+    const std::string source = "local Tags = game:GetService(\"TagService\")\nTags.";
+    CHECK(has(at(fixture, tree, source), "Name"));
+
+    // Two hops, because `local a = X` followed by `local b = a.Y` is ordinary
+    // code and stopping at one would be an arbitrary place to stop.
+    const std::string twice = "local W = game:GetService(\"Workspace\")\nlocal G = W.Level\nG.";
+    CHECK(has(at(fixture, tree, twice), "Name"));
+
+    // A local assigned something this cannot read is a local this cannot
+    // follow, and it says so by offering nothing rather than by guessing.
+    CHECK(at(fixture, tree, "local X = someFunction()\nX.").empty());
+}
+
+TEST_CASE("a local whose assignment is commented does not derail the walk")
+{
+    Reflection fixture;
+    Tree tree(fixture);
+
+    const std::string source = "local W = game:GetService(\"Workspace\") -- the world\nW.";
+    CHECK(has(at(fixture, tree, source), "Baseplate"));
+}

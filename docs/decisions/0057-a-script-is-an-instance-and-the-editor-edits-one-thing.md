@@ -151,6 +151,24 @@ service is. **There is no list of service names anywhere in this file**, and
 that is the point: a service registered by a module this build has never heard
 of resolves for free.
 
+**A step may be a call that names something**, because otherwise the first line
+of most Luau files ever written stops the walk dead:
+`game:GetService("AudioService").` is a path through `AudioService`, and so is
+`Workspace:WaitForChild("Level").`. Only a bare string literal counts -- a call
+with an expression in it is a call this cannot read, and it stops rather than
+guesses.
+
+**And a step may be a local somebody assigned earlier.** `local RunService =
+game:GetService("RunService")` is read the way a person scrolling up would read
+it: one shape, `local NAME = <path>`, spliced in front of the path being
+resolved, three hops deep. Nothing is evaluated, no function is followed, and no
+expression is weighed -- which is the line ADR 0018 draws and the reason this
+stays on the right side of it.
+
+**A dot with nothing readable behind it offers nothing**, which is a state of
+its own: `t:GetChildren().` used to fall through to the keyword list, and a list
+of every reserved word in the language under a dot is never the answer.
+
 Children are **one row per name**: six parts called `Ground` insert the same six
 characters, and a member wins a collision because `workspace.Name` is the
 property. A colon offers no children at all, because a child is not callable.
