@@ -2,11 +2,14 @@
 
 #include "luaug/asset/image.h"
 #include "luaug/core/json.h"
+#include "luaug/jobs/jobs.h"
 #include "luaug/platform/file.h"
+#include "luaug/platform/platform.h"
 #include "luaug/rhi/descs.h"
 #include "luaug/rhi/device.h"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <optional>
 
@@ -195,6 +198,13 @@ bool IconAtlas::load(rhi::IDevice& device, rhi::ICmdList& cmd, const std::filesy
     if (m_texture.valid())
         return true;
 
+    // **What building it cost, in the line that says it was built.** This runs
+    // on the first frame that has a command list, so whatever it costs is a
+    // frozen window on the way in -- and a number nobody can see is a number
+    // nobody improves. Reading a wall clock to report elapsed time is the one
+    // thing R10 allows it for, and nothing here reaches the simulation.
+    const core::u64 startedNs = platform::nowNs();
+
     m_sources.clear();
     m_cells.clear();
     m_fallbackId.clear();
@@ -277,42 +287,82 @@ bool IconAtlas::load(rhi::IDevice& device, rhi::ICmdList& cmd, const std::filesy
     (void)cellsPerRow;
 
     std::vector<u8> pixels(static_cast<usize>(atlasSize) * atlasSize * 4u, 0u);
-    std::vector<u8> cell;
     u32 penX = 0;
     u32 penY = 0;
     u32 rowHeight = 0;
     u32 drawn = 0;
     u32 missing = 0;
 
-    for (const std::string& id : ids) {
+    // **Three phases, because eighty-eight decodes in a row is a frozen window.**
+    // This runs on the first frame that has a command list, so whatever it costs
+    // is paid while somebody is looking at an editor that has not appeared yet --
+    // and measured, it cost 131 ms of a 280 ms opening frame.
+    //
+    // Reading stays serial: the files are a few kilobytes each, and the job pool
+    // is explicitly not allowed to block on IO. Decoding and downscaling go wide,
+    // which is where the time actually is. Packing stays serial and in `ids`
+    // order, so the atlas is byte-identical however many cores ran it -- a
+    // layout that depended on scheduling would make two machines disagree about
+    // where an icon is.
+    struct Encoded
+    {
+        std::vector<std::byte> bytes;
+        bool found = false;
+    };
+    std::vector<Encoded> encoded(ids.size());
+
+    for (usize index = 0; index < ids.size(); ++index) {
         // The first source that has a file for this id wins, which is the whole
         // of the override rule.
-        asset::Image image;
-        bool decoded = false;
         for (const Source& source : m_sources) {
             std::filesystem::path path;
             if (source.loose) {
-                path = source.root / (id + ".png");
+                path = source.root / (ids[index] + ".png");
             }
             else {
-                const auto it = source.icons.find(id);
+                const auto it = source.icons.find(ids[index]);
                 if (it == source.icons.end())
                     continue;
                 path = source.root / std::filesystem::path(it->second);
             }
-
-            std::vector<std::byte> encoded;
-            if (!platform::readFile(path, encoded))
+            if (!platform::readFile(path, encoded[index].bytes))
                 continue;
-            if (asset::decodeImage(encoded, image).has_value())
-                continue;
-            decoded = true;
+            encoded[index].found = true;
             break;
         }
-        if (!decoded) {
-            // Six `action.` ids are drawn tomorrow and are absent from the
-            // theme rather than present and broken, which is what lets this be
-            // a count rather than a failure.
+    }
+
+    struct Built
+    {
+        std::array<std::vector<u8>, SizeCount> cells;
+        bool ok = false;
+    };
+    std::vector<Built> built(ids.size());
+
+    // One icon per range: they are the same size and there are dozens, so a
+    // grain of one is the finest partition and the pool balances it for free.
+    // The partition is a function of the data and not of this machine's core
+    // count, which `rangeCount` documents and which is what keeps range indices
+    // meaning the same thing everywhere.
+    jobs::parallelFor("icon-decode", jobs::Domain::AssetIo, 0, ids.size(), 1,
+                      [&encoded, &built](usize begin, usize end, u32) noexcept {
+                          for (usize index = begin; index < end; ++index) {
+                              if (!encoded[index].found)
+                                  continue;
+                              asset::Image image;
+                              if (asset::decodeImage(encoded[index].bytes, image).has_value())
+                                  continue;
+                              for (usize s = 0; s < SizeCount; ++s)
+                                  boxDownscale(image, Sizes[s], built[index].cells[s]);
+                              built[index].ok = true;
+                          }
+                      });
+
+    for (usize index = 0; index < ids.size(); ++index) {
+        if (!built[index].ok) {
+            // Six `action.` ids are drawn tomorrow and are absent from the theme
+            // rather than present and broken, which is what lets this be a count
+            // rather than a failure.
             ++missing;
             continue;
         }
@@ -327,8 +377,7 @@ bool IconAtlas::load(rhi::IDevice& device, rhi::ICmdList& cmd, const std::filesy
                 rowHeight = 0;
             }
 
-            boxDownscale(image, size, cell);
-            blit(pixels, atlasSize, cell, size, penX + CellPadding, penY + CellPadding);
+            blit(pixels, atlasSize, built[index].cells[s], size, penX + CellPadding, penY + CellPadding);
 
             const auto edge = static_cast<f32>(atlasSize);
             entry.sprites[s] = IconSprite{
@@ -342,7 +391,7 @@ bool IconAtlas::load(rhi::IDevice& device, rhi::ICmdList& cmd, const std::filesy
             penX += stride;
             rowHeight = std::max(rowHeight, stride);
         }
-        m_cells.emplace(id, entry);
+        m_cells.emplace(ids[index], entry);
         ++drawn;
     }
 
@@ -361,7 +410,9 @@ bool IconAtlas::load(rhi::IDevice& device, rhi::ICmdList& cmd, const std::filesy
     cmd.uploadTexture(m_texture, std::as_bytes(std::span<const u8>(pixels)), 0);
     m_atlasSize = atlasSize;
 
-    m_status = std::to_string(drawn) + " icon(s) in a " + std::to_string(atlasSize) + "-square atlas";
+    const core::u64 elapsedNs = platform::nowNs() - startedNs;
+    m_status = std::to_string(drawn) + " icon(s) in a " + std::to_string(atlasSize) + "-square atlas, " +
+               std::to_string(elapsedNs / 1000000u) + " ms";
     if (missing > 0)
         m_status += ", " + std::to_string(missing) + " not drawn yet";
     return true;
