@@ -42,7 +42,11 @@ public:
     // Opens the VM in the one order that works: allocator, `useratom`, standard
     // libraries, removals, tag metatables, globals, then `luaL_sandbox`. Every
     // step after the sandbox is a step that silently does nothing.
-    [[nodiscard]] std::optional<core::EngineError> boot();
+    // `adoptDataModel` binds this VM to a `DataModel` the world already holds
+    // rather than making one, which is what lets a runtime be replaced while the
+    // world stays (ADR 0058). Invalid -- the default, and every boot -- builds
+    // the tree from nothing.
+    [[nodiscard]] std::optional<core::EngineError> boot(core::InstanceId adoptDataModel = {});
 
     // Compiles and starts `source` on its own sandboxed thread. Returns the
     // structured error that ended it, or nullopt -- including when the script

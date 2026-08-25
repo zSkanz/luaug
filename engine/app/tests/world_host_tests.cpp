@@ -982,8 +982,9 @@ TEST_CASE("a disabled Script in the scene does not run")
     Captured log;
     Project project;
     project.write("content/scenes/main.scene.json",
-                  sceneWithScript("Script", R"(local p = Instance.new(\"Part\") p.Name = \"ShouldNotExist\" )"
-                                            R"(p.Parent = workspace)",
+                  sceneWithScript("Script",
+                                  R"(local p = Instance.new(\"Part\") p.Name = \"ShouldNotExist\" )"
+                                  R"(p.Parent = workspace)",
                                   /*enabled=*/false));
 
     app::WorldHost host;
@@ -1035,4 +1036,218 @@ TEST_CASE("a mounted script carries its file in its own Source")
     const auto* text = std::get_if<std::string>(&source.value());
     REQUIRE(text != nullptr);
     CHECK(*text == "local x = 1\nreturn x\n");
+}
+
+// --- A script runs when you press play (ADR 0058) ----------------------------
+//
+// `startScripts` is one option and one branch, which is exactly why it is worth
+// four cases: a branch that is right for every caller but one, and wrong for
+// that one, looks identical to a branch that is wrong for every caller but one.
+
+namespace {
+
+// Counts what is under `Workspace`, which is the countable form of "a project
+// opened in the editor shows what its scene holds and nothing else".
+[[nodiscard]] core::usize workspaceChildren(app::WorldHost& host)
+{
+    core::usize count = 0;
+    for (core::InstanceId child = host.world().firstChild(host.workspace()); child.valid();
+         child = host.world().nextSibling(child)) {
+        ++count;
+    }
+    return count;
+}
+
+// A project whose scene holds one part and whose script builds another. The two
+// halves are what every case below tells apart.
+void writeSceneAndScript(Project& project)
+{
+    project.write("src/scripts/init.luau", R"(
+        local p = Instance.new("Part")
+        p.Name = "BuiltByScript"
+        p.Parent = workspace
+    )");
+    project.write("content/scenes/main.scene.json", kOnePartScene);
+}
+
+} // namespace
+
+TEST_CASE("boot mounts the scripts and the editor does not start them")
+{
+    Captured log;
+    Project project;
+    writeSceneAndScript(project);
+
+    app::WorldHost host;
+    app::WorldHostOptions options = app::testing::bootOptions(project.root);
+    options.bootScene = project.root / "content" / "scenes" / "main.scene.json";
+    options.startScripts = false;
+    REQUIRE_FALSE(host.boot(options).has_value());
+
+    // **Counted, not sampled.** "Nothing the script built" is a claim about the
+    // whole of `Workspace`, and a check for one absent name would pass just as
+    // well on a world where the script had built something else.
+    CHECK(workspaceChildren(host) == 1);
+    CHECK(bootChildNamed(host, "FromTheScene").valid());
+    CHECK_FALSE(bootChildNamed(host, "BuiltByScript").valid());
+
+    // **Mounted is the other half and it is the half that makes this usable.**
+    // The `Script` is in the tree, the Explorer shows it, `Source` is editable
+    // and a tab can open it -- what waits is the first resumption.
+    CHECK(host.mountedScriptCount() == 1);
+}
+
+TEST_CASE("every other way of running starts them at boot, as it always did")
+{
+    Captured log;
+    Project project;
+    writeSceneAndScript(project);
+
+    app::WorldHost host;
+    app::WorldHostOptions options = app::testing::bootOptions(project.root);
+    options.bootScene = project.root / "content" / "scenes" / "main.scene.json";
+    // The default, spelled out: a game, `luaug dev`, a headless run, the
+    // conformance runner and a replay all want behaviour the moment the world
+    // exists. This case is the regression the editor's one branch could cause.
+    REQUIRE(options.startScripts);
+    REQUIRE_FALSE(host.boot(options).has_value());
+
+    CHECK(workspaceChildren(host) == 2);
+    CHECK(bootChildNamed(host, "BuiltByScript").valid());
+}
+
+TEST_CASE("play starts the scripts a mount-only boot left waiting")
+{
+    Captured log;
+    Project project;
+    writeSceneAndScript(project);
+
+    app::WorldHost host;
+    app::WorldHostOptions options = app::testing::bootOptions(project.root);
+    options.bootScene = project.root / "content" / "scenes" / "main.scene.json";
+    options.startScripts = false;
+    REQUIRE_FALSE(host.boot(options).has_value());
+    REQUIRE_FALSE(bootChildNamed(host, "BuiltByScript").valid());
+
+    // What the play button does, and nothing else -- the world is the world it
+    // was, and the scripts are the ones the boot mounted.
+    script::startScripts(host.runtime().state());
+    host.tick();
+
+    CHECK(bootChildNamed(host, "BuiltByScript").valid());
+    CHECK(workspaceChildren(host) == 2);
+}
+
+TEST_CASE("stop throws the VM away, so a second play is the same as the first")
+{
+    Captured log;
+    Project project;
+    // **A required module is VM state and nothing else**, which is what makes it
+    // the probe this needs. Restoring the world at stop cannot touch it: a
+    // module's cached result lives in the registry, so a second play that found
+    // `n` already at one is a second play running on the first one's VM.
+    //
+    // Everything else that accumulates is invisible to a world comparison in
+    // exactly this way -- connections, globals, queued work -- and that is why
+    // "two plays in a row are identical" went unreported for so long.
+    project.write(".luaurc", R"({ "aliases": { "shared": "src/shared" } })");
+    project.write("src/shared/state.luau", R"(
+        return { n = 0 }
+    )");
+    project.write("src/scripts/init.luau", R"(
+        local state = require("@shared/state")
+        state.n += 1
+        local p = Instance.new("Part")
+        p.Name = "Run" .. tostring(state.n)
+        p.Parent = workspace
+
+        -- Due long after the stop below. If the VM outlives a stop, so does
+        -- this, and a world nobody is playing grows a part on its own.
+        task.delay(1.0, function()
+            local late = Instance.new("Part")
+            late.Name = "Late"
+            late.Parent = workspace
+        end)
+    )");
+    project.write("content/scenes/main.scene.json", kOnePartScene);
+
+    app::WorldHost host;
+    app::WorldHostOptions options = app::testing::bootOptions(project.root);
+    options.bootScene = project.root / "content" / "scenes" / "main.scene.json";
+    options.startScripts = false;
+    REQUIRE_FALSE(host.boot(options).has_value());
+
+    const scene::WorldSnapshot before = host.world().snapshot();
+
+    script::startScripts(host.runtime().state());
+    host.tick();
+    CHECK(bootChildNamed(host, "Run1").valid());
+    CHECK(workspaceChildren(host) == 2);
+
+    // The editor's stop, in the order the editor performs it: the world first,
+    // then the VM -- so the new runtime binds to the tree as it stands.
+    host.world().restore(before);
+    REQUIRE_FALSE(host.restartRuntime().has_value());
+    CHECK(workspaceChildren(host) == 1);
+
+    // Well past the delay. Nothing is playing, so nothing may appear.
+    for (int index = 0; index < 90; ++index)
+        host.tick();
+    CHECK_FALSE(bootChildNamed(host, "Late").valid());
+    CHECK(workspaceChildren(host) == 1);
+
+    // **And the second play is the first play.** `Run1` and not `Run2`, which is
+    // the whole claim: the module was evaluated again because there was no VM
+    // left holding its result.
+    script::startScripts(host.runtime().state());
+    host.tick();
+    CHECK(bootChildNamed(host, "Run1").valid());
+    CHECK_FALSE(bootChildNamed(host, "Run2").valid());
+    CHECK(workspaceChildren(host) == 2);
+}
+
+TEST_CASE("a rebuilt runtime adopts the services it found rather than making more")
+{
+    // The failure this rules out is the one M4 shipped for four milestones: a
+    // service the host cached and the VM rebuilt are two different instances,
+    // and every read afterwards answers with the struct defaults.
+    Captured log;
+    Project project;
+    writeSceneAndScript(project);
+
+    app::WorldHost host;
+    app::WorldHostOptions options = app::testing::bootOptions(project.root);
+    options.bootScene = project.root / "content" / "scenes" / "main.scene.json";
+    options.startScripts = false;
+    REQUIRE_FALSE(host.boot(options).has_value());
+
+    const core::InstanceId dataModel = host.runtime().dataModel();
+    const core::InstanceId workspace = host.workspace();
+    REQUIRE(dataModel.valid());
+    REQUIRE(workspace.valid());
+    const core::usize servicesBefore = [&] {
+        core::usize count = 0;
+        for (core::InstanceId child = host.world().firstChild(dataModel); child.valid();
+             child = host.world().nextSibling(child)) {
+            ++count;
+        }
+        return count;
+    }();
+
+    REQUIRE_FALSE(host.restartRuntime().has_value());
+
+    CHECK(host.runtime().dataModel() == dataModel);
+    CHECK(host.workspace() == workspace);
+    // Counted, because a second `Workspace` beside the first is exactly what an
+    // adoption that silently created would look like.
+    core::usize servicesAfter = 0;
+    for (core::InstanceId child = host.world().firstChild(dataModel); child.valid();
+         child = host.world().nextSibling(child)) {
+        ++servicesAfter;
+    }
+    CHECK(servicesAfter == servicesBefore);
+
+    // The mount table is a fact about the project and survives the VM that held
+    // it -- without it every chunk name and every `Ctrl+S` forgets its file.
+    CHECK(host.mountedScriptCount() == 1);
 }

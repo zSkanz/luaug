@@ -201,6 +201,12 @@ public:
     // from "raised by a script" without inspecting the stack.
     bool draining = false;
 
+    // The `Script` instances a property write has enabled since the last drain
+    // (ADR 0059 rule 3). Collected here and started there, because several
+    // enabled by one tick's writes must run in TREE order rather than in write
+    // order -- see `takeEnabledScripts`.
+    std::vector<core::InstanceId> enabledScripts;
+
     // Set while an engine message is being published to `MessageOut`.
     // Publishing enqueues a fire, and a fire that trips the depth cap logs --
     // which would publish again, at a depth that trips the cap again. The first
@@ -212,6 +218,17 @@ public:
 // Installs the `Signal` and `Connection` metatables and the `Signal` global.
 // Runs during boot with everything else, before the sandbox.
 void registerSignals(lua_State* L);
+
+// The `Script` instances a property write has enabled since the last drain,
+// taken and cleared (ADR 0059 rule 1). Unordered as it comes back -- the caller
+// puts them in document order, which is where that decision belongs.
+//
+// Written by `enqueueSceneChanges` and read by `ScriptRuntime::drain`. Two steps
+// rather than one because *when* has to be decided rather than fall out of the
+// implementation: several scripts enabled by one tick's writes must start in
+// tree order and not in write order, or an allocation artefact reaches
+// observable output (R10).
+[[nodiscard]] std::vector<core::InstanceId> takeEnabledScripts(lua_State* L);
 
 // A plain, unowned signal -- the same thing `Signal.new()` produces. Exported
 // for `Tween.Completed`, which is a signal on a value type rather than on an

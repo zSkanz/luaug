@@ -1,6 +1,7 @@
 #include "luaug/script/tasks.h"
 
 #include "luaug/scene/world.h"
+#include "luaug/script/modules.h"
 #include "luaug/script/signals.h"
 
 #include <lua.h>
@@ -252,6 +253,16 @@ void resumeDueTimers(lua_State* L, u64 tick)
         lua_getref(L, entry.threadRef);
         lua_State* co = lua_tothread(L, -1);
         if (co == nullptr) {
+            lua_pop(L, 1);
+            (void)lua_unref(L, entry.threadRef);
+            continue;
+        }
+
+        // **A `task.delay` or a `task.wait` belonging to a disabled script comes
+        // due and is dropped** (ADR 0059 rule 4). Dropped rather than left on
+        // the list, because "never resumed" and "resumed later" are different
+        // promises and only the first is the one `Enabled` makes.
+        if (resumptionSuppressed(L, scriptOfThread(co))) {
             lua_pop(L, 1);
             (void)lua_unref(L, entry.threadRef);
             continue;

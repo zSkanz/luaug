@@ -233,6 +233,7 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
 
     // Before any script runs, because a script's file scope may call
     // `SaveState` and the bag it reaches has to be the host's by then.
+    m_reloadState = options.reloadState;
     m_runtime->setReloadState(options.reloadState);
     if (options.reloadState != nullptr)
         options.reloadState->setIsReload(options.isReload);
@@ -366,9 +367,15 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
     // prefab named in code and one named in a file mean the same file (ADR
     // 0051). A project with no source gets none, and the binding says so
     // rather than handing back an empty prefab.
+    m_stampSource = options.bootStamps;
     m_runtime->setStampSource(options.bootStamps);
 
-    script::startScripts(m_runtime->state());
+    // **Mounted above; started here, and only if this run is one that starts
+    // them** (ADR 0058). The editor is the one caller that says no: a project
+    // opened in a tool shows what its scene holds, and behaviour begins when
+    // somebody presses play.
+    if (options.startScripts)
+        script::startScripts(m_runtime->state());
 
     // The boot drain. api-design.md §3's lifecycle reads "start each Script on
     // its own coroutine via `task.defer` … → first frame", and the arrow is
@@ -414,6 +421,56 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
         }
     }
 
+    return std::nullopt;
+}
+
+std::optional<core::EngineError> WorldHost::restartRuntime()
+{
+    if (!m_runtime.has_value() || !m_world.has_value())
+        return std::nullopt;
+
+    // Read BEFORE the teardown, because both live in the VM that is about to go.
+    const core::InstanceId dataModel = m_runtime->dataModel();
+    std::vector<script::ModuleRegistry::Entry> mounted = script::mountedEntries(m_runtime->state());
+
+    // Every connection, every required module, every queued resumption and every
+    // timer goes with this line. That is the whole point of it.
+    m_runtime.reset();
+
+    m_runtime.emplace(*m_world);
+    if (std::optional<core::EngineError> error = m_runtime->boot(dataModel); error.has_value())
+        return error;
+
+    m_runtime->setModuleLoader(script::ModuleLoader{
+        .user = this,
+        .resolve = &WorldHostLoader::resolve,
+        .read = &WorldHostLoader::read,
+    });
+    m_runtime->setReloadState(m_reloadState);
+    if (std::optional<core::EngineError> error = registerRuntimeModules(); error.has_value())
+        return error;
+
+    m_runtime->setStampSource(m_stampSource);
+    script::adoptMountedEntries(m_runtime->state(), std::move(mounted));
+
+    if (m_animation.has_value())
+        m_runtime->setAnimation(&*m_animation);
+    m_runtime->setInput(&m_input);
+    if (m_physics.has_value())
+        m_runtime->setPhysics(&*m_physics);
+
+    // **The services are the ones that were already there.** `registerServices`
+    // adopted the DataModel, and everything under it is found rather than made,
+    // so these three ids are the same ids -- asserted rather than assumed,
+    // because a service the host cached and the VM rebuilt would be exactly the
+    // M4 lighting defect again (see `boot`).
+    m_workspace = m_world->findFirstChildOfClass(dataModel, m_classes.findId(m_atoms.lookup("Workspace")));
+    m_lighting = m_world->findFirstChildOfClass(dataModel, m_classes.findId(m_atoms.lookup("Lighting")));
+    m_uiService = m_world->findFirstChildOfClass(dataModel, m_classes.findId(m_atoms.lookup("UIService")));
+
+    // Consumed rather than queued: a rebuild is not a thing the world did, and
+    // there is nothing connected yet that could observe it.
+    (void)m_world->changes().take();
     return std::nullopt;
 }
 

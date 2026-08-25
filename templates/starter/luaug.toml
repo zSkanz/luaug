@@ -6,6 +6,11 @@ name = "{{name}}"
 # Reverse-DNS, so two games with the same name are still two games.
 id = "dev.local.{{name}}"
 version = "0.1.0"
+# The world a run of this project starts with, relative to `content/`. The
+# scene is what the project HAS and the scripts are what it does (ADR 0047) --
+# and in the editor the scene is the whole of what you see until you press
+# play, because a script runs then and not when the project is opened.
+scene = "scenes/main.scene.json"
 # The engine series this project targets. `luaug doctor` compares it.
 engine = "0.1"
 # The game's own icon, embedded in the artifact by `luaug build` -- a multi-size

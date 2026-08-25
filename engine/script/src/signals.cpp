@@ -3,6 +3,7 @@
 #include "luaug/core/log.h"
 #include "luaug/scene/world.h"
 #include "luaug/script/instance_binding.h"
+#include "luaug/script/modules.h"
 #include "luaug/script/services.h"
 
 #include <lua.h>
@@ -563,13 +564,41 @@ void invokeFire(lua_State* L, const DeferredEntry& entry)
             }
         }
         else {
+            // **Whose handler this is, before there is a thread to ask.** A
+            // connection is stored as a function and its coroutine is not made
+            // until now, so the environment the function was loaded with is the
+            // only form of the question available (ADR 0059 rule 2: a disabled
+            // script's connections stay connected and stop being invoked).
+            lua_getref(L, ref);
+            const core::InstanceId owningScript = scriptOfFunction(L, -1);
+            if (resumptionSuppressed(L, owningScript)) {
+                lua_pop(L, 1);
+                continue;
+            }
+
             // Its own coroutine, because a handler must be allowed to yield and
             // an error in one must not touch the others. `lua_pcall` cannot do
             // either: everything under it is non-yieldable (U-34).
             co = lua_newthread(L);
             rooted = lua_gettop(L);
-            lua_getref(L, ref);
+            lua_insert(L, rooted - 1);
             lua_xmove(L, co, 1);
+            rooted = lua_gettop(L);
+
+            // **And the thread inherits the script's globals**, which is what
+            // makes the ownership above transitive: a `task.defer` inside this
+            // handler is created from this thread, and a thread created from one
+            // with no `script` in its globals would belong to nobody.
+            if (owningScript.valid()) {
+                lua_getfenv(co, -1);
+                if (lua_istable(co, -1)) {
+                    lua_xmove(co, L, 1);
+                    (void)lua_setfenv(L, rooted);
+                }
+                else {
+                    lua_pop(co, 1);
+                }
+            }
 
             // After the function is on the coroutine, for the reason above.
             if (once)
@@ -641,6 +670,14 @@ bool enqueueTaskCallback(lua_State* L, int threadRef, u32 argBase, u32 argCount)
     entry.argCount = argCount;
     sys.queue.push_back(entry);
     return true;
+}
+
+std::vector<core::InstanceId> takeEnabledScripts(lua_State* L)
+{
+    SignalSystem& sys = system(L);
+    std::vector<core::InstanceId> taken;
+    taken.swap(sys.enabledScripts);
+    return taken;
 }
 
 bool resumeScheduled(lua_State* L, lua_State* co, int argCount)
@@ -783,8 +820,27 @@ void enqueueSceneChanges(lua_State* L, std::span<const scene::Change> changes)
 {
     SignalSystem& sys = system(L);
     scene::World& w = world(L);
+    const scene::ClassId scriptClass = w.classes().findId(w.atoms().lookup("Script"));
+    const core::NameAtom enabledProperty = w.atoms().intern("Enabled");
 
     for (const scene::Change& change : changes) {
+        // **`Enabled` going true starts that script** (ADR 0059 rule 1), and it
+        // is noticed here because this is where every property write arrives --
+        // a script's own and the engine's alike -- and because a change queue
+        // entry is only enqueued when the value ACTUALLY changed, so a write of
+        // true over true is not a second start.
+        //
+        // Collected rather than started: the drain decides the order, and one
+        // tick may have enabled several.
+        if (change.kind == scene::ChangeKind::PropertyChanged && change.name == enabledProperty &&
+            w.alive(change.subject) && w.classOf(change.subject) == scriptClass) {
+            if (const std::optional<scene::Value> value = w.getProperty(change.subject, enabledProperty);
+                value.has_value()) {
+                if (const auto* flag = std::get_if<bool>(&value.value()); flag != nullptr && *flag)
+                    sys.enabledScripts.push_back(change.subject);
+            }
+        }
+
         // Resolved through the class, because an event's slot is per class and
         // the descriptor is what says whether this class has the event at all.
         const auto eventSignal = [&](core::NameAtom name) -> SignalId {
@@ -950,7 +1006,13 @@ usize drainDeferred(lua_State* L)
             sys.depth = entry.depth;
             lua_getref(L, entry.threadRef);
             lua_State* co = lua_tothread(L, -1);
-            if (co != nullptr) {
+            // **Dropped here rather than swept on disable** (ADR 0059 rule 4).
+            // Lazy matches "never resumed" exactly; eager would make
+            // `task.cancel` raise `task_not_scheduled` for a thread the caller
+            // is still holding. The queue does not grow, because a dropped entry
+            // is a drained one.
+            const bool suppressed = co != nullptr && resumptionSuppressed(L, scriptOfThread(co));
+            if (co != nullptr && !suppressed) {
                 if (entry.argCount > 0)
                     releaseArgumentsImpl(L, co, entry.argBase, entry.argCount);
                 (void)resumeHandler(L, co, static_cast<int>(entry.argCount));

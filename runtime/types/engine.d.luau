@@ -546,9 +546,19 @@ declare extern type BaseScript extends Instance with
 end
 
 declare extern type Script extends BaseScript with
-    --- Whether this script starts when the world does; writing it afterwards has no effect in v1,
-    --- neither stopping a running script nor starting one that did not run, because what sets it acts
-    --- before the start it applies to.
+    --- **Whether this script's threads are resumed.** It decides nothing else (ADR 0059). False at the
+    --- moment scripts start means this one never starts. Writing it afterwards takes effect at the next
+    --- deferred drain: **false to true STARTS it**, on its own coroutine, file scope running now
+    --- against the world as it is -- a start and not a resume, so a script that ran, was disabled and
+    --- is enabled again runs its file scope a second time. **True to false stops resumption**, and that
+    --- is all it does: a queued `task.defer`, a `task.delay` coming due and a signal fire are all
+    --- discarded when they come up, and a thread already executing runs to its next yield, because a
+    --- coroutine cannot be preempted. **Connections are NOT disconnected**, nothing it made is undone
+    --- and nothing it built is removed. They stop being invoked because nothing resumes the threads
+    --- that would run them; disconnect them yourself if that is what you need. Anything larger would
+    --- answer whether a connection dies with the thing its closure captured, which is a separate
+    --- question and not one a property setter may decide. Several scripts enabled by one tick start in
+    --- document order.
     Enabled: boolean
 end
 

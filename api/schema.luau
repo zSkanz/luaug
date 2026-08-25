@@ -121,6 +121,21 @@ export type Property = {
     --- argument `enumName` makes one field up. Absent means the property accepts
     --- anything, which is the honest answer for one that genuinely does.
     ContentKind: string?,
+
+    --- Whether a change to this property is enqueued even when nothing has
+    --- subscribed to it.
+    ---
+    --- **The default is the quiet path and it is the right default**: ten
+    --- thousand parts moving every tick enqueue nothing while nobody is
+    --- listening, which is what `World::setProperty`'s subscription mask buys.
+    --- This is for the handful of properties the ENGINE itself has to notice --
+    --- `Script.Enabled`, whose write starts or stops a script (ADR 0059) -- and
+    --- a property that has one is a property whose writes are rare enough that
+    --- the queue entry costs nothing.
+    ---
+    --- Not a substitute for a signal. `Changed` still fires only for a
+    --- subscriber; this decides whether the change reaches the queue at all.
+    Observed: boolean?,
     Doc: string,
 }
 

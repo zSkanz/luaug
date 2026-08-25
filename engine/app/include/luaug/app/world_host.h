@@ -134,6 +134,19 @@ struct WorldHostOptions
 
     scene::StampSource bootStamps;
     std::filesystem::path bootScene;
+
+    // **Whether boot starts the entry scripts, or only mounts them** (ADR 0058).
+    //
+    // True everywhere except the editor, and that asymmetry is the decision: a
+    // game, `luaug dev`, a headless run, the conformance runner and a replay all
+    // want behaviour running the moment the world exists. A TOOL wants the world
+    // it was given and nothing else, because a file scope that runs on open puts
+    // instances nobody authored into a tree somebody is about to save.
+    //
+    // Mounting is unaffected either way -- the `Script` instances are in the
+    // tree, the Explorer shows them, `Source` is editable and a tab can open one
+    // (ADR 0057). What waits is the first resumption, and with it `game.Loaded`.
+    bool startScripts = true;
 };
 
 // What the conformance run reported. Read after the loop, because the run ends
@@ -296,6 +309,26 @@ public:
     [[nodiscard]] scene::PhysicsSync* physics() noexcept { return m_physics ? &*m_physics : nullptr; }
     [[nodiscard]] const scene::PhysicsSync* physics() const noexcept { return m_physics ? &*m_physics : nullptr; }
     [[nodiscard]] script::ScriptRuntime& runtime() noexcept { return *m_runtime; }
+
+    // **Throws the VM away and builds another one on the same world** (ADR 0058).
+    //
+    // What a play session accumulates is not in the world: it is connections,
+    // required modules, deferred entries, timers and whatever a script left in
+    // its globals. Restoring the world at stop never touched any of it, so a
+    // second play inherited every one -- which is why "two plays in a row are
+    // identical" was not true and nobody had reported it.
+    //
+    // Three things survive on purpose. The **world** does, because the editor
+    // has already restored it to where play was pressed and rebuilding it would
+    // throw away that restore. The **DataModel** does, because it is the one
+    // instance a VM makes that the world then owns -- the new runtime adopts it
+    // and finds every service under it rather than building a second set. And
+    // the **mount table** does, because it says which FILE each `Script` came
+    // from, which is a fact about the project rather than about the VM.
+    //
+    // No script is started. This is the editor's stop, and the editor starts
+    // scripts when somebody presses play.
+    [[nodiscard]] std::optional<core::EngineError> restartRuntime();
     [[nodiscard]] bool shutdownRequested();
 
     // Read off `game`'s attributes, which is where the runner script puts them.
@@ -370,6 +403,13 @@ private:
     // rather than once a tick forever.
     std::vector<core::u32> m_skeletonsTried;
     std::optional<render::AnimationSystem> m_animation;
+
+    // The two things `boot` was handed that a REBUILT runtime has to be handed
+    // again (`restartRuntime`). Kept rather than re-derived: the reload bag
+    // belongs to whoever outlives this host and the stamp source is a policy the
+    // caller chose, and neither is recoverable from the world.
+    script::ReloadState* m_reloadState = nullptr;
+    scene::StampSource m_stampSource;
 
     std::filesystem::path m_root;
     core::InstanceId m_workspace;

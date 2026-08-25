@@ -336,13 +336,38 @@ local Classes: { Schema.Class } = {
         Module = "scene",
         Doc = "Luau that RUNS. Every enabled Script in the world is started on its own coroutine when the world "
             .. "does, and one that is not in the world does not run -- which is the whole difference between "
-            .. "storing a script and using it.",
+            .. "storing a script and using it."
+            .. '\n\n**In the editor, "when the world does" means when you press play** (ADR 0058). Opening a '
+            .. "project mounts every script -- they are in the tree, `Source` is editable, a tab can open one -- and "
+            .. "starts none of them, so a project shows what its scene holds and nothing a file scope built. Stop "
+            .. "tears the VM down, which is what makes a second play the same as the first. Every other way of "
+            .. "running this engine starts scripts at boot.",
         Properties = {
             {
                 Name = "Enabled",
                 Type = "boolean",
                 Default = "true",
-                Doc = "Whether this script starts when the world does; writing it afterwards has no effect in v1, neither stopping a running script nor starting one that did not run, because what sets it acts before the start it applies to.",
+                -- The engine is the subscriber here. A write to this starts or
+                -- stops a script (ADR 0059), and there is nothing for that to
+                -- subscribe through -- the mask is per instance and set by a
+                -- `GetPropertyChangedSignal`, so a rule that only worked once
+                -- somebody had connected to a signal would usually not work.
+                Observed = true,
+                Doc = "**Whether this script's threads are resumed.** It decides nothing else "
+                    .. "(ADR 0059).\n\nFalse at the moment scripts start means this one never "
+                    .. "starts. Writing it "
+                    .. "afterwards takes effect at the next deferred drain: **false to true STARTS it**, on its own "
+                    .. "coroutine, file scope running now against the world as it is -- a start and not a resume, so "
+                    .. "a script that ran, was disabled and is enabled again runs its file scope a second time. "
+                    .. "**True to false stops resumption**, and that is all it does: a queued `task.defer`, a "
+                    .. "`task.delay` coming due and a signal fire are all discarded when they come up, and a "
+                    .. "thread already executing runs to its next yield, because a coroutine cannot be preempted."
+                    .. "\n\n**Connections are NOT disconnected**, nothing it made is undone and nothing it "
+                    .. "built is removed. They stop being invoked because nothing resumes the threads that would "
+                    .. "run them; disconnect them yourself if that is what you need. Anything larger would answer "
+                    .. "whether a connection dies with the thing its closure captured, which is a separate question "
+                    .. "and not one a property setter may decide."
+                    .. "\n\nSeveral scripts enabled by one tick start in document order.",
             },
         },
     },

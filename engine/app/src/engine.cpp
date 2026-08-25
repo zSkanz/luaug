@@ -810,6 +810,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             return text;
         },
         .bootScene = bootScene,
+        // **The editor mounts and does not start** (ADR 0058). Every other way
+        // of running this binary starts scripts at boot exactly as it always
+        // did, and that asymmetry is the whole decision: a tool shows the world
+        // it was given, and behaviour begins when somebody presses play.
+        .startScripts = !options.editor,
     };
 
     auto host = std::make_unique<WorldHost>();
@@ -1081,10 +1086,43 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // server's reload -- see the comment there.
                 scriptReloadAsked = false;
                 if (editorCommands.play.has_value()) {
-                    if (*editorCommands.play)
+                    if (*editorCommands.play) {
+                        const bool wasEditing = editing(editor.runState());
                         editor.play(host->world());
-                    else
+                        // **Play is what starts the scripts** (ADR 0058), and
+                        // only the transition does: `Editor::play` refuses a
+                        // second press while playing, and starting them again
+                        // would run every file scope twice.
+                        //
+                        // Deferred rather than resumed, exactly as boot defers
+                        // them, so the first resumption lands in this frame's
+                        // drain and `game.Loaded` is raised after all of them.
+                        if (wasEditing && !editing(editor.runState()))
+                            script::startScripts(host->runtime().state());
+                    }
+                    else {
                         editor.stop(host->world(), inspector);
+
+                        // **And stop throws the VM away** (ADR 0058). The world
+                        // is back where play was pressed, which is what the line
+                        // above did; what it could not do is undo the
+                        // connections, the required modules and the queued
+                        // resumptions a play session made -- so a second play
+                        // inherited all of them and was not the same as the
+                        // first.
+                        //
+                        // After the restore rather than before, and the order is
+                        // load-bearing: the new runtime binds to the tree as it
+                        // stands, so it adopts the DataModel and finds the
+                        // services the restore put back.
+                        if (std::optional<core::EngineError> restart = host->restartRuntime(); restart.has_value()) {
+                            core::logText(core::LogLevel::Error, restart->message);
+                        }
+                        // Re-pointed for the same reason a reload re-points it:
+                        // the VM those referred to no longer exists.
+                        if (overlay.has_value())
+                            overlay->setScriptTarget(&host->runtime());
+                    }
                 }
                 if (editorCommands.pause.has_value())
                     editor.setPaused(*editorCommands.pause);
@@ -1156,8 +1194,17 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     // Out of play mode first. Loading a scene while playing
                     // would leave the snapshot describing a world that no longer
                     // exists, and stop would restore into it.
-                    if (editor.inPlayMode())
+                    if (editor.inPlayMode()) {
                         editor.stop(host->world(), inspector);
+                        // The same teardown the stop button performs, and for
+                        // the same reason: the scene about to be loaded must not
+                        // arrive under a VM still holding the last session's
+                        // connections (ADR 0058).
+                        if (std::optional<core::EngineError> restart = host->restartRuntime(); restart.has_value())
+                            core::logText(core::LogLevel::Error, restart->message);
+                        if (overlay.has_value())
+                            overlay->setScriptTarget(&host->runtime());
+                    }
                     (void)editor.openScene(host->world(), editorCommands.openScene, inspector);
                 }
                 if (!editorCommands.createFolder.empty())

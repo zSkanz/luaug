@@ -242,7 +242,15 @@ public:
 // Creates `game` and the two services that exist from boot, installs the
 // `game` and `workspace` globals, and binds every service method. Runs during
 // boot, before the sandbox.
-void registerServices(lua_State* L);
+// `adopt` is a `DataModel` this world already has, and it is what makes a VM
+// replaceable without replacing the world (ADR 0058: stop tears the runtime down
+// and builds a fresh one). Invalid -- the default, and every boot -- creates one.
+//
+// Adopting rather than creating is the whole difference, because everything
+// under it is FOUND: `getServiceOfClass` has always been find-or-create, so a
+// second boot over the same tree re-binds `Workspace`, `Lighting` and the rest
+// instead of building a second set beside them.
+void registerServices(lua_State* L, core::InstanceId adopt = {});
 
 // What the host publishes each frame. Called between frames rather than inside
 // one, so a stat never changes halfway through a tick that might read it.

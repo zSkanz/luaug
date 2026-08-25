@@ -149,6 +149,20 @@ public:
     usize loadFailures = 0;
 };
 
+// What a script's chunk is called: the project-relative file it was mounted
+// from, or its place in the tree when nothing mounted it (ADR 0057).
+//
+// **One function so that three callers agree.** `startScripts` puts this in
+// every error message, the script editor puts it on a tab, and a breakpoint is
+// keyed on it -- and a breakpoint whose key is not the name the VM reports is a
+// breakpoint that never fires. Empty for an instance that is not a script.
+[[nodiscard]] std::string scriptChunkName(lua_State* L, core::InstanceId instance);
+
+// The file a script was mounted from, or empty when the scene or the editor made
+// it. What `Ctrl+S` in the script editor asks, and the only question a second
+// copy of the source could not have answered.
+[[nodiscard]] std::string_view mountedPathOf(lua_State* L, core::InstanceId instance);
+
 // Installs the `require` global. Runs during boot, before the sandbox.
 void registerRequire(lua_State* L);
 
@@ -187,6 +201,63 @@ std::vector<core::InstanceId> mountScripts(lua_State* L, std::span<const Mounted
 // because a fire captures its connection list when it is raised (§3.1) and a
 // `game.Loaded:Connect` at file scope would otherwise miss its own fire.
 void startScripts(lua_State* L);
+
+// Starts ONE `Script`, on its own coroutine, deferred exactly as `startScripts`
+// defers each of its own -- and answers whether it did.
+//
+// **This exists because `Enabled` does something now** (ADR 0059). A false-to-
+// true write after boot is a START rather than a resume: there is no old thread
+// to hand back, and the file scope runs against the world as it is. It is the
+// same path `startScripts` uses for one instance, so a script started this way
+// and one started at play are the same script started the same way.
+//
+// False for anything that is not a `Script`, one whose `Enabled` is false, and
+// one with no source -- an empty `Script` is what somebody has the moment they
+// make one, and it is not a failure.
+bool startScript(lua_State* L, core::InstanceId instance);
+
+// The mount table -- which FILE each `Script` instance came from -- lifted out of
+// the VM and put back into another one.
+//
+// **A stop rebuilds the VM and keeps the world** (ADR 0058), and this mapping is
+// the one thing in the registry that describes the world rather than the VM: the
+// `Script` instances it names are still there afterwards, and losing it would
+// make `Ctrl+S` in the script editor and every chunk name forget which file a
+// script came from. Everything else in the registry -- required modules, their
+// cached results, the failure count -- is exactly what a teardown is for.
+[[nodiscard]] std::vector<ModuleRegistry::Entry> mountedEntries(lua_State* L);
+void adoptMountedEntries(lua_State* L, std::vector<ModuleRegistry::Entry> entries);
+
+// --- Which script a thread belongs to (ADR 0059) -----------------------------
+//
+// `Enabled` decides whether a script's threads are RESUMED, so every place that
+// resumes one has to be able to ask whose it is. These two are that question,
+// and they are here because the answer is a property of how an entry script is
+// started -- `luaL_sandboxthread` plus a `script` global -- which is what the
+// file above does.
+
+// The `Script` this thread belongs to, or invalid.
+//
+// Read from the thread's own globals table, and that is what makes it
+// TRANSITIVE: an entry script's coroutine gets its own globals with `script` in
+// them, and `lua_newthread` hands that same table to every thread created from
+// it -- so a `task.defer` three calls deep inside a script still answers with
+// that script. A thread the engine made for itself has the main globals, no
+// `script`, and belongs to nobody.
+[[nodiscard]] core::InstanceId scriptOfThread(lua_State* thread);
+
+// The same question asked of a FUNCTION, through the environment it was loaded
+// with. A signal handler is stored as a function and its thread is not made
+// until it fires, so this is the only form of the question available at the
+// moment a fire decides whether to invoke it.
+[[nodiscard]] core::InstanceId scriptOfFunction(lua_State* L, int index);
+
+// Whether a resumption belonging to this script must be dropped: it names a
+// live `Script` whose `Enabled` is false.
+//
+// **Invalid is never suppressed.** A thread with no owning script is the
+// engine's own, and a rule about scripts must not reach one.
+[[nodiscard]] bool resumptionSuppressed(lua_State* L, core::InstanceId script);
 
 // How many entry scripts were mounted. The conformance runner reports it, and a
 // project that mounted nothing is worth saying so about.

@@ -111,6 +111,17 @@ struct PropertyDesc
     // the second one.
     core::NameAtom contentKind{};
 
+    // Whether a change to this property reaches the change queue even when
+    // nothing has subscribed to it.
+    //
+    // **The default is the quiet path**: `setProperty` enqueues only for a
+    // subscriber, which is what makes ten thousand parts moving every tick cost
+    // nothing while nobody is listening. This is the exception for the few
+    // properties the ENGINE has to notice regardless -- `Script.Enabled`, whose
+    // write starts or stops a script (ADR 0059). Their writes are rare, so the
+    // entry is free; a property that changed every tick must not have this.
+    bool observed = false;
+
     ThreadSafety threadSafety = ThreadSafety::Unsafe;
     bool readOnly = false;
     // Backed, stored, read back faithfully -- and nothing acts on it yet. Not

@@ -536,7 +536,13 @@ World::SetResult World::setProperty(core::InstanceId id, core::NameAtom property
     // Past 64 properties the mask cannot say, so the write is loud. Correct,
     // and slower, for a class nothing in v1 has.
     const bool subscribed = slot >= 64 || (record->subscribedProperties & (u64{1} << slot)) != 0;
-    if (subscribed)
+    // **Or the engine is the subscriber.** A handful of properties are watched
+    // by the engine rather than by a script -- `Script.Enabled` is the one --
+    // and there is nothing for those to subscribe THROUGH: the mask is per
+    // instance and set by a `GetPropertyChangedSignal`, and a rule that only
+    // worked once somebody had connected to a signal would be a rule that
+    // usually did not work.
+    if (subscribed || descriptor->observed)
         m_changes.push({ChangeKind::PropertyChanged, id, core::InstanceId{}, property});
 
     return SetResult::Changed;

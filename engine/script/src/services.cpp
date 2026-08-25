@@ -1029,7 +1029,7 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
 
 } // namespace
 
-void registerServices(lua_State* L)
+void registerServices(lua_State* L, core::InstanceId adopt)
 {
     VmContext& ctx = context(L);
     ServiceState& state = *ctx.services;
@@ -1050,7 +1050,12 @@ void registerServices(lua_State* L)
 
     bindInstanceMethods(L, ServiceMethods);
 
-    state.dataModel = w.create(w.classes().findId(atoms.intern("DataModel")));
+    // **Adopted when there is one, created when there is not.** A `DataModel` is
+    // the one instance a VM makes that outlives the VM: everything else under it
+    // is found by `getServiceOfClass`, which has always been find-or-create, so
+    // this line was the only thing standing between a world and a second runtime
+    // bound to it.
+    state.dataModel = w.alive(adopt) ? adopt : w.create(w.classes().findId(atoms.intern("DataModel")));
 
     // `Workspace`, `ScriptService`, `Lighting` and `UIService` exist from boot;
     // every other service is created by its first `GetService`

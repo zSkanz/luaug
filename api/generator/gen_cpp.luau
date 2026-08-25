@@ -637,6 +637,13 @@ local function generate(target: Module)
                     -- the value -- a string -- can never answer it.
                     emit(`            .contentKind = atoms.intern("{property.ContentKind}"),`)
                 end
+                if property.Observed == true then
+                    -- The engine watches this one, so its writes reach the
+                    -- change queue with or without a subscriber. Emitted only
+                    -- when true: the default is the quiet path and every other
+                    -- property in the IDL wants it.
+                    emit("            .observed = true,")
+                end
                 emit(`            .threadSafety = {scope}ThreadSafety::{property.ThreadSafety or "Unsafe"},`)
                 emit(`            .readOnly = {if property.ReadOnly == true then "true" else "false"},`)
                 emit(`            .inert = {if property.Inert == true then "true" else "false"},`)

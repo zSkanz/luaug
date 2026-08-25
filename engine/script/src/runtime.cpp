@@ -172,7 +172,7 @@ ScriptRuntime::~ScriptRuntime()
     }
 }
 
-std::optional<core::EngineError> ScriptRuntime::boot()
+std::optional<core::EngineError> ScriptRuntime::boot(core::InstanceId adoptDataModel)
 {
     if (m_impl->state != nullptr)
         return std::nullopt;
@@ -219,7 +219,7 @@ std::optional<core::EngineError> ScriptRuntime::boot()
     // Last of the registrations, because it creates the DataModel and its two
     // boot services -- which needs `pushInstance`, and therefore the Instance
     // metatable, to already exist.
-    registerServices(L);
+    registerServices(L, adoptDataModel);
     registerRequire(L);
     // After `require` exists and before the sandbox seals: `@std/net` is
     // reached through `require` and through nothing else, which is what keeps
@@ -438,6 +438,25 @@ void ScriptRuntime::drain(core::Phase)
     // they happened, because a fire captures its connection list when it is
     // raised and not when it is drained (api-design.md §3.1).
     flushSceneChanges(m_impl->state);
+
+    // **A script enabled since the last drain starts here** (ADR 0059 rule 3),
+    // between the flush that noticed the write and the drain that runs what it
+    // queues -- so the file scope runs in THIS drain, which is where boot
+    // already starts scripts.
+    //
+    // Put into document order first. `collectDescendants` is depth-first
+    // preorder, the same order `startScripts` uses; taking them in the order the
+    // writes happened would let a pool artefact decide which of two scripts
+    // enabled by one tick runs first, which R10 forbids.
+    if (std::vector<core::InstanceId> enabled = takeEnabledScripts(m_impl->state); !enabled.empty()) {
+        std::vector<core::InstanceId> everything;
+        m_world.collectDescendants(dataModel(), everything);
+        for (const core::InstanceId instance : everything) {
+            if (std::find(enabled.begin(), enabled.end(), instance) != enabled.end())
+                (void)startScript(m_impl->state, instance);
+        }
+    }
+
     (void)drainDeferred(m_impl->state);
 
     // After the drain, which is what gives a `Destroying` handler a live handle
