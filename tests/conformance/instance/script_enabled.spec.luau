@@ -71,10 +71,10 @@ end
 
 describe("Script.Enabled", function()
     beforeEach(function()
-        local made = Instance.new("Folder")
-        made.Name = "ScriptEnabledSpec"
-        made.Parent = workspace
-        sandbox = made
+        local created = Instance.new("Folder")
+        created.Name = "ScriptEnabledSpec"
+        created.Parent = workspace
+        sandbox = created
     end)
 
     afterEach(function()
@@ -222,9 +222,9 @@ describe("Script.Enabled", function()
         end)
 
         it("leaves what the script built where it is", function()
-            -- Somebody will expect a disable to clean up. It does not, Roblox's
-            -- does not, and the alternative is this rule growing into ownership
-            -- semantics for every instance a script ever touched.
+            -- Somebody will expect a disable to clean up. It does not, and the
+            -- alternative is this rule growing into ownership semantics for
+            -- every instance a script ever touched.
             local script = sleeping("Builder", makes("Survivor"))
             script.Enabled = true
             task.wait()

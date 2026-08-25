@@ -1669,9 +1669,22 @@ void drawEditor(scene::World& world, Inspector& inspector, std::span<const core:
         const bool audible =
             audio != nullptr && contentKindNamed(kindName) == ContentKind::Audio && !mixed && !current.empty();
 
+        // **Every widget on a property row is one frame high**, and the
+        // audition button was not: `iconButton` sizes the PICTURE and the button
+        // then adds frame padding around it, so asking for `GetFrameHeight()`
+        // worth of icon produced a button taller and wider than the field beside
+        // it -- which pushed past the column, made this row taller than every
+        // other row, and is what "meio zuado" was pointing at.
+        //
+        // So the glyph is what is left of a frame after its padding, which is
+        // the font size, and the width the row reserves is what the button will
+        // actually measure. One row, one height.
+        const ImVec2 padding = ImGui::GetStyle().FramePadding;
         const float pickWidth = ImGui::GetFrameHeight();
+        const float glyph = ImGui::GetFontSize();
+        const float playWidth = glyph + padding.x * 2.0f;
         const float inner = ImGui::GetStyle().ItemInnerSpacing.x;
-        ImGui::SetNextItemWidth(-(audible ? pickWidth * 2.0f + inner * 2.0f : pickWidth + inner));
+        ImGui::SetNextItemWidth(-(audible ? pickWidth + playWidth + inner * 2.0f : pickWidth + inner));
         const bool typed = ImGui::InputTextWithHint("##value", mixed ? "mixed" : "asset://", buffer, sizeof(buffer),
                                                     ImGuiInputTextFlags_EnterReturnsTrue);
         if (typed)
@@ -1699,7 +1712,7 @@ void drawEditor(scene::World& world, Inspector& inspector, std::span<const core:
             // two-minute track needs the way to stop it in the place they
             // started it, not somewhere else on the row.
             const bool playing = audio->auditioning(current);
-            if (iconButton(icons, playing ? icons::ActionPause : icons::ActionPlay, pickWidth, "audition",
+            if (iconButton(icons, playing ? icons::ActionPause : icons::ActionPlay, glyph, "audition",
                            playing ? "||" : ">",
                            playing ? "stop the preview" : "hear this file without running the game")) {
                 if (playing) {
@@ -2596,6 +2609,28 @@ void drawViewportFullscreen(Editor& editor, rhi::TextureHandle texture, EditorCo
 // actually looked like. A dockspace does not arrange anything by itself; it
 // only makes arranging possible.
 //
+// **Which tab a dock node opens on**, which `SetWindowFocus` does not decide.
+//
+// That is not a guess: ImGui's `FocusWindow` carries the line that would do it
+// and the line is COMMENTED OUT, with its own note -- "for #2304 we avoid
+// applying focus immediately before the tabbar is visible". So D083's fix for
+// "the editor opens on stats" moved the focus and never moved the tab, and the
+// node went on opening on whichever window was docked last, which is what it
+// had always done. Reported again, in the same words, by the same person.
+//
+// What ImGui does read is the node's own `SelectedTabId` when the tab bar is
+// built, and `NextSelectedTabId` when one already exists. Setting both is the
+// same request asked of whichever of the two states the node is in.
+void selectDockTab(const char* name)
+{
+    ImGuiWindow* window = ImGui::FindWindowByName(name);
+    if (window == nullptr || window->DockNode == nullptr)
+        return;
+    window->DockNode->SelectedTabId = window->TabId;
+    if (window->DockNode->TabBar != nullptr)
+        window->DockNode->TabBar->NextSelectedTabId = window->TabId;
+}
+
 // Built once, and only when there is no saved layout: `DockBuilderRemoveNode`
 // would throw away the arrangement somebody chose.
 void buildDefaultLayout(ImGuiID dockspace)
@@ -4097,19 +4132,28 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     if (editor != nullptr)
         drawEditorDialogs(*editor, commands, dialogs, icons);
 
-    // After every panel has been declared, because focusing a window ImGui has
-    // not seen this frame does nothing. Only on the frame the default layout
-    // was built: a person who later chose the console should find the console,
-    // and the ini remembers which tab that was.
+    // After every panel has been declared, because a window ImGui has not seen
+    // this frame has no dock node to select a tab in.
     //
-    // **Properties before content**, and the order is the point twice over: each
-    // call selects the tab in its OWN node, so both nodes get the tab they
-    // should open on, and the last call is the one that also takes keyboard
-    // focus -- which belongs to the panel somebody is about to browse rather
-    // than to the one they are about to read.
-    if (builtThisFrame) {
-        ImGui::SetWindowFocus("Properties");
+    // **On the frame the layout was built, and once for a layout that predates
+    // this working.** The first is the default and needs no explanation. The
+    // second does: the tab selection above never took effect, so every project
+    // arranged before now has `stats` written into its `layout.ini` -- not
+    // because anybody chose it but because it was docked last. Reset Layout
+    // would fix it and would also throw away the arrangement somebody built,
+    // which is a bad trade for a tab. So the revision is bumped once, the tab is
+    // put where it belongs, and every panel size and split stays exactly where
+    // it was. A person who chooses `stats` afterwards keeps it, because the
+    // revision has already moved and this never runs again.
+    const bool migrating = editor != nullptr && editor->layoutRevision() < Editor::CurrentLayoutRevision;
+    if (builtThisFrame || migrating) {
+        selectDockTab("Properties");
+        selectDockTab("Content");
+        // Keyboard focus goes to the browser rather than to the grid: it belongs
+        // to the panel somebody is about to move around in.
         ImGui::SetWindowFocus("Content");
+        if (editor != nullptr)
+            editor->setLayoutRevision(Editor::CurrentLayoutRevision);
     }
 }
 

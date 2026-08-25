@@ -25,7 +25,7 @@ using luaug::app::testing::Captured;
 using luaug::app::testing::Project;
 using luaug::testing::nearly;
 
-TEST_CASE("an empty world still boots, with game and its boot services")
+TEST_CASE("an empty world still boots, with game and every service under it")
 {
     Captured log;
     app::WorldHost host;
@@ -33,12 +33,20 @@ TEST_CASE("an empty world still boots, with game and its boot services")
 
     CHECK(host.workspace().valid());
     CHECK(host.world().alive(host.runtime().dataModel()));
-    // `Workspace`, `ScriptService`, `Lighting` and -- from M6 -- `UIService` and
-    // `AudioService` exist from boot; nothing else does until it is asked for.
-    // The last three are there for one reason: the frame reads all of them
-    // whether or not a script asks, so "created on first GetService" cannot be
-    // true of any of them.
-    CHECK(host.world().childCount(host.runtime().dataModel()) == 5);
+
+    // **Every service, not the five that had earned their way in one at a time**
+    // (D099). The count is measured against the registry rather than written
+    // down, because a number in a test is a number somebody has to remember to
+    // change and this one moved five times without anybody deciding it should.
+    core::usize services = 0;
+    const scene::ClassRegistry& classes = host.world().classes();
+    for (scene::ClassId id = 1; id < static_cast<scene::ClassId>(classes.classCount()); ++id) {
+        const scene::ClassDescriptor* descriptor = classes.find(id);
+        if (descriptor != nullptr && hasFlag(descriptor->flags, scene::ClassFlags::Service))
+            ++services;
+    }
+    CHECK(services > 5);
+    CHECK(host.world().childCount(host.runtime().dataModel()) == services);
 }
 
 // --- The M4.5 gate addition: `Lighting` resolution, at the HOST --------------

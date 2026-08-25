@@ -1605,16 +1605,63 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             scriptReloadAsked = false;
             if (editor.inPlayMode())
                 editor.stop(host->world(), inspector);
+
+            // **What was open, by CHUNK.** Every instance is about to be a
+            // different one, so an id is worth nothing across this -- but a
+            // chunk name means the same thing in the new world, which is why
+            // breakpoints are keyed on it and why the tabs can be too.
+            struct Reopen
+            {
+                std::string chunk;
+                std::string file;
+                std::string title;
+            };
+            std::vector<Reopen> reopen;
+            for (const OpenScript& tab : scripts.tabs())
+                reopen.push_back(Reopen{tab.chunk, tab.file, tab.title});
+            const std::size_t wasActive = scripts.activeIndex();
+
             const ReloadReport reloaded = reloadWorld(host, worldOptions);
             if (reloaded.ok) {
                 inspector.onWorldChanged();
                 overlay->setInspectionTarget(&host->world(), host->runtime().dataModel(), &inspector);
                 overlay->setScriptTarget(&host->runtime());
-                // Every instance in the world is a new one, so a tab holding an
-                // old id is holding nothing. The chunk names -- and therefore
-                // the breakpoints -- are unchanged, which is why they are keyed
-                // on those.
-                (void)scripts.forgetDestroyed(host->world());
+
+                // **The overlay's visibility is the EDITOR's state, not the
+                // world's** -- and a reload brings a fresh `EngineState` whose
+                // `overlayVisible` is false. Without this the panels vanish the
+                // moment somebody saves a script and the editor is left as a
+                // bare viewport with no menu bar (reported by the human while
+                // this milestone was being built). The property still exists for
+                // a script to read; it is seeded from what is on screen rather
+                // than the other way round.
+                host->world().engineState().overlayVisible = overlayVisible;
+
+                // Tabs are re-opened against the new instances rather than
+                // closed. Somebody who pressed Ctrl+S was in the middle of
+                // writing that file, and having it shut is the last thing they
+                // asked for.
+                scripts.closeAll();
+                scene::World& fresh = host->world();
+                std::vector<core::InstanceId> everything;
+                fresh.collectDescendants(host->runtime().dataModel(), everything);
+                for (const Reopen& want : reopen) {
+                    for (const core::InstanceId id : everything) {
+                        if (script::scriptChunkName(host->runtime().state(), id) != want.chunk)
+                            continue;
+                        const std::optional<scene::Value> source =
+                            fresh.getProperty(id, fresh.atoms().intern("Source"));
+                        const auto* text = source.has_value() ? std::get_if<std::string>(&source.value()) : nullptr;
+                        scripts.open(id, want.chunk, want.file, want.title, text != nullptr ? *text : std::string{});
+                        break;
+                    }
+                }
+                if (wasActive < scripts.count())
+                    scripts.setActive(wasActive);
+                // Anything whose chunk is gone from the new world -- a file
+                // deleted between saves -- has no tab now, which is the honest
+                // outcome rather than a document nobody can save.
+                (void)scripts.forgetDestroyed(fresh);
             }
         }
 
@@ -1638,6 +1685,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     // blunter reason: the world it held has been destroyed.
                     inspector.onWorldChanged();
                     if (overlay.has_value()) {
+                        // The same rule the editor's own reload states: the
+                        // overlay's visibility belongs to whoever is looking,
+                        // not to the world, and a fresh `EngineState` would
+                        // otherwise close the panel on every hot reload.
+                        host->world().engineState().overlayVisible = overlayVisible;
                         overlay->setInspectionTarget(&host->world(), host->runtime().dataModel(), &inspector);
                         // And the VM, for the same blunt reason: the runtime the
                         // console evaluated in has been destroyed with the world.
@@ -2164,7 +2216,20 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // game with a camera is still shown through its own, which is the
             // whole of what pressing play means.
             const render::ViewOverride editorView{editor.cameraCFrame(), EditorFieldOfView, 0.1f, 5000.0f};
-            const bool gameHasCamera = host->currentCamera().valid();
+            // **And "has a camera" has to mean the same thing here as it does
+            // in `extract`, or the fallback misses exactly the case it is for.**
+            // `Workspace.CurrentCamera` is a REFERENCE: deleting the camera in
+            // the editor leaves the property naming a dead id, and an id stays
+            // structurally valid after the instance it named is gone. So this
+            // asked "is the field set" while `extract` asked "can I draw through
+            // it", the two disagreed for a world whose camera had been deleted,
+            // and the frame fell back to the M1 pulse -- the same rainbow D088
+            // and D091 each removed from a different direction, arriving from a
+            // third. The predicate is now `extract`'s, spelled out: alive, not
+            // retiring, and actually a camera.
+            const core::InstanceId gameCamera = host->currentCamera();
+            const bool gameHasCamera = host->world().alive(gameCamera) && !host->world().destroyed(gameCamera) &&
+                                       host->world().cameras().find(gameCamera) != nullptr;
             const bool useEditorView =
                 options.editor && editor.cameraAdopted() && (editing(editor.runState()) || !gameHasCamera);
             // **The selection, drawn as a silhouette rather than as a box.** The

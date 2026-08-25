@@ -1057,43 +1057,80 @@ void registerServices(lua_State* L, core::InstanceId adopt)
     // bound to it.
     state.dataModel = w.alive(adopt) ? adopt : w.create(w.classes().findId(atoms.intern("DataModel")));
 
-    // `Workspace`, `ScriptService`, `Lighting` and `UIService` exist from boot;
-    // every other service is created by its first `GetService`
-    // (api-design.md §1.2). The
-    // first two are here because a script reaches `workspace` through a global
-    // rather than through a call, and because the mount point has to exist
-    // before anything mounts.
-    const core::InstanceId workspace = getServiceOfClass(L, w.classes().findId(atoms.intern("Workspace")));
-    (void)getServiceOfClass(L, w.classes().findId(atoms.intern("ScriptService")));
-
-    // `Lighting` is here for a different reason, and it is the one M4.5 exists
-    // for: the renderer reads the environment every frame whether or not a
-    // script ever asks for the service, so "created on first `GetService`"
-    // cannot be true of it. It was, and the host cached the id of a service
-    // that did not exist yet -- so every frame M4 ever drew used the struct
-    // defaults and no scene's `Lighting` reached a pixel.
+    // **Every service exists from boot**, and the paragraphs this replaced are
+    // the argument for it. There were five of them: `Workspace` and
+    // `ScriptService` because a script reaches one through a global and the
+    // other is the mount point; `Lighting` because the renderer reads the
+    // environment every frame whether or not anybody asked; `UIService` because
+    // the frame lays out every `ScreenGui` under it; `AudioService` because the
+    // mixer reads `MasterVolume`. That is not five decisions. It is one decision
+    // found five times, each time after something had already read a service
+    // nobody had created -- and M4 spent four milestones lighting every scene
+    // with struct defaults because `Lighting` had not had its turn yet.
     //
-    // Found by `getServiceOfClass` rather than named as an id, and guarded on
-    // the class existing: `Lighting` is registered by `render`, and an engine
-    // built without that module has no such class. This file is in `script` and
-    // must not acquire an opinion about which modules are compiled in.
-    if (const ClassId lightingClass = w.classes().findId(atoms.intern("Lighting"));
-        lightingClass != scene::InvalidClass)
-        (void)getServiceOfClass(L, lightingClass);
+    // **The editor is what turns it from a convenience into a rule.** A tree
+    // whose shape depends on whether a script has called `GetService` is a tree
+    // that changes when you press play, which is what was reported: `RunService`
+    // and `HotReloadService` appearing in the Explorer on play and vanishing on
+    // stop. Scripts do not run until play now (ADR 0058), so a project nobody
+    // has played would show none of them at all -- and "the world you are
+    // editing is the world" cannot survive half its services being invisible.
+    //
+    // **`Workspace`, then `Lighting`, then every other service by name.**
+    //
+    // The order is what the Explorer shows, so it is a decision about reading
+    // rather than about construction -- which is why it is not registration
+    // order. Registration order is a fact about which module was compiled in and
+    // in what sequence its file was generated, and a person scanning a panel has
+    // no way to know any of that.
+    //
+    // The two at the front are the two a scene IS: the world, and how it is lit.
+    // They are also the two an editor opens into, and the only ones somebody
+    // reaches for by position rather than by name. Past those, twelve names is a
+    // list you scan alphabetically, so it is sorted alphabetically -- and a
+    // service added next year lands where its name puts it without anybody
+    // deciding where.
+    //
+    // Sorted rather than listed, because a list written by hand is a list that
+    // goes stale, and this order is also the CREATION order and therefore part
+    // of the world (R10): a comparison on names is the same on every machine,
+    // where registration order is only the same by luck.
+    //
+    // `DataModel` is not among them: it carries `NotCreatable` rather than
+    // `Service`, because it is the services' parent rather than one of them.
+    const ClassId workspaceClass = w.classes().findId(atoms.intern("Workspace"));
+    const ClassId lightingClass = w.classes().findId(atoms.intern("Lighting"));
 
-    // `UIService` joins them at M6 for exactly the reason `Lighting` did: the
-    // frame lays out and draws every `ScreenGui` under it whether or not a
-    // script ever asked for the service, so "created on first `GetService`"
-    // cannot be true of it either. Guarded the same way, because the class is
-    // registered by `ui` and an engine built without that module has none.
-    if (const ClassId uiClass = w.classes().findId(atoms.intern("UIService")); uiClass != scene::InvalidClass)
-        (void)getServiceOfClass(L, uiClass);
+    std::vector<ClassId> serviceClasses;
+    for (ClassId id = 1; id < static_cast<ClassId>(w.classes().classCount()); ++id) {
+        const scene::ClassDescriptor* descriptor = w.classes().find(id);
+        if (descriptor != nullptr && hasFlag(descriptor->flags, scene::ClassFlags::Service))
+            serviceClasses.push_back(id);
+    }
 
-    // And `AudioService`, for the third instance of the same reason: the mixer
-    // reads `MasterVolume` every frame whether or not a script asks for the
-    // service.
-    if (const ClassId audioClass = w.classes().findId(atoms.intern("AudioService")); audioClass != scene::InvalidClass)
-        (void)getServiceOfClass(L, audioClass);
+    const auto rank = [&](ClassId id) {
+        if (id == workspaceClass)
+            return 0;
+        if (id == lightingClass)
+            return 1;
+        return 2;
+    };
+    std::sort(serviceClasses.begin(), serviceClasses.end(), [&](ClassId a, ClassId b) {
+        if (rank(a) != rank(b))
+            return rank(a) < rank(b);
+        const scene::ClassDescriptor* left = w.classes().find(a);
+        const scene::ClassDescriptor* right = w.classes().find(b);
+        if (left == nullptr || right == nullptr)
+            return left != nullptr;
+        return atoms.text(left->name) < atoms.text(right->name);
+    });
+
+    core::InstanceId workspace;
+    for (const ClassId id : serviceClasses) {
+        const core::InstanceId created = getServiceOfClass(L, id);
+        if (id == workspaceClass)
+            workspace = created;
+    }
 
     // Whatever the boot tree raised is consumed rather than queued: nothing can
     // have connected yet, and a fire nobody could have subscribed to is a fire

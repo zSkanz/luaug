@@ -926,13 +926,13 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("GetService"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .doc = "Returns the service of this name, creating it on the first request. Services are singletons: every later call returns the same instance, and it is an ordinary child of `game` once created. A string literal gives an exactly typed result; a name computed at runtime gives the general `Instance`, which is the honest cost of not knowing the name at analysis time. An unknown name raises `scene.err.unknown_service`.",
+            .doc = "Returns the service of this name. Services are singletons and all of them exist from boot, so this is a lookup rather than a creation and every call returns the same ordinary child of `game`. A string literal gives an exactly typed result; a name computed at runtime gives the general `Instance`, which is the honest cost of not knowing the name at analysis time. An unknown name raises `scene.err.unknown_service`.",
         },
         MethodDesc{
             .name = atoms.intern("FindService"),
             .yields = false,
             .threadSafety = ThreadSafety::ReadParallel,
-            .doc = "Returns the service of this name if it already exists, and `nil` otherwise. It creates nothing, so it answers whether a service is in use rather than forcing it into existence -- which is the whole difference from `GetService`.",
+            .doc = "Returns the service of this name, or `nil` for a name that is not a service at all. \012\012**It answers the same as `GetService` for every real service now**, and that is a narrowing worth stating: it used to mean \"is this service in use\", because a service was created by its first `GetService`. All of them exist from boot, so there is no such question left to ask. What is left is the difference in how they refuse an unknown name -- this one returns `nil` where `GetService` raises -- which is the reason to keep it.",
         },
         MethodDesc{
             .name = atoms.intern("BindToClose"),
@@ -960,7 +960,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     dataModelDesc.super = instanceClass;
     dataModelDesc.flags = ClassFlags::NotCreatable;
     dataModelDesc.defaultName = atoms.intern("DataModel");
-    dataModelDesc.doc = "The root of the instance tree, reached through the `game` global. Services are its children: `Workspace` and `ScriptService` exist from boot and every other service is created by its first `GetService`. It is the services' parent rather than one of them.";
+    dataModelDesc.doc = "The root of the instance tree, reached through the `game` global. **Every service is a child of it and every service exists from boot**, in the order this file declares them -- so the tree has the same shape before a line of script has run as it does after, which is what lets an editor show it. It is the services' parent rather than one of them.";
     dataModelDesc.properties = dataModelProperties;
     dataModelDesc.methods = dataModelMethods;
     dataModelDesc.events = dataModelEvents;

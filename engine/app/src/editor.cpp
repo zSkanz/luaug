@@ -398,6 +398,9 @@ void Editor::rememberState(const std::filesystem::path& stateDirectory) const
     core::JsonWriter writer;
     writer.beginObject();
     writer.field("openScene", m_openScene);
+    // Which default arrangement this project has already been shown. See
+    // `Editor::CurrentLayoutRevision`.
+    writer.field("layoutRevision", static_cast<core::f64>(m_layoutRevision));
 
     // **What a person set, rather than what they did.** The manipulator's mode
     // and space, snapping and its steps, and how the browser lays entries out:
@@ -473,6 +476,13 @@ void Editor::recallState(const std::filesystem::path& stateDirectory)
     // Every block is optional and each is read on its own. A file written before
     // one of these existed is not a broken file -- it is a file from last week,
     // and the missing block means "whatever this build's default is".
+    //
+    // Absent means zero here, and zero is the answer that matters: a project
+    // arranged before this field existed is exactly the one whose default tab
+    // was never applied.
+    if (const core::JsonValue revision = root["layoutRevision"]; revision.type() == core::JsonType::Number)
+        m_layoutRevision = static_cast<core::i64>(revision.asNumber());
+
     if (const core::JsonValue tools = root["tools"]; tools.type() == core::JsonType::Object) {
         m_gizmoMode = gizmoModeFrom(tools["gizmo"].asString());
         m_gizmoLocal = tools["space"].asString() == "local";

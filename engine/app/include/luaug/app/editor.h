@@ -1098,6 +1098,29 @@ public:
     // rebuilt from nothing every launch, and a preference somebody set once
     // belongs to the project rather than to the run. The shell seeds its own
     // copy from this on the first frame and writes back through the setter.
+    // **What the DEFAULT arrangement knows that a saved one may not.**
+    //
+    // ImGui's `layout.ini` remembers where somebody put a panel, which is
+    // exactly right and is why nothing here overwrites it. What it cannot tell
+    // apart is a choice from an accident: a tab that opens because it was docked
+    // last looks identical, in that file, to one somebody clicked. So when a
+    // default changes for a reason -- see `selectDockTab` -- this number moves,
+    // the shell applies the new default once against a layout that predates it,
+    // and everything a person actually arranged is left alone.
+    //
+    // Bump it only for a default that was WRONG rather than merely different. A
+    // number that moved for a preference would be a preference overwritten.
+    static constexpr core::i64 CurrentLayoutRevision = 1;
+
+    [[nodiscard]] core::i64 layoutRevision() const noexcept { return m_layoutRevision; }
+    void setLayoutRevision(core::i64 revision) noexcept
+    {
+        if (m_layoutRevision == revision)
+            return;
+        m_layoutRevision = revision;
+        m_preferencesDirty = true;
+    }
+
     [[nodiscard]] EditorPanels::ContentView contentView() const noexcept { return m_contentView; }
     void setContentView(EditorPanels::ContentView view) noexcept
     {
@@ -1417,6 +1440,9 @@ private:
     bool m_snap = true;
     bool m_snapSuspended = false;
     EditorPanels::ContentView m_contentView = EditorPanels::ContentView::List;
+    // Zero for a project arranged before this existed, which is the case the
+    // migration is for.
+    core::i64 m_layoutRevision = 0;
     std::optional<platform::WindowPlacement> m_window;
     bool m_preferencesDirty = false;
     // Metres, metres, degrees -- indexed by `GizmoMode`. A quarter of a metre

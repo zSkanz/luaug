@@ -1,10 +1,17 @@
+#include "luaug/scene/class_registry.h"
+#include "luaug/scene/world.h"
 #include "luaug/script/services.h"
 
+#include <algorithm>
 #include <doctest/doctest.h>
 #include <ostream>
+#include <string>
+#include <vector>
 
 #include "script_fixture.h"
 
+namespace core = luaug::core;
+namespace scene = luaug::scene;
 using luaug::script::testing::Fixture;
 
 TEST_CASE("the world boots with game, Workspace and ScriptService")
@@ -28,13 +35,17 @@ TEST_CASE("the world boots with game, Workspace and ScriptService")
     )") == "");
 }
 
-TEST_CASE("a service is created on demand and is a singleton thereafter")
+TEST_CASE("every service exists from boot and GetService is a lookup")
 {
     Fixture fixture;
 
     CHECK(fixture.failure(R"(
-        -- Not yet asked for, so not yet in existence.
-        assert(game:FindService("RunService") == nil)
+        -- **There before anything asked**, which is what makes the tree the same
+        -- shape before a line of script has run as after -- and what lets an
+        -- editor show it (D099). It was created by its first `GetService` until
+        -- then, so `RunService` and `HotReloadService` appeared in the Explorer
+        -- when you pressed play and vanished when you stopped.
+        assert(game:FindService("RunService") ~= nil)
 
         local run = game:GetService("RunService")
         assert(run.ClassName == "RunService")
@@ -44,7 +55,7 @@ TEST_CASE("a service is created on demand and is a singleton thereafter")
         assert(game:GetService("RunService") == run)
         assert(game:FindService("RunService") == run)
 
-        -- And it is an ordinary child of game once created.
+        -- And it is an ordinary child of game.
         local found = false
         for _, child in game:GetChildren() do
             if child == run then
@@ -53,6 +64,61 @@ TEST_CASE("a service is created on demand and is a singleton thereafter")
         end
         assert(found)
     )") == "");
+}
+
+TEST_CASE("every service class in the build has an instance under game")
+{
+    // **Counted against the registry rather than named**, because a list written
+    // by hand is a list that goes stale the day somebody adds a service -- and
+    // the failure would be invisible until a person noticed a missing row in the
+    // Explorer, which is exactly how this was found in the first place.
+    Fixture fixture;
+
+    const scene::ClassRegistry& classes = fixture.classes;
+    const scene::World& world = *fixture.world;
+    const core::InstanceId dataModel = fixture.runtime->dataModel();
+
+    core::usize services = 0;
+    core::usize present = 0;
+    for (scene::ClassId id = 1; id < static_cast<scene::ClassId>(classes.classCount()); ++id) {
+        const scene::ClassDescriptor* descriptor = classes.find(id);
+        if (descriptor == nullptr || !hasFlag(descriptor->flags, scene::ClassFlags::Service))
+            continue;
+        ++services;
+        if (world.findFirstChildOfClass(dataModel, id).valid())
+            ++present;
+    }
+
+    CHECK(services > 5);
+    CHECK(present == services);
+}
+
+TEST_CASE("the services read Workspace, Lighting, then alphabetically")
+{
+    // **The order is what a person reads**, so it is asserted as a list rather
+    // than as a rule: a test that recomputed the rule would agree with any
+    // implementation of it, including the wrong one.
+    //
+    // The two at the front are the two a scene IS -- the world and how it is
+    // lit -- and past those a dozen names is a list scanned by name.
+    Fixture fixture;
+
+    const scene::World& world = *fixture.world;
+    std::vector<std::string> names;
+    for (core::InstanceId child = world.firstChild(fixture.runtime->dataModel()); child.valid();
+         child = world.nextSibling(child)) {
+        names.emplace_back(world.atoms().text(world.name(child)));
+    }
+
+    REQUIRE(names.size() >= 3);
+    CHECK(names[0] == "Workspace");
+    CHECK(names[1] == "Lighting");
+
+    // Everything after the two pinned ones, in name order, checked as a whole --
+    // "is sorted" is the claim, and one out-of-place pair is what it forbids.
+    const std::vector<std::string> rest(names.begin() + 2, names.end());
+    CHECK(std::is_sorted(rest.begin(), rest.end()));
+    CHECK(std::adjacent_find(rest.begin(), rest.end()) == rest.end());
 }
 
 TEST_CASE("GetService raises on an unknown name and FindService does not")
