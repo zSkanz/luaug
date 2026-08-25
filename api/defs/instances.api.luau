@@ -1642,7 +1642,12 @@ local Classes: { Schema.Class } = {
         Storage = "Sound",
         Doc = "One sound, playing or not (§2.2). **Parent it to a `BasePart` and it is positional**; parent it "
             .. "anywhere else and it is 2D. That is the whole of the 3D switch, and it is a property of where "
-            .. "the instance sits rather than a flag that could disagree with it.\n\n**Its timeline is the "
+            .. "the instance sits rather than a flag that could disagree with it.\n\n**Positional means two "
+            .. "things**: it gets quieter with distance, and it comes out of the side it is on. The side is an "
+            .. "azimuth in the listener's own frame, so turning around swaps it -- elevation is not expressed, "
+            .. "because two channels cannot, and a source directly ahead and one directly behind are both centre "
+            .. "for the same reason. A positional sound is folded to mono before it is placed; a 2D one keeps its "
+            .. "own stereo image, which is all it has.\n\n**Its timeline is the "
             .. "SimClock's, not the mixer's.** `TimePosition` advances by "
             .. "`FixedTimestep * PlaybackSpeed` per tick and `Ended` fires from that timeline, so a replay "
             .. "reproduces both exactly and a headless run with no audio device produces the same `Ended` on "

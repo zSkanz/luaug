@@ -105,6 +105,19 @@ struct Voice
     core::InstanceId id;
 
     f32 amplitude = 0.0f;
+    // **What the LISTENER's frame does to this voice**, on top of `amplitude`.
+    //
+    // Kept apart from the gain rather than folded into it, because the two
+    // answer different questions and one of them is asked by something else:
+    // `amplitude` is how loud this sound is, and it is what the voice cap sorts
+    // on -- a sound panned hard left is not a quieter sound and must not be the
+    // first one dropped.
+    f32 panLeft = 1.0f;
+    f32 panRight = 1.0f;
+    // Whether the world claims to know where this sound is, which is exactly
+    // whether it is parented to a `BasePart`. It decides the fold above.
+    bool positional = false;
+
     f32 frequency = 440.0f;
     f64 phase = 0.0;
     f64 phaseStep = 0.0;
@@ -163,8 +176,8 @@ struct Voice
 //
 // Returns false when a non-looped voice ran off the end, which is what retires
 // an audition.
-[[nodiscard]] bool mixClip(float* samples, ma_uint32 frameCount, const Clip& clip, f64& cursor, f64 step, f32 amplitude,
-                           bool looped) noexcept
+[[nodiscard]] bool mixClip(float* samples, ma_uint32 frameCount, const Clip& clip, f64& cursor, f64 step, f32 leftGain,
+                           f32 rightGain, bool downmix, bool looped) noexcept
 {
     for (ma_uint32 frame = 0; frame < frameCount; ++frame) {
         // Nearest sample rather than interpolated. At playback speed one --
@@ -185,8 +198,24 @@ struct Voice
             continue;
         }
         const core::usize at = index * kChannels;
-        samples[frame * kChannels] += clip.samples[at] * amplitude;
-        samples[frame * kChannels + 1] += clip.samples[at + 1] * amplitude;
+        // **A POSITIONAL sound is folded to mono before it is panned**, and a 2D
+        // one keeps its own stereo image untouched.
+        //
+        // The two cannot both be true of one voice. A file whose content sits in
+        // its right channel, placed to the listener's left, is in two places at
+        // once -- and the answer a person expects is the one the WORLD gives,
+        // because they put it there. A sound that is not parented to a part was
+        // never claimed to be anywhere, so its image is all it has and nothing
+        // here may take it.
+        if (downmix) {
+            const float mono = (clip.samples[at] + clip.samples[at + 1]) * 0.5f;
+            samples[frame * kChannels] += mono * leftGain;
+            samples[frame * kChannels + 1] += mono * rightGain;
+        }
+        else {
+            samples[frame * kChannels] += clip.samples[at] * leftGain;
+            samples[frame * kChannels + 1] += clip.samples[at + 1] * rightGain;
+        }
         cursor += step;
     }
     return true;
@@ -276,7 +305,8 @@ struct AudioSystem::Impl
                 continue;
 
             if (voice.clip != nullptr) {
-                (void)mixClip(samples, frameCount, *voice.clip, voice.cursor, voice.cursorStep, voice.amplitude,
+                (void)mixClip(samples, frameCount, *voice.clip, voice.cursor, voice.cursorStep,
+                              voice.amplitude * voice.panLeft, voice.amplitude * voice.panRight, voice.positional,
                               voice.looped);
                 continue;
             }
@@ -305,8 +335,11 @@ struct AudioSystem::Impl
         // authority, which it may do because nothing in the simulation can see
         // it.
         if (self->audition.active && self->audition.clip != nullptr) {
-            self->audition.active = mixClip(samples, frameCount, *self->audition.clip, self->audition.cursor,
-                                            self->audition.cursorStep, self->audition.amplitude, false);
+            // Centred and never folded: an audition is the file, and the file
+            // is not anywhere.
+            self->audition.active =
+                mixClip(samples, frameCount, *self->audition.clip, self->audition.cursor, self->audition.cursorStep,
+                        self->audition.amplitude, self->audition.amplitude, false, false);
         }
 
         // Soft-clipped rather than left to wrap: a mix past full scale is a game
@@ -424,17 +457,20 @@ void AudioSystem::tick(scene::World& world, f64 fixedDt)
     });
 }
 
-void AudioSystem::update(scene::World& world, core::InstanceId listener, const core::DVec3* earOverride)
+void AudioSystem::update(scene::World& world, core::InstanceId listener, const core::CFrameD* earOverride)
 {
     if (m_impl == nullptr)
         return;
 
-    core::DVec3 ear;
+    // The whole frame, not just the point: the rotation is what decides left
+    // from right, and reading only the position is what made every positional
+    // sound come out of the middle.
+    core::CFrameD ear;
     if (earOverride != nullptr) {
         ear = *earOverride;
     }
     else if (const scene::CameraComponent* camera = world.cameras().find(listener); camera != nullptr) {
-        ear = camera->cframe.position;
+        ear = camera->cframe;
     }
 
     std::vector<Voice> next;
@@ -454,11 +490,18 @@ void AudioSystem::update(scene::World& world, core::InstanceId listener, const c
         if (const scene::AudioGroupComponent* group = world.audioGroups().find(sound.group); group != nullptr)
             gain *= group->volume;
 
+        // Computed here and carried to the voice below, which is built after
+        // the gain test: a sound too quiet to hear is a sound with no voice to
+        // put a pan on.
+        bool positional = false;
+        f32 panLeft = 1.0f;
+        f32 panRight = 1.0f;
+
         // Positional iff the sound is parented to a `BasePart`. The whole of
         // the 3D switch, and it is a property of where the instance sits rather
         // than a flag that could disagree with it.
         if (const scene::PartComponent* part = world.parts().find(world.parentOf(id)); part != nullptr) {
-            const core::DVec3 delta = part->cframe.position - ear;
+            const core::DVec3 delta = part->cframe.position - ear.position;
             const auto distance =
                 static_cast<f32>(std::sqrt(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z));
             // Not `near` and `far`: both are macros in the Windows headers that
@@ -472,6 +515,12 @@ void AudioSystem::update(scene::World& world, core::InstanceId listener, const c
             const f32 falloff =
                 distance <= quiet ? 1.0f : (distance >= silent ? 0.0f : (silent - distance) / (silent - quiet));
             gain *= falloff;
+
+            // **Where it is, and not only how far.** Distance alone is half of
+            // positional: it says a sound is near without saying it is on your
+            // left, so turning around changed nothing at all.
+            positional = true;
+            detail::panGains(detail::panOf(ear, part->cframe.position), panLeft, panRight);
         }
 
         if (gain <= 0.0001f)
@@ -480,6 +529,9 @@ void AudioSystem::update(scene::World& world, core::InstanceId listener, const c
         Voice voice;
         voice.id = id;
         voice.amplitude = std::fmin(gain, 4.0f);
+        voice.positional = positional;
+        voice.panLeft = panLeft;
+        voice.panRight = panRight;
         voice.clip = m_impl->clipFor(sound.content);
         if (voice.clip != nullptr) {
             // The SEED. Whether it is used is decided under the lock below,
@@ -547,6 +599,44 @@ void AudioSystem::update(scene::World& world, core::InstanceId listener, const c
 }
 
 namespace detail {
+
+f32 panOf(const core::CFrameD& ear, const core::DVec3& source) noexcept
+{
+    const core::DVec3 delta{source.x - ear.position.x, source.y - ear.position.y, source.z - ear.position.z};
+
+    // `Mat3` stores columns, and `lookAtCFrame` writes column 0 as RIGHT and
+    // column 2 as BACK -- the look axis is -Z. Read straight out rather than
+    // through a helper, because `column` is local to `math.cpp`.
+    const auto alongRight = static_cast<f64>(ear.rotation.m[0][0]) * delta.x +
+                            static_cast<f64>(ear.rotation.m[0][1]) * delta.y +
+                            static_cast<f64>(ear.rotation.m[0][2]) * delta.z;
+    const auto alongBack = static_cast<f64>(ear.rotation.m[2][0]) * delta.x +
+                           static_cast<f64>(ear.rotation.m[2][1]) * delta.y +
+                           static_cast<f64>(ear.rotation.m[2][2]) * delta.z;
+
+    // The horizontal magnitude, which is what makes this an AZIMUTH rather than
+    // a projection: dividing by the full distance would pull a source overhead
+    // towards whichever side it leans, and dividing by nothing at all would let
+    // a distant source pan harder than a near one at the same angle.
+    const f64 horizontal = std::sqrt(alongRight * alongRight + alongBack * alongBack);
+    if (!(horizontal > 1e-6)) {
+        // Directly above, directly below, or exactly where the listener stands.
+        // None of the three has a side, and a sound standing on the listener is
+        // the one case where hard-panning would be most wrong.
+        return 0.0f;
+    }
+    return static_cast<f32>(alongRight / horizontal);
+}
+
+void panGains(f32 pan, f32& left, f32& right) noexcept
+{
+    const f32 clamped = std::clamp(pan, -1.0f, 1.0f);
+    // Quarter of a turn across the whole range: -1 lands on cos(0)=1 and
+    // sin(0)=0, +1 on the other end, and the centre on 0.707 twice.
+    const f64 angle = (static_cast<f64>(clamped) + 1.0) * 0.25 * 3.14159265358979;
+    left = static_cast<f32>(std::cos(angle));
+    right = static_cast<f32>(std::sin(angle));
+}
 
 bool shouldTakeTimeline(f64 mixerSeconds, f64 timelineSeconds, f64 duration, bool looped, f64 tolerance) noexcept
 {

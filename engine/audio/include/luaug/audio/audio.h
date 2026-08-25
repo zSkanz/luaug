@@ -69,6 +69,28 @@ namespace detail {
 [[nodiscard]] bool shouldTakeTimeline(f64 mixerSeconds, f64 timelineSeconds, f64 duration, bool looped,
                                       f64 tolerance) noexcept;
 
+// **Where a source sits across the listener**, as the sine of its azimuth: -1
+// hard left, +1 hard right, 0 straight ahead.
+//
+// **Horizontal only, and that is a decision rather than a simplification.** Two
+// speakers cannot express elevation: a source directly overhead has no left and
+// no right, and panning it by whatever sliver of horizontal offset it happens to
+// have would swing it across the field as somebody looked up.
+//
+// **Straight behind is also 0**, and that is honest rather than wrong. Front and
+// back are indistinguishable on two channels without a head model, and pretending
+// otherwise means choosing a side for a sound that is on neither.
+[[nodiscard]] f32 panOf(const core::CFrameD& ear, const core::DVec3& source) noexcept;
+
+// The two channel gains for a pan, constant POWER rather than constant
+// amplitude.
+//
+// Two channels at half amplitude are quieter than one channel at full, so a
+// linear pan dips in the middle -- a source crossing in front of the listener
+// audibly ducks as it passes. Both gains are 0.707 at the centre, which keeps
+// the sum of squares at one wherever it is.
+void panGains(f32 pan, f32& left, f32& right) noexcept;
+
 } // namespace detail
 
 struct AudioStats
@@ -162,17 +184,19 @@ public:
     // difference between pausing and stopping: a `Sound`'s `TimePosition` and
     // `Playing` are untouched, so resuming continues rather than restarts.
     //
-    // `ear` overrides where the listener STANDS, for the one caller that has a
-    // camera the world does not contain: an editor rendering through its own
-    // view because the game made none (D100). Null -- every other caller -- puts
-    // the ear on `listener`, and a `listener` naming no camera puts it at the
-    // origin, which is what a world with no camera has always sounded like.
+    // `ear` overrides where the listener STANDS AND WHICH WAY IT FACES, for the
+    // one caller that has a camera the world does not contain: an editor
+    // rendering through its own view because the game made none. Null -- every
+    // other caller -- puts the ear on `listener`, and a `listener` naming no
+    // camera leaves it at the origin facing -Z, which is what a world with no
+    // camera has always sounded like.
     //
-    // A position rather than an instance, because an override camera is not in
-    // the world and has no id to name. It is the same argument `ViewOverride`
-    // makes to the renderer, and it has to be the same DECISION as well or the
-    // picture and the sound disagree about where you are standing.
-    void update(scene::World& world, core::InstanceId listener, const core::DVec3* ear = nullptr);
+    // A frame rather than an instance, because an override camera is not in the
+    // world and has no id to name. It is the same argument `ViewOverride` makes
+    // to the renderer, and it has to be the same DECISION as well or the picture
+    // and the sound disagree about where you are standing -- and now about which
+    // way you are looking, because the rotation is what decides left from right.
+    void update(scene::World& world, core::InstanceId listener, const core::CFrameD* ear = nullptr);
 
     // Silences the mixer without changing a single `Sound` (D060).
     //

@@ -2026,7 +2026,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         const bool worldHasCamera = host->world().alive(listener) && !host->world().destroyed(listener) &&
                                     host->world().cameras().find(listener) != nullptr;
         const bool listenWithEditor = options.editor && editor.cameraAdopted() && !worldHasCamera;
-        const core::DVec3 editorEar = editor.cameraCFrame().position;
+        // The whole frame: the rotation is what decides left from right, so an
+        // ear given only a position hears everything in the middle.
+        const core::CFrameD editorEar = editor.cameraCFrame();
         host->audio().update(host->world(), listener, listenWithEditor ? &editorEar : nullptr);
 
         // The physics wireframe (roadmap M5, "Jolt debug-draw bridge"): what the

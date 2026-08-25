@@ -488,3 +488,114 @@ TEST_CASE("an audition does not touch the sound it was started from")
     const std::vector<std::string> seen = fixture.events();
     CHECK(std::ranges::find(seen, "Ended") == seen.end());
 }
+
+// --- Which side a sound comes out of -----------------------------------------
+//
+// Distance alone is half of positional: it says a sound is near without saying
+// it is on your left, so turning around changed nothing at all. These cases are
+// the other half, and they are written against the LISTENER's frame rather than
+// against world axes, because "left" is a fact about where somebody is facing.
+
+namespace {
+
+// A listener at `at`, facing `towards`. Built through the engine's own
+// `lookAtCFrame` rather than by writing a matrix here, so the case cannot pass
+// against a convention this file invented -- the look axis is -Z and column 0
+// is right, and a test that assumed otherwise would agree with itself forever.
+[[nodiscard]] luaug::core::CFrameD listenerAt(luaug::core::DVec3 at, luaug::core::DVec3 towards)
+{
+    return luaug::core::lookAtCFrame(at, towards, luaug::core::Vec3{0.0f, 1.0f, 0.0f});
+}
+
+} // namespace
+
+TEST_CASE("a source is panned by where it is across the listener")
+{
+    // Facing -Z, which is where `lookAtCFrame` puts a listener told to look at
+    // something in front of it.
+    const luaug::core::CFrameD ear = listenerAt({0.0, 0.0, 0.0}, {0.0, 0.0, -10.0});
+
+    // Straight ahead and straight behind are both centre, and that is honest
+    // rather than wrong: two channels cannot tell front from back without a
+    // head model, and choosing a side for a sound that is on neither would be
+    // an invention.
+    CHECK(audio::detail::panOf(ear, {0.0, 0.0, -10.0}) == doctest::Approx(0.0).epsilon(0.001));
+    CHECK(audio::detail::panOf(ear, {0.0, 0.0, 10.0}) == doctest::Approx(0.0).epsilon(0.001));
+
+    // +X is the listener's right, because column 0 is the right vector.
+    CHECK(audio::detail::panOf(ear, {10.0, 0.0, 0.0}) == doctest::Approx(1.0).epsilon(0.001));
+    CHECK(audio::detail::panOf(ear, {-10.0, 0.0, 0.0}) == doctest::Approx(-1.0).epsilon(0.001));
+
+    // **Distance does not change the side.** A source at the same angle pans
+    // the same however far away it is -- the falloff is what distance is for,
+    // and mixing the two would make a far sound drift towards the middle.
+    CHECK(audio::detail::panOf(ear, {1.0, 0.0, 0.0}) == doctest::Approx(1.0).epsilon(0.001));
+    CHECK(audio::detail::panOf(ear, {1000.0, 0.0, 0.0}) == doctest::Approx(1.0).epsilon(0.001));
+
+    // Forty-five degrees to the right is the sine of forty-five degrees.
+    CHECK(audio::detail::panOf(ear, {5.0, 0.0, -5.0}) == doctest::Approx(0.7071).epsilon(0.01));
+}
+
+TEST_CASE("turning around swaps the sides")
+{
+    // The case the reporter would run: stand still, look the other way, and the
+    // sound has to move. Against a listener read as a POSITION rather than as a
+    // frame -- which is what it was -- both of these answer zero.
+    const luaug::core::CFrameD facingAway = listenerAt({0.0, 0.0, 0.0}, {0.0, 0.0, -10.0});
+    const luaug::core::CFrameD facingBack = listenerAt({0.0, 0.0, 0.0}, {0.0, 0.0, 10.0});
+
+    const luaug::core::DVec3 source{10.0, 0.0, 0.0};
+    CHECK(audio::detail::panOf(facingAway, source) == doctest::Approx(1.0).epsilon(0.001));
+    CHECK(audio::detail::panOf(facingBack, source) == doctest::Approx(-1.0).epsilon(0.001));
+}
+
+TEST_CASE("a source with no side is centred rather than guessed at")
+{
+    const luaug::core::CFrameD ear = listenerAt({0.0, 0.0, 0.0}, {0.0, 0.0, -10.0});
+
+    // Directly overhead and directly below have no horizontal direction at all,
+    // and a sound standing exactly on the listener is the one case where
+    // hard-panning would be most wrong.
+    CHECK(audio::detail::panOf(ear, {0.0, 10.0, 0.0}) == doctest::Approx(0.0).epsilon(0.001));
+    CHECK(audio::detail::panOf(ear, {0.0, -10.0, 0.0}) == doctest::Approx(0.0).epsilon(0.001));
+    CHECK(audio::detail::panOf(ear, {0.0, 0.0, 0.0}) == doctest::Approx(0.0).epsilon(0.001));
+
+    // And elevation does not steal the side: a source up and to the right is
+    // still fully to the right, because the pan is an azimuth.
+    CHECK(audio::detail::panOf(ear, {10.0, 50.0, 0.0}) == doctest::Approx(1.0).epsilon(0.001));
+}
+
+TEST_CASE("the pan holds its power across the field")
+{
+    luaug::core::f32 left = 0.0f;
+    luaug::core::f32 right = 0.0f;
+
+    audio::detail::panGains(-1.0f, left, right);
+    CHECK(left == doctest::Approx(1.0).epsilon(0.001));
+    CHECK(right == doctest::Approx(0.0).epsilon(0.001));
+
+    audio::detail::panGains(1.0f, left, right);
+    CHECK(left == doctest::Approx(0.0).epsilon(0.001));
+    CHECK(right == doctest::Approx(1.0).epsilon(0.001));
+
+    audio::detail::panGains(0.0f, left, right);
+    CHECK(left == doctest::Approx(0.7071).epsilon(0.001));
+    CHECK(right == doctest::Approx(0.7071).epsilon(0.001));
+
+    // **Constant POWER, which is the whole reason it is a quarter turn and not
+    // a straight line.** Two channels at half amplitude are quieter than one at
+    // full, so a linear pan dips in the middle and a sound crossing in front of
+    // you audibly ducks as it passes. The sum of squares is one everywhere.
+    for (const luaug::core::f32 pan : {-1.0f, -0.5f, 0.0f, 0.3f, 1.0f}) {
+        audio::detail::panGains(pan, left, right);
+        CHECK(left * left + right * right == doctest::Approx(1.0).epsilon(0.001));
+    }
+
+    // Out of range is clamped rather than wrapped: a pan of two is a caller's
+    // arithmetic error, and cos of a bigger angle would swing it back towards
+    // the middle and then to the wrong side entirely.
+    audio::detail::panGains(4.0f, left, right);
+    CHECK(right == doctest::Approx(1.0).epsilon(0.001));
+    audio::detail::panGains(-4.0f, left, right);
+    CHECK(left == doctest::Approx(1.0).epsilon(0.001));
+}
