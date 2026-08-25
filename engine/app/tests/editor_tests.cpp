@@ -2561,3 +2561,186 @@ TEST_CASE("adding a child to a stamped instance unlinks it, and the save says so
 
     std::filesystem::remove_all(scratch, ec);
 }
+
+TEST_CASE("editing a stamp in the stage keeps every instance of it linked")
+{
+    // **The reported sequence, corrected.** Convert an instance into a stamp,
+    // OPEN the stamp from the browser, add the script inside the STAMP -- not in
+    // the scene -- save it, and every live instance follows the file and keeps
+    // its mark.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId workspace = world.create(fixture.workspaceClass);
+    world.setName(workspace, fixture.atoms.intern("Workspace"));
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+
+    const std::filesystem::path scratch = std::filesystem::temp_directory_path() / "luaug-editor-tests" / "stamp-stage";
+    std::error_code ec;
+    std::filesystem::remove_all(scratch, ec);
+    std::filesystem::create_directories(scratch, ec);
+
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(scratch);
+
+    const core::InstanceId subject = fixture.widget(world, "Spinner");
+    REQUIRE(world.setParent(subject, workspace) == std::nullopt);
+    REQUIRE(editor.createStamp(world, subject, workspace, "spinner"));
+    REQUIRE(world.stampOf(subject).valid());
+
+    // Open it, add a child INSIDE it, save it.
+    REQUIRE(editor.openStamp("spinner", fixture.classes, fixture.enums, fixture.atoms, inspector));
+    REQUIRE(editor.stage() != nullptr);
+    const core::InstanceId stageRoot = editor.stampSession().root;
+    REQUIRE(editor.stage()->world().alive(stageRoot));
+
+    const core::InstanceId script = fixture.widget(editor.stage()->world(), "Spin");
+    REQUIRE(editor.stage()->world().setParent(script, stageRoot) == std::nullopt);
+
+    REQUIRE(editor.saveStamp(world, workspace));
+
+    // **The live instance followed the file and is still linked.** It gained
+    // the child from the stamp rather than losing its mark.
+    CHECK(world.stampOf(subject).valid());
+    CHECK(world.findFirstChild(subject, fixture.atoms.intern("Spin")).valid());
+
+    editor.closeStamp(world, workspace, inspector, false);
+
+    // And a save-and-reload keeps it, which is the half the person actually
+    // sees: reopening the scene days later and finding a stamp still a stamp.
+    REQUIRE(editor.save(world, scratch / "main.scene.json"));
+
+    scene::World reopened(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId reopenedWorkspace = reopened.create(fixture.workspaceClass);
+    reopened.setName(reopenedWorkspace, fixture.atoms.intern("Workspace"));
+    reopened.workspaces().add(reopenedWorkspace, scene::WorkspaceComponent{});
+    REQUIRE(editor.load(reopened, scratch / "main.scene.json", inspector));
+
+    const core::InstanceId back = reopened.findFirstChild(reopenedWorkspace, fixture.atoms.intern("Spinner"));
+    REQUIRE(back.valid());
+    CHECK(reopened.stampOf(back).valid());
+    CHECK(reopened.findFirstChild(back, fixture.atoms.intern("Spin")).valid());
+
+    std::filesystem::remove_all(scratch, ec);
+}
+
+TEST_CASE("a scene made after editing a stamp does not disturb the one before it")
+{
+    // The rest of the report: a new empty scene, the stamp dragged into it, and
+    // everything saved -- then the FIRST scene reopened.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId workspace = world.create(fixture.workspaceClass);
+    world.setName(workspace, fixture.atoms.intern("Workspace"));
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+
+    const std::filesystem::path scratch =
+        std::filesystem::temp_directory_path() / "luaug-editor-tests" / "stamp-two-scenes";
+    std::error_code ec;
+    std::filesystem::remove_all(scratch, ec);
+    std::filesystem::create_directories(scratch, ec);
+
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(scratch);
+
+    const core::InstanceId subject = fixture.widget(world, "Spinner");
+    REQUIRE(world.setParent(subject, workspace) == std::nullopt);
+    REQUIRE(editor.createStamp(world, subject, workspace, "spinner"));
+
+    REQUIRE(editor.openStamp("spinner", fixture.classes, fixture.enums, fixture.atoms, inspector));
+    const core::InstanceId stageRoot = editor.stampSession().root;
+    const core::InstanceId script = fixture.widget(editor.stage()->world(), "Spin");
+    REQUIRE(editor.stage()->world().setParent(script, stageRoot) == std::nullopt);
+    REQUIRE(editor.saveStamp(world, workspace));
+    editor.closeStamp(world, workspace, inspector, false);
+
+    REQUIRE(editor.save(world, scratch / "main.scene.json"));
+
+    // A new empty scene, the stamp dragged in, saved.
+    editor.newScene(world, inspector);
+    REQUIRE(editor.instantiateStamp(world, "spinner", workspace, workspace, inspector, true));
+    REQUIRE(editor.save(world, scratch / "second.scene.json"));
+
+    // Back to the first one.
+    REQUIRE(editor.load(world, scratch / "main.scene.json", inspector));
+    const core::InstanceId back = world.findFirstChild(workspace, fixture.atoms.intern("Spinner"));
+    REQUIRE(back.valid());
+    CHECK(world.stampOf(back).valid());
+
+    std::filesystem::remove_all(scratch, ec);
+}
+
+TEST_CASE("saving a stamp that moved instances leaves the scene dirty")
+{
+    // **The silent way to lose a stamp link.** `restamp` rebuilds every live
+    // instance in the game's world when a stamp is saved -- that IS the link --
+    // and nothing marked the scene, because the frame's own `touch()` attributes
+    // a mutation to whatever document is open and what is open is the stamp.
+    //
+    // A person then starts a new scene or closes the editor, is asked nothing
+    // because the scene believes it is clean, and reopens later to find an
+    // instance that is no longer a stamp -- because the mark was only ever in
+    // memory.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId workspace = world.create(fixture.workspaceClass);
+    world.setName(workspace, fixture.atoms.intern("Workspace"));
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+
+    const std::filesystem::path scratch = std::filesystem::temp_directory_path() / "luaug-editor-tests" / "stamp-dirty";
+    std::error_code ec;
+    std::filesystem::remove_all(scratch, ec);
+    std::filesystem::create_directories(scratch, ec);
+
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(scratch);
+
+    const core::InstanceId subject = fixture.widget(world, "Spinner");
+    REQUIRE(world.setParent(subject, workspace) == std::nullopt);
+    REQUIRE(editor.createStamp(world, subject, workspace, "spinner"));
+
+    // Saved, so the scene starts this clean -- which is the state that made the
+    // loss possible.
+    REQUIRE(editor.save(world, scratch / "main.scene.json"));
+    REQUIRE_FALSE(editor.hasUnsavedWork());
+
+    REQUIRE(editor.openStamp("spinner", fixture.classes, fixture.enums, fixture.atoms, inspector));
+    const core::InstanceId stageRoot = editor.stampSession().root;
+    const core::InstanceId script = fixture.widget(editor.stage()->world(), "Spin");
+    REQUIRE(editor.stage()->world().setParent(script, stageRoot) == std::nullopt);
+    REQUIRE(editor.saveStamp(world, workspace));
+
+    // The live instance changed, so there IS work to lose.
+    CHECK(world.findFirstChild(subject, fixture.atoms.intern("Spin")).valid());
+    CHECK(editor.hasUnsavedWork());
+
+    editor.closeStamp(world, workspace, inspector, false);
+    // And it survives closing the stamp: the stage is gone, the scene's change
+    // is not.
+    CHECK(editor.sceneDirty());
+    CHECK(editor.hasUnsavedWork());
+
+    std::filesystem::remove_all(scratch, ec);
+}
+
+TEST_CASE("a mutation belongs to the document that was open when it happened")
+{
+    // A frame's command drain can open a stamp partway through, and `touch()`
+    // runs at the end of it. Told which document rather than asking, the scene's
+    // edit stays the scene's.
+    app::testing::Fixture fixture;
+    Editor editor;
+
+    // Nothing open: an edit is the scene's.
+    editor.touchAs(false);
+    CHECK(editor.sceneDirty());
+    CHECK(editor.hasUnsavedWork());
+
+    // And told otherwise, it is not -- which is what a real stage edit does.
+    Editor other;
+    other.touchAs(true);
+    CHECK_FALSE(other.sceneDirty());
+    CHECK(other.hasUnsavedWork());
+}

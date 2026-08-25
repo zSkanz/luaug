@@ -1390,9 +1390,15 @@ public:
     // and the scene otherwise. One call at the frame's safe point rather than a
     // flag on each verb, because "did anything change" is a question about every
     // verb rather than about any one of them.
-    void touch() noexcept
+    void touch() noexcept { touchAs(m_stamp.open()); }
+
+    // The same, told WHICH document rather than asking. A frame's command drain
+    // can open or close a stamp partway through, and a mutation belongs to the
+    // document that was open when it happened rather than to whichever one is
+    // open by the time the frame gets round to marking it.
+    void touchAs(bool stamped) noexcept
     {
-        if (m_stamp.open())
+        if (stamped)
             m_stamp.dirty = true;
         else
             m_sceneDirty = true;

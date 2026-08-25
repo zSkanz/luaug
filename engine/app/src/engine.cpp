@@ -1493,6 +1493,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 if (editorCommands.breakStamp.valid())
                     (void)editor.breakStamp(authored(), editorCommands.breakStamp);
 
+                // **Which document the frame's mutations belonged to, decided
+                // BEFORE anything can swap it.** `touch()` marks the stage when
+                // a stamp is open and the scene otherwise, and it runs at the
+                // end of this drain -- so a frame that both edited the scene and
+                // opened a stamp used to attribute the edit to the stamp, and
+                // the scene stayed clean with unsaved work in it.
+                const bool mutatedWhileStamped = editor.stampSession().open();
+
                 // **Opening and closing both replace the world**, so they are
                 // drained here beside play and stop rather than acted on where
                 // they were clicked -- a panel behind this one is still drawing
@@ -1519,7 +1527,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // to the document, and a close confirmation that appeared after
                 // pressing Escape is one people learn to dismiss without reading.
                 if (editorCommands.mutatesWorld())
-                    editor.touch();
+                    editor.touchAs(mutatedWhileStamped);
 
                 // --- The clipboard --------------------------------------
                 //

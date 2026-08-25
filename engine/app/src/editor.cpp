@@ -1139,6 +1139,18 @@ bool Editor::saveStamp(scene::World& game, core::InstanceId gameRoot)
         game.alive(gameRoot) ? scene::restamp(game, gameRoot, m_stamp.path, m_stamp.baseline, text, &moved) : 0u;
     m_stamp.baseline = text;
 
+    // **Every instance it moved is a change to the SCENE, and the scene has to
+    // know.** `restamp` rebuilds live instances in the game's world -- that is
+    // the whole point of a linked stamp -- and nothing else marks it, because
+    // the frame's own `touch()` attributes a mutation to whatever is open and
+    // what is open is this stamp.
+    //
+    // Without this the sequence is silent and it loses work: edit a stamp, watch
+    // every instance in the scene change, close the editor or start a new scene,
+    // and be asked nothing -- because the scene believes it is clean.
+    if (followed > 0 || moved.unlinkedStamps > 0)
+        m_sceneDirty = true;
+
     m_stamp.dirty = false;
     std::string message = "saved " + m_stamp.path + " (" + std::to_string(report.instances) + " instance(s))";
     if (followed > 0)
