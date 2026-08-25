@@ -152,12 +152,28 @@ pane multiplies cells by one advance everywhere else for exactly this reason,
 and the popup was the one place that had asked ImGui instead.
 
 **Finding 13 -- a widget that holds ImGui's active id makes every other item in
-the frame unhoverable.** `ItemHoverable` returns false while another item is
-active (`imgui.cpp:5157`), so the first click on the Explorer, the Viewport, the
-Properties grid or another tab did nothing and only the second one landed. It
-cannot be fixed inside the pane's own draw -- whichever panel was submitted
-earlier has already been asked whether it was clicked, and answered no -- so the
-release happens at the top of the frame, before a single window is submitted.
+the frame unhoverable, and the cost is one CLICK rather than one frame.**
+`ItemHoverable` returns false while another item is active (`imgui.cpp`), so the
+first click on the Explorer, the Viewport, the Properties grid or another tab
+did nothing and only the second one landed. Releasing the active id at the top
+of the frame is necessary -- whichever panel was submitted earlier has already
+been asked whether it was clicked, and answered no -- and it is **not
+sufficient**. Six lines further down the same function: an item carrying
+`ImGuiItemFlags_AllowOverlap`, which every Explorer row does, is hoverable only
+if it was ALREADY the hovered id on the PREVIOUS frame. While the caret lived in
+the pane no row could hover, so on the frame the block was lifted no row had the
+history it needed either. The answer is to declare what is true --
+`ActiveIdAllowOverlap` -- so hover is resolved underneath the caret and the row
+is already hovered when the press arrives.
+
+**And the first attempt was signed off on a misread picture**, which is the part
+worth keeping. The screenshot showed the clicked row highlighted; it was the
+HOVER highlight, and the old selection was still sitting two rows down in the
+same shot. D101 had recorded the same lesson the day before -- a fix verified by
+reading the call site rather than by watching the pixel -- and this is the
+version of it where the pixel was watched and read wrong. What settled it was
+instrumenting the running window and printing what ImGui itself thought on the
+click frame.
 
 **Finding 14 -- a property row is one line high and a script is not.** The grid
 drew every line of `Source`, so selecting a script made the Properties panel as

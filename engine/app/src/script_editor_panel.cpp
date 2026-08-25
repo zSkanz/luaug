@@ -992,6 +992,30 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
         // without any of them being edited.
         ImGui::SetActiveIdUsingAllKeyboardKeys();
 
+        // **And this is what lets the FIRST click on anything else land.**
+        //
+        // ImGui refuses to hover any item while another one is active
+        // (`imgui.cpp`, `ItemHoverable`). For most widgets that is invisible,
+        // because most widgets are active only while a button is held. A caret
+        // is active for as long as somebody is typing, so with the pane holding
+        // the active id the Explorer's rows, the Viewport and the other tabs
+        // were never hovered at all.
+        //
+        // **And the cost is not one frame, it is one CLICK**, which is why
+        // releasing the active id when a click arrives was not enough on its
+        // own. The Explorer's rows are submitted with
+        // `ImGuiSelectableFlags_AllowOverlap`, and an overlap-allowing item is
+        // hoverable only if it was ALREADY the hovered id on the previous frame
+        // (`ItemHoverable` again) -- so a row that was blocked from hovering
+        // while the caret lived here cannot be pressed on the frame the block
+        // is lifted either. The first click established the hover and the
+        // second one did the work, which is exactly what was reported.
+        //
+        // Declaring the overlap says the true thing: this widget is active and
+        // another may take that from it. Hover goes on being resolved
+        // underneath, so the row is already hovered when the click arrives.
+        ImGui::GetCurrentContext()->ActiveIdAllowOverlap = true;
+
         // **Asking the platform for characters, which is not automatic.** SDL3
         // does not deliver text until something calls `SDL_StartTextInput`, and
         // the only thing that makes ImGui call it is a widget setting
