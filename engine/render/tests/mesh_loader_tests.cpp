@@ -187,3 +187,42 @@ TEST_CASE("a world naming more maps than the pipeline holds still loads them all
     CHECK(library.size() == named);
     loader.destroy(*fixture.device);
 }
+
+TEST_CASE("tearing down while a texture is on its way in leaves nothing behind")
+{
+    // **The shutdown case, which is the one that reads as "it crashed when I
+    // closed it" and points at nothing.** A decode job writes into buffers the
+    // loader owns, so a teardown that returned while one was running would free
+    // the memory the pool is writing into -- reproducing on a fast machine and
+    // never on a slow one.
+    //
+    // The job pool is uninitialised here and therefore serial, so what this
+    // actually exercises is the read half: a request queued and then abandoned
+    // must be cancelled rather than left holding a slot.
+    Fixture fixture;
+    const std::filesystem::path image(LUAUG_RENDER_TEST_IMAGE);
+    REQUIRE(std::filesystem::exists(image));
+    REQUIRE(platform::initIo());
+
+    scene::World world = fixture.worldNaming(image);
+    {
+        render::MeshLoader loader;
+        loader.setDeferredTextures(true);
+        render::TextureLibrary library;
+
+        CHECK(loader.syncTextures(*fixture.device, *fixture.cmd, world, library) == 0);
+        REQUIRE(loader.texturesInFlight() == 1);
+
+        loader.destroy(*fixture.device);
+        CHECK(loader.texturesInFlight() == 0);
+    }
+
+    // And a loader that goes out of scope without `destroy` being called at all,
+    // which is what a stack unwind does.
+    {
+        render::MeshLoader loader;
+        loader.setDeferredTextures(true);
+        render::TextureLibrary library;
+        CHECK(loader.syncTextures(*fixture.device, *fixture.cmd, world, library) == 0);
+    }
+}

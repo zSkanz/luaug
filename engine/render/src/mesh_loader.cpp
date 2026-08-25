@@ -161,12 +161,39 @@ void MeshLoader::setContentRoot(std::filesystem::path root)
 
 void MeshLoader::destroy(rhi::IDevice& device)
 {
+    // **Waited for, not abandoned.** A decode job writes into buffers these
+    // entries own, and returning while one is running frees the memory the pool
+    // is still writing into -- a use-after-free that reproduces on a fast
+    // machine and never on a slow one, at shutdown, where a crash reads as "the
+    // editor crashed when I closed it" and points at nothing.
+    releasePendingTextures();
+
     for (const rhi::TextureHandle texture : textures_) {
         if (texture.valid())
             device.destroy(texture);
     }
     textures_.clear();
     failed_.clear();
+}
+
+MeshLoader::~MeshLoader()
+{
+    // No device here, so no texture can be freed -- `destroy` is what does that,
+    // and a caller who forgot it has leaked them whatever this does. What cannot
+    // be left is a job still writing into memory this object is about to
+    // release, so that much happens unconditionally.
+    releasePendingTextures();
+}
+
+void MeshLoader::releasePendingTextures() noexcept
+{
+    for (PendingTexture& pending : pendingTextures_) {
+        if (pending.decode.valid())
+            jobs::wait(pending.decode);
+        if (pending.read.valid())
+            platform::cancelIo(pending.read);
+    }
+    pendingTextures_.clear();
 }
 
 // **The deferred half of `syncTextures`** (D118). See the header for the

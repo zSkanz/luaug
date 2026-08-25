@@ -135,11 +135,21 @@ public:
     // the cache's to free; the textures are this one's.
     void destroy(rhi::IDevice& device);
 
+    // Waits for any decode still running, because one is writing into memory
+    // this object owns. See the definition: abandoning it is a use-after-free at
+    // shutdown, which is the hardest kind to attribute.
+    ~MeshLoader();
+
+    MeshLoader() = default;
+    MeshLoader(const MeshLoader&) = delete;
+    MeshLoader& operator=(const MeshLoader&) = delete;
+
 private:
     // The three stages of a deferred load, run once a frame from `syncTextures`.
     core::u32 pumpTextures(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world,
                            TextureLibrary& library);
     [[nodiscard]] bool textureInFlight(core::NameAtom urn) const noexcept;
+    void releasePendingTextures() noexcept;
 
     std::filesystem::path contentRoot_;
     const asset::ContentMounts* mounts_ = nullptr;
