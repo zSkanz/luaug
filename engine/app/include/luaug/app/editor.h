@@ -177,6 +177,7 @@ struct EditorDialogs
     bool preferences = false;
     bool about = false;
     bool newFolder = false;
+    bool newMaterial = false;
     // The make-a-stamp box, which is the same shape again -- and it carries the
     // instance the question is ABOUT, because "a stamp of what" is decided by
     // the row somebody right-clicked and not by whatever is selected when they
@@ -429,6 +430,11 @@ struct EditorCommands
     // A content-relative path to copy beside itself. How a material is made
     // from a material, and how anything else in the browser is copied.
     std::string duplicateContent;
+    // The name for a new material in the browser's current folder. A material is
+    // the one authored file somebody makes from nothing -- a mesh and a texture
+    // arrive from outside, a stamp and a scene are made from what is in the
+    // world -- so it is the one the browser has to be able to create.
+    std::string createMaterial;
     std::string renameContent;
     std::string renameContentTo;
 
@@ -468,7 +474,8 @@ struct EditorCommands
                !openStamp.empty() || saveStamp || closeStamp || createClass != scene::InvalidClass || deleteSelection ||
                duplicateSelection || reparentTo.valid() || renameInstance.valid() || !saveAs.empty() ||
                !openScene.empty() || !createFolder.empty() || !deleteContent.empty() || !duplicateContent.empty() ||
-               !renameContent.empty() || importAssets || importParent.valid() || openScript.valid();
+               !createMaterial.empty() || !renameContent.empty() || importAssets || importParent.valid() ||
+               openScript.valid();
     }
 };
 

@@ -123,6 +123,12 @@ bool ContentTree::isUsableName(std::string_view name) noexcept
 {
     if (name.empty() || name == "." || name == "..")
         return false;
+    // **Whitespace is not a name.** A folder called "   " is one nobody can
+    // find, tell apart from its neighbour, or type again -- and on Windows a
+    // trailing space is silently dropped, so the file ends up under a name the
+    // person did not choose and the browser cannot match.
+    if (name.find_first_not_of(" \t\r\n") == std::string_view::npos)
+        return false;
     for (const char c : name) {
         // A separator would let a name climb out of the folder it was typed in,
         // which is the whole of the traversal problem in one character.
@@ -316,6 +322,52 @@ bool ContentTree::rename(const ContentEntry& entry, std::string_view newName)
         return false;
 
     return refresh();
+}
+
+std::string ContentTree::createMaterial(std::string_view materialName)
+{
+    if (m_root.empty() || !isUsableName(materialName))
+        return {};
+
+    // The suffix is put back rather than required, exactly as `rename` does it:
+    // typing `stone` means a material called stone, and typing
+    // `stone.material.json` means the same thing.
+    std::string target(materialName);
+    const std::string loweredTarget = lowered(target);
+    const std::string_view extension = asset::MaterialExtension;
+    if (target.size() < extension.size() ||
+        loweredTarget.compare(target.size() - extension.size(), extension.size(), extension) != 0) {
+        target += std::string(extension);
+    }
+
+    std::filesystem::path folder = m_root;
+    if (!m_relative.empty())
+        folder /= std::filesystem::path(m_relative);
+
+    std::error_code ec;
+    const std::filesystem::path path = folder / std::filesystem::path(target);
+    // Refused rather than replacing. Somebody who typed a name that is already
+    // taken has made a mistake, and a browser that answered by destroying their
+    // material is one they stop trusting with anything.
+    if (std::filesystem::exists(path, ec))
+        return {};
+
+    if (!platform::createDirectories(folder))
+        return {};
+    // The default block: white, dielectric, no maps. A part pointed at it looks
+    // exactly as it did with none, which is the starting point somebody wants --
+    // change one field, see one change.
+    asset::MaterialAsset made;
+    // Named after the file, which is what somebody typed and what they will
+    // look for. The two can drift later -- a material may be renamed inside
+    // itself -- and this is only the starting point.
+    made.name = target.substr(0, target.size() - extension.size());
+    if (!platform::writeTextFile(path, asset::writeMaterial(made)))
+        return {};
+
+    if (!refresh())
+        return {};
+    return target;
 }
 
 std::string ContentTree::duplicate(const ContentEntry& entry)

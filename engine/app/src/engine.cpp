@@ -1564,6 +1564,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // may have been re-read between the click and here -- and an
                 // index into a list that moved is how a delete hits the row
                 // below the one somebody chose.
+                // **Made rather than found**, so it is not part of the walk that
+                // resolves an existing entry by path: there is nothing there yet.
+                if (!editorCommands.createMaterial.empty()) {
+                    const std::string made = editor.content().createMaterial(editorCommands.createMaterial);
+                    editor.report(made.empty() ? "could not create that material -- is something already called that?"
+                                               : "created " + made,
+                                  made.empty());
+                }
                 if (!editorCommands.deleteContent.empty() || !editorCommands.renameContent.empty() ||
                     !editorCommands.duplicateContent.empty()) {
                     const std::string& wanted = !editorCommands.deleteContent.empty() ? editorCommands.deleteContent

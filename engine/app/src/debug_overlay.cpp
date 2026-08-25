@@ -3133,6 +3133,16 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
     if (iconButton(icons, icons::ContentFolder, toolbarIcon, "new-folder", "new folder", "new folder", true, true))
         dialogs.newFolder = true;
 
+    // **A material is the one authored file somebody makes from nothing.** A
+    // mesh and a texture arrive from outside and a stamp is made from what is in
+    // the world; a material is written. Without this, importing textures and
+    // then having no way to build a surface out of them was a dead end.
+    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+    if (iconButton(icons, icons::ContentOther, toolbarIcon, "new-material", "new material", "new material", true,
+                   true)) {
+        dialogs.newMaterial = true;
+    }
+
     // **Bringing a file in from the machine**, which is the other half of a
     // content browser: a project's assets come from somewhere, and until now the
     // only way in was a file manager beside the editor. Dropping files on the
@@ -3562,6 +3572,8 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
             ImGui::Separator();
             if (ImGui::MenuItem("New Folder..."))
                 dialogs.newFolder = true;
+            if (ImGui::MenuItem("New Material..."))
+                dialogs.newMaterial = true;
             if (ImGui::MenuItem("Refresh"))
                 (void)tree.refresh();
             ImGui::EndPopup();
@@ -3863,6 +3875,10 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
     if (dialogs.renameInstance || dialogs.renameContent) {
         ImGui::OpenPopup("Rename");
     }
+    if (dialogs.newMaterial) {
+        dialogs.newMaterial = false;
+        ImGui::OpenPopup("New Material");
+    }
     if (dialogs.newFolder) {
         dialogs.newFolder = false;
         ImGui::OpenPopup("New Folder");
@@ -3959,6 +3975,48 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         if ((submitted || accepted) && ContentTree::isUsableName(typed)) {
             commands.createFolder = typed;
             folder.fill(0);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(400.0f, 0.0f), ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("New Material", nullptr, ImGuiWindowFlags_NoResize)) {
+        static std::array<char, 128> material{};
+        // **What it makes, in one line.** An empty material is the identity --
+        // white, dielectric, no maps -- so a part pointed at it looks exactly as
+        // it did with none. That is deliberate: the first thing anybody does is
+        // change one field and expect to see one change.
+        ImGui::TextDisabled("An empty material: white, no maps. Point a part at it and give it textures.");
+        ImGui::Spacing();
+
+        ImGui::SetNextItemWidth(-1.0f);
+        if (dialogOpening()) {
+            material.fill(0);
+            ImGui::SetKeyboardFocusHere();
+        }
+        const bool submitted =
+            ImGui::InputText("##material", material.data(), material.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+        const std::string typed(material.data());
+
+        ImGui::Spacing();
+        // Greyed before the press rather than refused after it, exactly as the
+        // folder dialog does: a name a filesystem cannot carry is knowable while
+        // it is being typed. What it CANNOT know here is whether the name is
+        // taken -- that is a question about a folder, and the answer comes back
+        // as a refusal with a message.
+        ImGui::BeginDisabled(!ContentTree::isUsableName(typed));
+        const bool accepted = ImGui::Button("Create", ImVec2(120.0f, 0.0f));
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
+            material.fill(0);
+            ImGui::CloseCurrentPopup();
+        }
+
+        if ((submitted || accepted) && ContentTree::isUsableName(typed)) {
+            commands.createMaterial = typed;
+            material.fill(0);
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
