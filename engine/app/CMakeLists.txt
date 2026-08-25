@@ -219,6 +219,16 @@ if(LUAUG_BUILD_TESTS)
     target_compile_definitions(luaug_app_tests PRIVATE
         LUAUG_TEST_IMAGE="${CMAKE_SOURCE_DIR}/engine/asset/tests/data/checker.png")
 
+    # A folder of real textures for the skipped thumbnail bench, overridable
+    # because the interesting answer comes from somebody's OWN 4K art rather than
+    # from a fixture. Defaults to the icon masters, which are the only sizeable
+    # pictures the repository carries.
+    if(NOT DEFINED LUAUG_TEST_THUMBNAIL_DIR)
+        set(LUAUG_TEST_THUMBNAIL_DIR "${CMAKE_SOURCE_DIR}/icons/default/class")
+    endif()
+    target_compile_definitions(luaug_app_tests PRIVATE
+        LUAUG_TEST_THUMBNAIL_DIR="${LUAUG_TEST_THUMBNAIL_DIR}")
+
     # Gate: --version must report the pin and the ABI constants (ADR 0031).
     # Asserted on the real binary rather than in-process, so it also proves the
     # provenance header actually reached the shipped executable.

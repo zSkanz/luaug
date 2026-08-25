@@ -1,16 +1,16 @@
 #pragma once
 
+#include "luaug/asset/image.h"
 #include "luaug/core/types.h"
+#include "luaug/jobs/jobs.h"
+#include "luaug/platform/async_io.h"
 #include "luaug/rhi/types.h"
 
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
-
-namespace luaug::asset {
-struct Image;
-}
 
 namespace luaug::rhi {
 class ICmdList;
@@ -33,20 +33,28 @@ namespace luaug::app {
 //     the world it is meant to decorate, spent on pictures drawn at 96 px. So
 //     what is uploaded is a downscale, at `Edge` on the longer side, and the
 //     full-size decode is thrown away in the same breath it was made.
-//   - **Time.** Decoding one 4K PNG is tens of milliseconds. A folder's worth in
-//     one frame is a freeze, and the frame it freezes is the one where somebody
-//     just clicked into the folder. So `PerFrame` of them land per frame and the
-//     rest fill in behind, which reads as a browser thinking rather than as an
-//     editor hanging.
+//   - **Time.** See below: it is the reason this is a pipeline.
 //   - **Count.** Scrolling never ends. `Resident` is a hard ceiling with
 //     least-recently-drawn eviction, so a project with nine thousand textures
 //     costs exactly what a project with two hundred does.
 //
-// Requests come from the draw and the work happens in the frame loop, which is
-// the same shape `UiText` uses for `ImageLabel` and for the same reason: an
-// upload needs a live command list, and the panel is drawn nowhere near one. A
-// picture is therefore ready on the frame AFTER it was first asked for, which is
-// invisible on a panel that stays open.
+// **Three stages, because the decode does not fit in a frame.** Measured on
+// ordinary 1024-square PNGs from a texture pack: 14 to 36 ms to decode and 2 ms
+// to resample, EACH. That is a whole frame at 60 Hz and eight at 240, so a
+// budget on the main thread cannot help -- an image cannot be decoded half way,
+// and a floor of one per frame is a floor of one dropped frame per thumbnail.
+// At 4K it is sixteen times worse.
+//
+// So the file is read by `platform::readFileAsync`, the decode and the resample
+// run on the job pool as `Domain::AssetIo` -- which that domain is defined as,
+// "decode, transcode, materialisation preparation" -- and only the upload
+// happens on the frame, because only the frame has a command list. Opening a
+// folder of 4K textures costs the main thread a few small uploads and nothing
+// else.
+//
+// A picture is therefore ready some frames after it was first asked for, and
+// the row draws its icon until then. On a panel that stays open, that is a
+// browser filling in rather than an editor hanging.
 class ThumbnailCache
 {
 public:
@@ -56,10 +64,11 @@ public:
     // 128x128 RGBA8 is 64 KB, so the ceiling is 16 MB of VRAM -- a fixed,
     // knowable cost that does not depend on how big the project's textures are.
     static constexpr core::usize Resident = 256;
-    // Two per frame. Measured against the worst case that matters: a folder of
-    // 4K PNGs fills a screenful in under a second and never drops a frame doing
-    // it.
-    static constexpr core::usize PerFrame = 2;
+    // How many files may be in the pipeline at once. Bounded because a folder of
+    // nine hundred textures would otherwise queue nine hundred reads and hold
+    // nine hundred decoded images in memory at the same time; four is enough to
+    // keep the pool fed while a person is still reading the first screenful.
+    static constexpr core::usize MaxInFlight = 4;
 
     struct Thumbnail
     {
@@ -73,32 +82,64 @@ public:
         [[nodiscard]] bool valid() const noexcept { return texture.valid() && width > 0 && height > 0; }
     };
 
-    // What to draw for `path` on frame `frame`, and a standing request to have
-    // it. Invalid until it is ready or forever if it cannot be, and the caller
-    // draws the kind's icon in both cases -- which is why this never reports
-    // failure: there is nothing different to do about it.
+    ThumbnailCache() = default;
+    ~ThumbnailCache();
+
+    ThumbnailCache(const ThumbnailCache&) = delete;
+    ThumbnailCache& operator=(const ThumbnailCache&) = delete;
+
+    // What to draw for `path`, and a standing request to have it. Invalid until
+    // it is ready or forever if it cannot be, and the caller draws the kind's
+    // icon in both cases -- which is why this never reports failure: there is
+    // nothing different to do about it.
     [[nodiscard]] Thumbnail request(const std::filesystem::path& path);
 
-    // Decodes and uploads what was asked for, up to `PerFrame`, then evicts down
-    // to `Resident`. Runs where a command list is live.
+    // One frame of the pipeline: admit what fits, take what the IO service
+    // finished, upload what the pool finished, then evict down to `Resident`.
+    // Runs where a command list is live.
     //
     // **Eviction happens here, before the panel is drawn**, and that ordering is
     // what makes it safe: what is dropped was last wanted on an earlier frame,
     // so nothing in this frame's draw list refers to it.
     void flush(rhi::IDevice& device, rhi::ICmdList& cmd);
 
+    // Waits for what is in flight and frees every texture. The wait is not
+    // optional: a decode job holds a pointer into this object, and returning
+    // while one is running would free the memory it is writing into.
     void destroy(rhi::IDevice& device);
 
     // Uploaded and drawable.
     [[nodiscard]] core::usize residentCount() const noexcept;
-    // Asked for and not yet attempted -- what the next flushes will work
-    // through, and what says the budget is a budget rather than a stall.
+    // Asked for and not yet drawable -- queued, reading, or decoding. What says
+    // the pipeline is a pipeline rather than a stall.
     [[nodiscard]] core::usize pendingCount() const noexcept;
     // Every path this remembers anything about, resident or failed or waiting.
     // The number `Resident` caps, and the one that says eviction happened.
     [[nodiscard]] core::usize trackedCount() const noexcept { return entries_.size(); }
 
 private:
+    enum class Stage : core::u8
+    {
+        // Asked for, and waiting for a slot in the pipeline.
+        Queued,
+        Reading,
+        Decoding,
+        Ready,
+        // Not there, not a picture, or the device refused it. Remembered so a
+        // folder holding one bad file does not spend a slot on it every frame.
+        Failed,
+    };
+
+    // The state a decode job writes into. Held by pointer so its address is
+    // stable while `entries_` grows underneath it -- a job holding an index into
+    // a vector that reallocates is a job writing into freed memory.
+    struct Work
+    {
+        std::vector<std::byte> bytes;
+        asset::Image image;
+        bool ok = false;
+    };
+
     struct Entry
     {
         std::string key;
@@ -106,15 +147,22 @@ private:
         core::u32 width = 0;
         core::u32 height = 0;
         core::u64 lastWanted = 0;
-        bool pending = true;
-        bool failed = false;
+        Stage stage = Stage::Queued;
+        platform::IoRequest read;
+        jobs::JobHandle decode;
+        std::unique_ptr<Work> work;
     };
 
     [[nodiscard]] Entry* find(std::string_view key) noexcept;
+    [[nodiscard]] core::usize inFlight() const noexcept;
+    void admit();
+    void collectReads();
+    void collectDecodes(rhi::IDevice& device, rhi::ICmdList& cmd);
+    void evict(rhi::IDevice& device);
 
     std::vector<Entry> entries_;
-    // Bumped by `flush`, so "least recently wanted" means "not asked for in
-    // the most frames" without the caller having to have a frame number.
+    // Bumped by `flush`, so "least recently wanted" means "not asked for in the
+    // most frames" without the caller having to have a frame number.
     core::u64 frame_ = 0;
 };
 
