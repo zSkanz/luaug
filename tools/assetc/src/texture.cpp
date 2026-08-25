@@ -24,7 +24,7 @@ void ensureEncoderReady()
 
 } // namespace
 
-std::optional<core::EngineError> encodeTexture(const asset::Image& image, std::vector<std::byte>& out)
+std::optional<core::EngineError> encodeTexture(const asset::Image& image, bool srgb, std::vector<std::byte>& out)
 {
     out.clear();
 
@@ -56,11 +56,22 @@ std::optional<core::EngineError> encodeTexture(const asset::Image& image, std::v
     params.m_ktx2_uastc_supercompression = basist::KTX2_SS_ZSTANDARD;
 
     params.m_mip_gen = true;
+    // **The transfer function is a property of the SLOT, not of the file.**
+    // The same PNG is colour under `baseColor` and linear data under
+    // `metallicRoughness`, and the encoder has no way to know which -- so the
+    // caller says.
+    //
+    // Getting it wrong is not subtle once you look for it: a normal map encoded
+    // as sRGB has its channels bent by the transfer curve before compression,
+    // so every normal is wrong by a smooth amount that reads as bad lighting
+    // rather than as a broken texture. Every normal and ORM map this engine has
+    // ever compiled was encoded that way, because this was `true`.
+    //
     // One call rather than three fields: upstream renamed the transfer-function
     // parameter in 2026 and documents `set_srgb_options` as the way to keep the
     // three consistent (`basisu_comp.h:599-606`). Three fields set by hand is
     // three chances to leave one behind at the next pin bump.
-    params.set_srgb_options(true);
+    params.set_srgb_options(srgb);
 
     // Nothing is written by the encoder; the bytes come back in memory and this
     // tool decides where they go. An encoder that wrote files of its own would

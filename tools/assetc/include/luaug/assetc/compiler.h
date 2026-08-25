@@ -132,7 +132,13 @@ struct CompileResult
 [[nodiscard]] CompileResult compile(const CompileOptions& options);
 
 // Encodes decoded pixels into the engine's texture container.
-[[nodiscard]] std::optional<core::EngineError> encodeTexture(const asset::Image& image, std::vector<std::byte>& out);
+//
+// `srgb` says what KIND of data the pixels are, and it is a property of the slot
+// the texture fills rather than of the file: base colour and emissive are
+// colour, normal and metallic-roughness are numbers. The same PNG can be both,
+// in two materials, and the encoder cannot tell.
+[[nodiscard]] std::optional<core::EngineError> encodeTexture(const asset::Image& image, bool srgb,
+                                                             std::vector<std::byte>& out);
 
 [[nodiscard]] std::string writeManifest(std::span<const ManifestEntry> entries);
 

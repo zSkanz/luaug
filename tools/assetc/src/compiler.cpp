@@ -272,21 +272,44 @@ CompileResult compile(const CompileOptions& options)
             // it contains -- so a texture shared by forty meshes is one blob
             // rather than forty, and that is the whole point of addressing
             // content by hash.
+            // **Which images are colour and which are numbers**, decided by
+            // what REFERENCES them rather than by what they look like. Base
+            // colour and emissive are colour; normal and metallic-roughness are
+            // data, and running them through an sRGB curve bends every value by
+            // a smooth amount that reads as bad lighting rather than as a broken
+            // texture.
+            //
+            // Every image this compiler has ever produced was marked sRGB,
+            // because the field was written `true` with a comment saying the
+            // material would decide and nothing ever did.
+            //
+            // An image used as BOTH -- which an exporter packing roughness into
+            // a colour map produces -- is encoded as colour. That is the wrong
+            // answer for one of its two uses and the right one for the other,
+            // and it is the choice that keeps a shared blob a shared blob;
+            // splitting it would mean the same pixels twice in the pack under
+            // two names.
+            std::vector<bool> colourData(model.images.size(), false);
+            for (const asset::MaterialDef& material : model.materials) {
+                if (material.baseColor.present() && material.baseColor.image < colourData.size())
+                    colourData[material.baseColor.image] = true;
+                if (material.emissive.present() && material.emissive.image < colourData.size())
+                    colourData[material.emissive.image] = true;
+            }
+
             std::vector<asset::TextureSlot> slots;
             slots.reserve(model.images.size());
-            for (const asset::Image& image : model.images) {
+            for (usize imageIndex = 0; imageIndex < model.images.size(); ++imageIndex) {
+                const bool srgb = colourData[imageIndex];
                 std::vector<std::byte> encoded;
-                const auto error = encodeTexture(image, encoded);
+                const auto error = encodeTexture(model.images[imageIndex], srgb, encoded);
                 if (error) {
                     result.diagnostic = source.relative.generic_string() + ": " + error->message;
                     return result;
                 }
                 asset::TextureSlot slot;
                 slot.hash = pack.addContent(AssetKind::Texture, encoded);
-                // Colour data until something says otherwise. The material
-                // decides per SLOT; this is the file's default and the mesh
-                // record is what carries the truth.
-                slot.srgb = true;
+                slot.srgb = srgb;
                 slots.push_back(slot);
                 result.textureCount += 1;
             }
@@ -318,8 +341,12 @@ CompileResult compile(const CompileOptions& options)
                 result.diagnostic = source.relative.generic_string() + ": " + error->message;
                 return result;
             }
+            // A loose image in the content directory, with no material to say
+            // what it is for. Colour is the honest default: it is what most
+            // standalone textures in a project are, and it is what this has
+            // always done.
             std::vector<std::byte> encoded;
-            if (const auto error = encodeTexture(image, encoded)) {
+            if (const auto error = encodeTexture(image, true, encoded)) {
                 result.diagnostic = source.relative.generic_string() + ": " + error->message;
                 return result;
             }

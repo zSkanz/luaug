@@ -53,7 +53,7 @@ TEST_CASE("a texture survives the encode and comes back as pixels")
 
     const luaug::asset::Image source = testImage(64, false);
     std::vector<std::byte> ktx2;
-    REQUIRE_FALSE(luaug::assetc::encodeTexture(source, ktx2).has_value());
+    REQUIRE_FALSE(luaug::assetc::encodeTexture(source, true, ktx2).has_value());
     REQUIRE_FALSE(ktx2.empty());
 
     luaug::asset::TranscodeOptions options;
@@ -108,7 +108,7 @@ TEST_CASE("alpha survives the round trip and is reported")
 
     const luaug::asset::Image source = testImage(32, true);
     std::vector<std::byte> ktx2;
-    REQUIRE_FALSE(luaug::assetc::encodeTexture(source, ktx2).has_value());
+    REQUIRE_FALSE(luaug::assetc::encodeTexture(source, true, ktx2).has_value());
 
     luaug::asset::TranscodeOptions options;
     options.forceUncompressed = true;
@@ -129,7 +129,7 @@ TEST_CASE("one asset transcodes to whatever the device can sample")
 
     const luaug::asset::Image source = testImage(32, true);
     std::vector<std::byte> ktx2;
-    REQUIRE_FALSE(luaug::assetc::encodeTexture(source, ktx2).has_value());
+    REQUIRE_FALSE(luaug::assetc::encodeTexture(source, true, ktx2).has_value());
 
     // The whole point of the container: the pack carries UASTC once and the
     // device decides what it becomes.
@@ -165,7 +165,7 @@ TEST_CASE("baseLevelOnly stops at the level the UI draws")
 
     const luaug::asset::Image source = testImage(32, false);
     std::vector<std::byte> ktx2;
-    REQUIRE_FALSE(luaug::assetc::encodeTexture(source, ktx2).has_value());
+    REQUIRE_FALSE(luaug::assetc::encodeTexture(source, true, ktx2).has_value());
 
     luaug::asset::TranscodeOptions options;
     options.baseLevelOnly = true;
@@ -185,12 +185,38 @@ TEST_CASE("encoding the same image twice produces the same bytes")
     const luaug::asset::Image source = testImage(64, true);
     std::vector<std::byte> first;
     std::vector<std::byte> second;
-    REQUIRE_FALSE(luaug::assetc::encodeTexture(source, first).has_value());
-    REQUIRE_FALSE(luaug::assetc::encodeTexture(source, second).has_value());
+    REQUIRE_FALSE(luaug::assetc::encodeTexture(source, true, first).has_value());
+    REQUIRE_FALSE(luaug::assetc::encodeTexture(source, true, second).has_value());
 
     // The property the content hash rests on. The encoder is deliberately
     // single-threaded and built without SSE for exactly this.
     CHECK(first == second);
+}
+
+TEST_CASE("the transfer function reaches the bytes")
+{
+    seedRealCatalog();
+
+    // **The whole point of `srgb` being a parameter.** The same pixels encoded
+    // as colour and as data are different bytes, because the encoder bends the
+    // values through the transfer curve before compressing them. If these came
+    // back equal, the flag would be reaching nothing -- which is exactly the
+    // state this compiler was in, with every normal and ORM map marked sRGB.
+    const luaug::asset::Image source = testImage(64, true);
+    std::vector<std::byte> colour;
+    std::vector<std::byte> data;
+    REQUIRE_FALSE(luaug::assetc::encodeTexture(source, true, colour).has_value());
+    REQUIRE_FALSE(luaug::assetc::encodeTexture(source, false, data).has_value());
+
+    CHECK_FALSE(colour.empty());
+    CHECK_FALSE(data.empty());
+    CHECK(colour != data);
+
+    // And each is still deterministic on its own, which is the property the
+    // content hash rests on.
+    std::vector<std::byte> again;
+    REQUIRE_FALSE(luaug::assetc::encodeTexture(source, false, again).has_value());
+    CHECK(again == data);
 }
 
 TEST_CASE("an image with no pixels is refused rather than encoded")
@@ -199,7 +225,7 @@ TEST_CASE("an image with no pixels is refused rather than encoded")
 
     luaug::asset::Image empty;
     std::vector<std::byte> out;
-    const auto error = luaug::assetc::encodeTexture(empty, out);
+    const auto error = luaug::assetc::encodeTexture(empty, true, out);
     REQUIRE(error.has_value());
     CHECK(error->message.find("asset.texture.err.encode_failed") != std::string::npos);
     CHECK(out.empty());
