@@ -161,7 +161,18 @@ public:
     // While suspended it pushes silence and reads the world anyway, which is the
     // difference between pausing and stopping: a `Sound`'s `TimePosition` and
     // `Playing` are untouched, so resuming continues rather than restarts.
-    void update(scene::World& world, core::InstanceId listener);
+    //
+    // `ear` overrides where the listener STANDS, for the one caller that has a
+    // camera the world does not contain: an editor rendering through its own
+    // view because the game made none (D100). Null -- every other caller -- puts
+    // the ear on `listener`, and a `listener` naming no camera puts it at the
+    // origin, which is what a world with no camera has always sounded like.
+    //
+    // A position rather than an instance, because an override camera is not in
+    // the world and has no id to name. It is the same argument `ViewOverride`
+    // makes to the renderer, and it has to be the same DECISION as well or the
+    // picture and the sound disagree about where you are standing.
+    void update(scene::World& world, core::InstanceId listener, const core::DVec3* ear = nullptr);
 
     // Silences the mixer without changing a single `Sound` (D060).
     //

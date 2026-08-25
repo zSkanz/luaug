@@ -537,6 +537,35 @@ struct EditorStatus
     bool failed = false;
 };
 
+// Where the editor's one-line status lives, and a counter that moves every time
+// it is written.
+//
+// **The counter is what the toast needs.** A message that fades has to know when
+// it was SET, and comparing the text cannot answer that: saving twice produces
+// the same sentence, and a toast that refused to reappear for it would be a
+// toast that stops working the second time you use a command.
+//
+// A wrapper rather than a setter at fifty-seven call sites: every one of them
+// says `m_status = EditorStatus{...}`, which is the clearest way to write it,
+// and this keeps that spelling while making the assignment observable.
+class StatusSlot
+{
+public:
+    StatusSlot& operator=(EditorStatus next)
+    {
+        m_value = std::move(next);
+        ++m_serial;
+        return *this;
+    }
+
+    [[nodiscard]] const EditorStatus& value() const noexcept { return m_value; }
+    [[nodiscard]] core::u64 serial() const noexcept { return m_serial; }
+
+private:
+    EditorStatus m_value;
+    core::u64 m_serial = 0;
+};
+
 class Editor
 {
 public:
@@ -1163,7 +1192,19 @@ public:
         return changed;
     }
 
-    [[nodiscard]] const EditorStatus& status() const noexcept { return m_status; }
+    [[nodiscard]] const EditorStatus& status() const noexcept { return m_status.value(); }
+
+    // Moves every time the status is written, whether or not the words changed.
+    // What the viewport's toast restarts its fade on.
+    [[nodiscard]] core::u64 statusSerial() const noexcept { return m_status.serial(); }
+
+    // Says something in the editor's own voice, from outside it.
+    //
+    // The one caller is the properties grid reporting a write the world
+    // refused. It has no other way to say so: the grid is drawn by the shell and
+    // the status belongs to the editor, and a refusal nobody is told about is a
+    // value that silently did not change.
+    void report(std::string message, bool failed) { m_status = EditorStatus{std::move(message), failed}; }
 
     [[nodiscard]] UndoStack& history() noexcept { return m_history; }
     [[nodiscard]] const UndoStack& history() const noexcept { return m_history; }
@@ -1482,7 +1523,7 @@ private:
     // Held by pointer because a `WorldSnapshot` is thirty component pools and
     // an editor that is not playing should not be carrying an empty one.
     std::unique_ptr<scene::WorldSnapshot> m_playSnapshot;
-    EditorStatus m_status;
+    StatusSlot m_status;
     ContentTree m_content;
     std::string m_openScene;
     UndoStack m_history;

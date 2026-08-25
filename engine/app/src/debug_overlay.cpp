@@ -528,6 +528,22 @@ core::u32 g_addOpenRow = 0;
 // run in -- panels draw, then shortcuts. See both ends for why the popup being
 // open is not a question that can be asked afterwards.
 bool g_escapeTaken = false;
+// Which row of the add menu the keyboard is on, and the filter that list was
+// built from. See the menu itself for why a highlight of our own rather than
+// ImGui's navigation: the keyboard belongs to the search box, and a list you
+// arrow through without leaving the box is what a search box is for.
+// The status toast's fade: which write of the status is on screen, and when it
+// arrived. Wall clock through `ImGui::GetTime`, which is the right clock for
+// chrome and reaches nothing the simulation can read.
+core::u64 g_statusSerial = 0;
+double g_statusAt = 0.0;
+
+int g_addHighlight = 0;
+std::string g_addHighlightFilter;
+// The matches this frame, rebuilt each frame because the filter can change each
+// frame. A member of the file rather than of the loop so the allocation is paid
+// once rather than once a frame.
+std::vector<scene::ClassId> g_addMatches;
 // Whether the right-drag in progress BEGAN over the viewport image. Latched on
 // the press, because that is the only moment the question can be answered: once
 // the pointer is held it stops reporting a position, and asking afterwards lets
@@ -1257,6 +1273,8 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 // the box is what makes that true.
                 if (ImGui::IsWindowAppearing()) {
                     g_addFilter.fill(0);
+                    g_addHighlight = 0;
+                    g_addHighlightFilter.clear();
                     ImGui::SetKeyboardFocusHere();
                 }
                 ImGui::SetNextItemWidth(210.0f);
@@ -1284,14 +1302,82 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 }
 
                 const std::string_view filter(g_addFilter.data());
+
+                // **The matches are collected before anything is drawn**, and
+                // that is what makes the keyboard work at all: Up and Down have
+                // to know how many rows there are, and Enter has to know which
+                // class it is about, both before the first `Selectable` decides
+                // whether it is the highlighted one.
+                g_addMatches.clear();
+                for (const scene::ClassId classId : g_creatable) {
+                    const scene::ClassDescriptor* candidate = world.classes().find(classId);
+                    if (candidate == nullptr)
+                        continue;
+                    if (filter.empty() || containsFold(world.atoms().text(candidate->name), filter))
+                        g_addMatches.push_back(classId);
+                }
+
+                // **Typing puts you back on the first match**, which is the
+                // whole of "it always comes with the first thing selected and I
+                // control from there": a highlight left three rows down while
+                // the list under it changed is a highlight pointing at whatever
+                // happens to be there now.
+                if (g_addHighlightFilter != filter) {
+                    g_addHighlightFilter = filter;
+                    g_addHighlight = 0;
+                }
+
+                // **A highlight of our own rather than ImGui's navigation.** The
+                // search box has the keyboard -- it has to, or the first
+                // keystroke would go nowhere -- and handing the arrows to nav
+                // would mean tabbing out of the box to use them. Every command
+                // palette in every editor works this way for the same reason:
+                // you type and you arrow, and neither interrupts the other.
+                //
+                // Single-line `InputText` uses neither arrow, so nothing is
+                // being taken from it.
+                const int matchCount = static_cast<int>(g_addMatches.size());
+                bool followHighlight = false;
+                if (matchCount > 0) {
+                    // Wrapped, because a list this short is a ring: pressing Up
+                    // on the first row to reach the last is faster than
+                    // twenty-nine presses of Down, and there is no scrollbar
+                    // position to be confused about at either end.
+                    if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true)) {
+                        g_addHighlight = (g_addHighlight + 1) % matchCount;
+                        followHighlight = true;
+                    }
+                    if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true)) {
+                        g_addHighlight = (g_addHighlight + matchCount - 1) % matchCount;
+                        followHighlight = true;
+                    }
+                }
+                g_addHighlight = matchCount == 0 ? 0 : std::clamp(g_addHighlight, 0, matchCount - 1);
+
+                // Enter makes the highlighted one, which is the other half of
+                // never touching the mouse. Both Return keys, because a numpad
+                // Enter is an Enter.
+                scene::ClassId chosenByKey = scene::InvalidClass;
+                if (matchCount > 0 &&
+                    (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)))
+                    chosenByKey = g_addMatches[static_cast<core::usize>(g_addHighlight)];
+
                 if (ImGui::BeginChild("add-list", ImVec2(210.0f, 260.0f))) {
-                    for (const scene::ClassId classId : g_creatable) {
+                    // **Whether the pointer has actually moved.** Hovering a row
+                    // moves the highlight, so the mouse and the keyboard never
+                    // point at two different things -- but a pointer resting
+                    // over the list while somebody arrows past it would drag the
+                    // highlight back under the cursor on every frame, and the
+                    // arrows would appear not to work at all.
+                    const ImGuiIO& io = ImGui::GetIO();
+                    const bool pointerMoved = io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f;
+
+                    for (int match = 0; match < matchCount; ++match) {
+                        const scene::ClassId classId = g_addMatches[static_cast<core::usize>(match)];
                         const scene::ClassDescriptor* candidate = world.classes().find(classId);
                         if (candidate == nullptr)
                             continue;
                         const std::string_view candidateName = world.atoms().text(candidate->name);
-                        if (!filter.empty() && !containsFold(candidateName, filter))
-                            continue;
 
                         // **The icon a row of this class would wear**, drawn
                         // beside the name here for the reason it is drawn in the
@@ -1308,12 +1394,20 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                         (void)std::snprintf(item, sizeof(item), "##%.*s", static_cast<int>(candidateName.size()),
                                             candidateName.data());
                         const ImVec2 itemOrigin = ImGui::GetCursorPos();
-                        const bool chosen = ImGui::Selectable(item);
+                        const bool highlighted = match == g_addHighlight;
+                        const bool chosen = ImGui::Selectable(item, highlighted);
                         // Taken here, because the icon and the name are drawn
                         // over the selectable afterwards and `IsItemHovered`
                         // answers about the LAST item -- which would make the
                         // description below appear only over the word.
                         const bool itemHovered = ImGui::IsItemHovered();
+                        if (itemHovered && pointerMoved)
+                            g_addHighlight = match;
+                        // Followed only when the KEYBOARD moved it. Scrolling to
+                        // the highlight every frame would fight the scrollbar
+                        // the moment somebody dragged it.
+                        if (highlighted && followHighlight)
+                            ImGui::SetScrollHereY(0.5f);
 
                         const float itemIcon = ImGui::GetTextLineHeight();
                         ImGui::SetCursorPos(itemOrigin);
@@ -1329,7 +1423,7 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                             ImGui::SetCursorPos(itemOrigin);
                         ImGui::TextUnformatted(candidateName.data(), candidateName.data() + candidateName.size());
 
-                        if (chosen) {
+                        if (chosen || classId == chosenByKey) {
                             commands->createClass = classId;
                             commands->createParent = row.id;
                             ImGui::CloseCurrentPopup();
@@ -2104,6 +2198,34 @@ void drawProperties(scene::World& world, Inspector& inspector, ContentTree* tree
 // The one frame of latency Decision 15 buys determinism with, said out loud,
 // plus what the last few writes actually did. A refusal that is not reported is
 // a value that snaps back with no explanation.
+// A write the world refused, said out loud once.
+//
+// **Only the tail is looked at**, because `outcomes()` is a rolling history and
+// not a per-frame list: re-reporting the whole of it every frame would pin the
+// toast open forever on a refusal from a minute ago.
+void reportRefusedWrites(const scene::World& world, const Inspector& inspector, Editor* editor)
+{
+    static core::usize seen = 0;
+    const std::span<const WriteOutcome> outcomes = inspector.outcomes();
+    // The list is bounded and drops the oldest, so it shrinks as well as grows;
+    // a count that outran it would skip every later refusal in silence.
+    if (seen > outcomes.size())
+        seen = 0;
+
+    for (core::usize index = seen; index < outcomes.size(); ++index) {
+        const WriteOutcome& outcome = outcomes[index];
+        if (outcome.result == scene::World::SetResult::Changed ||
+            outcome.result == scene::World::SetResult::Unchanged) {
+            continue;
+        }
+        if (editor == nullptr)
+            continue;
+        const std::string_view name = world.atoms().text(outcome.property);
+        editor->report(std::string(name) + ": " + setResultLabel(outcome.result), true);
+    }
+    seen = outcomes.size();
+}
+
 void drawWriteLog(scene::World& world, const Inspector& inspector)
 {
     if (inspector.pendingCount() > 0)
@@ -2476,13 +2598,12 @@ void drawTransport(Editor& editor, EditorCommands& commands, const IconAtlas* ic
         break;
     }
 
-    // Whatever the last save or stop had to say, on the line under the buttons
-    // rather than in a modal: somebody pressing save twice a minute should not
-    // have to dismiss anything.
-    if (!editor.status().message.empty()) {
-        const ImVec4 colour = editor.status().failed ? themeColor(palette().danger) : themeColor(palette().success);
-        ImGui::TextColored(colour, "%s", editor.status().message.c_str());
-    }
+    // The status used to be a second line here, and moving it is not cosmetic:
+    // a line that exists when there is something to say and does not when there
+    // is nothing RESIZES the viewport under it, twice per save. Everything
+    // measured against that image moves with it -- the aspect ratio, the picking
+    // ray, the manipulator under the pointer -- so a confirmation was making the
+    // world jump. It is a toast over the picture now; see `drawViewportStatus`.
 }
 
 // What the mouse and keyboard are asking the viewport for.
@@ -2546,6 +2667,55 @@ void reportLookInput(Editor& editor, bool overViewport)
 // window it is called inside, which is what keeps the aspect ratio, the picking
 // ray and the image somebody is looking at agreeing with each other whichever
 // of the two is drawing.
+// **The status, over the world, fading.**
+//
+// Drawn straight into the draw list rather than as an item, which is the whole
+// point: an item occupies layout, and layout that appears and disappears is a
+// viewport that changes size when the editor has something to say.
+//
+// `region` is the image's rectangle in screen space.
+void drawViewportStatus(const Editor& editor, ImVec2 at, ImVec2 region)
+{
+    const EditorStatus& status = editor.status();
+    if (status.message.empty() || region.x < 32.0f)
+        return;
+
+    // Restarted on the WRITE and not on the words, so saving twice shows the
+    // confirmation twice. See `StatusSlot`.
+    if (editor.statusSerial() != g_statusSerial) {
+        g_statusSerial = editor.statusSerial();
+        g_statusAt = ImGui::GetTime();
+    }
+
+    // **An error is held far longer than a confirmation**, because the person
+    // reading a confirmation already knew what they did and the person reading
+    // an error has just been surprised by it.
+    const double age = ImGui::GetTime() - g_statusAt;
+    const double hold = status.failed ? 9.0 : 3.5;
+    constexpr double kFade = 0.75;
+    if (age >= hold + kFade)
+        return;
+    const auto alpha = static_cast<float>(age < hold ? 1.0 : 1.0 - (age - hold) / kFade);
+
+    const ImVec2 padding = ImGui::GetStyle().FramePadding;
+    const float wrap = region.x - padding.x * 6.0f;
+    const ImVec2 extent = ImGui::CalcTextSize(status.message.c_str(), nullptr, false, wrap);
+    const ImVec2 origin(at.x + padding.x * 2.0f, at.y + padding.x * 2.0f);
+
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    // A ground under the words, because the world behind them is any colour at
+    // all and green on grass is not text.
+    ImVec4 ground = themeColor(palette().background);
+    ground.w = 0.82f * alpha;
+    draw->AddRectFilled(ImVec2(origin.x - padding.x, origin.y - padding.y),
+                        ImVec2(origin.x + extent.x + padding.x, origin.y + extent.y + padding.y),
+                        ImGui::ColorConvertFloat4ToU32(ground), 3.0f);
+
+    ImVec4 ink = status.failed ? themeColor(palette().danger) : themeColor(palette().success);
+    ink.w *= alpha;
+    draw->AddText(nullptr, 0.0f, origin, ImGui::ColorConvertFloat4ToU32(ink), status.message.c_str(), nullptr, wrap);
+}
+
 void drawViewportBody(Editor& editor, rhi::TextureHandle texture, EditorCommands& commands)
 {
     const ImVec2 size = ImGui::GetContentRegionAvail();
@@ -2555,6 +2725,7 @@ void drawViewportBody(Editor& editor, rhi::TextureHandle texture, EditorCommands
     SDL_GPUTexture* native = texture.valid() ? rhi::nativeTexture(*g_device, texture) : nullptr;
     if (native != nullptr && size.x >= 1.0f && size.y >= 1.0f) {
         ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)), size);
+        drawViewportStatus(editor, origin, size);
 
         // **Dropped into the WORLD** (ADR 0052): dragging something out of
         // the project's tree and onto the viewport is the shortest way to
@@ -2708,6 +2879,36 @@ void buildDefaultLayout(ImGuiID dockspace)
     ImGui::DockBuilderDockWindow("Debug", bottom);
 
     ImGui::DockBuilderFinish(dockspace);
+}
+
+// --- What every dialog in this shell does with the keyboard -----------------
+//
+// **The box has the keyboard the moment it opens, Enter is the accept button,
+// and Escape is Cancel.** Written once because the six dialogs had different
+// halves of it: Rename re-focused its field on every frame -- which re-selects
+// the text under somebody's caret sixty times a second -- New Folder focused
+// nothing and came back holding the last name typed, and not one of them
+// answered Escape.
+
+// True on the frame a modal opens, which is where seeding and focusing belong:
+// doing either every frame overwrites what a person is typing with what they
+// started from.
+[[nodiscard]] bool dialogOpening()
+{
+    return ImGui::IsWindowAppearing();
+}
+
+// Escape means Cancel, and it SAYS it took the key.
+//
+// `CloseCurrentPopup` takes effect immediately, so the shell's own Escape
+// handler would otherwise find no popup where this one had been and drop the
+// selection on the same press -- which is D095, one dialog over.
+[[nodiscard]] bool dialogCancelled()
+{
+    if (!ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+        return false;
+    g_escapeTaken = true;
+    return true;
 }
 
 // A short label for a kind, so a row says what it is without an icon set.
@@ -3509,6 +3710,10 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         ImGui::TextUnformatted("content/");
         ImGui::SameLine(0.0f, 0.0f);
         ImGui::SetNextItemWidth(330.0f);
+        if (dialogOpening()) {
+            path.fill(0);
+            ImGui::SetKeyboardFocusHere();
+        }
         const bool submitted =
             ImGui::InputText("##scene-path", path.data(), path.size(), ImGuiInputTextFlags_EnterReturnsTrue);
         const std::string typed(path.data());
@@ -3533,7 +3738,7 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         const bool accepted = ImGui::Button("Save", ImVec2(120.0f, 0.0f));
         ImGui::EndDisabled();
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))) {
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
             path.fill(0);
             ImGui::CloseCurrentPopup();
         }
@@ -3666,7 +3871,11 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         }
 
         ImGui::SetNextItemWidth(-1.0f);
-        ImGui::SetKeyboardFocusHere();
+        // Once, on the frame it opens. Every frame re-selects the whole name
+        // under somebody's caret, which makes the arrow keys useless and a
+        // double-click-to-pick-a-word impossible.
+        if (dialogOpening())
+            ImGui::SetKeyboardFocusHere();
         const bool submitted =
             ImGui::InputText("##rename", name.data(), name.size(), ImGuiInputTextFlags_EnterReturnsTrue);
         const std::string typed(name.data());
@@ -3676,7 +3885,7 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         const bool accepted = ImGui::Button("Rename", ImVec2(120.0f, 0.0f));
         ImGui::EndDisabled();
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))) {
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
             dialogs.renameTarget = {};
             dialogs.renameContentPath.clear();
             ImGui::CloseCurrentPopup();
@@ -3702,6 +3911,12 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
     if (ImGui::BeginPopupModal("New Folder", nullptr, ImGuiWindowFlags_NoResize)) {
         static std::array<char, 128> folder{};
         ImGui::SetNextItemWidth(-1.0f);
+        // Cleared as well as focused: dismissed by clicking outside, this box
+        // used to come back holding the last folder somebody made.
+        if (dialogOpening()) {
+            folder.fill(0);
+            ImGui::SetKeyboardFocusHere();
+        }
         const bool submitted =
             ImGui::InputText("##folder", folder.data(), folder.size(), ImGuiInputTextFlags_EnterReturnsTrue);
         const std::string typed(folder.data());
@@ -3713,7 +3928,7 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         const bool accepted = ImGui::Button("Create", ImVec2(120.0f, 0.0f));
         ImGui::EndDisabled();
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))) {
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
             folder.fill(0);
             ImGui::CloseCurrentPopup();
         }
@@ -3738,6 +3953,10 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         ImGui::TextUnformatted("content/");
         ImGui::SameLine(0.0f, 0.0f);
         ImGui::SetNextItemWidth(-1.0f);
+        if (dialogOpening()) {
+            stamp.fill(0);
+            ImGui::SetKeyboardFocusHere();
+        }
         const bool submitted =
             ImGui::InputText("##stamp", stamp.data(), stamp.size(), ImGuiInputTextFlags_EnterReturnsTrue);
         const std::string typed(stamp.data());
@@ -3759,7 +3978,7 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         const bool accepted = ImGui::Button("Create", ImVec2(120.0f, 0.0f));
         ImGui::EndDisabled();
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))) {
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
             stamp.fill(0);
             dialogs.stampSubject = {};
             ImGui::CloseCurrentPopup();
@@ -3791,7 +4010,11 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))) {
+        // **Escape is Cancel on a question too**, and on this one it is the
+        // answer somebody reaches for fastest: a confirmation you cannot back
+        // out of with the key every other dialog uses is a confirmation people
+        // learn to click through without reading.
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
             dialogs.deleteContentPath.clear();
             ImGui::CloseCurrentPopup();
         }
@@ -4097,7 +4320,17 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         if (ImGui::Begin("Properties", &panels.properties)) {
             if (world != nullptr && inspector != nullptr) {
                 drawProperties(*world, *inspector, editor != nullptr ? &editor->content() : nullptr, icons, audio);
-                drawWriteLog(*world, *inspector);
+                // **The write log is a DEBUG panel and the editor is not one.**
+                // It stays in the F3 overlay, where showing the machinery is the
+                // whole point; here it was a collapsing header that appeared
+                // after every edit, pushed the grid down and went away again --
+                // a panel reflowing under somebody's pointer as they drag a
+                // number.
+                //
+                // What it was carrying that nothing else was: a write the world
+                // REFUSED. That is now said in the editor's own voice, so the
+                // one useful line survives the panel it was buried in.
+                reportRefusedWrites(*world, *inspector, editor);
             }
         }
         ImGui::End();

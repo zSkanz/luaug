@@ -2010,7 +2010,24 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // itself exists to prevent.
         if (advancing(editor.runState()))
             host->audio().stopAudition();
-        host->audio().update(host->world(), host->currentCamera());
+        // **The ear goes where the eye is.** A sound parented to a part
+        // is positional, and what it is positional AGAINST is the listener --
+        // which is `Workspace.CurrentCamera`. A game with no camera of its own
+        // is rendered through the editor's (D100), and until now the listener
+        // stayed at the world origin while the picture moved: every sound was
+        // attenuated against a point nobody was standing at, so a sound near the
+        // origin was loud wherever you flew and a distant one was silent from
+        // right beside it.
+        //
+        // The SAME predicate the frame uses to choose the view, computed once
+        // and read twice, because D100 is what a predicate spelled differently
+        // in two files does.
+        const core::InstanceId listener = host->currentCamera();
+        const bool worldHasCamera = host->world().alive(listener) && !host->world().destroyed(listener) &&
+                                    host->world().cameras().find(listener) != nullptr;
+        const bool listenWithEditor = options.editor && editor.cameraAdopted() && !worldHasCamera;
+        const core::DVec3 editorEar = editor.cameraCFrame().position;
+        host->audio().update(host->world(), listener, listenWithEditor ? &editorEar : nullptr);
 
         // The physics wireframe (roadmap M5, "Jolt debug-draw bridge"): what the
         // SOLVER thinks the world looks like, which is the only picture that can

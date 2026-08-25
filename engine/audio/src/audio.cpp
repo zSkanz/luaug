@@ -424,14 +424,18 @@ void AudioSystem::tick(scene::World& world, f64 fixedDt)
     });
 }
 
-void AudioSystem::update(scene::World& world, core::InstanceId listener)
+void AudioSystem::update(scene::World& world, core::InstanceId listener, const core::DVec3* earOverride)
 {
     if (m_impl == nullptr)
         return;
 
     core::DVec3 ear;
-    if (const scene::CameraComponent* camera = world.cameras().find(listener); camera != nullptr)
+    if (earOverride != nullptr) {
+        ear = *earOverride;
+    }
+    else if (const scene::CameraComponent* camera = world.cameras().find(listener); camera != nullptr) {
         ear = camera->cframe.position;
+    }
 
     std::vector<Voice> next;
     next.reserve(kMaxVoices);
