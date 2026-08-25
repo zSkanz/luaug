@@ -2661,6 +2661,9 @@ void buildDefaultLayout(ImGuiID dockspace)
     // explicitly below.
     ImGui::DockBuilderDockWindow("Content", bottom);
     ImGui::DockBuilderDockWindow("Console", bottom);
+    // Beside the console, because both are places somebody looks when something
+    // is not doing what they expected.
+    ImGui::DockBuilderDockWindow("Debug", bottom);
 
     ImGui::DockBuilderFinish(dockspace);
 }
@@ -3400,6 +3403,7 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
         ImGui::MenuItem("Content", nullptr, &panels.content);
         ImGui::MenuItem("Console", nullptr, &panels.console);
         ImGui::MenuItem("Stats", nullptr, &panels.stats);
+        ImGui::MenuItem("Debug", nullptr, &panels.debug);
         ImGui::Separator();
         // Not a panel, but it is a question about what the panels SHOW, and
         // this is the menu a person opens to ask one.
@@ -3858,8 +3862,8 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
 void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,
                      script::ScriptRuntime* runtime, Editor* editor, rhi::TextureHandle viewport, bool& laidOut,
                      EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs, IconAtlas* icons,
-                     ScriptEditor* scripts, ScriptEditorCommands& scriptCommands, audio::AudioSystem* audio,
-                     bool furniture)
+                     ScriptEditor* scripts, ScriptEditorCommands& scriptCommands, DebugView& debug,
+                     audio::AudioSystem* audio, bool furniture)
 {
     // **F3 down: the world and nothing else.** Returning before the dockspace
     // rather than hiding each panel, because a dockspace with no windows in it
@@ -3928,7 +3932,10 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // for and what a hand-rolled tab bar would have refused.
     if (scripts != nullptr) {
         const ImGuiDockNode* central = ImGui::DockBuilderGetCentralNode(dockspace);
-        drawScriptEditor(*scripts, central != nullptr ? static_cast<core::u32>(central->ID) : 0u, scriptCommands);
+        drawScriptEditor(*scripts, central != nullptr ? static_cast<core::u32>(central->ID) : 0u, debug,
+                         scriptCommands);
+        if (panels.debug)
+            drawDebugPanel(*scripts, debug, scriptCommands, panels.debug);
     }
 
     if (panels.explorer) {
@@ -4893,7 +4900,7 @@ void DebugOverlay::render(rhi::ICmdList& cmd, rhi::TextureHandle target, const F
         drawLauncher(launcher_);
     else if (shell_ == Shell::Editor)
         drawEditorShell(frame, world_, root_, inspector_, runtime_, editor_, viewportTexture_, layoutBuilt_, commands_,
-                        panels_, dialogs_, icons_, scripts_, scriptCommands_, audio_, visible_);
+                        panels_, dialogs_, icons_, scripts_, scriptCommands_, debugView_, audio_, visible_);
     else
         drawShell(frame, world_, root_, inspector_, runtime_, streaming_);
     ImGui::Render();

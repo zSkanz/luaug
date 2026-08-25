@@ -239,6 +239,10 @@ struct EditorPanels
     bool content = true;
     bool console = true;
     bool stats = true;
+    // The stack, the variables and the transport (ADR 0057). On by default
+    // because a debugger nobody can find is a debugger nobody uses, and it says
+    // "running" when nothing is stopped rather than being empty.
+    bool debug = true;
 
     // How the content browser lays its entries out.
     //
@@ -1197,8 +1201,28 @@ public:
     // for, and then exactly one however many the frame owed. Consuming the request here
     // rather than at the button is what makes a step one tick rather than one
     // tick per frame the button stays held.
+    // **Whether a script is stopped in the debugger** (ADR 0057). Written every
+    // frame by the loop, read only by `allowedTicks`.
+    void setDebuggerParked(bool parked) noexcept { m_debuggerParked = parked; }
+    [[nodiscard]] bool debuggerParked() const noexcept { return m_debuggerParked; }
+
     [[nodiscard]] core::u32 allowedTicks(core::u32 owed) noexcept
     {
+        // **No tick begins while a script is parked, and that is what keeps R10
+        // true rather than a courtesy.** ADR 0025's guarantee is indexed by
+        // TICKS and `task.wait` deadlines are tick indices -- so if the world
+        // advanced while a coroutine sat on a breakpoint, that script would
+        // resume N ticks later than it would have without a debugger and the run
+        // would diverge. With this, the tick sequence is byte-identical to the
+        // one nobody debugged and the pause happens between ticks as far as the
+        // simulation can tell.
+        //
+        // Here rather than in the panel for the reason this function already
+        // states about pausing: a rule about the world belongs to the world's
+        // model, and a rule with one caller in a panel is a rule that is wrong
+        // the first time something else asks.
+        if (m_debuggerParked)
+            return 0;
         if (advancing(m_run))
             return owed;
         // The request survives a frame that owed nothing. A step is a promise
@@ -1464,6 +1488,7 @@ private:
     UndoStack m_history;
 
     bool m_sceneDirty = false;
+    bool m_debuggerParked = false;
     bool m_closeRequested = false;
     core::CFrameD m_cameraCFrame;
     bool m_cameraAdopted = false;

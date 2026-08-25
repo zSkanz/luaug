@@ -279,6 +279,25 @@ public:
     // before it goes to column zero, and what a new line inherits as its indent.
     [[nodiscard]] core::u32 indentOf(core::u32 line) const noexcept;
 
+    // --- Bytes and cells -----------------------------------------------------
+    //
+    // **A column is bytes and a monospace cell is a codepoint, and the two are
+    // not the same the moment somebody types an accent.** `á` is two bytes and
+    // one glyph: a pane that placed runs at `byteColumn * advance` would leave a
+    // gap the width of a space after every accented letter, and its caret would
+    // sit one cell to the right of the character it is on.
+    //
+    // Found by a person typing Portuguese into it, which is the only way this
+    // class of defect is ever found -- every ASCII test passes either way.
+    //
+    // The document keeps BYTES, because that is what an edit splices at and what
+    // the lexer reports. These two turn a byte column into the cell a monospace
+    // pane should draw it in, and back.
+    [[nodiscard]] core::u32 cellOf(core::u32 line, core::u32 column) const noexcept;
+    [[nodiscard]] core::u32 columnOfCell(core::u32 line, core::u32 cell) const noexcept;
+    // Cells in the whole line, which is its drawn width.
+    [[nodiscard]] core::u32 cellCount(core::u32 line) const noexcept;
+
     // --- Searching -----------------------------------------------------------
 
     struct SearchOptions

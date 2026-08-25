@@ -358,3 +358,59 @@ TEST_CASE("a document that parses has nothing to say")
     document.refreshDiagnostics();
     CHECK(document.diagnostics().empty());
 }
+
+// --- Bytes and cells ---------------------------------------------------------
+//
+// **The defect a person typing Portuguese found and every ASCII test passed
+// through.** A column is bytes, a monospace cell is a codepoint, and `á` is two
+// bytes and one glyph -- so a pane placing runs at `byteColumn * advance` left a
+// gap the width of a space after every accented letter, and put its caret one
+// cell to the right of the character it was on.
+
+TEST_CASE("a cell is a codepoint and a column is bytes")
+{
+    // `local á = 1`: the accented letter is two bytes, so the line is twelve
+    // bytes and eleven cells.
+    ScriptDocument document("local \xc3\xa1 = 1");
+    CHECK(document.lineLength(0) == 12);
+    CHECK(document.cellCount(0) == 11);
+
+    // Everything before the accent agrees, and everything after it is off by
+    // exactly the extra byte -- which is the gap that showed up on screen.
+    CHECK(document.cellOf(0, 0) == 0);
+    CHECK(document.cellOf(0, 6) == 6);
+    CHECK(document.cellOf(0, 8) == 7);
+    CHECK(document.cellOf(0, 12) == 11);
+
+    // And back, which is what a click has to do.
+    CHECK(document.columnOfCell(0, 0) == 0);
+    CHECK(document.columnOfCell(0, 6) == 6);
+    CHECK(document.columnOfCell(0, 7) == 8);
+    CHECK(document.columnOfCell(0, 11) == 12);
+    // Past the end is the end, which is where a click to the right of the last
+    // character lands.
+    CHECK(document.columnOfCell(0, 99) == 12);
+}
+
+TEST_CASE("every cell round-trips to the column it came from")
+{
+    // A four-byte codepoint beside a two-byte one, because the arithmetic that
+    // works for one and not the other is exactly the arithmetic somebody writes
+    // by hand.
+    ScriptDocument document("a\xc3\xa9z\xf0\x9f\x8e\xb2" "b");
+    for (core::u32 cell = 0; cell <= document.cellCount(0); ++cell) {
+        const core::u32 column = document.columnOfCell(0, cell);
+        INFO("cell " << cell << " -> column " << column);
+        CHECK(document.cellOf(0, column) == cell);
+        // And a column a caret can really occupy: never inside a codepoint.
+        CHECK(document.clamp(Position{0, column}).column == column);
+    }
+}
+
+TEST_CASE("an ASCII line is its own cell count, which is why this was invisible")
+{
+    ScriptDocument document("local x = 1");
+    CHECK(document.cellCount(0) == document.lineLength(0));
+    for (core::u32 column = 0; column <= document.lineLength(0); ++column)
+        CHECK(document.cellOf(0, column) == column);
+}

@@ -149,7 +149,7 @@ void placeCaret(OpenScript& tab, Position to, bool select)
     tab.caret.head = tab.document.clamp(to);
     if (!select)
         tab.caret.anchor = tab.caret.head;
-    tab.caret.desiredColumn = tab.caret.head.column;
+    tab.caret.desiredColumn = tab.document.cellOf(tab.caret.head.line, tab.caret.head.column);
     // Moving by hand ends a typing run, so the next Ctrl+Z stops where somebody
     // moved rather than swallowing what came before.
     tab.document.breakUndoRun();
@@ -159,10 +159,12 @@ void placeCaret(OpenScript& tab, Position to, bool select)
 // a short line and coming back lands where they left.
 void moveVertically(OpenScript& tab, int delta, bool select)
 {
-    const u32 wanted = tab.caret.desiredColumn;
+    // The CELL, not the byte: moving down a line whose accents sit elsewhere
+    // should keep the caret under the same glyph, not the same byte offset.
+    const u32 wantedCell = tab.caret.desiredColumn;
     const auto line = static_cast<std::int64_t>(tab.caret.head.line) + delta;
     const auto clamped = static_cast<u32>(std::clamp<std::int64_t>(line, 0, tab.document.lineCount() - 1));
-    tab.caret.head = tab.document.clamp(Position{clamped, wanted});
+    tab.caret.head = tab.document.clamp(Position{clamped, tab.document.columnOfCell(clamped, wantedCell)});
     if (!select)
         tab.caret.anchor = tab.caret.head;
     tab.document.breakUndoRun();
@@ -204,8 +206,13 @@ void insertText(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, s
     // Rounded rather than floored, so clicking the right half of a glyph puts
     // the caret after it -- which is what every editor does and what makes a
     // click at the end of a line land at the end of the line.
-    const float column = std::round((point.x - textOrigin.x) / m.advance);
-    return document.clamp(Position{line, static_cast<u32>(std::max(0.0f, column))});
+    //
+    // A pixel names a CELL, and a cell is a codepoint. Turning it back into a
+    // byte column is what keeps a click on an accented word landing on the
+    // letter under the pointer.
+    const float cell = std::round((point.x - textOrigin.x) / m.advance);
+    return document.clamp(
+        Position{line, document.columnOfCell(line, static_cast<u32>(std::max(0.0f, cell)))});
 }
 
 void handleTyping(OpenScript& tab, ScriptEditorCommands& out, std::size_t index)
@@ -356,11 +363,20 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
 
 // --- Drawing -----------------------------------------------------------------
 
-void drawGutter(const OpenScript& tab, const ScriptEditor& editor, const PaneMetrics& m, ImDrawList* draw,
-                ImVec2 origin, u32 line, bool current)
+void drawGutter(const OpenScript& tab, const ScriptEditor& editor, const DebugView& debug, const PaneMetrics& m,
+                ImDrawList* draw, ImVec2 origin, u32 line, bool current)
 {
     const ThemePalette& p = currentTheme().palette;
     const float y = origin.y + static_cast<float>(line) * m.lineHeight;
+
+    // **Where execution is stopped**, drawn as a band rather than a marker in
+    // the margin: a person looking for it is looking at the code, not at the
+    // numbers. Luau reports lines from one and a document counts them from
+    // zero, which is the whole of the conversion here.
+    if (debug.parked && debug.chunk == tab.chunk && debug.line == line + 1) {
+        draw->AddRectFilled(ImVec2(origin.x, y), ImVec2(origin.x + m.gutter, y + m.lineHeight),
+                            col(p.warning, 0.35f));
+    }
 
     char number[16]{};
     (void)std::snprintf(number, sizeof(number), "%u", line + 1);
@@ -388,13 +404,18 @@ void drawLine(const OpenScript& tab, const PaneMetrics& m, ImDrawList* draw, ImV
     // **Only the columns that can be seen.** A minified line of a hundred
     // thousand bytes is one `AddText` of a hundred thousand glyphs otherwise,
     // and the clip rectangle would throw away the work after it was done.
-    const auto lastVisible = static_cast<u32>(paneWidth / m.advance) + 2u;
+    const auto lastVisibleCell = static_cast<u32>(paneWidth / m.advance) + 2u;
 
+    // `from` and `to` are BYTE columns; where a run is DRAWN is its CELL. The
+    // two differ the moment a line holds anything outside ASCII, and treating
+    // them as one is what put a space after every accented letter.
     const auto run = [&](u32 from, u32 to, ImU32 colour) {
-        if (to <= from || from >= lastVisible)
+        if (to <= from)
             return;
-        to = std::min(to, lastVisible);
-        draw->AddText(m.font, ImGui::GetFontSize(), ImVec2(textOrigin.x + static_cast<float>(from) * m.advance, y),
+        const u32 cell = tab.document.cellOf(line, from);
+        if (cell >= lastVisibleCell)
+            return;
+        draw->AddText(m.font, ImGui::GetFontSize(), ImVec2(textOrigin.x + static_cast<float>(cell) * m.advance, y),
                       colour, text.data() + from, text.data() + to);
     };
 
@@ -419,8 +440,11 @@ void drawSelection(const OpenScript& tab, const PaneMetrics& m, ImDrawList* draw
     const Range span = tab.caret.selection();
     const ImU32 colour = col(currentTheme().palette.accent, 0.30f);
     for (u32 line = std::max(first, span.begin.line); line <= std::min(last, span.end.line); ++line) {
-        const u32 from = line == span.begin.line ? span.begin.column : 0u;
-        const u32 to = line == span.end.line ? span.end.column : tab.document.lineLength(line) + 1u;
+        const u32 from = tab.document.cellOf(line, line == span.begin.line ? span.begin.column : 0u);
+        // A line in the middle of a selection is highlighted one cell past its
+        // end, so a multi-line selection reads as covering the newline it holds.
+        const u32 to = line == span.end.line ? tab.document.cellOf(line, span.end.column)
+                                             : tab.document.cellCount(line) + 1u;
         const float y = textOrigin.y + static_cast<float>(line) * m.lineHeight;
         draw->AddRectFilled(ImVec2(textOrigin.x + static_cast<float>(from) * m.advance, y),
                             ImVec2(textOrigin.x + static_cast<float>(to) * m.advance, y + m.lineHeight), colour);
@@ -435,9 +459,11 @@ void drawDiagnostics(const OpenScript& tab, const PaneMetrics& m, ImDrawList* dr
         if (diagnostic.at.line < first || diagnostic.at.line > last)
             continue;
         const float y = textOrigin.y + static_cast<float>(diagnostic.at.line + 1) * m.lineHeight - 2.0f;
-        const float x0 = textOrigin.x + static_cast<float>(diagnostic.at.column) * m.advance;
+        const float x0 =
+            textOrigin.x +
+            static_cast<float>(tab.document.cellOf(diagnostic.at.line, diagnostic.at.column)) * m.advance;
         const float x1 = std::max(
-            x0 + m.advance, textOrigin.x + static_cast<float>(tab.document.lineLength(diagnostic.at.line)) * m.advance);
+            x0 + m.advance, textOrigin.x + static_cast<float>(tab.document.cellCount(diagnostic.at.line)) * m.advance);
         // A straight underline rather than a wave: at one physical pixel a wave
         // is a dotted line that reads as a rendering fault.
         draw->AddLine(ImVec2(x0, y), ImVec2(x1, y), colour, 1.0f);
@@ -536,7 +562,8 @@ void drawFindBar(OpenScript& tab, ScriptEditorCommands& out, std::size_t index)
     ImGui::PopStyleColor();
 }
 
-void drawPane(OpenScript& tab, ScriptEditor& editor, ScriptEditorCommands& out, std::size_t index)
+void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, ScriptEditorCommands& out,
+              std::size_t index)
 {
     const ThemePalette& p = currentTheme().palette;
     const PaneMetrics m = metricsFor(tab.document);
@@ -672,9 +699,17 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, ScriptEditorCommands& out, 
             col(p.surfaceRaised, 0.45f));
     }
 
+    if (debug.parked && debug.chunk == tab.chunk && debug.line > 0) {
+        const float stopY = textOrigin.y + static_cast<float>(debug.line - 1) * m.lineHeight;
+        draw->AddRectFilled(ImVec2(origin.x + m.gutter, stopY),
+                            ImVec2(origin.x + ImGui::GetScrollX() + std::max(paneWidth, extent.x),
+                                   stopY + m.lineHeight),
+                            col(p.warning, 0.22f));
+    }
+
     drawSelection(tab, m, draw, textOrigin, first, last);
     for (u32 line = first; line <= last && line < lineCount; ++line) {
-        drawGutter(tab, editor, m, draw, ImVec2(origin.x + ImGui::GetScrollX(), origin.y), line,
+        drawGutter(tab, editor, debug, m, draw, ImVec2(origin.x + ImGui::GetScrollX(), origin.y), line,
                    line == tab.caret.head.line);
         drawLine(tab, m, draw, textOrigin, line, paneWidth + ImGui::GetScrollX());
     }
@@ -685,7 +720,9 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, ScriptEditorCommands& out, 
         // blinks together.
         const float phase = std::fmod(static_cast<float>(ImGui::GetTime()), 1.06f);
         if (phase < 0.7f) {
-            const float x = textOrigin.x + static_cast<float>(tab.caret.head.column) * m.advance;
+            const float x =
+                textOrigin.x +
+                static_cast<float>(tab.document.cellOf(tab.caret.head.line, tab.caret.head.column)) * m.advance;
             draw->AddLine(ImVec2(x, caretY), ImVec2(x, caretY + m.lineHeight), col(p.accent), 1.5f);
         }
     }
@@ -702,7 +739,122 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, ScriptEditorCommands& out, 
 
 } // namespace
 
-void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, ScriptEditorCommands& out)
+void drawDebugPanel(ScriptEditor& editor, DebugView& debug, ScriptEditorCommands& out, bool& open)
+{
+    if (!ImGui::Begin("Debug", &open)) {
+        ImGui::End();
+        return;
+    }
+
+    const ThemePalette& p = currentTheme().palette;
+
+    // The transport. Disabled rather than hidden when nothing is stopped, so
+    // the buttons stay where a hand already expects them -- the same rule the
+    // File menu follows for Save.
+    ImGui::BeginDisabled(!debug.parked);
+    if (ImGui::Button("Continue"))
+        out.step = DebugStep::Continue;
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("let the script run on (F5)");
+    ImGui::SameLine();
+    if (ImGui::Button("Over"))
+        out.step = DebugStep::Over;
+    ImGui::SameLine();
+    if (ImGui::Button("Into"))
+        out.step = DebugStep::Into;
+    ImGui::SameLine();
+    if (ImGui::Button("Out"))
+        out.step = DebugStep::Out;
+    ImGui::EndDisabled();
+
+    ImGui::SameLine();
+    if (debug.parked)
+        ImGui::TextColored(ImVec4(p.warning.r, p.warning.g, p.warning.b, 1.0f), "stopped in %s at line %u", debug.chunk.c_str(), debug.line);
+    else
+        ImGui::TextDisabled("running");
+
+    // The keys every debugger uses, so hands already know them. Read HERE and
+    // not in the code pane: the pane owns the keyboard while the caret is in it,
+    // and pressing F5 should not require clicking away from the code being
+    // looked at.
+    if (debug.parked) {
+        if (ImGui::IsKeyPressed(ImGuiKey_F5, false))
+            out.step = DebugStep::Continue;
+        if (ImGui::IsKeyPressed(ImGuiKey_F10, false))
+            out.step = DebugStep::Over;
+        if (ImGui::IsKeyPressed(ImGuiKey_F11, false))
+            out.step = ImGui::GetIO().KeyShift ? DebugStep::Out : DebugStep::Into;
+    }
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Breakpoints");
+    if (editor.breakpoints().empty()) {
+        ImGui::TextDisabled("Click a line number to stop there.");
+    }
+    else {
+        for (const Breakpoint& bp : editor.breakpoints()) {
+            // **Hollow when it is bound to nothing**, which is a breakpoint set
+            // before the world ran or one on a line with no code. Saying so is
+            // the difference between "not armed yet" and "armed and never
+            // fires", which look identical from the outside.
+            if (bp.boundLine == 0)
+                ImGui::TextDisabled("%s:%u  (not bound)", bp.chunk.c_str(), bp.line + 1);
+            else if (bp.boundLine != bp.line + 1)
+                ImGui::Text("%s:%u  (stops at %u)", bp.chunk.c_str(), bp.line + 1, bp.boundLine);
+            else
+                ImGui::Text("%s:%u", bp.chunk.c_str(), bp.line + 1);
+        }
+    }
+
+    if (!debug.parked) {
+        ImGui::End();
+        return;
+    }
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Call stack");
+    for (std::size_t index = 0; index < debug.frames.size(); ++index) {
+        const DebugFrameView& frame = debug.frames[index];
+        char label[256]{};
+        (void)std::snprintf(label, sizeof(label), "%s  %s:%u##frame-%zu", frame.function.c_str(),
+                            frame.chunk.c_str(), frame.line, index);
+        if (ImGui::Selectable(label, index == debug.selectedFrame))
+            debug.selectedFrame = index;
+    }
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Variables");
+    if (debug.selectedFrame < debug.frames.size()) {
+        const DebugFrameView& frame = debug.frames[debug.selectedFrame];
+        if (ImGui::BeginTable("##vars", 3,
+                              ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+            ImGui::TableSetupColumn("name");
+            ImGui::TableSetupColumn("type");
+            ImGui::TableSetupColumn("value");
+            ImGui::TableHeadersRow();
+            const auto row = [](const DebugValueView& value) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextUnformatted(value.name.c_str());
+                ImGui::TableSetColumnIndex(1);
+                ImGui::TextDisabled("%s", value.type.c_str());
+                ImGui::TableSetColumnIndex(2);
+                ImGui::TextUnformatted(value.preview.c_str());
+            };
+            for (const DebugValueView& value : frame.locals)
+                row(value);
+            for (const DebugValueView& value : frame.upvalues)
+                row(value);
+            ImGui::EndTable();
+        }
+        if (frame.locals.empty() && frame.upvalues.empty())
+            ImGui::TextDisabled("Nothing named in this frame.");
+    }
+
+    ImGui::End();
+}
+
+void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, DebugView& debug, ScriptEditorCommands& out)
 {
     const std::optional<std::size_t> focus = editor.takeFocusRequest();
 
@@ -730,7 +882,7 @@ void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, ScriptEditorComm
         if (ImGui::Begin(name, &open, flags)) {
             if (ImGui::IsWindowAppearing() || ImGui::IsWindowFocused())
                 editor.setActive(index);
-            drawPane(*tab, editor, out, index);
+            drawPane(*tab, editor, debug, out, index);
         }
         ImGui::End();
 
@@ -754,7 +906,10 @@ namespace luaug::app {
 
 // ADR 0011: a shipping build has no ImGui, so the pane has no body. The
 // signature stays so the frame loop calls it without an #ifdef.
-void drawScriptEditor(ScriptEditor&, core::u32, ScriptEditorCommands&)
+void drawScriptEditor(ScriptEditor&, core::u32, DebugView&, ScriptEditorCommands&)
+{}
+
+void drawDebugPanel(ScriptEditor&, DebugView&, ScriptEditorCommands&, bool&)
 {}
 
 } // namespace luaug::app

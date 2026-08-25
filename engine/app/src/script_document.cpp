@@ -209,6 +209,39 @@ u32 ScriptDocument::indentOf(u32 index) const noexcept
     return column;
 }
 
+u32 ScriptDocument::cellOf(u32 index, u32 column) const noexcept
+{
+    const std::string_view text = line(index);
+    const std::size_t limit = std::min<std::size_t>(column, text.size());
+    u32 cells = 0;
+    for (std::size_t at = 0; at < limit; ++at) {
+        if (!isContinuation(text[at]))
+            ++cells;
+    }
+    return cells;
+}
+
+u32 ScriptDocument::columnOfCell(u32 index, u32 cell) const noexcept
+{
+    const std::string_view text = line(index);
+    u32 cells = 0;
+    for (std::size_t at = 0; at < text.size(); ++at) {
+        if (isContinuation(text[at]))
+            continue;
+        if (cells == cell)
+            return static_cast<u32>(at);
+        ++cells;
+    }
+    // Past the end is the end, which is where a click to the right of the last
+    // character should land.
+    return static_cast<u32>(text.size());
+}
+
+u32 ScriptDocument::cellCount(u32 index) const noexcept
+{
+    return cellOf(index, lineLength(index));
+}
+
 std::string ScriptDocument::textIn(Range range) const
 {
     const Range span = ordered(clamp(range.begin), clamp(range.end));

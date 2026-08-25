@@ -1,6 +1,7 @@
 #include "luaug/app/engine.h"
 
 #include "luaug/app/script_editor.h"
+#include "luaug/script/debugger.h"
 
 #include <lua.h>
 
@@ -1159,8 +1160,43 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 }
 
                 if (scriptCommands.toggleBreakpointLine.has_value()) {
-                    if (const OpenScript* tab = scripts.at(scripts.activeIndex()); tab != nullptr)
-                        (void)scripts.toggleBreakpoint(tab->chunk, *scriptCommands.toggleBreakpointLine);
+                    if (const OpenScript* tab = scripts.at(scripts.activeIndex()); tab != nullptr) {
+                        const core::u32 line = *scriptCommands.toggleBreakpointLine;
+                        script::Debugger& debugger = host->runtime().debugger();
+                        // **Both sides, in one place.** The editor holds what a
+                        // person asked for and the VM holds what is actually
+                        // patched; letting a panel arm one and not the other is
+                        // how a marker that never fires happens.
+                        if (scripts.toggleBreakpoint(tab->chunk, line)) {
+                            // Luau counts lines from one and a document from
+                            // zero, and the answer comes back in Luau's.
+                            const core::u32 bound =
+                                debugger.setBreakpoint(host->runtime().state(), tab->chunk, line + 1);
+                            scripts.setBoundLine(tab->chunk, line, bound);
+                        }
+                        else {
+                            debugger.clearBreakpoint(host->runtime().state(), tab->chunk, line + 1);
+                        }
+                    }
+                }
+
+                // Continue, or a step. The debugger is the only thing that may
+                // resume a parked coroutine, and this is the safe point.
+                switch (scriptCommands.step) {
+                case DebugStep::Continue:
+                    host->runtime().debugger().resume(host->runtime().state());
+                    break;
+                case DebugStep::Over:
+                    host->runtime().debugger().stepOver(host->runtime().state());
+                    break;
+                case DebugStep::Into:
+                    host->runtime().debugger().stepInto(host->runtime().state());
+                    break;
+                case DebugStep::Out:
+                    host->runtime().debugger().stepOut(host->runtime().state());
+                    break;
+                case DebugStep::None:
+                    break;
                 }
 
                 if (scriptCommands.save.has_value()) {
@@ -1184,6 +1220,57 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
                 if (scriptCommands.close.has_value())
                     (void)scripts.close(*scriptCommands.close);
+
+                // **What the panel draws, copied out of the VM.** A view rather
+                // than a pointer: the panel outlives a reload and the snapshot
+                // does not, and a `const char*` from `lua_getlocal` does not
+                // outlive the pause it was read in.
+                {
+                    const script::DebugSnapshot& vmSnapshot = host->runtime().debugger().snapshot();
+                    DebugView& view = overlay->debugView();
+                    const bool wasParked = view.parked;
+                    view.parked = vmSnapshot.parked;
+                    view.chunk = vmSnapshot.chunk;
+                    view.line = vmSnapshot.line;
+                    view.frames.clear();
+                    for (const script::DebugFrame& stackFrame : vmSnapshot.frames) {
+                        DebugFrameView out;
+                        out.function = stackFrame.function;
+                        out.chunk = stackFrame.chunk;
+                        out.line = stackFrame.line;
+                        const auto copy = [](const std::vector<script::DebugValue>& from,
+                                             std::vector<DebugValueView>& to) {
+                            for (const script::DebugValue& value : from)
+                                to.push_back(DebugValueView{value.name, value.type, value.preview});
+                        };
+                        copy(stackFrame.locals, out.locals);
+                        copy(stackFrame.upvalues, out.upvalues);
+                        view.frames.push_back(std::move(out));
+                    }
+                    // A fresh stop looks at the innermost frame, which is where
+                    // execution actually is.
+                    if (view.parked && !wasParked)
+                        view.selectedFrame = 0;
+                    if (view.selectedFrame >= view.frames.size())
+                        view.selectedFrame = 0;
+
+                    // The world holds still while a script does. The rule lives
+                    // in `allowedTicks` -- see the note there on why it is not a
+                    // courtesy.
+                    editor.setDebuggerParked(view.parked);
+
+                    // **The tab the stop is in, brought to the front.** Stopping
+                    // somewhere somebody cannot see is a debugger they have to
+                    // go looking through.
+                    if (view.parked && !wasParked) {
+                        for (std::size_t index = 0; index < scripts.count(); ++index) {
+                            if (scripts.at(index)->chunk != view.chunk)
+                                continue;
+                            scripts.setActive(index);
+                            break;
+                        }
+                    }
+                }
 
                 // Not acted on here. A reload destroys the `WorldHost` this
                 // block is still reading from, so it waits for the one place a
@@ -1630,6 +1717,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 selectedChunk = script::scriptChunkName(host->runtime().state(), inspector.selection());
             }
 
+            // **Before the VM dies.** A parked coroutine cannot survive its own
+            // `lua_State`, and keeping the reference would be a dangling one.
+            host->runtime().debugger().detach(host->runtime().state());
+            editor.setDebuggerParked(false);
+
             const ReloadReport reloaded = reloadWorld(host, worldOptions);
             if (reloaded.ok) {
                 inspector.onWorldChanged();
@@ -1682,6 +1774,15 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // deleted between saves -- has no tab now, which is the honest
                 // outcome rather than a document nobody can save.
                 (void)scripts.forgetDestroyed(fresh);
+
+                // The breakpoints are keyed on chunk names, which mean the same
+                // thing in the new world -- so they are re-armed rather than
+                // lost, and whatever the VM says they bound to is written back.
+                for (const Breakpoint& bp : scripts.breakpoints()) {
+                    const core::u32 bound =
+                        host->runtime().debugger().setBreakpoint(host->runtime().state(), bp.chunk, bp.line + 1);
+                    scripts.setBoundLine(bp.chunk, bp.line, bound);
+                }
             }
         }
 

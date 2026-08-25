@@ -155,6 +155,11 @@ public:
     // into.
     void setScriptEditor(ScriptEditor* scripts) noexcept { scripts_ = scripts; }
 
+    // What the Debug panel draws, written by the frame loop at the safe point
+    // from the VM's own snapshot. A copy rather than a pointer into
+    // `engine/script`, because a reload destroys what a pointer would name.
+    [[nodiscard]] DebugView& debugView() noexcept { return debugView_; }
+
     // What the code pane asked for while it drew, drained like `takeCommands`
     // and for the same reason: saving writes a file and reloading replaces the
     // world, and neither may happen inside an ImGui callback.
@@ -290,6 +295,7 @@ private:
     [[maybe_unused]] LauncherView* launcher_ = nullptr;
     [[maybe_unused]] ScriptEditor* scripts_ = nullptr;
     [[maybe_unused]] ScriptEditorCommands scriptCommands_;
+    [[maybe_unused]] DebugView debugView_;
     [[maybe_unused]] audio::AudioSystem* audio_ = nullptr;
 };
 
