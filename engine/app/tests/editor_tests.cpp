@@ -2498,3 +2498,66 @@ TEST_CASE("placing a second instance of a stamp does not unlink the first")
 
     std::filesystem::remove_all(scratch, ec);
 }
+
+TEST_CASE("adding a child to a stamped instance unlinks it, and the save says so")
+{
+    // **The reported sequence, exactly.** Convert an instance into a stamp, add
+    // a script under it, save -- and the instance stops being an instance of the
+    // file. That is the format's own rule (`scene_file.cpp` says so at the
+    // branch): the shape has to match, and recording "this one has an extra
+    // child" would be an added-and-removed-object machinery nobody designed.
+    //
+    // What was wrong was not the rule but the SILENCE. The scene kept
+    // everything and the person found out days later, on reopening, that a
+    // stamp they were editing no longer reached anything.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId workspace = world.create(fixture.workspaceClass);
+    world.setName(workspace, fixture.atoms.intern("Workspace"));
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+
+    const std::filesystem::path scratch =
+        std::filesystem::temp_directory_path() / "luaug-editor-tests" / "stamp-unlink";
+    std::error_code ec;
+    std::filesystem::remove_all(scratch, ec);
+    std::filesystem::create_directories(scratch, ec);
+
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(scratch);
+
+    const core::InstanceId subject = fixture.widget(world, "Spinner");
+    REQUIRE(world.setParent(subject, workspace) == std::nullopt);
+    REQUIRE(editor.createStamp(world, subject, workspace, "spinner"));
+    REQUIRE(world.stampOf(subject).valid());
+
+    // Saving it as it stands keeps the link, and says nothing.
+    REQUIRE(editor.save(world, scratch / "a.scene.json"));
+    CHECK_FALSE(editor.status().failed);
+
+    // Now the step that breaks it: a child added AFTER the conversion.
+    const core::InstanceId script = fixture.widget(world, "Spin");
+    REQUIRE(world.setParent(script, subject) == std::nullopt);
+
+    REQUIRE(editor.save(world, scratch / "a.scene.json"));
+    // **The person is told, at the moment it happens.** Reported as a failure
+    // so the status line stands out: the save succeeded and something they
+    // will care about changed.
+    CHECK(editor.status().failed);
+    CHECK(editor.status().message.find("unlinked") != std::string::npos);
+
+    // And reopening confirms what the message said: no mark, and the child is
+    // still there -- the save lost nothing.
+    scene::World reopened(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId reopenedWorkspace = reopened.create(fixture.workspaceClass);
+    reopened.setName(reopenedWorkspace, fixture.atoms.intern("Workspace"));
+    reopened.workspaces().add(reopenedWorkspace, scene::WorkspaceComponent{});
+    REQUIRE(editor.load(reopened, scratch / "a.scene.json", inspector));
+
+    const core::InstanceId back = reopened.findFirstChild(reopenedWorkspace, fixture.atoms.intern("Spinner"));
+    REQUIRE(back.valid());
+    CHECK_FALSE(reopened.stampOf(back).valid());
+    CHECK(reopened.findFirstChild(back, fixture.atoms.intern("Spin")).valid());
+
+    std::filesystem::remove_all(scratch, ec);
+}

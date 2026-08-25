@@ -183,7 +183,17 @@ bool Editor::save(scene::World& world, const std::filesystem::path& path)
     // out when you reopen is finding it out too late.
     if (report.droppedReferences > 0)
         message += " (" + std::to_string(report.droppedReferences) + " reference(s) outside the scene were dropped)";
-    m_status = EditorStatus{message, false};
+    // **Said out loud, because the alternative is finding out days later.** A
+    // stamped instance whose contents no longer match its file is written in
+    // full and unlinked -- the scene keeps everything, but the instance stops
+    // following the stamp, and nothing about looking at it says so. Adding a
+    // child to one is the ordinary way to arrive here.
+    if (report.unlinkedStamps > 0) {
+        message += " -- " + std::to_string(report.unlinkedStamps) +
+                   " stamped instance(s) no longer match their stamp and were unlinked; add or remove anything "
+                   "inside one and it stops being an instance of the file";
+    }
+    m_status = EditorStatus{message, report.unlinkedStamps > 0};
     return true;
 }
 
