@@ -73,6 +73,59 @@ using asset::AssetKind;
     return platform::readFile(path, out);
 }
 
+// **Bumped by hand whenever what this tool PRODUCES changes**, so a cache
+// written by an older build is a miss rather than a wrong answer. Not derived
+// from anything: a version derived from source hashes would invalidate on a
+// comment, and one derived from nothing would survive a codec change.
+//
+// Bump it when: an encoder parameter moves, a format version moves, the
+// importer starts producing different geometry, or the naming rules change.
+constexpr core::u32 kCompilerRules = 1;
+
+// What one source compiled to, remembered between runs.
+//
+// Keyed by content: the source bytes, the companions it read, the pinned
+// options and the rules version. That is the whole input to a pure function, so
+// a hit is not a guess -- it is the same answer arrived at without doing the
+// work again. **A miss is never wrong, only slow.**
+struct CachedSource
+{
+    // The blobs this source produced, in the order it produced them, each with
+    // the kind it was added under.
+    std::vector<std::pair<AssetKind, std::vector<std::byte>>> blobs;
+    // The manifest rows, with their hashes already known.
+    std::vector<ManifestEntry> entries;
+};
+
+[[nodiscard]] std::filesystem::path cachePathFor(const std::filesystem::path& root, const ContentHash& key)
+{
+    const std::string hex = key.toHex();
+    // Fanned out one level, for the reason the editor's object store is: a
+    // project is thousands of entries and one flat directory is where
+    // filesystems stop coping.
+    return root / hex.substr(0, 2) / (hex + ".cache");
+}
+
+// The key for one source. Everything that could change the answer goes in, and
+// nothing that could not.
+[[nodiscard]] ContentHash cacheKey(std::span<const std::byte> sourceBytes, const CompileOptions& options,
+                                   SourceKind kind)
+{
+    core::ContentHasher hasher;
+    hasher.update(sourceBytes);
+
+    // The pinned options, byte for byte. An upstream default change is a diff in
+    // this tool (Decision 1), so hashing the struct is hashing the decision.
+    const asset::MeshCompileOptions& mesh = options.mesh;
+    hasher.update(std::as_bytes(std::span<const asset::MeshCompileOptions, 1>{&mesh, 1}));
+
+    const core::u32 rules = kCompilerRules;
+    hasher.update(std::as_bytes(std::span<const core::u32, 1>{&rules, 1}));
+    const auto kindValue = static_cast<core::u32>(kind);
+    hasher.update(std::as_bytes(std::span<const core::u32, 1>{&kindValue, 1}));
+    return hasher.finish();
+}
+
 // `[1.0, 2.0, 3.0]` and friends. Absent or malformed yields the fallback rather
 // than a zero, because a zero here is a part at the world origin and looks like
 // a bug in the generator rather than a bug in its file.
@@ -186,6 +239,12 @@ const char* sourceKindName(SourceKind kind) noexcept
 
 std::vector<SourceFile> collectSources(const std::filesystem::path& root, std::string& diagnostic)
 {
+    return collectSources(root, {}, diagnostic);
+}
+
+std::vector<SourceFile> collectSources(const std::filesystem::path& root, const std::filesystem::path& exclude,
+                                       std::string& diagnostic)
+{
     std::vector<SourceFile> sources;
 
     std::error_code ec;
@@ -215,6 +274,19 @@ std::vector<SourceFile> collectSources(const std::filesystem::path& root, std::s
         if (!it->is_regular_file()) {
             continue;
         }
+        // **Never its own cache.** A project is free to put one under its
+        // content directory, and a build that compiled its own cache files
+        // would produce a pack that grew every run -- which is what happened
+        // the first time this was tested.
+        if (!exclude.empty()) {
+            // A prefix compare on the generic form, so the answer does not
+            // depend on which separator the platform writes.
+            const std::string candidate = it->path().generic_string();
+            const std::string barrier = exclude.generic_string();
+            if (candidate.size() > barrier.size() && candidate.compare(0, barrier.size(), barrier) == 0)
+                continue;
+        }
+
         SourceFile source;
         source.path = it->path();
         source.relative = std::filesystem::relative(it->path(), root, ec);
@@ -233,12 +305,134 @@ std::vector<SourceFile> collectSources(const std::filesystem::path& root, std::s
     return sources;
 }
 
+namespace {
+
+// A cache entry is its own tiny binary format rather than JSON: it holds blobs,
+// and base64 of a four-megabyte mesh to store it beside a manifest would cost
+// more than recompiling it.
+//
+//   u32 magic, u32 blobCount, then per blob: u32 kind, u64 size, bytes
+//   u32 entryCount, then per entry: the row's fixed fields and its urn
+constexpr core::u32 kCacheMagic = 0x4C554143u; // "LUAC"
+
+void putU32(std::vector<std::byte>& out, core::u32 value)
+{
+    for (int shift = 0; shift < 32; shift += 8)
+        out.push_back(static_cast<std::byte>((value >> shift) & 0xffu));
+}
+
+void putU64(std::vector<std::byte>& out, core::u64 value)
+{
+    for (int shift = 0; shift < 64; shift += 8)
+        out.push_back(static_cast<std::byte>((value >> shift) & 0xffu));
+}
+
+[[nodiscard]] bool takeU32(std::span<const std::byte> bytes, usize& at, core::u32& out)
+{
+    if (at + 4 > bytes.size())
+        return false;
+    out = 0;
+    for (int index = 0; index < 4; ++index)
+        out |= static_cast<core::u32>(bytes[at + static_cast<usize>(index)]) << (index * 8);
+    at += 4;
+    return true;
+}
+
+[[nodiscard]] bool takeU64(std::span<const std::byte> bytes, usize& at, core::u64& out)
+{
+    if (at + 8 > bytes.size())
+        return false;
+    out = 0;
+    for (int index = 0; index < 8; ++index)
+        out |= static_cast<core::u64>(bytes[at + static_cast<usize>(index)]) << (index * 8);
+    at += 8;
+    return true;
+}
+
+[[nodiscard]] std::vector<std::byte> encodeCache(const CachedSource& cached)
+{
+    std::vector<std::byte> out;
+    putU32(out, kCacheMagic);
+    putU32(out, static_cast<core::u32>(cached.blobs.size()));
+    for (const auto& [kind, blob] : cached.blobs) {
+        putU32(out, static_cast<core::u32>(kind));
+        putU64(out, blob.size());
+        out.insert(out.end(), blob.begin(), blob.end());
+    }
+    putU32(out, static_cast<core::u32>(cached.entries.size()));
+    for (const ManifestEntry& entry : cached.entries) {
+        putU64(out, entry.hash.high);
+        putU64(out, entry.hash.low);
+        putU32(out, static_cast<core::u32>(entry.kind));
+        putU64(out, entry.originalBytes);
+        putU64(out, entry.storedBytes);
+        putU32(out, entry.lodCount);
+        putU32(out, entry.vertexCount);
+        putU32(out, entry.meshletCount);
+        putU32(out, static_cast<core::u32>(entry.urn.size()));
+        const auto* text = reinterpret_cast<const std::byte*>(entry.urn.data());
+        out.insert(out.end(), text, text + entry.urn.size());
+    }
+    return out;
+}
+
+// **Every field is checked against the remaining length before it is read.** A
+// cache file is written by this machine and is still a file on a disk: a
+// truncated one from a killed build must be a miss, not a crash.
+[[nodiscard]] bool decodeCache(std::span<const std::byte> bytes, CachedSource& out)
+{
+    usize at = 0;
+    core::u32 magic = 0;
+    if (!takeU32(bytes, at, magic) || magic != kCacheMagic)
+        return false;
+
+    core::u32 blobCount = 0;
+    if (!takeU32(bytes, at, blobCount))
+        return false;
+    for (core::u32 index = 0; index < blobCount; ++index) {
+        core::u32 kind = 0;
+        core::u64 size = 0;
+        if (!takeU32(bytes, at, kind) || !takeU64(bytes, at, size) || at + size > bytes.size())
+            return false;
+        out.blobs.emplace_back(static_cast<AssetKind>(kind),
+                               std::vector<std::byte>(bytes.begin() + static_cast<std::ptrdiff_t>(at),
+                                                      bytes.begin() + static_cast<std::ptrdiff_t>(at + size)));
+        at += size;
+    }
+
+    core::u32 entryCount = 0;
+    if (!takeU32(bytes, at, entryCount))
+        return false;
+    for (core::u32 index = 0; index < entryCount; ++index) {
+        ManifestEntry entry;
+        core::u32 kind = 0;
+        core::u64 original = 0;
+        core::u64 stored = 0;
+        core::u32 urnSize = 0;
+        if (!takeU64(bytes, at, entry.hash.high) || !takeU64(bytes, at, entry.hash.low) || !takeU32(bytes, at, kind) ||
+            !takeU64(bytes, at, original) || !takeU64(bytes, at, stored) || !takeU32(bytes, at, entry.lodCount) ||
+            !takeU32(bytes, at, entry.vertexCount) || !takeU32(bytes, at, entry.meshletCount) ||
+            !takeU32(bytes, at, urnSize) || at + urnSize > bytes.size()) {
+            return false;
+        }
+        entry.kind = static_cast<AssetKind>(kind);
+        entry.originalBytes = static_cast<usize>(original);
+        entry.storedBytes = static_cast<usize>(stored);
+        entry.urn.assign(reinterpret_cast<const char*>(bytes.data() + at), urnSize);
+        at += urnSize;
+        out.entries.push_back(std::move(entry));
+    }
+    return true;
+}
+
+} // namespace
+
 CompileResult compile(const CompileOptions& options)
 {
     CompileResult result;
 
     std::string diagnostic;
-    const std::vector<SourceFile> sources = collectSources(options.inputRoot, diagnostic);
+    const std::vector<SourceFile> sources = collectSources(options.inputRoot, options.cacheRoot, diagnostic);
     if (!diagnostic.empty()) {
         result.diagnostic = diagnostic;
         return result;
@@ -254,6 +448,53 @@ CompileResult compile(const CompileOptions& options)
             result.diagnostic = "could not read " + source.path.string();
             return result;
         }
+
+        // **Answered from the cache when the inputs are the ones it was written
+        // for.** A chunk is not cached: it is cheap to build and its blob is
+        // written beside the pack rather than into it, so there is nothing here
+        // to hand back.
+        const bool cacheable = options.cacheRoot.empty() ? false : source.kind != SourceKind::Chunk;
+        const ContentHash key = cacheable ? cacheKey(bytes, options, source.kind) : ContentHash{};
+        if (cacheable) {
+            std::vector<std::byte> cachedBytes;
+            CachedSource cached;
+            if (platform::readFile(cachePathFor(options.cacheRoot, key), cachedBytes) &&
+                decodeCache(cachedBytes, cached)) {
+                for (const auto& [blobKind, blob] : cached.blobs)
+                    (void)pack.addContent(blobKind, blob);
+                for (const ManifestEntry& entry : cached.entries) {
+                    switch (entry.kind) {
+                    case AssetKind::Mesh:
+                        result.meshCount += 1;
+                        break;
+                    case AssetKind::Texture:
+                        result.textureCount += 1;
+                        break;
+                    default:
+                        result.rawCount += 1;
+                        break;
+                    }
+                    manifest.push_back(entry);
+                }
+                // A texture blob a mesh named is in `blobs` but not in
+                // `entries`, and it is counted where it was produced -- so the
+                // reported totals are the same on a hit as on a miss.
+                result.textureCount += static_cast<u32>(cached.blobs.size() - cached.entries.size());
+                result.stats.cacheHits += 1;
+                continue;
+            }
+            result.stats.cacheMisses += 1;
+        }
+
+        // Everything this source adds to the pack, so a miss can be remembered.
+        // Recorded as it goes rather than diffed afterwards: the pack
+        // deduplicates, and a blob two sources share would otherwise be
+        // attributed to neither.
+        CachedSource produced;
+        const auto remember = [&produced](AssetKind kind, std::span<const std::byte> blob) {
+            produced.blobs.emplace_back(kind, std::vector<std::byte>(blob.begin(), blob.end()));
+        };
+        const auto rememberEntry = [&produced](const ManifestEntry& entry) { produced.entries.push_back(entry); };
 
         switch (source.kind) {
         case SourceKind::Mesh: {
@@ -312,6 +553,8 @@ CompileResult compile(const CompileOptions& options)
                 slot.srgb = srgb;
                 slots.push_back(slot);
                 result.textureCount += 1;
+                result.stats.texturesEncoded += 1;
+                remember(AssetKind::Texture, encoded);
             }
 
             asset::CompiledMesh compiled;
@@ -330,6 +573,9 @@ CompileResult compile(const CompileOptions& options)
             entry.lodCount = static_cast<u32>(compiled.lods.size());
             entry.vertexCount = static_cast<u32>(compiled.vertices.size());
             entry.meshletCount = static_cast<u32>(compiled.meshlets.meshlets.size());
+            result.stats.meshesCompiled += 1;
+            remember(AssetKind::Mesh, encoded);
+            rememberEntry(entry);
             manifest.push_back(std::move(entry));
             result.meshCount += 1;
             break;
@@ -357,6 +603,9 @@ CompileResult compile(const CompileOptions& options)
             entry.kind = AssetKind::Texture;
             entry.originalBytes = bytes.size();
             entry.storedBytes = encoded.size();
+            result.stats.texturesEncoded += 1;
+            remember(AssetKind::Texture, encoded);
+            rememberEntry(entry);
             manifest.push_back(std::move(entry));
             result.textureCount += 1;
             break;
@@ -409,10 +658,23 @@ CompileResult compile(const CompileOptions& options)
             entry.kind = AssetKind::Raw;
             entry.originalBytes = bytes.size();
             entry.storedBytes = bytes.size();
+            remember(AssetKind::Raw, bytes);
+            rememberEntry(entry);
             manifest.push_back(std::move(entry));
             result.rawCount += 1;
             break;
         }
+        }
+
+        // **The cache is written LAST**, after the source has compiled without
+        // a diagnostic -- so a build that failed halfway leaves nothing behind
+        // that a later run would trust. A write that fails is a warning and the
+        // build proceeds: a cache that cannot be written is slow, not wrong.
+        if (cacheable && !produced.blobs.empty()) {
+            const std::filesystem::path path = cachePathFor(options.cacheRoot, key);
+            std::string ignored;
+            if (platform::createDirectories(path.parent_path()))
+                (void)writeFile(path, encodeCache(produced), ignored);
         }
     }
 

@@ -353,3 +353,136 @@ TEST_CASE("the extensions the importer claims are a closed list")
     CHECK_FALSE(luaug::assetc::isExoticMesh(".png"));
     CHECK_FALSE(luaug::assetc::isExoticMesh(""));
 }
+
+// --- Incrementality -----------------------------------------------------------
+
+TEST_CASE("a second build of an unchanged tree compiles nothing")
+{
+    // **An assertion, not a threshold.** "The second build took 200 ms" is a
+    // number that drifts with the machine; "the second build encoded zero
+    // textures" is the claim incrementality actually makes, and it either holds
+    // or it does not.
+    seedRealCatalog();
+    const Fixture fixture;
+
+    const std::filesystem::path cache = fixture.root / ".cache";
+    CompileOptions options;
+    options.inputRoot = fixture.root;
+    options.cacheRoot = cache;
+
+    const CompileResult first = compile(options);
+    REQUIRE_MESSAGE(first.ok, first.diagnostic);
+    CHECK(first.stats.meshesCompiled > 0);
+    CHECK(first.stats.texturesEncoded > 0);
+    CHECK(first.stats.cacheHits == 0);
+
+    const CompileResult second = compile(options);
+    REQUIRE_MESSAGE(second.ok, second.diagnostic);
+    CHECK(second.stats.meshesCompiled == 0);
+    CHECK(second.stats.texturesEncoded == 0);
+    CHECK(second.stats.cacheHits == first.stats.cacheMisses);
+
+    // **And it produced the same build.** A cache that returned faster and
+    // differently would be worse than no cache at all -- this is the property
+    // the whole content-hash design rests on.
+    CHECK(first.pack == second.pack);
+    CHECK(first.manifest == second.manifest);
+    CHECK(first.meshCount == second.meshCount);
+    CHECK(first.textureCount == second.textureCount);
+    CHECK(first.rawCount == second.rawCount);
+}
+
+TEST_CASE("changing one file recompiles that one and no other")
+{
+    seedRealCatalog();
+    const Fixture fixture;
+
+    const std::filesystem::path cache = fixture.root / ".cache";
+    CompileOptions options;
+    options.inputRoot = fixture.root;
+    options.cacheRoot = cache;
+
+    const CompileResult first = compile(options);
+    REQUIRE_MESSAGE(first.ok, first.diagnostic);
+
+    // A raw file is the cheapest thing to change and the easiest to count.
+    Fixture::write(fixture.root / "raw" / "notes.txt", "changed");
+
+    const CompileResult second = compile(options);
+    REQUIRE_MESSAGE(second.ok, second.diagnostic);
+    CHECK(second.stats.cacheMisses == 1);
+    CHECK(second.stats.cacheHits == first.stats.cacheMisses - 1);
+    // The meshes were not touched, so nothing was recompiled.
+    CHECK(second.stats.meshesCompiled == 0);
+    CHECK(second.stats.texturesEncoded == 0);
+}
+
+TEST_CASE("a cache written for other options is a miss rather than a wrong answer")
+{
+    // The key carries the pinned options and a rules version. An upstream
+    // default change is a diff in this tool, and a cache written before it must
+    // not be believed afterwards.
+    seedRealCatalog();
+    const Fixture fixture;
+
+    const std::filesystem::path cache = fixture.root / ".cache";
+    CompileOptions options;
+    options.inputRoot = fixture.root;
+    options.cacheRoot = cache;
+    REQUIRE(compile(options).ok);
+
+    CompileOptions other = options;
+    other.mesh.maxLods = options.mesh.maxLods == 1 ? 2u : 1u;
+    const CompileResult second = compile(other);
+    REQUIRE_MESSAGE(second.ok, second.diagnostic);
+    CHECK(second.stats.cacheHits == 0);
+    CHECK(second.stats.meshesCompiled > 0);
+}
+
+TEST_CASE("a truncated cache file is a miss rather than a crash")
+{
+    // Written by this machine and still a file on a disk: a build killed halfway
+    // through leaves one, and the next run has to survive reading it.
+    seedRealCatalog();
+    const Fixture fixture;
+
+    const std::filesystem::path cache = fixture.root / ".cache";
+    CompileOptions options;
+    options.inputRoot = fixture.root;
+    options.cacheRoot = cache;
+    const CompileResult first = compile(options);
+    REQUIRE(first.ok);
+
+    // Truncate every cache file to a handful of bytes.
+    std::error_code ec;
+    for (std::filesystem::recursive_directory_iterator it(cache, ec), end; it != end; it.increment(ec)) {
+        if (!it->is_regular_file())
+            continue;
+        std::ofstream out(it->path(), std::ios::binary | std::ios::trunc);
+        out << "LUA";
+    }
+
+    const CompileResult second = compile(options);
+    REQUIRE_MESSAGE(second.ok, second.diagnostic);
+    CHECK(second.stats.cacheHits == 0);
+    // And it built the same thing it did the first time.
+    CHECK(first.pack == second.pack);
+}
+
+TEST_CASE("no cache root is the behaviour this tool always had")
+{
+    seedRealCatalog();
+    const Fixture fixture;
+
+    CompileOptions options;
+    options.inputRoot = fixture.root;
+
+    const CompileResult first = compile(options);
+    const CompileResult second = compile(options);
+    REQUIRE(first.ok);
+    REQUIRE(second.ok);
+    CHECK(second.stats.cacheHits == 0);
+    CHECK(second.stats.cacheMisses == 0);
+    CHECK(second.stats.meshesCompiled == first.stats.meshesCompiled);
+    CHECK(first.pack == second.pack);
+}

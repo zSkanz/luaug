@@ -90,6 +90,33 @@ struct CompileOptions
 {
     std::filesystem::path inputRoot;
     asset::MeshCompileOptions mesh;
+
+    // Where compiled blobs are remembered between runs, or empty for no cache.
+    //
+    // **The expensive half of this tool is per-source and pure**: given the same
+    // bytes and the same pinned options, a mesh compiles to the same blob and a
+    // texture encodes to the same one. That is not an optimisation this design
+    // permits, it is a property the content hash already rests on -- so a build
+    // that recompiles an unchanged file is doing work it has already proved it
+    // did not need to do.
+    //
+    // A cache miss is never wrong, only slow. A cache that cannot be read or
+    // written is a warning and the build proceeds.
+    std::filesystem::path cacheRoot;
+};
+
+// What one run actually did, as counts rather than as a duration.
+//
+// **Assertions, not thresholds.** "The second build took 200 ms" is a number
+// that drifts with the machine; "the second build encoded zero textures" is the
+// claim incrementality actually makes, and it either holds or it does not.
+struct CompileStats
+{
+    u32 meshesCompiled = 0;
+    u32 texturesEncoded = 0;
+    // Sources answered entirely out of the cache.
+    u32 cacheHits = 0;
+    u32 cacheMisses = 0;
 };
 
 // One compiled cell, written as its own file so the streaming manager can read
@@ -120,11 +147,19 @@ struct CompileResult
     u32 textureCount = 0;
     u32 rawCount = 0;
     u32 chunkCount = 0;
+
+    CompileStats stats;
 };
 
 // Every regular file under `root`, sorted by relative path. Empty with a
 // diagnostic when the directory cannot be walked.
 [[nodiscard]] std::vector<SourceFile> collectSources(const std::filesystem::path& root, std::string& diagnostic);
+
+// The same walk, skipping anything under `exclude`. A project may put its cache
+// inside its content directory, and a build that compiled its own cache files
+// would produce a pack that grew every run.
+[[nodiscard]] std::vector<SourceFile> collectSources(const std::filesystem::path& root,
+                                                     const std::filesystem::path& exclude, std::string& diagnostic);
 
 // The whole build, in memory. In memory because the two outputs -- a pack and a
 // manifest -- have to agree with each other, and writing one before the other
