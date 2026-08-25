@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 using namespace luaug;
 using luaug::app::ContentKind;
@@ -558,4 +559,95 @@ TEST_CASE("the current folder survives the navigation that changes it")
     // Still the path it was taken at, whatever the tree did afterwards.
     CHECK(held == "a/b");
     CHECK(tree.currentFolder().empty());
+}
+
+// --- Every stamp in the project ----------------------------------------------
+
+namespace {
+
+// A stamp file, minus everything a reader does not need to answer "what class is
+// this a file of".
+[[nodiscard]] std::string stampOf(std::string_view className)
+{
+    return std::string(R"({"format":"luaug-scene","version":1,"root":{"class":")") + std::string(className) +
+           R"(","name":"Thing","properties":{}}})";
+}
+
+} // namespace
+
+TEST_CASE("the project's stamps are found wherever they are filed")
+{
+    // **The browser is a place and this is a question.** A reference picker
+    // asking "which materials could this part use" must not answer differently
+    // depending on which folder somebody last clicked into -- so this walks the
+    // whole content root rather than reading the panel's current listing.
+    Scratch scratch("collect-stamps");
+    scratch.file("stamps/wooden.stamp.json", stampOf("Material"));
+    scratch.file("stamps/props/lantern.stamp.json", stampOf("Model"));
+    scratch.file("materials/deep/nested/metal.stamp.json", stampOf("Material"));
+    // Not stamps, and each is a way the walk could go wrong: a scene shares the
+    // extension's tail, a texture shares the folder, and a plain JSON is what a
+    // sloppy suffix check would take.
+    scratch.file("scenes/main.scene.json", "{}");
+    scratch.file("stamps/notes.json", "{}");
+    scratch.file("stamps/wood.png", "x");
+
+    ContentTree tree;
+    REQUIRE(tree.open(scratch.root()));
+
+    const std::vector<app::ContentEntry> found = tree.collectStamps();
+    REQUIRE(found.size() == 3);
+
+    // Sorted by path, so two machines listing one project agree -- the same rule
+    // the folder listing follows and for the same reason.
+    CHECK(found[0].path == "materials/deep/nested/metal.stamp.json");
+    CHECK(found[1].path == "stamps/props/lantern.stamp.json");
+    CHECK(found[2].path == "stamps/wooden.stamp.json");
+
+    // The class each is a file OF, which is what a picker filters on. A stamp
+    // whose class could not be read comes back empty rather than absent, and an
+    // empty one is refused by every filter.
+    CHECK(found[0].rootClass == "Material");
+    CHECK(found[1].rootClass == "Model");
+    CHECK(found[2].rootClass == "Material");
+
+    // Forward slashes on every platform: the path goes into a scene file, and a
+    // backslash there means the file only opens on the machine that wrote it.
+    for (const app::ContentEntry& entry : found)
+        CHECK(entry.path.find('\\') == std::string::npos);
+}
+
+TEST_CASE("the build output is not part of the project")
+{
+    // `.luaug` holds the import cache and the packed content, and walking it
+    // would be walking the build output -- which on a real project is thousands
+    // of files and, worse, would offer a compiled copy of a stamp beside the
+    // stamp itself.
+    Scratch scratch("collect-stamps-dot");
+    scratch.file("stamps/real.stamp.json", stampOf("Material"));
+    scratch.file(".luaug/import/cached.stamp.json", stampOf("Material"));
+    scratch.file(".hidden/also.stamp.json", stampOf("Material"));
+
+    ContentTree tree;
+    REQUIRE(tree.open(scratch.root()));
+
+    const std::vector<app::ContentEntry> found = tree.collectStamps();
+    REQUIRE(found.size() == 1);
+    CHECK(found[0].path == "stamps/real.stamp.json");
+}
+
+TEST_CASE("a project with no content answers with nothing rather than failing")
+{
+    // Which is the ordinary state of a project somebody has just made, and a
+    // picker that threw here would be a picker that cannot be opened.
+    Scratch scratch("collect-stamps-empty");
+
+    ContentTree tree;
+    REQUIRE(tree.open(scratch.root()));
+    CHECK(tree.collectStamps().empty());
+
+    // And a tree that was never opened at all, which is every shell with no
+    // project -- the F3 overlay over a running game has one of those.
+    ContentTree unopened;
+    CHECK(unopened.collectStamps().empty());
 }

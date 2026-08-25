@@ -118,6 +118,21 @@ public:
     bool leave();
 
     [[nodiscard]] const std::vector<ContentEntry>& entries() const noexcept { return m_entries; }
+
+    // Every stamp in the project, wherever it is filed, with its root class
+    // read. Sorted by path, so two machines listing the same project agree.
+    //
+    // **The browser is a place and this is a question**, which is why it does
+    // not go through `entries()`: the panel shows one folder because a person
+    // navigates, and "which materials could this part use" has nothing to do
+    // with where somebody happens to be standing. A reference picker offering
+    // only what is in the current folder would be a picker that answers
+    // differently depending on a click nobody thought was part of the question.
+    //
+    // Reads every `.stamp.json` header, so it is a scan and not a lookup. Call
+    // it when a picker opens rather than while one draws.
+    [[nodiscard]] std::vector<ContentEntry> collectStamps() const;
+
     // Relative to the root, empty at the root itself.
     // **By value, and that is a fix rather than a style.** It used to return a
     // reference into the tree, and `enter`/`leave` ASSIGN to the string it

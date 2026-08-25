@@ -196,6 +196,46 @@ bool ContentTree::refresh()
     return true;
 }
 
+std::vector<ContentEntry> ContentTree::collectStamps() const
+{
+    std::vector<ContentEntry> found;
+    if (m_root.empty())
+        return found;
+
+    std::error_code ec;
+    // `recursive_directory_iterator` with the error-code overload skips what it
+    // cannot enter rather than throwing, which is what a content folder holding
+    // a junction or a permission-denied subtree needs.
+    for (std::filesystem::recursive_directory_iterator it(m_root, ec), end; it != end && !ec; it.increment(ec)) {
+        const std::filesystem::path& path = it->path();
+        const std::string name = path.filename().string();
+        if (name.empty() || name.front() == '.') {
+            // Dot-folders are skipped WHOLE -- `.luaug` holds the import cache,
+            // and walking it would be walking the build output.
+            if (it->is_directory(ec))
+                it.disable_recursion_pending();
+            continue;
+        }
+        if (it->is_directory(ec) || contentKindOf(name) != ContentKind::Stamp)
+            continue;
+
+        ContentEntry row;
+        row.name = name;
+        row.kind = ContentKind::Stamp;
+        const std::filesystem::path relative = std::filesystem::relative(path, m_root, ec);
+        // Forward slashes on every platform, for the reason `ContentEntry::path`
+        // gives: a path in a scene file means the same thing on all of them.
+        row.path = ec ? name : relative.generic_string();
+        ec.clear();
+        row.rootClass = rootClassOf(path);
+        found.push_back(std::move(row));
+    }
+
+    std::sort(found.begin(), found.end(),
+              [](const ContentEntry& a, const ContentEntry& b) { return lowered(a.path) < lowered(b.path); });
+    return found;
+}
+
 bool ContentTree::enter(std::string_view folderName)
 {
     if (!isUsableName(folderName))

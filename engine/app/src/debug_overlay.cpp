@@ -1706,6 +1706,11 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
 // frame for the reason the add menu class list is: the popup stays open for as
 // long as somebody is reading it, and filling it is a walk of the whole tree.
 std::vector<core::InstanceId> g_refCandidates;
+// And the stamps of that class the PROJECT holds, which is the other half of
+// the same question: a material somebody made is a file until something points
+// at it, and a picker offering only what is already in the world would make
+// importing one and using it two unrelated gestures.
+std::vector<ContentEntry> g_refStamps;
 std::array<char, 64> g_refFilter{};
 
 // **A reference is a value somebody sets, not a fact they read.**
@@ -1730,7 +1735,8 @@ std::array<char, 64> g_refFilter{};
 // and nothing to click.
 void drawInstanceRef(scene::World& world, core::InstanceId root, Inspector& inspector,
                      std::span<const core::InstanceId> targets, const scene::PropertyDesc& descriptor,
-                     const SharedValue& shared, bool mixed, const IconAtlas* icons, EditorCommands* commands)
+                     const SharedValue& shared, bool mixed, ContentTree* tree, const IconAtlas* icons,
+                     EditorCommands* commands)
 {
     core::InstanceId reference;
     if (!mixed && std::holds_alternative<core::InstanceId>(shared.value))
@@ -1808,6 +1814,19 @@ void drawInstanceRef(scene::World& world, core::InstanceId root, Inspector& insp
             if (acceptsInstance(world, descriptor, row.id))
                 g_refCandidates.push_back(row.id);
         }
+
+        // **Only for a reference that named a class.** Choosing a file here
+        // PLACES an instance, which is a large side effect to offer for a
+        // property whose answer is "any instance at all" -- `Weld.Part0` takes a
+        // part or an attachment and the IDL has no way to say so, so its list
+        // would be every stamp in the project and not one of them a good guess.
+        g_refStamps.clear();
+        if (tree != nullptr && descriptor.instanceClass.valid()) {
+            for (ContentEntry& entry : tree->collectStamps()) {
+                if (acceptsStampClass(world, descriptor, entry.rootClass))
+                    g_refStamps.push_back(std::move(entry));
+            }
+        }
         ImGui::SetKeyboardFocusHere();
     }
 
@@ -1827,13 +1846,13 @@ void drawInstanceRef(scene::World& world, core::InstanceId root, Inspector& insp
     }
     ImGui::Separator();
 
-    if (g_refCandidates.empty()) {
-        // A real answer rather than an empty box: a scene with no `Material` in
-        // it has nothing to point a `Material` at, and saying which class is
-        // missing is what tells somebody to go and make one.
+    if (g_refCandidates.empty() && g_refStamps.empty()) {
+        // A real answer rather than an empty box: a project with no `Material`
+        // anywhere has nothing to point a `Material` at, and saying which class
+        // is missing is what tells somebody to go and make one.
         const std::string_view wanted = descriptor.instanceClass.valid() ? world.atoms().text(descriptor.instanceClass)
                                                                          : std::string_view("Instance");
-        ImGui::TextDisabled("no %.*s in this scene", static_cast<int>(wanted.size()), wanted.data());
+        ImGui::TextDisabled("no %.*s in this project", static_cast<int>(wanted.size()), wanted.data());
         ImGui::EndPopup();
         return;
     }
@@ -1866,6 +1885,47 @@ void drawInstanceRef(scene::World& world, core::InstanceId root, Inspector& insp
             ImGui::CloseCurrentPopup();
         }
         ImGui::PopID();
+    }
+
+    // **The files, under the instances, and said to be files.** They are a
+    // different thing to choose -- picking one puts an instance in the world and
+    // points at THAT -- so they are separated rather than mixed into one list
+    // that would quietly do two different things depending on the row.
+    if (!g_refStamps.empty() && commands != nullptr) {
+        ImGui::Separator();
+        ImGui::TextDisabled("from the project");
+        for (const ContentEntry& entry : g_refStamps) {
+            const std::string shown = ContentTree::displayNameOf(entry);
+            if (!needle.empty() && !containsFold(shown, needle))
+                continue;
+
+            ImGui::PushID(entry.path.c_str());
+            const ImVec2 origin = ImGui::GetCursorPos();
+            const bool chosen = ImGui::Selectable("##stamp");
+
+            const float rowIcon = ImGui::GetTextLineHeight();
+            ImGui::SetCursorPos(origin);
+            const ImVec2 iconOrigin = ImGui::GetCursorScreenPos();
+            if (drawIcon(icons, classIconId(entry.rootClass), rowIcon)) {
+                // The same badge the browser and the Explorer wear, for the same
+                // one idea: this row is a file one comes from.
+                drawIconBadge(icons, iconOrigin, rowIcon);
+                ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
+            }
+            else {
+                ImGui::SetCursorPos(origin);
+            }
+            ImGui::TextUnformatted(shown.c_str());
+
+            if (chosen) {
+                // The same command the drop issues, so the two ways in cannot
+                // drift: place one if the world has none, reuse the one it has.
+                commands->assignStampPath = entry.path;
+                commands->assignStampProperty = std::string(world.atoms().text(descriptor.name));
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::PopID();
+        }
     }
     ImGui::EndChild();
     ImGui::EndPopup();
@@ -1918,7 +1978,7 @@ void drawEditor(scene::World& world, core::InstanceId root, Inspector& inspector
     if (editorFor(descriptor) == EditorKind::InstanceRef) {
         ImGui::PushID(static_cast<int>(descriptor.name.id));
         ImGui::SetNextItemWidth(-FLT_MIN);
-        drawInstanceRef(world, root, inspector, targets, descriptor, shared, mixed, icons, commands);
+        drawInstanceRef(world, root, inspector, targets, descriptor, shared, mixed, tree, icons, commands);
         ImGui::PopID();
         return;
     }
