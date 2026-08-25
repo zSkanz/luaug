@@ -238,11 +238,11 @@ core::u32 MeshLoader::pumpTextures(rhi::IDevice& device, rhi::ICmdList& cmd, con
                 continue;
             }
 
-            pending.bytes = std::make_unique<std::vector<std::byte>>();
+            pending.work = std::make_unique<TextureWork>();
             const bool got =
-                status == platform::IoStatus::Ready && platform::takeIoResult(pending.read, *pending.bytes);
+                status == platform::IoStatus::Ready && platform::takeIoResult(pending.read, pending.work->bytes);
             pending.read = {};
-            if (!got || pending.bytes->empty()) {
+            if (!got || pending.work->bytes.empty()) {
                 // A material without its texture still draws, in its own
                 // numbers. A material refused for a missing map would take the
                 // surface with it.
@@ -254,23 +254,18 @@ core::u32 MeshLoader::pumpTextures(rhi::IDevice& device, rhi::ICmdList& cmd, con
                 continue;
             }
 
-            // **The pointers the job writes through outlive this vector
-            // growing**, which is why both are on the heap: another map asked
-            // for between now and the job finishing would reallocate
-            // `pendingTextures_`, and a job holding an element's address would
-            // be writing into freed memory.
-            pending.image = std::make_unique<asset::Image>();
-            std::vector<std::byte>* source = pending.bytes.get();
-            asset::Image* target = pending.image.get();
-            bool* decoded = &pending.decoded;
-            pending.decode =
-                jobs::schedule("texture-decode", jobs::Domain::AssetIo, [source, target, decoded]() noexcept {
-                    *decoded = !asset::decodeImage(*source, *target).has_value();
-                    // The encoded bytes are the biggest allocation in the
-                    // pipeline and nothing needs them again.
-                    source->clear();
-                    source->shrink_to_fit();
-                });
+            // **One pointer, to memory that does not move.** Another map asked
+            // for between now and the job finishing reallocates
+            // `pendingTextures_`, so anything the job addresses has to live
+            // somewhere the vector is not.
+            TextureWork* work = pending.work.get();
+            pending.decode = jobs::schedule("texture-decode", jobs::Domain::AssetIo, [work]() noexcept {
+                work->ok = !asset::decodeImage(work->bytes, work->image).has_value();
+                // The encoded bytes are the biggest allocation in the pipeline
+                // and nothing needs them again.
+                work->bytes.clear();
+                work->bytes.shrink_to_fit();
+            });
             if (!pending.decode.valid()) {
                 markFailed(pending.urn);
                 drop();
@@ -285,7 +280,7 @@ core::u32 MeshLoader::pumpTextures(rhi::IDevice& device, rhi::ICmdList& cmd, con
             continue;
         }
 
-        if (!pending.decoded) {
+        if (pending.work == nullptr || !pending.work->ok) {
             const std::array<core::I18nArg, 1> args{
                 core::I18nArg{"path", std::string(world.atoms().text(pending.urn))}};
             core::log(core::LogLevel::Warn, LUAUG_TR("render.err.material_texture_missing"), args);
@@ -294,7 +289,7 @@ core::u32 MeshLoader::pumpTextures(rhi::IDevice& device, rhi::ICmdList& cmd, con
             continue;
         }
 
-        const rhi::TextureHandle handle = uploadImage(device, cmd, *pending.image, "material");
+        const rhi::TextureHandle handle = uploadImage(device, cmd, pending.work->image, "material");
         if (!handle.valid()) {
             markFailed(pending.urn);
             drop();

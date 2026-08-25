@@ -157,17 +157,28 @@ private:
     bool primitivesUploaded_ = false;
     bool deferredTextures_ = false;
 
-    // One texture on its way in. Held by pointer because a decode job writes
-    // into it: the vector grows as more maps are asked for, and a job holding an
-    // element's address would be writing into freed memory after a reallocation.
+    // Everything a decode job touches, in ONE heap allocation.
+    //
+    // **Not a field of `PendingTexture`, and that is the whole point.** The
+    // vector below grows whenever another map is asked for, which can happen on
+    // the same frame a job is running -- so a job holding the address of
+    // anything inside an element would be writing into freed memory after the
+    // reallocation. Three fields on the heap together is one indirection and no
+    // way to get it wrong; three pointers into a vector is three chances to.
+    struct TextureWork
+    {
+        std::vector<std::byte> bytes;
+        asset::Image image;
+        bool ok = false;
+    };
+
+    // One texture on its way in.
     struct PendingTexture
     {
         core::NameAtom urn;
         platform::IoRequest read;
         jobs::JobHandle decode;
-        std::unique_ptr<asset::Image> image;
-        std::unique_ptr<std::vector<std::byte>> bytes;
-        bool decoded = false;
+        std::unique_ptr<TextureWork> work;
     };
     std::vector<PendingTexture> pendingTextures_;
     // Content URNs that failed to load, so a broken file costs one attempt and

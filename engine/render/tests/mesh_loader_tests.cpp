@@ -11,6 +11,7 @@
 // the frame does, because a capture records the frame it was told to, and one
 // that lets the frame finish first, because a person is watching.
 #include "luaug/core/i18n.h"
+#include "luaug/jobs/jobs.h"
 #include "luaug/platform/async_io.h"
 #include "luaug/render/mesh_loader.h"
 #include "luaug/rhi/backends.h"
@@ -23,6 +24,7 @@
 #include <doctest/doctest.h>
 #include <filesystem>
 #include <thread>
+#include <vector>
 
 using namespace luaug;
 
@@ -225,4 +227,63 @@ TEST_CASE("tearing down while a texture is on its way in leaves nothing behind")
         render::TextureLibrary library;
         CHECK(loader.syncTextures(*fixture.device, *fixture.cmd, world, library) == 0);
     }
+}
+
+TEST_CASE("the pipeline works with real threads, and with the queue growing under it")
+{
+    // **Every other case here runs on the serial pool**, where a job finishes on
+    // the calling thread before `schedule` returns -- which is the mode a test
+    // wants and is also the mode in which no threading defect can appear. This
+    // one starts real workers.
+    //
+    // What it exercises on purpose: more maps are asked for while earlier ones
+    // are still decoding, so `pendingTextures_` reallocates underneath jobs that
+    // are running. Everything a job touches lives in one heap allocation for
+    // exactly that reason; the first version of this pipeline kept a `bool` in
+    // the vector element and handed the job its address.
+    Fixture fixture;
+    const std::filesystem::path image(LUAUG_RENDER_TEST_IMAGE);
+    REQUIRE(std::filesystem::exists(image));
+    REQUIRE(platform::initIo());
+
+    const bool startedPool = !jobs::initialized();
+    if (startedPool)
+        jobs::init(4);
+
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const std::filesystem::path folder = image.parent_path();
+    std::vector<std::filesystem::path> images;
+    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(folder)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".png")
+            images.push_back(entry.path());
+    }
+    REQUIRE_FALSE(images.empty());
+
+    render::MeshLoader loader;
+    loader.setDeferredTextures(true);
+    render::TextureLibrary library;
+
+    // One material named per frame, so the queue is still being written to while
+    // the pool is reading from it.
+    core::usize named = 0;
+    for (int frame = 0; frame < 4000; ++frame) {
+        if (named < images.size() * 4) {
+            const core::InstanceId id = world.create(fixture.materialClass);
+            world.materials().find(id)->colorMap = world.atoms().intern(images[named % images.size()].generic_string());
+            ++named;
+        }
+        (void)loader.syncTextures(*fixture.device, *fixture.cmd, world, library);
+        REQUIRE(loader.texturesInFlight() <= render::MeshLoader::MaxTexturesInFlight);
+        if (named >= images.size() * 4 && loader.texturesInFlight() == 0 && library.size() >= images.size())
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    // One entry per distinct file, however many materials named it: the library
+    // is keyed by URN, and four materials sharing a map is one texture.
+    CHECK(library.size() == images.size());
+    loader.destroy(*fixture.device);
+
+    if (startedPool)
+        jobs::shutdown();
 }
