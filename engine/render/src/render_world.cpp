@@ -142,6 +142,31 @@ const char* primitiveContent(core::i32 shape) noexcept
     }
 }
 
+void MaterialLibrary::set(core::NameAtom content, const RenderMaterial& material)
+{
+    const auto position =
+        std::lower_bound(entries_.begin(), entries_.end(), content,
+                         [](const Slot& slot, core::NameAtom value) { return slot.content.id < value.id; });
+    if (position != entries_.end() && position->content == content) {
+        position->material = material;
+        return;
+    }
+    entries_.insert(position, Slot{content, material});
+}
+
+void MaterialLibrary::clear() noexcept
+{
+    entries_.clear();
+}
+
+const RenderMaterial* MaterialLibrary::find(core::NameAtom content) const noexcept
+{
+    const auto position =
+        std::lower_bound(entries_.begin(), entries_.end(), content,
+                         [](const Slot& slot, core::NameAtom value) { return slot.content.id < value.id; });
+    return position != entries_.end() && position->content == content ? &position->material : nullptr;
+}
+
 void MeshLibrary::set(core::NameAtom content, const Entry& entry)
 {
     const auto position =
@@ -178,10 +203,47 @@ const MeshLibrary::Entry* MeshLibrary::find(core::NameAtom content) const noexce
     return &position->entry;
 }
 
+namespace {
+
+// The material a part names, or null -- for no material, for a library that is
+// not there, and for one whose file has not loaded yet. All three draw the same
+// way, and that is deliberate: a surface that vanishes while its material loads
+// is worse than one that arrives plain and then gets its texture.
+[[nodiscard]] const RenderMaterial* materialOf(const MaterialLibrary* materials, core::NameAtom content)
+{
+    if (materials == nullptr || content.id == 0)
+        return nullptr;
+    return materials->find(content);
+}
+
+// `BasePart.Color`, multiplied into a material's base colour and emissive.
+//
+// **The fourth channel already worked this way.** `Transparency` and the
+// material's own alpha have been multiplied together since M4 -- "the two
+// sources of see-through, multiplied" -- and leaving RGB alone was an
+// inconsistency rather than a decision. White is the identity, and
+// `PartComponent::color` defaults to white, so nothing that existed before this
+// draws differently.
+//
+// Emissive is tinted too: a red lamp made from a white glowing material is what
+// somebody expects `Color` to do, and leaving emissive untinted would make the
+// lit part red and the glow white.
+void tintBy(RenderMaterial& material, const Color3& color)
+{
+    material.uniforms.baseColor[0] *= color.r;
+    material.uniforms.baseColor[1] *= color.g;
+    material.uniforms.baseColor[2] *= color.b;
+    material.uniforms.emissive[0] *= color.r;
+    material.uniforms.emissive[1] *= color.g;
+    material.uniforms.emissive[2] *= color.b;
+}
+
+} // namespace
+
 void extract(const scene::World& world, core::InstanceId root, core::InstanceId lightingHost, const MeshLibrary& meshes,
              f32 viewportAspect, f32 shadowRadius, const AnimationSystem* animation, f32 alpha,
              const TransformHistory* history, RenderWorld& out, const ViewOverride* view,
-             std::span<const core::InstanceId> outlined)
+             std::span<const core::InstanceId> outlined, const MaterialLibrary* materials)
 {
     out.clear();
     if (!root.valid())
@@ -406,6 +468,12 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         core::NameAtom content;
         u32 local = 0;
         u32 slot = 0;
+        // The part's own contribution to the block. Two parts sharing a mesh
+        // and a section but tinted differently -- or pointed at different
+        // materials -- are two bind sets, and collapsing them onto one slot
+        // would draw the second in the first one's colour.
+        core::NameAtom material;
+        Color3 tint{1.0f, 1.0f, 1.0f};
     };
     std::vector<ResolvedMaterial> resolved;
 
@@ -453,13 +521,20 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             }
         }
 
+        // What the part itself says about its surface, resolved once for the
+        // whole mesh rather than once per section: `Material` is a property of
+        // the PART, and every section of it gets the same answer.
+        const core::NameAtom meshPart2Material = part->materialContent;
+        const RenderMaterial* partMaterial = materialOf(materials, meshPart2Material);
+
         for (u32 section = 0; section < entry->sectionCount; ++section) {
             // Resolved before the cull test so that `material` is meaningful
             // on every candidate, and deduplicated across the frame by
-            // (content, local index) so the sort key can group draws that
-            // share a bind set. A linear scan, because a scene has a handful
-            // of materials and an unordered container's iteration order must
-            // not reach observable output (R10).
+            // (content, local index, the part's material and its tint) so the
+            // sort key can group draws that share a bind set. A linear scan,
+            // because a scene has a handful of materials and an unordered
+            // container's iteration order must not reach observable output
+            // (R10).
             u32 localMaterial = 0;
             if (section < entry->sectionMaterial.size())
                 localMaterial = entry->sectionMaterial[section];
@@ -487,7 +562,8 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             u32 materialSlot = 0;
             bool found = false;
             for (u32 index = 0; index < static_cast<u32>(resolved.size()); ++index) {
-                if (resolved[index].content == meshPart.meshContent && resolved[index].local == localMaterial) {
+                if (resolved[index].content == meshPart.meshContent && resolved[index].local == localMaterial &&
+                    resolved[index].material == meshPart2Material && resolved[index].tint == part->color) {
                     materialSlot = resolved[index].slot;
                     found = true;
                     break;
@@ -495,14 +571,22 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             }
             if (!found) {
                 materialSlot = static_cast<u32>(out.materials.size());
-                out.materials.push_back(localMaterial < entry->materials.size()
-                                            ? entry->materials[localMaterial]
-                                            // A section whose material the importer did not
-                                            // produce still draws, in the default: a mesh that
-                                            // vanishes because one primitive lacked a material
-                                            // is harder to diagnose than a white one.
-                                            : RenderMaterial{});
-                resolved.push_back(ResolvedMaterial{meshPart.meshContent, localMaterial, materialSlot});
+                RenderMaterial block = localMaterial < entry->materials.size()
+                                           ? entry->materials[localMaterial]
+                                           // A section whose material the importer did not
+                                           // produce still draws, in the default: a mesh that
+                                           // vanishes because one primitive lacked a material
+                                           // is harder to diagnose than a white one.
+                                           : RenderMaterial{};
+                // A `Material` on the part REPLACES the file's block, for every
+                // section of it. A mesh with none keeps what its own file
+                // described, which is what an unimported mesh looks like.
+                if (partMaterial != nullptr)
+                    block = *partMaterial;
+                tintBy(block, part->color);
+                out.materials.push_back(block);
+                resolved.push_back(ResolvedMaterial{meshPart.meshContent, localMaterial, materialSlot,
+                                                    meshPart2Material, part->color});
             }
 
             // The two sources of see-through, multiplied: the part's own
@@ -564,6 +648,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
     struct ResolvedPartMaterial
     {
         Color3 color;
+        core::NameAtom content;
         u32 slot;
     };
     std::vector<ResolvedPartMaterial> partMaterials;
@@ -598,10 +683,14 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
                 return;
         }
 
+        // Deduplicated by (material, colour) rather than by colour alone: two
+        // parts sharing one material and one tint are one bind set, and two
+        // sharing a tint but not a material are not.
+        const RenderMaterial* authored = materialOf(materials, part.materialContent);
         u32 materialSlot = 0;
         bool found = false;
         for (const ResolvedPartMaterial& candidate : partMaterials) {
-            if (candidate.color == part.color) {
+            if (candidate.color == part.color && candidate.content == part.materialContent) {
                 materialSlot = candidate.slot;
                 found = true;
                 break;
@@ -609,19 +698,28 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         }
         if (!found) {
             RenderMaterial material;
-            material.uniforms.baseColor[0] = part.color.r;
-            material.uniforms.baseColor[1] = part.color.g;
-            material.uniforms.baseColor[2] = part.color.b;
-            material.uniforms.baseColor[3] = 1.0f;
-            // Dielectric and fairly rough, which is what an untextured building
-            // block looks like. `RenderMaterial`'s own defaults are metallic 1
-            // and roughness 1, which is right for a glTF that forgot to say and
-            // wrong for a `Part` that has no way to.
-            material.uniforms.metallicRoughnessNormalCutoff[0] = 0.0f;
-            material.uniforms.metallicRoughnessNormalCutoff[1] = 0.7f;
+            if (authored != nullptr) {
+                material = *authored;
+            }
+            else {
+                material.uniforms.baseColor[0] = 1.0f;
+                material.uniforms.baseColor[1] = 1.0f;
+                material.uniforms.baseColor[2] = 1.0f;
+                material.uniforms.baseColor[3] = 1.0f;
+                // Dielectric and fairly rough, which is what an untextured
+                // building block looks like. `RenderMaterial`'s own defaults are
+                // metallic 1 and roughness 1, which is right for a glTF that
+                // forgot to say and wrong for a `Part` that has no way to.
+                material.uniforms.metallicRoughnessNormalCutoff[0] = 0.0f;
+                material.uniforms.metallicRoughnessNormalCutoff[1] = 0.7f;
+            }
+            // The tint, over whichever base. With no material the base is white
+            // and this IS the part's colour, which is what a plain part has
+            // always drawn as.
+            tintBy(material, part.color);
             materialSlot = static_cast<u32>(out.materials.size());
             out.materials.push_back(material);
-            partMaterials.push_back(ResolvedPartMaterial{part.color, materialSlot});
+            partMaterials.push_back(ResolvedPartMaterial{part.color, part.materialContent, materialSlot});
         }
 
         const bool transparent = opacity < 1.0f;

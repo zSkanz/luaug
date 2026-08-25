@@ -120,6 +120,10 @@
           "ReadOnly": true
         },
         {
+          "Name": "Material",
+          "Type": "Content"
+        },
+        {
           "Name": "Orientation",
           "Type": "vector"
         },

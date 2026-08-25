@@ -443,6 +443,24 @@ local Classes: { Schema.Class } = {
                 Doc = "How see-through this part is, 0 fully opaque and 1 fully invisible.",
             },
             {
+                Name = "Material",
+                Type = "Content",
+                ContentKind = "Material",
+                Doc = "The material file this part's surface is described by, or empty for none.\n\n"
+                    .. "**`Color` multiplies it.** A part with no material has a white base, so white times "
+                    .. "`Color` is `Color` -- which is what a plain part has always looked like. A part WITH "
+                    .. "one takes that material's base colour, its maps and its metalness and roughness, and "
+                    .. "tints the result by `Color`. Leaving `Color` white is therefore the way to see a "
+                    .. "material exactly as it was authored, and it is what an import writes on every part it "
+                    .. "creates.\n\nThe fourth channel already worked this way: `Transparency` "
+                    .. "and the material's own alpha have always been multiplied together, and doing the same "
+                    .. "to the other three removes an inconsistency rather than adding a rule.\n\n"
+                    .. "**There is no texture property on a part, and there will not be one.** A texture "
+                    .. "reaches a surface through a material or not at all, so that two parts can share one "
+                    .. "and changing it changes both.\n\nA `MeshPart` with no material draws the "
+                    .. "one its own file described, which is what an unimported mesh looks like.",
+            },
+            {
                 Name = "Anchored",
                 Type = "boolean",
                 Default = "false",

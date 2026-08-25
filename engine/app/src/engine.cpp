@@ -576,6 +576,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     core::u64 transformHistoryWorld = 0;
 
     render::MeshLibrary meshLibrary;
+    // The materials `BasePart.Material` names. Beside the mesh library rather
+    // than inside it, because a material is not a property of a mesh: two parts
+    // naming one share one entry, and a `Part` with no mesh still has a surface.
+    render::MaterialLibrary materialLibrary;
     render::MeshCache meshCache;
     render::MeshLoader meshLoader;
 
@@ -2261,6 +2265,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             if (renderer != nullptr && renderer->valid())
                 meshLoader.syncPrimitives(*device, *cmd, host->world(), meshCache, meshLibrary);
             if (renderer != nullptr && renderer->valid())
+                (void)meshLoader.syncMaterials(*device, *cmd, host->world(), host->workspace(), materialLibrary);
+            if (renderer != nullptr && renderer->valid())
                 if (meshLoader.sync(*device, *cmd, host->world(), host->workspace(), meshCache, meshLibrary) > 0 &&
                     host->physics() != nullptr) {
                     // A mesh finished loading, so the physics mirror can be told
@@ -2330,7 +2336,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             render::extract(authored(), stageOf() != nullptr ? stageOf()->workspace() : host->workspace(),
                             stageOf() != nullptr ? stageOf()->lighting() : host->lighting(), meshLibrary, aspect,
                             shadowRadius, host->animation(), renderAlpha, &transformHistory, snapshot,
-                            useEditorView ? &editorView : nullptr, outlined);
+                            useEditorView ? &editorView : nullptr, outlined, &materialLibrary);
             // The UI is laid out against the TARGET's size rather than the
             // window's: an offscreen render at 640x360 has to produce the
             // layout that resolution would, which is the whole of what the

@@ -67,6 +67,21 @@ public:
     core::u32 sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world, core::InstanceId root,
                    MeshCache& cache, MeshLibrary& library, SkeletonLibrary* skeletons = nullptr);
 
+    // Loads every `BasePart.Material` the world names and the library does not
+    // yet hold. Same safe point, same rules, same return as `sync`.
+    //
+    // Separate from `sync` because a material is not a property of a mesh: two
+    // parts naming one material are one entry, a `Part` with no mesh still has a
+    // surface, and a material file changes without its mesh changing. The two
+    // walks are over different pools for the same reason.
+    //
+    // **The URNs inside a material name SOURCE images** -- the `.png` the artist
+    // shipped -- and this decodes and uploads them. That is the dev-mode path
+    // ADR 0010 keeps forever; a shipped game's material arrives compiled with
+    // its textures already named by hash.
+    core::u32 syncMaterials(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world, core::InstanceId root,
+                            MaterialLibrary& library);
+
     // Builds and uploads the five `Enum.PartShape` solids and registers them in
     // `library` under their reserved URNs (`primitiveContent`). Idempotent: the
     // second call does nothing, which is what makes it safe to put at the top of

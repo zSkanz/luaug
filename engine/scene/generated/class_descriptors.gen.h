@@ -120,6 +120,8 @@ Value getBasePartColor(const World& world, core::InstanceId id);
 bool setBasePartColor(World& world, core::InstanceId id, const Value& value);
 Value getBasePartTransparency(const World& world, core::InstanceId id);
 bool setBasePartTransparency(World& world, core::InstanceId id, const Value& value);
+Value getBasePartMaterial(const World& world, core::InstanceId id);
+bool setBasePartMaterial(World& world, core::InstanceId id, const Value& value);
 Value getBasePartAnchored(const World& world, core::InstanceId id);
 bool setBasePartAnchored(World& world, core::InstanceId id, const Value& value);
 Value getBasePartCanCollide(const World& world, core::InstanceId id);

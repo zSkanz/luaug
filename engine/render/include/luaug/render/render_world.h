@@ -317,6 +317,38 @@ inline constexpr f32 kMaxSortDepth = 655.0f;
 // not do that by loading anything: extraction runs inside a frame and a file
 // read is not a frame's work. So resolution is a lookup, and whatever populates
 // this does so at the FrameStart safe point like every other mutation.
+// The materials somebody pointed a part at, by content id.
+//
+// Separate from `MeshLibrary` because a material is not a property of a mesh:
+// two parts naming one material share one entry, changing the file changes
+// both, and a `Part` with no mesh at all still has a surface. It is also what
+// makes `BasePart.Material` a REPLACEMENT rather than a merge -- one lookup
+// answers with the whole block, and a merge would need per-field "is set" bits
+// on a struct whose virtue is being flat.
+class MaterialLibrary
+{
+public:
+    void set(core::NameAtom content, const RenderMaterial& material);
+    void clear() noexcept;
+
+    // Null for a URN nothing has loaded, which is the ordinary state of a part
+    // whose file has not been read yet. A part in that state draws as if it had
+    // no material -- its own `Color` -- rather than not drawing: a surface that
+    // vanishes while its material loads is worse than one that arrives plain.
+    [[nodiscard]] const RenderMaterial* find(core::NameAtom content) const noexcept;
+    [[nodiscard]] usize size() const noexcept { return entries_.size(); }
+
+private:
+    // Sorted by atom, like `MeshLibrary`, and for the same reason: R10 forbids
+    // an unordered container's iteration reaching observable output.
+    struct Slot
+    {
+        core::NameAtom content;
+        RenderMaterial material;
+    };
+    std::vector<Slot> entries_;
+};
+
 class MeshLibrary
 {
 public:
@@ -449,6 +481,17 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
              // is a hash lookup per draw in a list that can be tens of
              // thousands long. Empty -- which is every frame a game renders --
              // costs one compare per draw.
-             std::span<const core::InstanceId> outlined = {});
+             std::span<const core::InstanceId> outlined = {},
+             // The materials `BasePart.Material` names, or null in a build that
+             // does not load them -- a capture harness, a test. Null is exactly
+             // today's behaviour: every part draws its own `Color` and every mesh
+             // draws the block its file described.
+             //
+             // **A material REPLACES rather than merges.** One lookup answers
+             // with the whole block, for every section of the part; a merge would
+             // need per-field "is set" bits on a struct whose virtue is being
+             // flat, and "which half of this material is mine" is not a question
+             // anybody wants to answer while looking at a wrong-coloured wall.
+             const MaterialLibrary* materials = nullptr);
 
 } // namespace luaug::render

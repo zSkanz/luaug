@@ -53,8 +53,16 @@ struct PartComponent
 {
     core::CFrameD cframe;
     core::Vec3 size{1.0f, 1.0f, 1.0f};
+    // **A multiplier on whatever the surface's base is**, and white by default so
+    // that a part nobody has coloured shows its material exactly as authored.
     core::Color3 color{1.0f, 1.0f, 1.0f};
     f32 transparency = 0.0f;
+
+    // `BasePart.Material`: the material file this surface is described by, or
+    // zero for none. Interned rather than held as a string, for the reason
+    // `MeshPartComponent::meshContent` is -- a component has to stay trivially
+    // copyable, because `World::snapshot` is a per-pool memcpy.
+    core::NameAtom materialContent;
     // `Enum.PartShape`'s value. Stored as the raw item value rather than as an
     // enum class so that the generated accessor needs no per-enum C++ type.
     i32 shape = 0;

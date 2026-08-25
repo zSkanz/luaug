@@ -3,6 +3,7 @@
 #include "luaug/asset/content.h"
 #include "luaug/asset/gltf.h"
 #include "luaug/asset/image.h"
+#include "luaug/asset/material.h"
 #include "luaug/asset/mesh_format.h"
 #include "luaug/asset/primitives.h"
 #include "luaug/asset/texture.h"
@@ -174,6 +175,132 @@ void MeshLoader::destroy(rhi::IDevice& device)
     }
     textures_.clear();
     failed_.clear();
+}
+
+core::u32 MeshLoader::syncMaterials(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world,
+                                    core::InstanceId root, MaterialLibrary& library)
+{
+    if (!root.valid())
+        return 0;
+
+    core::u32 loaded = 0;
+
+    // Over the PARTS, not the mesh parts: a `Part` has a surface too, and this
+    // is the pool that has one of every kind.
+    world.parts().forEach([&](core::InstanceId id, const scene::PartComponent& part) {
+        (void)id;
+        const core::NameAtom content = part.materialContent;
+        if (content.id == 0 || library.find(content) != nullptr)
+            return;
+        if (std::binary_search(failed_.begin(), failed_.end(), content,
+                               [](core::NameAtom a, core::NameAtom b) { return a.id < b.id; }))
+            return;
+
+        const std::string urn(world.atoms().text(content));
+
+        // Remembered as failed before anything else can go wrong, so every early
+        // return below costs one attempt rather than one per frame.
+        const auto markFailed = [&]() {
+            const auto position = std::lower_bound(failed_.begin(), failed_.end(), content,
+                                                   [](core::NameAtom a, core::NameAtom b) { return a.id < b.id; });
+            failed_.insert(position, content);
+        };
+
+        const asset::ResolvedContent resolved = mounts_ != nullptr ? mounts_->resolve(urn) : asset::ResolvedContent{};
+        const std::filesystem::path path =
+            resolved.source == asset::ResolvedContent::Source::Loose ? resolved.path : resolve(contentRoot_, urn);
+
+        std::string text;
+        if (!platform::readTextFile(path, text)) {
+            const std::array<core::I18nArg, 1> args{core::I18nArg{"path", path.string()}};
+            core::log(core::LogLevel::Warn, LUAUG_TR("render.err.material_file_missing"), args);
+            markFailed();
+            return;
+        }
+
+        asset::MaterialAsset authored;
+        if (auto error = asset::readMaterial(text, path.string(), authored); error.has_value()) {
+            std::string reported = error->message;
+            if (!error->detail.empty()) {
+                reported += " (";
+                reported += error->detail;
+                reported += ")";
+            }
+            reported += " -- ";
+            reported += path.string();
+            core::logText(core::LogLevel::Warn, reported);
+            markFailed();
+            return;
+        }
+
+        // One decode and one upload per DISTINCT source image, because a
+        // material that uses the same file for two slots -- which a
+        // roughness-in-both-channels export does -- should not upload it twice.
+        std::vector<std::pair<std::string, rhi::TextureHandle>> uploaded;
+        const auto textureOf = [&](const asset::MaterialTexture& slot) -> rhi::TextureHandle {
+            if (!slot.present())
+                return {};
+            // The vertex layout carries ONE UV set. A material sampling the
+            // second would silently read the first, so it is dropped instead --
+            // untextured is a visible wrong and silently-wrong-texture is not
+            // (`fillEntry` states the same rule for a mesh's own materials).
+            if (slot.uvSet != 0)
+                return {};
+            for (const auto& [name, handle] : uploaded) {
+                if (name == slot.content)
+                    return handle;
+            }
+
+            const asset::ResolvedContent found =
+                mounts_ != nullptr ? mounts_->resolve(slot.content) : asset::ResolvedContent{};
+            const std::filesystem::path imagePath = found.source == asset::ResolvedContent::Source::Loose
+                                                        ? found.path
+                                                        : resolve(contentRoot_, slot.content);
+            std::vector<std::byte> bytes;
+            asset::Image image;
+            rhi::TextureHandle handle;
+            if (!platform::readFile(imagePath, bytes) || asset::decodeImage(bytes, image).has_value()) {
+                // A material without its texture still draws, tinted by its
+                // factors. A material refused for a missing map would take the
+                // surface with it.
+                const std::array<core::I18nArg, 1> args{core::I18nArg{"path", imagePath.string()}};
+                core::log(core::LogLevel::Warn, LUAUG_TR("render.err.material_texture_missing"), args);
+            }
+            else {
+                handle = uploadImage(device, cmd, image, "material");
+                if (handle.valid())
+                    textures_.push_back(handle);
+            }
+            uploaded.emplace_back(slot.content, handle);
+            return handle;
+        };
+
+        RenderMaterial material;
+        material.uniforms.baseColor[0] = authored.baseColorFactor.r;
+        material.uniforms.baseColor[1] = authored.baseColorFactor.g;
+        material.uniforms.baseColor[2] = authored.baseColorFactor.b;
+        material.uniforms.baseColor[3] = authored.baseColorAlpha;
+        material.uniforms.emissive[0] = authored.emissiveFactor.r;
+        material.uniforms.emissive[1] = authored.emissiveFactor.g;
+        material.uniforms.emissive[2] = authored.emissiveFactor.b;
+        material.uniforms.metallicRoughnessNormalCutoff[0] = authored.metallicFactor;
+        material.uniforms.metallicRoughnessNormalCutoff[1] = authored.roughnessFactor;
+        material.uniforms.metallicRoughnessNormalCutoff[2] = authored.normalScale;
+        material.uniforms.metallicRoughnessNormalCutoff[3] =
+            authored.alphaMode == asset::AlphaMode::Mask ? authored.alphaCutoff : 0.0f;
+        material.baseColor = textureOf(authored.baseColor);
+        material.normal = textureOf(authored.normal);
+        material.metallicRoughness = textureOf(authored.metallicRoughness);
+        material.emissive = textureOf(authored.emissive);
+
+        library.set(content, material);
+        ++loaded;
+
+        const std::array<core::I18nArg, 1> args{core::I18nArg{"path", urn}};
+        core::log(core::LogLevel::Info, LUAUG_TR("render.info.material_loaded"), args);
+    });
+
+    return loaded;
 }
 
 void MeshLoader::syncPrimitives(rhi::IDevice& device, rhi::ICmdList& cmd, scene::World& world, MeshCache& cache,

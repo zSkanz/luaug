@@ -561,6 +561,27 @@ bool setBasePartTransparency(World& world, core::InstanceId id, const Value& val
     return true;
 }
 
+Value getBasePartMaterial(const World& world, core::InstanceId id)
+{
+    const PartComponent* part = readPart(world, id);
+    if (part == nullptr)
+        return Value{};
+    return std::string(world.atoms().text(part->materialContent));
+}
+
+bool setBasePartMaterial(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* text = std::get_if<std::string>(&value);
+    PartComponent* part = writePart(world, id);
+    if (text == nullptr || part == nullptr)
+        return false;
+    // Interned, not resolved -- whether the file loads is the renderer's problem
+    // and a later one, and reading the property back must give what was written
+    // even when it does not (`MeshContent` says the same).
+    part->materialContent = world.atoms().intern(*text);
+    return true;
+}
+
 // --- Part -------------------------------------------------------------------
 
 Value getPartShape(const World& world, core::InstanceId id)

@@ -431,7 +431,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(moduleScriptDesc);
 
     // --- BasePart ---
-    static std::array<PropertyDesc, 16> basePartProperties;
+    static std::array<PropertyDesc, 17> basePartProperties;
     basePartProperties = {{
         PropertyDesc{
             .name = atoms.intern("CFrame"),
@@ -498,6 +498,18 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getBasePartTransparency,
             .set = native::setBasePartTransparency,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Material"),
+            .type = ValueType::String,
+            .contentKind = atoms.intern("Material"),
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The material file this part's surface is described by, or empty for none.\012\012**`Color` multiplies it.** A part with no material has a white base, so white times `Color` is `Color` -- which is what a plain part has always looked like. A part WITH one takes that material's base colour, its maps and its metalness and roughness, and tints the result by `Color`. Leaving `Color` white is therefore the way to see a material exactly as it was authored, and it is what an import writes on every part it creates.\012\012The fourth channel already worked this way: `Transparency` and the material's own alpha have always been multiplied together, and doing the same to the other three removes an inconsistency rather than adding a rule.\012\012**There is no texture property on a part, and there will not be one.** A texture reaches a surface through a material or not at all, so that two parts can share one and changing it changes both.\012\012A `MeshPart` with no material draws the one its own file described, which is what an unimported mesh looks like.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getBasePartMaterial,
+            .set = native::setBasePartMaterial,
         },
         PropertyDesc{
             .name = atoms.intern("Anchored"),
