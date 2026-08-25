@@ -366,7 +366,22 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
 
             asset::Model model;
             if (auto error = asset::importGltf(bytes, path.parent_path(), {}, model); error.has_value()) {
-                core::logText(core::LogLevel::Warn, error->message);
+                // **The reason, and not only that there was one.** `MeshContent`
+                // promises that a file which fails to import "reports why,
+                // because a part that silently becomes invisible is harder to
+                // diagnose than one that says it could not load" -- and this
+                // line was throwing the why away. The message is the sentence a
+                // catalog can translate; the detail is what the parser actually
+                // objected to, which is the half somebody needs to fix a file.
+                std::string reported = error->message;
+                if (!error->detail.empty()) {
+                    reported += " (";
+                    reported += error->detail;
+                    reported += ")";
+                }
+                reported += " -- ";
+                reported += path.string();
+                core::logText(core::LogLevel::Warn, reported);
                 markFailed();
                 return;
             }

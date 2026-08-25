@@ -16,6 +16,7 @@
 using luaug::asset::AlphaMode;
 using luaug::asset::GltfImportOptions;
 using luaug::asset::importGltf;
+using luaug::asset::MaterialDef;
 using luaug::asset::Mesh;
 using luaug::asset::Model;
 using luaug::asset::Submesh;
@@ -968,4 +969,55 @@ TEST_CASE_FIXTURE(CatalogFixture, "gltf: an unskinned mesh carries no skin strea
     CHECK(model.skin.empty());
     CHECK(model.joints.empty());
     CHECK(model.clips.empty());
+}
+
+// --- The one archived extension this importer knows -------------------------
+//
+// `KHR_materials_pbrSpecularGlossiness` was superseded by metallic-roughness and
+// moved to the archive, and it is still what a great many exported models
+// declare -- in `extensionsRequired`, which is the half that matters: a parser
+// that does not know an extension listed there refuses the whole document. A
+// downloaded horse is the case that found it: five materials, every one of them
+// carrying the extension and none carrying a metallic-roughness block, so
+// ignoring it would have lost every texture instead.
+
+TEST_CASE_FIXTURE(CatalogFixture, "gltf: a required specular-glossiness extension does not refuse the file")
+{
+    Model model;
+    // The claim, first and on its own: this used to be `UnknownRequiredExtension`
+    // and no mesh at all, and a case that only checked the material would have
+    // reported the failure as a missing texture.
+    REQUIRE_FALSE(importGltf(readFixture("spec_gloss.gltf"), dataDirectory(), unoptimized(), model).has_value());
+    CHECK(model.mesh.vertices.size() > 0u);
+    REQUIRE(model.materials.size() == 1u);
+}
+
+TEST_CASE_FIXTURE(CatalogFixture, "gltf: specular-glossiness is read as the metallic-roughness it would have been")
+{
+    Model model;
+    REQUIRE_FALSE(importGltf(readFixture("spec_gloss.gltf"), dataDirectory(), unoptimized(), model).has_value());
+    REQUIRE(model.materials.size() == 1u);
+    const MaterialDef& material = model.materials[0];
+
+    // Diffuse is the base colour, factor and texture both. The fixture's
+    // material has no `pbrMetallicRoughness` block at all, so every one of these
+    // would be fastgltf's default -- white, fully rough, no image -- if the
+    // extension were merely tolerated rather than read.
+    CHECK(near(material.baseColorFactor.r, 0.25f));
+    CHECK(near(material.baseColorFactor.g, 0.5f));
+    CHECK(near(material.baseColorFactor.b, 0.75f));
+    CHECK(near(material.baseColorAlpha, 0.5f));
+    CHECK(material.baseColor.present());
+
+    // Glossiness is the complement of roughness, and metallic is zero: the
+    // extension has no metalness at all, it expresses metal through a coloured
+    // specular that a renderer built on the other model cannot use.
+    CHECK(near(material.roughnessFactor, 0.25f));
+    CHECK(near(material.metallicFactor, 0.0f));
+
+    // And no ORM image is invented. The extension's second texture packs
+    // specular in RGB and glossiness in A, which is neither of the channels this
+    // slot means -- reading it here would tint every surface by its own
+    // specular, which is worse than the plain material it would have replaced.
+    CHECK_FALSE(material.metallicRoughness.present());
 }

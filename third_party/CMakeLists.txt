@@ -329,6 +329,19 @@ set(FASTGLTF_ENABLE_EXAMPLES  OFF CACHE BOOL "" FORCE)
 set(FASTGLTF_ENABLE_DOCS      OFF CACHE BOOL "" FORCE)
 set(FASTGLTF_ENABLE_GLTF_RS   OFF CACHE BOOL "" FORCE)
 set(FASTGLTF_ENABLE_ASSIMP    OFF CACHE BOOL "" FORCE)
+# **On, for one archived extension that half the internet's models declare.**
+#
+# `KHR_materials_pbrSpecularGlossiness` was superseded by metallic-roughness and
+# moved to the archive, and it is still what a Sketchfab export emits -- listed
+# in `extensionsRequired`, so a parser that does not know it refuses the whole
+# file rather than ignoring a block. A downloaded horse is the case that found
+# this: five materials, every one of them carrying the extension and NO
+# metallic-roughness block at all, so ignoring it would not have been an option
+# either -- it would have loaded the geometry and lost every texture.
+#
+# It is the only deprecated extension this switch turns on, because it is the
+# only one fastgltf gates behind it.
+set(FASTGLTF_ENABLE_DEPRECATED_EXT ON CACHE BOOL "" FORCE)
 add_subdirectory(fastgltf ${CMAKE_BINARY_DIR}/third_party/fastgltf SYSTEM)
 
 # fastgltf's install rules are unconditional -- it exposes no INSTALL option --

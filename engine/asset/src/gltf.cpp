@@ -501,14 +501,43 @@ std::optional<core::EngineError> Importer::resolveMaterial(const fg::Optional<st
     }
 
     const fg::Material& source = asset_.materials[index];
+
+    // **A specular-glossiness material is read as the metallic-roughness one it
+    // would have been**, because that is the only model anything downstream has.
+    //
+    // The conversion is the archived extension's own: diffuse is the base
+    // colour, glossiness is the complement of roughness, and metallic is zero --
+    // the extension has no metalness, it expresses metal through a coloured
+    // specular, which a renderer built on the other model cannot use. What is
+    // lost is the specular colour, and losing it is right: a plausible material
+    // with the right texture on it is what somebody downloading a model wants,
+    // and refusing the file is what they had.
+    //
+    // Read INSTEAD of `pbrData` rather than on top of it. A file carrying the
+    // extension has no metallic-roughness block to fall back on -- fastgltf hands
+    // back the defaults for one, which are white and fully rough -- so mixing
+    // them would paint the diffuse texture with a white base factor and call it
+    // agreement.
+    const fg::MaterialSpecularGlossiness* specGloss = source.specularGlossiness.get();
+
     MaterialDef material;
     material.name = std::string(source.name);
-    material.baseColorFactor = Color3{static_cast<f32>(source.pbrData.baseColorFactor.x()),
-                                      static_cast<f32>(source.pbrData.baseColorFactor.y()),
-                                      static_cast<f32>(source.pbrData.baseColorFactor.z())};
-    material.baseColorAlpha = static_cast<f32>(source.pbrData.baseColorFactor.w());
-    material.metallicFactor = static_cast<f32>(source.pbrData.metallicFactor);
-    material.roughnessFactor = static_cast<f32>(source.pbrData.roughnessFactor);
+    if (specGloss != nullptr) {
+        material.baseColorFactor =
+            Color3{static_cast<f32>(specGloss->diffuseFactor.x()), static_cast<f32>(specGloss->diffuseFactor.y()),
+                   static_cast<f32>(specGloss->diffuseFactor.z())};
+        material.baseColorAlpha = static_cast<f32>(specGloss->diffuseFactor.w());
+        material.metallicFactor = 0.0f;
+        material.roughnessFactor = 1.0f - static_cast<f32>(specGloss->glossinessFactor);
+    }
+    else {
+        material.baseColorFactor = Color3{static_cast<f32>(source.pbrData.baseColorFactor.x()),
+                                          static_cast<f32>(source.pbrData.baseColorFactor.y()),
+                                          static_cast<f32>(source.pbrData.baseColorFactor.z())};
+        material.baseColorAlpha = static_cast<f32>(source.pbrData.baseColorFactor.w());
+        material.metallicFactor = static_cast<f32>(source.pbrData.metallicFactor);
+        material.roughnessFactor = static_cast<f32>(source.pbrData.roughnessFactor);
+    }
     material.emissiveFactor =
         Color3{static_cast<f32>(source.emissiveFactor.x()), static_cast<f32>(source.emissiveFactor.y()),
                static_cast<f32>(source.emissiveFactor.z())};
@@ -518,13 +547,27 @@ std::optional<core::EngineError> Importer::resolveMaterial(const fg::Optional<st
 
     // In the file's own declaration order, so which image lands in which slot
     // is a property of the document rather than of an iteration order (R10).
-    if (source.pbrData.baseColorTexture.has_value()) {
-        if (auto error = resolveTexture(source.pbrData.baseColorTexture.value(), material.baseColor))
-            return error;
+    if (specGloss != nullptr) {
+        // The diffuse map IS the base colour map. There is no metallic-roughness
+        // image to take: the extension's second texture packs specular in RGB
+        // and glossiness in A, which is neither of the channels this renderer's
+        // ORM map means, and reading it into that slot would tint every surface
+        // by its own specular.
+        if (specGloss->diffuseTexture.has_value()) {
+            if (auto error = resolveTexture(specGloss->diffuseTexture.value(), material.baseColor))
+                return error;
+        }
     }
-    if (source.pbrData.metallicRoughnessTexture.has_value()) {
-        if (auto error = resolveTexture(source.pbrData.metallicRoughnessTexture.value(), material.metallicRoughness))
-            return error;
+    else {
+        if (source.pbrData.baseColorTexture.has_value()) {
+            if (auto error = resolveTexture(source.pbrData.baseColorTexture.value(), material.baseColor))
+                return error;
+        }
+        if (source.pbrData.metallicRoughnessTexture.has_value()) {
+            if (auto error =
+                    resolveTexture(source.pbrData.metallicRoughnessTexture.value(), material.metallicRoughness))
+                return error;
+        }
     }
     if (source.normalTexture.has_value()) {
         if (auto error = resolveTexture(source.normalTexture.value(), material.normal))
@@ -1150,10 +1193,20 @@ std::optional<core::EngineError> importGltf(std::span<const std::byte> bytes,
     if (!data)
         return core::makeError(LUAUG_TR("asset.gltf.err.parse_failed"), {}, describe(data.error()));
 
-    // No extensions are enabled: gltf.h says no extension beyond the core
-    // specification's PBR material is honoured, and a parser that enabled one
-    // would populate fields nothing reads.
-    fg::Parser parser;
+    // **One extension, and it is an archived one.**
+    //
+    // `KHR_materials_pbrSpecularGlossiness` was superseded by metallic-roughness
+    // and moved to the archive years ago, and it is still what a great many
+    // exported models declare -- in `extensionsRequired`, which is the part that
+    // matters: a parser that does not know an extension listed there refuses the
+    // whole document rather than ignoring a block it does not understand. So a
+    // perfectly ordinary downloaded model was not "imported without its
+    // materials", it was `UnknownRequiredExtension` and no mesh at all.
+    //
+    // Nothing else is enabled, and the rule that kept the list empty still
+    // holds: a parser that enabled an extension nothing reads would populate
+    // fields nothing reads. This one IS read -- see `readMaterial`.
+    fg::Parser parser(fg::Extensions::KHR_materials_pbrSpecularGlossiness);
     // LoadExternalBuffers/Images resolve a relative URI against `baseDirectory`
     // -- a `.gltf` beside its `.bin` and its `.png`. GenerateMeshIndices gives
     // an unindexed primitive the trivial index buffer so there is one path
