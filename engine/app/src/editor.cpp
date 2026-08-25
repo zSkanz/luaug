@@ -1185,14 +1185,15 @@ bool Editor::closeStamp(scene::World& game, core::InstanceId gameRoot, Inspector
     return true;
 }
 
-std::string Editor::createMaterial(scene::World& world, core::InstanceId root, std::string_view name)
+std::string Editor::createStampOfClass(scene::World& world, core::InstanceId root, scene::ClassId classId,
+                                       std::string_view name)
 {
     if (!stampNameIsUsable(name))
         return {};
 
-    const scene::ClassId materialClass = world.classes().findId(world.atoms().intern("Material"));
-    if (materialClass == scene::InvalidClass) {
-        m_status = EditorStatus{"this build has no Material class", true};
+    const scene::ClassDescriptor* descriptor = world.classes().find(classId);
+    if (descriptor == nullptr) {
+        m_status = EditorStatus{"no such class", true};
         return {};
     }
 
@@ -1206,9 +1207,9 @@ std::string Editor::createMaterial(scene::World& world, core::InstanceId root, s
     }
 
     // Recorded BEFORE the instance exists, so one undo takes both back.
-    m_history.record(world, "Create Material");
+    m_history.record(world, "New Stamp");
 
-    const core::InstanceId made = world.create(materialClass);
+    const core::InstanceId made = world.create(classId);
     // Named after the file, minus its folders and its suffix -- which is what
     // somebody typed and what they will look for in the Explorer.
     std::string stem = relative;
@@ -1224,8 +1225,8 @@ std::string Editor::createMaterial(scene::World& world, core::InstanceId root, s
     }
 
     if (!createStamp(world, made, root, name)) {
-        // `createStamp` said why. Taking the instance back with it, because a
-        // material in the world that nothing wrote is not what was asked for.
+        // `createStamp` said why. Taking the instance back with it, because an
+        // instance in the world that nothing wrote is not what was asked for.
         (void)m_history.undo(world);
         return {};
     }

@@ -651,6 +651,205 @@ struct ContentDrag
     return changed;
 }
 
+// **One class picker, for every place that asks "which class".** The Explorer's
+// add-a-child menu grew it -- a search box, a wrapping highlight, Enter to take
+// the highlighted one, Escape to leave, and the IDL's own prose on hover -- and
+// the content browser needs the same thing to ask which kind of stamp to make. A
+// second copy would be a second set of keyboard rules to keep in step, and they
+// would stop being the same set the first time one of them was improved.
+//
+// Draws INSIDE a popup the caller has already begun. Returns the class chosen
+// this frame, or `InvalidClass`, and closes the popup when it returns one.
+//
+// `spacing` is the caller's item spacing: this window is a menu and not a row,
+// and the two callers draw rows at different pitches.
+[[nodiscard]] scene::ClassId drawClassPicker(const scene::World& world, const Inspector& inspector,
+                                             const IconAtlas* icons, ImVec2 spacing)
+{
+    scene::ClassId picked = scene::InvalidClass;
+    // Same as the row menu above: this window is not a row.
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, spacing);
+    if (g_creatableWorld != inspector.worldIdentity() || g_creatable.empty()) {
+        g_creatableWorld = inspector.worldIdentity();
+        collectCreatableClasses(world, g_creatable);
+    }
+
+    // Focused on open, because a list of thirty is a list you type
+    // at rather than scroll -- and the first keystroke landing in
+    // the box is what makes that true.
+    if (ImGui::IsWindowAppearing()) {
+        g_addFilter.fill(0);
+        g_addHighlight = 0;
+        g_addHighlightFilter.clear();
+        ImGui::SetKeyboardFocusHere();
+    }
+    ImGui::SetNextItemWidth(210.0f);
+    // "search" rather than "filter": one is what a person is doing
+    // and the other is what the code is doing, and a hint is written
+    // for the first of those. It is also the word on every other box
+    // in this shell now, and three names for one gesture is three
+    // things to learn.
+    ImGui::InputTextWithHint("##add-filter", "search", g_addFilter.data(), g_addFilter.size());
+
+    // **Escape closes it**, which is what Escape does to every
+    // transient thing on a screen. The shell's own Escape handler
+    // deliberately refuses while a popup is open -- it would take
+    // the key from the dialogs that need it -- so the popup that
+    // wants it has to ask, and this is the one that does.
+    //
+    // And it SAYS it took the key, because closing a popup takes
+    // effect immediately: by the time the shell's handler runs there
+    // is no popup left for its guard to see, and the one press
+    // closed the menu and dropped the selection the menu had been
+    // opened for. One Escape, one thing.
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        ImGui::CloseCurrentPopup();
+        g_escapeTaken = true;
+    }
+
+    const std::string_view filter(g_addFilter.data());
+
+    // **The matches are collected before anything is drawn**, and
+    // that is what makes the keyboard work at all: Up and Down have
+    // to know how many rows there are, and Enter has to know which
+    // class it is about, both before the first `Selectable` decides
+    // whether it is the highlighted one.
+    g_addMatches.clear();
+    for (const scene::ClassId classId : g_creatable) {
+        const scene::ClassDescriptor* candidate = world.classes().find(classId);
+        if (candidate == nullptr)
+            continue;
+        if (filter.empty() || containsFold(world.atoms().text(candidate->name), filter))
+            g_addMatches.push_back(classId);
+    }
+
+    // **Typing puts you back on the first match**, which is the
+    // whole of "it always comes with the first thing selected and I
+    // control from there": a highlight left three rows down while
+    // the list under it changed is a highlight pointing at whatever
+    // happens to be there now.
+    if (g_addHighlightFilter != filter) {
+        g_addHighlightFilter = filter;
+        g_addHighlight = 0;
+    }
+
+    // **A highlight of our own rather than ImGui's navigation.** The
+    // search box has the keyboard -- it has to, or the first
+    // keystroke would go nowhere -- and handing the arrows to nav
+    // would mean tabbing out of the box to use them. Every command
+    // palette in every editor works this way for the same reason:
+    // you type and you arrow, and neither interrupts the other.
+    //
+    // Single-line `InputText` uses neither arrow, so nothing is
+    // being taken from it.
+    const int matchCount = static_cast<int>(g_addMatches.size());
+    bool followHighlight = false;
+    if (matchCount > 0) {
+        // Wrapped, because a list this short is a ring: pressing Up
+        // on the first row to reach the last is faster than
+        // twenty-nine presses of Down, and there is no scrollbar
+        // position to be confused about at either end.
+        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true)) {
+            g_addHighlight = (g_addHighlight + 1) % matchCount;
+            followHighlight = true;
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true)) {
+            g_addHighlight = (g_addHighlight + matchCount - 1) % matchCount;
+            followHighlight = true;
+        }
+    }
+    g_addHighlight = matchCount == 0 ? 0 : std::clamp(g_addHighlight, 0, matchCount - 1);
+
+    // Enter makes the highlighted one, which is the other half of
+    // never touching the mouse. Both Return keys, because a numpad
+    // Enter is an Enter.
+    scene::ClassId chosenByKey = scene::InvalidClass;
+    if (matchCount > 0 &&
+        (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)))
+        chosenByKey = g_addMatches[static_cast<core::usize>(g_addHighlight)];
+
+    if (ImGui::BeginChild("add-list", ImVec2(210.0f, 260.0f))) {
+        // **Whether the pointer has actually moved.** Hovering a row
+        // moves the highlight, so the mouse and the keyboard never
+        // point at two different things -- but a pointer resting
+        // over the list while somebody arrows past it would drag the
+        // highlight back under the cursor on every frame, and the
+        // arrows would appear not to work at all.
+        const ImGuiIO& io = ImGui::GetIO();
+        const bool pointerMoved = io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f;
+
+        for (int match = 0; match < matchCount; ++match) {
+            const scene::ClassId classId = g_addMatches[static_cast<core::usize>(match)];
+            const scene::ClassDescriptor* candidate = world.classes().find(classId);
+            if (candidate == nullptr)
+                continue;
+            const std::string_view candidateName = world.atoms().text(candidate->name);
+
+            // **The icon a row of this class would wear**, drawn
+            // beside the name here for the reason it is drawn in the
+            // tree at all: a list of thirty identifiers is read by
+            // shape before it is read by word, and a menu that names
+            // what it will make without showing it is a menu you have
+            // to read twice.
+            //
+            // The name is still what the item IS -- the selectable
+            // spans the row and the icon is drawn over it -- so
+            // filtering, keyboard focus and the click target are
+            // exactly what they were.
+            char item[96];
+            (void)std::snprintf(item, sizeof(item), "##%.*s", static_cast<int>(candidateName.size()),
+                                candidateName.data());
+            const ImVec2 itemOrigin = ImGui::GetCursorPos();
+            const bool highlighted = match == g_addHighlight;
+            const bool chosen = ImGui::Selectable(item, highlighted);
+            // Taken here, because the icon and the name are drawn
+            // over the selectable afterwards and `IsItemHovered`
+            // answers about the LAST item -- which would make the
+            // description below appear only over the word.
+            const bool itemHovered = ImGui::IsItemHovered();
+            if (itemHovered && pointerMoved)
+                g_addHighlight = match;
+            // Followed only when the KEYBOARD moved it. Scrolling to
+            // the highlight every frame would fight the scrollbar
+            // the moment somebody dragged it.
+            if (highlighted && followHighlight)
+                ImGui::SetScrollHereY(0.5f);
+
+            const float itemIcon = ImGui::GetTextLineHeight();
+            ImGui::SetCursorPos(itemOrigin);
+            // The ATLAS falls back for a class no theme has heard
+            // of -- `debug_overlay_tests.cpp` holds it to that -- so
+            // there is nothing to do here for a project's own class.
+            // False means there is no atlas at all, which is a build
+            // with no icons rather than a class with none, and then
+            // the name simply stands where it always did.
+            if (drawIcon(icons, classIconId(candidateName), itemIcon))
+                ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+            else
+                ImGui::SetCursorPos(itemOrigin);
+            ImGui::TextUnformatted(candidateName.data(), candidateName.data() + candidateName.size());
+
+            if (chosen || classId == chosenByKey) {
+                picked = classId;
+                ImGui::CloseCurrentPopup();
+            }
+            // The IDL's own prose, which the properties grid already
+            // shows for a property and which is the only description
+            // of a class anywhere at runtime.
+            if (candidate->doc[0] != 0 && itemHovered) {
+                ImGui::BeginTooltip();
+                ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+                ImGui::TextUnformatted(candidate->doc);
+                ImGui::PopTextWrapPos();
+                ImGui::EndTooltip();
+            }
+        }
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
+    return picked;
+}
+
 // The tree, from `root` down.
 //
 // **`root` is not drawn when it is the world's**, and IS drawn when it is a
@@ -1260,188 +1459,12 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             ImGui::SetCursorPos(ImVec2(rowOrigin.x, rowOrigin.y + rowHeight));
 
             if (commands != nullptr && ImGui::BeginPopup("add-child")) {
-                // Same as the row menu above: this window is not a row.
-                ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, spacing);
                 g_addOpenRow = row.id.index;
-                if (g_creatableWorld != inspector.worldIdentity() || g_creatable.empty()) {
-                    g_creatableWorld = inspector.worldIdentity();
-                    collectCreatableClasses(world, g_creatable);
+                if (const scene::ClassId picked = drawClassPicker(world, inspector, icons, spacing);
+                    picked != scene::InvalidClass) {
+                    commands->createClass = picked;
+                    commands->createParent = row.id;
                 }
-
-                // Focused on open, because a list of thirty is a list you type
-                // at rather than scroll -- and the first keystroke landing in
-                // the box is what makes that true.
-                if (ImGui::IsWindowAppearing()) {
-                    g_addFilter.fill(0);
-                    g_addHighlight = 0;
-                    g_addHighlightFilter.clear();
-                    ImGui::SetKeyboardFocusHere();
-                }
-                ImGui::SetNextItemWidth(210.0f);
-                // "search" rather than "filter": one is what a person is doing
-                // and the other is what the code is doing, and a hint is written
-                // for the first of those. It is also the word on every other box
-                // in this shell now, and three names for one gesture is three
-                // things to learn.
-                ImGui::InputTextWithHint("##add-filter", "search", g_addFilter.data(), g_addFilter.size());
-
-                // **Escape closes it**, which is what Escape does to every
-                // transient thing on a screen. The shell's own Escape handler
-                // deliberately refuses while a popup is open -- it would take
-                // the key from the dialogs that need it -- so the popup that
-                // wants it has to ask, and this is the one that does.
-                //
-                // And it SAYS it took the key, because closing a popup takes
-                // effect immediately: by the time the shell's handler runs there
-                // is no popup left for its guard to see, and the one press
-                // closed the menu and dropped the selection the menu had been
-                // opened for. One Escape, one thing.
-                if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
-                    ImGui::CloseCurrentPopup();
-                    g_escapeTaken = true;
-                }
-
-                const std::string_view filter(g_addFilter.data());
-
-                // **The matches are collected before anything is drawn**, and
-                // that is what makes the keyboard work at all: Up and Down have
-                // to know how many rows there are, and Enter has to know which
-                // class it is about, both before the first `Selectable` decides
-                // whether it is the highlighted one.
-                g_addMatches.clear();
-                for (const scene::ClassId classId : g_creatable) {
-                    const scene::ClassDescriptor* candidate = world.classes().find(classId);
-                    if (candidate == nullptr)
-                        continue;
-                    if (filter.empty() || containsFold(world.atoms().text(candidate->name), filter))
-                        g_addMatches.push_back(classId);
-                }
-
-                // **Typing puts you back on the first match**, which is the
-                // whole of "it always comes with the first thing selected and I
-                // control from there": a highlight left three rows down while
-                // the list under it changed is a highlight pointing at whatever
-                // happens to be there now.
-                if (g_addHighlightFilter != filter) {
-                    g_addHighlightFilter = filter;
-                    g_addHighlight = 0;
-                }
-
-                // **A highlight of our own rather than ImGui's navigation.** The
-                // search box has the keyboard -- it has to, or the first
-                // keystroke would go nowhere -- and handing the arrows to nav
-                // would mean tabbing out of the box to use them. Every command
-                // palette in every editor works this way for the same reason:
-                // you type and you arrow, and neither interrupts the other.
-                //
-                // Single-line `InputText` uses neither arrow, so nothing is
-                // being taken from it.
-                const int matchCount = static_cast<int>(g_addMatches.size());
-                bool followHighlight = false;
-                if (matchCount > 0) {
-                    // Wrapped, because a list this short is a ring: pressing Up
-                    // on the first row to reach the last is faster than
-                    // twenty-nine presses of Down, and there is no scrollbar
-                    // position to be confused about at either end.
-                    if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true)) {
-                        g_addHighlight = (g_addHighlight + 1) % matchCount;
-                        followHighlight = true;
-                    }
-                    if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true)) {
-                        g_addHighlight = (g_addHighlight + matchCount - 1) % matchCount;
-                        followHighlight = true;
-                    }
-                }
-                g_addHighlight = matchCount == 0 ? 0 : std::clamp(g_addHighlight, 0, matchCount - 1);
-
-                // Enter makes the highlighted one, which is the other half of
-                // never touching the mouse. Both Return keys, because a numpad
-                // Enter is an Enter.
-                scene::ClassId chosenByKey = scene::InvalidClass;
-                if (matchCount > 0 &&
-                    (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)))
-                    chosenByKey = g_addMatches[static_cast<core::usize>(g_addHighlight)];
-
-                if (ImGui::BeginChild("add-list", ImVec2(210.0f, 260.0f))) {
-                    // **Whether the pointer has actually moved.** Hovering a row
-                    // moves the highlight, so the mouse and the keyboard never
-                    // point at two different things -- but a pointer resting
-                    // over the list while somebody arrows past it would drag the
-                    // highlight back under the cursor on every frame, and the
-                    // arrows would appear not to work at all.
-                    const ImGuiIO& io = ImGui::GetIO();
-                    const bool pointerMoved = io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f;
-
-                    for (int match = 0; match < matchCount; ++match) {
-                        const scene::ClassId classId = g_addMatches[static_cast<core::usize>(match)];
-                        const scene::ClassDescriptor* candidate = world.classes().find(classId);
-                        if (candidate == nullptr)
-                            continue;
-                        const std::string_view candidateName = world.atoms().text(candidate->name);
-
-                        // **The icon a row of this class would wear**, drawn
-                        // beside the name here for the reason it is drawn in the
-                        // tree at all: a list of thirty identifiers is read by
-                        // shape before it is read by word, and a menu that names
-                        // what it will make without showing it is a menu you have
-                        // to read twice.
-                        //
-                        // The name is still what the item IS -- the selectable
-                        // spans the row and the icon is drawn over it -- so
-                        // filtering, keyboard focus and the click target are
-                        // exactly what they were.
-                        char item[96];
-                        (void)std::snprintf(item, sizeof(item), "##%.*s", static_cast<int>(candidateName.size()),
-                                            candidateName.data());
-                        const ImVec2 itemOrigin = ImGui::GetCursorPos();
-                        const bool highlighted = match == g_addHighlight;
-                        const bool chosen = ImGui::Selectable(item, highlighted);
-                        // Taken here, because the icon and the name are drawn
-                        // over the selectable afterwards and `IsItemHovered`
-                        // answers about the LAST item -- which would make the
-                        // description below appear only over the word.
-                        const bool itemHovered = ImGui::IsItemHovered();
-                        if (itemHovered && pointerMoved)
-                            g_addHighlight = match;
-                        // Followed only when the KEYBOARD moved it. Scrolling to
-                        // the highlight every frame would fight the scrollbar
-                        // the moment somebody dragged it.
-                        if (highlighted && followHighlight)
-                            ImGui::SetScrollHereY(0.5f);
-
-                        const float itemIcon = ImGui::GetTextLineHeight();
-                        ImGui::SetCursorPos(itemOrigin);
-                        // The ATLAS falls back for a class no theme has heard
-                        // of -- `debug_overlay_tests.cpp` holds it to that -- so
-                        // there is nothing to do here for a project's own class.
-                        // False means there is no atlas at all, which is a build
-                        // with no icons rather than a class with none, and then
-                        // the name simply stands where it always did.
-                        if (drawIcon(icons, classIconId(candidateName), itemIcon))
-                            ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
-                        else
-                            ImGui::SetCursorPos(itemOrigin);
-                        ImGui::TextUnformatted(candidateName.data(), candidateName.data() + candidateName.size());
-
-                        if (chosen || classId == chosenByKey) {
-                            commands->createClass = classId;
-                            commands->createParent = row.id;
-                            ImGui::CloseCurrentPopup();
-                        }
-                        // The IDL's own prose, which the properties grid already
-                        // shows for a property and which is the only description
-                        // of a class anywhere at runtime.
-                        if (candidate->doc[0] != 0 && itemHovered) {
-                            ImGui::BeginTooltip();
-                            ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
-                            ImGui::TextUnformatted(candidate->doc);
-                            ImGui::PopTextWrapPos();
-                            ImGui::EndTooltip();
-                        }
-                    }
-                }
-                ImGui::EndChild();
-                ImGui::PopStyleVar();
                 ImGui::EndPopup();
             }
             else if (g_addOpenRow == row.id.index) {
@@ -3084,7 +3107,7 @@ void openSceneOrAsk(Editor& editor, EditorCommands& commands, EditorDialogs& dia
 }
 
 void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs,
-                 const IconAtlas* icons)
+                 const IconAtlas* icons, const scene::World* world, const Inspector* inspector)
 {
     if (!ImGui::Begin("Content", &panels.content)) {
         ImGui::End();
@@ -3128,14 +3151,24 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
     if (iconButton(icons, icons::ContentFolder, toolbarIcon, "new-folder", "new folder", "new folder", true, true))
         dialogs.newFolder = true;
 
-    // **A material is the one authored file somebody makes from nothing.** A
-    // mesh and a texture arrive from outside and a stamp is made from what is in
-    // the world; a material is written. Without this, importing textures and
-    // then having no way to build a surface out of them was a dead end.
+    // **One "new stamp", and the picker says which kind.** A verb per class would
+    // be a toolbar that grew a button every time the engine grew a class -- and
+    // the question "which class" already has an answer somewhere: the Explorer's
+    // add-a-child menu. Same picker, same keyboard, same prose on hover.
     ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
-    if (iconButton(icons, icons::ContentOther, toolbarIcon, "new-material", "new material", "new material", true,
-                   true)) {
-        dialogs.newMaterial = true;
+    if (iconButton(icons, icons::ActionAdd, toolbarIcon, "new-stamp", "new stamp", "new stamp", true, true))
+        ImGui::OpenPopup("new-stamp-class");
+    if (ImGui::BeginPopup("new-stamp-class")) {
+        // Null while nothing is being inspected -- a host with no world -- and
+        // then there is no list of classes to offer.
+        if (world != nullptr && inspector != nullptr) {
+            if (const scene::ClassId picked = drawClassPicker(*world, *inspector, icons, ImGui::GetStyle().ItemSpacing);
+                picked != scene::InvalidClass) {
+                dialogs.newStampClass = picked;
+                dialogs.newStampFromClass = true;
+            }
+        }
+        ImGui::EndPopup();
     }
 
     // **Bringing a file in from the machine**, which is the other half of a
@@ -3584,8 +3617,8 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
             ImGui::Separator();
             if (ImGui::MenuItem("New Folder..."))
                 dialogs.newFolder = true;
-            if (ImGui::MenuItem("New Material..."))
-                dialogs.newMaterial = true;
+            if (ImGui::MenuItem("New Stamp..."))
+                ImGui::OpenPopup("new-stamp-class");
             if (ImGui::MenuItem("Refresh"))
                 (void)tree.refresh();
             ImGui::EndPopup();
@@ -3887,9 +3920,9 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
     if (dialogs.renameInstance || dialogs.renameContent) {
         ImGui::OpenPopup("Rename");
     }
-    if (dialogs.newMaterial) {
-        dialogs.newMaterial = false;
-        ImGui::OpenPopup("New Material");
+    if (dialogs.newStampFromClass) {
+        dialogs.newStampFromClass = false;
+        ImGui::OpenPopup("New Stamp From Class");
     }
     if (dialogs.newFolder) {
         dialogs.newFolder = false;
@@ -3993,42 +4026,43 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
     }
 
     ImGui::SetNextWindowSize(ImVec2(400.0f, 0.0f), ImGuiCond_Appearing);
-    if (ImGui::BeginPopupModal("New Material", nullptr, ImGuiWindowFlags_NoResize)) {
-        static std::array<char, 128> material{};
-        // **What it makes, in one line.** An empty material is the identity --
-        // white, dielectric, no maps -- so a part pointed at it looks exactly as
-        // it did with none. That is deliberate: the first thing anybody does is
-        // change one field and expect to see one change.
-        ImGui::TextDisabled("An empty material: white, no maps. Point a part at it and give it textures.");
+    if (ImGui::BeginPopupModal("New Stamp From Class", nullptr, ImGuiWindowFlags_NoResize)) {
+        static std::array<char, 128> stampName{};
+        // **What it makes, in one line.** A stamp is a file of an instance, so
+        // this makes both: the instance goes into the world where it can be
+        // edited, and the file into the browser where it can be reused.
+        ImGui::TextDisabled("Makes one in the world and a file to reuse it from.");
         ImGui::Spacing();
 
         ImGui::SetNextItemWidth(-1.0f);
         if (dialogOpening()) {
-            material.fill(0);
+            stampName.fill(0);
             ImGui::SetKeyboardFocusHere();
         }
         const bool submitted =
-            ImGui::InputText("##material", material.data(), material.size(), ImGuiInputTextFlags_EnterReturnsTrue);
-        const std::string typed(material.data());
+            ImGui::InputText("##stamp-name", stampName.data(), stampName.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+        const std::string typed(stampName.data());
 
         ImGui::Spacing();
-        // Greyed before the press rather than refused after it, exactly as the
-        // folder dialog does: a name a filesystem cannot carry is knowable while
-        // it is being typed. What it CANNOT know here is whether the name is
-        // taken -- that is a question about a folder, and the answer comes back
-        // as a refusal with a message.
-        ImGui::BeginDisabled(!ContentTree::isUsableName(typed));
+        // Greyed before the press rather than refused after it: a name a
+        // filesystem cannot carry is knowable while it is being typed. What it
+        // CANNOT know here is whether the name is taken -- that is a question
+        // about a folder, and the answer comes back as a refusal with a message.
+        ImGui::BeginDisabled(!Editor::stampNameIsUsable(typed));
         const bool accepted = ImGui::Button("Create", ImVec2(120.0f, 0.0f));
         ImGui::EndDisabled();
         ImGui::SameLine();
         if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
-            material.fill(0);
+            stampName.fill(0);
+            dialogs.newStampClass = scene::InvalidClass;
             ImGui::CloseCurrentPopup();
         }
 
-        if ((submitted || accepted) && ContentTree::isUsableName(typed)) {
-            commands.createMaterial = typed;
-            material.fill(0);
+        if ((submitted || accepted) && Editor::stampNameIsUsable(typed)) {
+            commands.newStampClass = dialogs.newStampClass;
+            commands.newStampName = typed;
+            stampName.fill(0);
+            dialogs.newStampClass = scene::InvalidClass;
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
@@ -4369,7 +4403,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         if (panels.viewport)
             drawViewport(*editor, viewport, commands, panels.viewport, icons);
         if (panels.content)
-            drawContent(*editor, commands, panels, dialogs, icons);
+            drawContent(*editor, commands, panels, dialogs, icons, world, inspector);
     }
 
     // **Siblings of the Viewport, in the central node** (ADR 0057). A window per

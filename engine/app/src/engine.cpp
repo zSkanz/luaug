@@ -1566,11 +1566,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // below the one somebody chose.
                 // **Made rather than found**, so it is not part of the walk that
                 // resolves an existing entry by path: there is nothing there yet.
-                if (!editorCommands.createMaterial.empty()) {
-                    // Into the world AND into the browser: a material is an
-                    // instance, and what a project keeps for reuse is a stamp of
-                    // one. `createMaterial` says why when it refuses.
-                    (void)editor.createMaterial(authored(), authoredRoot(), editorCommands.createMaterial);
+                if (editorCommands.newStampClass != scene::InvalidClass) {
+                    // Into the world AND into the browser: a stamp is a file of
+                    // an instance, so making one makes both.
+                    // `createStampOfClass` says why when it refuses.
+                    (void)editor.createStampOfClass(authored(), authoredRoot(), editorCommands.newStampClass,
+                                                    editorCommands.newStampName);
                 }
                 if (!editorCommands.deleteContent.empty() || !editorCommands.renameContent.empty() ||
                     !editorCommands.duplicateContent.empty()) {

@@ -177,7 +177,13 @@ struct EditorDialogs
     bool preferences = false;
     bool about = false;
     bool newFolder = false;
-    bool newMaterial = false;
+    // The browser's make-a-stamp-of-a-CLASS box, which is a different question
+    // from `newStamp` below: that one stamps an instance somebody right-clicked,
+    // this one makes the instance too.
+    bool newStampFromClass = false;
+    // What the picker chose, carried to the name box: the two are one gesture
+    // and the answer arrives a frame before the question is finished.
+    scene::ClassId newStampClass = scene::InvalidClass;
     // The make-a-stamp box, which is the same shape again -- and it carries the
     // instance the question is ABOUT, because "a stamp of what" is decided by
     // the row somebody right-clicked and not by whatever is selected when they
@@ -430,11 +436,12 @@ struct EditorCommands
     // A content-relative path to copy beside itself. How a material is made
     // from a material, and how anything else in the browser is copied.
     std::string duplicateContent;
-    // The name for a new material in the browser's current folder. A material is
-    // the one authored file somebody makes from nothing -- a mesh and a texture
-    // arrive from outside, a stamp and a scene are made from what is in the
-    // world -- so it is the one the browser has to be able to create.
-    std::string createMaterial;
+    // A new stamp in the browser's current folder: WHICH class, and what to call
+    // it. One verb rather than one per class -- the browser asks the same
+    // question the Explorer's add-a-child menu asks, and gets its answer from
+    // the same picker.
+    scene::ClassId newStampClass = scene::InvalidClass;
+    std::string newStampName;
     std::string renameContent;
     std::string renameContentTo;
 
@@ -474,7 +481,7 @@ struct EditorCommands
                !openStamp.empty() || saveStamp || closeStamp || createClass != scene::InvalidClass || deleteSelection ||
                duplicateSelection || reparentTo.valid() || renameInstance.valid() || !saveAs.empty() ||
                !openScene.empty() || !createFolder.empty() || !deleteContent.empty() || !duplicateContent.empty() ||
-               !createMaterial.empty() || !renameContent.empty() || importAssets || importParent.valid() ||
+               newStampClass != scene::InvalidClass || !renameContent.empty() || importAssets || importParent.valid() ||
                openScript.valid();
     }
 };
@@ -964,21 +971,22 @@ public:
     // something inside what a system made, and **a subtree that already
     // contains a stamped instance**, which ADR 0049 declines to answer for
     // rather than half-answering.
-    // Makes a `Material` in the world and stamps it into the content browser in
-    // one step, returning the stamp's content-relative path or empty.
+    // Makes a default instance of `classId` in the world and stamps it into the
+    // content browser in one step, returning the stamp's content-relative path
+    // or empty.
     //
-    // **Both, because a material is both.** It is an instance -- you select it,
-    // you edit its fields in the Properties panel, you point parts at it -- and
-    // what a project keeps for reuse is a stamp of one. Making only the file
-    // would leave nothing to edit; making only the instance would leave nothing
-    // to reuse. So this does what converting does, one step earlier: it writes
-    // the file and the instance becomes an instance OF that file.
+    // **Both, because that is what a new stamp IS.** A stamp is a file of an
+    // instance: making only the file would leave nothing to edit, and making
+    // only the instance would leave nothing to reuse. So this does what
+    // converting does, one step earlier -- it writes the file, and the instance
+    // becomes an instance OF that file.
     //
-    // The material it makes is the default block -- white, dielectric, no maps
-    // -- which is the identity: a part pointed at it looks exactly as it did
-    // with none. That is the right starting point, because the first thing
-    // anybody does is change one field and expect to see one change.
-    [[nodiscard]] std::string createMaterial(scene::World& world, core::InstanceId root, std::string_view name);
+    // What it makes is the class's own defaults, which for a `Material` is the
+    // identity -- white, dielectric, no maps, so a part pointed at it looks
+    // exactly as it did with none. That is the right starting point for any of
+    // them: change one field, see one change.
+    [[nodiscard]] std::string createStampOfClass(scene::World& world, core::InstanceId root, scene::ClassId classId,
+                                                 std::string_view name);
 
     bool createStamp(scene::World& world, core::InstanceId id, core::InstanceId root, std::string_view name);
 
