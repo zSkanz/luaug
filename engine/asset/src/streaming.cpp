@@ -131,9 +131,35 @@ void StreamingManager::tick(const StreamingBudget& budget)
     // in one direction whichever way it is set: a mountain and a pebble cannot
     // share a distance. A cell is wanted when ANY focus wants it, which is the
     // same union the score already takes.
+    // **A world with no focus at all is a world that does not stream** (S8.2).
+    //
+    // "No focus" is not "a focus that wants nothing": a project that streams
+    // always registers one, so a project that has none has said it does not.
+    // Treating that as "nothing is wanted" made every scene-based project
+    // materialise an EMPTY world unless it happened to know the word
+    // `StreamingMode = "Persistent"` -- which the starter template had to say,
+    // about a fifteen-part scene, in order to appear at all. A one-word
+    // incantation standing between somebody and their first frame is the worst
+    // shape a default can have, because nothing on screen says what is missing.
+    //
+    // The cost is a project that registers its focus LATE: it loads everything
+    // on the frames before it does, then evicts. That is a real cost paid by a
+    // rare pattern, and it is strictly better than a world nobody can see.
+    const bool everythingWanted = m_foci.empty();
+
     for (usize i = 0; i < m_entries.size(); ++i) {
         const ChunkIndexEntry& indexEntry = m_index.chunks[i];
         Entry& entry = m_entries[i];
+
+        if (everythingWanted) {
+            // Scored as though they were all equally near, which they are: with
+            // no focus there is nothing to be near TO, and the loader's order
+            // then falls back to the index's, which is a property of the
+            // operation sequence (R10) rather than of an address.
+            entry.score = 0.0;
+            entry.wanted = true;
+            continue;
+        }
 
         f64 best = std::numeric_limits<f64>::infinity();
         bool inside = false;

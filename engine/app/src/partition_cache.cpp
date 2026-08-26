@@ -145,7 +145,7 @@ PartitionOutcome partitionProject(scene::World& registries, const std::filesyste
         std::string indexText;
         if (platform::readTextFile(indexPath, indexText)) {
             if (!asset::readChunkIndex(indexText, outcome.index).has_value()) {
-                outcome.active = !outcome.index.chunks.empty();
+                outcome.active = outcome.index.chunks.size() >= MinimumStreamedCells;
                 // A partition that produced no cells leaves the ORIGINAL scene
                 // to boot. The residual is byte-identical to it in that case,
                 // and pointing at a copy of a file would be a dependency on the
@@ -238,7 +238,7 @@ PartitionOutcome partitionProject(scene::World& registries, const std::filesyste
 
     pruneSiblings(root, directory);
 
-    outcome.active = !outcome.index.chunks.empty();
+    outcome.active = outcome.index.chunks.size() >= MinimumStreamedCells;
     if (outcome.active) {
         outcome.scenePath = directory / std::filesystem::path(kScene);
         const core::I18nArg args[] = {{"cells", static_cast<core::i64>(outcome.report.cells)},

@@ -496,3 +496,50 @@ TEST_CASE("a layer with no radius of its own follows the focus's own pair")
     harness.settle(budget);
     CHECK(harness.manager.stats().resident > 0);
 }
+
+// --- A world with no focus (S8.2) --------------------------------------------
+
+TEST_CASE("a world nobody is looking at loads everything, because it does not stream")
+{
+    // **"No focus" is not "a focus that wants nothing".** A project that streams
+    // always registers one, so a project that has none has said it does not.
+    // Treating that as "nothing is wanted" made every scene-based project
+    // materialise an EMPTY world unless it knew the word
+    // `StreamingMode = "Persistent"` -- which the starter template had to say,
+    // about a fifteen-part scene, in order to appear at all. A one-word
+    // incantation between somebody and their first frame is the worst shape a
+    // default can have, because nothing on screen says what is missing.
+    seedRealCatalog();
+    Harness harness(gridIndex(1));
+    harness.manager.setFoci({});
+
+    StreamingBudget budget;
+    budget.milliseconds = 1000.0;
+    harness.settle(budget);
+
+    CHECK(harness.manager.stats().resident == 9);
+}
+
+TEST_CASE("registering a focus takes the rule back off")
+{
+    // The cost of the rule, paid where it belongs: a project that registers its
+    // focus late loads everything on the frames before it does, then evicts.
+    // What must NOT happen is the everything-wanted state surviving a focus.
+    seedRealCatalog();
+    Harness harness(gridIndex(2));
+    harness.manager.setFoci({});
+
+    StreamingBudget budget;
+    budget.milliseconds = 1000.0;
+    harness.settle(budget);
+    REQUIRE(harness.manager.stats().resident == 25);
+
+    const StreamingFocus foci[] = {focusAt(CellCentre, 1.0, 1.0)};
+    harness.manager.setFoci(foci);
+    harness.settle(budget);
+
+    // Everything outside the one cell is out of range now, so the eviction pass
+    // takes it -- which is the proof the rule is off rather than merely unused.
+    CHECK(harness.manager.stats().resident < 25);
+    CHECK(harness.manager.stateOf(ChunkId{0, 0, 0}) == ChunkState::Resident);
+}

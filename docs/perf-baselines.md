@@ -123,11 +123,27 @@ of them, all touching, is 0.94 ms of a 16.7 ms frame. Only `crowd50` is
 committed as a gate; the other three points were measured outside the repository
 so that CI pays for one scene rather than four.
 
+**Where a budget in this table actually lives, because the answer is not
+"CI".** Every one of them is the `budgetMs` in that scene's own
+`tests/bench/<name>/scenario.json`, and the thing that enforces it is the
+`perf_budget` CTest -- which runs in the LOCAL gate, on the machine these
+numbers were measured on, and in CI as one of the same suite. A row that said
+"the CI threshold" was describing a place rather than a mechanism, and it was
+describing the wrong place: nothing in `.github/workflows` knows what a bench
+scene costs.
+
+**And the budgets are catastrophe detectors, not regression detectors.**
+`bench.h` says so and this table is the reason it can: a runner's speed varies
+by more than any regression worth catching, so the gate fails on something being
+broken and the numbers below are where a change of a millisecond is noticed by a
+person reading a diff. That is why `churn10k`'s budget is 32 ms against a
+measured 7 -- more than four times the headroom, deliberately.
+
 | Milestone | Scene | Preset | Metric | Value | Budget/Gate |
 |---|---|---|---|---|---|
 | M2 | `tests/bench/instances500` (500 parts in 10 models, one CFrame write each per tick) | `win-msvc-dev` | mean sim tick | **0.134 ms** | 4 ms — the roadmap's "500-instance scene ticks under budget" |
 | M2 | `tests/bench/instances500` | `win-msvc-dev` | worst sim tick | 0.357 ms | — |
-| M2 | `tests/bench/churn10k` (10,000 parts, 1,000 listeners, two thirds moving) | `win-msvc-dev` | mean sim tick | **2.02 ms** | 16 ms — the property-churn CI threshold |
+| M2 | `tests/bench/churn10k` (10,000 parts, 1,000 listeners, two thirds moving) | `win-msvc-dev` | mean sim tick | **2.02 ms** | 32 ms — `churn10k`'s own `budgetMs`, checked by the `perf_budget` test |
 | M2 | `tests/bench/churn10k` | `win-msvc-dev` | worst sim tick | 2.95 ms | — |
 | M3 | `tests/hotreload` one-script project | `win-msvc-dev` | reload span | **0.9 ms** | 500 ms — ADR 0024's hard requirement |
 | M3 | `tests/hotreload` 500-instance project (5 models × 100 parts, all moving) | `win-msvc-dev` | reload span, worst of 3 | **1.6 ms** | 500 ms |
@@ -162,7 +178,7 @@ to a file and taxes every configuration to enable.
 | M5 | `tests/bench/physics1k` | `win-msvc-dev` | physics: apply / step / writeback | 0.024 / 1.78 / 0.214 ms | — |
 | M5 | `tests/bench/instances500` (500 parts, one CFrame write each per tick, now also 500 static bodies) | `win-msvc-dev` | mean sim tick | **0.62 ms** | 4 ms |
 | M5 | `tests/bench/instances500` | `win-msvc-dev` | physics: apply / step / writeback | 0.081 / 0.313 / 0.078 ms | — |
-| M5 | `tests/bench/churn10k` (10,000 anchored parts, 1,000 listeners, two thirds moving) | `win-msvc-dev` | mean sim tick | **4.96 ms** | 16 ms |
+| M5 | `tests/bench/churn10k` (10,000 anchored parts, 1,000 listeners, two thirds moving) | `win-msvc-dev` | mean sim tick | **4.96 ms** | 32 ms |
 | M5 | `tests/bench/churn10k` | `win-msvc-dev` | worst sim tick | 9.13 ms | — |
 | M5 | `tests/bench/churn10k` | `win-msvc-dev` | physics: apply / step / writeback | 1.60 / 1.23 / 0.026 ms | — |
 | M5 | `tests/bench/crowd50` (50 `CharacterBody` shoulder to shoulder, all walking into a wall, so the crowd stays a crowd) | `win-msvc-dev` | mean sim tick | **0.22 ms** | 16 ms |
@@ -174,7 +190,7 @@ to a file and taxes every configuration to enable.
 | **M6** | `tests/bench/platforms200` (200 platforms written every tick, 200 written every 15th so each transitions both ways 20 times, 600 anchored parts nobody writes) | `win-msvc-dev` | mean sim tick | **0.60 ms** | 16 ms |
 | M6 | `tests/bench/platforms200` | `win-msvc-dev` | worst sim tick | 2.8 ms | — |
 | M6 | `tests/bench/platforms200` | `win-msvc-dev` | physics: apply / step / writeback | 0.14 / 0.29 / 0.08 ms | — |
-| M6 | `tests/bench/churn10k` **after D031** (the same scene: two thirds of its anchored parts are written every tick, so two thirds of them are now KINEMATIC) | `win-msvc-dev` | mean sim tick | **7.32 ms** | 16 ms |
+| M6 | `tests/bench/churn10k` **after D031** (the same scene: two thirds of its anchored parts are written every tick, so two thirds of them are now KINEMATIC) | `win-msvc-dev` | mean sim tick | **7.32 ms** | 32 ms |
 | M6 | `tests/bench/churn10k` | `win-msvc-dev` | physics: apply / step / writeback | 0.43 / 3.89 / 0.78 ms | — |
 | M6 | `tests/bench/churn10k` | GitHub `windows-latest` | mean sim tick | 19.6 ms | the runner is 2.7x this machine, which is why the budget is a detector and this file is the instrument |
 | M6 | `examples/04-obby` (the deliverable: the course, two tweened platforms, a skinned rig, a `ScreenGui` with a list layout, five sounds) | `win-msvc-dev` | median frame, 1080p | **0.53 ms** | 16.7 ms — a 60 fps frame |
@@ -188,7 +204,7 @@ to a file and taxes every configuration to enable.
 | E9 | `tests/bench/ragdoll10` | `win-msvc-dev` | worst sim tick | 0.75 ms | — |
 | E9 | `tests/bench/ragdoll10` | `win-msvc-dev` | physics: apply / step / writeback | 0.012 / 0.262 / 0.034 ms | — |
 | E9 | `tests/bench/physics1k` **after the constraint family** (the same scene, unchanged) | `win-msvc-dev` | mean sim tick | **2.00 ms** | 16 ms — unchanged from M5's 2.02, which is the claim |
-| E9 | `tests/bench/churn10k` **after the constraint family** (the same scene, unchanged) | `win-msvc-dev` | mean sim tick | **6.98 ms** | 16 ms — 7.32 at M6, so the three new per-tick passes cost a scene with no joints in it nothing |
+| E9 | `tests/bench/churn10k` **after the constraint family** (the same scene, unchanged) | `win-msvc-dev` | mean sim tick | **6.98 ms** | 32 ms — 7.32 at M6, so the three new per-tick passes cost a scene with no joints in it nothing |
 
 **A ragdoll is cheaper than two hundred sockets, and the ratio is the point.**
 `sockets200` is 400 bodies in 200 two-body islands and costs 0.58 ms of solver;

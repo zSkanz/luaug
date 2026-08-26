@@ -514,13 +514,36 @@ that sends the next session to the wrong place.
 ### S8 — Small debt, then the release
 
 - [ ] **S8.1** `../PROGRESS.md` archiving, now that one writer makes it safe.
-- [ ] **S8.2** The starter template's unnecessary incantation.
-- [ ] **S8.3** `localgate.ps1` and `shipping-build.sh` disagree about how many
-      profiles ship.
+- [x] **S8.2** The starter template's unnecessary incantation — gone, and the
+      fix was not where the item pointed. `StreamingMode = "Persistent"` was
+      CORRECT usage: a partitioned record carries no parent path, by design,
+      because a path into `Workspace` is sometimes nil in a world that is not
+      all present (ADR 0053, rule 5). What was wrong is that a fifteen-part
+      project was partitioned at all. Streaming now needs a scene to reach four
+      cells before it is worth anything: below that the whole grid is inside
+      any sensible load radius, so nothing is ever evicted and the only thing
+      the partition buys is the tree-identity trap. The starter boots whole.
+      **Two engine changes came out of chasing it**: the floor, and the rule
+      that a world with no focus registered wants everything — "no focus" is
+      not "a focus that wants nothing", and a world nobody can see with nothing
+      on screen saying why is the worst shape a default has.
+- [x] **S8.3** `localgate.ps1` and `shipping-build.sh` disagree about how many
+      profiles ship — corrected. The gate builds THREE (`shipping`, `player`,
+      `editor`) and `shipping-build.sh`'s own header has said so since `editor`
+      was added; `localgate.ps1`'s comment and its error message both still
+      said two. A stage that names fewer profiles than it builds sends somebody
+      looking in two places when the fault is in a third.
 - [ ] **S8.4** A checked-in golden nothing reads.
 - [ ] **S8.5** D131's residual, D047, D044, D003's rotational half.
-- [ ] **S8.8** `perf-baselines.md` states the wrong `churn10k` budget in three
-      rows and misdescribes where thresholds are enforced — see above.
+- [x] **S8.8** `perf-baselines.md` states the wrong `churn10k` budget and
+      misdescribes where thresholds are enforced — corrected. `churn10k`'s
+      budget is 32 ms, not 16, and it was wrong in FOUR rows rather than three
+      (E9 added one). Every other scene's row already matched its own
+      `scenario.json`. The file now says where a budget actually lives — the
+      scene's own `budgetMs`, enforced by the `perf_budget` CTest — rather than
+      calling it "the CI threshold", which named a place instead of a
+      mechanism, and named the wrong place: nothing in `.github/workflows`
+      knows what a bench scene costs.
 - [ ] **S8.6** The release: where the editor archive attaches, and what version
       it carries.
 - [ ] **S8.7** Hand back to the owner with one act left: make it public.

@@ -88,13 +88,18 @@ TEST_CASE("a scene partitions once and then answers from the cache")
 {
     seedRealCatalog();
     Project project("cache");
-    project.write(sceneOf(partNode("A", 10.0) + "," + partNode("B", 400.0)));
+    // **Four parts, four cells**, because that is the floor a scene has to reach
+    // before streaming it is worth anything (S8.2). Two would partition
+    // perfectly well and then be refused, which is a different case and is the
+    // one below this.
+    project.write(sceneOf(partNode("A", 10.0) + "," + partNode("B", 400.0) + "," + partNode("C", 800.0) + "," +
+                          partNode("D", 1200.0)));
 
     const app::PartitionOutcome first = project.run();
     CHECK(first.repartitioned);
     CHECK(first.active);
-    CHECK(first.index.chunks.size() == 2);
-    CHECK(first.report.records == 2);
+    CHECK(first.index.chunks.size() == 4);
+    CHECK(first.report.records == 4);
 
     // The second press of play. Asserted on the boolean rather than on a clock:
     // a wall-clock comparison is a test that fails when the machine is busy.
@@ -168,4 +173,52 @@ TEST_CASE("a scene that streams nothing leaves the original scene to boot")
     // No residual to point at: the scene is unchanged, and a copy of it in the
     // cache would be a dependency a project with no cells has no use for.
     CHECK(outcome.scenePath.empty());
+}
+
+// --- The floor a scene has to reach (S8.2) -----------------------------------
+
+TEST_CASE("a scene too small to be worth streaming is not streamed")
+{
+    // **Below the floor the partition costs and buys nothing.** Streaming exists
+    // to keep a world out of memory until you are near it; a scene that fits in
+    // two cells is entirely inside any sensible load radius, so nothing is ever
+    // evicted and the whole thing is resident from the first pump either way.
+    //
+    // What it DOES cost is tree identity. A partitioned record carries no parent
+    // path -- by design, because a path into `Workspace` is sometimes nil in a
+    // world that is not all present (ADR 0053, rule 5) -- so a small project
+    // that got partitioned found its authored `Model` empty and its parts
+    // somewhere else. The only way out was knowing the words
+    // `StreamingMode = "Persistent"`, which the starter template had to say
+    // about fifteen parts in order to appear at all.
+    seedRealCatalog();
+    Project project("small");
+    project.write(sceneOf(partNode("A", 10.0) + "," + partNode("B", 400.0)));
+
+    const app::PartitionOutcome outcome = project.run();
+    CHECK_FALSE(outcome.active);
+    // **The ORIGINAL scene boots**, which is what `active` being false means:
+    // a residual scene path here would point at a copy of the file for a project
+    // that has no use for one.
+    CHECK(outcome.scenePath.empty());
+}
+
+TEST_CASE("the floor is about cells and not about parts")
+{
+    // Forty parts in one room is a room. What decides whether streaming helps is
+    // how far apart things are, not how many there are -- and a floor counting
+    // parts would stream a dense room and not stream a sparse continent.
+    seedRealCatalog();
+    Project project("dense");
+    std::string parts;
+    for (int index = 0; index < 40; ++index) {
+        if (index > 0)
+            parts += ",";
+        parts += partNode("P" + std::to_string(index), 1.0 + static_cast<double>(index));
+    }
+    project.write(sceneOf(parts));
+
+    const app::PartitionOutcome outcome = project.run();
+    CHECK(outcome.report.records == 40);
+    CHECK_FALSE(outcome.active);
 }

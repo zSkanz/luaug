@@ -34,12 +34,6 @@ end
 
 -- Authored in the scene, found here. `WaitForChild` rather than `FindFirstChild`
 -- because a script should say what it needs rather than check whether it got it.
---
--- `Level` is a `Model` with `StreamingMode = "Persistent"`, which keeps it out of
--- the streaming grid entirely (ADR 0053). A world this size has no business
--- streaming, and a partitioned world only materialises around a focus somebody
--- registers -- so without that word these two parts would be in cells nothing
--- ever loads, and this line would wait forever.
 local level = workspace:WaitForChild("Level") :: Model
 local spinner = level:WaitForChild("Spinner") :: Part
 

@@ -363,12 +363,17 @@ Invoke-Stage 'asan' {
 # warnings-as-errors is the stricter reader of the `#if`s that only this profile
 # takes.
 #
-# **It builds two profiles, not one** (D057): `shipping` and `player`, which are
-# the two nothing else here compiles. `player` is what `luaug build` packages --
-# the Luau compiler ON and the debug overlay OFF, a combination no other profile
-# has -- so without this it would be a shipped artifact no gate ever built,
-# which is the objection that ruled out shipping the `shipping` profile in the
-# first place.
+# **It builds three profiles, not one** (D057, and `editor` since): `shipping`,
+# `player` and `editor` -- the three nothing else here compiles. `player` is
+# what `luaug build` packages, the Luau compiler ON and the debug overlay OFF,
+# a combination no other profile has; `editor` is the reverse pairing and is
+# what a released editor archive is built from. Without this each would be a
+# shipped artifact no gate ever built, which is the objection that ruled out
+# shipping the `shipping` profile in the first place.
+#
+# This comment said TWO until 2026-08-26, and so did the error message below --
+# a stage that names fewer profiles than it builds is one whose failure sends
+# somebody looking in two places when the fault is in a third (S8.3).
 #
 # Cost: `luaug_host` alone from each, compiled and linked, and not the tree
 # around them. The reasoning is in the script, and the short version is that
@@ -385,15 +390,14 @@ Invoke-Stage 'shipping' {
     $existing = docker ps -aq --filter 'name=^luaug-shipping-gate$'
     if ($existing) { docker rm -f luaug-shipping-gate | Out-Null }
 
-    # The same named volume the Linux stage uses: the two presets write to
-    # different subdirectories of it, so the vendored fetches and the ccache-less
-    # object trees both survive between runs and neither stage disturbs the
-    # other.
+    # The same named volume the Linux stage uses: each preset writes to its own
+    # subdirectory of it, so the vendored fetches and the ccache-less object
+    # trees all survive between runs and no stage disturbs another.
     docker run --name luaug-shipping-gate `
         -v "${repo}:/repo" `
         -v "luaug-tier2-build:/build" `
         luaug-tier2:latest bash scripts/gates/shipping-build.sh
-    if ($LASTEXITCODE -ne 0) { throw "the shipping or player profile failed to build" }
+    if ($LASTEXITCODE -ne 0) { throw "the shipping, player or editor profile failed to build" }
 }
 
 Pop-Location

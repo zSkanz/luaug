@@ -32,9 +32,6 @@
    {
     "class": "Model",
     "name": "Level",
-    "properties": {
-     "StreamingMode": "Persistent"
-    },
     "children": [
      {
       "class": "Part",

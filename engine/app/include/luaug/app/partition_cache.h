@@ -28,6 +28,26 @@ class World;
 
 namespace luaug::app {
 
+// How many cells a scene has to fall into before it is worth streaming (S8.2).
+//
+// **Below this the partition costs and buys nothing.** Streaming exists to keep
+// a world out of memory until you are near it; a scene that fits in three cells
+// is entirely inside any sensible load radius, so nothing is ever evicted and
+// the whole thing is resident from the first pump either way.
+//
+// What it DOES cost is tree identity. A partitioned record carries no parent
+// path -- by design, because a path into `Workspace` is sometimes nil in a world
+// that is not all present, which is why ADR 0053's rule 5 makes tags the way to
+// address streamed content. So a small project that got partitioned found its
+// authored `Model` empty and its parts somewhere else, and the only way out was
+// to know the words `StreamingMode = "Persistent"`. The starter template said
+// them, about fifteen parts, in order to appear at all.
+//
+// Four rather than two, so a scene straddling a cell boundary is not streamed by
+// accident: a single room centred on a corner lands in four cells and is still a
+// single room.
+inline constexpr core::usize MinimumStreamedCells = 4;
+
 struct PartitionOutcome
 {
     // False when the project has no scene, the scene could not be read, or the
