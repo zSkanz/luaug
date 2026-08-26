@@ -250,12 +250,34 @@ that sends the next session to the wrong place.
       source order. **20.2 s to 8.1 s** on five textures, and the determinism
       gate builds a third, serial leg so the claim is checked rather than
       asserted. `assetc = 7` in the layer table, which was also owed.
-- [ ] **S4.4** Step 9's unbuilt half — the skeleton overlay and the joint
-      picker, so `JointName` stops being free text typed from memory.
+- [x] **S4.4** Step 9's unbuilt half — built. `View > Skeletons` draws every
+      skinned mesh's rig through the same `DebugDraw` the physics wireframe
+      uses, and `Bone.JointName` has a filtered, depth-indented picker off the
+      rig above it. Lines rather than instances, which is assumption 2 made
+      visible: 677 joints would be 677 Explorer rows and 677 contributions to
+      the world hash bought for a picture. Four cases drive the drawing over an
+      invented rig; the one that measures a bone's endpoints for a part ten
+      metres out and turned a quarter turn fails when the composition is
+      dropped.
 - [ ] **S4.5** Step 14 — the cut-over. Last, because it is the only
       irreversible one.
-- [ ] **S4.6** Step 15 — benches, baselines, decision records, roadmap.
-- [ ] **S4.7** E9's declared verification, none of which exists.
+- [~] **S4.6** Step 15 — **benches and baselines done**, decision records and
+      the roadmap left. `tests/bench/ragdoll10` is built and
+      `docs/perf-baselines.md` carries an E9 block: `sockets200`, `ragdoll10`,
+      and `physics1k`/`churn10k` re-measured to show the constraint family's
+      three new per-tick passes cost a jointless scene nothing (2.00 against
+      M5's 2.02; 6.98 against M6's 7.32).
+- [~] **S4.7** E9's declared verification — **four of six built**.
+      `tests/determinism/ragdoll` (four bodies, sixty joints, three thousand
+      ticks, reproduced) and `tests/bench/ragdoll10` are in; so is
+      `physics/ragdoll.spec.luau`, and so is decision 6's own
+      `Ragdoll:Build`/`Blend` with eleven C++ cases over an invented rig.
+      **Both new scenes earned their keep on the first run**: the determinism
+      one found D145's dangling pool pointer, and the bench found the joint
+      frame the builder was giving a swing-twist — a cone measured across the
+      bone instead of along it, so every shoulder started outside its own limit
+      and the character launched. What is left is `import_matches_build` and
+      the rendercapture leg, both of which belong to step 14.
 - [ ] **S4.8** E5's unfinished half.
 
 ### S5 — The editor's declared verbs

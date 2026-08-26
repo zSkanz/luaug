@@ -15,6 +15,7 @@
 #include "luaug/scene/skeleton_host.h"
 #include "luaug/scene/world.h"
 
+#include <cmath>
 #include <doctest/doctest.h>
 #include <string>
 #include <string_view>
@@ -239,6 +240,51 @@ TEST_CASE("a joint is created per limb below the root, and it never lets the pai
     const core::DVec3 at1 = (driven->cframe * end1->cframe).position;
     CHECK(at0.y == doctest::Approx(1.0).epsilon(0.001));
     CHECK(at1.y == doctest::Approx(at0.y).epsilon(0.001));
+}
+
+TEST_CASE("a socket's axis runs down the bone and a hinge's runs across it")
+{
+    // **The two kinds want opposite frames, and getting it wrong is invisible
+    // here and catastrophic three seconds into a simulation.** A swing-twist
+    // measures its cone from the joint frame's own X and twists about it, so a
+    // shoulder's has to run down the bone; a hinge TURNS about it, and an elbow
+    // turns across the bone.
+    //
+    // The builder gave both the same frame at first. Every ball socket then
+    // started thirty degrees outside a sixty-degree cone, sixty joints pushed at
+    // once to fix it, and the character launched -- found by
+    // `tests/determinism/ragdoll`, because what it took was a scene that
+    // simulates. This is the unit case that would have found it first.
+    Character character;
+    RagdollProfile profile;
+    profile.limbs.push_back(RagdollLimb{{"Hips"}, -1});
+    // 1 is a ball socket, 2 a hinge -- `physics::ConstraintType`'s values.
+    profile.limbs.push_back(RagdollLimb{{"Chest"}, 0, 0.08f, 0.18f, 1});
+    profile.limbs.push_back(RagdollLimb{{"Head"}, 1, 0.08f, 0.18f, 2});
+    REQUIRE_FALSE(buildRagdoll(character.fixture.world, character.rig, character.ragdoll, profile,
+                               fixtureClasses(character.fixture.schema))
+                      .error.has_value());
+
+    // The rig runs straight up, so every bone's direction is world +Y.
+    const auto axisOf = [&](std::string_view limb) {
+        const core::InstanceId part = childNamed(character.fixture.world, character.ragdoll, limb);
+        REQUIRE(part.valid());
+        const core::InstanceId joint = childNamed(character.fixture.world, part, "Joint");
+        REQUIRE(joint.valid());
+        const ConstraintComponent* constraint = character.fixture.world.constraints().find(joint);
+        REQUIRE(constraint != nullptr);
+        const PartComponent* host = character.fixture.world.parts().find(part);
+        const AttachmentComponent* end = character.fixture.world.attachments().find(constraint->attachment1);
+        REQUIRE(host != nullptr);
+        REQUIRE(end != nullptr);
+        return (host->cframe * end->cframe).rotation * core::Vec3{1.0f, 0.0f, 0.0f};
+    };
+
+    const core::Vec3 socket = axisOf("Chest");
+    CHECK(std::abs(socket.y) == doctest::Approx(1.0).epsilon(0.001));
+
+    const core::Vec3 hinge = axisOf("Head");
+    CHECK(std::abs(hinge.y) == doctest::Approx(0.0).epsilon(0.001));
 }
 
 TEST_CASE("a limb the rig has no joint for is skipped, and its children hang from what is left")
