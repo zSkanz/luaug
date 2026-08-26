@@ -395,7 +395,32 @@ jobs:
           call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
           cmake --preset ${{ matrix.preset }} -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded || exit /b 1
           cmake --build --preset ${{ matrix.preset }} || exit /b 1
-          ctest --preset ${{ matrix.preset }} -LE gpu-golden || exit /b 1
+          ctest --preset ${{ matrix.preset }} -LE gpu-golden > ctest.log 2>&1 || (type ctest.log & exit /b 1)
+          type ctest.log
+
+      # **What a runner is allowed to skip, named** (S7.2). CTest counts a skip
+      # as a pass, so six gates that need a graphics device or a display have
+      # reported green on every push without executing: `editor_seam` and
+      # `editor_shell` open a window, and the four differentials render two
+      # frames and compare them. Nothing said so, in the summary or anywhere
+      # else, which is the whole complaint -- the local gate has failed on an
+      # unexpected skip since S7.3 and this half was owed.
+      #
+      # The list is a CEILING and not a prediction: a runner that HAS a device
+      # runs them and passes, and needs no edit here. What fails is anything
+      # ELSE skipping, which is the regression worth catching -- a test that
+      # quietly stops finding its fixture skips exactly like a test that cannot
+      # find a GPU, and until now both were green.
+      #
+      # The three `screenshot_gate*` are absent because `-LE gpu-golden`
+      # excludes them outright rather than skipping them: a pixel golden is tied
+      # to the GPU that recorded it, which architecture.md §9 says is why the
+      # capture gate and not the image comparison is the blocking render gate.
+      - name: No test skipped that was not expected to (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          scripts/gates/assert-no-skips.sh ctest.log             editor_seam editor_shell chunk_grid_differential             graphics_settings_differential local_shadow_differential             example_ragdoll_builds
 
       - name: Configure, build and test (Linux)
         if: runner.os == 'Linux'
@@ -406,7 +431,38 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=sccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           cmake --build --preset ${{ matrix.preset }}
-          ctest --preset ${{ matrix.preset }} -LE gpu-golden
+          # `tee` so the step still shows the run, and PIPESTATUS so a red ctest
+          # is still a red step: a pipeline reports the LAST command's status,
+          # which here is always `tee` succeeding.
+          set +e
+          ctest --preset ${{ matrix.preset }} -LE gpu-golden 2>&1 | tee ctest.log
+          status=${PIPESTATUS[0]}
+          set -e
+          exit "$status"
+
+      # **What a runner is allowed to skip, named** (S7.2). CTest counts a skip
+      # as a pass, so six gates that need a graphics device or a display have
+      # reported green on every push without executing: `editor_seam` and
+      # `editor_shell` open a window, and the four differentials render two
+      # frames and compare them. Nothing said so, in the summary or anywhere
+      # else, which is the whole complaint -- the local gate has failed on an
+      # unexpected skip since S7.3 and this half was owed.
+      #
+      # The list is a CEILING and not a prediction: a runner that HAS a device
+      # runs them and passes, and needs no edit here. What fails is anything
+      # ELSE skipping, which is the regression worth catching -- a test that
+      # quietly stops finding its fixture skips exactly like a test that cannot
+      # find a GPU, and until now both were green.
+      #
+      # The three `screenshot_gate*` are absent because `-LE gpu-golden`
+      # excludes them outright rather than skipping them: a pixel golden is tied
+      # to the GPU that recorded it, which architecture.md §9 says is why the
+      # capture gate and not the image comparison is the blocking render gate.
+      - name: No test skipped that was not expected to (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          scripts/gates/assert-no-skips.sh ctest.log             editor_seam editor_shell chunk_grid_differential             graphics_settings_differential local_shadow_differential             example_ragdoll_builds
 
       # The M3 gate wants two things green "on both tiers" that ctest cannot
       # give: `luaug test`, which is the CLI's own path to the same suite, and

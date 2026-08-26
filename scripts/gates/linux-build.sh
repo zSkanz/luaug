@@ -55,7 +55,25 @@ echo "== test =="
 # number and tears the server down afterwards; tests that ask for a headless
 # platform still get one, because that is a parameter they pass rather than
 # something they infer from the environment.
-xvfb-run -a ctest --preset "$preset" --output-on-failure --label-exclude gpu-golden
+#
+# **Skips are asserted here too, and were not.** `localgate.ps1` fails on a
+# skipped test and names it -- on the WINDOWS stage only, which is how
+# `editor_shell` came to report Skipped on this tier inside a run that printed
+# `ok linux`. The check belongs beside the ctest it is about, and in this file
+# rather than in the PowerShell so that every caller of this gate gets it.
+#
+# Nothing is allowed to skip here: this tier has a device through lavapipe and a
+# screen through Xvfb, so a skip means one of those stopped being found.
+ctestLog="$(mktemp)"
+trap 'rm -f "$ctestLog"' EXIT
+set +e
+xvfb-run -a ctest --preset "$preset" --output-on-failure --no-tests=error     --label-exclude gpu-golden 2>&1 | tee "$ctestLog"
+ctestStatus=${PIPESTATUS[0]}
+set -e
+if [ "$ctestStatus" -ne 0 ]; then
+    exit "$ctestStatus"
+fi
+bash "$(dirname "$0")/assert-no-skips.sh" "$ctestLog"
 
 # The CLI's own path to the same suite, which the M3 gate requires green "on
 # both tiers". It runs the engine the build above produced -- LUAUG_BUILD_ROOT

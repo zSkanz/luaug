@@ -528,7 +528,33 @@ that sends the next session to the wrong place.
 ### S7 — The gates prove what they claim
 
 - [ ] **S7.1** macOS runs tests.
-- [ ] **S7.2** The two gates that skip on every CI push.
+- [x] **S7.2** Six, not two, and the Linux stage was as blind as CI. CTest
+      counts a skip as a pass, so `editor_seam`, `editor_shell` and the four
+      differentials have reported green on every push without executing —
+      they want a graphics device or a display and a hosted runner has neither.
+      S7.3 made `localgate.ps1` fail on an unexpected skip; it turned out to do
+      that on the **Windows stage only**, which is how `editor_shell` came to
+      print `***Skipped` inside a run that said `ok linux`.
+
+      `scripts/gates/assert-no-skips.sh` is the one implementation all three
+      callers share, which is where CLAUDE.md says gate logic goes. It takes a
+      ctest log and a list of names that are allowed to skip: **a ceiling, not a
+      prediction** — a runner that gains a device runs them, passes, and needs no
+      edit here, and what fails is anything ELSE skipping. That is the
+      regression worth catching, because a test that quietly stops finding its
+      fixture skips exactly like a test that cannot find a GPU, and until now
+      both were green.
+
+      `linux-build.sh` allows nothing at all: that tier has a device through
+      lavapipe and a screen through Xvfb, so a skip there means one of the two
+      stopped being found. `ci.yml` names the six on Windows and Linux, and says
+      why the three `screenshot_gate*` are absent — `-LE gpu-golden` excludes
+      those outright rather than skipping them.
+
+      Break-verified in both directions: with the shell's window hidden again the
+      Linux stage fails naming `editor_shell` while ctest prints "100% tests
+      passed", and the script's parsing is unit-checked over a log with a skip,
+      an allowed skip, a failure and a clean run.
 - [x] **S7.3** A skip that nothing asserts is a skip nobody notices — six of
       them. `localgate.ps1` now FAILS on a skipped test and names which,
       with `-AllowSkips` as the deliberate escape for a machine with no GPU.
