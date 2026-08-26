@@ -22,6 +22,7 @@
 #include "luaug/rhi/sdlgpu_interop.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/enum_registry.h"
+#include "luaug/scene/skeleton_host.h"
 #include "luaug/scene/value.h"
 #include "luaug/scene/world.h"
 
@@ -156,6 +157,16 @@ const rhi::IDevice* g_device = nullptr;
 // and pointed at from here for the same reason `g_device` is: the row that wants
 // one is drawn several call frames below anything holding an overlay.
 ThumbnailCache* g_thumbnails = nullptr;
+
+// The rig, for the one property that names a joint (`Bone.JointName`).
+//
+// Beside `g_thumbnails` and for the same reason it is there rather than in a
+// signature: the row that needs it is drawn five call frames below anything
+// holding a world host, and the alternative is threading a pointer through
+// `drawProperties`, `drawPropertyRow` and `drawPropertyEditor` so that one
+// branch of one switch can read it. Null is legal -- a build with no renderer
+// has no skeletons, and the field is then what it was before, a text box.
+const scene::SkeletonHost* g_skeleton = nullptr;
 
 // What this person chose to look at the engine through (ADR 0056), and what the
 // display said when the window opened.
@@ -1997,6 +2008,23 @@ void drawInstanceRef(scene::World& world, core::InstanceId root, Inspector& insp
     ImGui::EndPopup();
 }
 
+// The skinned mesh at or above `id`, or an invalid id.
+//
+// The same walk `PhysicsSync::rigAbove` does and for the same reason: a `Bone`
+// is parented to a `MeshPart` but may sit under an `Attachment` under another
+// `Bone`, so "which rig is this joint name against" is a question about
+// ancestry rather than about the parent. Duplicated rather than exposed because
+// the physics one answers with the pool it is mirroring and this one answers
+// with the pool the panel is looking at; the walk is four lines.
+[[nodiscard]] core::InstanceId rigAbove(const scene::World& world, core::InstanceId id)
+{
+    for (core::InstanceId walk = id; walk.valid(); walk = world.parentOf(walk)) {
+        if (g_skeleton != nullptr && g_skeleton->jointCount(walk) > 0)
+            return walk;
+    }
+    return {};
+}
+
 // `tree` is the content browser's, and null wherever there is none -- the F3
 // overlay over a running game has an inspector and no project. The `Content`
 // editor then keeps its text field and its drop target and offers an empty list,
@@ -2154,12 +2182,79 @@ void drawEditor(scene::World& world, core::InstanceId root, Inspector& inspector
         // one member's string. Pre-filling would make replacing forty names
         // with one look like a correction rather than an overwrite -- and
         // Enter on a field nobody edited would do it.
+        // **A joint name is a string the rig has to agree with**, and until
+        // this picker existed the only way to find out whether it did was to
+        // type a guess and watch `JointIndex` for a -1. A rig exported from
+        // Blender calls the same bone `mixamorig:LeftHand` or `hand.L` or
+        // `Bip01 L Hand` depending on who exported it, and nobody remembers
+        // which (E9 step 9).
+        //
+        // Keyed on the PROPERTY's name rather than on the class, which keeps
+        // this file's rule -- no switch on a class name -- and is narrower
+        // besides: `JointName` is the property this is about, and a second
+        // class declaring one would get the picker for free. There is no
+        // descriptor field to hang it off the way the audio button hangs off
+        // `ContentKind`, because a joint is not a file.
+        const bool namesJoint =
+            world.atoms().text(descriptor.name) == "JointName" && g_skeleton != nullptr && targets.size() == 1;
+        const core::InstanceId rig = namesJoint ? rigAbove(world, targets[0]) : core::InstanceId{};
+        const core::u32 jointCount = rig.valid() ? g_skeleton->jointCount(rig) : 0;
+
+        const float pickWidth = ImGui::GetFrameHeight();
+        const float inner = ImGui::GetStyle().ItemInnerSpacing.x;
+        if (jointCount > 0)
+            ImGui::SetNextItemWidth(-(pickWidth + inner));
+
         const bool entered =
             mixed ? ImGui::InputTextWithHint("##value", "mixed", buffer, sizeof(buffer),
                                              ImGuiInputTextFlags_EnterReturnsTrue)
                   : ImGui::InputText("##value", buffer, sizeof(buffer), ImGuiInputTextFlags_EnterReturnsTrue);
         if (entered)
             commit(scene::Value{std::string(buffer)});
+
+        if (jointCount > 0) {
+            ImGui::SameLine(0.0f, inner);
+            if (ImGui::Button("...", ImVec2(pickWidth, 0.0f)))
+                ImGui::OpenPopup("joint-pick");
+
+            if (ImGui::BeginPopup("joint-pick")) {
+                // **Filtered, because 677 is a real number.** The horse that
+                // opened this milestone has that many joints, and a flat list
+                // of them is a scroll bar rather than a picker.
+                static std::array<char, 64> filter{};
+                // Cleared on the frame the popup opens rather than every frame,
+                // which would overwrite what somebody is typing with what they
+                // started from. `dialogOpening()` says the same thing and is
+                // declared below this, for the modals.
+                if (ImGui::IsWindowAppearing())
+                    filter.fill(0);
+                ImGui::SetNextItemWidth(220.0f);
+                ImGui::InputTextWithHint("##joint-filter", "filter", filter.data(), filter.size());
+
+                ImGui::BeginChild("joint-list", ImVec2(220.0f, 260.0f));
+                const std::string_view needle(filter.data());
+                for (core::u32 joint = 0; joint < jointCount; ++joint) {
+                    const std::string_view name = g_skeleton->jointName(rig, joint);
+                    if (!needle.empty() && !containsFold(name, needle))
+                        continue;
+                    // Indented by depth, so the list reads as the tree it is --
+                    // which is what tells a hand from the forearm above it when
+                    // a rig has named neither of them well.
+                    core::u32 depth = 0;
+                    for (core::i32 walk = g_skeleton->jointParent(rig, joint); walk >= 0 && depth < 24;
+                         walk = g_skeleton->jointParent(rig, static_cast<core::u32>(walk))) {
+                        depth += 1;
+                    }
+                    const std::string label = std::string(depth * 2, ' ') + std::string(name);
+                    if (ImGui::Selectable(label.c_str(), name == std::string_view(buffer))) {
+                        commit(scene::Value{std::string(name)});
+                        ImGui::CloseCurrentPopup();
+                    }
+                }
+                ImGui::EndChild();
+                ImGui::EndPopup();
+            }
+        }
         break;
     }
     case EditorKind::Content: {
@@ -4170,6 +4265,11 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
             ImGui::SetTooltip("show what streaming materialised. It is not part of the scene: the save skips it and "
                               "nothing authored can live in it");
         }
+        ImGui::MenuItem("Skeletons", nullptr, &panels.showSkeletons);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("draw every skinned mesh's rig as lines, so a joint is something you can see before you "
+                              "name it in a Bone");
+        }
         ImGui::Separator();
         // Not "close everything": somebody who has lost a panel behind another
         // wants the arrangement back, not an empty window.
@@ -5786,6 +5886,11 @@ void DebugOverlay::setThumbnails(ThumbnailCache* thumbnails) noexcept
     g_thumbnails = thumbnails;
 }
 
+void DebugOverlay::setSkeleton(const scene::SkeletonHost* skeleton) noexcept
+{
+    g_skeleton = skeleton;
+}
+
 void DebugOverlay::handleEvents(std::span<const platform::Event> events)
 {
     if (!active_)
@@ -5944,6 +6049,9 @@ void DebugOverlay::handleEvents(std::span<const platform::Event>)
 // picture in. The frame loop still owns a cache and still offers it, which is
 // what keeps that loop free of an #ifdef.
 void DebugOverlay::setThumbnails(ThumbnailCache*) noexcept
+{}
+
+void DebugOverlay::setSkeleton(const scene::SkeletonHost*) noexcept
 {}
 
 void DebugOverlay::render(rhi::ICmdList&, rhi::TextureHandle, const Frame&)

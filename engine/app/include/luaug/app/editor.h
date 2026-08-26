@@ -312,6 +312,22 @@ struct EditorPanels
     // A switch rather than a rule, because "what did streaming actually
     // materialise" is a real question with no other way to ask it.
     bool showGenerated = false;
+
+    // **Whether the viewport draws the rig**, and it is off.
+    //
+    // A skeleton is the one thing in a scene with no visual at all: joints are
+    // a flat array inside a render-side library, and until this switch existed
+    // the only way to find out what a rig called its hand was to type a name
+    // into `Bone.JointName` and watch whether `JointIndex` stopped saying -1.
+    // Every editor that animates draws the armature -- and draws it as lines
+    // rather than as instances, because a 677-joint character is 677 rows in
+    // the Explorer, 677 entries in the change queue and 677 contributions to
+    // the world hash bought for a picture (E9 assumption 2).
+    //
+    // Off by default for the same reason the physics wireframe is: it is a line
+    // per joint for every skinned mesh in the world, which is a frame cost
+    // nobody should pay without asking.
+    bool showSkeletons = false;
 };
 
 // What the shell asked for this frame, drained by the frame loop at the safe

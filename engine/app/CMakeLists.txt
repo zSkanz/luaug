@@ -32,6 +32,7 @@ luaug_add_module(app
         src/launcher_run.cpp
         src/partition_cache.cpp
         src/picking.cpp
+        src/skeleton_overlay.cpp
         src/editor.cpp
         src/content_tree.cpp
         src/content_import.cpp
@@ -205,6 +206,7 @@ luaug_add_module_tests(app
         tests/inspector_tests.cpp
         tests/launcher_tests.cpp
         tests/picking_tests.cpp
+        tests/skeleton_overlay_tests.cpp
         tests/editor_tests.cpp
         tests/content_tree_tests.cpp
         tests/partition_cache_tests.cpp

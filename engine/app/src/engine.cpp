@@ -22,6 +22,7 @@
 #include "luaug/app/partition_cache.h"
 #include "luaug/app/reload.h"
 #include "luaug/app/screenshot.h"
+#include "luaug/app/skeleton_overlay.h"
 #include "luaug/app/soak.h"
 #include "luaug/app/streaming_host.h"
 #include "luaug/app/thumbnails.h"
@@ -2377,6 +2378,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             physics->backend().debugDraw(physics->worldHandle(), sink);
         }
 
+        // The rig, behind the View menu's `Skeletons` for the same reason: a
+        // line per joint for every skinned mesh in the world. Drawn after the
+        // ticks, because the pose it reads is the one this frame will show.
+        if (const render::AnimationSystem* animation = host->animation();
+            animation != nullptr && overlay.has_value() && overlay->panels().showSkeletons) {
+            drawSkeletons(host->world(), *animation, debugDraw);
+        }
+
         if (!pendingSamples.empty()) {
             const u64 tick = host->world().engineState().tick;
             const u64 hash = host->world().worldHash();
@@ -2950,6 +2959,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     overlay->setIcons(&iconAtlas);
                     overlay->setThumbnails(&thumbnails);
                     overlay->setScriptEditor(&scripts);
+                    // Re-pointed every frame rather than once: a project open
+                    // or a hot reload builds a new animation system, and a
+                    // pointer set at boot would name the previous one.
+                    overlay->setSkeleton(host->animation());
                 }
                 overlay->render(*cmd, options.editor && present.valid() ? present : target, frame);
             }

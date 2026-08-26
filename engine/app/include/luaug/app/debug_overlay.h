@@ -35,7 +35,8 @@ class Window;
 
 namespace luaug::scene {
 class World;
-}
+class SkeletonHost;
+} // namespace luaug::scene
 
 namespace luaug::audio {
 class AudioSystem;
@@ -195,6 +196,15 @@ public:
     // asks while it draws and the loop answers between frames.
     void setThumbnails(ThumbnailCache* thumbnails) noexcept;
 
+    // Where `Bone.JointName`'s picker gets its list of joints, or null for a
+    // shell with no renderer behind it -- in which case the field is a text box,
+    // which is what it was before the picker existed.
+    //
+    // Set by the frame loop rather than taken in the constructor: the animation
+    // system is built by `WorldHost::boot`, which happens after the overlay
+    // exists, and it is replaced whenever the world is.
+    void setSkeleton(const scene::SkeletonHost* skeleton) noexcept;
+
     // What the shell asked for while it drew, taken by the frame loop and reset.
     // Draining rather than reading, so a command cannot be acted on twice
     // because a frame did not draw.
@@ -204,6 +214,14 @@ public:
         commands_.clear();
         return taken;
     }
+
+    // What the View menu's switches are set to, read by the frame loop.
+    //
+    // Read rather than drained, unlike `takeCommands`: a command is an intent
+    // acted on once, and a switch is a state that stays true until somebody
+    // turns it off. Const, because the frame loop consults these and the shell
+    // is the only thing that sets them.
+    [[nodiscard]] const EditorPanels& panels() const noexcept { return panels_; }
 
     // Applies the F3 toggle from this frame's translated events, and forwards
     // the untranslated stream behind them -- platform::rawEvents() -- to
