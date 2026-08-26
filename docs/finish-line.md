@@ -162,25 +162,25 @@ that sends the next session to the wrong place.
 
 ### S2 — The record says what is true
 
-- [ ] **S2.1** `../PROGRESS.md` — it contradicts itself in the sentence that
+- [x] **S2.1** `../PROGRESS.md` — it contradicts itself in the sentence that
       names the next action, and claims the ImGui shell cannot be driven fifty
       lines after disproving it.
-- [ ] **S2.2** `roadmap.md` phase-1 table — stale on four rows, and E3 is named
+- [x] **S2.2** `roadmap.md` phase-1 table — stale on four rows, and E3 is named
       wrong.
-- [ ] **S2.3** `roadmap.md` M4.5 checklist — fifteen unticked boxes of which the
+- [x] **S2.3** `roadmap.md` M4.5 checklist — fifteen unticked boxes of which the
       register closes thirteen.
-- [ ] **S2.4** `api-design.md` §5 — declares as unbuilt an output that shipped
+- [x] **S2.4** `api-design.md` §5 — declares as unbuilt an output that shipped
       and is freshness-gated.
-- [ ] **S2.5** E3 gets a roadmap detail section, the only E-milestone without
+- [x] **S2.5** E3 gets a roadmap detail section, the only E-milestone without
       one. Its gate keeps one honest PENDING row: whether a badge reads at
       16 px is a picture, and the geometry test is not that picture.
-- [ ] **S2.6** `briefs/e9-kickoff.md` and E9's roadmap section — E9 is being
+- [x] **S2.6** `briefs/e9-kickoff.md` and E9's roadmap section — E9 is being
       deferred against by name and has no gate to close against.
-- [ ] **S2.7** The decision record for the material reversal, and for the Part B
+- [x] **S2.7** The decision record for the material reversal, and for the Part B
       deviation justified only in commit messages.
-- [ ] **S2.8** The two dangling `D-` placeholders in `defects.md`, and the
+- [x] **S2.8** The two dangling `D-` placeholders in `defects.md`, and the
       `docs-lint` blind spot that let them through a green gate.
-- [ ] **S2.9** `../CLAUDE.md` and `ci.yml` disagree about whether macOS blocks a
+- [x] **S2.9** `../CLAUDE.md` and `ci.yml` disagree about whether macOS blocks a
       code push. They are exact opposites, tag behaviour included.
 
 ### S3 — The defect tail
@@ -192,15 +192,15 @@ that sends the next session to the wrong place.
       override while an untouched internal one stays not-an-override. The loader
       needed nothing: it has resolved instance properties through a deferred pass
       since the format existed, and only the writer skipped.
-- [ ] **S3.2** Every loose texture is encoded as sRGB, and the Material design
+- [x] **S3.2** Every loose texture is encoded as sRGB, and the Material design
       names loose textures — the regression a past fix already closed once.
-- [ ] **S3.3** The toolbar's New button wipes an unsaved scene with no prompt.
+- [x] **S3.3** The toolbar's New button wipes an unsaved scene with no prompt.
       Four other doors ask; this is the fifth.
-- [ ] **S3.4** A stamp whose root is a `Model` is placed at the world origin.
-- [ ] **S3.5** `dev.err.not_implemented` has no i18n entry, and the gate built
+- [x] **S3.4** A stamp whose root is a `Model` is placed at the world origin.
+- [x] **S3.5** `dev.err.not_implemented` has no i18n entry, and the gate built
       for exactly that is structurally blind to it.
-- [ ] **S3.6** Three comments that are live doc/code lies.
-- [ ] **S3.7** The Console's log is a fixed-height child in a resizable panel.
+- [x] **S3.6** Three comments that are live doc/code lies.
+- [x] **S3.7** The Console's log is a fixed-height child in a resizable panel.
 - [x] **S3.8** D129 — a sound's first play decodes on the calling thread.
       **Settled: a prefetch with a synchronous floor.** The read is async and
       the decode is a job, both started from the frame and never from the
@@ -256,7 +256,10 @@ that sends the next session to the wrong place.
 - [ ] **S5.15** Attributes.
 - [ ] **S5.16** Thumbnails for meshes, scenes and stamps; a material swatch.
 - [ ] **S5.17** Pivot/centre choice for a multi-selection.
-- [ ] **S5.18** Sibling reordering.
+- [~] **S5.18** Sibling reordering. **The `World` verb is built** — a move
+      that changes nothing reports `Unchanged`, the duplicate-name chain is
+      rebuilt around it, and the world hash follows. The Explorer's
+      drag-between-rows half is what is left.
 - [ ] **S5.19** The typed stubs every scaffolded project's settings already
       point at.
 
@@ -286,7 +289,7 @@ that sends the next session to the wrong place.
       `--no-tests=error` beside it, because an empty suite is not a passing
       one either. **The CI half is still owed** and belongs with S7.2.
 - [ ] **S7.4** No gate builds the three Windows profiles the release ships.
-- [~] **S7.5** `linux-clang-asan` is fully wired and run by nothing. **Now
+- [x] **S7.5** `linux-clang-asan` is fully wired and run by nothing. **Now
       run**: a `-Only asan` stage locally and a non-blocking nightly job,
       both through the same script. Two blockers found and fixed, neither in
       our code — the image had no sanitizer runtime, and UBSan's `vptr` check
@@ -359,6 +362,21 @@ that sends the next session to the wrong place.
   instrument until then, and macOS -- Tier 3, unbuildable here -- has no
   instrument at all in the meantime.
 
+## What went wrong with delegating, and the rule it produced
+
+**Four parallel agent workflows died silently after roughly ten minutes of
+work each**, having written no result and left the tree half-edited. One had
+written a whole test file for an implementation it never wrote, which broke the
+build for every other agent that tried to compile; another had left
+`if (false) return MoveResult::Unchanged;` under a complete comment explaining
+why the predicate had to be there.
+
+What was salvageable was salvaged and finished by hand, and it was most of it.
+The rule for the rest of this campaign: **delegate narrow, verifiable pieces,
+and never a piece whose half-done state breaks the tree for everybody else.** A
+long agent task is a bet that it finishes; four of them at once is four bets,
+and the tree pays for every one that loses.
+
 ## Log
 
 - **2026-08-26** — Campaign opened. Peers notified; all three replied, disclaimed
@@ -367,6 +385,12 @@ that sends the next session to the wrong place.
 - **2026-08-26** — **164 commits and the three existing tags reached `origin`.**
   The repository had no backup and no review of eight milestones' work; it has
   both now. `milestone/e2` and `milestone/e3` created and pushed.
+- **2026-08-26** — **The sanitizers passed for the first time ever**: 41 ctest
+  entries, 1,158 conformance cases and the hot-reload gate under ASan and
+  UBSan. Getting there found a heap-use-after-free in `World::clone` that had
+  been there since clone existed, plus three things that were not defects in
+  this engine at all. The nightly job is blocking now, which is the promise it
+  made while it had never passed.
 - **2026-08-26** — The untracked tree landed in four commits: the documentation
   site with the two gate edits that already invoked it, the branding set, the
   two examples, and the icon masters. Scratch swept.
