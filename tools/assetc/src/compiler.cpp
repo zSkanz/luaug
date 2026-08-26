@@ -1,6 +1,7 @@
 #include "luaug/assetc/compiler.h"
 
 #include "luaug/asset/chunk.h"
+#include "luaug/asset/content.h"
 #include "luaug/asset/gltf.h"
 #include "luaug/asset/image.h"
 #include "luaug/asset/mesh_format.h"
@@ -998,6 +999,12 @@ CompileResult compile(const CompileOptions& options)
     std::sort(result.chunks.begin(), result.chunks.end(),
               [](const ChunkOutput& a, const ChunkOutput& b) { return a.relativePath < b.relativePath; });
 
+    // Handed back beside the pack, for a caller that writes an object store
+    // instead of one: the store is one file per blob and cannot be produced from
+    // a built pack without unpacking what was just packed.
+    for (const asset::PackWriter::BlobView& blob : pack.blobs())
+        result.blobs.emplace_back(blob.hash, std::vector<std::byte>(blob.bytes.begin(), blob.bytes.end()));
+
     result.pack = pack.build();
     result.manifest = writeManifest(manifest);
     result.chunkIndex = result.chunkCount > 0 ? asset::writeChunkIndex(chunkIndex) : std::string{};
@@ -1065,6 +1072,114 @@ CompileResult importOne(const CompileOptions& options, const std::filesystem::pa
     one.only.clear();
     one.only.push_back(sourcePath);
     return compile(one);
+}
+
+// The manifest's own spelling, read back. `content.cpp` has the same table and
+// keeps it file-local, which is right for it and leaves this side needing one:
+// two callers of one JSON shape is exactly where a second spelling drifts.
+[[nodiscard]] asset::AssetKind assetKindFromNameLocal(std::string_view name) noexcept
+{
+    for (const asset::AssetKind kind : {asset::AssetKind::Mesh, asset::AssetKind::Texture, asset::AssetKind::Material,
+                                        asset::AssetKind::Prefab, asset::AssetKind::Chunk, asset::AssetKind::Raw}) {
+        if (name == asset::assetKindName(kind))
+            return kind;
+    }
+    return asset::AssetKind::Unknown;
+}
+
+std::optional<core::EngineError> writeObjectStore(const CompileResult& result, const std::filesystem::path& objects,
+                                                  const std::filesystem::path& index)
+{
+    if (!platform::createDirectories(objects)) {
+        const core::I18nArg args[] = {{"path", objects.string()}};
+        return core::makeError(LUAUG_TR("asset.store.err.write_failed"), args);
+    }
+
+    // **Blobs first, index last.** A store whose index names a blob that is not
+    // there fails at first use; one whose blobs are there and unnamed merely
+    // wastes disk until the next import overwrites the index anyway.
+    for (const auto& [hash, bytes] : result.blobs) {
+        const std::filesystem::path path = asset::ContentMounts::objectPath(objects, hash);
+        // **Skipped when it is already there, and that is content addressing
+        // doing its job** rather than an optimisation: the name IS the hash, so
+        // a file that exists under it holds these bytes and rewriting it would
+        // write the same ones.
+        if (platform::fileExists(path))
+            continue;
+        if (!platform::createDirectories(path.parent_path())) {
+            const core::I18nArg args[] = {{"path", path.parent_path().string()}};
+            return core::makeError(LUAUG_TR("asset.store.err.write_failed"), args);
+        }
+        std::string diagnostic;
+        if (!writeFile(path, bytes, diagnostic)) {
+            const core::I18nArg args[] = {{"path", path.string()}};
+            return core::makeError(LUAUG_TR("asset.store.err.write_failed"), args);
+        }
+    }
+
+    // **Merged, not replaced.** An import adds to a store that already has forty
+    // other models in it, and a re-import of one source must replace its own
+    // rows rather than append a second set -- a URN names one blob, and two rows
+    // for it would make which one wins depend on read order.
+    //
+    // Keyed by URN in a sorted map, so the file this writes is a pure function
+    // of what is in the store and not of the order imports happened in.
+    std::map<std::string, std::pair<core::ContentHash, AssetKind>> rows;
+
+    std::string existing;
+    if (platform::readTextFile(index, existing)) {
+        core::JsonDocument document;
+        if (document.parse(existing, index.string()).ok) {
+            // **`assets`, because that is what `readManifest` reads.** The writer
+            // spoke its own dialect first and the round-trip case caught it:
+            // the store mounted without complaint and resolved nothing.
+            const core::JsonValue entries = document.root()["assets"];
+            for (usize at = 0; at < entries.size(); ++at) {
+                const core::JsonValue entry = entries.at(at);
+                const std::string_view urn = entry["urn"].asString();
+                core::ContentHash hash;
+                if (urn.empty() || !core::parseHex(entry["hash"].asString(), hash))
+                    continue;
+                rows[std::string(urn)] = {hash, assetKindFromNameLocal(entry["kind"].asString())};
+            }
+        }
+        // A manifest that will not parse is REPLACED rather than refused. It is
+        // a cache of what is already on disk under content-addressed names, so
+        // the worst a lost one costs is a re-import; refusing would leave a
+        // project unable to import anything until somebody deleted a file by
+        // hand.
+    }
+
+    for (const ManifestEntry& entry : result.entries)
+        rows[entry.urn] = {entry.hash, entry.kind};
+
+    core::JsonWriter writer;
+    writer.beginObject();
+    writer.field("format", "luaug-content-manifest");
+    writer.field("version", static_cast<core::i64>(1));
+    writer.key("assets");
+    writer.beginArray();
+    for (const auto& [urn, row] : rows) {
+        writer.beginObject();
+        writer.field("urn", urn);
+        writer.field("hash", row.first.toHex());
+        writer.field("kind", asset::assetKindName(row.second));
+        writer.endObject();
+    }
+    writer.endArray();
+    writer.endObject();
+
+    if (!platform::createDirectories(index.parent_path())) {
+        const core::I18nArg args[] = {{"path", index.parent_path().string()}};
+        return core::makeError(LUAUG_TR("asset.store.err.write_failed"), args);
+    }
+    const std::string& text = writer.text();
+    std::string diagnostic;
+    if (!writeFile(index, std::as_bytes(std::span<const char>(text.data(), text.size())), diagnostic)) {
+        const core::I18nArg args[] = {{"path", index.string()}};
+        return core::makeError(LUAUG_TR("asset.store.err.write_failed"), args);
+    }
+    return std::nullopt;
 }
 
 } // namespace luaug::assetc

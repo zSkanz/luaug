@@ -97,6 +97,15 @@ ContentHash PackWriter::addContent(AssetKind kind, std::span<const std::byte> by
     return hash;
 }
 
+std::vector<PackWriter::BlobView> PackWriter::blobs() const
+{
+    std::vector<BlobView> out;
+    out.reserve(m_blobs.size());
+    for (const Blob& blob : m_blobs)
+        out.push_back(BlobView{blob.hash, blob.kind, std::span<const std::byte>(blob.bytes)});
+    return out;
+}
+
 bool PackWriter::contains(const ContentHash& hash) const noexcept
 {
     return std::any_of(m_blobs.begin(), m_blobs.end(), [&hash](const Blob& blob) { return blob.hash == hash; });

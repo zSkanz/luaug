@@ -133,6 +133,7 @@
   "asset.texture.err.hdr_unsupported": "That texture is HDR, and this engine has no HDR texture path.",
   "asset.texture.err.transcode_failed": "Could not transcode the texture to {format}.",
   "asset.texture.err.encode_failed": "Could not encode the texture ({code}).",
+  "asset.store.err.write_failed": "Could not write the content object store at {path}.",
   "asset.manifest.err.open_failed": "Could not read the content manifest {content}.",
   "asset.manifest.err.malformed": "The content manifest is malformed: {detail}.",
   "asset.manifest.err.missing_blob": "The content manifest names {content}, but the pack beside it does not hold it.",

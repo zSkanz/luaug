@@ -1,3 +1,4 @@
+#include "luaug/asset/content.h"
 #include "luaug/asset/mesh_format.h"
 #include "luaug/asset/pack.h"
 #include "luaug/asset/texture.h"
@@ -861,4 +862,124 @@ TEST_CASE("importOne on a path outside the input root compiles nothing")
     const CompileResult outside = importOne(options, std::filesystem::path(LUAUG_ASSET_TEST_DATA) / "checker.png");
     CHECK(outside.ok);
     CHECK(outside.entries.empty());
+}
+
+// --- The object store: what an editor writes instead of a pack (E9 step 12) --
+//
+// `ContentMounts::mountObjects` has been able to READ one since E9 opened and
+// nothing could write one. **A store rather than a pack because an editor
+// imports one file at a time**: a `.lpack` is one file holding everything, so
+// adding to it means rewriting it, which is the wrong shape for a tool where
+// somebody drops a model into a folder and expects the other forty to still be
+// there.
+
+TEST_CASE("a store an import wrote is a store the engine can mount")
+{
+    seedRealCatalog();
+    const MaterialFixture fixture;
+
+    CompileOptions options;
+    options.inputRoot = fixture.root;
+    const std::filesystem::path objects = fixture.root / ".luaug" / "objects";
+    const std::filesystem::path index = fixture.root / ".luaug" / "index.json";
+
+    const CompileResult one = importOne(options, fixture.root / "textures" / "normal.png");
+    REQUIRE_MESSAGE(one.ok, one.diagnostic);
+    REQUIRE(one.entries.size() == 1);
+    REQUIRE_FALSE(writeObjectStore(one, objects, index).has_value());
+
+    // The round trip, and it is the assertion that matters: what the writer
+    // produced is what the reader accepts, rather than two sides that agree
+    // about a format on paper.
+    luaug::asset::ContentMounts mounts;
+    REQUIRE_FALSE(mounts.mountObjects(objects, index).has_value());
+
+    const luaug::asset::ResolvedContent found = mounts.resolve("asset://textures/normal.png");
+    CHECK(found.found());
+    CHECK(found.hash == one.entries[0].hash);
+    CHECK_FALSE(found.bytes.empty());
+}
+
+TEST_CASE("a second import adds to the store rather than replacing it")
+{
+    // The whole reason a store exists. An import that replaced the index would
+    // make importing a second model delete the first, which is the behaviour a
+    // pack would have forced.
+    seedRealCatalog();
+    const MaterialFixture fixture;
+
+    CompileOptions options;
+    options.inputRoot = fixture.root;
+    const std::filesystem::path objects = fixture.root / ".luaug" / "objects";
+    const std::filesystem::path index = fixture.root / ".luaug" / "index.json";
+
+    const CompileResult first = importOne(options, fixture.root / "textures" / "normal.png");
+    const CompileResult second = importOne(options, fixture.root / "textures" / "colour.png");
+    REQUIRE_MESSAGE(first.ok, first.diagnostic);
+    REQUIRE_MESSAGE(second.ok, second.diagnostic);
+    REQUIRE_FALSE(writeObjectStore(first, objects, index).has_value());
+    REQUIRE_FALSE(writeObjectStore(second, objects, index).has_value());
+
+    luaug::asset::ContentMounts mounts;
+    REQUIRE_FALSE(mounts.mountObjects(objects, index).has_value());
+    CHECK(mounts.contains("asset://textures/normal.png"));
+    CHECK(mounts.contains("asset://textures/colour.png"));
+}
+
+TEST_CASE("re-importing one source replaces its row rather than adding a second")
+{
+    // A URN names one blob. Two rows for it would make which one wins depend on
+    // the order the index happened to be read in, which is the kind of answer
+    // that is right until somebody adds an import.
+    seedRealCatalog();
+    const MaterialFixture fixture;
+
+    CompileOptions options;
+    options.inputRoot = fixture.root;
+    const std::filesystem::path objects = fixture.root / ".luaug" / "objects";
+    const std::filesystem::path index = fixture.root / ".luaug" / "index.json";
+
+    const CompileResult one = importOne(options, fixture.root / "textures" / "normal.png");
+    REQUIRE_MESSAGE(one.ok, one.diagnostic);
+    REQUIRE_FALSE(writeObjectStore(one, objects, index).has_value());
+    REQUIRE_FALSE(writeObjectStore(one, objects, index).has_value());
+
+    std::string text;
+    REQUIRE(luaug::platform::readTextFile(index, text));
+    // Counted in the text rather than through the reader, because the reader
+    // would happily accept a duplicate and quietly keep one of them.
+    usize occurrences = 0;
+    for (usize at = text.find("asset://textures/normal.png"); at != std::string::npos;
+         at = text.find("asset://textures/normal.png", at + 1)) {
+        ++occurrences;
+    }
+    CHECK(occurrences == 1);
+}
+
+TEST_CASE("the store the writer produces is a pure function of what is in it")
+{
+    // Written twice from two imports in the opposite order. The index is keyed
+    // and sorted, so the bytes must not remember which import happened first --
+    // the same property the pack has and for the same reason.
+    seedRealCatalog();
+    const MaterialFixture fixture;
+
+    CompileOptions options;
+    options.inputRoot = fixture.root;
+    const CompileResult a = importOne(options, fixture.root / "textures" / "normal.png");
+    const CompileResult b = importOne(options, fixture.root / "textures" / "colour.png");
+    REQUIRE_MESSAGE(a.ok, a.diagnostic);
+    REQUIRE_MESSAGE(b.ok, b.diagnostic);
+
+    const auto build = [&](const CompileResult& first, const CompileResult& second, const char* label) {
+        const std::filesystem::path objects = fixture.root / ".luaug" / label / "objects";
+        const std::filesystem::path index = fixture.root / ".luaug" / label / "index.json";
+        REQUIRE_FALSE(writeObjectStore(first, objects, index).has_value());
+        REQUIRE_FALSE(writeObjectStore(second, objects, index).has_value());
+        std::string text;
+        REQUIRE(luaug::platform::readTextFile(index, text));
+        return text;
+    };
+
+    CHECK(build(a, b, "forward") == build(b, a, "backward"));
 }

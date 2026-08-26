@@ -36,6 +36,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace luaug::assetc {
@@ -155,6 +156,17 @@ struct CompileResult
     std::vector<ChunkOutput> chunks;
     std::string chunkIndex;
 
+    // Every blob this build produced, by hash, in the order the pack holds
+    // them. **The pack is one file and an object store is one file per blob**,
+    // so a store cannot be written from `pack` without unpacking what was just
+    // packed -- and the editor writes a store rather than a pack, because a
+    // store can be added to one import at a time.
+    //
+    // Deduplicated exactly as the pack is: two sources with the same bytes are
+    // one entry here, which is what makes the store content-addressed rather
+    // than merely content-named.
+    std::vector<std::pair<core::ContentHash, std::vector<std::byte>>> blobs;
+
     u32 meshCount = 0;
     u32 textureCount = 0;
     u32 rawCount = 0;
@@ -189,6 +201,28 @@ struct CompileResult
 // `sourcePath` is absolute and must lie under `options.inputRoot`, because a URN
 // is the path relative to that root and a source outside it has no name.
 [[nodiscard]] CompileResult importOne(const CompileOptions& options, const std::filesystem::path& sourcePath);
+
+// Writes a build's blobs into a content-addressed object store and merges its
+// manifest rows into the store's index (E9 step 12, ADR-pending).
+//
+// **A store rather than a pack, because an editor imports one file at a time.**
+// A `.lpack` is one file that holds everything: adding to it means rewriting it,
+// which is the wrong shape for a tool where somebody drops a model into a folder
+// and expects the other forty to still be there. A store is one file per blob
+// plus an index, so an import appends.
+//
+// `objects` is the directory `ContentMounts::mountObjects` reads and `index` is
+// the manifest beside it. Both are created when they do not exist.
+//
+// **The index is merged, not replaced**, and a re-import of the same source
+// overwrites its own rows rather than appending duplicates -- a URN names one
+// blob, and two rows for it would make which one wins depend on read order.
+//
+// **The index is written LAST**, after every blob is on disk. A store whose
+// index names a blob that is not there is a store that fails at first use; one
+// whose blobs are there and unnamed merely wastes disk until the next import.
+[[nodiscard]] std::optional<core::EngineError>
+writeObjectStore(const CompileResult& result, const std::filesystem::path& objects, const std::filesystem::path& index);
 
 // Encodes decoded pixels into the engine's texture container.
 //

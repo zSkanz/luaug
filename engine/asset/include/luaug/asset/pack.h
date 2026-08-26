@@ -118,6 +118,20 @@ public:
     ContentHash addContent(AssetKind kind, std::span<const std::byte> bytes);
 
     [[nodiscard]] bool contains(const ContentHash& hash) const noexcept;
+
+    // Every blob added, by hash and kind, in insertion order.
+    //
+    // **For a caller that has to write the same content somewhere a pack is
+    // not** -- an object store, which is one file per blob and can be added to
+    // one import at a time where a pack has to be rewritten whole (E9 step 12).
+    // Spans into this writer, so they last as long as it does and no longer.
+    struct BlobView
+    {
+        ContentHash hash;
+        AssetKind kind = AssetKind::Unknown;
+        std::span<const std::byte> bytes;
+    };
+    [[nodiscard]] std::vector<BlobView> blobs() const;
     [[nodiscard]] usize count() const noexcept { return m_blobs.size(); }
     [[nodiscard]] u64 payloadBytes() const noexcept;
 
