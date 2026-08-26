@@ -86,20 +86,42 @@ local DeathHeight = -60
 
 -- --- The character -----------------------------------------------------------
 
---- The height field from `tools/generate_world.luau`, repeated here rather than
+--- The island from `tools/generate_world.luau`, repeated here rather than
 --- shared. **Deliberate**: the generator runs in Lute at build time and this
 --- runs in the engine at play time, so there is no module both can require
 --- without the world's shape becoming a runtime dependency of the build. Two
---- copies of six lines, with this comment on both, beats a coupling.
+--- copies, with this comment on both, beats a coupling.
+---
+--- **They have to move together, and three other things move with them**: the
+--- spawn in the scene, the four lantern posts in `Scenery`, and
+--- `AutopilotFlyRadius` below. Changing the field and not the scene buries the
+--- character in the ground -- which is what happened the first time this island
+--- was generated, and is why they are listed here rather than remembered.
 local function heightAt(x: number, z: number): number
-    return 8 * math.sin(x / 1200) * math.cos(z / 1000) + 3 * math.sin((x + z) / 500)
+    local distance = math.sqrt(x * x + z * z)
+    local land = math.clamp(1 - distance / 820, 0, 1)
+    land = land * land * (3 - 2 * land)
+    local seabed = math.clamp((distance - 820) / 260, 0, 1)
+    seabed = seabed * seabed * (3 - 2 * seabed)
+    return 13 * land + 1.4 * math.sin(x / 400) * math.cos(z / 360) * land - 9 * seabed
 end
 
 --- **The world this project starts with is a FILE, and this script is what it
---- does with it** (ADR 0047). `content/scenes/main.scene.json` holds the
---- character, the capsule welded to it, the lantern and its post, the two welds
---- and the input map; `luaug.toml` names it as the scene a run of this project
---- begins with, and the editor writes back to that same file.
+--- does with it** (ADR 0047). `content/scenes/main.scene.json` holds four things
+--- at the top of `Workspace` and nothing loose:
+---
+---   `Player`    a `Model`: the character, the capsule welded to it, and the
+---               lantern on its shoulder -- each weld parented to the part it
+---               attaches rather than lying beside them
+---   `Scenery`   what is AUTHORED rather than streamed. Four lantern posts,
+---               placed as stamps of `content/stamps/lanternpost.stamp.json`,
+---               so changing that one file moves all four
+---   `Input`     the action map, in a folder, because it is configuration and
+---               not world
+---   the camera
+---
+--- `luaug.toml` names the scene a run begins with, and the editor writes back to
+--- that same file.
 ---
 --- **That is the arrangement Unity and Unreal have**, and the reason it is worth
 --- the migration is not tidiness: while this script BUILT the world, saving a
@@ -111,17 +133,27 @@ end
 --- manipulator, a colour typed into the properties grid and a `PointLight`
 --- somebody adds are all kept by Save, and this script finds whatever the file
 --- holds by the names it agreed to.
-local function fromScene(name: string): Instance
-    local found = workspace:FindFirstChild(name)
-    assert(found ~= nil, `the scene is missing "{name}" -- content/scenes/main.scene.json is this project's world`)
-    return found :: Instance
+--- **A dotted path rather than a name**, because the scene now has a shape.
+--- The rig is a `Model`, the input map is in a `Folder`, and every weld lives on
+--- the part it attaches -- which is what a person expects to find in an Explorer
+--- and what `Model.StreamingMode` will need when E5 gives the model a say in
+--- what streams together (ADR 0053).
+---
+--- The assert names the path rather than the leaf: `Player.Walker` missing and
+--- `Walker` missing are two different mistakes, and the second one used to be
+--- reported for both.
+local function fromScene(path: string): Instance
+    local at: Instance = workspace
+    for segment in string.gmatch(path, "[^%.]+") do
+        local found = at:FindFirstChild(segment)
+        assert(found ~= nil, `the scene has no "{path}" -- stopped at "{segment}" under {at.Name}`)
+        at = found
+    end
+    return at
 end
 
-local character = fromScene("Walker") :: CharacterBody
-local lanternPost = fromScene("LanternPost")
-local lanternFound = lanternPost:FindFirstChild("Lantern")
-assert(lanternFound ~= nil, "the scene's LanternPost has no Lantern")
-local lantern = lanternFound :: PointLight
+local character = fromScene("Player.Walker") :: CharacterBody
+local lantern = fromScene("Player.LanternPost.Lantern") :: PointLight
 
 -- **Hot reload keeps your place.** `SaveState` takes numbers and tables of
 -- them, not a `vector` -- the value is copied engine-side at the moment of the
@@ -239,8 +271,8 @@ local recoverSound = oneShot("Recover", 0.3, 0.8)
 --- keep: movement and jump run on the SimClock where a replay can see them, and
 --- the camera runs on the render clock because a camera should turn at the
 --- frame rate (ADR 0039).
-local Gameplay = fromScene("Gameplay")
-local CameraControls = fromScene("CameraControls")
+local Gameplay = fromScene("Input.Gameplay")
+local CameraControls = fromScene("Input.CameraControls")
 
 local function action(context: Instance, name: string): InputAction
     local found = context:FindFirstChild(name)
@@ -394,7 +426,10 @@ end
 --- whole cycles each.
 local AutopilotLeg = 25
 local AutopilotWalkRadius = 220
-local AutopilotFlyRadius = 900
+-- Just inside the shore, so the flight arcs over the coastline rather than
+-- out across empty water: the beach meeting the sea is the thing worth
+-- seeing from the air, and past 820 m there is nothing but ocean.
+local AutopilotFlyRadius = 780
 local AutopilotFlySpeed = 45
 
 local function autopilot(time: number)

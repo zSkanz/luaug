@@ -4,7 +4,7 @@ REM from CMake, so nothing depends on this file -- it exists so a human does not
 REM have to remember where an out-of-tree build put the binary (R14).
 REM
 REM Extra arguments pass through, so the headless forms still work:
-REM   run.bat --headless --frames=600 --exit --screenshot=out.png
+REM   run.bat --headless --frames=120 --exit --screenshot=out.png
 REM
 REM See examples/README.md for the convention and how to add one.
 
@@ -27,17 +27,14 @@ if not exist "%LUAUG_HOST%" (
     exit /b 1
 )
 
+REM This example is the project-directory shape: every src/scripts/**/*.luau
+REM becomes an entry Script and the rest is reached through require
+REM (api-design.md section 4). The host is handed the directory, not a file.
+REM
+REM %~dp0 is this file's own directory and always ends in a backslash, which
+REM would escape the closing quote and corrupt the argument -- so it is stripped
+REM before the path is passed.
 set "LUAUG_EXAMPLE=%~dp0"
 set "LUAUG_EXAMPLE=%LUAUG_EXAMPLE:~0,-1%"
-
-REM **The world is in the scene now** (ADR 0053), so there is nothing to generate
-REM or compile before a run. `content\scenes\main.scene.json` holds the island as
-REM ordinary instances and the engine partitions it into streamed cells on boot,
-REM cached under .luaug\partition.
-REM
-REM This file used to run the generator and assetc when `content\world` was
-REM missing. `tools\generate_world.luau` is a SEED rather than a build step: it
-REM fills an empty Scenery folder once, and after that the scene is the source
-REM and the editor is what edits it.
 
 "%LUAUG_HOST%" "%LUAUG_EXAMPLE%" %*

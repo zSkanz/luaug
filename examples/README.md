@@ -13,6 +13,7 @@ automated headless gate script (screenshot/capture + asserted behavior):
 | `04-obby` | M6 | IAS input, UI, tweens, audio, minimal animation — playable end-to-end |
 | `05-streaming` | M7 | chunk streaming, floating origin, LOD/HLOD, memory ceilings |
 | `10-open-world` | M8 | the v1 flagship: streamed open world + character + day/night + hot reload. The first example with a `luaug.toml` the engine reads, and the one the soak gate drives |
+| `11-ocean` | post-v1 | one wave function shared by the water, the boat and the cargo: instanced opaque tiles, a fixed pool that follows the boat, and Archimedes buoyancy through `ApplyImpulse`. Unnumbered — the first example not born of a milestone, and the one that measured what moving a part from Luau costs |
 
 Assets used by examples must be permissively licensed and recorded in
 `THIRD_PARTY_NOTICES.md`. Keep binary assets tiny until the git-LFS ADR (M4);

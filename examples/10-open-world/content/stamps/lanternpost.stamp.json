@@ -1,0 +1,91 @@
+{
+ "format": "luaug-scene",
+ "version": 1,
+ "root": {
+  "class": "Model",
+  "name": "LanternPost",
+  "properties": {
+   "PrimaryPart": "LanternPost.Post"
+  },
+  "children": [
+   {
+    "class": "Part",
+    "name": "Post",
+    "properties": {
+     "Anchored": true,
+     "Size": [
+      0.35,
+      4.2,
+      0.35
+     ],
+     "Color": [
+      0.16,
+      0.15,
+      0.14
+     ],
+     "CFrame": [
+      0,
+      2.1,
+      0,
+      1,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   },
+   {
+    "class": "Part",
+    "name": "Head",
+    "properties": {
+     "Anchored": true,
+     "Size": [
+      0.7,
+      0.7,
+      0.7
+     ],
+     "Color": [
+      0.95,
+      0.78,
+      0.45
+     ],
+     "CFrame": [
+      0,
+      4.45,
+      0,
+      1,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      1
+     ]
+    },
+    "children": [
+     {
+      "class": "PointLight",
+      "name": "Lantern",
+      "properties": {
+       "Brightness": 6,
+       "Range": 22,
+       "Color": [
+        1.0,
+        0.82,
+        0.55
+       ],
+       "Shadows": true
+      }
+     }
+    ]
+   }
+  ]
+ }
+}
