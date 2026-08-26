@@ -332,11 +332,17 @@ that sends the next session to the wrong place.
   not be read at all** — no debugger on this machine, and the handler wrote
   nothing else. It writes a readable note now: exception, plain name, faulting
   address, and a symbolised stack with file and line. Owes a register row.
-- **The editor restores a remembered scene without checking it still exists.**
-  `.luaug/editor.json` in the owner's project names `scenes/testing.scene.json`,
-  which is gone, so the project opens empty with no diagnostic. Needs a
-  fallback to the `luaug.toml` scene and a keyed warning. Blocked on
-  `engine/app/src/editor.cpp`, which another agent holds. Owes a register row.
+- **A reported second defect that turned out not to exist, recorded so nobody
+  re-reports it.** The owner's `.luaug/editor.json` names
+  `scenes/testing.scene.json`, which is gone, and an editor run appeared to open
+  the project empty -- "Loaded a scene of 0 instance(s)". The fallback is in
+  fact already there and correct (`engine/app/src/engine.cpp`: a remembered
+  scene that does not exist falls through to `luaug.toml`'s), and re-running it
+  loads all six instances with the stale `editor.json` in place and without it.
+  **The empty read came from a stale binary**, built before other sessions'
+  committed work had been linked in. The lesson is the campaign's own standing
+  rule pointing the other way: check what you are running before believing what
+  it says.
 - **The Linux half of the crash gate is unverified.** On MSVC the runtime's
   own `__try` around `main` means `std::terminate` never runs, so the note
   carries the stack rather than the message; POSIX should reach `terminate`
