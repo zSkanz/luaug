@@ -169,6 +169,17 @@ lute tools/repo/vendor.luau status
 # acts on it" would be visible, and two milestones later a property was born into
 # exactly that state and nobody marked it. A marker that depends on somebody
 # remembering is the one thing it exists not to depend on.
+# **The tag and the declared version, when this commit IS a tag** (S7.12). Every
+# ordinary run is on an untagged commit and has nothing to compare, which is why
+# the call is guarded here rather than inside the tool: a tool that passed when
+# handed no tag would also pass in CI when the tag went missing, and a version
+# check that silently succeeds when it cannot find its input is the check not
+# running.
+if head_tag="$(git describe --tags --exact-match 2>/dev/null)"; then
+    echo "== the tag and the declared version agree =="
+    lute tools/repo/versioncheck.luau "$head_tag"
+fi
+
 echo "== stored-and-unread properties =="
 lute tools/repo/inertcheck.luau
 

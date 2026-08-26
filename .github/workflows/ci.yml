@@ -8,7 +8,13 @@ on:
     # tag points at a commit those jobs already built when it landed on `main`,
     # and Tier-3 is carried by the push rather than by the tag: `build-macos`
     # below is blocking on every code push, which is M4's own gate item.
-    tags: ["milestone/*"]
+    # **And a release tag**, which is a different thing from a milestone one and
+    # is here for one job: `luau-check` compares the tag against the version the
+    # repository declares (S7.12). Everything a release stamps comes from that
+    # declaration -- the archive's name, `luaug --version`, the version in every
+    # packaged artifact -- so a tag that disagrees with it publishes a release
+    # page saying one number and a binary saying another.
+    tags: ["milestone/*", "v*"]
   pull_request:
   # The "run everything" button, for a full matrix on a branch without having to
   # push to it. A dispatch carries no base commit, so `changes` cannot call it
@@ -674,6 +680,17 @@ jobs:
       # went red here for reasons that had nothing to do with it.
       - name: Luau gates
         run: scripts/gates/luau-check.sh
+
+      # **On a release tag, and it is the only job that looks at one** (S7.12).
+      # A release names itself twice -- in the tag somebody pushes and in
+      # `project(LuauG VERSION ...)`, which ADR 0031 makes authoritative -- and
+      # nothing checked that the two said the same thing.
+      #
+      # Unconditional rather than gated on the ref: the tool itself decides
+      # whether a tag is a release, and it says so either way. A step that ran
+      # only on a pattern would be a check nobody sees not running.
+      - name: The tag and the declared version agree
+        run: lute tools/repo/versioncheck.luau
 
   # ---------------------------------------------------------------------------
   # The C++ formatting gate (architecture.md §9), turned on at the start of M5

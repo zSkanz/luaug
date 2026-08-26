@@ -563,7 +563,18 @@ that sends the next session to the wrong place.
       the forward renderer.
 - [ ] **S7.11** The input harness that found three defects and was never
       committed.
-- [ ] **S7.12** A release-time check that the tag and the project version agree.
+- [x] **S7.12** A release-time check that the tag and the project version agree
+      — built as `tools/repo/versioncheck.luau`, run by the Luau gate locally
+      when HEAD carries a tag and by CI on every `v*` push. A release names
+      itself twice: in the tag somebody pushes and in `project(LuauG VERSION
+      ...)`, which ADR 0031 makes authoritative and which everything a release
+      stamps comes from — the archive's name, `luaug --version`, the version in
+      every packaged artifact. `v1.1.0` against a tree declaring `1.0.0` would
+      publish a release page saying one number and a binary saying another, and
+      the first bug report would arrive against the wrong version. D086 records
+      the near-miss from the other direction. A milestone tag is skipped and
+      says so, because a check that goes quiet is indistinguishable from one
+      that is not running.
 - [ ] **S7.13** `inertcheck`'s stated blind spot, live today.
 - [ ] **S7.14** The window icon test has never run against the hand-built `.ico`
       now in the tree.
