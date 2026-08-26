@@ -200,6 +200,7 @@ luaug_add_module_tests(app
         tests/two_worlds_tests.cpp
         tests/project_config_tests.cpp
         tests/ui_theme_tests.cpp
+        tests/ui_text_tests.cpp
         tests/thumbnail_tests.cpp
         tests/script_document_tests.cpp
         tests/script_editor_tests.cpp

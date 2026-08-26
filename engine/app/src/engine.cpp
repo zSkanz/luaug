@@ -706,6 +706,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // instead of only the tool. (`options.editor && !options.headless` is
     // identically `options.editor`: `main.cpp` refuses the two together.)
     meshLoader.setDeferredMeshes(!options.headless);
+    // And the UI's pictures, for the same reason and by the same predicate: an
+    // `ImageLabel` names the same kind of PNG a material does, and the
+    // synchronous path decoded every one a frame newly named, in that frame,
+    // with no bound at all.
+    uiText.setDeferredImages(!options.headless);
     // The same mounts the meshes come from, so `TextLabel.Font` can name a face
     // out of the project the same way `MeshPart.MeshContent` names a model.
     uiText.setMounts(&contentMounts);
