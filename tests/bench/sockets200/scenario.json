@@ -1,0 +1,7 @@
+{
+  "name": "sockets200",
+  "script": "init.luau",
+  "seed": 2003,
+  "ticks": 300,
+  "budgetMs": 16.0
+}
