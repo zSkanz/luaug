@@ -189,6 +189,37 @@ if ! diff -r -q "$reference_before" docs/api >/dev/null; then
     exit 1
 fi
 
+# --- The documentation site builds, and every reference in it resolves --------
+#
+# The site is NOT checked in, so there is no freshness diff to run: it is built
+# from the IDL and `docs/manual/**` on demand, and a stale copy cannot exist
+# because the build IS the read.
+#
+# What can go wrong instead is a REFERENCE that no longer resolves -- a manual
+# page linking `api:Part.Shape` after `Shape` was renamed, a code sample named
+# after a member that no longer exists, a navigation entry for a page nobody
+# wrote -- and a doc site that renders those as plain text would go quietly
+# wrong. So the generator resolves every one of them against the API definition
+# and exits non-zero listing what it could not, and this stage is that exit code.
+#
+# It also audits the published prose: a doc string that still cites a design
+# section, a decision record or an internal milestone is prose written for
+# somebody maintaining the engine, on a page written for somebody using it.
+#
+# Built into a temporary directory rather than the developer's build root, so
+# the check costs nothing a person has to clean up and cannot be satisfied by
+# output somebody built by hand an hour ago.
+echo "== the documentation site builds =="
+site_out="$(mktemp -d)"
+trap 'rm -f "$defs_before" "$icons_before" "$dump_before"; rm -rf "$reference_before" "$descriptors_before" "$site_out"' EXIT
+if ! lute api/generator/gen_site.luau "--out=$site_out" >/dev/null; then
+    echo "luau-check: the documentation site did not build." >&2
+    echo "  Re-run it to see what it could not resolve:" >&2
+    echo "    lute api/generator/gen_site.luau" >&2
+    lute api/generator/gen_site.luau "--out=$site_out" 2>&1 | head -40 >&2
+    exit 1
+fi
+
 # R6, as a check rather than as an afternoon. M8's scope asks for a licence and
 # NOTICE audit of every vendored dependency; an audit somebody performs once is a
 # fact about one day, and a pin bump is exactly when it stops being true.
