@@ -253,17 +253,49 @@ void collectPaths(const World& world, core::InstanceId id, const std::string& pr
     return !liveChild.valid() && !referenceChild.valid();
 }
 
+// The path of `id` under `root`, or nothing at all when `id` is not under it.
+// The root itself is the EMPTY path, which is why this answers with an optional
+// rather than a string a caller has to test for emptiness -- "not in this
+// subtree" and "is this subtree" are different answers and one of them is a
+// reference the file has to record.
+[[nodiscard]] std::optional<std::string> pathUnder(const World& world, core::InstanceId root, core::InstanceId id)
+{
+    if (!id.valid())
+        return std::nullopt;
+    std::string path;
+    for (core::InstanceId walk = id; walk.valid(); walk = world.parentOf(walk)) {
+        if (walk == root)
+            return path;
+        const std::string_view name = world.atoms().text(world.name(walk));
+        path = path.empty() ? std::string(name) : std::string(name) + "." + path;
+    }
+    return std::nullopt;
+}
+
 // Emits the properties of `liveId` that differ from `refId`, under
 // `overridePath`. Recurses into children by position.
 //
-// **Instance-valued properties are never overrides**, and that is a rule rather
-// than an omission: the live one names an instance in the live world and the
-// reference names one in the stamp's own, so the two ids are not comparable at
-// all. A reference inside a stamp resolves inside that stamp, which is what
-// `placeStamp` already guarantees.
+// **An instance-valued property is compared by PATH, not by id** (D137). The
+// live value names an instance in the live world and the reference names one in
+// the stamp's own, so the two ids are not comparable -- which is true, and was
+// for a long time the reason this skipped every `ValueType::Instance` property
+// outright. That skipped two things it should not have: a reference RE-POINTED
+// at a different member of the stamp, and a reference to anything BESIDE the
+// stamp rather than under it. Both were dropped silently. The second is how a
+// `Material` assigned to a part inside a placed stamp disappeared on save --
+// the placed-stamp twin of D133, and it did not even reach the writer that
+// counts a dropped reference.
+//
+// Ids are not comparable; paths under each subtree's own root are. Equal paths
+// mean the stamp's own reference, untouched, and that is not an override --
+// which is the case the blanket skip was protecting, because recording one per
+// placed instance would turn a mark and a placement into a claim about an edit
+// nobody made. Anything else is written as a full scene path, which the loader
+// has resolved through its deferred pass since the format existed.
 void collectOverrides(JsonWriter& out, bool& anyOverride, const World& live, core::InstanceId liveId,
                       const World& reference, core::InstanceId refId, core::InstanceId stampRoot,
-                      const std::unordered_map<core::u32, std::string>& paths, SceneIoReport& report)
+                      core::InstanceId referenceRoot, const std::unordered_map<core::u32, std::string>& paths,
+                      SceneIoReport& report)
 {
     const ClassDescriptor* descriptor = live.classes().find(live.classOf(liveId));
     bool anyHere = false;
@@ -272,8 +304,6 @@ void collectOverrides(JsonWriter& out, bool& anyOverride, const World& live, cor
          current = live.classes().find(current->super)) {
         for (const PropertyDesc& property : current->properties) {
             if (property.get == nullptr || property.set == nullptr || property.readOnly)
-                continue;
-            if (property.type == ValueType::Instance)
                 continue;
             const std::string_view name = live.atoms().text(property.name);
             if (isStructuralProperty(name))
@@ -292,8 +322,30 @@ void collectOverrides(JsonWriter& out, bool& anyOverride, const World& live, cor
             std::optional<Value> theirs;
             if (referenceProperty != nullptr && referenceProperty->get != nullptr)
                 theirs = referenceProperty->get(reference, refId);
-            if (theirs.has_value() && *theirs == *mine)
+            // **`get_if`, and the descriptor's declared type is not enough to
+            // justify `get`.** A getter answers `Value{}` -- Nil -- for an
+            // instance whose component is not there, which every accessor in
+            // the tree does and which is not an error; `std::get` on that
+            // throws `bad_variant_access`, and an exception raised here is not
+            // caught anywhere between this and `main`. It terminated the editor
+            // on save, in a project a person was in the middle of building.
+            // Ask what the value HOLDS, never what the schema says it should.
+            if (property.type == ValueType::Instance) {
+                const core::InstanceId* liveHeld = std::get_if<core::InstanceId>(&*mine);
+                const core::InstanceId* refHeld =
+                    theirs.has_value() ? std::get_if<core::InstanceId>(&*theirs) : nullptr;
+                const core::InstanceId liveTarget = liveHeld != nullptr ? *liveHeld : core::InstanceId{};
+                const core::InstanceId refTarget = refHeld != nullptr ? *refHeld : core::InstanceId{};
+                if (!liveTarget.valid() && !refTarget.valid())
+                    continue;
+                const std::optional<std::string> livePath = pathUnder(live, stampRoot, liveTarget);
+                const std::optional<std::string> refPath = pathUnder(reference, referenceRoot, refTarget);
+                if (livePath.has_value() && refPath.has_value() && *livePath == *refPath)
+                    continue;
+            }
+            else if (theirs.has_value() && *theirs == *mine) {
                 continue;
+            }
 
             if (!anyHere) {
                 if (!anyOverride) {
@@ -316,7 +368,8 @@ void collectOverrides(JsonWriter& out, bool& anyOverride, const World& live, cor
     core::InstanceId liveChild = live.firstChild(liveId);
     core::InstanceId referenceChild = reference.firstChild(refId);
     while (liveChild.valid() && referenceChild.valid()) {
-        collectOverrides(out, anyOverride, live, liveChild, reference, referenceChild, stampRoot, paths, report);
+        collectOverrides(out, anyOverride, live, liveChild, reference, referenceChild, stampRoot, referenceRoot,
+                         paths, report);
         liveChild = live.nextSibling(liveChild);
         referenceChild = reference.nextSibling(referenceChild);
     }
@@ -359,7 +412,8 @@ void writeInstance(JsonWriter& out, const World& world, core::InstanceId id,
         if (reference != nullptr && sameShape(world, id, *reference->world, reference->root)) {
             out.field("stamp", stampName);
             bool anyOverride = false;
-            collectOverrides(out, anyOverride, world, id, *reference->world, reference->root, id, paths, report);
+            collectOverrides(out, anyOverride, world, id, *reference->world, reference->root, id, reference->root,
+                             paths, report);
             if (anyOverride)
                 out.endObject();
             out.endObject();
@@ -1101,7 +1155,8 @@ core::u32 restamp(World& world, core::InstanceId root, std::string_view stamp, s
         kept.beginObject();
         bool anyOverride = false;
         SceneIoReport measured;
-        collectOverrides(kept, anyOverride, world, target, reference, referenceRoot, target, paths, measured);
+        collectOverrides(kept, anyOverride, world, target, reference, referenceRoot, target, referenceRoot, paths,
+                         measured);
         if (anyOverride)
             kept.endObject();
         kept.endObject();

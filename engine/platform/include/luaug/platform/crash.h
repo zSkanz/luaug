@@ -12,10 +12,18 @@
 // It lives in `platform` for the reason the SDL seam does: it is per-OS code,
 // and nothing above should have to know which OS it is on.
 //
-// What it deliberately does NOT do: symbolize, upload, or attempt to continue.
-// The dump is for a developer with a debugger, and a handler that tries to
-// recover from a corrupted process is a handler that turns one bad report into
-// two.
+// **It writes a readable note beside the dump**, and that reverses an earlier
+// decision here rather than extending it. This used to say it deliberately did
+// not symbolize, on the reasoning that the dump is for a developer with a
+// debugger. That reasoning assumed a debugger, and the machine this engine is
+// developed on has none installed -- so a person hit a crash, sent the `.dmp`,
+// and the only way to read it was to guess. The note carries the exception, its
+// plain name, the faulting address where there is one, the `what()` of an
+// uncaught C++ exception, and a symbolised stack.
+//
+// What it still deliberately does NOT do: upload, or attempt to continue. A
+// handler that tries to recover from a corrupted process is a handler that
+// turns one bad report into two.
 #pragma once
 
 #include <filesystem>
@@ -28,7 +36,12 @@ namespace luaug::platform {
 // On a fault the handler writes `luaug-crash-<pid>.dmp` (Windows minidump) or
 // `luaug-crash-<pid>.txt` (POSIX signal note) into `directory`, then lets the
 // default behaviour run -- so a debugger still breaks and an exit code still
-// says what happened.
+// says what happened. On Windows it writes `luaug-crash-<pid>.txt` as well: the
+// half a person can read.
+//
+// It also installs a `std::terminate` handler, because an uncaught C++
+// exception is not a fault and reached neither of the paths above -- it
+// produced a dump with no cause in it, and on POSIX nothing at all.
 //
 // `directory` is passed in rather than resolved here for the same reason
 // `core::openLogFile`'s path is: whoever is running decides where their
@@ -41,5 +54,10 @@ namespace luaug::platform {
 // The path the handler WOULD write to, so a host can print it at startup. A
 // crash artifact nobody knows the name of is a crash artifact nobody sends.
 [[nodiscard]] std::filesystem::path crashArtifactPath();
+
+// The readable note beside it -- the same sentence, and for the same reason.
+// On POSIX this is the artifact: there is no dump there, and the note is the
+// whole of what a fault leaves behind.
+[[nodiscard]] std::filesystem::path crashNotePath();
 
 } // namespace luaug::platform
