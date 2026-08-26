@@ -92,15 +92,42 @@ Each is a decision, not a proposal; each says what would change it.
 |---|---|---|---|
 | 1 | Make the repository public? | **Theirs, at the end.** Everything else is sequenced so it is the last act and unblocks the rest. | They reserved it explicitly. |
 | 2 | Three sessions writing one tree | **Settled: one writer.** Asked; all three declared, confirmed nothing mid-edit, and stood down. Two protocol rules added above from what they reported. | R11 cannot hold under uncoordinated writers, and two sessions had already reverted each other's uncommitted work. |
-| 3 | `churn10k` 2.02 → 7.32 ms/tick | *pending* | |
-| 4 | Jolt `CROSS_PLATFORM_DETERMINISTIC` | *pending* | |
-| 5 | `PointLight.Shadows` / `SpotLight.Shadows` | *pending* | |
-| 6 | `Ragdoll:Build` / `Blend` | *pending* | |
-| 7 | The split-piece URN form | *pending* | |
-| 8 | `examples/05-streaming` golden row | *pending* | |
-| 9 | Where the editor archive attaches | *pending* | |
-| 10 | Dot-access to children (`api-design.md` divergence #26) | *pending* | Raised at handover. The owner reported it as a bug **twice**. A live inconsistency rides on it: autocomplete offers children after a plain dot and the runtime refuses them. Either the divergence is reversed, or the completion stops offering what cannot work. |
+| 3 | `churn10k` 2.02 → 7.32 ms/tick | **Not a regression. No decision record owed.** But the audit was right that something is wrong nearby -- see the note below the table. | The number rose twice and both are recorded in `perf-baselines.md`'s own tables with the apply/step/writeback split beside them: at M5 the benchmark's world gained a physics simulation, so its parts became Jolt bodies and it stopped measuring what M2 measured; at M6, D031 made two thirds of its anchored parts KINEMATIC because something writes their `CFrame` every tick. Both are more work correctly priced. The greater-than-ten-per-cent clause is about a regression at constant work, and this is neither. |
+| 4 | Jolt `CROSS_PLATFORM_DETERMINISTIC` | **Decided by experiment, and the experiment is specified rather than guessed.** Turn the flag on, regenerate both tiers' traces for `tests/determinism/churn`, and measure the cost on `physics1k` and `churn10k`. If the traces converge, cross-platform hash equality is one build flag away and the flag stays on with the cost recorded. If they do not, it buys nothing and comes back off. Scheduled in S6. | Reasoning by argument was about to get this wrong in both directions, so evidence settles it. The facts that force an experiment: `tests/determinism/example01`'s Windows and Linux traces are **byte-identical**, so the engine's own simulation already IS cross-platform deterministic; `tests/determinism/churn`'s **differ from tick 500 onward while tick 0 matches**, and `churn` is the one whose parts Jolt simulates. That points hard at Jolt being the only divergence -- which would make level C one flag away, the opposite of what ADR 0025 assumed when it called level C research-grade. It is still only a pointer: the divergence could equally be our own float math on the kinematic path. One flag and two trace regenerations answers it, and guessing does not. |
+| 5 | `PointLight.Shadows` / `SpotLight.Shadows` | **Honour them.** A shadow atlas, a 2D map per spot light and a cube map per point light, a per-frame caster budget ordered by screen-space size, sampled from the clustered light pass that already exists. Built in S6. | Four reasons. R18 makes visual fidelity a v1 target, and a lamp that casts no shadow is one of the most visible things a renderer can get wrong -- it is the same complaint as "one environment lights the whole world, so a cave is lit by the sky". The property has now shipped inert across THREE milestones, and every attempt to defer it produced a third answer instead of one of the two the roadmap asked for; ending that is what this campaign is. Removing it is strictly worse: it is in the api-dump, the inspector and the generated reference, so removing a shipped property would be a breaking change that buys nothing and the milestone that renders it would put it straight back. And the machinery is mostly here -- cascaded maps in `engine/render/src/shadow.cpp`, clustered lights from M7.5 -- so what is missing is an atlas, two projections and a budget, not a shadow system. |
+| 6 | `Ragdoll:Build` / `Blend` | **Build them**, as E9's plan specified. | The owner's own constraint in the plan is verbatim *"ragdoll is for now"*, so this is implementing a decision rather than taking one. Everything underneath it landed: the constraint seam in `IPhysics3D` with its Jolt backend, `Attachment` and `Bone`, and the skeleton override path. What is missing is the authoring verb on top. And the current state is the worst of the three available: a class that ships one boolean whose own documentation argues out loud against the design it came from. |
+| 7 | The split-piece URN form | **A fragment: `asset://models/horse.gltf#Body`.** A URN with no fragment, for a file that was split, resolves to nothing and produces a keyed error naming the primitives it should have named. | Four reasons, in order of weight. The convention ALREADY EXISTS and is already parsed -- `engine/script/src/animation.cpp:188` splits on `#` for a clip name -- so this is a second use of a rule, not a new rule. `engine/asset/include/luaug/asset/model_split.h` already states in its own contract that "the name becomes the URN fragment AND the instance's name", so the code was written to this answer and leaving it undecided was the only inconsistency. `isValidUrn` accepts it unchanged -- it refuses `\`, empty segments, `.` and `..`, and has no opinion about `#`. And a fragment keeps the SOURCE file visible in the name, which is what makes the error message useful and a scene diff readable; a synthetic separate URN would need a rule guaranteeing it cannot collide with a file the project actually has, which is a namespace problem invented for nothing. |
+| 8 | `examples/05-streaming` golden row | **Restate the row as regenerate-and-re-measure.** The content bytes are not committed and will not be. | This one was already decided elsewhere and only the row did not know. `.gitignore` carries the reasoning in full: that example's world is GENERATED, what is committed is the forty-line generator and not the megabyte and a half it writes, and the roadmap's own deliverable line asks for no giant binary assets in the repository. A golden row that asks somebody to compare committed bytes against a directory that is deliberately ignored cannot be ticked by anyone on any machine, which is why nobody has. |
+| 9 | Where the editor archive attaches | **Neither. It attaches to a new `v1.1.0`, cut when the editor phase closes** -- which is not yet, because E9 is open. Until then no archive is attached anywhere. | A release names what it contains. `v1.0.0` points at `milestone/m8` and attaching an editor built from a tree nine milestones newer would make that tag say something false about what it built, permanently and to everybody who downloads it. And the editor is not a fix to v1.0.0; it is a feature phase on top of it, which is a minor version. Cutting it now would also be premature in the ordinary sense: E9 is two thirds built and the thing would be shipped mid-milestone. |
+| 10 | Dot-access to children (`api-design.md` divergence #26) | **Keep the divergence. Make the refusal legible, at edit time and at run time, and fix the completion to match.** A decision record states the price in the owner's terms so that reversing it later is reversing a decision rather than discovering one. Built in S6. | The cost of allowing it is not "child access is weakly typed", which is how the divergence note undersells it. Allowing `script.Nested` requires a string indexer on `Instance`, and an indexer does not only type the child access -- it makes EVERY unknown key on EVERY instance resolve to `Instance?` instead of erroring, so `part.Positon = ...` stops being a type error and becomes a silent nil write. The price is typo detection across the whole language, and R2 makes every file here strict. The familiarity argument is also weaker than it looks: the platform this borrows from flags the same expression under its own strict mode, so what would be imported is a habit that is non-strict there too. What the owner is reporting twice is almost certainly not "give me the indexer" but "this fails and tells me nothing" -- so the work is a diagnostic that names the live child and the accessor, at edit time via the lint pass that already walks the AST, and the completion offering children only inside `WaitForChild("` and `FindFirstChild("`. The diagnostic names `FindFirstChild`, not `WaitForChild`: scripts start when play starts and the tree is already built, so recommending the yielding one would teach exactly the load-order habit the divergence exists to kill. |
 | 11 | `art/` in git | **Masters in, working files out.** `art/` lands minus retired drafts, `temporary/` and rejected candidates -- 39.5 MB, 203 files. | `icons/bake.py` is TRACKED and reads `art/editor-icons/` to generate the COMMITTED `icons/default/**`. A generated artifact whose input is absent cannot be regenerated by anyone. (A peer's sweep for readers of `art/` missed this because it did not include `*.py`.) The rejected and retired piles are working files, and a public repository cannot remove them from its history afterwards. |
+
+**Two things decision 3 turned up that are not decision 3**, both in
+`perf-baselines.md`, the file whose entire purpose is to be the instrument.
+
+- **It states the wrong budget for `churn10k`, in all three of its rows.** They
+  say 16 ms; `tests/bench/churn10k/scenario.json` says **32**. Commit `8f80ccf1`
+  doubled it -- *"churn10k's budget doubles, because D031 changed what the scene
+  is"* -- and the table was not told, including the M6 row written after that
+  commit. This is why the 19.6 ms GitHub-runner number reads as over budget when
+  it is comfortably inside one.
+- **It says the CI perf smoke "reads the latest table for its thresholds".** It
+  does not. `engine/app/src/bench.cpp:44` reads `budgetMs` out of each
+  scenario's own JSON, and the table is read by nobody. A file that misdescribes
+  where its own numbers are enforced sends the next person to change the wrong
+  one.
+
+Checked and NOT a finding, recorded so nobody re-checks it: `perf_budget` does
+run in CI. The workflow's `ctest -LE gpu-golden` excludes only that label, and
+this test carries `perf`.
+
+**One thing decision 3 also turned up.** The M6 row records
+`churn10k` at **19.6 ms on a GitHub `windows-latest` runner against a 16 ms
+budget**, with the note that the runner is 2.7x slower than this machine "which
+is why the budget is a detector and this file is the instrument". A budget the
+CI machine cannot meet is a gate that either fails on every push or is being
+scaled somewhere the table does not say. S7 checks which, because those are very
+different things and only one of them is a working gate.
 
 ---
 
@@ -158,8 +185,13 @@ that sends the next session to the wrong place.
 
 ### S3 — The defect tail
 
-- [ ] **S3.1** An instance-valued property set inside a placed stamp is dropped
-      silently on save. Reproduce first; the fix is a decision, not a patch.
+- [x] **S3.1** An instance-valued property set inside a placed stamp is dropped
+      silently on save. **Reproduced** with three cases, two failing; fixed by
+      comparing instance-valued properties by PATH under each subtree's own root
+      rather than by id, which is what makes a re-pointed or outside reference an
+      override while an untouched internal one stays not-an-override. The loader
+      needed nothing: it has resolved instance properties through a deferred pass
+      since the format existed, and only the writer skipped.
 - [ ] **S3.2** Every loose texture is encoded as sRGB, and the Material design
       names loose textures — the regression a past fix already closed once.
 - [ ] **S3.3** The toolbar's New button wipes an unsaved scene with no prompt.
@@ -183,7 +215,8 @@ that sends the next session to the wrong place.
 
 ### S4 — E9 closed
 
-- [ ] **S4.1** Decide the split-piece URN form. Blocks the two below.
+- [x] **S4.1** Decide the split-piece URN form. **Settled: a fragment** -- see
+      decision 7. Owes a decision record, which lands with E9's own.
 - [ ] **S4.2** Step 12 — the editor compiles on import: `assetc::importOne`,
       the object-store writer, `luaug_assetc_lib` linked into the app, and
       `splitByPrimitive` reaching a world.
@@ -240,8 +273,11 @@ that sends the next session to the wrong place.
 
 - [ ] **S7.1** macOS runs tests.
 - [ ] **S7.2** The two gates that skip on every CI push.
-- [ ] **S7.3** A skip that nothing asserts is a skip nobody notices — six of
-      them.
+- [x] **S7.3** A skip that nothing asserts is a skip nobody notices — six of
+      them. `localgate.ps1` now FAILS on a skipped test and names which,
+      with `-AllowSkips` as the deliberate escape for a machine with no GPU.
+      `--no-tests=error` beside it, because an empty suite is not a passing
+      one either. **The CI half is still owed** and belongs with S7.2.
 - [ ] **S7.4** No gate builds the three Windows profiles the release ships.
 - [ ] **S7.5** `linux-clang-asan` is fully wired and run by nothing.
 - [ ] **S7.6** The nightly real-image golden job that two documents promise.
@@ -265,15 +301,43 @@ that sends the next session to the wrong place.
       profiles ship.
 - [ ] **S8.4** A checked-in golden nothing reads.
 - [ ] **S8.5** D131's residual, D047, D044, D003's rotational half.
+- [ ] **S8.8** `perf-baselines.md` states the wrong `churn10k` budget in three
+      rows and misdescribes where thresholds are enforced — see above.
 - [ ] **S8.6** The release: where the editor archive attaches, and what version
       it carries.
 - [ ] **S8.7** Hand back to the owner with one act left: make it public.
 
 ---
 
+## Found while working, not on the original list
+
+- **A crash the owner hit was mine, and reading it was impossible.** The
+  `std::get` in S3.1's fix decided by the property's DECLARED type; every
+  accessor answers `Value{}` for a missing component, and `std::get` on that
+  throws. Fixed with `get_if`. **But the real finding is that the `.dmp` could
+  not be read at all** — no debugger on this machine, and the handler wrote
+  nothing else. It writes a readable note now: exception, plain name, faulting
+  address, and a symbolised stack with file and line. Owes a register row.
+- **The editor restores a remembered scene without checking it still exists.**
+  `.luaug/editor.json` in the owner's project names `scenes/testing.scene.json`,
+  which is gone, so the project opens empty with no diagnostic. Needs a
+  fallback to the `luaug.toml` scene and a keyed warning. Blocked on
+  `engine/app/src/editor.cpp`, which another agent holds. Owes a register row.
+- **The Linux half of the crash gate is unverified.** On MSVC the runtime's
+  own `__try` around `main` means `std::terminate` never runs, so the note
+  carries the stack rather than the message; POSIX should reach `terminate`
+  and therefore the message. The gate asserts each accordingly and only the
+  Windows half has been run.
+
 ## Blocked
 
-Nothing yet.
+- **Nothing is blocked on the owner.** The one act reserved for them -- making the
+  repository public -- is sequenced last and blocks nothing before it.
+- **GitHub Actions has been dark since 2026-08-22**, every run completing in about
+  four seconds having executed zero steps, which is the quota signature. So CI
+  cannot confirm anything until the repository is public. Local gates are the
+  instrument until then, and macOS -- Tier 3, unbuildable here -- has no
+  instrument at all in the meantime.
 
 ## Log
 

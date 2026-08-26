@@ -19,6 +19,16 @@
 #   scripts/localgate.ps1 -Only docs   # one stage: docs | luau | format | windows | linux | shipping
 #   scripts/localgate.ps1 -SkipLinux   # ONLY when Docker is genuinely unavailable
 #   scripts/localgate.ps1 -Only format -Fix   # rewrite the C++ tree instead of checking it
+#   scripts/localgate.ps1 -AllowSkips         # ONLY on a machine with no GPU
+#
+# **A skipped test is a failure here.** Six gates in this repository answer
+# `LUAUG_TEST_SKIP` when there is no graphics device, and ctest counts a skip as
+# a pass -- so a GPU that stopped coming up would turn all six green with no
+# alarm, and the pixel gates, the two-worlds proof and the settings differential
+# would all quietly stop meaning anything. This machine has a device; if a test
+# skips on it, something is wrong with the machine or with the test. -AllowSkips
+# is for a machine that genuinely has no GPU, and typing it is the point:
+# accepting the loss should be a decision, not a default.
 #
 # The Linux stage is about twelve seconds warm and is not redundant with the
 # Windows one: Clang diagnoses things MSVC does not, warnings are errors, and it
@@ -33,7 +43,9 @@ param(
     # Only meaningful with -Only format: reformat in place rather than report.
     # Off by default, because a gate that edits your tree without being asked is
     # not a gate.
-    [switch]$Fix
+    [switch]$Fix,
+    # Accept skipped tests instead of failing on them. See the note above.
+    [switch]$AllowSkips
 )
 
 # 'Continue', not 'Stop', and this is not laziness. Windows PowerShell 5.1 turns
@@ -50,6 +62,39 @@ Push-Location $repo
 
 $script:failures = @()
 $script:results = @()
+
+# **A test that skips is a test that did not run, and ctest calls that a pass.**
+#
+# Six gates here answer `LUAUG_TEST_SKIP` when no graphics device comes up --
+# the screenshot golden, the settings differential, the two-worlds editor-seam
+# proof and three more. On a machine with a GPU every one of them is supposed to
+# execute, so a skip means the device stopped being found and six gates went
+# green while measuring nothing. That failure is silent by construction, which is
+# exactly the kind this repository writes checks for.
+#
+# The list of what skipped is printed rather than only counted, because "one
+# test skipped" sends somebody looking and "screenshot_gate skipped" tells them
+# what they lost.
+function Assert-NoSkips {
+    param([string]$Log)
+
+    if (-not (Test-Path $Log)) { return }
+    $skipped = Select-String -Path $Log -Pattern '^\s*\d+/\d+\s+Test\s+#\d+:\s+(\S+)\s+\.+\*+Skipped' -AllMatches |
+        ForEach-Object { $_.Matches[0].Groups[1].Value }
+
+    if (-not $skipped -or $skipped.Count -eq 0) { return }
+
+    $names = ($skipped | Sort-Object -Unique) -join ', '
+    if ($AllowSkips) {
+        Write-Host "[gate] $($skipped.Count) test(s) skipped, accepted by -AllowSkips: $names" -ForegroundColor Yellow
+        return
+    }
+
+    throw ("$($skipped.Count) test(s) SKIPPED, and ctest counts a skip as a pass: $names`n" +
+        "        On a machine with a graphics device these are supposed to run. A skip here means " +
+        "the device stopped being found and those gates went green while measuring nothing.`n" +
+        "        If this machine genuinely has no GPU, re-run with -AllowSkips and accept that.")
+}
 
 function Invoke-Stage {
     param([string]$Name, [scriptblock]$Body)
@@ -183,20 +228,27 @@ Invoke-Stage 'windows' {
     # dependencies at all, and every incremental build silently reuses objects
     # compiled against an older header. It cost this project four debugging
     # sessions before anybody looked at why.
+    # `--no-tests=error` because an empty suite is not a passing suite: a preset
+    # that stopped registering tests would otherwise report success having run
+    # nothing, which is the same shape of lie the skip check below exists for.
+    $ctestLog = Join-Path $env:TEMP "luaug-localgate-ctest-$PID.txt"
     $script = @"
 chcp 65001 >nul
 call "$vcvars" >nul || exit /b 1
 cmake --preset win-msvc-dev || exit /b 1
 cmake --build --preset win-msvc-dev || exit /b 1
-ctest --preset win-msvc-dev --output-on-failure || exit /b 1
+ctest --preset win-msvc-dev --output-on-failure --no-tests=error > "$ctestLog" 2>&1 || (type "$ctestLog" & exit /b 1)
+type "$ctestLog"
 "@
     $temp = Join-Path $env:TEMP "luaug-localgate-$PID.cmd"
     Set-Content -Path $temp -Value $script -Encoding ascii
     try {
         & cmd.exe /c $temp
         if ($LASTEXITCODE -ne 0) { throw "the Windows build or tests failed" }
+        Assert-NoSkips -Log $ctestLog
     } finally {
         Remove-Item $temp -ErrorAction SilentlyContinue
+        Remove-Item $ctestLog -ErrorAction SilentlyContinue
     }
 
     # The CLI's own path to the same suite. The M3 gate wants `luaug test` green
