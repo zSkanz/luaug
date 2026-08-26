@@ -357,6 +357,18 @@ struct EditorPanels
     //
     // Off by default: it is a line per shape edge for every body in the world.
     bool showCollision = false;
+
+    // **Whether the viewport draws a reference grid**, at the translate snap
+    // step, and it is off.
+    //
+    // Lines you can see and a snap you cannot are two grids, and the one that
+    // catches is the invisible one -- so this draws at the SAME spacing the snap
+    // uses rather than at a round number of its own. Turning it on is how "why
+    // did it land there" stops being a question.
+    //
+    // Off by default because a grid is only useful while placing something, and
+    // a permanent one is lines across every screenshot.
+    bool showGrid = false;
 };
 
 // What the shell asked for this frame, drained by the frame loop at the safe

@@ -21,6 +21,7 @@
 #include "luaug/app/inspector.h"
 #include "luaug/app/launcher.h"
 #include "luaug/app/partition_cache.h"
+#include "luaug/app/reference_grid.h"
 #include "luaug/app/reload.h"
 #include "luaug/app/screenshot.h"
 #include "luaug/app/skeleton_overlay.h"
@@ -2398,6 +2399,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         if (const render::AnimationSystem* animation = host->animation();
             animation != nullptr && overlay.has_value() && overlay->panels().showSkeletons) {
             drawSkeletons(host->world(), *animation, debugDraw);
+        }
+
+        // The reference grid, at the SAME step the translate snap uses -- lines
+        // you can see and a snap you cannot are two grids, and the one that
+        // catches is the invisible one. On the y = 0 plane, which is where a
+        // world's floor is until somebody decides otherwise.
+        if (overlay.has_value() && overlay->panels().showGrid) {
+            drawReferenceGrid(editor.cameraCFrame().position, 0.0, editor.snapStep(GizmoMode::Translate), debugDraw);
         }
 
         // The streaming grid, behind `View > Streaming Grid` in the editor and

@@ -327,7 +327,22 @@ that sends the next session to the wrong place.
       is in**, beside the frame and memory readouts it already had. What is
       left is the render-side counters, which the F3 overlay shows and the
       editor's panel does not.
-- [ ] **S5.13** Snap step editable; a reference grid drawn.
+- [x] **S5.13** Snap step editable; a reference grid drawn — both built.
+      `setSnapStep` had existed since the manipulator did and nothing could
+      call it, so every scene in this editor was built on a quarter of a metre
+      and fifteen degrees whether or not those were the numbers -- and a snap
+      you cannot change is a snap you turn off. It is a right-click on the snap
+      button rather than a Preferences page, because a step is a thing somebody
+      changes while placing something.
+
+      **The grid draws at the SNAP's step**, not at a round number of its own:
+      lines you can see and a snap you cannot are two grids, and the one that
+      catches is the invisible one. It thins by powers of ten as the camera
+      rises, so every line on screen is still a line the snap would produce --
+      a spacing computed as reach-over-line-count would be a rounder grid
+      beside the one that catches. Six cases, and the alignment one is
+      break-verified: a grid centred on the camera lines up with nothing and
+      looks correct from every single position.
 - [x] **S5.14** Properties search and categories — built, and the categories
       are DERIVED. Every other engine puts a `Category` string on each
       property; two hundred of those in the IDL is two hundred things to keep

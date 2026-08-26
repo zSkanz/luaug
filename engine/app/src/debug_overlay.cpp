@@ -3182,7 +3182,8 @@ void drawConsole(script::ScriptRuntime* runtime)
 // pressing play asks "run my game", pressing stop asks "give me my world back",
 // and a button that means one of them while showing the other is the first
 // thing a person notices.
-void drawTransport(Editor& editor, EditorCommands& commands, EditorDialogs& dialogs, const IconAtlas* icons)
+void drawTransport(Editor& editor, EditorCommands& commands, EditorDialogs& dialogs, EditorPanels& panels,
+                   const IconAtlas* icons)
 {
     const RunState run = editor.runState();
     const bool inPlay = editor.inPlayMode();
@@ -3308,10 +3309,60 @@ void drawTransport(Editor& editor, EditorCommands& commands, EditorDialogs& dial
         const bool snapping = editor.snapping();
         if (snapping)
             ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-        if (toolButton(icons::ActionGrid, "snap", "snap to the grid  (hold Alt to suspend)"))
+        if (toolButton(icons::ActionGrid, "snap",
+                       "snap to the grid  (hold Alt to suspend, right-click for the step)")) {
             editor.setSnap(!editor.snapping());
+        }
         if (snapping)
             ImGui::PopStyleColor();
+
+        // **The step, behind a right-click on the button it belongs to** (S5.13).
+        // `setSnapStep` has existed since the manipulator did and nothing could
+        // call it, so every scene in this editor was built on a quarter of a
+        // metre and fifteen degrees whether or not those were the numbers -- and
+        // a snap you cannot change is a snap you turn off.
+        //
+        // Not a Preferences page: a step is a thing somebody changes while
+        // placing something, and a dialog two menus away is one they change once
+        // and then work around.
+        if (ImGui::BeginPopupContextItem("snap-step")) {
+            ImGui::TextDisabled("snap step");
+            ImGui::Separator();
+
+            // One row per mode rather than one for whichever is active, because
+            // the useful gesture is "set them all up the way I work" and doing
+            // that through three tool switches is three times the clicks.
+            struct Row
+            {
+                GizmoMode mode;
+                const char* label;
+                const char* format;
+                f32 slowest;
+                f32 fastest;
+            };
+            static constexpr Row Rows[] = {
+                {GizmoMode::Translate, "move", "%.3f m", 0.001f, 64.0f},
+                {GizmoMode::Rotate, "turn", "%.1f deg", 0.1f, 90.0f},
+                {GizmoMode::Scale, "size", "%.3f m", 0.001f, 64.0f},
+            };
+            for (const Row& row : Rows) {
+                ImGui::PushID(row.label);
+                ImGui::TextUnformatted(row.label);
+                ImGui::SameLine(60.0f);
+                ImGui::SetNextItemWidth(140.0f);
+                f32 step = editor.snapStep(row.mode);
+                if (ImGui::DragFloat("##step", &step, step * 0.05f + 0.001f, row.slowest, row.fastest, row.format))
+                    editor.setSnapStep(row.mode, step);
+                ImGui::PopID();
+            }
+
+            ImGui::Separator();
+            // **The grid follows the move step**, which is what makes it a
+            // reference rather than a decoration: lines you can see and a snap
+            // you cannot are two grids, and the one that catches is invisible.
+            ImGui::Checkbox("show a grid in the viewport", &panels.showGrid);
+            ImGui::EndPopup();
+        }
     }
 
     ImGui::SameLine();
@@ -3528,7 +3579,7 @@ void drawViewportBody(Editor& editor, rhi::TextureHandle texture, EditorCommands
 }
 
 void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& commands, EditorDialogs& dialogs,
-                  bool& open, const IconAtlas* icons)
+                  EditorPanels& panels, bool& open, const IconAtlas* icons)
 {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     // **Room for the camera**, painted over the gap by `drawTabIcons`. Before
@@ -3539,7 +3590,7 @@ void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& co
     ImGui::PopStyleVar();
 
     if (visible) {
-        drawTransport(editor, commands, dialogs, icons);
+        drawTransport(editor, commands, dialogs, panels, icons);
         drawViewportBody(editor, texture, commands);
     }
     ImGui::End();
@@ -4533,6 +4584,11 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
             ImGui::SetTooltip("draw every skinned mesh's rig as lines, so a joint is something you can see before you "
                               "name it in a Bone");
         }
+        ImGui::MenuItem("Grid", nullptr, &panels.showGrid);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("a reference grid at the snap's own step, so what catches is what you can see. "
+                              "Right-click the snap button for the step");
+        }
         ImGui::MenuItem("Collision Shapes", nullptr, &panels.showCollision);
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("draw what the SOLVER thinks each part is, which is not always what is drawn: a mesh "
@@ -5199,7 +5255,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
 
     if (editor != nullptr) {
         if (panels.viewport)
-            drawViewport(*editor, viewport, commands, dialogs, panels.viewport, icons);
+            drawViewport(*editor, viewport, commands, dialogs, panels, panels.viewport, icons);
         if (panels.content)
             drawContent(*editor, commands, panels, dialogs, icons, world, inspector);
     }
