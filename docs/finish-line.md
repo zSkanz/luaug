@@ -441,7 +441,17 @@ that sends the next session to the wrong place.
       refusal: that is the normal case over a selection, and reporting it as a
       failure would fire the toast on the one gesture people use tags for.
 - [ ] **S5.16** Thumbnails for meshes, scenes and stamps; a material swatch.
-- [ ] **S5.17** Pivot/centre choice for a multi-selection.
+- [x] **S5.17** Pivot/centre choice for a multi-selection — built, as a toggle
+      beside the axis-space one because they are the same kind of question: one
+      is which way the handles point and this is where they are. Over one
+      instance the two answers are identical and the control does nothing; over
+      forty they are the difference between rotating a row of columns about the
+      one you clicked last and rotating it about itself. The centre is the MEAN
+      of the transforms rather than the middle of a bounding box: a box's
+      centre moves when one part is scaled, so a gizmo on it would drift during
+      a scale drag — and a handle that moves while you hold it is one that does
+      not track the pointer. Four cases, persisted with the other tool
+      preferences.
 - [~] **S5.18** Sibling reordering. **The `World` verb is built** — a move
       that changes nothing reports `Unchanged`, the duplicate-name chain is
       rebuilt around it, and the world hash follows. The Explorer's

@@ -470,6 +470,9 @@ void Editor::rememberState(const std::filesystem::path& stateDirectory) const
     // The word rather than a flag, for the same reason: `"space": false` names
     // nothing, and `local` and `world` are what the toolbar itself says.
     writer.field("space", m_gizmoLocal ? "local" : "world");
+    // The same shape and the same argument: `"origin": true` names nothing, and
+    // `pivot` and `centre` are what the toolbar itself says.
+    writer.field("origin", m_gizmoOrigin == GizmoOrigin::Centre ? "centre" : "pivot");
     writer.field("snap", m_snap);
     writer.key("snapSteps");
     writer.beginArray();
@@ -541,6 +544,7 @@ void Editor::recallState(const std::filesystem::path& stateDirectory)
     if (const core::JsonValue tools = root["tools"]; tools.type() == core::JsonType::Object) {
         m_gizmoMode = gizmoModeFrom(tools["gizmo"].asString());
         m_gizmoLocal = tools["space"].asString() == "local";
+        m_gizmoOrigin = tools["origin"].asString() == "centre" ? GizmoOrigin::Centre : GizmoOrigin::Pivot;
         if (const core::JsonValue snap = tools["snap"]; snap.type() == core::JsonType::Boolean)
             m_snap = snap.asBool();
         if (const core::JsonValue steps = tools["snapSteps"]; steps.type() == core::JsonType::Array) {
@@ -2454,6 +2458,30 @@ std::optional<GizmoFrame> Editor::gizmoFrame(const scene::World& world, const In
 
     GizmoFrame frame;
     frame.transform.position = located->position;
+
+    // **The middle of the selection, when asked for** (S5.17). Over one instance
+    // this is the instance, so the control does nothing there; over forty it is
+    // the difference between rotating a row of columns about the one you clicked
+    // last and rotating it about itself.
+    //
+    // The mean of the transforms rather than the centre of the bounding box: a
+    // box's centre moves when one part is scaled, so a gizmo on it would drift
+    // during a scale drag -- and a handle that moves while you hold it is a
+    // handle that does not track the pointer.
+    if (m_gizmoOrigin == GizmoOrigin::Centre && inspector.selectionCount() > 1) {
+        core::DVec3 sum{};
+        core::usize counted = 0;
+        for (const core::InstanceId id : inspector.selectionSet()) {
+            if (const std::optional<core::CFrameD> at = gizmoTransformOf(world, id); at.has_value()) {
+                sum = sum + at->position;
+                ++counted;
+            }
+        }
+        if (counted > 0) {
+            const auto divisor = static_cast<core::f64>(counted);
+            frame.transform.position = core::DVec3{sum.x / divisor, sum.y / divisor, sum.z / divisor};
+        }
+    }
     // World axes unless somebody asked for the part's own. A rotated crate is
     // unusable in world space and a wall is unusable in local, which is why this
     // is a choice rather than a decision made here.

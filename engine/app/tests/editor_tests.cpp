@@ -3997,3 +3997,99 @@ TEST_CASE("detaching does not touch the simulation")
     CHECK(editor.runState() == before);
     CHECK(editor.allowedTicks(3) == 3u);
 }
+
+// --- Where the gizmo sits over a selection (S5.17) ---------------------------
+
+namespace {
+
+// A world with three parts in a row, and an editor with a camera far enough back
+// that the gizmo has a size.
+struct Row
+{
+    app::testing::Fixture fixture;
+    scene::World world{fixture.classes, fixture.enums, fixture.atoms, 1234u};
+    Editor editor;
+    Inspector inspector;
+    core::InstanceId root;
+    std::array<core::InstanceId, 3> parts{};
+
+    Row()
+    {
+        root = fixture.widget(world, "Root");
+        for (std::size_t index = 0; index < parts.size(); ++index) {
+            parts[index] = world.create(fixture.partClass);
+            REQUIRE_FALSE(world.setParent(parts[index], root).has_value());
+            world.parts().find(parts[index])->cframe.position =
+                core::DVec3{static_cast<core::f64>(index) * 4.0, 0.0, 0.0};
+        }
+        editor.setViewport({0.0f, 0.0f, 800.0f, 600.0f});
+        editor.setCamera(core::perspective(1.0f, 800.0f / 600.0f, 0.1f, 500.0f), core::Mat4{},
+                         core::DVec3{0.0, 0.0, 60.0});
+    }
+};
+
+} // namespace
+
+TEST_CASE("pivot puts the gizmo on the last thing clicked")
+{
+    // The default, because it is the one with no surprise in it: the gizmo is
+    // where you are looking.
+    Row row;
+    row.inspector.select(row.parts[0]);
+    row.inspector.add(row.parts[1]);
+    row.inspector.add(row.parts[2]);
+    REQUIRE(row.inspector.selection() == row.parts[2]);
+
+    const std::optional<GizmoFrame> frame = row.editor.gizmoFrame(row.world, row.inspector);
+    REQUIRE(frame.has_value());
+    CHECK(frame->transform.position.x == doctest::Approx(8.0));
+}
+
+TEST_CASE("centre puts it in the middle of everything selected")
+{
+    Row row;
+    row.editor.setGizmoOrigin(Editor::GizmoOrigin::Centre);
+    row.inspector.select(row.parts[0]);
+    row.inspector.add(row.parts[1]);
+    row.inspector.add(row.parts[2]);
+
+    const std::optional<GizmoFrame> frame = row.editor.gizmoFrame(row.world, row.inspector);
+    REQUIRE(frame.has_value());
+    // 0, 4 and 8 average to 4.
+    CHECK(frame->transform.position.x == doctest::Approx(4.0));
+}
+
+TEST_CASE("over one instance the two answers are the same")
+{
+    // Which is why the control does nothing there, and why it is a toggle rather
+    // than a mode with a state somebody has to keep track of.
+    Row row;
+    row.inspector.select(row.parts[1]);
+
+    row.editor.setGizmoOrigin(Editor::GizmoOrigin::Pivot);
+    const std::optional<GizmoFrame> pivot = row.editor.gizmoFrame(row.world, row.inspector);
+    row.editor.setGizmoOrigin(Editor::GizmoOrigin::Centre);
+    const std::optional<GizmoFrame> centre = row.editor.gizmoFrame(row.world, row.inspector);
+
+    REQUIRE(pivot.has_value());
+    REQUIRE(centre.has_value());
+    CHECK(pivot->transform.position == centre->transform.position);
+}
+
+TEST_CASE("the centre is the mean of the transforms, not of a bounding box")
+{
+    // A box's centre moves when one part is SCALED, so a gizmo on it would drift
+    // during a scale drag -- and a handle that moves while you hold it is a
+    // handle that does not track the pointer.
+    Row row;
+    row.editor.setGizmoOrigin(Editor::GizmoOrigin::Centre);
+    row.inspector.select(row.parts[0]);
+    row.inspector.add(row.parts[2]);
+
+    const core::DVec3 before = row.editor.gizmoFrame(row.world, row.inspector)->transform.position;
+    // One of them grows hugely. Its POSITION has not moved.
+    row.world.parts().find(row.parts[2])->size = core::Vec3{40.0f, 40.0f, 40.0f};
+    const core::DVec3 after = row.editor.gizmoFrame(row.world, row.inspector)->transform.position;
+
+    CHECK(after.x == doctest::Approx(before.x));
+}

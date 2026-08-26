@@ -3348,6 +3348,18 @@ void drawTransport(Editor& editor, EditorCommands& commands, EditorDialogs& dial
                           : editor.gizmoLocal() ? "the selection's own axes -- click for the world's"
                                                 : "the world's axes -- click for the selection's own");
 
+    // **Where the gizmo sits over a selection** (S5.17), beside the axis-space
+    // toggle because they are the same kind of question: one is which way the
+    // handles point and this is where they are.
+    ImGui::SameLine();
+    {
+        const bool centred = editor.gizmoOrigin() == Editor::GizmoOrigin::Centre;
+        if (ImGui::Button(centred ? "centre" : "pivot"))
+            editor.setGizmoOrigin(centred ? Editor::GizmoOrigin::Pivot : Editor::GizmoOrigin::Centre);
+        ImGui::SetItemTooltip(centred ? "the middle of the selection -- click for the last thing clicked"
+                                      : "the last thing clicked -- click for the middle of the selection");
+    }
+
     ImGui::SameLine();
     {
         const bool snapping = editor.snapping();

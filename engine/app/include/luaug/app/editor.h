@@ -1555,6 +1555,28 @@ public:
     // **World axes or the selection's own.** Which one is right depends on the
     // part, which is why it is a person's choice and not this file's: a rotated
     // crate is unusable in world space and a wall is unusable in local.
+    // **Where the manipulator sits over a SELECTION** (S5.17).
+    //
+    // The primary's own transform, or the middle of everything selected. Over
+    // one instance the two are the same and the control does nothing; over
+    // forty they are the difference between rotating a row of columns about the
+    // one you clicked last and rotating it about itself, which is two different
+    // gestures somebody means at different moments.
+    //
+    // `Pivot` is the default because it is the one with no surprise in it: the
+    // gizmo is on the thing you last clicked, which is where you are looking.
+    enum class GizmoOrigin : core::u8
+    {
+        Pivot,
+        Centre,
+    };
+    [[nodiscard]] GizmoOrigin gizmoOrigin() const noexcept { return m_gizmoOrigin; }
+    void setGizmoOrigin(GizmoOrigin origin) noexcept
+    {
+        m_gizmoOrigin = origin;
+        m_preferencesDirty = true;
+    }
+
     [[nodiscard]] bool gizmoLocal() const noexcept { return m_gizmoLocal; }
     void setGizmoLocal(bool local) noexcept;
 
@@ -1805,6 +1827,7 @@ private:
     RunState m_run = RunState::Editing;
     GizmoMode m_gizmoMode = GizmoMode::Translate;
     bool m_gizmoLocal = false;
+    GizmoOrigin m_gizmoOrigin = GizmoOrigin::Pivot;
     bool m_snap = true;
     bool m_snapSuspended = false;
     EditorPanels::ContentView m_contentView = EditorPanels::ContentView::List;
