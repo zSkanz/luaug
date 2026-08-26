@@ -29,6 +29,55 @@
 #include "luaug/app/ui_theme.h"
 #include "luaug/scene/world.h"
 
+namespace luaug::app {
+
+// Finds `<something>.luau:<digits>` -- the first one, which is the raise site.
+//
+// Hand-rolled rather than a regex, and that is the cheap answer here: this runs
+// once per visible console line per frame, and `<regex>` costs more to construct
+// than this costs to run.
+std::optional<SourceLocation> parseSourceLocation(std::string_view text)
+{
+    constexpr std::string_view kSuffix = ".luau:";
+    const std::size_t at = text.find(kSuffix);
+    if (at == std::string_view::npos)
+        return std::nullopt;
+
+    std::size_t digits = at + kSuffix.size();
+    core::u32 line = 0;
+    std::size_t counted = 0;
+    // Bounded, because a run of digits long enough to overflow is not a line
+    // number and multiplying through it would wrap into one that looks real.
+    for (; digits < text.size() && text[digits] >= '0' && text[digits] <= '9' && counted < 9; ++digits, ++counted)
+        line = line * 10 + static_cast<core::u32>(text[digits] - '0');
+    if (counted == 0 || line == 0)
+        return std::nullopt;
+    // **More digits than a line number has is a refusal, not a truncation.**
+    // Stopping at nine and using what was read turns an absurd run into a
+    // plausible line, and the click then scrolls somewhere arbitrary in a file
+    // that is perfectly fine.
+    if (digits < text.size() && text[digits] >= '0' && text[digits] <= '9')
+        return std::nullopt;
+
+    // Back to the start of the chunk name: everything up to a separator that
+    // could not be part of one. A log line is `[level] [key] chunk.luau:12`, and
+    // the chunk may itself hold slashes.
+    std::size_t begin = at;
+    while (begin > 0) {
+        const char c = text[begin - 1];
+        if (c == ' ' || c == '\t' || c == '\'' || c == '"' || c == '[' || c == ']' || c == '(' || c == ')')
+            break;
+        --begin;
+    }
+
+    SourceLocation found;
+    found.chunk = std::string(text.substr(begin, at + 5 - begin)); // includes ".luau"
+    found.line = line;
+    return found;
+}
+
+} // namespace luaug::app
+
 #if LUAUG_DEBUG_UI
 
 #include <algorithm>
@@ -37,9 +86,11 @@
 #include <cstring>
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <optional>
 #include <string>
 
 namespace luaug::app {
+
 namespace {
 
 using core::f32;

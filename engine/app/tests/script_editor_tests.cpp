@@ -4,6 +4,7 @@
 // ones every editor gets wrong once: opening the same thing twice, closing the
 // tab you were looking at, and a document that says it is saved and is not.
 #include "luaug/app/script_editor.h"
+#include "luaug/app/script_editor_panel.h"
 #include "luaug/core/name_atom.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/enum_registry.h"
@@ -18,6 +19,8 @@
 using namespace luaug;
 using app::Position;
 using app::ScriptEditor;
+using luaug::app::parseSourceLocation;
+using luaug::app::SourceLocation;
 
 namespace {
 
@@ -272,4 +275,85 @@ TEST_CASE("closing the stamp session closes the tabs that lived in it")
     CHECK(editor.forgetDestroyed(scene.world, nullptr) == 1);
     REQUIRE(editor.count() == 1);
     CHECK(editor.at(0)->origin == app::ScriptOrigin::Scene);
+}
+
+// --- Which console lines are links (S5.11) -----------------------------------
+//
+// **An error in the console names a file and a line and nothing takes you to
+// it**, which is the difference between a console and a log file. What decides
+// whether a line becomes a link is this parser, and what it must not do is turn
+// ordinary output into something that looks clickable and goes somewhere wrong.
+
+TEST_CASE("a runtime error's own location is found")
+{
+    const std::optional<SourceLocation> at =
+        parseSourceLocation("init.luau:183: [scene.err.unknown_member] RunService has no member named \"Stepped\"");
+    REQUIRE(at.has_value());
+    CHECK(at->chunk == "init.luau");
+    CHECK(at->line == 183u);
+}
+
+TEST_CASE("a chunk with directories in it keeps them")
+{
+    // The chunk name is what the VM gave the chunk, and matching a tab means
+    // matching it exactly -- half of it would find nothing.
+    const std::optional<SourceLocation> at = parseSourceLocation("src/scripts/init.luau:140: something went wrong");
+    REQUIRE(at.has_value());
+    CHECK(at->chunk == "src/scripts/init.luau");
+    CHECK(at->line == 140u);
+}
+
+TEST_CASE("the FIRST location is the one, because the rest is the traceback")
+{
+    // Luau puts the raise site at the front and appends how it got there behind.
+    // Jumping to the last would land in whatever called the thing that failed,
+    // which is nearly always the wrong file.
+    const std::optional<SourceLocation> at =
+        parseSourceLocation("deep.luau:12: attempt to index nil\\nstack: caller.luau:99");
+    REQUIRE(at.has_value());
+    CHECK(at->chunk == "deep.luau");
+    CHECK(at->line == 12u);
+}
+
+TEST_CASE("a log line with a prefix in brackets is still parsed")
+{
+    // What the console actually holds: the sink writes `[error] [key] message`.
+    const std::optional<SourceLocation> at =
+        parseSourceLocation("[error] [script.err.runtime] Error while running a handler: a.luau:7: boom");
+    REQUIRE(at.has_value());
+    CHECK(at->chunk == "a.luau");
+    CHECK(at->line == 7u);
+}
+
+TEST_CASE("ordinary output is not a link")
+{
+    // A line that happens to contain a colon and a number is not a location, and
+    // linking it would be a control that goes somewhere wrong -- worse than one
+    // that is not there.
+    CHECK_FALSE(parseSourceLocation("Loaded a scene of 400 instance(s).").has_value());
+    CHECK_FALSE(parseSourceLocation("resident 12 loading 3 decoded 0 failed 0").has_value());
+    CHECK_FALSE(parseSourceLocation("12:34:56 something happened").has_value());
+    CHECK_FALSE(parseSourceLocation("").has_value());
+}
+
+TEST_CASE("a .luau with no line after it is not a location")
+{
+    // A path in a message is a path. Only a path with a line number on it is
+    // somewhere to go.
+    CHECK_FALSE(parseSourceLocation("mounted src/scripts/init.luau").has_value());
+    CHECK_FALSE(parseSourceLocation("init.luau: no line here").has_value());
+}
+
+TEST_CASE("line zero is not a line")
+{
+    // Every editor and every error in the world counts lines from one, so a zero
+    // is a parse that went wrong rather than the top of the file.
+    CHECK_FALSE(parseSourceLocation("a.luau:0: nowhere").has_value());
+}
+
+TEST_CASE("an absurd run of digits is refused rather than wrapping into a plausible line")
+{
+    // Multiplying through it would overflow into a number that looks real, and
+    // the click would scroll somewhere arbitrary in a file that is fine.
+    CHECK_FALSE(parseSourceLocation("a.luau:99999999999999: nope").has_value());
 }

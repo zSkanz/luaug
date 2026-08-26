@@ -72,8 +72,37 @@ enum class DebugStep : core::u8
 };
 
 // What the pane decided while it drew.
+// A `chunk.luau:123` in a log line, and where it points (S5.11).
+//
+// **An error in the console names a line and nothing takes you to it**, which is
+// the difference between a console and a log file. Every editor with both panes
+// makes the error clickable, and the reason is that the alternative is reading a
+// number, switching panes, and scrolling.
+//
+// The FIRST location in the message, not the last: Luau puts the raise site at
+// the front and appends the traceback behind it, so the first is where the
+// problem is and the rest is how it got there.
+struct SourceLocation
+{
+    std::string chunk;
+    core::u32 line = 0;
+};
+
+// Finds one in `text`, or nothing.
+//
+// Recognises `<anything>.luau:<digits>`, which is what both the runtime's errors
+// and Luau's own tracebacks emit. Deliberately narrow: a log line that happens
+// to contain a colon and a number is not a location, and turning ordinary output
+// into a link that goes somewhere wrong is worse than not linking it.
+[[nodiscard]] std::optional<SourceLocation> parseSourceLocation(std::string_view text);
+
 struct ScriptEditorCommands
 {
+    // A console line somebody clicked: open this chunk and put the caret on this
+    // line. Drained by the frame loop, which is the only thing that may open a
+    // tab -- the panel is drawn from a snapshot and cannot reach the world.
+    std::optional<SourceLocation> jumpTo;
+
     // A tab to write out: its index. Where it goes is the tab's own business --
     // its file when it has one, the scene otherwise.
     std::optional<std::size_t> save;
@@ -96,7 +125,7 @@ struct ScriptEditorCommands
     [[nodiscard]] bool any() const noexcept
     {
         return save.has_value() || close.has_value() || saveAll || !edited.empty() ||
-               toggleBreakpointLine.has_value() || step != DebugStep::None;
+               toggleBreakpointLine.has_value() || step != DebugStep::None || jumpTo.has_value();
     }
 };
 

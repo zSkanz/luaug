@@ -3093,7 +3093,7 @@ void drawMemory(script::ScriptRuntime& runtime)
     return false;
 }
 
-void drawConsole(script::ScriptRuntime* runtime)
+void drawConsole(script::ScriptRuntime* runtime, ScriptEditorCommands* scriptCommands = nullptr)
 {
     ConsoleLog& log = console();
 
@@ -3140,7 +3140,26 @@ void drawConsole(script::ScriptRuntime* runtime)
                                   : line.level == core::LogLevel::Debug ? ImVec4(0.6f, 0.65f, 0.75f, 1.0f)
                                                                         : ImVec4(0.85f, 0.88f, 0.92f, 1.0f);
             ImGui::PushStyleColor(ImGuiCol_Text, colour);
-            ImGui::TextUnformatted(line.text.c_str());
+
+            // **A line that names a source location is a link** (S5.11). An
+            // error in the console names a file and a line and nothing takes you
+            // to it, which is the difference between a console and a log file.
+            //
+            // Only the lines that name one: turning ordinary output into
+            // something that looks clickable and goes nowhere is worse than not
+            // linking any of it.
+            if (const std::optional<SourceLocation> at = parseSourceLocation(line.text); at.has_value()) {
+                ImGui::PushID(static_cast<int>(shown));
+                if (ImGui::Selectable(line.text.c_str()) && scriptCommands != nullptr)
+                    scriptCommands->jumpTo = at;
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s, line %u", at->chunk.c_str(), static_cast<unsigned>(at->line));
+                ImGui::PopID();
+            }
+            else {
+                ImGui::TextUnformatted(line.text.c_str());
+            }
+
             ImGui::PopStyleColor();
         }
         // **A filter that hides everything says so.** An empty pane and a pane
@@ -5470,7 +5489,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // is what somebody wants when the VM failed to boot.
     if (panels.console) {
         if (ImGui::Begin("Console", &panels.console))
-            drawConsole(runtime);
+            drawConsole(runtime, &scriptCommands);
         ImGui::End();
     }
 
@@ -6260,7 +6279,7 @@ void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, I
         // wants when the VM failed to boot, which is the moment they most want
         // it. The input line simply does nothing.
         ImGui::SeparatorText("Console");
-        drawConsole(runtime);
+        drawConsole(runtime, nullptr);
     }
     ImGui::End();
 }

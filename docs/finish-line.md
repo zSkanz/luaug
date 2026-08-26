@@ -376,7 +376,16 @@ that sends the next session to the wrong place.
       Deliberately not `step(0)`: that still runs the solver, the character
       controllers and the contact diff, so it would fire `Touched` in the
       editor. Three cases assert it creates, retires, and raises nothing.
-- [ ] **S5.11** A console error jumps to the line that raised it.
+- [x] **S5.11** A console error jumps to the line that raised it — built. A
+      line that names a `chunk.luau:123` becomes a link; every other line is
+      drawn as it was, because turning ordinary output into something that
+      looks clickable and goes somewhere wrong is worse than not linking any of
+      it. The FIRST location in a message, since Luau puts the raise site at
+      the front and appends the traceback behind. The panel finds it and the
+      frame loop acts on it -- the pane is drawn from a snapshot and cannot
+      open a tab, because opening one reads the world. Eight cases, and one of
+      them caught a real defect while being written: a digit cap that
+      TRUNCATED turned an absurd run into a plausible line number.
 - [~] **S5.12** The Stats panel shows what is already measured — **streaming
       is in**, beside the frame and memory readouts it already had. What is
       left is the render-side counters, which the F3 overlay shows and the

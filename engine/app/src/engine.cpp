@@ -1312,6 +1312,74 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
                 ScriptEditorCommands scriptCommands = overlay->takeScriptCommands();
 
+                // **A console error, clicked** (S5.11). The panel found a
+                // `chunk.luau:123` in the line and this is what acts on it: the
+                // pane is drawn from a snapshot and cannot open a tab, because
+                // opening one reads the world.
+                if (scriptCommands.jumpTo.has_value()) {
+                    const SourceLocation& at = *scriptCommands.jumpTo;
+
+                    // **A tab that already has the chunk first.** Re-opening
+                    // would be a second document over one file, which is two
+                    // undo histories editing one thing -- and `ScriptEditor` is
+                    // idempotent by INSTANCE, which does not help here because
+                    // the console names a chunk and not an id.
+                    std::optional<std::size_t> found;
+                    for (std::size_t index = 0; index < scripts.count(); ++index) {
+                        const OpenScript* tab = scripts.at(index);
+                        if (tab != nullptr && tab->chunk == at.chunk)
+                            found = index;
+                    }
+
+                    // Otherwise the script instance whose chunk it is, opened.
+                    // **Asked of the RUNTIME rather than derived here**, because
+                    // the chunk name in an error is the one the VM gave the
+                    // chunk, and a second way of spelling it is a second way of
+                    // being wrong.
+                    if (!found.has_value()) {
+                        scene::World& w = authored();
+                        core::InstanceId subject;
+                        w.scripts().forEach([&](core::InstanceId id, const scene::ScriptComponent&) {
+                            if (subject.valid())
+                                return;
+                            if (script::scriptChunkName(host->runtime().state(), id) == at.chunk)
+                                subject = id;
+                        });
+
+                        if (subject.valid()) {
+                            const std::optional<scene::Value> source =
+                                w.getProperty(subject, w.atoms().intern("Source"));
+                            const auto* text = source.has_value() ? std::get_if<std::string>(&source.value()) : nullptr;
+                            scripts.open(subject, ScriptOrigin::Scene, at.chunk,
+                                         std::string(script::mountedPathOf(host->runtime().state(), subject)),
+                                         std::string(w.atoms().text(w.name(subject))),
+                                         text != nullptr ? *text : std::string{});
+                            found = scripts.indexOf(subject, ScriptOrigin::Scene);
+                        }
+                    }
+
+                    if (found.has_value()) {
+                        scripts.setActive(*found);
+                        if (OpenScript* tab = scripts.at(*found); tab != nullptr) {
+                            // Zero-based inside, one-based in a message: every
+                            // editor and every error in the world counts lines
+                            // from one, and the document counts from zero.
+                            const core::u32 line = at.line > 0 ? at.line - 1 : 0;
+                            tab->caret.head = Position{line, 0};
+                            tab->caret.collapse();
+                            tab->caret.desiredColumn = 0;
+                            // Stale on purpose, which is how the pane knows the
+                            // caret moved and scrolls to it.
+                            tab->shownCaret = Position{~0u, 0};
+                        }
+                    }
+                    else {
+                        // Said rather than silent: a click that does nothing is
+                        // indistinguishable from a control that does not work.
+                        editor.report("nothing open is " + at.chunk, true);
+                    }
+                }
+
                 // **The text goes into the world as it is typed**, so pressing
                 // play runs what is on the screen. `Ctrl+S` is about the FILE,
                 // not about the engine -- which is what "an instance is the only
