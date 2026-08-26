@@ -25,6 +25,16 @@ endforeach()
 include("${CMAKE_CURRENT_LIST_DIR}/../support/ensure_generated_world.cmake")
 
 function(compile_into label)
+    # An optional second argument: the `--jobs` value this run uses. **That is
+    # what turns a claim into a check** (E9 step 11): textures are encoded one
+    # per worker now, and the argument that this changes no byte -- per-job
+    # buffers, a barrier, a merge in source order -- is prose until a serial
+    # build and a parallel one are compared. `--jobs 1` is the serial one.
+    set(extra "")
+    if(ARGC GREATER 1)
+        set(extra --jobs "${ARGV1}")
+    endif()
+
     set(out "${WORKDIR}/${label}")
     # Removed rather than overwritten: a stale file from a previous run that
     # neither build produced would compare equal to itself and hide a real
@@ -36,6 +46,7 @@ function(compile_into label)
             --input "${CONTENT}"
             --output "${out}/content.lpack"
             --manifest "${out}/content.manifest.json"
+            ${extra}
         RESULT_VARIABLE result
         OUTPUT_VARIABLE output
         ERROR_VARIABLE output)
@@ -44,15 +55,23 @@ function(compile_into label)
     endif()
 endfunction()
 
+# Three, not two. The first pair is what this gate has always compared: two
+# processes with the same arguments, which is what catches a hash seeded from an
+# address or a container iterated in allocation order. The third is SERIAL, and
+# comparing it against the others is what holds the parallel texture encode to
+# its claim -- a build whose bytes depended on how many workers ran would pass
+# the first comparison and fail this one.
 compile_into(first)
 compile_into(second)
+compile_into(serial 1)
 
 # Every file either run produced, by relative path. Taken from BOTH sides and
 # merged, so a file one build wrote and the other did not is a difference rather
 # than something the loop never looks at.
 file(GLOB_RECURSE firstFiles RELATIVE "${WORKDIR}/first" "${WORKDIR}/first/*")
 file(GLOB_RECURSE secondFiles RELATIVE "${WORKDIR}/second" "${WORKDIR}/second/*")
-set(allFiles ${firstFiles} ${secondFiles})
+file(GLOB_RECURSE serialFiles RELATIVE "${WORKDIR}/serial" "${WORKDIR}/serial/*")
+set(allFiles ${firstFiles} ${secondFiles} ${serialFiles})
 list(REMOVE_DUPLICATES allFiles)
 list(SORT allFiles)
 
@@ -72,16 +91,23 @@ set(differences "")
 foreach(relative IN LISTS allFiles)
     set(a "${WORKDIR}/first/${relative}")
     set(b "${WORKDIR}/second/${relative}")
-    if(NOT EXISTS "${a}" OR NOT EXISTS "${b}")
-        list(APPEND differences "${relative}: produced by only one of the two builds")
+    set(c "${WORKDIR}/serial/${relative}")
+    if(NOT EXISTS "${a}" OR NOT EXISTS "${b}" OR NOT EXISTS "${c}")
+        list(APPEND differences "${relative}: produced by only some of the three builds")
         continue()
     endif()
     # Hashes rather than a byte compare, so a difference names a file instead of
     # dumping a megabyte of binary at whoever is reading the failure.
     file(SHA256 "${a}" hashA)
     file(SHA256 "${b}" hashB)
+    file(SHA256 "${c}" hashC)
     if(NOT hashA STREQUAL hashB)
-        list(APPEND differences "${relative}: ${hashA} != ${hashB}")
+        list(APPEND differences "${relative}: two runs with the same arguments differ -- ${hashA} != ${hashB}")
+    elseif(NOT hashA STREQUAL hashC)
+        # Named apart from the pair above, because the two failures mean
+        # different things and send somebody to different code: this one is the
+        # parallel texture encode not producing what the serial path does.
+        list(APPEND differences "${relative}: parallel and --jobs 1 differ -- ${hashA} != ${hashC}")
     endif()
 endforeach()
 
@@ -91,4 +117,6 @@ if(NOT differences STREQUAL "")
         "the asset build is not deterministic; ${compared} file(s) compared:\n  ${report}")
 endif()
 
-message(STATUS "asset build determinism: ${compared} file(s) byte-identical across two processes")
+message(STATUS
+    "asset build determinism: ${compared} file(s) byte-identical across three processes, "
+    "one of them serial")

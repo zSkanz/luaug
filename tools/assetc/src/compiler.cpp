@@ -7,12 +7,14 @@
 #include "luaug/assetc/exotic.h"
 #include "luaug/core/json.h"
 #include "luaug/core/json_writer.h"
+#include "luaug/jobs/jobs.h"
 #include "luaug/platform/file.h"
 
 #include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <system_error>
 
 namespace luaug::assetc {
@@ -612,6 +614,77 @@ CompileResult compile(const CompileOptions& options)
     std::vector<ManifestEntry> manifest;
     asset::ChunkIndex chunkIndex;
 
+    // --- Textures encoded in parallel, merged in source order (E9 step 11) ---
+    //
+    // **What is parallel here is one texture per worker, and what stays serial
+    // is basis's own threading.** `texture.cpp` sets `m_multithreading = false`
+    // and explains why: the encoder resolves ties across its internal threads by
+    // completion order, so the BYTES would depend on how busy the machine was
+    // and a content hash would stop being a name. That argument is about one
+    // encode. Two encodes of two different images share nothing, so running
+    // them side by side changes neither one's output.
+    //
+    // The determinism discipline is the one `jobs` documents for exactly this:
+    // per-job buffers, a barrier, and a merge in a stable order -- here the
+    // source order the sort above established, which decides pack insertion,
+    // dedupe and every diagnostic's sequence. Nothing downstream can tell how
+    // many workers ran.
+    //
+    // A texture is encoded here even when the cache is about to answer for it.
+    // That is a real cost and it is the smaller one: deciding otherwise means
+    // reading every source and computing every cache key before any encode
+    // starts, which serialises the disk in front of the work this exists to
+    // parallelise. A cold build is the case that hurts and it is the case this
+    // helps.
+    std::vector<std::optional<std::vector<std::byte>>> preEncoded(sources.size());
+    {
+        std::vector<usize> textureIndices;
+        for (usize index = 0; index < sources.size(); ++index) {
+            if (sources[index].kind == SourceKind::Texture)
+                textureIndices.push_back(index);
+        }
+
+        if (textureIndices.size() > 1) {
+            jobs::parallelFor("assetc.texture.encode", jobs::Domain::Tooling, 0, textureIndices.size(), 1,
+                              [&](usize begin, usize end, core::u32 bucket) noexcept {
+                                  // The bucket index is what a stable commit would merge by;
+                                  // here every job writes into its own SOURCE slot, which is a
+                                  // stronger ordering than the bucket and makes it unused.
+                                  (void)bucket;
+                                  // **Nothing may leave this body.** `jobs` requires a
+                                  // `noexcept` callable, and on MSVC an exception escaping one
+                                  // is `__fastfail` -- the process died with 0xC0000409 and no
+                                  // output at all the first time this ran. A decode or an
+                                  // encode that throws leaves its slot empty, and the serial
+                                  // loop below then does the work and produces the diagnostic,
+                                  // which is where a diagnostic belongs anyway.
+                                  try {
+                                      for (usize at = begin; at < end; ++at) {
+                                          const usize index = textureIndices[at];
+                                          std::vector<std::byte> raw;
+                                          if (!readWhole(sources[index].path, raw))
+                                              continue;
+                                          asset::Image image;
+                                          if (asset::decodeImage(raw, image))
+                                              continue;
+                                          const std::string urn = urnFor(sources[index].relative);
+                                          std::vector<std::byte> encoded;
+                                          if (encodeTexture(image, looseTextureIsColour(textureUses, urn), encoded))
+                                              continue;
+                                          // Written into this source's OWN slot and read after
+                                          // the barrier, which is what makes the merge stable:
+                                          // no two workers touch one element and nothing is
+                                          // appended.
+                                          preEncoded[index] = std::move(encoded);
+                                      }
+                                  } catch (...) {
+                                      // Left for the serial loop, which will say what went
+                                      // wrong with the source it went wrong on.
+                                  }
+                              });
+        }
+    }
+
     for (const SourceFile& source : sources) {
         std::vector<std::byte> bytes;
         if (!readWhole(source.path, bytes)) {
@@ -757,10 +830,25 @@ CompileResult compile(const CompileOptions& options)
         }
 
         case SourceKind::Texture: {
+            // **Taken from the parallel pass when it produced one.** The bytes
+            // are identical either way -- the same image, the same transfer
+            // function, the same single-threaded encoder -- so this is a lookup
+            // and not a second answer. When the pass declined (one texture in
+            // the build, a read that failed, an image that would not decode) the
+            // serial path below produces the same result and the diagnostic.
+            const usize sourceIndex = static_cast<usize>(&source - sources.data());
+            std::vector<std::byte> encoded;
+            if (preEncoded[sourceIndex].has_value()) {
+                encoded = std::move(*preEncoded[sourceIndex]);
+                preEncoded[sourceIndex].reset();
+            }
+
             asset::Image image;
-            if (const auto error = asset::decodeImage(bytes, image)) {
-                result.diagnostic = source.relative.generic_string() + ": " + error->message;
-                return result;
+            if (encoded.empty()) {
+                if (const auto error = asset::decodeImage(bytes, image)) {
+                    result.diagnostic = source.relative.generic_string() + ": " + error->message;
+                    return result;
+                }
             }
             // **What a `Material` in this project says this image is for.**
             // `ColorMap` and `EmissiveMap` are colour; `NormalMap` and
@@ -771,10 +859,11 @@ CompileResult compile(const CompileOptions& options)
             //
             // An image NO material claims stays colour, which is the honest
             // default for a standalone image and what this has always done.
-            std::vector<std::byte> encoded;
-            if (const auto error = encodeTexture(image, textureIsColour, encoded)) {
-                result.diagnostic = source.relative.generic_string() + ": " + error->message;
-                return result;
+            if (encoded.empty()) {
+                if (const auto error = encodeTexture(image, textureIsColour, encoded)) {
+                    result.diagnostic = source.relative.generic_string() + ": " + error->message;
+                    return result;
+                }
             }
 
             ManifestEntry entry;

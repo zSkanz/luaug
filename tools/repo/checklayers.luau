@@ -54,6 +54,14 @@ local Layers: { [string]: number } = {
     script = 5,
 
     app = 6,
+
+    -- A TOOL, above every module it may include. It is not part of the engine
+    -- and nothing in `engine/` may include it -- which is the whole point of
+    -- giving it a number rather than leaving it out: an edge from `app` into
+    -- `assetc` would be an ordinary downward edge and therefore allowed, and
+    -- E9's editor-side import is exactly that edge arriving deliberately rather
+    -- than by accident.
+    assetc = 7,
 }
 
 -- architecture.md §2 gives `script` a dependency on `ui`, which sits at the

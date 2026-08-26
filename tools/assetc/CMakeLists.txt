@@ -18,7 +18,11 @@ add_library(luaug_assetc_lib STATIC
 target_include_directories(luaug_assetc_lib PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_link_libraries(luaug_assetc_lib
     PUBLIC luaug::asset luaug::core
-    PRIVATE luaug::warnings luaug::platform basis::encoder)
+    # `jobs` for the parallel texture encode (E9 step 11). Its determinism rule
+    # is what makes it usable here at all: per-job buffers, a barrier, and a
+    # merge in source order, so the pack is built from the same bytes in the same
+    # sequence however many workers ran.
+    PRIVATE luaug::warnings luaug::platform luaug::jobs basis::encoder)
 
 # assimp, and ONLY here (ADR 0010). The engine reads `.lmesh`, a format assimp
 # has never heard of, and the layering gate reading real `#include` edges is what
@@ -35,7 +39,7 @@ else()
 endif()
 
 add_executable(assetc src/main.cpp)
-target_link_libraries(assetc PRIVATE luaug::warnings luaug_assetc_lib luaug::platform)
+target_link_libraries(assetc PRIVATE luaug::warnings luaug_assetc_lib luaug::platform luaug::jobs)
 
 # The catalog beside the binary, for the same reason `luaug-host` gets one: an
 # engine error this tool relays should read as prose rather than as a bare key.

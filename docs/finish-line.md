@@ -238,7 +238,11 @@ that sends the next session to the wrong place.
 - [ ] **S4.2** Step 12 — the editor compiles on import: `assetc::importOne`,
       the object-store writer, `luaug_assetc_lib` linked into the app, and
       `splitByPrimitive` reaching a world.
-- [ ] **S4.3** Step 11's unbuilt half — parallel texture encode.
+- [x] **S4.3** Step 11's unbuilt half — parallel texture encode. **Built**:
+      one texture per worker with basis's own threading still off, merged in
+      source order. **20.2 s to 8.1 s** on five textures, and the determinism
+      gate builds a third, serial leg so the claim is checked rather than
+      asserted. `assetc = 7` in the layer table, which was also owed.
 - [ ] **S4.4** Step 9's unbuilt half — the skeleton overlay and the joint
       picker, so `JointName` stops being free text typed from memory.
 - [ ] **S4.5** Step 14 — the cut-over. Last, because it is the only
