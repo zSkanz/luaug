@@ -29,7 +29,8 @@ to trust when this paragraph and it disagree.
 ```
 scripts/localgate.ps1                # EVERYTHING that can run here: docs + Luau gates
                                      #   + Windows build/tests + the Linux tier in Docker
-scripts/localgate.ps1 -Only windows  # one stage while iterating: docs | luau | format | windows | linux
+                                     #   + the shipping and player profiles nothing else builds
+scripts/localgate.ps1 -Only windows  # one stage: docs | luau | format | windows | linux | shipping
 ```
 
 **Run the Linux stage.** It is ~12 s warm, and it is not redundant with the
@@ -41,13 +42,12 @@ has already caught a real defect that would otherwise have gone to CI. Use
 using it means accepting that a Clang-only diagnostic reaches `main` instead of
 you.
 
-Roughly 90 seconds warm for the full five stages, 27 tests on Windows and 26 on
-Linux. The same run costs ~35
-charged minutes on GitHub, and this repository is **private**, so Actions
-minutes carry platform multipliers (Linux 1×, Windows 2×, macOS 10×) against a
-quota that has been close to exhausted. CI is there to prove `main` is green
-after a push and to build macOS — it is not where you find out whether your
-change compiles.
+Roughly 90 seconds warm for the full six stages, 27 tests on Windows and 26 on
+Linux. The same run costs ~68 charged minutes on GitHub, and this repository is
+**private**, so Actions minutes carry platform multipliers (Linux 1×, Windows
+2×, macOS 10×) against a quota that has been close to exhausted — about 30 of
+those minutes are macOS alone. CI is there to prove `main` is green after a push
+and to build macOS — it is not where you find out whether your change compiles.
 
 The gate logic lives in `scripts/gates/*.sh`, and `ci.yml` runs the same files.
 If you add a check, add it there, not in the workflow.

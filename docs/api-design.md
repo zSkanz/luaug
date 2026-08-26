@@ -15,7 +15,7 @@ during implementation goes through an ADR + an edit here in the same commit.
 | Tier | What lives there | Rationale |
 |---|---|---|
 | **Globals** | The world model: `game`, `workspace`, `script`, `Instance`, datatypes (`Vector2`, `Vector3`, `CFrame`, `Color3`, `UDim`, `UDim2`, `Rect`, `TweenInfo`, `RaycastParams`, `Random`, `Signal`), `Enum`, plus the Luau builtins listed in full below | Roblox muscle memory: you never require Vector3 |
-| **`@std/…`** | The cross-runtime stdlib (Lute-compatible surface, §7): `@std/json`, `@std/net`, `@std/fs`, `@std/path`, `@std/task`, `@std/stringext`, `@std/tableext`, … | The convergence bet (ADR 0030): utility code runs unchanged on Roblox/Lute/LuauG |
+| **`@std/…`** | The cross-runtime stdlib (Lute-compatible surface, §7): `@std/json`, `@std/net`, `@std/fs`, `@std/path`, `@std/task`, `@std/stringext`, `@std/tableext`, … This is the scope, not the state: §7 says which of them the game VM registers, and today it is one | The convergence bet (ADR 0030): utility code runs unchanged on Roblox/Lute/LuauG |
 | **`@luaug/…`** | Engine-provided optional Luau libraries (not core world): `@luaug/camera` (third-person/orbit rigs), `@luaug/testing` (engine-aware test helpers) | Keeps the global surface small; optional things are opt-in |
 
 **Two `@luaug/…` modules named in earlier drafts of this table are not shipped
@@ -83,39 +83,56 @@ and is an ordinary child of it.
 
 ```json
 {
-  "languageMode": "strict",
-  "aliases": {
-    "shared":  "src/shared",
-    "pkg":     "luau_packages"
-  }
+    "languageMode": "strict",
+    "lint": { "*": true },
+    "lintErrors": true,
+    "typeErrors": true,
+    "aliases": {
+        "shared": "src/shared",
+        "pkg": "luau_packages",
+        "std": "~/.lute/typedefs/1.0.0/std",
+        "lute": "~/.lute/typedefs/1.0.0/lute"
+    }
 }
 ```
 
-- `@std/…` and `@luaug/…` are **not** user `.luaurc` aliases: at runtime they
-  resolve via `luarequire_registermodule`; in the editor/CI they resolve via
-  generated `luau-lsp` `require.directoryAliases` pointing at typed stubs in
-  `.luaug/types/` (the `lute setup` pattern, mirrored by `luaug setup`). This
-  keeps the user `.luaurc` clean and avoids runtime/analyzer conflicts.
+- **`std` and `lute` ARE `.luaurc` aliases**, and this section said they were
+  not. The design was that `@std/…` and `@luaug/…` would resolve only through
+  `luarequire_registermodule` at runtime and through `luau-lsp`
+  `require.directoryAliases` in the editor, keeping the user `.luaurc` clean.
+  What the template actually scaffolds points `std` and `lute` at the pinned
+  Lute typedefs on disk, which is what makes a `@std` require analyze at all —
+  the `.luaug/types/std/` stubs the `directoryAliases` name are §5's artifact
+  (3), and nothing generates them.
+- `@luaug/…` still resolves only at runtime, and only for the modules the engine
+  mounts as content (`@luaug/camera`, `@luaug/testing`).
 - `@self`, `./`, `../`, `init.luau` behave per the Luau require-by-string
-  spec. pesde appends its own per-dependency aliases when used.
+  spec. pesde would append its own per-dependency aliases; nothing scaffolds a
+  `pesde.toml` today (§4).
 
 ### 1.4 Engine version pinning as users see it
 
-- `rokit.toml` pins the `luaug` CLI (and `lute`, `luau-lsp`, `stylua`) —
-  reproducible toolchain.
-- `luaug.toml` `[project] engine = "0.1.3"` pins the runtime; the CLI uses
-  exactly that runtime and `luaug setup` regenerates `.luaug/types/` to match.
+- `rokit.toml` pins the toolchain — reproducible by deliberate edit rather than
+  by whatever was latest. The scaffolded one pins `lute`, `luau-lsp` and
+  `stylua`; **it does not pin `luaug`**, because the CLI is not distributed
+  through rokit and finds the engine binaries beside its own install (ADR 0054)
+  rather than resolving a version.
+- `luaug.toml` `[project] engine = "0.1"` records the engine series a project
+  targets. **Nothing compares it to the runtime**, so the CLI warning this line
+  promised does not exist, and neither does the `luaug setup` that was to
+  regenerate `.luaug/types/` against it — `luaug new` writes those definitions
+  once, at scaffold time (§4).
 - At runtime: `game.EngineVersion: string` and `game.LuauVersion: string`
   (read-only).
-- Type defs and the api-dump are versioned artifacts of each engine release; a
-  mismatch produces a CLI warning. (The docs JSON this line also named was
-  dropped in M3 — see §5's generated-artifact list.)
+- Type defs and the api-dump are versioned artifacts of each engine release.
+  (The docs JSON this line also named was dropped in M3 — see §5's
+  generated-artifact list.)
 
 ---
 
 ## 2. v1 API surface
 
-### 2.1 Services (the complete v1 list — 15 + 2 dev-only)
+### 2.1 Services (the complete list — 12 + 1 dev-only)
 
 **`Workspace`** (global `workspace`) — 3D scene root.
 - Props: `Gravity: vector` (SI, default `(0, -9.81, 0)`), `CurrentCamera: Camera`
@@ -138,7 +155,7 @@ and is an ordinary child of it.
 - Events (in-frame order, all `(dt: number)`): `PreRender` (render-rate,
   variable dt), `PreAnimation`, `PreSimulation`, `PostSimulation`, `Heartbeat`
   (fixed-tick, per architecture §3 — this rate split is documented loudly).
-  **`PreRender` never fires in a headless run** (`luaug test --engine`, the
+  **`PreRender` never fires in a headless run** (`luaug test`, the
   determinism harness): headless mode is the same scheduler minus the render
   steps, and `PreRender` is one of them. It stays connectable so shared code
   need not branch on it, but a handler connected to it in a headless process
@@ -154,8 +171,24 @@ and is an ordinary child of it.
 **`InputService`** — host for the Input Action System (§2.4) + device state.
 - Props: `PointerLocked: boolean`, `PointerVisible: boolean`,
   `LastInputDeviceType: Enum.InputDeviceType`
-- Methods: `GetPointerPosition() → Vector2`
-- Events: `InputDeviceChanged(deviceType)`, `WindowFocusChanged(focused)`
+- Methods: `GetPointerPosition() → Vector2`, `IsKeyDown(keyCode) → boolean`,
+  `SetVirtualState(keyCode, value)` — the second drives one of the `Virtual` key
+  codes from something that is not hardware, a HUD button or an on-screen stick
+- Events: `InputDeviceChanged(deviceType)`, `WindowFocusChanged(focused)`, plus
+  `InputBegan`, `InputChanged` and `InputEnded`, each carrying an `InputObject`
+  (`UserInputType`, `KeyCode`, `Position`, `Delta`) and a second argument saying
+  whether the UI already consumed it
+- **The raw events are ADR 0041 and they amend ADR 0029's "only input model"
+  clause**, which §2.4's own heading still states. They are fed from the IAS's
+  dispatch rather than from the OS, on the `Simulation` clock, after the UI has
+  taken what it took — so a handler that writes to the world is replayable by
+  construction, and a recorded stream still sees every input a game reads. The
+  IAS stays the recommended path for a shipped game, because it is what a
+  rebinding screen can enumerate and what binds a key and a gamepad button to one
+  action; these are the direct, familiar, unrebindable option beside it. The
+  `@luaug/input` sugar module M6 scoped was dropped in the same decision:
+  `IsKeyDown` plus the events make the simple case cheap, and shipping both would
+  be two answers to one question.
 
 **`TweenService`** — `Create(instance, tweenInfo, goals: {[string]: any}) →
 Tween`; `GetValue(alpha, easingStyle, easingDirection) → number`. Easing enum
@@ -165,21 +198,19 @@ set identical to Roblox's so tutorials transfer.
 Methods: `PlayLocal(content) → Sound` (fire-and-forget 2D). The listener is
 `Workspace.CurrentCamera`. `AudioGroup` instances are the mixing buses.
 
-**`AssetService`** — content loading over the content-addressed pipeline.
-- `LoadModelAsync(content: Content) → Model`, `PreloadAsync(contents:
-  {Content})`, `Exists(content) → boolean`. See §2.6 (prefabs).
-
-**`LocalizationService`** — §6. `Locale`, `SystemLocale`,
-`Translate(key, params?)`, `LoadCatalog(locale, content)`, `LocaleChanged`.
-
 **`UIService`** — parent of `ScreenGui` instances (the PlayerGui role) +
 screen metrics: `SafeAreaInsets: Rect` (read), `DisplayScale: number` (read).
 
 **`Lighting`** — day/night + environment. Props: `ClockTime: number` (0–24),
 `GeographicLatitude`, `Ambient: Color3`, `Brightness: number`,
 `FogColor: Color3`, `FogStart: number`, `FogEnd: number`,
-`ExposureCompensation: number`, `SunDirection: vector` (read, derived). Child
-class: `Sky` (`SkyboxContent: Content` HDRI/cubemap, `SunAngularSize`).
+`ExposureCompensation: number`, `SunDirection: vector` (read, derived). **The
+`Sky` child class named here was never built**, and what stands in its place is
+not a smaller version of it: the sky is analytic, derived from `ClockTime`,
+`GeographicLatitude` and `FogColor`, and the renderer prefilters that same sky as
+the environment the image-based lighting reads. There is no `SkyboxContent`, so
+an HDRI or a cubemap cannot be supplied at all — which is right outdoors and
+wrong underground, and is a gap rather than a design.
 
 Three of those changed meaning at M7.5 when the renderer gained image-based
 lighting, and the change is worth stating because a scene authored against the
@@ -263,10 +294,6 @@ moment its last carrier drops it, even though the signals that report the drop
 are deferred like everything else. `GetTagged` returns a fresh array the
 caller owns (§3.1).
 
-**`WindowService`** — desktop-first, no Roblox analog: `Title: string`,
-`Mode: Enum.WindowMode` (Windowed/Fullscreen/Borderless), `Size: Vector2`,
-`VSync: boolean`; Events: `Resized(size)`.
-
 **`DebugService`** — ImGui overlay + instrumentation (present in shipped
 builds with the overlay off unless enabled).
 - Overlay: `OverlayVisible: boolean`, `ShowPanel(name)`, `HidePanel(name)`
@@ -304,13 +331,32 @@ until M6. The `DevOnly` tag was the point: it meant a shipping build never
 contained it, so its removal would be structural rather than a promise. M6
 removed it, and the class is absent from the IDL, from the generated
 definitions, from the api-dump and from the binary. ADR 0029's "the only input
-model" is now a property of the code.
+model" became a property of the code, and then ADR 0041 amended the clause
+itself — `InputService` above carries a raw event surface, fed from the IAS's own
+pipeline rather than from a second path into the OS.
 
 The scaffold's one lasting consequence is a naming one, and it is worth knowing
 if you read a recorded input stream from M5: the key names it used are the same
 names `Enum.KeyCode`'s items carry, because `platform`, the recorded stream and
 the enum are deliberately one spelling space. The digits changed spelling
 (`"0"` became `Digit0`) when that space was unified.
+
+**Three services this section declared were never built, and the count above is
+the count that exists.** Saying so here is cheaper than a reader finding out at
+`game:GetService`. `AssetService` was M7's Luau surface over the asset pipeline —
+`LoadModelAsync`, `PreloadAsync`, `Exists` — and the pipeline shipped without it:
+content reaches the world through a property that names it (`MeshPart.MeshContent`,
+`Material.ColorMap`), through a stamp (§2.6) and through the streaming manager, so
+nothing in v1 ever had to ask for a load. `LocalizationService` was §6's in-game
+half; the catalog format, the key discipline and the engine-side formatter all
+shipped, and nothing loads a *game's* catalog — §6 still describes the service and
+that description is a design, not a report. `WindowService` had no caller either:
+`[window] title` and `[window] size` in `luaug.toml` are read at boot (§4), and
+nothing changes either at runtime. None of the three is in the IDL, the generated
+definitions, the api-dump or the binary, so `game:GetService("AssetService")`
+raises `scene.err.unknown_service` exactly as any other name that is not a service
+does. All three are additive to build, and `Enum.WindowMode` went with the third
+of them (§2.3).
 
 **Reserved meanings, not implemented in v1** (do not squat them): the service
 names `Players`, `NetworkService`, `ReplicationService` and
@@ -322,17 +368,25 @@ these are reserved so that v1 code cannot come to mean something else by them
 once the client/server split ships.
 
 **Networking is not a service in v1**: `require("@std/net")` (§7) is the
-socket/HTTP/WS surface, so backend code is portable to Lute verbatim
-(ADR 0012).
+network surface, so backend code is portable to Lute verbatim (ADR 0012). What
+the game VM actually registers is one function — `request`, the HTTP client — and
+§7's table says which of that module's other members are still design.
 
-### 2.2 Instance class hierarchy (v1 minimum)
+### 2.2 Instance class hierarchy
 
 ```
 Instance (abstract)
 ├─ DataModel (game)
 ├─ <all services above>
 ├─ Folder
-├─ Script                      -- entry-point code (§3); there is NO ModuleScript class
+├─ BaseScript (abstract)       -- Source: string -- the Luau this instance carries. It is data
+│  │                           -- on the instance rather than a path to a file, which is what
+│  │                           -- makes a script something you can create, copy, put inside a
+│  │                           -- stamp and save in a scene like anything else (ADR 0050)
+│  ├─ Script                   -- Luau that RUNS: Enabled, and every enabled Script in the
+│  │                           -- world starts on its own coroutine when the world does (§3)
+│  └─ ModuleScript             -- Luau that is REQUIRED: require(module) evaluates it once and
+│                              -- every later require of the same instance gives the same value
 ├─ PVInstance (abstract)       -- anything with a place in the world: PivotOffset: CFrame,
 │  │                           -- GetPivot() -> CFrame, PivotTo(cf)
 │  ├─ BasePart (abstract)      -- CFrame, Position, Orientation (degrees, YXZ), Size,
@@ -340,11 +394,12 @@ Instance (abstract)
 │  │  │                        -- Material, CollisionGroup, Friction, Restitution, Density,
 │  │  │                        -- LinearVelocity/AngularVelocity (read), ApplyImpulse(v),
 │  │  │                        -- Touched/TouchEnded signals
-│  │  │                        -- (`Material` is the one member of this list M5 did
-│  │  │                        --  not ship: it is a surface look rather than
-│  │  │                        --  rigidbody state, nothing reads it, and a
-│  │  │                        --  type-checked no-op looks more like a working API
-│  │  │                        --  than a missing member does)
+│  │  │                        -- (`Material` was the one member of this list M5 did
+│  │  │                        --  not ship, on the rule that a type-checked no-op
+│  │  │                        --  looks more like a working API than a missing
+│  │  │                        --  member does. It ships now, and as a `Material?`
+│  │  │                        --  reference rather than the enum this line once
+│  │  │                        --  meant: `Enum.Material` does not exist)
 │  │  ├─ Part                  -- Shape: Enum.PartShape (Block/Ball/Cylinder/Capsule/Wedge)
 │  │  ├─ MeshPart              -- MeshContent: Content, CollisionFidelity: Enum.CollisionFidelity
 │  │  └─ CharacterBody         -- Jolt character controller (capsule): Move(direction: vector),
@@ -356,7 +411,20 @@ Instance (abstract)
 │  ├─ Model                    -- PrimaryPart, GetExtentsSize(), StreamingMode
 │  └─ Camera                   -- CFrame, FieldOfView, NearPlane, FarPlane, ViewportSize (read),
 │                              -- WorldToViewportPoint(), ViewportPointToRay(). No CameraType.
+├─ Material                    -- a surface: Color, Transparency, ColorMap, NormalMap,
+│                              -- MetallicRoughnessMap, Emissive/EmissiveMap, Metalness,
+│                              -- Roughness, NormalScale, AlphaMode, AlphaCutoff, DoubleSided.
+│                              -- Point a BasePart at one; BasePart.Color multiplies it, and
+│                              -- what a project keeps in content/ is a STAMP of one (§2.6)
 ├─ Attachment                  -- CFrame (relative to parent BasePart), WorldCFrame (read)
+│  └─ Bone                     -- a joint of a skinned mesh: JointName, JointIndex, Transform
+├─ Constraint (abstract)       -- Attachment0, Attachment1, Enabled, CollideConnected
+│  ├─ HingeConstraint          -- LimitsEnabled, LowerAngle, UpperAngle
+│  ├─ BallSocketConstraint     -- LimitsEnabled, UpperAngle, TwistLimit
+│  └─ FixedConstraint          -- no members of its own
+├─ Ragdoll                     -- Enabled, and it owns nothing else: a ragdoll IS parts, Bones
+│                              -- and constraints, each an instance you can see and move, and
+│                              -- this is the flag that says to drive the pose from them
 ├─ Weld / WeldConstraint       -- rigid attachment (ships in M5): Part0, Part1, Enabled;
 │                              -- Weld carries explicit C0/C1, WeldConstraint captures the
 │                              -- relative transform when it becomes active. A TRANSFORM
@@ -365,12 +433,15 @@ Instance (abstract)
 │                              -- involved -- a CharacterBody is a CharacterVirtual rather
 │                              -- than a Body, so no constraint could reach it anyway
 ├─ PointLight / SpotLight      -- child of BasePart/Attachment (the Roblox attach model),
-│                              -- Color, Brightness, Range, (Spot: Angle), Shadows: boolean
-├─ Sky                         -- under Lighting
+│                              -- Color, Brightness, Range, Enabled, (Spot: Angle), and
+│                              -- Shadows, which is stored, reported faithfully and acted on
+│                              -- by nothing: the sun is this release's only caster, and it is
+│                              -- the last property the IDL still marks `Inert` (§5)
 ├─ Sound                       -- Content, Playing, Looped, Volume, PlaybackSpeed, TimePosition,
-│  │                           -- RollOffMinDistance/MaxDistance (3D iff parented to a BasePart),
-│  │                           -- Play()/Pause()/Stop(), Ended/Loaded signals, Group: AudioGroup?
-│  └─ AudioGroup               -- mixing bus: Volume
+│                              -- RollOffMinDistance/MaxDistance (3D iff parented to a BasePart),
+│                              -- Play()/Pause()/Stop(), Ended/Loaded signals, Group: AudioGroup?
+├─ AudioGroup                  -- mixing bus: Volume. A sibling of Sound and not a subclass of
+│                              -- it: a Sound NAMES its bus through `Group`
 ├─ AnimationPlayer             -- under a Model/MeshPart with a skinned mesh (ships in M6):
 │  │                           -- LoadAnimation(content) → AnimationTrack
 │  └─ AnimationTrack (non-Instance handle) -- Play(fadeTime?), Stop(fadeTime?), Looped,
@@ -378,33 +449,37 @@ Instance (abstract)
 │                              -- v1 scope: glTF clip playback + linear blending; no state
 │                              -- machines, no IK (roadmap M6)
 ├─ InputContext / InputAction / InputBinding   (§2.4)
-└─ UI classes:
-   ScreenGui                   -- Enabled, DisplayOrder, ScreenInsets
-   └─ UIObject (abstract)      -- Position/Size: UDim2, AnchorPoint: Vector2, Rotation,
-      │                        -- BackgroundColor: Color3, BackgroundTransparency, Visible,
-      │                        -- ZIndex, LayoutOrder, AutomaticSize, ClipsDescendants,
-      │                        -- AbsolutePosition/AbsoluteSize (read),
-      │                        -- Activated, PointerEntered, PointerExited signals
-      ├─ Frame
-      ├─ TextLabel             -- Text, TextColor, TextSize, Font: Content,
-      │                        -- HorizontalAlignment, VerticalAlignment, TextWrapped, TextScaled
-      │                        -- (no RichText in v1)
-      ├─ TextButton
-      ├─ TextInput             -- Text, PlaceholderText, Focused/FocusLost signals
-      ├─ ImageLabel            -- Image: Content, ImageColor, ScaleType, SliceCenter: Rect
-      ├─ ImageButton
-      ├─ ScrollFrame           -- CanvasSize, CanvasPosition, ScrollBarThickness
-      └─ modifiers: UIListLayout (FillDirection, Padding: UDim, HorizontalAlignment,
-                    VerticalAlignment, SortOrder, Wraps), UIPadding, UICorner
+├─ ScreenGui                   -- Enabled, DisplayOrder, ScreenInsets. The screen root a UI tree
+│                              -- is parented UNDER; it extends Instance, not UIObject
+├─ UIObject (abstract)         -- Position/Size: UDim2, AnchorPoint: Vector2, Rotation,
+│  │                           -- BackgroundColor: Color3, BackgroundTransparency, Visible,
+│  │                           -- ZIndex, LayoutOrder, AutomaticSize, ClipsDescendants,
+│  │                           -- AbsolutePosition/AbsoluteSize (read),
+│  │                           -- Activated, PointerEntered, PointerExited signals
+│  ├─ Frame
+│  ├─ TextLabel                -- Text, TextColor, TextSize, Font: Content,
+│  │  │                        -- HorizontalAlignment, VerticalAlignment, TextWrapped, TextScaled
+│  │  │                        -- (no RichText)
+│  │  ├─ TextButton            -- a TextLabel that is clickable; no members of its own
+│  │  └─ TextInput             -- PlaceholderText, Focused/FocusLost signals
+│  ├─ ImageLabel               -- Image: Content, ImageColor, ScaleType, SliceCenter: Rect
+│  │  └─ ImageButton           -- an ImageLabel that is clickable; no members of its own
+│  └─ ScrollFrame              -- CanvasSize, CanvasPosition, ScrollBarThickness
+└─ UI modifiers, each extending Instance and acting on the UIObject it is parented to:
+   UIListLayout (FillDirection, Padding: UDim, HorizontalAlignment, VerticalAlignment,
+   SortOrder, Wraps), UIPadding, UICorner
 ```
 
 Layout is computed directly -- two passes over each dirty `ScreenGui` -- and no
 solver is exposed or vendored. It was to have been Clay; ADR 0040 records why a
 `UDim2` placement turned out to be arithmetic rather than a constraint problem.
-**Not in v1 (documented honestly):**
-Terrain, ParticleEmitter, SurfaceGui/billboards, RichText, video, and every
-constraint except the rigid weld — no `HingeConstraint`, `SpringConstraint` or
-`Motor6D`, and no solver joint of any kind.
+**Not here (documented honestly):**
+Terrain, ParticleEmitter, SurfaceGui/billboards, RichText and video. **The solver
+joints came off this list.** It read "every constraint except the rigid weld —
+no `HingeConstraint`, `SpringConstraint` or `Motor6D`, and no solver joint of any
+kind", and `HingeConstraint`, `BallSocketConstraint` and `FixedConstraint` now
+ship over `Attachment` pairs, and a `Ragdoll` is assembled from them rather than
+owning bodies of its own. `SpringConstraint` and `Motor6D` are still absent.
 
 **`Instance` base members:** `Name`, `Parent`; `ClassName` (read-only); tree:
 `FindFirstChild`, `FindFirstChildOfClass`, `FindFirstChildWhichIsA`,
@@ -466,9 +541,11 @@ takes one argument and returns an unparented instance whose `Name` is its
 `ClassName` (`Instance.new("Folder").Name == "Folder"`); no v1 class declares a
 different default name. An unknown class name raises `scene.err.unknown_class`;
 a class tagged `Abstract`, `Service`, `NotCreatable` or `DevOnly` in the IDL
-(§5) raises `scene.err.not_creatable` — which is what `Instance.new("BasePart")`,
-`Instance.new("Workspace")` and `Instance.new("Script")` each get, the last
-because dynamic script creation is not supported in v1 (§3). Passing a second
+(§5) raises `scene.err.not_creatable` — which is what `Instance.new("BasePart")`
+and `Instance.new("Workspace")` each get. `Instance.new("Script")` was the third
+example on that line, on the rule that a script existed only because a file did;
+ADR 0050 reversed it, and `Script` and `ModuleScript` are created from the same
+call as everything else (§3). Passing a second
 argument is a **type** error in the generated definitions, and that is where
 divergence #7 is enforced; at runtime the extra argument is ignored, and in
 particular the instance is not parented to it. Assigning a read-only member
@@ -568,10 +645,13 @@ change how it falls.
 | `Rect` | `Rect.new(min: Vector2, max: Vector2)`; `Min`, `Max`, `Width`, `Height`. |
 | `TweenInfo` | `TweenInfo.new(time, easingStyle?, easingDirection?, repeatCount?, reverses?, delayTime?)` — enum params also accept string literals ("Quad") via typed unions. |
 | `Signal<T...>` / `Connection` | THE signal types (never "RBXScriptSignal"). `Signal:Connect(fn) → Connection`, `:Once(fn)`, `:Wait() → T...`; `Connection:Disconnect()`, `.Connected`. `Disconnect` is idempotent: a second call is a no-op and `.Connected` stays `false`. Deferred-only (ADR 0015), ordering per §3.1. User-creatable: `Signal.new()` with `:Fire(...)`, `:Destroy()` — replaces BindableEvent/BindableFunction. `Signal.new()` is generic and its pack is inferred from the `Fire`/`Connect` sites; annotate it (`Signal<string>`, `Signal<()>`) where inference has nothing to work from, such as an array element type. `ConnectParallel` reserved, not in v1. |
-| `RaycastParams` / `RaycastResult` | `RaycastParams.new { Filter = {Instance}, FilterType = Enum.RaycastFilterType.Exclude, CollisionGroup = "Default" }` (table constructor); result: `Instance`, `Position`, `Normal`, `Distance`. Both are read-only once built: a params object mutated between two casts is a question that means something different depending on when the engine looked at it. The filter covers a named instance's **descendants**, so filtering a `Model` filters its parts, and each word means what it says at the edges — an empty `Exclude` filter hits everything and an empty `Include` filter hits nothing. `CollisionGroup` is the empty string for "any group". **`RaycastResult.Material` is not in M5**: `BasePart.Material` is not either, and a field that reported a value nothing sets would be worse than one that is absent — both arrive with the surface-material work. Note for `--!strict` callers: Luau table types are invariant, so `Filter = { part }` needs `:: { Instance }` — the annotation a `{Instance}` field costs. |
+| `RaycastParams` / `RaycastResult` | `RaycastParams.new { Filter = {Instance}, FilterType = Enum.RaycastFilterType.Exclude, CollisionGroup = "Default" }` (table constructor); result: `Instance`, `Position`, `Normal`, `Distance`. Both are read-only once built: a params object mutated between two casts is a question that means something different depending on when the engine looked at it. The filter covers a named instance's **descendants**, so filtering a `Model` filters its parts, and each word means what it says at the edges — an empty `Exclude` filter hits everything and an empty `Include` filter hits nothing. `CollisionGroup` is the empty string for "any group". **`RaycastResult` still carries no `Material`**, and the reason it was given here has since gone: `BasePart.Material` ships (§2.2) and this field did not arrive with it. The rule that kept it out stands on its own — a field reporting a value nothing sets is worse than one that is absent, and nothing sets this one. Note for `--!strict` callers: Luau table types are invariant, so `Filter = { part }` needs `:: { Instance }` — the annotation a `{Instance}` field costs. |
 | `Random` | `Random.new(seed?)`: `NextNumber(min?, max?)`, `NextInteger(min, max)`, `NextUnitVector()`, `Clone()`. `NextNumber()` is [0, 1) and `NextNumber(min, max)` is [min, max) — half-open, like every other range in the engine; `NextInteger(min, max)` is inclusive at **both** ends, which is the one place the engine is not half-open and the reason it is spelled out. `min > max`, or a non-integer bound to `NextInteger`, raises `script.err.random_range`. `NextUnitVector` is uniform over the sphere, not merely unit length. The seed is any number, truncated toward zero. Deterministic streams (R10) — see the note below the table. |
+| `Tween` | The handle `TweenService:Create` returns: `Play()`, `Pause()`, `Cancel()`; `Instance: Instance?`, `TweenInfo`, `PlaybackState: Enum.PlaybackState` (read), `Completed: Signal<Enum.PlaybackState>`. Not creatable on its own — there is no `Tween.new`, because a tween without the service that steps it would be a handle to nothing. |
+| `AnimationTrack` | The handle `AnimationPlayer:LoadAnimation` returns (§2.2). |
+| `InputObject` | The read-only snapshot `InputService`'s raw events carry (§2.1, ADR 0041): `UserInputType`, `KeyCode`, `Position`, `Delta`. A snapshot and not a live object, so holding one past its handler tells you what happened rather than what is happening. |
 | `Content` | A type alias of `string` in v1 (`asset://…`, `save://…` URIs); reserved to become opaque later. It is a real exported type name, generated into `engine.d.luau` (§5), so `local c: Content = "asset://models/tree.glb"` type-checks — which is what makes the alias worth having before it becomes opaque. |
-| `Enum` | Global `Enum` namespace; `EnumItem` = `Name`, `Value`, `EnumType` — and `EnumType` is the enum **object**, not its name as a string, so `Enum.PartShape.Ball.EnumType == Enum.PartShape`. `Enum.X:GetEnumItems()` returns a **fresh** array on every call, in declaration order (fresh so a caller may sort it; ordered because R10 forbids container order reaching observable order). v1 enums: `EasingStyle` (Linear, Sine, Quad, Cubic, Quart, Quint, Exponential, Circular, Back, Bounce, Elastic), `EasingDirection`, `KeyCode` (keys + mouse + gamepad buttons), `InputActionType` (Bool, Direction1D, Direction2D, Direction3D, ViewportPosition), `InputDeviceType` (KeyboardMouse, Gamepad, Touch), `InputRate` (Simulation, Render — ADR 0039), `PartShape`, `Material` (small v1 set), `CollisionFidelity` (Default, Hull, Box, Precise), `RotationOrder` (XYZ, XZY, YXZ, YZX, ZXY, ZYX — all six permutations; YXZ wherever an `order` parameter is omitted), `RaycastFilterType` (Include, Exclude), `StreamingMode` (Nonatomic, Atomic, Persistent), `PlaybackState`, `CharacterState` (Grounded, Airborne), `AutomaticSize`, `FillDirection`, `HorizontalAlignment`, `VerticalAlignment`, `SortOrder`, `ScaleType` (Stretch, Slice, Tile), `WindowMode`, `LogLevel` (Trace, Debug, Info, Warning, Error — ascending severity, and `Value` orders them), `RunContext` (Client, Server — declared and carrying both items in v1, but nothing reads them; §2.1). |
+| `Enum` | Global `Enum` namespace; `EnumItem` = `Name`, `Value`, `EnumType` — and `EnumType` is the enum **object**, not its name as a string, so `Enum.PartShape.Ball.EnumType == Enum.PartShape`. `Enum.X:GetEnumItems()` returns a **fresh** array on every call, in declaration order (fresh so a caller may sort it; ordered because R10 forbids container order reaching observable order). The declared enums, in full: `EasingStyle` (Linear, Sine, Quad, Cubic, Quart, Quint, Exponential, Circular, Back, Bounce, Elastic), `EasingDirection`, `KeyCode` (keys + mouse + gamepad buttons), `InputActionType` (Bool, Direction1D, Direction2D, Direction3D, ViewportPosition), `InputDeviceType` (KeyboardMouse, Gamepad, Touch), `InputRate` (Simulation, Render — ADR 0039), `PartShape`, `CollisionFidelity` (Default, Hull, Box, Precise), `RotationOrder` (XYZ, XZY, YXZ, YZX, ZXY, ZYX — all six permutations; YXZ wherever an `order` parameter is omitted), `RaycastFilterType` (Include, Exclude), `StreamingMode` (Nonatomic, Atomic, Persistent), `PlaybackState`, `CharacterState` (Grounded, Airborne), `AutomaticSize`, `FillDirection`, `HorizontalAlignment`, `VerticalAlignment`, `SortOrder`, `ScaleType` (Stretch, Slice, Tile), `LogLevel` (Trace, Debug, Info, Warning, Error — ascending severity, and `Value` orders them), `RunContext` (Client, Server — declared and carrying both items in v1, but nothing reads them; §2.1), `AlphaMode` (Opaque, Mask, Blend — glTF's three, how a `Material` reads the alpha channel of its colour), `UserInputType` (the device an `InputObject` came from; §2.1). **Two names left this list rather than joining it**: `Material` is a class now and not an enum (§2.2), and `WindowMode` went with the `WindowService` that was never built (§2.1). |
 
 **What `typeof` returns.** `typeof(Vector3.new(1, 2, 3))` is **`"vector"`** —
 Vector3 *is* the VM primitive (divergence #9, §9), which is why every signature
@@ -584,8 +664,9 @@ instance is `"Instance"` whatever its class — the class is `ClassName`. A
 `Enum` global itself is `"Enums"` — three names for three different things, and
 the plural is the one people forget. The remaining datatypes answer with their
 own names: `"Vector2"`, `"CFrame"`, `"Color3"`, `"UDim"`, `"UDim2"`, `"Rect"`,
-`"TweenInfo"`, `"RaycastParams"`, `"RaycastResult"`, `"Random"`. `Content` is a
-`string` in v1 and answers `"string"`.
+`"TweenInfo"`, `"Tween"`, `"AnimationTrack"`, `"InputObject"`,
+`"RaycastParams"`, `"RaycastResult"`, `"Random"`. `Content` is a `string` in v1
+and answers `"string"`.
 
 Reading a member a datatype does not have raises
 `script.err.unknown_member`, exactly as on an instance (§2.2): `c.r` on a
@@ -678,7 +759,7 @@ that never reach the world hash, or seed it from something the simulation
 already knows. `Clone()` copies the stream position, so the clone continues the
 same sequence independently of the original.
 
-### 2.4 Input Action System (the only input path — ADR 0029)
+### 2.4 Input Action System (ADR 0029; the raw surface beside it is ADR 0041, §2.1)
 
 - `InputContext : Instance` — `Enabled: boolean`, `Priority: number`,
   `Sink: boolean`, `Rate: Enum.InputRate`; children are InputActions. Parented
@@ -688,10 +769,16 @@ same sequence independently of the original.
   signals `Pressed`, `Released` (Bool), `StateChanged` (all types).
 - `InputBinding : Instance` (child of an InputAction) —
   `KeyCode: Enum.KeyCode`, composites `Up/Down/Left/Right: Enum.KeyCode`
-  (Direction1D and Direction2D), `Scale: number`,
-  `UIButton: ImageButton | TextButton?`, `DisplayName: string` (a localization
-  key is allowed), `Image: Content`, `DeviceType: Enum.InputDeviceType`
-  (read-only, derived from `KeyCode`).
+  (Direction1D and Direction2D), `Scale: number`, `DisplayName: string` (a
+  localization key is allowed), `Image: Content`, `DeviceType:
+  Enum.InputDeviceType` (read-only, derived from `KeyCode`).
+- **`UIButton` was declared here and never built.** It was to bind an action to
+  an on-screen `ImageButton` or `TextButton` directly. What ships instead is
+  `InputService:SetVirtualState(keyCode, value)` against one of the `Virtual`
+  key codes (§2.1): the button's own `Activated` handler drives the state, and
+  the binding stays an ordinary `KeyCode` binding rather than a second kind of
+  binding with a second resolution rule. `examples/04-obby`'s HUD jump button is
+  that path's proving caller.
 - `InputAction:GetPreferredBinding(deviceType?) → InputBinding?` for prompt
   glyphs ("Press [E]").
 
@@ -709,8 +796,9 @@ action's determinism class by re-tuning a number about layering.
 engine's property value domain is a closed set in which only an `Instance` can
 be nil, so `Enum.KeyCode` carries an explicit `Unknown` item — that is what
 "unbound" means — and `DeviceType` is derived from `KeyCode` rather than stored,
-so a binding cannot claim to be a gamepad binding for the `W` key.
-`UIButton` stays genuinely optional, because an Instance reference can be nil.
+so a binding cannot claim to be a gamepad binding for the `W` key. Every
+member `InputBinding` actually carries is total; the one optional member the
+rule was stated against was `UIButton`, which is not there.
 
 **`StateChanged` carries no arguments**, like `Destroying` and the signal from
 `GetPropertyChangedSignal`, and the handler reads `GetState()`. Same reason as
@@ -731,10 +819,10 @@ save/load pair for bindings in v1.
 |---|---|---|---|
 | 1 | Immediate/Deferred signal modes | Deferred-only | One semantics; predictable; parallel-ready |
 | 2 | `wait`/`spawn`/`delay`/`tick` globals | `task.*` + `os.clock` only | Kill the footguns at birth |
-| 3 | UserInputService/ContextActionService/Mouse | Input Action System only | One modern input model, rebindable/promptable by default |
+| 3 | UserInputService/ContextActionService/Mouse | The Input Action System, plus `InputService`'s raw events beside it | One modern input model, rebindable and promptable by default, and it stays the recommended path for a shipped game. **"Only" stopped being true at ADR 0041**: `InputBegan`/`InputChanged`/`InputEnded` and `IsKeyDown` exist because reading one key cost a context, an action, a binding and the parenting between them. They are fed from the IAS's own dispatch rather than from a second path into the OS, which is what keeps a replay able to see every input a game reads (§2.1) |
 | 4 | `RBXScriptSignal`/`RBXScriptConnection` | `Signal<T...>` / `Connection` | Legal + cleaner; generic-typed |
 | 5 | BindableEvent/BindableFunction | `Signal.new()` / plain functions | Instances were the wrong shape for this |
-| 6 | ModuleScript instances + `require(instance)` | Plain `.luau` files + require-by-string | Real filesystem modules; no WaitForChild-require dance; analyzer parity |
+| 6 | ModuleScript instances + `require(instance)` | Both: `.luau` files by string, and `ModuleScript` instances by reference | **Reversed by ADR 0050**, and the row stays because half of what it argued for is still true — a file module is a real filesystem module with analyzer parity, and `src/shared/` is still exactly that. What the divergence cost was everything a script could not be while its identity was a file: it could not go inside a stamp, could not be copied with the thing it belongs to, and could not be created the way every other instance is. So `Source` became a property, `ModuleScript` came back, and `require` accepts one. Only a `ModuleScript` — requiring a `Script` would run it a second time somewhere else, which is precisely what the two classes exist to keep apart |
 | 7 | `Instance.new(class, parent)` | Single-arg only | The parent-then-mutate perf wart, removed |
 | 8 | `.Changed` catch-all event | `GetPropertyChangedSignal` / `AttributeChanged` only | The untypeable catch-all, removed |
 | 9 | `Vector3.X/Y/Z` | canonical `x/y/z` | It IS the native `vector` primitive; matches the vector stdlib RFC and the builtin type |
@@ -745,7 +833,7 @@ save/load pair for bindings in v1.
 | 14 | PhysicalProperties + material-derived physics | `Friction`/`Restitution`/`Density` props | Direct, typed, no bundle object in v1 |
 | 15 | Studs | SI meters/kg/seconds | glTF-native, physics-native |
 | 16 | CameraType state machine | Fully scriptable Camera + `@luaug/camera` rigs | Code-first engine; no hidden controllers; NearPlane/FarPlane exposed |
-| 17 | MouseEnter/MouseLeave, InputBegan on GUI | `PointerEntered`/`PointerExited`, `Activated`, IAS `UIButton` bindings | Device-neutral |
+| 17 | MouseEnter/MouseLeave, InputBegan on GUI | `PointerEntered`/`PointerExited`, `Activated`, and a button that drives an action through `InputService:SetVirtualState` | Device-neutral. The `UIButton` binding this row named was never built (§2.4); the virtual key code is what took its place |
 | 18 | `workspace.StreamingEnabled` + props | `StreamingService` | Streaming is a system, not scene-root state |
 | 19 | SoundService/SoundGroup | `AudioService`/`AudioGroup` | Consistent Audio* naming |
 | 20 | `rbxassetid://` | `asset://` project paths (content-addressed) | Open, local-first pipeline |
@@ -760,67 +848,101 @@ save/load pair for bindings in v1.
 This rename list is **frozen**: no further renames without a new row here, and
 no runtime aliases, ever.
 
-### 2.6 Prefabs — reusable pre-built instance trees
+### 2.6 Stamps — reusable pre-built instance trees
 
 LuauG supports the Unity-prefab / Roblox-model workflow — authoring an
 instance tree once (with children, properties, attributes, tags) and
-instantiating it many times — through three composable mechanisms:
+instantiating it many times. **The thing is called a `Stamp`, and the name was
+chosen against the obvious ones** (ADR 0049): `Prefab` is Unity's, `Blueprint`
+is Unreal's, `Model` is Roblox's and an instanced `Scene` is Godot's, and
+borrowing one imports a mental model this engine has not agreed to — somebody
+who reads "prefab" goes looking for nested variants and an override list that
+grows forever. A stamp is also a noun and a verb: you stamp one into the world,
+the instance is stamped, and what it came from is its stamp.
 
 1. **`Instance:Clone()`** (M2): any instance tree can be kept as a template
    (parented to `nil` or a storage Folder) and deep-cloned on demand, with
    internal references fixed up. This is the classic Roblox pattern and works
-   for trees built in code or loaded from assets.
-2. **`AssetService:LoadModelAsync("asset://…")`** (M4+): loads an imported
-   asset — a glTF hierarchy or a compiled prefab — as a ready `Model` tree
-   (MeshParts, lights, attachments as children). Load once, then `Clone()`
-   per instance; `PreloadAsync` warms it.
-3. **`.prefab.luau` — the v1 authoring format**: a `--!strict` Luau module
-   returning a declarative, typed tree description (class, properties,
-   attributes, tags, children — validated against the same API schema as
-   everything else). The asset pipeline compiles these to `PrefabDef` assets:
-   instantiable at runtime through `AssetService`, and bakeable into streamed
-   chunk payloads by the world importer (architecture §10).
+   for trees built in code or loaded from assets. A clone knows nothing about
+   where it came from, which is the whole difference from the next one.
+2. **`Instance.stamp(name, linked?)`** — a source file under
+   `content/stamps/<name>.stamp.json`, placed into the world. **A stamp file is
+   a scene of one subtree**: the same writer, the same reader and the same four
+   correctness rules `.scene.json` has, over a root that is one instance instead
+   of `Workspace`. Writing a second format would have meant two definitions of
+   "everything about a subtree", and they would disagree the first time somebody
+   added a property. Placing one is **two verbs**, and the second argument picks
+   between them: **linked** — the default — writes the instance as its mark plus
+   what differs, so everything it does not override comes from the file on every
+   load and editing the file changes every instance with it; **a copy**
+   (`linked = false`) is made by the stamp and owes it nothing afterwards.
 
-   ```luau
-   --!strict
-   return prefab.define "Tree" {
-       class = "Model",
-       children = {
-           trunk = { class = "MeshPart", MeshContent = "asset://models/trunk.glb",
-                     Anchored = true, tags = { "Climbable" } },
-           leaves = { class = "MeshPart", MeshContent = "asset://models/leaves.glb" },
-       },
-   }
-   ```
+**A property write on a linked instance is an override** (ADR 0051, which
+reverses ADR 0049's break-on-edit rule). It stays on that instance, is recorded
+under the path inside the stamp it applies to, and survives the source changing.
+A *structural* change is not an override and is not recorded as one: adding or
+removing a child is a different thing from setting a parameter, and a format that
+carried it would be inventing added-and-removed-object machinery nobody has
+designed here. So the save writes such an instance in full, drops its mark, and
+counts it — nothing is lost, the world is exactly what it was, and the instance
+is its own from then on. The alternative was a save that refuses, and a save that
+refuses is a save that loses work.
 
-   Being plain Luau, prefabs are code-first (fits the no-editor v1), diffable,
-   and parameterizable. When the visual editor arrives (phase 2), "save as
-   prefab" writes exactly this format — the Unity-style drag-and-save flow
-   lands on an already-shipping foundation. A general *scene serialization*
-   format beyond prefabs (whole-world save files) remains deliberately
-   deferred (risk §10.6): glTF + prefabs + spawner code cover v1.
+**The `.prefab.luau` authoring format this section specified was never built**,
+and neither was the `PrefabDef` asset the pipeline was to compile it into, nor
+the `AssetService` that would have instantiated one (§2.1). What replaced them is
+not a second format but the absence of one: a stamp is a scene, a scene is
+`.scene.json`, and the editor writes both. **The general scene serialization
+deferred below as risk §10.6 is therefore the thing that shipped** — ADR 0047
+made a project's authored world a file, and boot loads it before the scripts run
+(§3).
 
 ---
 
 ## 3. Script execution model (v1)
 
-**One process, one game VM** (architecture §5). Model: **entry scripts + file
-modules**, no client/server folders yet.
+**One process, one game VM** (architecture §5). Model: **a script is an ordinary
+instance carrying its own source** (ADR 0050), reached either by mounting a file
+or by being in the world the scene describes; no client/server folders yet.
 
+- **A script's source is a property.** `BaseScript` is abstract and carries
+  `Source: string`; `Script` **runs** and `ModuleScript` is **required**, and
+  both are creatable from the same `Instance.new` every other class uses.
+  This section said the opposite until ADR 0050 — a `Script` was `NotCreatable`
+  because it existed only where a file did — and the reason that rule went is
+  worth keeping: a script whose identity is a file cannot go inside a stamp,
+  cannot be copied with the thing it belongs to, cannot live in a content
+  library, and cannot be created the way everything else is.
 - **Mounting:** at boot, every `src/scripts/**/*.luau` file becomes a `Script`
   instance under `game:GetService("ScriptService")` (subdirectories become
-  `Folder`s). Scripts have `Enabled: boolean` and `RunContext` (reserved enum;
-  unset in v1). Modules (everything else, canonically `src/shared/`) never
-  appear in the tree — they are required by string. Dynamic script creation
-  (`Instance.new("Script")` + source) is not supported in v1.
-- **`Script.Enabled`:** a Script whose `Enabled` is `false` **at boot** never
-  starts — it is still mounted and still appears in the tree, but no coroutine
-  is created for it. Writing `Enabled` after boot has **no effect in v1**: it
-  neither stops a running coroutine nor starts a script that did not run. The
-  property is documented with that limit rather than left with no stated
-  behaviour, because what sets it is build configuration and the hot-reload
-  world restart, and both act before the boot they apply to. Re-running a
-  script is what the restart is for (§3.2, ADR 0024).
+  `Folder`s), with the file's text as its `Source`. Scripts have
+  `Enabled: boolean` and `RunContext` (reserved enum; unset in v1). Files under
+  `src/shared/` are still required by string and still never appear in the tree.
+  **The mount is no longer the only way to have a script**: one saved in a scene
+  or placed from a stamp is the same instance the mount would have made, and
+  neither knows about the other.
+- **`require` accepts an instance**, and only a `ModuleScript`: requiring a
+  `Script` would run it a second time somewhere else, which is exactly what the
+  two classes exist to keep apart. The cache is keyed by the instance and has the
+  same three states a path-keyed module has — a value, a failure that is
+  re-raised rather than re-run, and "being evaluated right now", which is a
+  cycle.
+- **`Script.Enabled` decides whether that script's threads are resumed, and
+  nothing else** (ADR 0059). False when scripts start means this one never
+  starts; it is still mounted and still in the tree, and no coroutine is created
+  for it. Writing it afterwards takes effect at the next deferred drain — this
+  section said a write after boot had *no* effect in v1, and that limit is gone.
+  **False to true starts it**, on its own coroutine, file scope running now
+  against the world as it is: a start and not a resume, so a script that ran, was
+  disabled and is enabled again runs its file scope a second time. **True to
+  false stops resumption**, and only that: a queued `task.defer`, a `task.delay`
+  coming due and a signal fire are discarded when they come up, and a thread
+  already executing runs to its next yield, because a coroutine cannot be
+  preempted. **Connections are not disconnected** and nothing the script built is
+  removed — they stop being invoked because nothing resumes the threads that
+  would run them. Anything larger would decide whether a connection dies with the
+  thing its closure captured, and a property setter is the worst place to answer
+  that. Several scripts enabled by one tick start in document order.
 - **Conformance specs** are mounted the same way. They live outside
   `src/scripts/**` (§4), but the headless runner mounts each
   `tests/conformance/**/*.spec.luau` file as an entry `Script`: `script` is
@@ -829,8 +951,13 @@ modules**, no client/server folders yet.
   fired. So a `game.Loaded:Connect` made at file scope does run, and every spec
   observes a fully booted world rather than a half-built one.
 - **Lifecycle:** engine init → load `luaug.toml` + asset manifest → build the
-  DataModel + mount scripts → start each Script on its own coroutine via
-  `task.defer` in deterministic path-sorted order → first frame.
+  DataModel + mount scripts → **load the boot scene** named by `[project] scene`
+  → start each Script on its own coroutine via `task.defer` in deterministic
+  path-sorted order → the boot drain → first frame. The scene step is ADR 0047's
+  and this section gained it there: the world a project *starts* with is a file,
+  and it is loaded before a line of that project's behaviour runs, so a script's
+  file scope sees the authored world instead of an empty one. The boot drain
+  advances no clock — `SimTime` is still zero when it ends.
   **Mounting and starting are two steps, and the editor does only the first**
   (ADR 0058): a project opened in `luaug edit` shows its scripts and does not
   run them, play starts them, and stop tears the VM down so a second play is the
@@ -1068,8 +1195,13 @@ from `Heartbeat` on the same tick come due on the same tick.
   §9's own lints rejected the alternatives: a boolean property may not carry an
   `Is` prefix, and an event must be a past-tense fact or a `Pre*`/`Post*` phase.
   The rules were right and the first spelling was not.
-- **Asset change → in-place swap:** textures/meshes/audio hot-swap without a
-  VM restart (content-hash change pushed over the dev WebSocket).
+- **Asset change → in-place swap** — designed here and **not implemented**.
+  Textures, meshes and audio were to hot-swap without a VM restart on a
+  content-hash change pushed over the dev WebSocket. The message type exists in
+  the protocol and the engine answers it with `dev.err.not_implemented` rather
+  than ignoring it, which is the honest half: a verb that is reserved says so
+  where a verb that is silently dropped looks like a bug in the watcher. Editing
+  an asset today needs the code-change path, which is the full VM restart above.
 - Transport (ADR 0035): the dev server (Lute, `@lute/fs.watch` + an `@std/net`
   WebSocket **server** on the `[dev] port`) launches the runtime, and the
   runtime **connects out to it as a WebSocket client** and receives
@@ -1077,8 +1209,10 @@ from `Heartbeat` on the same tick come due on the same tick.
   **Only the dev server listens** — the engine opens no port in any profile, and
   the client half is compiled into dev builds only. The same server serves the
   dev server's other clients (the hot-reload gate test, the overlay console, a
-  future editor) and relays between them and the engine. `eval` powers the dev
-  console in the overlay.
+  future editor) and relays between them and the engine. `eval` is reserved the
+  same way `asset-changed` is and is answered the same way: running arbitrary
+  source in a live world touches R4 and needs its own design, so the dev console
+  it was to power does not evaluate anything.
 - **Reload ordering:** the state bag and the `PreserveOnReload` instances are
   captured before the VM is destroyed and restored into the fresh world
   **before** the new entry scripts are deferred, so a script that looks for what
@@ -1091,10 +1225,21 @@ from `Heartbeat` on the same tick come due on the same tick.
 
 **Config format: `luaug.toml`** (consistent with rokit.toml/pesde.toml;
 comments; static). Sections: `[project]` name, id (reverse-DNS), version,
-`engine = "0.1"`, `icon`; `[window]` title, size; `[dev]` port; `[assets]` extra
-source dirs, import options; `[permissions]` net_serve, fs_paths (§7);
-`[memory]` optional script-heap hard cap and budget overrides; `[graphics]`
-the quality family (below); `[build]` targets, bytecode opt level.
+**`scene`** — the world a run starts with, relative to `content/` (ADR 0047,
+§3's lifecycle) — `engine = "0.1"`, `icon`; `[window]` title, size; `[dev]`
+port; `[assets]` extra source dirs, import options; `[permissions]` net_serve,
+fs_paths (§7); `[memory]` optional script-heap hard cap and budget overrides;
+`[graphics]` the quality family (below); `[build]` targets, bytecode opt level.
+
+**Five of those sections are read and three are not.** What reaches the engine or
+the CLI is `[project]` `name`, `id`, `icon` and `scene`; `[window]` `title` and
+`size`; `[dev]` `port`; `[assets]` `content`, which names the directory
+`build-assets` compiles; and the whole of `[graphics]`. **`[permissions]`,
+`[memory]` and `[build]` are parsed by nothing**, and neither is `[project]
+version` — the permission model belongs to the `@std` surface §7 has not
+finished, the heap cap belongs to a budget the engine enforces from its own
+defaults, and the build target is a flag on `luaug build` rather than a table. A
+key nothing reads is not a default: a project that sets one is setting nothing.
 
 **`[graphics]` — the quality family (M8, ADR 0044).** These are *engine*
 settings and not `Lighting` properties: `Lighting` describes the world and
@@ -1129,59 +1274,87 @@ the engine's.
 ```
 my-game/
 ├─ luaug.toml
-├─ .luaurc                  -- strict mode + @shared/@pkg aliases (§1.3)
-├─ rokit.toml               -- luaug, lute, luau-lsp, stylua pinned
-├─ pesde.toml               -- empty deps; `luaug add` manages it
+├─ .luaurc                  -- strict mode + shared/pkg/std/lute aliases (§1.3)
+├─ rokit.toml               -- lute, luau-lsp, stylua pinned (§1.4)
 ├─ stylua.toml
 ├─ .vscode/
 │  ├─ settings.json         -- luau-lsp: platform.type=standard (Roblox defs OFF),
 │  │                        -- types.definitionFiles=[.luaug/types/engine.d.luau],
-│  │                        -- types.documentationFiles=[.luaug/types/engine-docs.json],
 │  │                        -- require.directoryAliases for @std/ and @luaug/ stubs
 │  └─ extensions.json       -- johnnymorganz.luau-lsp, stylua
+├─ content/
+│  └─ scenes/main.scene.json -- the world the project starts with (§2.6, ADR 0047)
 ├─ src/
 │  ├─ scripts/main.luau     -- entry Script (--!strict)
-│  └─ shared/               -- modules, require("@shared/...")
-├─ assets/
-│  ├─ models/  textures/  audio/  prefabs/
-│  └─ i18n/en.json
+│  └─ shared/greeting.luau  -- modules, require("@shared/...")
+├─ assets/i18n/en.json
 ├─ tests/example.test.luau
 ├─ .luaug/                  -- generated (gitignored): types/, cache/, manifest
 └─ .gitignore
 ```
 
-**Two test conventions, and they are not one suite.** A *user project* puts its
-tests in `tests/**/*.test.luau`: `lute test` runs them pure, `luaug test
---engine` runs the same files against a headless engine (§7). The *engine's own
-conformance suite* — the specs written from this document, which decide whether
-an implementation is LuauG at all — lives at
-`tests/conformance/**/*.spec.luau` in the engine repository and is run only by
-the headless runtime, which mounts each file as an entry Script (§3). The
-different extension is the point: the two are globbed by different runners, and
-a conformance spec that matched the user pattern would be picked up by `lute
-test`, where there is no engine to conform to and every case fails for the
-wrong reason.
+Three lines of that tree were written before the things in them existed and are
+corrected here rather than left as a scaffold nobody gets. **`pesde.toml` is not
+scaffolded** — `luaug add` does not exist (below), so an empty manifest for a
+package manager the CLI cannot drive would be furniture. **There is no
+`types.documentationFiles` setting**: the docs JSON it named was dropped in M3
+and the hover text rides inside the definitions file (§5), which the template's
+own settings say in a comment beside the line. And **`assets/` holds the i18n
+catalog and nothing else**: models, textures and audio live under `content/`,
+which is what the engine mounts and what `build-assets` compiles, and there is no
+`prefabs/` directory because a stamp is a file under `content/stamps/`.
 
-**CLI command set** (the `luaug` CLI is a Lute app compiled with
-`lute compile`; it launches the separate native runtime binary):
+**Two test conventions, and they are not one suite.** A *user project* puts its
+tests in `tests/**/*.test.luau`, and `lute test` runs them pure — the starter
+template scaffolds one. The *engine's own conformance suite* — the specs written
+from this document, which decide whether an implementation is LuauG at all —
+lives at `tests/conformance/**/*.spec.luau` and is run only by the headless
+runtime, which mounts each file as an entry Script (§3). The different extension
+is the point: the two are globbed by different runners, and a conformance spec
+that matched the user pattern would be picked up by `lute test`, where there is
+no engine to conform to and every case fails for the wrong reason.
+
+**What `luaug test` does is the second of those and only the second.** It runs a
+suite of `*.spec.luau` on the headless engine and emits TAP, defaulting to
+`tests/conformance`; the `--engine` flag this section named does not exist,
+because there is no non-engine mode of the command for it to switch off. A user
+project's own `*.test.luau` files therefore run under `lute test` and not under
+`luaug`, which is the half of the two-runner story that shipped.
+
+**CLI command set.** The `luaug` CLI is a set of Lute scripts run by the pinned
+`lute` rather than a `lute compile`d binary — that was M3's decision and this row
+was written before it — and it launches the separate native runtime binary. The
+table is the command set the CLI's own `--help` prints, which is the one that
+exists:
 
 | Command | Wraps |
 |---|---|
-| `luaug new [template]` | scaffold (`starter`, `obby`, `openworld-demo`) |
-| `luaug dev` | asset watcher/importer (@lute/fs.watch) + WS hot-reload server (@std/net) + runtime in dev mode w/ overlay |
-| `luaug run` | runtime, no watch |
-| `luaug build --target win64` | The distributable folder: the host binary under the game's name and wearing its icon, the engine's content beside it, and the game in `game/` — which the player mounts when given no script. Ships Luau **source** rather than bytecode; ADR 0045 says why, and amends this row |
-| `luaug asset import\|list\|hash` | assimp offline → glTF 2.0 canonical → runtime formats (engine mesh, KTX2/BCn textures, ogg/wav); crypto-digest cache in `.luaug/cache` |
-| `luaug test [--engine]` | `lute test` for pure `tests/**/*.test.luau`; `--engine` boots the headless runtime exposing the same @std/test-compatible runner with the engine API available |
-| `luaug check` | `luau-lsp analyze` with the generated settings/defs (CI-ready) + StyLua check + i18n lint |
-| `luaug fmt` | StyLua |
-| `luaug setup` | regenerate `.luaug/types/` + `.vscode` config for the pinned engine version (the `lute setup` pattern) |
-| `luaug add <pkg>` | pesde wrapper (installs to `luau_packages`, maintains aliases) |
-| `luaug doctor` | toolchain/version diagnosis |
+| `luaug new <name>` | scaffold from a template. `--template` exists and `starter` is the only value it accepts |
+| `luaug dev [path]` | run the project with a watcher attached: a saved file rebuilds the world (asset watcher/importer + the hot-reload server, §3.2) |
+| `luaug edit [path]` | run the project with the editor UI in place of the debug overlay (ADR 0046) |
+| `luaug build [path]` | The distributable folder: the host binary under the game's name and wearing its icon, the engine's content beside it, and the game in `game/` — which the player mounts when given no script. Ships Luau **source** rather than bytecode; ADR 0045 says why, and amends this row |
+| `luaug build-assets` | compile `content/` into a pack and a manifest — glTF 2.0 canonical → runtime formats (engine mesh, KTX2/BCn textures, ogg/wav), with a crypto-digest cache in `.luaug/cache` |
+| `luaug test [path]` | run the conformance suite on the headless engine |
+| `luaug check [path]` | `luau-lsp analyze` with the generated settings/defs (CI-ready) + StyLua check + i18n lint |
+| `luaug fmt [path]` | StyLua |
 
-Zero-config onboarding = `luaug new` + open VS Code: defs, docs, aliases,
-formatter all preconfigured; nothing to install manually beyond
-`rokit install`.
+**Five commands in this table were designed and never built**, and none of them
+is load-bearing for anything above. `luaug run` is `luaug dev` without the
+watcher, and the watcher costs nothing a run cares about. `luaug asset
+import|list|hash` became one command, `build-assets`, with no sub-verbs and no
+`assimp` front end in a shipped build. `luaug setup` was the `lute setup`
+pattern; `luaug new` copies the definitions into `.luaug/types/` at scaffold time
+instead, so nothing has ever needed to ask for them again — and it is also why
+there is no command that would regenerate them after an engine upgrade.
+`luaug add` needs the package manager `pesde.toml` was scaffolded for, and
+`luaug doctor` is named by the comment in the template's own `luaug.toml` and
+answers nothing today.
+
+Zero-config onboarding = `luaug new` + open VS Code: defs, hover documentation,
+aliases and formatter preconfigured; nothing to install manually beyond
+`rokit install`. **The `@std`/`@luaug` aliases are the one part of that promise
+still owed** — the settings point at `.luaug/types/std/` and
+`.luaug/types/luaug/`, and nothing generates them (§5, artifact 3).
 
 ---
 
@@ -1202,7 +1375,8 @@ catalog. The same files drive the C++ side (architecture §4): generated
 property getter/setter tables, method dispatch glue, enum registration, and
 thread-safety assertions.
 
-**Generated artifacts per engine release** (all diff-checked in CI):
+**Generated artifacts per engine release** (each gated in CI, though not all
+the same way — the two shapes are below):
 1. `runtime/types/engine.d.luau` — `declare extern type` for every
    class/datatype + global declarations (`game`, `workspace`, `script`,
    `Instance.new` string-singleton overloads). Never `declare class`. **The doc
@@ -1223,18 +1397,57 @@ thread-safety assertions.
    under a reflowed paragraph. Ordered by name rather than by declaration
    order, so moving a class between `.api.luau` files produces no diff at all
    and an added member produces one in a single place.
-5. `docs/reference/**` — markdown reference pages.
+5. `docs/api/**` — the markdown reference. One page per class, plus a page
+   each for the datatypes, the enums and the libraries, plus an index: 56 class
+   pages and four others at the current definitions. A page lists what its class
+   **declares** and links to its base rather than flattening what it inherits,
+   which is the api-dump's rule in (4) and holds here for the same reason —
+   flattening turns one added member on `Instance` into a diff on every page in
+   the directory.
+6. The **documentation site** — the manual authored under `docs/manual/**` and a
+   reference page for every class, datatype, enum and library, emitted as one
+   self-contained static site by `api/generator/gen_site.luau` and built by
+   `scripts/docs.ps1` / `scripts/docs.sh`. It is §8's "Docs site outline", and
+   its table of contents is authored in `api/generator/site/nav.luau` rather
+   than discovered, because the order of a manual is most of what a manual is.
 
 **Built so far:** (1) since M2, freshness-gated, carrying the doc comments since
-M3; (4) since M4, freshness-gated the same way. (2) is dropped. **(3) and (5)
-are declared here and not generated yet** — they are recorded as carried work in
-`PROGRESS.md` rather than left to read as though they exist.
+M3; (4) since M4, freshness-gated the same way; (5) since M8; (6) since
+2026-08-26. (2) is dropped. **(3) is the one artifact declared here and still not
+generated** — `luaug new` copies (1) into a scaffolded project's `.luaug/types/`
+and writes no `std/` or `luaug/` stubs beside it, so the
+`require.directoryAliases` in the template's `.vscode/settings.json` name
+directories that are not there.
 
-The paths in (1) and (4) are the real ones. They were written here as
-`.luaug/types/...` when this section was drafted and never corrected as the
-generators landed, which is the stale-spec bug MASTER_PROMPT §5 names: `.luaug/`
-is per-project generated state, and these two are repository artifacts that ship
-with the engine.
+**Two shapes of gate, because the two outputs are read differently.** Both live
+in `scripts/gates/luau-check.sh`. (5) is checked in, so its stage — *generated
+API reference is fresh*, which runs `lute api/generator/gen_reference.luau` —
+copies `docs/api/` aside, re-runs the generator and diffs the **directory**. The
+copy is taken BEFORE the generator runs, like every other freshness check in that
+file, so a hand edit is caught rather than overwritten and then reported clean. A
+directory rather than a file list, because a class removed from the IDL has to
+take its page with it, and a stale page is exactly the documentation that
+outlives what it describes.
+
+(6) is deliberately **not** checked in, and there is therefore no freshness diff
+to run: a site is read after somebody built it, so the build IS the read and a
+stale copy cannot exist. Checking it in would buy a diff nobody reads across tens
+of thousands of generated lines and cost churn on every edit to a doc string. So
+its stage — *the documentation site builds*, which runs
+`lute api/generator/gen_site.luau "--out=$site_out"` into a temporary directory —
+is that exit code and nothing else. What it catches is not staleness but a
+**reference that no longer resolves**: every `api:` link in the manual, every code
+sample's file name and every page the navigation declares is checked against the
+IDL and the filesystem, and the run exits non-zero listing what it could not
+resolve. It also audits the published prose, because a doc string that cites a
+design section, a decision record or an internal milestone is prose written for
+somebody maintaining the engine on a page written for somebody using it.
+
+The paths in (1), (4) and (5) are the real ones. (1) and (4) were written here as
+`.luaug/types/...` and (5) as `docs/reference/**`, and none of the three was
+corrected as its generator landed — which is the stale-spec bug MASTER_PROMPT §5
+names, three times in one list. `.luaug/` is per-project generated state, and all
+three of these are repository artifacts that ship with the engine.
 
 Naming-rule lints run inside the generator (§9) as a CI gate.
 
@@ -1258,7 +1471,12 @@ Naming-rule lints run inside the generator (§9) as a CI gate.
   → surfaced to console/overlay/`error()`. Errors reaching Luau are
   pre-formatted strings prefixed with the key
   (`[engine.assets.err.not_found] …`) so tests match on keys, not prose.
-- **In-game `LocalizationService`:** `Locale: string` (BCP-47, settable),
+- **In-game `LocalizationService` — designed here and never built** (§2.1). The
+  three halves that did ship are the ones the engine itself needs: the catalog
+  format, the key discipline R3 enforces, and the C++ formatter above. What is
+  missing is the Luau surface, so a game today has a catalog under
+  `assets/i18n/` that nothing loads. The design stands as written:
+  `Locale: string` (BCP-47, settable),
   `SystemLocale: string` (read), `LocaleChanged: Signal<string>`,
   `Translate(key: string, params: {[string]: any}?) → string` (a missing key
   echoes the key + a dev log), `LoadCatalog(locale: string, content: Content)`
@@ -1270,48 +1488,81 @@ Naming-rule lints run inside the generator (§9) as a CI gate.
 
 ## 7. @std implementation scope for v1 (ADR 0030)
 
+**Registered in the game VM, today: one module and one function.**
+`require("@std/net")` resolves and exports `request`, the HTTP client; nothing
+else on this table is reachable from a script. The table is therefore the *scope*
+this section committed to and not a report of what a game can call, and the third
+column says which is which. `@luaug/testing` and `@luaug/camera` do ship, as
+Luau content the engine mounts.
+
 | Module | Game runtime? | v1 notes / sandbox |
 |---|---|---|
-| `@std/task` | Yes — IS the global `task`, the same table: `require("@std/task") == task`. Table identity, not merely the same surface, because two tables would be two schedulers and only one of them owns the queue in §3.1 | spawn/defer/delay/wait/cancel; synchronize/desynchronize are reserved names, meaning absent — not present-and-erroring |
-| `@std/json` | Yes | encode/decode |
-| `@std/path` | Yes | pure |
-| `@std/stringext`, `@std/tableext` | Yes | pure |
-| `@std/net` | Yes | `request` (HTTP client) + WS client: always available. `serve` (HTTP+WS server) and raw sockets: dev mode always; shipped builds require `[permissions] net_serve = true` in luaug.toml |
-| `@std/fs` | Yes, virtualized | Paths are URI-rooted: `asset://` (read-only mounted content) and `save://` (per-user writable dir) in shipped builds. Dev mode: project-root read/write. Raw OS paths only behind an `--allow-fs` dev flag / `[permissions] fs_paths` |
-| `@std/test` | Shim only | The real runner is Lute's; engine headless mode (`luaug test --engine`) provides a compatible surface so the same `*.test.luau` files run with the engine API |
+| `@std/task` | **Not registered.** `task` is a global and the module name does not resolve | The design was table identity, not merely the same surface: `require("@std/task") == task`, because two tables would be two schedulers and only one of them owns the queue in §3.1. spawn/defer/delay/wait/cancel; synchronize/desynchronize are reserved names, meaning absent — not present-and-erroring |
+| `@std/json` | **Not registered** | encode/decode |
+| `@std/path` | **Not registered** | pure |
+| `@std/stringext`, `@std/tableext` | **Not registered** | pure |
+| `@std/net` | **Yes — `request` only** | `request` (HTTP client) is built and parks the calling coroutine on a worker, resuming at a frame safe point. The WS client, `serve` (HTTP+WS server) and raw sockets are design: shipped builds were to require `[permissions] net_serve = true` in luaug.toml, and nothing reads that key yet |
+| `@std/fs` | **Not registered** | Paths were to be URI-rooted: `asset://` (read-only mounted content) and `save://` (per-user writable dir) in shipped builds; dev mode project-root read/write; raw OS paths only behind an `--allow-fs` dev flag / `[permissions] fs_paths`. A game VM today has no filesystem at all, which is the safe end of that design to be unfinished at |
+| `@std/test` | **Not registered** | The real runner is Lute's. What the engine actually provides headless is `@luaug/testing`, which `tests/conformance/**` is written against |
 | `@std/io` | No (game VM) | Headless/dev console only |
 | `@std/process`, `@std/luau` | **Tooling-only** | Never in the game VM (security; `@std/luau` = a loadstring-equivalent) |
 
-A shared **conformance test suite runs against both Lute and the LuauG
-runtime in CI** — the insurance policy on the convergence bet.
+**The shared conformance suite runs on the LuauG runtime and not on Lute.**
+`tests/conformance/**/*.spec.luau` is driven by `luaug test`, in the gate and in
+CI, and there is no second run of those files under `lute` — the insurance policy
+on the convergence bet is written down here and has never been collected. It is
+also what would have caught this table going stale: a spec that required
+`@std/json` would have failed the first time the suite ran without it, and no
+spec ever required one.
 
 ---
 
 ## 8. Examples & docs plan
 
-**Templates/examples (each a working `luaug new` target):**
-1. `starter` — the §4 tree; one script spawning a lit part, one shared
-   module, one test.
-2. `obby` — teaches the idiom set: parts via code, checkpoints via Tags +
-   `TagService.GetInstanceAddedSignal`, respawn via `CharacterBody`, jump via
-   an IAS `InputAction`, TweenService platforms, `Signal.new` for game
-   events, a ScreenGui HUD, localized strings, a prefab.
-3. `openworld-demo` (flagship) — chunked glTF terrain under
-   `StreamingService` with the character as focus; third-person
-   `CharacterBody` + a `@luaug/camera` rig; IAS contexts (`gameplay` vs
-   `menu`, Sink/Priority shown); day/night driving `Lighting.ClockTime` in
-   `PostSimulation`; ambient `Sound` + `AudioGroup` mixing; ImGui
-   streaming/stats panels; the hot-reload workflow with `"PreserveOnReload"`
-   on the character; an optional `backend/` Lute app sharing `@shared` code
-   over `@std/net` WS.
+**One template, and the other two became examples.** `luaug new` has exactly one
+target — `starter`, the §4 tree — and what it scaffolds moved with ADR 0047: the
+lit part its one script used to spawn is **authored in the scene** now, and the
+script finds it with `WaitForChild` and spins it on `Heartbeat`. That is the
+split the template exists to teach, and a file scope that built a world would
+teach the opposite. The two below were written here as templates and shipped
+under `examples/` instead, and the difference is not cosmetic: a template is
+scaffolded into somebody's own project and has to stay small enough to read,
+while an example is a project this repository keeps building.
 
-**Docs site outline:** Learn (Install & toolchain → Your first world →
-Scripting model → Instances/Attributes/Tags → Prefabs → Input (IAS) → UI →
-Audio → Physics & CharacterBody → Streaming large worlds → Shipping a build)
-· Guides (Hot reload deep-dive, Assets & the glTF pipeline, Testing, i18n,
-Building a backend with Lute, the Debug overlay) · Reference (generated from
-the api-dump) · **"Coming from Roblox"** — the keystone doc
-([`coming-from-roblox.md`](coming-from-roblox.md)).
+1. `starter` — the `luaug new` target: one script, one shared module, one scene,
+   one test.
+2. `examples/04-obby` (M6) — the idiom set, and a game rather than a
+   demonstration: a course of `Part`s, platforms moved by a tweened `CFrame`, a
+   `ScreenGui` + `UIListLayout` menu that arrives by tweening a `UDim2`, a HUD
+   button driving a real `InputAction` through `InputService:SetVirtualState`,
+   `Sound` on the SimClock, and a skinned glTF playing one `AnimationTrack` on
+   the character. The Tags-and-`Signal.new` checkpoint pattern this row promised
+   is not in it, and neither are localized strings — that catalog needs the
+   `LocalizationService` §6 never got.
+3. `examples/10-open-world` (M8, the flagship) — a streamed world with the
+   **character** as the focus rather than the camera; third-person
+   `CharacterBody` + a `@luaug/camera` rig; `MinRadius` and
+   `PauseOutsideLoadedArea` doing the work when the ground has not arrived; one
+   `Lighting.ClockTime` driving sky, shadow direction, fog, reflections and
+   exposure together; ambient `Sound`; and hot reload that puts the character
+   back where it was standing, through `HotReloadService:SaveState`. Two things
+   this row promised are not in it: `AudioGroup` mixing, and the `backend/` Lute
+   app sharing `@shared` code over `@std/net` WS — the second cannot exist until
+   the WS client does (§7).
+
+**The docs site is built** (§5, artifact 6), and its outline is authored in
+`api/generator/site/nav.luau` rather than here, because a table of contents in
+two places is a table of contents that disagrees with itself. What that file now
+declares is wider than the sketch this line carried: Get started · Core concepts
+· Building a world · Rendering and lighting · Physics · Input · User interface ·
+Audio · Animation · Assets and streaming · Guides · **Why it works this way** —
+the decisions a person will trip over, each with the reasoning that settled it —
+and **Coming from Roblox**, which is the keystone and is three pages rather than
+one: the migration guide, every deliberate divergence (§2.5), and what is not
+here. [`coming-from-roblox.md`](coming-from-roblox.md) is still the repository's
+own copy of that argument. The reference half is generated from the IDL and not
+from the api-dump: the dump carries no doc prose (§5, artifact 4) and could not
+produce a reference page if it wanted to.
 
 ---
 
@@ -1366,8 +1617,12 @@ convention, and LuauG keeps it (ADR 0034).
 - **Enforcement:** the generator's schema validator encodes every rule above
   as CI-failing lints on the IDL (regex + structural checks: `Async` iff
   yields, the event tense list, no `Get` prefix on properties, singular enum
-  names); `luaug check` + `luaug fmt --check` gate user/example code; all
-  engine examples and templates are analyzed in CI under the pinned luau-lsp.
+  names), and `scripts/gates/luau-check.sh` runs it as
+  `lute api/generator/check.luau`. `luaug check` gates the rest — it is
+  `luau-lsp analyze` and `stylua --check` in one command, over the whole
+  repository including every example and template, under the pinned luau-lsp.
+  There is no `luaug fmt --check`: `fmt` rewrites and `check` reports, and the
+  gate calls `check`.
 
 ---
 
@@ -1384,17 +1639,29 @@ convention, and LuauG keeps it (ADR 0034).
    budget fails (ADR 0024).
 3. **@std convergence depends on Lute surface stability.** **Rec:** pin Lute
    via rokit; the shared conformance suite (§7) is a v1 deliverable, not an
-   afterthought; wrap divergences behind our stubs.
-4. **No ModuleScript breaks the "model with scripts inside" habit.**
-   **Rec:** the asset importer strips embedded scripts with a loud, keyed
-   warning; the migration guide gets a dedicated recipe (the spawner-module +
-   prefab pattern).
-5. **IAS is new even to Roblox devs (2026).** **Rec:** the obby template and
-   five copy-paste IAS recipes in the migration guide are launch blockers.
-6. **No general scene serialization format** (code-only worlds strain as
-   content grows). **Rec:** deferred by design in v1 — glTF + `.prefab.luau`
-   + spawner modules cover it (§2.6); prototype a broader scene format in
-   1.x; never invent a format under deadline.
+   afterthought; wrap divergences behind our stubs. **Open, and the most
+   overdue item on this list.** Lute is pinned. The suite was never run against
+   it, and the surface it would have compared has one module in it (§7) — so the
+   bet is neither collected nor lost, which is the state a bet should not be in
+   after a release.
+4. ~~**No ModuleScript breaks the "model with scripts inside" habit.**~~
+   **Closed by ADR 0050, in the other direction.** `ModuleScript` exists, a
+   script's `Source` is a property, and a script inside a model is exactly what
+   a stamp carries — so the habit works rather than needing a recipe. What the
+   asset importer does with a script embedded in a glTF is a separate question
+   and not this one.
+5. **IAS is new even to Roblox devs (2026).** **Rec:** the obby and five
+   copy-paste IAS recipes in the migration guide are launch blockers. The obby
+   shipped as `examples/04-obby` rather than as a template (§8), and ADR 0041
+   took the other half of this risk out by making one key readable without a
+   context, an action and a binding.
+6. ~~**No general scene serialization format**~~ (code-only worlds strain as
+   content grows). **Closed by ADR 0047**, and the recommendation was right
+   about the shape of the answer if not the timing: it was not invented under
+   deadline, it was invented when a person tried to edit a world and asked how
+   to save it. `.scene.json` is the format, a stamp is the same format over one
+   subtree (§2.6), and `[project] scene` is what a run loads before its scripts
+   start (§3). `.prefab.luau` was never built and is not what covered this.
 7. **Single-VM v1 code may assume shared memory and break under a future
    client/server split.** **Rec:** never ship `IsServer()`-style stubs in v1;
    push the sibling-backend-on-Lute pattern hard in docs; reserve

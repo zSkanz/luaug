@@ -219,20 +219,34 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   have been reappearing in `PROGRESS.md` since M0 or M1. Three are paid in this
   milestone; the other three get a named destination instead, because a debt
   scheduled where it does harm is not scheduled, it is moved.
-  - [ ] **Trim `Luau.Analysis`** (carried from M0). Vendored Luau builds four
+  - [x] **Trim `Luau.Analysis`** (carried from M0). Vendored Luau builds four
         libraries; the engine links the VM and the compiler and throws the type
         checker away, which is roughly a third of a cold build. It needs a patch
         under `third_party/patches/` (R13) — impossible until M4, when
         `applyPatches` was found to have never run and every tree was found to
         be CRLF-mangled. Both are fixed, so this is now half an hour.
-  - [ ] **`api-dump.json`** (carried from M3). `api-design.md` §5 specifies it as
+        **Closed, and not with a patch after all**: upstream exposes no option to
+        switch Analysis off, so `cmake/luaug_luau.cmake` adds Luau
+        `EXCLUDE_FROM_ALL` and names the four targets the engine actually links —
+        `Luau.VM`, `Luau.CodeGen`, `Luau.Compiler` and `Luau.Ast`. Nothing else
+        is reachable from a build target, so nothing else is built. The file
+        records what it was worth: 407 s of every cold build, compiled and thrown
+        away.
+  - [x] **`api-dump.json`** (carried from M3). `api-design.md` §5 specifies it as
         diff-checked in CI "to force changelog entries and catch accidental API
         breaks" — it is the gate that notices the public surface changing, and
         M4 is the milestone that grows that surface the most (Camera, MeshPart,
         materials, lights). It is the one carried item that loses value by
         waiting: shipped now it guards M5–M8, shipped at M8 it guarded nothing.
-  - [ ] **`luaug --version`.** Advertised by `luaug --help` and answered with
-        "Unknown command". One dispatch entry.
+        **Closed**: `api/api-dump.json` is generated from the IDL, and
+        `scripts/gates/luau-check.sh` regenerates it and diffs the result, so a
+        change to the public surface that does not carry its dump is a red gate
+        rather than a silent break.
+  - [x] **`luaug --version`.** Advertised by `luaug --help` and answered with
+        "Unknown command". One dispatch entry. **Closed**: `tools/cli/main.luau`
+        dispatches both `--version` and the bare flag to `commands/version`, and
+        E4 made it answer from inside an installation as well as from inside this
+        repository, with the stamp naming where the number came from.
   - **Not here, and where instead:** the **shipping profile** does not configure
     and also needs a bytecode-loading path that does not exist — it belongs with
     `luaug build` (M8). **DXIL signing on Linux** has no consumer until a Linux
@@ -314,8 +328,14 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   true of `milestone/m4`, which is tagged today over the defect above: whether
   that tag stands is the human's call.
 
+  **They said so on 2026-08-20** (`33c6ee83`), and `milestone/m4.5` is tagged on
+  that commit. Every box below is ticked with the row or the commit that closed
+  it except one — `PointLight.Shadows` and `SpotLight.Shadows` — which is left
+  open and visible rather than tidied away, because what closed it at the time
+  was a marker rather than a decision.
+
 - **Scope — the defects, each with the evidence that found it.**
-  - [ ] **`Lighting` is unreachable from the renderer.** `WorldHost::start`
+  - [x] **`Lighting` is unreachable from the renderer.** `WorldHost::start`
         caches `findFirstChildOfClass(dataModel, Lighting)` before any script
         runs, under a comment claiming the service exists by then. `services.cpp`
         states the rule one line from where it is broken: `Workspace` and
@@ -324,17 +344,32 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
         for the identical reason: `extract` reads it every frame whether or not
         a script ever asks for it. Resolving lazily on each miss is smaller and
         leaves the same trap one refactor away.
-  - [ ] **A host-level test for it.** `render_world_tests.cpp` builds a
+        **Closed by D002** (`4e4e3fc2`): `Lighting` is a boot service beside
+        `Workspace` and `ScriptService`, guarded on the class existing because
+        `registerServices` lives in `script` and must not acquire an opinion
+        about which modules are compiled in, and `api-design.md` §1.2's list
+        of boot services changed in the same commit.
+  - [x] **A host-level test for it.** `render_world_tests.cpp` builds a
         `Lighting` instance itself and hands its id straight to `extract`, so
         every environment assertion passes against an id the host never
         produces. The untested step is the one that was broken. The test belongs
         at the host, and it must fail if the id is resolved before the service
         exists.
-  - [ ] **Re-record every M4 gate artifact afterwards.** The goldens, the
+        **Closed**: `world_host_tests.cpp`, "the host resolves `Lighting` on a
+        world no script ever touched" — and the proof beside it is a
+        differential rather than a golden, because a golden can only say "the
+        same as last time", which is exactly what it said while this was
+        broken.
+  - [x] **Re-record every M4 gate artifact afterwards.** The goldens, the
         lavapipe attempt and the 1080p baseline all describe a scene lit by the
         wrong sun. A number recorded against a defect is not a baseline, and
         M5's "no >10% regression" clause would be measured against it.
-  - [ ] **`BasePart.Transparency` must actually fade, by human instruction on
+        **Closed at the milestone's own gate** (`33c6ee83`): the six capture
+        goldens re-recorded and green, the lavapipe image re-recorded and
+        rendering the blended pass, and `docs/perf-baselines.md` given an M4.5
+        row — 0.46 ms median, 1.79 ms worst, three runs inside 4% — with M4's
+        rows kept and struck through rather than overwritten.
+  - [x] **`BasePart.Transparency` must actually fade, by human instruction on
         2026-08-20.** The sorted, blended transparent pass, which was scheduled
         at M6 earlier the same day and moved here when the human was told what
         cutout does not do: at a 0.5 cutoff, 0.4 renders fully opaque and 0.6
@@ -373,7 +408,12 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
         one — a `Frame` over a world is the same blended, sorted draw — so the
         milestone that ships UI now gets it already written and tested against
         world geometry, which is the harder of its two callers.
-  - [ ] **The shadow grid crawls.** The ortho box is centred on the camera (the
+
+        **Closed by D001** (`e86f9b0b`), and the finding underneath it is the
+        part worth carrying: the value could not reach the renderer *at all*
+        — `DrawItem` had no field for it — so the pass was never the first
+        problem.
+  - [x] **The shadow grid crawls.** The ortho box is centred on the camera (the
         snapshot is camera-relative and `sunViewProjection` looks at the
         origin), so an orbiting camera slides the texel grid 0.42 of a texel per
         frame at the example's speed. Snap the box centre to texel increments in
@@ -381,6 +421,14 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
         the increment is one too. The rotational half — a moving sun turning its
         own grid — is a separate problem needing normal-offset bias; it is
         visible only while `ClockTime` moves and is not required here.
+        **Closed by D003** (`27c47549`) for the half this milestone scoped. The
+        rotational half was reported three more times afterwards — D044, D050
+        and D054 — and what those closed is a mitigation rather than a
+        removal: a cascade's lattice lives in the light's rotating frame, so a
+        shadow edge advances one texel at a time and cannot slide. D054 hides
+        the step behind a six-texel penumbra floor and a seven-by-seven kernel
+        rotated per pixel, which took the worst single step from 3.58 pixels
+        to 0.75.
   - [ ] **`PointLight.Shadows` and `SpotLight.Shadows` accept a write and change
         nothing.** Stored, extracted, never read: one cascade from the sun is
         all this release has. The M4 brief names it as deliberate, in a C++
@@ -388,7 +436,18 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
         clicking the inspector reads. Decide it the way Transparency was
         decided: honour it, or remove the property until the milestone that
         renders it.
-  - [ ] **The pivot is a `Model` concept, and in the reference API it is not.**
+
+        **STILL OPEN, and it is the only item on this list that is.** M4.5
+        answered it with a third option rather than either of the two the box
+        asks for: the properties stayed and were marked `Inert`, so the IDL, the
+        inspector and the api-dump all now say plainly that nothing acts on
+        them. That made the surface honest and left it inert, which is a
+        different thing from deciding it. M7.5 did not change it either — it
+        brought four cascades and clustered lights, and `pbr.hlsl` still opens
+        "one shadowed" light. `native_accessors.cpp` stores the flag and reports
+        it back under a comment saying so. The question the box asks is still
+        the question.
+  - [x] **The pivot is a `Model` concept, and in the reference API it is not.**
         Replaces an item that said `Model.PrimaryPart` has no consumer, which
         was wrong: `modelPivot` reads it, and the sweep that "found" it searched
         `engine/render` alone for a value consumed in `engine/script`. A
@@ -433,7 +492,12 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
         mass.** It is a scripting-space transform, and Jolt has its own notion of
         a body's centre. Wiring one into the other would make a hinge move a
         body's dynamics, which is a bug that would take a milestone to notice.
-  - [ ] **The crash handler and the log file sink.** `architecture.md` §app
+
+        **Closed by D012 and D013** (`721f6194`): `PVInstance` is a real
+        abstract class between `Instance` and `BasePart`/`Model`/`Camera`,
+        `PivotOffset` exists, and `modelPivot` computes the extents box its own
+        comment had always claimed.
+  - [x] **The crash handler and the log file sink.** `architecture.md` §app
         promises "crash handler (minidump + log)" and neither exists. A human
         running the engine by hand is this project's verification model, and has
         now reported five defects from memory. The handler is the half that
@@ -441,8 +505,12 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
         flushes per line and the process died without reaching any C++ path.
         `core` is L0 and `platform::paths()` is L1, so `app` injects the path at
         boot.
+        **Closed** (`7cc1c77c`): a minidump and a log file beside it, and D015
+        with them — `fopen_s` opened the log for exclusive access, so nothing
+        could read the engine's log while it ran, which is the half of a log
+        sink that makes it useful.
 
-  - [ ] **A crash while editing `Size` and `CFrame` in the inspector, still
+  - [x] **A crash while editing `Size` and `CFrame` in the inspector, still
         undiagnosed.** Reported by the human on 2026-08-20, separately from the
         `Parent` crash and not explained by it: that one was an uncaught
         `std::bad_variant_access` from a property editor trusting a declared type
@@ -457,6 +525,15 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
         earning one: the write path goes through the scheduler's FrameStart safe
         point (Decision 15), a defocus tears down and reclaims swapchain
         resources, and either is a place a stale pointer would survive testing.
+        **Closed by D004, and not by a fix.** It was never reproduced: the
+        write path was driven through zero, negative, 1e30 and infinity for 32
+        frames with a render extraction each time, and the window was minimized
+        and restored 25 times over 900 windowed frames, and neither faulted.
+        The reporter said on 2026-08-23 that it no longer happens, and the
+        register carries what most likely closed it — the panel was rebuilt
+        around a gesture, a selection set and one row height between M4.5 and
+        E2. **If it returns it returns with evidence**, which is what the
+        handler above is for.
 
 - **Everything the human reported, and where each one is.** The list exists
   because eight of these arrived over one afternoon of a person using the
@@ -475,22 +552,43 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   | The Android triangle is stretched in portrait | Not a defect: the sample's vertices are in NDC, so it fills whatever aspect the device has. Recorded at the checkpoint |
 
 - **Scope — so this class of defect stops being found by clicking.**
-  - [ ] **The inspector marks a property with no consumer.** All three of the
+  - [x] **The inspector marks a property with no consumer.** All three of the
         unbacked properties above were found by a human changing a value and
         watching nothing happen. The descriptor table already knows each
         property's backing; what it cannot say today is whether anything reads
         it. Whatever the mechanism, the requirement is that the panel
         distinguishes "written and acted on" from "written and stored" — that
         distinction is the only defence `instances.api.luau`'s own rule has.
-  - [ ] **Read `architecture.md` §app against reality, once, as a list.** Four
+        **Closed**: `Inert` is a property-level declaration in the IDL meaning
+        "backed, stored, read back faithfully, and nothing acts on it yet", and
+        it flows to `PropertyDesc`, to the inspector as a visible tag, and to
+        the api-dump. `tools/repo/inertcheck.luau` then makes it a gate rather
+        than a convention, and D055 closed that tool's own blind spot: it swept
+        component pools only, so every property belonging to a service with one
+        instance per world — half the API surface — was never checked at all.
+  - [x] **Read `architecture.md` §app against reality, once, as a list.** Four
         items so far had no milestone owner and each was discovered separately:
         the `DebugShell`, the api-dump, the triangle sample, and now the crash
         handler. The point is to find the fifth before a human does.
-  - [ ] **A milestone-close rewrite must not drop open defects.** Three
+        **Closed** (`13e01d3f`): the list is in `briefs/m4.5-kickoff.md`, one
+        row per promise. It found two rather than one, and each was given a
+        milestone rather than a note — D016, `BindToClose` with no capped grace
+        period, at M5, and D017, the `DebugShell`'s missing memory-category
+        table and log/REPL pane, at M6. Both are fixed now. The reusable part
+        is what the list found the two gaps to have in common: **a promise
+        whose absence is invisible from inside the code**, because nothing
+        fails to compile because `BindToClose` does not wait.
+  - [x] **A milestone-close rewrite must not drop open defects.** Three
         human-reported items were removed from `PROGRESS.md` — not archived —
         while it was being rewritten to close M4, on the day the human is asked
         to sign it off. Whatever enforces it, the ledger's open items have to
         survive a close.
+        **Closed** (`13e01d3f`): `docs/defects.md`, append-only, with
+        `scripts/gates/docs-lint.sh` checking that the ids run without gaps or
+        duplicates and that every `D###` cited anywhere else exists there. A
+        deleted row is a hole the gate names rather than a bullet nobody
+        misses, and that is the whole mechanism: not a database, a shape a
+        check can hold.
 
 - **Deliverable:** `examples/02-meshes`, unchanged as source, rendering what its
   script actually describes — the sun crossing the sky over the ninety-second
@@ -1221,13 +1319,16 @@ only prose in `docs/api-design.md` — no selection highlight, no manipulator, n
 undo, no dockspace, no scene file format, and no way for the engine to write a
 file (`engine/platform/include/luaug/platform/file.h` reads and never writes).
 
-**The sequence, and E1 and E2 are specified.** E3 and E4 are ordered intent in
-the same sense as the phase list above: each gets its detail and its gate at its
-own kickoff, from what the milestone before it learned. Writing five gates on the
-day the phase opened would have been writing four of them from a position that
-had not seen an editor run — and E2's, written after E1 shipped, is a different
-document for it: it names three defects that only somebody who had built the
-first one could have found.
+**The sequence, and only E1 and E2 were specified on the day the phase opened.**
+Everything after them was ordered intent in the same sense as the phase list
+above: each got its detail and its gate at its own kickoff, from what the
+milestone before it learned. Writing five gates on that first day would have been
+writing four of them from a position that had not seen an editor run — and E2's,
+written after E1 shipped, is a different document for it: it names three defects
+that only somebody who had built the first one could have found. Every section
+below now exists, and **E3's was written after its milestone closed** rather than
+before it opened, which is stated at the top of that section rather than left for
+a reader to notice.
 
 **Re-cut 2026-08-22, at E1's review, by human decision.** The first sequence
 below put manipulators in one milestone, saving in another and play in a third —
@@ -1259,14 +1360,15 @@ size were normal.
 
 | ID | Name | Size | Runnable artifact |
 |----|------|------|-------------------|
-| E1 | The Editor | XXL | `luaug edit`: an application with a menu bar and dockable panels; a viewport you click, fly and select in; **play, pause, step, stop and save**; a **content browser** with folders and context menus, from which **opening a scene loads it**; **undo and redo**; and a scene format that makes a project's world data. **Built, awaiting review** |
-| E2 | Moving Things | L | Translate, rotate and scale manipulators; creating instances; reparenting by drag; multi-select — the direct manipulation the loop and the undo stack make safe. **Specified below, in progress** |
-| E3 | Assets and Prefabs | M | Prefabs as scenes, an asset importer path from the browser, and a scene that references what it uses. **The model is settled: ADR 0048** -- content holds SOURCES, an instance in the world may be a LINK to one, and editing a linked instance breaks the link and makes it its own thing. Written at E2 from the human's own description rather than invented while wiring a browser |
-| E4 | The Editor Ships | M | The distribution question ADR 0046 deliberately declined, and the editor's own performance gate: a folder somebody downloads, and an Explorer that costs what is open rather than what exists. **Settled: ADR 0054.** Specified below, in progress |
-| E5 | The World You Build | L | A world authored in `Workspace` becomes a streamed world on its own — no generator script, nothing sorted by hand. `Model.StreamingMode` makes the model the unit rather than the part; cells are chosen by size as well as position on the `layer` that has existed unused since M7. **Settled: ADR 0053.** Placed here rather than in phase 2 because it is an authoring capability and E3's stamps are its neighbour |
-| E6 | The Launcher | M | `luaug-host` with no project opens a project browser instead of printing a usage error: recent projects, a new one from a template, a folder picker, and the editor started on what you chose. **Settled: ADR 0055.** Specified below, in progress |
-| E7 | The Look | M | The shell stops looking like the debug overlay it grew out of: one theme as data rather than `StyleColorsDark` plus nine literals, Inter instead of a 13 px bitmap face, square everywhere, a palette measured against WCAG rather than argued about, and a launcher laid out for somebody arriving rather than for whoever wired it. **Settled: ADR 0056.** Specified below, in progress |
-| E8 | The Script Editor | XL | You can write Luau inside the engine: any number of scripts as tabs beside the Viewport, Luau colour from the engine's own lexer, find and replace, errors underlined where the parser puts them, autocomplete from the reflection tables, and a **working debugger** -- breakpoints, stepping, the call stack and the locals, with the script parked and the frame loop still drawing. **Settled: ADR 0057.** Specified below, in progress |
+| E1 | The Editor | XXL | `luaug edit`: an application with a menu bar and dockable panels; a viewport you click, fly and select in; **play, pause, step, stop and save**; a **content browser** with folders and context menus, from which **opening a scene loads it**; **undo and redo**; and a scene format that makes a project's world data. **COMPLETE**, signed off 2026-08-22, tagged `milestone/e1` |
+| E2 | Moving Things | L | Translate, rotate and scale manipulators; creating instances; reparenting by drag; multi-select — the direct manipulation the loop and the undo stack make safe. **COMPLETE**, signed off 2026-08-23, tagged `milestone/e2` |
+| E3 | Content and Prefabs | M | Prefabs as scenes, an asset importer path from the browser, and a scene that references what it uses. **The model is settled: ADR 0048** -- content holds SOURCES, and an instance in the world may be a LINK to one. Written at E2 from the human's own description rather than invented while wiring a browser. ADR 0048's third clause -- that editing a linked instance breaks the link -- was reversed while the milestone was building it: an edit is an override and the link survives (ADR 0051). **COMPLETE**, signed off 2026-08-23, tagged `milestone/e3` |
+| E4 | The Editor Ships | M | The distribution question ADR 0046 deliberately declined, and the editor's own performance gate: a folder somebody downloads, and an Explorer that costs what is open rather than what exists. **Settled: ADR 0054.** **COMPLETE**, signed off 2026-08-24, tagged `milestone/e4` |
+| E5 | The World You Build | L | A world authored in `Workspace` becomes a streamed world on its own — no generator script, nothing sorted by hand. `Model.StreamingMode` makes the model the unit rather than the part; cells are chosen by size as well as position on the `layer` that has existed unused since M7. **Settled: ADR 0053.** Placed here rather than in phase 2 because it is an authoring capability and E3's stamps are its neighbour. **BUILT, awaiting review** since 2026-08-24: every gate row is green except the chunk-state overlay on `examples/06-scene`, which is a picture |
+| E6 | The Launcher | M | `luaug-host` with no project opens a project browser instead of printing a usage error: recent projects, a new one from a template, a folder picker, and the editor started on what you chose. **Settled: ADR 0055.** **COMPLETE**, signed off 2026-08-24, tagged `milestone/e6` |
+| E7 | The Look | M | The shell stops looking like the debug overlay it grew out of: one theme as data rather than `StyleColorsDark` plus nine literals, Inter instead of a 13 px bitmap face, square everywhere, a palette measured against WCAG rather than argued about, and a launcher laid out for somebody arriving rather than for whoever wired it. **Settled: ADR 0056.** **BUILT, awaiting review** since 2026-08-24: what it waits on is a person looking at the four pictures in `docs/images/e7/` |
+| E8 | The Script Editor | XL | You can write Luau inside the engine: any number of scripts as tabs beside the Viewport, Luau colour from the engine's own lexer, find and replace, errors underlined where the parser puts them, autocomplete from the reflection tables, and a **working debugger** -- breakpoints, stepping, the call stack and the locals, with the script parked and the frame loop still drawing. **Settled: ADR 0057.** **BUILT, awaiting review** since 2026-08-24 |
+| E9 | Compiled Assets and a Skeleton You Can Touch | XL | Dragging a model in makes a `Model` you can open, with named parts you can select and materials you can edit; `Model.Scale` grows it with one number; a `Bone` is something a part can be welded to; and a character can be made a ragdoll. The import compiles rather than the runtime parsing, so a loose `.gltf` stops being what ships. **The material reversal is settled: ADR 0060.** **In progress** -- twelve of its fifteen steps are in `main`, one of those twelve was reversed, and steps 12, 14 and 15 are unbuilt |
 
 **What moved into E1 and why it was right.** Undo was E2's, and E1 grew delete
 and duplicate — the two actions that make its absence dangerous. The content
@@ -1568,6 +1670,112 @@ changes over time.
   it moves the way a manipulator should** — deliberately not automatable, and the
   gate item every milestone since M4 has proven is where the real defects come
   from.
+
+
+### E3 — Content and Prefabs (M)
+
+**Settled by three decision records rather than one**, and that is the
+milestone's shape rather than an accident.
+[ADR 0049](decisions/0049-a-stamp-is-a-source-and-an-instance-carries-its-mark.md)
+names the thing and says how an instance carries its mark;
+[ADR 0050](decisions/0050-a-script-is-an-ordinary-instance-and-its-source-is-a-property.md)
+makes a script an ordinary instance; and
+[ADR 0051](decisions/0051-a-prefab-is-inherited-and-an-edit-is-an-override.md)
+reverses 0049's own break-on-edit rule. All three implement
+[ADR 0048](decisions/0048-content-is-the-source-and-an-instance-is-a-link-to-it.md),
+which E2 wrote down at its close in the human's own words: content holds sources,
+the world holds a world, and an instance in the world may be a link to a source.
+
+**This section was written after the milestone closed, which is worth saying
+first.** E3 had no kickoff. It was specified in a conversation, one message at a
+time, by a person who was using the editor while it was being built — which is
+why four of its defects were reported by that person on the day they were
+introduced, and why three of its decisions were reversed by whoever asked for
+them. `docs/briefs/e3-kickoff.md` is the account assembled at the close; this is
+the scope and the gate it was actually held to. **COMPLETE, signed off
+2026-08-23**, tagged `milestone/e3`.
+
+#### Scope
+
+- **A prefab is a STAMP**, named by the human over prefab, blueprint and model.
+  A stamp file is a scene of one subtree — the same writer, the same reader, a
+  different root — so there is one format rather than two definitions of
+  "everything about a subtree".
+- **Convert any instance to one from the row it is on**, and the instance becomes
+  an instance of the file it just made. A source plus a copy of it that nothing
+  connects is two things that drift apart by tomorrow.
+- **Place one linked or as a copy**, from the browser and from code:
+  `Instance.stamp(name)` and `Instance.stamp(name, false)`. Both are real things
+  to want — a lamp post you will place forty of wants the link, a starting point
+  you are about to rebuild does not.
+- **Open one onto a stage**: a `scene::World` of its own with a Workspace, a
+  Lighting and nothing else. The game's world is never touched, so there is
+  nothing to restore and nothing that can go wrong on the way back.
+- **An edit is an OVERRIDE and the link survives it.** Changing the source moves
+  every instance that has not overridden that property. A structural change is
+  written in full and unlinked rather than refused, because **a save that refuses
+  is a save that loses work**.
+- **A script is an ordinary instance carrying its own `Source`**: `Script` that
+  runs, `ModuleScript` that is required, and `require` taking an instance. There
+  is no New Script dialog, because there is no file to write.
+- **The Explorer badges a stamped root**, two draws with a knockout, with the
+  scale, the halo and the corner read from the icon theme rather than from three
+  literals in a draw call. The knockout is what makes it exist: measured across
+  the class set at 16 px, 37 of 42 icons already have ink where the badge goes.
+- **And what a person expects to be there already**: dragging an instance into
+  the browser makes a stamp of it and dragging one out places it; `Del`, `F2`,
+  `Ctrl+D` and `Ctrl+S`; and a clipboard on `Ctrl+C`/`X`/`V` and `Ctrl+Shift+V`
+  that holds TEXT rather than ids — which is what lets a copy survive the
+  delete, the scene load or the stamp session that happens between it and the
+  paste.
+
+#### NOT in scope
+
+A stamp whose source is another stamp — a variant. Making one is refused
+outright rather than half-answered, because which level an override belongs to
+has no answer yet (ADR 0049, ADR 0051). A second content tree: `content/` holds
+files and the world holds a world, and ADR 0052 is the record of the other shape
+being built, tested, shipped and taken out the same afternoon, on one question
+from the human that Unity and Unreal do not have two contents either. Anything
+in `content/` reachable from a script: there is no global for it, deliberately,
+until somebody needs one — a name on the global list is the hardest thing in
+this API to take back. And retiring `src/scripts` as the mount, which every
+example in this repository is built on and which is ADR 0050's open question.
+
+#### Gate (definition of done)
+
+- **A stamp round-trips, and a scene holds a mark rather than a copy.**
+  `scene_file_tests.cpp`, four cases: the round trip, the collapse to a mark,
+  changing the stamp changing every instance, and a scene naming a stamp nobody
+  can supply still opening. Break-verified — with the collapse removed, three of
+  the four fail.
+- **An edit is an override and the link survives it**: the override written and
+  read back, the source moving everything except where an instance said
+  otherwise, and a structural change written in full and unlinked.
+- **Make, place, break, and open onto a stage.** `editor_tests.cpp`: the file
+  written and the subject converted, a stamp of a stamp refused, one undo for a
+  whole placement, and the stage built with the game's world untouched — the
+  test holds ids from before and checks them after, including one it retires on
+  the way in.
+- **A script is an instance, and a module is required.**
+  `script_environment.spec.luau` asserts the new model where it asserted the old
+  one, `instance_construction.spec.luau` makes both classes, and a module's
+  failure is cached rather than retried.
+- **The clipboard survives what happens between a copy and a paste**, asserted
+  by deleting the original and pasting it back.
+- **The badge's geometry lives in the theme**, asserted on a real device: the two
+  ids are in the staged atlas, a theme with no overlay block gets the documented
+  defaults, and one that overrides all three gets all three.
+- **A badge over `class.Folder` reads at 16 px on both panels. PENDING — a
+  person at a window.** The knockout is what the claim rests on and it is drawn;
+  whether it *reads* is a picture, and the geometry test that passes on a real
+  device is not that picture. It stays open rather than being answered by the
+  test next to it, for the reason every visual row in this phase stays open: the
+  ImGui shell cannot render headlessly and SDL does not accept injected input,
+  so there is no automated path to a picture of this editor.
+- **A human uses it and says whether it works. Pass by construction** — E3 was
+  specified while being used, and four of its defects came from that.
+- **`scripts/localgate.ps1` green on every stage.**
 
 
 ### E4 — The Editor Ships (M)
@@ -2019,3 +2227,108 @@ invariant written where whoever enables it will read it.
   with the locals showing, step, continue, save, and see the world reload.
   Screenshots in the gate record, in both themes.
 - **`scripts/localgate.ps1` is green on every stage.**
+
+### E9 — Compiled Assets and a Skeleton You Can Touch (XL)
+
+**In progress, and it is the first milestone in this phase that was built
+before anything wrote down what it was.** Its plan lived outside this repository
+and its decisions lived in commit messages;
+[ADR 0060](decisions/0060-a-material-is-an-instance-and-a-stamp-is-how-one-is-shared.md)
+is the first of them to get a record, and the rest are owed at step 15. The
+reconnaissance and the account of what is actually in `main` are in
+`docs/briefs/e9-kickoff.md`; this section is the scope statement and the gate,
+because a milestone that is being deferred against by number needs something to
+close against.
+
+**Opened 2026-08-25 by importing a downloaded model**, which exposed the whole
+seam in one afternoon: the file was refused outright, then loaded lying on its
+back, then turned out to carry 677 joints against a 64-matrix palette. Three
+fixes landed and none of them was the problem. The shape underneath is wrong in
+four connected ways. **The runtime parses vendor formats** — a loose `.gltf` is
+re-parsed on every launch, with no LODs, no meshlets and textures uploaded as
+raw RGBA8 with no mips, while `assetc`, which does all of that, exists and the
+editor does not call it. **A model arrives as one opaque `MeshPart`**, so five
+materials become five submeshes of one part with nothing to select and nothing
+to give a material to. **There is no material** — `MaterialDef` is embedded in
+the mesh, so two parts cannot point at one. And **the skeleton is invisible and
+untouchable**: joints are a flat array in a render-side library keyed by URN, so
+nothing in `scene` or `physics` can read a joint transform, which means there is
+no socket to weld to and no path for physics to drive a pose.
+
+#### Outcome
+
+**You drag a model in and it becomes a `Model` you can open, with named parts you
+can select and materials you can edit; you scale it with one number; you weld a
+sword to a hand; and you turn a character into a ragdoll.** Compiled,
+incremental, and fast enough that none of it is a wait.
+
+Where it stands against the plan's fifteen steps, read off the tree rather than
+off the plan:
+
+- **In `main`:** steps 1 through 11 and step 13, twelve of the fifteen —
+  `core::cframeFromMatrix` and the pivot helpers lifted into
+  `engine/scene/src/pivot.cpp`; the object mount on `ContentMounts`;
+  `Model.Scale` and `MeshPart.MeshSize`; the constraint seam on `IPhysics3D`
+  and its Jolt backend; `scene::SkeletonHost` in both directions;
+  `splitByPrimitive`; the sRGB fix, which is `encodeTexture` taking what KIND of
+  data the pixels are rather than assuming colour; `Attachment` and `Bone`;
+  `BallSocketConstraint`, `HingeConstraint` and `FixedConstraint`;
+  incrementality in `assetc`; and `Ragdoll`, driven every tick as a joint
+  override, with `Bone.Transform` beside it.
+- **Reversed, and it is one of those twelve:** step 3. A material was to be a
+  `content/*.material.json` file written by the import. It is an **instance**,
+  and what a project keeps in `content/` is a **stamp** of one — which is E3's
+  mechanism doing this job rather than a second answer to all of it.
+  `BasePart.Material` points at either, and `BasePart.Color` multiplies it, so
+  white on both sides is the identity and no existing scene changes. **Settled
+  by ADR 0060**, written after the reversal had already shipped, which is the
+  order this milestone has done everything in and the reason step 15 exists.
+- **Unbuilt:** steps 12, 14 and 15 — the editor compiling on import (the
+  object-store writer, `luaug_assetc_lib` linked into the app under
+  `LUAUG_DEBUG_UI`, and `splitByPrimitive` reaching a world); the cut-over,
+  which is last because it is the only irreversible one; and the benches,
+  baselines and decision records. **And four pieces of steps that otherwise
+  landed**, which is the part a step count hides: `assetc::importOne`, without
+  which the editor's import and `assetc` stay two code paths rather than one
+  call; the skeleton overlay and the joint picker, without which `JointName` is
+  free text typed from memory; parallel texture encode; and `Ragdoll:Build` and
+  `Ragdoll.Blend` — the class exists and is driven, but the profile that says
+  which joints, what capsule and what limits does not, so a ragdoll is still
+  assembled by hand.
+
+#### Gate (definition of done)
+
+- **The editor's import and `assetc` produce the same bytes**, per URN and per
+  blob, because they are the same call — `import_matches_build` asserts it
+  rather than the two paths being compared by eye.
+- **A re-import of an unchanged tree does no work**, asserted as an equality:
+  `texturesEncoded == 0 && meshesCompiled == 0`. A threshold would pass while
+  the defect was still there.
+- **Parallelism does not change a byte.** `asset_determinism` gains a `--jobs=1`
+  leg that must be byte-identical to the parallel one.
+- **The constraint seam does not break R10.** Two worlds built by the same call
+  sequence are bit-identical after 300 steps; `tests/determinism/ragdoll` runs
+  four ragdolls for 3000 ticks, checkpointed; and `tests/determinism/churn` and
+  `character` **must not move**, verified before landing rather than after.
+- **The four traps the Jolt backend has to survive are each asserted**, because
+  every one of them is silent when missed: a constrained body that is rebuilt
+  does not dangle its constraints, a destroyed body drops them, constraints are
+  retired before bodies, and `collideConnected = false` really excludes the pair.
+- **A `Bone` that names a joint the rig does not have resolves to `-1` and falls
+  back to its parent**, not to the origin.
+- **The existing benches are unchanged within noise** —
+  `tests/bench/{physics1k, churn10k, instances500, crowd50, platforms200}` —
+  because everything in Part B is behind an empty container. New:
+  `tests/bench/{ragdoll10, sockets200}`.
+- **`streaming_soak`'s memory ceiling is re-measured**, not carried: BC7 and
+  mips reach editor content for the first time, and a ceiling that stays
+  generous after the thing it bounds got four times cheaper no longer bounds
+  anything.
+- **A person imports the model this milestone was opened for**: drags it in,
+  gets a `Model` with named parts and materials in the browser, sets
+  `Model.Scale` and takes it back with one undo, welds a part to a `Bone` and
+  sees it follow, builds a ragdoll and watches the skinned mesh deform with it,
+  and reopens the project with nothing recompiled.
+- **`scripts/localgate.ps1` is green on every stage**, before each step rather
+  than at the end — `-Only linux` included, because this milestone touches six
+  modules and Clang diagnoses what MSVC does not.

@@ -3,13 +3,16 @@ name: CI
 on:
   push:
     branches: [main]
-    # Milestone tags still build so a tag is provably green on its own, but they
-    # are no longer what carries Tier-3: `build-macos` became blocking on every
-    # code push at M4, which is the roadmap's own gate item.
+    # A milestone tag runs the static gates -- documentation, Luau, formatting --
+    # and nothing else. Every compile job skips a tag deliberately, because the
+    # tag points at a commit those jobs already built when it landed on `main`,
+    # and Tier-3 is carried by the push rather than by the tag: `build-macos`
+    # below is blocking on every code push, which is M4's own gate item.
     tags: ["milestone/*"]
   pull_request:
-  # The "run everything, macOS included" button, for when a change needs the
-  # full matrix without inventing a tag for it.
+  # The "run everything" button, for a full matrix on a branch without having to
+  # push to it. A dispatch carries no base commit, so `changes` cannot call it
+  # documentation-only and every build job runs.
   workflow_dispatch:
 
 concurrency:
@@ -164,15 +167,17 @@ jobs:
   # the one hash-pinned DirectXShaderCompiler archive (ADR 0032) is the whole
   # input.
   #
-  # Linux stays on every push, unlike macOS below: it is the cheapest tier at
-  # 1x, and it has already caught a real bug this milestone (SDL refusing to
-  # configure with neither X11 nor Wayland). If the local Docker-based Linux
-  # gate lands and takes that duty over, the change is to lift the
-  # `ubuntu-latest` row out of the matrix into its own job with its own `if:` --
-  # a matrix leg cannot carry a condition of its own, and building the machinery
-  # that would let it (a matrix computed in `changes` and passed through
-  # `fromJSON`) before there is a second trigger to justify it would cost more
-  # in legibility than it saves in that future edit.
+  # Linux stays on every push and earns it: it is the cheapest tier at 1x, and it
+  # is the tier least redundant with a local run. It caught SDL refusing to
+  # configure with neither X11 nor Wayland, and it caught the missing
+  # `<algorithm>` include in 758b322c that neither local tier could -- a
+  # transitive header graph is a property of the runner's libstdc++ rather than
+  # of the code. If that duty ever moves to the local Docker-based Linux gate,
+  # the change is to lift the `ubuntu-latest` row out of the matrix into its own
+  # job with its own `if:` -- a matrix leg cannot carry a condition of its own,
+  # and building the machinery that would let it (a matrix computed in `changes`
+  # and passed through `fromJSON`) before there is a second trigger to justify it
+  # would cost more in legibility than it saves in that future edit.
   # ---------------------------------------------------------------------------
   build-test:
     needs: changes
@@ -540,43 +545,45 @@ jobs:
   # coverage over the headers they exercise. Nothing is run, so the absence of a
   # `ctest` step below is the point of the job, not an oversight.
   #
-  # NO LONGER ON EVERY PUSH, and that is a cost decision rather than a technical
-  # one. macOS minutes bill at 10x on a private repository, which made this the
-  # most expensive job in the file -- roughly 30 charged minutes -- despite
-  # being the fastest to finish. It now runs at the milestone tag that the gate
-  # is recorded against (`milestone/*`), which is what "Tier-3 compile" asks for
-  # literally, and on demand.
+  # BLOCKING ON EVERY CODE PUSH. The paragraphs above say what this job can
+  # honestly claim; this one says why it has to claim it at every commit. No
+  # machine this project develops on can build or run macOS, so this job is the
+  # only instrument that exists for an entire supported platform -- and a
+  # platform with no instrument is one that breaks without anybody knowing.
   #
-  # What that gives up, stated plainly: a macOS-only break is now discovered at
-  # the milestone gate rather than at the commit that caused it, so somebody
-  # will have to bisect for it. If that happens twice, this decision was wrong.
+  # It was narrowed to a milestone tag on 2026-08-20 (db091da5) and restored here
+  # on 2026-08-26. **The narrowing was a cost decision and never a technical
+  # one**, and the cost is worth writing down because it is the only thing that
+  # ever argued against this job: macOS minutes bill at 10x on a PRIVATE
+  # repository, which made this the most expensive job in the file at roughly 30
+  # charged minutes despite being the fastest to finish, and GitHub had reported
+  # 80% of the month's quota consumed. That constraint is being removed rather
+  # than ignored -- the repository is going public, and a public repository is
+  # not billed for standard GitHub-hosted runners at all. The 10x multiplier
+  # survives; it now multiplies nothing.
   #
-  # There is no compiler cache here either. A cache last written a milestone ago
-  # would mostly miss, and saving one costs 10x minutes for a build that already
-  # finishes in under three.
+  # So that nobody narrows it again without knowing what they are giving up:
+  # while this job sat on a tag, a macOS-only break was discoverable only at the
+  # milestone gate rather than at the commit that caused it -- on the one tier
+  # where whoever finds it cannot bisect locally, because the machine to bisect
+  # on does not exist here. If minutes ever bind again, the narrowings that keep
+  # that property are the ones that still name a commit, a nightly schedule or a
+  # merge queue; a tag names a milestone.
+  #
+  # There is still no compiler cache here, and the reason changed with the
+  # trigger. It used to be that two runs sat a milestone apart, so a restored
+  # cache would mostly miss. Now it is that a cold build of this tier is 168 s of
+  # observed wall time, small enough that saving and restoring a cache is a real
+  # fraction of it -- and this job has no test step for a cache to shorten.
   # ---------------------------------------------------------------------------
   build-macos:
-    # **Narrowed back on 2026-08-20, deliberately.** It became blocking at M4,
-    # which was the roadmap's own gate item, and the comment that made it blocking
-    # named the condition for undoing it: "if the quota becomes the binding
-    # constraint, narrowing this back is a decision to take deliberately rather
-    # than by letting a red macOS be ignored." GitHub reported 80% of the month's
-    # Actions quota consumed, the human took the decision, and this is it -- not a
-    # red job being tolerated, and not `[skip ci]` on the pushes that matter.
-    #
-    # macOS is charged at 10x on a private repository and is roughly two thirds of
-    # the cost of every push; Windows is 2x and is covered locally with the same
-    # toolchain by `scripts/localgate.ps1`; the Linux tier is 1x and is the one
-    # that is NOT redundant -- it caught a missing `<algorithm>` include in
-    # 758b322c that neither local tier could, because a transitive header graph is
-    # a property of the runner's libstdc++ rather than of the code. So the Linux
-    # and Windows jobs stay on every push and this one goes back to a milestone tag
-    # or a manual dispatch.
-    #
-    # What that costs is stated rather than glossed: a macOS-only break is now
-    # found at the milestone tag rather than at the commit that caused it. That was
-    # the trade before M4 and it is the trade again.
-    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/milestone/') }}
+    # Gated exactly as `build-test` is, and for the reasons stated there: only a
+    # literal `false` from `changes` stops it, so a `changes` job that fails or
+    # errors still builds; a documentation-only push does not build at all; and a
+    # tag push is skipped because the tag points at a commit this job already
+    # built when it landed.
+    needs: changes
+    if: ${{ !cancelled() && !startsWith(github.ref, 'refs/tags/') && needs.changes.outputs.code != 'false' }}
     runs-on: macos-latest
     # Was 45, which at 10x is 450 charged minutes for a job whose observed wall
     # time is 168 s. This is the largest single tail risk in the file; 20 still
