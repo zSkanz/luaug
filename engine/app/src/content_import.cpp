@@ -69,6 +69,20 @@ ContentImportReport compileImported(const std::filesystem::path& projectRoot, co
         report.textures += result.textureCount;
         report.cacheHits += result.stats.cacheHits;
         report.cacheMisses += result.stats.cacheMisses;
+
+        // The fragments this source produced, read off the rows it produced --
+        // so the editor names an instance with the same word the store is keyed
+        // by, rather than deriving it a second time and hoping.
+        std::vector<std::string> fragments;
+        const std::string urn = "asset://" + std::filesystem::path(name).generic_string();
+        for (const assetc::ManifestEntry& entry : result.entries) {
+            const std::size_t hash = entry.urn.find('#');
+            if (hash == std::string::npos || entry.urn.compare(0, hash, urn) != 0)
+                continue;
+            fragments.push_back(entry.urn.substr(hash + 1));
+        }
+        if (!fragments.empty())
+            report.pieces.emplace_back(name, std::move(fragments));
     }
 
     return report;

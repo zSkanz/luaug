@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace luaug::app {
@@ -48,6 +49,19 @@ struct ContentImportReport
     // nothing should say nothing.
     core::u32 cacheHits = 0;
     core::u32 cacheMisses = 0;
+
+    // What each compiled model split into, by content-relative name: the URN
+    // FRAGMENTS, in the order the compiler produced them.
+    //
+    // **This is what lets the editor place a `Model` of named parts** rather
+    // than one opaque `MeshPart` (E9 step 12). The names come from the compiler
+    // rather than from a second walk of the file, so the instance's name, the
+    // fragment in its `MeshContent` and the blob in the store are one answer
+    // instead of three that have to agree.
+    //
+    // A file that produced one piece is absent: one piece is the whole model,
+    // and there is nothing to split.
+    std::vector<std::pair<std::string, std::vector<std::string>>> pieces;
 };
 
 // Compiles `names` -- content-relative paths under `contentRoot` -- into the

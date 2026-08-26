@@ -1517,9 +1517,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     // Companions are not compiled and are not meant to be: a
                     // `.bin` and the images beside a `.gltf` are read BY it, and
                     // compiling the model reads them.
-                    if (const ContentImportReport compiled =
-                            compileImported(options.scriptPath, editor.content().root(), report.imported);
-                        !compiled.failed.empty()) {
+                    const ContentImportReport compiled =
+                        compileImported(options.scriptPath, editor.content().root(), report.imported);
+                    if (!compiled.failed.empty()) {
                         // Named rather than counted, and not fatal: the loose
                         // file is still there and still resolves, so a source
                         // the compiler refused is slower rather than absent.
@@ -1538,20 +1538,72 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                         const std::string folder = editor.content().currentFolder();
                         const scene::ClassId meshPartClass =
                             authored().classes().findId(authored().atoms().intern("MeshPart"));
+                        const scene::ClassId modelClass =
+                            authored().classes().findId(authored().atoms().intern("Model"));
+                        const core::NameAtom meshContent = authored().atoms().intern("MeshContent");
+
                         for (const std::string& name : report.imported) {
                             if (contentKindOf(name) != ContentKind::Mesh || meshPartClass == scene::InvalidClass)
                                 continue;
+
+                            // `asset://` plus the path under the content root,
+                            // which is what a mount resolves and what a scene
+                            // stores.
+                            const std::string urn = "asset://" + (folder.empty() ? name : folder + "/" + name);
+
+                            // What the compiler split this file into, if it
+                            // split it at all. Read off the rows it produced
+                            // rather than derived again here, so the instance's
+                            // name, the fragment in its `MeshContent` and the
+                            // blob in the store are one answer instead of three.
+                            const std::vector<std::string>* pieces = nullptr;
+                            for (const auto& [piecesName, fragments] : compiled.pieces) {
+                                if (piecesName == name)
+                                    pieces = &fragments;
+                            }
+
+                            // **One `MeshPart` per primitive, under a `Model`**
+                            // (E9 step 12). What an author has in the file is a
+                            // body, a mane and a saddle; what the engine gave
+                            // them was "horse" -- one part with five submeshes,
+                            // nothing to select and nothing to give a material
+                            // to.
+                            //
+                            // A file that split into one piece is still one
+                            // part, because a `Model` around a single part is a
+                            // container that buys nothing and costs a click.
+                            if (pieces != nullptr && pieces->size() > 1 && modelClass != scene::InvalidClass &&
+                                editor.createInstance(authored(), modelClass, importParent, authoredRoot(),
+                                                      inspector)) {
+                                const core::InstanceId model = inspector.selection();
+                                // Named after the file rather than after a
+                                // piece: the file is what somebody dragged in.
+                                authored().setName(
+                                    model, authored().atoms().intern(std::filesystem::path(name).stem().string()));
+
+                                for (const std::string& piece : *pieces) {
+                                    if (!editor.createInstance(authored(), meshPartClass, model, authoredRoot(),
+                                                               inspector)) {
+                                        continue;
+                                    }
+                                    authored().setName(inspector.selection(), authored().atoms().intern(piece));
+                                    (void)authored().setProperty(inspector.selection(), meshContent,
+                                                                 scene::Value{urn + "#" + piece});
+                                }
+                                // The MODEL is what a person wants selected
+                                // after dropping a model in, not whichever piece
+                                // happened to be created last.
+                                inspector.select(model);
+                                continue;
+                            }
+
                             if (!editor.createInstance(authored(), meshPartClass, importParent, authoredRoot(),
                                                        inspector)) {
                                 continue;
                             }
-                            // `asset://` plus the path under the content root,
-                            // which is what a mount resolves and what a scene
-                            // stores. `createInstance` selects what it made, so
-                            // the selection IS the thing to point at the file.
-                            const std::string urn = "asset://" + (folder.empty() ? name : folder + "/" + name);
-                            (void)authored().setProperty(inspector.selection(),
-                                                         authored().atoms().intern("MeshContent"), scene::Value{urn});
+                            // `createInstance` selects what it made, so the
+                            // selection IS the thing to point at the file.
+                            (void)authored().setProperty(inspector.selection(), meshContent, scene::Value{urn});
                         }
                     }
                     importParent = core::InstanceId{};
