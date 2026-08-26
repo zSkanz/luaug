@@ -1,6 +1,8 @@
 #include "luaug/app/project_config.h"
 
 #include "luaug/core/toml.h"
+#include "luaug/core/toml_edit.h"
+#include "luaug/platform/file.h"
 
 #include <fstream>
 #include <span>
@@ -147,6 +149,43 @@ ProjectConfig loadProjectConfig(const std::filesystem::path& projectRoot, const 
     applyOverrides(overrides, config.graphics);
     config.graphics = render::clampSettings(config.graphics);
     return config;
+}
+
+bool writeProjectSetting(const std::filesystem::path& projectRoot, std::string_view key, std::string_view rendered,
+                         std::string* diagnostic)
+{
+    const auto fail = [&](std::string message) {
+        if (diagnostic != nullptr)
+            *diagnostic = std::move(message);
+        return false;
+    };
+
+    const std::filesystem::path file = projectRoot / "luaug.toml";
+
+    // **A project with no file yet gets one**, because the alternative is a
+    // Settings dialog that works on some projects and silently does nothing on
+    // the rest -- and "the rest" is every project before somebody first names
+    // its window.
+    std::string text;
+    if (std::filesystem::exists(file) && !readFile(file, text))
+        return fail("could not read " + file.string());
+
+    const std::optional<std::string> edited = core::setTomlValue(text, key, rendered);
+    if (!edited.has_value())
+        return fail("could not place " + std::string(key) + " in " + file.string());
+
+    // **Parsed before it is written.** The edit is textual, so a value somebody
+    // typed can produce a file the reader refuses -- and the failure mode of
+    // writing it anyway is a project the engine will not open, from a dialog
+    // whose whole job is to be safe to poke at.
+    core::TomlDocument check;
+    if (const core::TomlDocument::ParseResult result = check.parse(*edited, file.string()); !result.ok) {
+        return fail("that would leave " + file.filename().string() + " unreadable: " + result.diagnostic);
+    }
+
+    if (!platform::writeTextFile(file, *edited))
+        return fail("could not write " + file.string());
+    return true;
 }
 
 } // namespace luaug::app

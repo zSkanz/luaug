@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace luaug::app {
 
@@ -93,6 +94,25 @@ struct ProjectConfig
 // like every other config diagnostic in the engine).
 [[nodiscard]] ProjectConfig loadProjectConfig(const std::filesystem::path& projectRoot,
                                               const GraphicsOverrides& overrides, std::string* diagnostic = nullptr);
+
+// Writes one setting into `<projectRoot>/luaug.toml`, leaving the rest of the
+// file byte for byte (S5.7).
+//
+// **An edit, not a save.** A project file is a document somebody wrote -- every
+// one in this repository opens with a paragraph explaining why its settings are
+// what they are -- so a Settings dialog that serialised `ProjectConfig` back
+// would delete all of it the first time anybody changed a window title.
+// `core::setTomlValue` finds the line and replaces what is right of the `=`.
+//
+// `key` is the dotted path the reader uses (`window.title`, `graphics.quality`)
+// and `rendered` is the TOML literal -- `core::tomlString` and friends produce
+// it. A project with no file yet gets one.
+//
+// Returns false and fills `diagnostic` when the file cannot be read or written,
+// or when the result would not parse -- which is the check that stops a Settings
+// dialog turning a working project into one the engine refuses to open.
+[[nodiscard]] bool writeProjectSetting(const std::filesystem::path& projectRoot, std::string_view key,
+                                       std::string_view rendered, std::string* diagnostic = nullptr);
 
 // The same resolution without a file, for a bare script or a project that has
 // none.

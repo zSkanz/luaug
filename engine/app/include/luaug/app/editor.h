@@ -199,6 +199,12 @@ struct EditorDialogs
 {
     bool saveAs = false;
     bool preferences = false;
+    // **The PROJECT's settings, which are a different thing from Preferences.**
+    // A preference is about this person and this machine -- which theme, which
+    // panels; a project setting is about the game and is committed with it. Two
+    // dialogs rather than two tabs, because putting them together is how
+    // somebody changes the window title of a game they are only visiting.
+    bool projectSettings = false;
     bool about = false;
     bool newFolder = false;
     // The browser's make-a-stamp-of-a-CLASS box, which is a different question

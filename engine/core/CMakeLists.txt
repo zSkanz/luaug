@@ -18,6 +18,7 @@ luaug_add_module(core
         src/number_parse.cpp
         src/random.cpp
         src/toml.cpp
+        src/toml_edit.cpp
     PRIVATE_DEPS
         blake3::blake3
 )
@@ -36,5 +37,6 @@ luaug_add_module_tests(core
         tests/slotmap_tests.cpp
         tests/name_atom_tests.cpp
         tests/random_tests.cpp
+        tests/toml_edit_tests.cpp
         tests/toml_tests.cpp
 )

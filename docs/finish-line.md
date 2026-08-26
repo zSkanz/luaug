@@ -315,7 +315,22 @@ that sends the next session to the wrong place.
       already uses -- because a typo is a tag nothing will ever find, which
       looks exactly like a working one.
 - [ ] **S5.6** A stamp override is visible, revertable and appliable.
-- [ ] **S5.7** Project settings, which needs a TOML writer the engine lacks.
+- [x] **S5.7** Project settings — built, and the writer it needed is a
+      **surgical** one rather than a serialiser. Every `luaug.toml` in this
+      repository opens with a paragraph explaining why its settings are what
+      they are; a dialog that parsed the file and printed it back would delete
+      all of that the first time somebody changed a window title. So
+      `core::setTomlValue` finds the line, replaces what is right of the `=`,
+      and leaves every other byte -- comments, ordering, blank lines, trailing
+      notes -- exactly where it was. A key the file lacks is appended under its
+      own header; a table it lacks is created at the end; those are the only
+      cases where anything is added.
+
+      The dialog writes on Apply rather than per keystroke, stops at the first
+      refusal so a failure cannot leave the file half changed, and PARSES the
+      result before writing it -- which is what stops a Settings box turning a
+      working project into one the engine will not open. Seventeen cases, most
+      of them asserting what the edit did NOT touch.
 - [ ] **S5.8** Camera control during play.
 - [x] **S5.9** The Streaming panel in the editor shell — built, inside Stats.
       `drawShell` has drawn those counters since M7 and `drawEditorShell` was

@@ -7,7 +7,10 @@
 // when a PLAYER contradicts the file, which is the case the layering exists for.
 
 #include "luaug/app/project_config.h"
+#include "luaug/core/toml_edit.h"
+#include "luaug/platform/file.h"
 
+#include <array>
 #include <cmath>
 #include <doctest/doctest.h>
 #include <filesystem>
@@ -124,4 +127,98 @@ TEST_CASE("a project with no file is the defaults plus the command line")
     CHECK(config.graphics.quality == render::QualityLevel::High);
     CHECK(sameMetres(config.graphics.shadowDistance, 60.0f));
     CHECK(config.name.empty());
+}
+
+// --- Writing a setting back (S5.7) -------------------------------------------
+
+TEST_CASE("a setting written back is read back, and the file keeps its comments")
+{
+    // The round trip the Settings dialog is: read, change one thing, write, and
+    // the next `loadProjectConfig` sees it. Everything else in the file -- the
+    // paragraph at the top especially -- has to survive, because every project
+    // file in this repository has one and a dialog that ate it would eat it the
+    // first time anybody moved a slider.
+    const ProjectDir project(R"(# What this project is, and why these settings are what they are.
+
+[project]
+name = "Before"
+
+[graphics]
+quality = "high"   # authored against, not demanded
+)");
+
+    std::string diagnostic;
+    REQUIRE_MESSAGE(
+        app::writeProjectSetting(project.path, "project.name", luaug::core::tomlString("After"), &diagnostic),
+        diagnostic);
+
+    const app::ProjectConfig config = app::loadProjectConfig(project.path, app::GraphicsOverrides{});
+    CHECK(config.name == "After");
+    CHECK(config.graphics.quality == render::QualityLevel::High);
+
+    std::string text;
+    REQUIRE(luaug::platform::readTextFile(project.path / "luaug.toml", text));
+    CHECK(text.find("# What this project is") != std::string::npos);
+    CHECK(text.find("# authored against, not demanded") != std::string::npos);
+}
+
+TEST_CASE("a project with no file yet gets one")
+{
+    // Otherwise the Settings dialog works on some projects and silently does
+    // nothing on the rest -- and "the rest" is every project before somebody
+    // first names its window.
+    const std::filesystem::path fresh = std::filesystem::temp_directory_path() / "luaug-project-config-fresh";
+    std::error_code ignored;
+    std::filesystem::remove_all(fresh, ignored);
+    std::filesystem::create_directories(fresh);
+
+    std::string diagnostic;
+    REQUIRE_MESSAGE(app::writeProjectSetting(fresh, "window.title", luaug::core::tomlString("A New Game"), &diagnostic),
+                    diagnostic);
+
+    const app::ProjectConfig config = app::loadProjectConfig(fresh, app::GraphicsOverrides{});
+    CHECK(config.windowTitle == "A New Game");
+    std::filesystem::remove_all(fresh, ignored);
+}
+
+TEST_CASE("a write that would leave the file unreadable is refused before it happens")
+{
+    // The check that stops a Settings dialog turning a working project into one
+    // the engine will not open. The edit is textual, so a value that is not a
+    // TOML literal produces a file the reader refuses -- and writing it anyway
+    // would be a dialog whose whole job is to be safe to poke at doing the one
+    // unsafe thing.
+    const ProjectDir project(R"([project]
+name = "Intact"
+)");
+
+    std::string diagnostic;
+    // Not run through `tomlString`, which is exactly the mistake this guards.
+    CHECK_FALSE(app::writeProjectSetting(project.path, "project.name", "not a literal", &diagnostic));
+    CHECK_FALSE(diagnostic.empty());
+
+    const app::ProjectConfig config = app::loadProjectConfig(project.path, app::GraphicsOverrides{});
+    CHECK(config.name == "Intact");
+}
+
+TEST_CASE("the window size round-trips as two integers")
+{
+    const ProjectDir project(R"([window]
+size = [1280, 720]
+)");
+
+    const std::array<luaug::core::f64, 2> wanted{1920.0, 1080.0};
+    std::string diagnostic;
+    REQUIRE_MESSAGE(
+        app::writeProjectSetting(project.path, "window.size", luaug::core::tomlNumberArray(wanted), &diagnostic),
+        diagnostic);
+
+    const app::ProjectConfig config = app::loadProjectConfig(project.path, app::GraphicsOverrides{});
+    CHECK(config.windowWidth == 1920);
+    CHECK(config.windowHeight == 1080);
+
+    // As integers, so a save is not a diff on a value nobody changed.
+    std::string text;
+    REQUIRE(luaug::platform::readTextFile(project.path / "luaug.toml", text));
+    CHECK(text.find("[1920, 1080]") != std::string::npos);
 }

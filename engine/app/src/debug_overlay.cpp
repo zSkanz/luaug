@@ -7,6 +7,7 @@
 
 #include "luaug/app/backends.h"
 #include "luaug/app/icons.h"
+#include "luaug/app/project_config.h"
 #include "luaug/app/script_editor.h"
 #include "luaug/app/thumbnails.h"
 #include "luaug/app/ui_theme.h"
@@ -15,6 +16,7 @@
 #include "luaug/core/log.h"
 #include "luaug/core/math.h"
 #include "luaug/core/text_key.h"
+#include "luaug/core/toml_edit.h"
 #include "luaug/platform/platform.h"
 #include "luaug/platform/sdl_interop.h"
 #include "luaug/platform/window.h"
@@ -4567,6 +4569,8 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
         ImGui::Separator();
         if (ImGui::MenuItem("Preferences..."))
             dialogs.preferences = true;
+        if (ImGui::MenuItem("Project Settings..."))
+            dialogs.projectSettings = true;
         ImGui::EndMenu();
     }
 
@@ -4637,6 +4641,126 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
 // viewport could not be opened from the menu -- which is exactly what a Save As
 // has to be. Modal, because each of these is a question with an answer, and one
 // left half-answered behind a panel is one somebody loses track of.
+// --- Project settings (S5.7) --------------------------------------------------
+//
+// **The PROJECT's settings, which are a different thing from Preferences.** A
+// preference is about this person and this machine -- which theme, which panels;
+// a project setting is about the game and is committed with it.
+//
+// Every field here writes ONE key, in place, leaving the rest of `luaug.toml`
+// byte for byte -- comments included. That is not politeness: every project file
+// in this repository opens with a paragraph explaining why its settings are what
+// they are, and a dialog that serialised the config back would delete all of it
+// the first time somebody changed a window title.
+//
+// Written on Apply rather than per keystroke, because each write is a file write
+// and a title typed one letter at a time would be twelve of them -- and because
+// a half-typed value briefly in the file is a project the engine briefly
+// refuses to open.
+void drawProjectSettings(Editor& editor)
+{
+    ImGui::SetNextWindowSize(ImVec2(520.0f, 0.0f), ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal("Project Settings", nullptr, ImGuiWindowFlags_NoResize))
+        return;
+
+    const std::filesystem::path root = editor.content().root().parent_path();
+
+    static std::array<char, 128> name{};
+    static std::array<char, 128> title{};
+    static std::array<char, 96> identity{};
+    static std::array<int, 2> size{};
+    static int quality = 2;
+    static std::string problem;
+
+    // Seeded on the frame it opens, and only then: re-reading every frame would
+    // overwrite what somebody is typing with what is still on disk.
+    if (dialogOpening()) {
+        problem.clear();
+        name.fill(0);
+        title.fill(0);
+        identity.fill(0);
+
+        const ProjectConfig config = loadProjectConfig(root, GraphicsOverrides{});
+        (void)std::snprintf(name.data(), name.size(), "%s", config.name.c_str());
+        (void)std::snprintf(title.data(), title.size(), "%s", config.windowTitle.c_str());
+        (void)std::snprintf(identity.data(), identity.size(), "%s", config.id.c_str());
+        size[0] = config.windowWidth > 0 ? config.windowWidth : 1280;
+        size[1] = config.windowHeight > 0 ? config.windowHeight : 720;
+        quality = static_cast<int>(config.graphics.quality);
+    }
+
+    ImGui::TextDisabled("%s", (root / "luaug.toml").string().c_str());
+    ImGui::Spacing();
+
+    ImGui::SeparatorText("Project");
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::InputTextWithHint("##name", "what the project calls itself", name.data(), name.size());
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::InputTextWithHint("##id", "reverse-DNS identity, e.g. dev.luaug.my-game", identity.data(), identity.size());
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("on Windows this is what the shell groups taskbar buttons and pinned shortcuts by -- two "
+                          "games sharing one id share one button");
+    }
+
+    ImGui::SeparatorText("Window");
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::InputTextWithHint("##title", "the window's title bar", title.data(), title.size());
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::InputInt2("##size", size.data());
+
+    ImGui::SeparatorText("Graphics");
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::Combo("##quality", &quality, "low\0medium\0high\0ultra\0");
+    ImGui::TextDisabled("what this world is AUTHORED against, not a demand on the player's machine");
+
+    if (!problem.empty()) {
+        ImGui::Spacing();
+        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f), "%s", problem.c_str());
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    if (ImGui::Button("Apply", ImVec2(120.0f, 0.0f))) {
+        problem.clear();
+        const std::array<core::f64, 2> extent{static_cast<core::f64>(size[0]), static_cast<core::f64>(size[1])};
+        static constexpr std::array<const char*, 4> Presets{"low", "medium", "high", "ultra"};
+        const int chosen = quality >= 0 && quality < static_cast<int>(Presets.size()) ? quality : 2;
+
+        // **One key at a time, and it stops at the first refusal.** A dialog
+        // that pressed on after a failed write would leave the file half
+        // changed, which is the one state worse than not saving.
+        const std::array<std::pair<const char*, std::string>, 5> writes{{
+            {"project.name", core::tomlString(std::string_view(name.data()))},
+            {"project.id", core::tomlString(std::string_view(identity.data()))},
+            {"window.title", core::tomlString(std::string_view(title.data()))},
+            {"window.size", core::tomlNumberArray(extent)},
+            {"graphics.quality", core::tomlString(Presets[static_cast<std::size_t>(chosen)])},
+        }};
+
+        bool ok = true;
+        for (const auto& [key, rendered] : writes) {
+            if (!writeProjectSetting(root, key, rendered, &problem)) {
+                ok = false;
+                break;
+            }
+        }
+        if (ok) {
+            // **Not applied to the running window**, and the dialog says so. A
+            // project file names what a RUN starts with; changing it while one
+            // is open would make the editor's window disagree with the file
+            // that describes it, and re-reading it mid-session is a different
+            // feature.
+            editor.report("saved to luaug.toml -- the window follows on the next run", false);
+            ImGui::CloseCurrentPopup();
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled())
+        ImGui::CloseCurrentPopup();
+
+    ImGui::EndPopup();
+}
+
 void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& dialogs, IconAtlas* icons)
 {
     if (dialogs.saveAs) {
@@ -4647,10 +4771,16 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         dialogs.preferences = false;
         ImGui::OpenPopup("Preferences");
     }
+    if (dialogs.projectSettings) {
+        dialogs.projectSettings = false;
+        ImGui::OpenPopup("Project Settings");
+    }
     if (dialogs.about) {
         dialogs.about = false;
         ImGui::OpenPopup("About LuauG");
     }
+
+    drawProjectSettings(editor);
 
     ImGui::SetNextWindowSize(ImVec2(470.0f, 0.0f), ImGuiCond_Appearing);
     if (ImGui::BeginPopupModal("Save Scene As", nullptr, ImGuiWindowFlags_NoResize)) {
