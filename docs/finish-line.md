@@ -328,7 +328,17 @@ that sends the next session to the wrong place.
       left is the render-side counters, which the F3 overlay shows and the
       editor's panel does not.
 - [ ] **S5.13** Snap step editable; a reference grid drawn.
-- [ ] **S5.14** Properties search and categories.
+- [x] **S5.14** Properties search and categories — built, and the categories
+      are DERIVED. Every other engine puts a `Category` string on each
+      property; two hundred of those in the IDL is two hundred things to keep
+      in step, and what they would mostly say is which class the property came
+      from -- which the registry already knows for certain. So the headers are
+      `BasePart` and `Part` rather than "Transform" and "Appearance", and the
+      second is a fact rather than a judgement. `collectProperties` already
+      emits root-first, so the rows arrive grouped and the panel only notices
+      when the group changes. The filter turns the headers off: a filter is a
+      flat answer to "where is that one" and headers between two matches are
+      furniture around it.
 - [x] **S5.15** Attributes — built, beside the tags and through the same queue.
       A property is declared by a class and an attribute is not, which is why
       it is a section rather than more rows: the panel cannot know what to show

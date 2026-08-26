@@ -233,6 +233,24 @@ void collectProperties(const scene::ClassRegistry& classes, scene::ClassId class
 void collectCommonProperties(const scene::World& world, std::span<const core::InstanceId> targets,
                              std::vector<const scene::PropertyDesc*>& out);
 
+// Which class in `classId`'s ancestry first declares `name`, root-most, or
+// `InvalidClass` when none does.
+//
+// **The grouping the properties grid uses, and it is derived rather than
+// authored** (S5.14). Every other engine puts a `Category` string on each
+// property; two hundred of those in the IDL is two hundred things to keep in
+// step, and what they would mostly say is which class the property came from --
+// which the registry already knows for certain. So "Transform" and "Appearance"
+// are not offered, "BasePart" and "Part" are, and the second is a fact rather
+// than a judgement.
+//
+// **Root-most rather than nearest**, so a class that redeclares an inherited
+// property groups where it was INTRODUCED. That matches the row order, which
+// `collectProperties` builds root-first, and it matches `propertySlot`'s
+// numbering -- a subscription made through the base names the same slot.
+[[nodiscard]] scene::ClassId declaringClassOf(const scene::ClassRegistry& classes, scene::ClassId classId,
+                                              core::NameAtom name);
+
 // Whether two values are the same value, for the question below.
 //
 // `operator==` everywhere except that two NaNs compare unequal and are

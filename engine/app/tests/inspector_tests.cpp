@@ -43,6 +43,7 @@ using luaug::app::collectCommonProperties;
 using luaug::app::collectProperties;
 using luaug::app::collectTree;
 using luaug::app::collectVisibleTree;
+using luaug::app::declaringClassOf;
 using luaug::app::editable;
 using luaug::app::editorFor;
 using luaug::app::EditorKind;
@@ -1281,4 +1282,69 @@ TEST_CASE("the three kinds share one queue, and they apply in the order they wer
     CHECK(world.getProperty(subject, fixture.atom("Count")) == scene::Value{core::f64{2.0}});
     CHECK(world.getAttribute(subject, fixture.atom("Difficulty")) == scene::Value{core::f64{5.0}});
     CHECK(world.hasTag(subject, fixture.atom("Landmark")));
+}
+
+// --- Which class a row came from (S5.14) -------------------------------------
+
+TEST_CASE("a property groups under the class that declares it")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+
+    // The fixture's own hierarchy: `Widget` extends `Thing`, and the properties
+    // are split between them. What the grid shows as a header is this answer.
+    const scene::ClassId widget = world.classOf(fixture.widget(world, "Subject"));
+    const scene::ClassId declaring = declaringClassOf(fixture.classes, widget, fixture.atom("Count"));
+    REQUIRE(declaring != scene::InvalidClass);
+
+    const scene::ClassDescriptor* owner = fixture.classes.find(declaring);
+    REQUIRE(owner != nullptr);
+    // Whichever class it is, the claim that matters is that the answer is a
+    // class that really declares it -- not the class of the instance.
+    const auto declares = [&](const scene::ClassDescriptor& candidate) {
+        for (const scene::PropertyDesc& property : candidate.properties) {
+            if (property.name == fixture.atom("Count"))
+                return true;
+        }
+        return false;
+    };
+    CHECK(declares(*owner));
+}
+
+TEST_CASE("a name no class in the ancestry declares has no declaring class")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const scene::ClassId widget = world.classOf(fixture.widget(world, "Subject"));
+    CHECK(declaringClassOf(fixture.classes, widget, fixture.atom("NoSuchProperty")) == scene::InvalidClass);
+}
+
+TEST_CASE("the grouping walks to the ROOT-most declarer, not the nearest")
+{
+    // A class that redeclares an inherited property groups where the property
+    // was INTRODUCED. That is what makes the headers line up with the row order,
+    // which `collectProperties` builds root-first -- a nearer declarer would put
+    // a header in the middle of the group it belongs to.
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const scene::ClassId widget = world.classOf(fixture.widget(world, "Subject"));
+
+    std::vector<const scene::PropertyDesc*> properties;
+    collectProperties(fixture.classes, widget, properties);
+    REQUIRE_FALSE(properties.empty());
+
+    // Every row's declaring class must be at or above the instance's own, and
+    // the sequence of them must never go back to a class already left behind --
+    // which is the whole property the header logic depends on.
+    std::vector<scene::ClassId> seen;
+    scene::ClassId group = scene::InvalidClass;
+    for (const scene::PropertyDesc* descriptor : properties) {
+        const scene::ClassId declaring = declaringClassOf(fixture.classes, widget, descriptor->name);
+        CHECK(declaring != scene::InvalidClass);
+        if (declaring == group)
+            continue;
+        CHECK(std::find(seen.begin(), seen.end(), declaring) == seen.end());
+        seen.push_back(declaring);
+        group = declaring;
+    }
 }

@@ -283,6 +283,27 @@ bool sameValue(const scene::Value& a, const scene::Value& b) noexcept
     return a == b;
 }
 
+scene::ClassId declaringClassOf(const scene::ClassRegistry& classes, scene::ClassId classId, core::NameAtom name)
+{
+    scene::ClassId declaring = scene::InvalidClass;
+    for (scene::ClassId id = classId; id != scene::InvalidClass;) {
+        const scene::ClassDescriptor* descriptor = classes.find(id);
+        if (descriptor == nullptr)
+            break;
+        for (const scene::PropertyDesc& property : descriptor->properties) {
+            if (property.name == name) {
+                // Not a `break` out of both: the walk continues UP, because the
+                // root-most declarer is the answer and a nearer one only shadows
+                // it.
+                declaring = id;
+                break;
+            }
+        }
+        id = descriptor->super;
+    }
+    return declaring;
+}
+
 void collectCommonProperties(const scene::World& world, std::span<const core::InstanceId> targets,
                              std::vector<const scene::PropertyDesc*>& out)
 {

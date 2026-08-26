@@ -2777,6 +2777,15 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
     // anywhere below this line, which is Decision 16's whole claim.
     collectCommonProperties(world, targets, g_properties);
 
+    // **A search box, because the grid grew** (S5.14). A `Part` declares
+    // twenty-odd properties across four classes and a `TextLabel` more than
+    // that; "which row is `CanCollide` again" is a scroll, and it is the single
+    // most common thing anybody does in a properties panel.
+    static std::array<char, 64> filter{};
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::InputTextWithHint("##property-filter", "filter properties", filter.data(), filter.size());
+    const std::string_view needle(filter.data());
+
     if (g_properties.empty()) {
         // Two classes with nothing in common is a legal selection and an empty
         // grid is the honest answer -- but an empty panel with no sentence in
@@ -2789,12 +2798,35 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
         ImGui::TableSetupColumn("property", ImGuiTableColumnFlags_WidthStretch, 0.45f);
         ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.55f);
 
+        // **The class each row came from, as a header.** `collectProperties`
+        // already emits root-first, so the rows arrive grouped and this only has
+        // to notice when the group changes -- no sorting, no second pass.
+        //
+        // Off while filtering: a filter is a flat answer to "where is that one",
+        // and headers between two matches would be furniture around it.
+        const scene::ClassId primaryClass = world.classOf(inspector.selection());
+        scene::ClassId group = scene::InvalidClass;
+
         for (const scene::PropertyDesc* descriptor : g_properties) {
+            const std::string_view propertyName = world.atoms().text(descriptor->name);
+            if (!needle.empty() && !containsFold(propertyName, needle))
+                continue;
+
+            if (needle.empty()) {
+                if (const scene::ClassId declaring = declaringClassOf(world.classes(), primaryClass, descriptor->name);
+                    declaring != group) {
+                    group = declaring;
+                    const scene::ClassDescriptor* owner = world.classes().find(group);
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::SeparatorText(owner != nullptr ? std::string(world.atoms().text(owner->name)).c_str() : "?");
+                }
+            }
+
             ImGui::PushID(static_cast<int>(descriptor->name.id));
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
 
-            const std::string_view propertyName = world.atoms().text(descriptor->name);
             const EditorKind kind = editorFor(*descriptor);
 
             // **A composite's name is a disclosure**, open by default: the rows
