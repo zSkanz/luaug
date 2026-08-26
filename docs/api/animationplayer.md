@@ -27,6 +27,6 @@ offers is on the base's page, which is what keeps one added member on
 
 A track for one clip. Everything after a `#` is the clip's NAME inside the file, and a string with no `#` is a clip name in this player's own mesh -- so the common case is `player:LoadAnimation("Walk")`.
 
-A path before the `#` must be the mesh this player is under: a clip is not yet addressable on its own, so it exists only inside the file its skeleton came from, and a URN naming a different file loads nothing rather than playing the wrong rig.
+**A path before the `#` names the file the CLIP is in, and it need not be the one this player's skeleton came from.** One walk cycle authored once and played by every character is the reason a clip is addressable at all, and a clip from elsewhere is retargeted onto this rig by joint NAME. A joint the target does not have is skipped rather than guessed, so a clip for a horse played on a person moves the joints they have in common and no others -- and a file nothing has loaded gives the same empty track a clip name the file lacks does.
 
 **Load a track once and keep it.** It always returns a track, even for a clip that is not there -- a mesh that has not finished loading would otherwise make an ordinary frame a nil index -- and every call is a handle the VM holds until the world goes away.

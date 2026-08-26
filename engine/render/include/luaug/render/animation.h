@@ -112,7 +112,8 @@ public:
     // same lifetime `PhysicsSync` has.
     AnimationSystem(const scene::World& world, const SkeletonLibrary& skeletons);
 
-    [[nodiscard]] scene::TrackId createTrack(core::InstanceId player, std::string_view clip) override;
+    [[nodiscard]] scene::TrackId createTrack(core::InstanceId player, core::NameAtom content,
+                                             std::string_view clip) override;
     void play(scene::TrackId track, f32 fadeTime, f32 weight, f32 speed) override;
     void stop(scene::TrackId track, f32 fadeTime) override;
     void adjustWeight(scene::TrackId track, f32 weight, f32 fadeTime) override;

@@ -151,7 +151,7 @@ AnimationSystem::AnimationSystem(const scene::World& world, const SkeletonLibrar
     : world_(&world), skeletons_(&skeletons)
 {}
 
-scene::TrackId AnimationSystem::createTrack(core::InstanceId player, std::string_view clip)
+scene::TrackId AnimationSystem::createTrack(core::InstanceId player, core::NameAtom content, std::string_view clip)
 {
     Track track;
     track.player = player;
@@ -174,7 +174,12 @@ scene::TrackId AnimationSystem::createTrack(core::InstanceId player, std::string
         track.meshPart = clipSourceUnder(track.driveRoot);
     }
     if (const scene::MeshPartComponent* mesh = world_->meshParts().find(track.meshPart); mesh != nullptr) {
-        track.content = mesh->meshContent;
+        // **The clip's own file when one was named, and the mesh's otherwise**
+        // (S6.8). `track.content` is what the sampler reads the clip out of, and
+        // `jointMapFor` already maps that rig's joints onto whichever mesh it is
+        // driving -- so a clip from elsewhere is retargeted by the same code that
+        // drives a shirt from a body's skeleton.
+        track.content = content.valid() ? content : mesh->meshContent;
         if (const SkeletonLibrary::Entry* entry = skeletons_->find(track.content); entry != nullptr) {
             for (u32 index = 0; index < entry->clips.size(); ++index) {
                 if (clip.empty() || entry->clips[index].name == clip) {

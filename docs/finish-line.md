@@ -498,7 +498,17 @@ that sends the next session to the wrong place.
       the mouse and gamepad items and is safe because a scene stores an enum
       item by name. Seven cases. Clicking to place it is left: that needs the
       glyph advances the layout produced, and the layout is a different pass.
-- [ ] **S6.8** An animation clip addressable on its own.
+- [x] **S6.8** An animation clip addressable on its own — built, and it was
+      nearly free. `LoadAnimation` refused a path that was not the player's own
+      mesh, so a clip existed only inside the glTF its skeleton came from and a
+      project with twelve characters carried twelve copies of every animation.
+      **The retargeting was already there**: `jointMapFor` has mapped joints by
+      NAME since one player had to drive a body and a shirt with different
+      rigs. What was missing was any way to SAY which file the clip was in, so
+      the change is one argument through `createTrack` and the removal of a
+      refusal. A joint the target rig lacks is skipped rather than guessed, so
+      a horse's clip on a person moves what they share and nothing else. Four
+      cases, break-verified — three fail without it.
 - [ ] **S6.9** i18n plural rules beyond English.
 - [ ] **S6.10** Jolt on a real job pool.
 - [ ] **S6.11** The four outstanding items of the rendering reference decision.

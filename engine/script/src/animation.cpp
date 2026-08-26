@@ -173,10 +173,17 @@ int trackStop(lua_State* L)
 // mesh, which is the common case and the one worth being short:
 // `player:LoadAnimation("Walk")`.
 //
-// **A path before the `#` must be the mesh the player is under.** v1 has no
-// asset pipeline (M7 is where clips become addressable on their own), so a clip
-// only exists inside the glTF file its skeleton came from; a URN naming a
-// different file loads nothing rather than silently playing the wrong rig.
+// **A path before the `#` names the file the CLIP is in** (S6.8), and it need
+// not be the file the player's own skeleton came from: one walk cycle authored
+// once and played by every character in a game is the reason a clip is
+// addressable at all. It is retargeted onto this rig by joint NAME, which is not
+// new work -- `AnimationSystem` has mapped joints that way since one player had
+// to drive a body and a shirt with different rigs. What was missing was any way
+// to SAY which file the clip was in.
+//
+// A rig that shares no joint names with the clip's plays nothing rather than
+// something wrong: the mapper skips a joint the target does not have, so a clip
+// for a horse on a person moves the joints they have in common and no others.
 int animationPlayerLoadAnimation(lua_State* L)
 {
     const core::InstanceId player = checkInstance(L, 1);
@@ -185,22 +192,23 @@ int animationPlayerLoadAnimation(lua_State* L)
     const std::string_view content{text, length};
 
     std::string_view clip = content;
+    std::string_view path;
     if (const usize hash = content.rfind('#'); hash != std::string_view::npos) {
-        const std::string_view path = content.substr(0, hash);
+        path = content.substr(0, hash);
         clip = content.substr(hash + 1);
-
-        if (!path.empty()) {
-            const scene::World& w = *context(L).world;
-            const scene::MeshPartComponent* mesh = w.meshParts().find(w.parentOf(player));
-            if (mesh == nullptr || w.atoms().text(mesh->meshContent) != path)
-                clip = {};
-        }
     }
 
     ServiceState& state = services(L);
     TrackRecord record;
-    if (scene::AnimationHost* animation = state.animation; animation != nullptr && !clip.empty())
-        record.track = animation->createTrack(player, clip);
+    if (scene::AnimationHost* animation = state.animation; animation != nullptr && !clip.empty()) {
+        // **Interned rather than looked up**, because the library is keyed by
+        // atom and a URN nothing has loaded yet is a track that finds no clip --
+        // which is the same answer it gives for a name the file does not have,
+        // and the state a `MeshPart` is in for the frames before its file
+        // arrives.
+        const core::NameAtom from = path.empty() ? core::NameAtom{} : context(L).world->atoms().intern(path);
+        record.track = animation->createTrack(player, from, clip);
+    }
     record.ended = createScriptSignal(L);
 
     state.animationTracks.push_back(record);

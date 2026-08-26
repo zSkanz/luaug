@@ -17,6 +17,7 @@
 #pragma once
 
 #include "luaug/core/id.h"
+#include "luaug/core/name_atom.h"
 #include "luaug/scene/types.h"
 
 #include <span>
@@ -49,11 +50,21 @@ class AnimationHost
 public:
     virtual ~AnimationHost() = default;
 
-    // A track for one clip of `player`'s parented mesh, by name. An empty name
-    // means the file's first clip. Returns 0 when the player has no skeleton or
-    // the clip is not there; the track still exists and still answers reads,
-    // with a length of zero.
-    [[nodiscard]] virtual TrackId createTrack(core::InstanceId player, std::string_view clip) = 0;
+    // A track for one clip, by name. An empty name means the file's first clip.
+    // Returns 0 when the player has no skeleton or the clip is not there; the
+    // track still exists and still answers reads, with a length of zero.
+    //
+    // **`content` is the file the CLIP lives in, which need not be the file the
+    // skeleton came from** (S6.8). Empty means the player's own mesh, which is
+    // the common case and the only one that existed before. A different URN is a
+    // clip authored somewhere else -- one walk cycle shared by every character
+    // in a game -- and it is retargeted onto this rig by joint NAME.
+    //
+    // That retargeting is not new work: `AnimationSystem` has mapped joints by
+    // name since one player had to drive a body and a shirt with different rigs.
+    // What was missing was any way to say which file the clip was in.
+    [[nodiscard]] virtual TrackId createTrack(core::InstanceId player, core::NameAtom content,
+                                              std::string_view clip) = 0;
 
     virtual void play(TrackId track, f32 fadeTime, f32 weight, f32 speed) = 0;
     virtual void stop(TrackId track, f32 fadeTime) = 0;

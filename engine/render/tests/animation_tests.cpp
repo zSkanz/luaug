@@ -129,7 +129,7 @@ TEST_CASE("a track that names a clip the file does not have still answers reads"
     const core::InstanceId player = fixture.rig(std::move(entry));
 
     render::AnimationSystem animation{fixture.world, fixture.skeletons};
-    const scene::TrackId missing = animation.createTrack(player, "NoSuchClip");
+    const scene::TrackId missing = animation.createTrack(player, {}, "NoSuchClip");
 
     // Not zero and not a crash: a mesh that has not finished loading would
     // otherwise make a perfectly ordinary frame a nil index.
@@ -151,7 +151,7 @@ TEST_CASE("an empty clip name takes the file's first clip")
     const core::InstanceId player = fixture.rig(std::move(entry));
 
     render::AnimationSystem animation{fixture.world, fixture.skeletons};
-    CHECK(close(animation.state(animation.createTrack(player, "")).length, 1.0f));
+    CHECK(close(animation.state(animation.createTrack(player, {}, "")).length, 1.0f));
 }
 
 TEST_CASE("sampling walks the clip and the palette is joint times inverse bind")
@@ -162,7 +162,7 @@ TEST_CASE("sampling walks the clip and the palette is joint times inverse bind")
     const core::InstanceId player = fixture.rig(std::move(entry));
 
     render::AnimationSystem animation{fixture.world, fixture.skeletons};
-    const scene::TrackId track = animation.createTrack(player, "Slide");
+    const scene::TrackId track = animation.createTrack(player, {}, "Slide");
     animation.play(track, 0.0f, 1.0f, 1.0f);
 
     // Half a second in, halfway between the two keys: y = 2.
@@ -193,7 +193,7 @@ TEST_CASE("a joint no channel drives keeps its rest transform")
     const core::InstanceId player = fixture.rig(std::move(entry));
 
     render::AnimationSystem animation{fixture.world, fixture.skeletons};
-    animation.play(animation.createTrack(player, "Slide"), 0.0f, 1.0f, 1.0f);
+    animation.play(animation.createTrack(player, {}, "Slide"), 0.0f, 1.0f, 1.0f);
     animation.sample(1.0 / 60.0);
 
     const render::Pose* pose = animation.pose(fixture.mesh);
@@ -209,7 +209,7 @@ TEST_CASE("a non-looping clip stops at its end and reports it once")
     const core::InstanceId player = fixture.rig(std::move(entry));
 
     render::AnimationSystem animation{fixture.world, fixture.skeletons};
-    const scene::TrackId track = animation.createTrack(player, "Slide");
+    const scene::TrackId track = animation.createTrack(player, {}, "Slide");
     animation.play(track, 0.0f, 1.0f, 1.0f);
 
     for (int tick = 0; tick < 59; ++tick)
@@ -251,7 +251,7 @@ TEST_CASE("a looping clip wraps rather than resetting, and never ends")
     const core::InstanceId player = fixture.rig(std::move(entry));
 
     render::AnimationSystem animation{fixture.world, fixture.skeletons};
-    const scene::TrackId track = animation.createTrack(player, "Slide");
+    const scene::TrackId track = animation.createTrack(player, {}, "Slide");
     animation.setLooped(track, true);
     animation.play(track, 0.0f, 1.0f, 1.0f);
 
@@ -273,7 +273,7 @@ TEST_CASE("Play restarts from the beginning, unlike a tween")
     const core::InstanceId player = fixture.rig(std::move(entry));
 
     render::AnimationSystem animation{fixture.world, fixture.skeletons};
-    const scene::TrackId track = animation.createTrack(player, "Slide");
+    const scene::TrackId track = animation.createTrack(player, {}, "Slide");
     animation.play(track, 0.0f, 1.0f, 1.0f);
     for (int tick = 0; tick < 30; ++tick)
         animation.sample(1.0 / 60.0);
@@ -295,8 +295,8 @@ TEST_CASE("two tracks at half weight land halfway between their clips")
     const core::InstanceId player = fixture.rig(std::move(entry));
 
     render::AnimationSystem animation{fixture.world, fixture.skeletons};
-    const scene::TrackId up = animation.createTrack(player, "Up");
-    const scene::TrackId downTrack = animation.createTrack(player, "Down");
+    const scene::TrackId up = animation.createTrack(player, {}, "Up");
+    const scene::TrackId downTrack = animation.createTrack(player, {}, "Down");
     // Three to one rather than one to one, so the answer is a number the bind
     // pose could not also produce -- an even blend of +3 and -1 IS the bind
     // pose, and a case that cannot tell blending from doing nothing is not a
@@ -323,8 +323,8 @@ TEST_CASE("a weight of zero contributes nothing rather than dragging a joint to 
     const core::InstanceId player = fixture.rig(std::move(entry));
 
     render::AnimationSystem animation{fixture.world, fixture.skeletons};
-    const scene::TrackId loud = animation.createTrack(player, "Up");
-    const scene::TrackId silent = animation.createTrack(player, "Also");
+    const scene::TrackId loud = animation.createTrack(player, {}, "Up");
+    const scene::TrackId silent = animation.createTrack(player, {}, "Also");
     animation.play(loud, 0.0f, 1.0f, 1.0f);
     animation.play(silent, 0.0f, 0.0f, 1.0f);
 
@@ -344,7 +344,7 @@ TEST_CASE("a fade reaches its target and a fade to zero is a stop")
     const core::InstanceId player = fixture.rig(std::move(entry));
 
     render::AnimationSystem animation{fixture.world, fixture.skeletons};
-    const scene::TrackId track = animation.createTrack(player, "Slide");
+    const scene::TrackId track = animation.createTrack(player, {}, "Slide");
     animation.play(track, 0.5f, 1.0f, 1.0f);
     CHECK(close(animation.state(track).weight, 0.0f));
 
@@ -375,7 +375,7 @@ TEST_CASE("Speed scales the clock and a speed of zero holds the pose")
     const core::InstanceId player = fixture.rig(std::move(entry));
 
     render::AnimationSystem animation{fixture.world, fixture.skeletons};
-    const scene::TrackId track = animation.createTrack(player, "Slide");
+    const scene::TrackId track = animation.createTrack(player, {}, "Slide");
     animation.play(track, 0.0f, 1.0f, 2.0f);
     for (int tick = 0; tick < 15; ++tick)
         animation.sample(1.0 / 60.0);
@@ -395,7 +395,7 @@ TEST_CASE("retire forgets the tracks of an instance that is gone, and keeps answ
     const core::InstanceId player = fixture.rig(std::move(entry));
 
     render::AnimationSystem animation{fixture.world, fixture.skeletons};
-    const scene::TrackId track = animation.createTrack(player, "Slide");
+    const scene::TrackId track = animation.createTrack(player, {}, "Slide");
     animation.play(track, 0.0f, 1.0f, 1.0f);
     animation.sample(1.0 / 60.0);
     REQUIRE(animation.pose(fixture.mesh) != nullptr);
@@ -439,7 +439,7 @@ TEST_CASE("rotation is interpolated the short way round")
     const core::InstanceId player = fixture.rig(std::move(entry));
 
     render::AnimationSystem animation{fixture.world, fixture.skeletons};
-    animation.play(animation.createTrack(player, "Flip"), 0.0f, 1.0f, 1.0f);
+    animation.play(animation.createTrack(player, {}, "Flip"), 0.0f, 1.0f, 1.0f);
     for (int tick = 0; tick < 30; ++tick)
         animation.sample(1.0 / 60.0);
 
@@ -554,7 +554,7 @@ TEST_CASE("a joint answers where the clip put it once one is playing")
     fixture.skeletons.set(fixture.content, posed);
 
     render::AnimationSystem animation(fixture.world, fixture.skeletons);
-    const scene::TrackId track = animation.createTrack(player, "slide");
+    const scene::TrackId track = animation.createTrack(player, {}, "slide");
     animation.play(track, 0.0f, 1.0f, 1.0f);
     // Half a second into a clip that slides the child from y = 1 to y = 3.
     animation.sample(0.5);
@@ -624,7 +624,7 @@ TEST_CASE("going limp keeps the pose the animation left, joint by joint")
 
     render::AnimationSystem animation(fixture.world, fixture.skeletons);
     scene::SkeletonHost& host = animation;
-    const scene::TrackId track = animation.createTrack(player, "slide");
+    const scene::TrackId track = animation.createTrack(player, {}, "slide");
     animation.play(track, 0.0f, 1.0f, 1.0f);
     animation.sample(1.0);
 
@@ -746,7 +746,7 @@ TEST_CASE("the pose keeps the model transforms it used to throw away")
     fixture.skeletons.set(fixture.content, posed);
 
     render::AnimationSystem animation(fixture.world, fixture.skeletons);
-    const scene::TrackId track = animation.createTrack(player, "slide");
+    const scene::TrackId track = animation.createTrack(player, {}, "slide");
     animation.play(track, 0.0f, 1.0f, 1.0f);
     animation.sample(0.5);
 
@@ -827,7 +827,7 @@ TEST_CASE("one player over a Model drives every skinned mesh under it")
     REQUIRE(fixture.world.setParent(player, model) == std::nullopt);
 
     render::AnimationSystem animation(fixture.world, fixture.skeletons);
-    const scene::TrackId track = animation.createTrack(player, "slide");
+    const scene::TrackId track = animation.createTrack(player, {}, "slide");
     REQUIRE(track != 0);
     animation.play(track, 0.0f, 1.0f, 1.0f);
     animation.sample(0.5);
@@ -880,7 +880,7 @@ TEST_CASE("a joint the other rig does not have is skipped rather than guessed")
     REQUIRE(fixture.world.setParent(player, model) == std::nullopt);
 
     render::AnimationSystem animation(fixture.world, fixture.skeletons);
-    const scene::TrackId track = animation.createTrack(player, "slide");
+    const scene::TrackId track = animation.createTrack(player, {}, "slide");
     animation.play(track, 0.0f, 1.0f, 1.0f);
     animation.sample(0.5);
 
@@ -914,7 +914,7 @@ TEST_CASE("a player parented straight to a mesh still drives only that mesh")
     REQUIRE(fixture.world.setParent(player, bodyMesh) == std::nullopt);
 
     render::AnimationSystem animation(fixture.world, fixture.skeletons);
-    const scene::TrackId track = animation.createTrack(player, "slide");
+    const scene::TrackId track = animation.createTrack(player, {}, "slide");
     animation.play(track, 0.0f, 1.0f, 1.0f);
     animation.sample(0.5);
 
@@ -923,4 +923,106 @@ TEST_CASE("a player parented straight to a mesh still drives only that mesh")
     CHECK(at.position.y == doctest::Approx(2.0).epsilon(0.01));
     // The shirt is untouched: it has no pose at all.
     CHECK(animation.pose(shirtMesh) == nullptr);
+}
+
+// --- A clip from another file (S6.8) -----------------------------------------
+//
+// **One walk cycle authored once and played by every character in a game** is
+// the reason a clip is addressable at all. Until now `LoadAnimation` refused a
+// path that was not the player's own mesh, so a clip existed only inside the
+// glTF its skeleton came from -- which means a project with twelve characters
+// has twelve copies of every animation.
+//
+// The retargeting is not new work: `jointMapFor` has mapped joints by NAME since
+// one player had to drive a body and a shirt with different rigs. What was
+// missing was any way to say which file the clip was in.
+
+TEST_CASE("a clip from another file drives this rig, matched by joint name")
+{
+    Fixture fixture;
+    const core::InstanceId player = fixture.rig(twoJointSkeleton());
+
+    // A second file with the same joint NAMES and the clip in it. Nothing in
+    // this rig has a clip of its own, which is the case a shared library is.
+    const core::NameAtom library = fixture.atoms.intern("asset://anim/locomotion.glb");
+    render::SkeletonLibrary::Entry clips = twoJointSkeleton();
+    clips.clips.push_back(slideClip("Walk"));
+    fixture.skeletons.set(library, std::move(clips));
+
+    render::AnimationSystem animation{fixture.world, fixture.skeletons};
+    const scene::TrackId track = animation.createTrack(player, library, "Walk");
+    REQUIRE(track != 0);
+    CHECK(close(animation.state(track).length, 1.0f));
+
+    animation.play(track, 0.0f, 1.0f, 1.0f);
+    animation.sample(0.5);
+
+    // Halfway through a slide from 1 to 3 on Y: the child joint is at 2.
+    const render::Pose* pose = animation.pose(fixture.mesh);
+    REQUIRE(pose != nullptr);
+    REQUIRE(pose->model.size() == 2);
+    CHECK(close(pose->model[1].m[3][1], 2.0f));
+}
+
+TEST_CASE("a joint the target rig does not have is skipped rather than guessed")
+{
+    // A clip for a horse played on a person moves the joints they have in common
+    // and no others. Guessing an index instead is a limb folded backwards.
+    Fixture fixture;
+    const core::InstanceId player = fixture.rig(twoJointSkeleton());
+
+    const core::NameAtom library = fixture.atoms.intern("asset://anim/tail.glb");
+    render::SkeletonLibrary::Entry clips;
+    asset::Joint root;
+    root.name = "root";
+    root.parent = asset::Joint::NoParent;
+    clips.joints.push_back(root);
+    asset::Joint tail;
+    tail.name = "tail";
+    tail.parent = 0;
+    clips.joints.push_back(tail);
+    // The clip moves joint 1, which is "tail" -- a name this rig's joint 1
+    // ("child") does not share.
+    clips.clips.push_back(slideClip("Swish"));
+    fixture.skeletons.set(library, std::move(clips));
+
+    render::AnimationSystem animation{fixture.world, fixture.skeletons};
+    const scene::TrackId track = animation.createTrack(player, library, "Swish");
+    animation.play(track, 0.0f, 1.0f, 1.0f);
+    animation.sample(0.5);
+
+    // The child stays at its bind position, one unit up, rather than sliding to
+    // two: nothing addressed it.
+    const render::Pose* pose = animation.pose(fixture.mesh);
+    REQUIRE(pose != nullptr);
+    REQUIRE(pose->model.size() == 2);
+    CHECK(close(pose->model[1].m[3][1], 1.0f));
+}
+
+TEST_CASE("naming a file nothing has loaded is a track that plays nothing")
+{
+    // The same answer a name the file does not have gives, and the state a
+    // `MeshPart` is in for the frames before its own file arrives. Not an error:
+    // an ordinary frame must not be a nil index.
+    Fixture fixture;
+    render::SkeletonLibrary::Entry entry = twoJointSkeleton();
+    entry.clips.push_back(slideClip("Walk"));
+    const core::InstanceId player = fixture.rig(std::move(entry));
+
+    render::AnimationSystem animation{fixture.world, fixture.skeletons};
+    const scene::TrackId track = animation.createTrack(player, fixture.atoms.intern("asset://anim/absent.glb"), "Walk");
+    CHECK(close(animation.state(track).length, 0.0f));
+}
+
+TEST_CASE("no file named still means the player's own mesh")
+{
+    // Every call that existed before this feature, and the common case after it.
+    Fixture fixture;
+    render::SkeletonLibrary::Entry entry = twoJointSkeleton();
+    entry.clips.push_back(slideClip("Walk"));
+    const core::InstanceId player = fixture.rig(std::move(entry));
+
+    render::AnimationSystem animation{fixture.world, fixture.skeletons};
+    const scene::TrackId track = animation.createTrack(player, {}, "Walk");
+    CHECK(close(animation.state(track).length, 1.0f));
 }
