@@ -3,6 +3,8 @@
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
 #include "luaug/core/text_key.h"
+#include "luaug/jobs/jobs.h"
+#include "luaug/platform/async_io.h"
 #include "luaug/platform/file.h"
 #include "luaug/scene/world.h"
 
@@ -93,6 +95,19 @@ struct Clip
 {
     std::vector<f32> samples;
     u32 frames = 0;
+};
+
+// What a prefetch job reads and writes, in ONE heap allocation.
+//
+// Not fields on the pending entry, and that is the rule `MeshLoader` and
+// `UiText` each learned the hard way: the pending list grows whenever a new
+// sound names a URN nobody has named before, and a job holding the address of
+// anything inside an element is writing into freed memory after the
+// reallocation.
+struct ClipWork
+{
+    std::vector<std::byte> bytes;
+    std::shared_ptr<Clip> clip;
 };
 
 struct Voice
@@ -264,7 +279,56 @@ struct AudioSystem::Impl
 
     // Decodes on the first ask and answers from the cache after. Null for a URN
     // that names nothing, which plays the placeholder tone.
+    //
+    // **This still decodes on the calling thread when it has to** (D129), and
+    // that is deliberate rather than unfinished. The tick reads it to know how
+    // long a sound is, and the answer decides when `Ended` fires -- which
+    // `replay.cpp` hashes. An answer that arrived a few ticks later on a slow
+    // disk would make the world hash depend on the disk, which R10 forbids
+    // outright. So the synchronous path stays as the floor, and `beginPrefetch`
+    // below is what stops it being reached.
     [[nodiscard]] const Clip* clipFor(std::string_view content);
+
+    // --- Prefetch (D129) ----------------------------------------------------
+    //
+    // **The hitch this removes.** A sound's first play used to decode the whole
+    // file wherever it was first asked for -- tens of milliseconds for a short
+    // effect, and a three-minute track is about seventy megabytes of f32 that
+    // has to be produced before the frame can end.
+    //
+    // The shape is a prefetch with a synchronous floor, and the floor is what
+    // makes it legal: the read is asynchronous and the decode is a job, both
+    // started from the FRAME and never from the tick, and if the tick asks for a
+    // clip that has not landed it decodes it itself exactly as it always did. So
+    // the result is identical whether the prefetch won the race or not, and the
+    // world hash cannot learn anything about the disk.
+    //
+    // What it buys: a sound authored in a scene is prefetched from the first
+    // frame the scene is alive, so by the time anything plays it the clip is
+    // resident and neither path decodes at all. What it does NOT buy: a sound
+    // created and played in the same tick still pays, which is what it paid
+    // before.
+    struct Prefetch
+    {
+        std::string urn;
+        platform::IoRequest read;
+        jobs::JobHandle decode;
+        std::unique_ptr<ClipWork> work;
+    };
+
+    // Two at a time. A bank of forty sounds must not open forty files and hold
+    // forty decoded clips at once, and this is a prefetch: being slow is exactly
+    // what it is allowed to be.
+    static constexpr core::usize MaxClipsInFlight = 2;
+
+    std::vector<Prefetch> prefetching;
+
+    [[nodiscard]] bool resident(std::string_view content) const noexcept;
+    [[nodiscard]] bool prefetchInFlight(std::string_view content) const noexcept;
+    void beginPrefetch(std::string_view content);
+    void pumpPrefetch();
+    void releasePrefetch() noexcept;
+    const Clip* install(std::string_view content, std::shared_ptr<Clip> clip);
 
     static void dataCallback(ma_device* device, void* output, const void* input, ma_uint32 frameCount)
     {
@@ -399,6 +463,10 @@ void AudioSystem::stop()
 {
     if (m_impl == nullptr)
         return;
+    // Before anything else: a decode job writes into memory this object owns,
+    // and tearing down while one runs is a use-after-free that reproduces on a
+    // fast machine and never on a slow one.
+    m_impl->releasePrefetch();
     if (m_impl->deviceStarted) {
         ma_device_uninit(&m_impl->device);
         m_impl->deviceStarted = false;
@@ -417,8 +485,22 @@ void AudioSystem::tick(scene::World& world, f64 fixedDt)
     // run (R10).
     world.sounds().forEach([&](core::InstanceId id, scene::SoundComponent& sound) {
         if (!sound.loadedFired) {
-            // Immediately, because there is nothing to load until M7. Declared
-            // now so that code written today does not change when there is.
+            // **Immediately, and that is now a decision rather than a
+            // placeholder.** The comment here used to say "there is nothing to
+            // load until M7", which stopped being true when M7 made `Content`
+            // real -- so this fired before any decode had been attempted, eleven
+            // lines above a `clipDuration` that performs one.
+            //
+            // Firing it when the clip is actually resident was considered and
+            // rejected, because there is no way to do it that is both honest and
+            // legal. Waiting for the prefetch would make the event's TICK depend
+            // on disk speed, and `replay.cpp` hashes the events a tick raises
+            // (R10). Forcing residency here instead would make every sound in a
+            // scene decode on its first tick -- forty files at load, which is a
+            // far worse version of the very stall D129 is about.
+            //
+            // So it stays immediate and it is documented as meaning "this sound
+            // exists and its content is named", not "the bytes are here".
             sound.loadedFired = true;
             world.changes().push(scene::Change{scene::ChangeKind::InstanceEventNoArgs, id, {}, loaded});
         }
@@ -473,10 +555,22 @@ void AudioSystem::update(scene::World& world, core::InstanceId listener, const c
         ear = camera->cframe;
     }
 
+    // **Here and not in the tick** (D129). The read is asynchronous and its
+    // completions land only in `pumpIo`, which is a frame safe point by design --
+    // pumping from the tick would put an arbitrary moment between a read and the
+    // world, which is what R10 forbids.
+    m_impl->pumpPrefetch();
+
     std::vector<Voice> next;
     next.reserve(kMaxVoices);
 
     world.sounds().forEach([&](core::InstanceId id, const scene::SoundComponent& sound) {
+        // Every sound with content, playing or not, and before any early return
+        // below -- which is the whole point. A sound authored in a scene is
+        // prefetched from the first frame the scene is alive, so by the time
+        // anything plays it the clip is resident and neither path decodes.
+        m_impl->beginPrefetch(sound.content);
+
         // Suspended: the world is read and nothing is heard. Returning before
         // the walk instead would be the same silence, and this way the walk's
         // side effects -- none today, and that is not a promise the future owes
@@ -659,6 +753,215 @@ bool shouldTakeTimeline(f64 mixerSeconds, f64 timelineSeconds, f64 duration, boo
 
 } // namespace detail
 
+namespace {
+
+// The decode itself, shared by the synchronous path and the prefetch job so the
+// two cannot drift into producing different clips from the same bytes.
+//
+// Straight into the MIXER's format -- f32, stereo, 48 kHz -- so the callback
+// never resamples. miniaudio does the conversion as part of the decode, which is
+// one pass over the data instead of two.
+//
+// Null for bytes that will not decode. **Nothing is logged here**: this runs on
+// a job thread as often as not, and the caller knows the URN.
+[[nodiscard]] std::shared_ptr<Clip> decodeClip(std::span<const std::byte> bytes)
+{
+    std::shared_ptr<Clip> clip;
+    if (bytes.empty())
+        return clip;
+
+    ma_decoder_config config = ma_decoder_config_init(ma_format_f32, kChannels, kSampleRate);
+    ma_decoder decoder{};
+    if (ma_decoder_init_memory(bytes.data(), bytes.size(), &config, &decoder) == MA_SUCCESS) {
+        // **The declared length is a hint, and reading until the decoder
+        // stops is the answer.** D094: this used to require a length and
+        // drop the clip when it could not get one, and miniaudio's own
+        // header says it cannot get one for Ogg Vorbis -- a format this
+        // engine's API documents as supported, and which therefore played
+        // the placeholder tone instead of the file. The estimate is also a
+        // frame or two out either way once a resampler is in the path, which
+        // is a clipped tail or a silent one.
+        ma_uint64 hint = 0;
+        if (ma_decoder_get_length_in_pcm_frames(&decoder, &hint) != MA_SUCCESS) {
+            hint = 0;
+        }
+
+        // One second at a time when there is no hint: large enough that a
+        // short sound is a single read, small enough that the slack on the
+        // last chunk is not worth measuring.
+        constexpr core::usize kChunkFrames = kSampleRate;
+
+        clip = std::make_shared<Clip>();
+        clip->samples.resize((hint > 0 ? static_cast<core::usize>(hint) : kChunkFrames) * kChannels);
+
+        core::usize filled = 0;
+        for (;;) {
+            core::usize capacity = clip->samples.size() / kChannels;
+            if (filled == capacity) {
+                capacity += kChunkFrames;
+                clip->samples.resize(capacity * kChannels);
+            }
+            ma_uint64 read = 0;
+            const ma_result status = ma_decoder_read_pcm_frames(&decoder, clip->samples.data() + filled * kChannels,
+                                                                static_cast<ma_uint64>(capacity - filled), &read);
+            filled += static_cast<core::usize>(read);
+            // Both halves are an end: `MA_AT_END` with a partial read is the
+            // last chunk of a file, and a successful read of nothing is a
+            // decoder that has no more to give.
+            if (status != MA_SUCCESS || read == 0) {
+                break;
+            }
+        }
+
+        clip->frames = static_cast<u32>(filled);
+        clip->samples.resize(filled * kChannels);
+        clip->samples.shrink_to_fit();
+        if (clip->frames == 0) {
+            clip.reset();
+        }
+        ma_decoder_uninit(&decoder);
+    }
+    return clip;
+}
+
+} // namespace
+
+bool AudioSystem::Impl::resident(std::string_view content) const noexcept
+{
+    const auto at = std::lower_bound(clips.begin(), clips.end(), content,
+                                     [](const auto& entry, std::string_view key) { return entry.first < key; });
+    return at != clips.end() && at->first == content;
+}
+
+bool AudioSystem::Impl::prefetchInFlight(std::string_view content) const noexcept
+{
+    return std::any_of(prefetching.begin(), prefetching.end(),
+                       [content](const Prefetch& entry) { return entry.urn == content; });
+}
+
+const Clip* AudioSystem::Impl::install(std::string_view content, std::shared_ptr<Clip> clip)
+{
+    const auto at = std::lower_bound(clips.begin(), clips.end(), content,
+                                     [](const auto& entry, std::string_view key) { return entry.first < key; });
+    // Already there because the synchronous path won the race, which is not an
+    // error and is the ordinary outcome for a sound played the tick it was made.
+    // The prefetch's answer is dropped rather than replacing a clip the audio
+    // thread may be holding a raw pointer into.
+    if (at != clips.end() && at->first == content)
+        return at->second.get();
+
+    const bool decoded = clip != nullptr;
+    const auto inserted = clips.insert(at, {std::string(content), std::move(clip)});
+    if (decoded)
+        clipsLoaded.fetch_add(1, std::memory_order_relaxed);
+    else
+        clipsMissing.fetch_add(1, std::memory_order_relaxed);
+    return inserted->second.get();
+}
+
+void AudioSystem::Impl::beginPrefetch(std::string_view content)
+{
+    if (content.empty() || mounts == nullptr)
+        return;
+    if (prefetching.size() >= MaxClipsInFlight)
+        return;
+    if (resident(content) || prefetchInFlight(content))
+        return;
+
+    const asset::ResolvedContent resolved = mounts->resolve(content);
+
+    Prefetch entry;
+    entry.urn = std::string(content);
+    entry.work = std::make_unique<ClipWork>();
+
+    if (!resolved.bytes.empty()) {
+        // Already in memory -- a pack mount, whose bytes are valid for as long
+        // as the mount is. Straight to the decode; there is nothing to read.
+        ClipWork* work = entry.work.get();
+        const std::span<const std::byte> packed = resolved.bytes;
+        entry.decode = jobs::schedule("audio.clip.decode", jobs::Domain::AssetIo,
+                                      [work, packed]() noexcept { work->clip = decodeClip(packed); });
+    }
+    else if (resolved.source == asset::ResolvedContent::Source::Loose) {
+        // `Low`, because this is speculation by definition: nothing is waiting
+        // on it, and anything that IS waiting takes the synchronous floor.
+        entry.read = platform::readFileAsync(resolved.path, platform::IoPriority::Low);
+        if (!entry.read.valid())
+            return;
+    }
+    else {
+        return;
+    }
+
+    prefetching.push_back(std::move(entry));
+}
+
+void AudioSystem::Impl::pumpPrefetch()
+{
+    if (prefetching.empty())
+        return;
+
+    // **Only when something is in flight.** An unconditional pump would drain
+    // completions for other subsystems on frames where they do not currently
+    // land, which can move streaming-dependent output.
+    platform::pumpIo();
+
+    for (core::usize index = 0; index < prefetching.size();) {
+        Prefetch& entry = prefetching[index];
+        bool done = false;
+
+        if (entry.read.valid()) {
+            const platform::IoStatus status = platform::ioStatus(entry.read);
+            if (status == platform::IoStatus::Ready) {
+                if (platform::takeIoResult(entry.read, entry.work->bytes)) {
+                    entry.read = {};
+                    ClipWork* work = entry.work.get();
+                    entry.decode = jobs::schedule("audio.clip.decode", jobs::Domain::AssetIo,
+                                                  [work]() noexcept { work->clip = decodeClip(work->bytes); });
+                }
+                else {
+                    done = true;
+                }
+            }
+            else if (status != platform::IoStatus::Pending) {
+                // Terminal and not consumed, so the slot is released by hand --
+                // D131, where every failed read leaked one and all asynchronous
+                // IO in the process stopped at five hundred and twelve.
+                platform::cancelIo(entry.read);
+                done = true;
+            }
+        }
+        else if (entry.decode.valid() && jobs::finished(entry.decode)) {
+            (void)install(entry.urn, std::move(entry.work->clip));
+            done = true;
+        }
+        else if (!entry.decode.valid()) {
+            done = true;
+        }
+
+        if (done) {
+            prefetching.erase(prefetching.begin() + static_cast<std::ptrdiff_t>(index));
+        }
+        else {
+            ++index;
+        }
+    }
+}
+
+void AudioSystem::Impl::releasePrefetch() noexcept
+{
+    for (Prefetch& entry : prefetching) {
+        // **Waited for, not abandoned.** The job writes into memory this object
+        // owns, and returning while one runs is a use-after-free that reproduces
+        // on a fast machine and never on a slow one.
+        if (entry.decode.valid())
+            jobs::wait(entry.decode);
+        if (entry.read.valid())
+            platform::cancelIo(entry.read);
+    }
+    prefetching.clear();
+}
+
 const Clip* AudioSystem::Impl::clipFor(std::string_view content)
 {
     const auto at = std::lower_bound(clips.begin(), clips.end(), content,
@@ -672,7 +975,6 @@ const Clip* AudioSystem::Impl::clipFor(std::string_view content)
 
     // A failed decode is CACHED as a null clip, so a sound naming a missing file
     // costs one lookup a frame rather than one decode attempt a frame.
-    std::shared_ptr<Clip> clip;
     const asset::ResolvedContent resolved = mounts->resolve(content);
     std::vector<std::byte> owned;
     std::span<const std::byte> bytes = resolved.bytes;
@@ -682,61 +984,9 @@ const Clip* AudioSystem::Impl::clipFor(std::string_view content)
         }
     }
 
+    std::shared_ptr<Clip> clip;
     if (!bytes.empty()) {
-        // Decoded straight into the MIXER's format -- f32, stereo, 48 kHz -- so
-        // the callback never resamples. miniaudio does the conversion as part of
-        // the decode, which is one pass over the data instead of two.
-        ma_decoder_config config = ma_decoder_config_init(ma_format_f32, kChannels, kSampleRate);
-        ma_decoder decoder{};
-        if (ma_decoder_init_memory(bytes.data(), bytes.size(), &config, &decoder) == MA_SUCCESS) {
-            // **The declared length is a hint, and reading until the decoder
-            // stops is the answer.** D094: this used to require a length and
-            // drop the clip when it could not get one, and miniaudio's own
-            // header says it cannot get one for Ogg Vorbis -- a format this
-            // engine's API documents as supported, and which therefore played
-            // the placeholder tone instead of the file. The estimate is also a
-            // frame or two out either way once a resampler is in the path, which
-            // is a clipped tail or a silent one.
-            ma_uint64 hint = 0;
-            if (ma_decoder_get_length_in_pcm_frames(&decoder, &hint) != MA_SUCCESS) {
-                hint = 0;
-            }
-
-            // One second at a time when there is no hint: large enough that a
-            // short sound is a single read, small enough that the slack on the
-            // last chunk is not worth measuring.
-            constexpr core::usize kChunkFrames = kSampleRate;
-
-            clip = std::make_shared<Clip>();
-            clip->samples.resize((hint > 0 ? static_cast<core::usize>(hint) : kChunkFrames) * kChannels);
-
-            core::usize filled = 0;
-            for (;;) {
-                core::usize capacity = clip->samples.size() / kChannels;
-                if (filled == capacity) {
-                    capacity += kChunkFrames;
-                    clip->samples.resize(capacity * kChannels);
-                }
-                ma_uint64 read = 0;
-                const ma_result status = ma_decoder_read_pcm_frames(&decoder, clip->samples.data() + filled * kChannels,
-                                                                    static_cast<ma_uint64>(capacity - filled), &read);
-                filled += static_cast<core::usize>(read);
-                // Both halves are an end: `MA_AT_END` with a partial read is the
-                // last chunk of a file, and a successful read of nothing is a
-                // decoder that has no more to give.
-                if (status != MA_SUCCESS || read == 0) {
-                    break;
-                }
-            }
-
-            clip->frames = static_cast<u32>(filled);
-            clip->samples.resize(filled * kChannels);
-            clip->samples.shrink_to_fit();
-            if (clip->frames == 0) {
-                clip.reset();
-            }
-            ma_decoder_uninit(&decoder);
-        }
+        clip = decodeClip(bytes);
         if (clip == nullptr) {
             const core::I18nArg args[] = {{"content", std::string(content)}};
             core::log(core::LogLevel::Warn, LUAUG_TR("audio.warn.undecodable"), args);
@@ -747,15 +997,7 @@ const Clip* AudioSystem::Impl::clipFor(std::string_view content)
         core::log(core::LogLevel::Warn, LUAUG_TR("audio.warn.content_missing"), args);
     }
 
-    const bool decoded = clip != nullptr;
-    const auto inserted = clips.insert(at, {std::string(content), std::move(clip)});
-    if (decoded) {
-        clipsLoaded.fetch_add(1, std::memory_order_relaxed);
-    }
-    else {
-        clipsMissing.fetch_add(1, std::memory_order_relaxed);
-    }
-    return inserted->second.get();
+    return install(content, std::move(clip));
 }
 
 f64 AudioSystem::clipDuration(std::string_view content)

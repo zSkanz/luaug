@@ -20,6 +20,12 @@ luaug_add_module(audio
         asset
         core
         scene
+        # Both from D129's prefetch: the read is `platform::readFileAsync` and
+        # the decode is a job. Named here rather than leaned on transitively,
+        # because `tools/repo/checklayers.luau` reads real `#include` edges and
+        # an unnamed one is an edge nobody decided.
+        jobs
+        platform
 )
 
 target_include_directories(luaug_audio SYSTEM PRIVATE "${LUAUG_THIRD_PARTY_DIR}/miniaudio")

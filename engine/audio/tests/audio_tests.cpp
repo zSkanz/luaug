@@ -1,14 +1,17 @@
 #include "luaug/audio/audio.h"
 #include "luaug/audio/scene_types.h"
+#include "luaug/platform/async_io.h"
 #include "luaug/scene/world.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <doctest/doctest.h>
 #include <filesystem>
 #include <fstream>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "class_descriptors.gen.h"
@@ -244,6 +247,25 @@ struct ContentFixture
         std::filesystem::remove_all(root, ec);
     }
 };
+
+// Runs frames until the prefetch pipeline is empty, or gives up.
+//
+// **Bounded, and it sleeps.** A test that spins forever on a defect reports as a
+// hung machine rather than as a failure -- and the sleep is the point rather
+// than a delay: the read is on the IO thread and the decode is on a worker, so
+// a busy loop on this thread would starve the very work it is waiting for.
+void settleAudio(Fixture& fixture, int frames = 2000)
+{
+    for (int frame = 0; frame < frames; ++frame) {
+        fixture.system.update(*fixture.world, InstanceId{});
+        const audio::AudioStats stats = fixture.system.stats();
+        if (stats.clipsLoaded + stats.clipsMissing > 0)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    // One more, so the pass that installs is not the pass the loop stopped on.
+    fixture.system.update(*fixture.world, InstanceId{});
+}
 
 } // namespace
 
@@ -598,4 +620,111 @@ TEST_CASE("the pan holds its power across the field")
     CHECK(right == doctest::Approx(1.0).epsilon(0.001));
     audio::detail::panGains(-4.0f, left, right);
     CHECK(left == doctest::Approx(1.0).epsilon(0.001));
+}
+
+// --- The prefetch (D129) -----------------------------------------------------
+//
+// **What this is for, and what it deliberately is not.** A sound's first play
+// used to decode the whole file wherever it was first asked for, and for a long
+// track that is tens of megabytes of f32 produced before the frame could end.
+// The prefetch moves that work off the frame -- an asynchronous read and a
+// decode job, both started from `update` and never from `tick`.
+//
+// The floor is what makes it legal. If the tick asks for a clip the prefetch has
+// not landed, it decodes it itself, exactly as it always did. So the ANSWER is
+// the same whether the prefetch won its race or not, and the world hash cannot
+// learn anything about how fast the disk is (R10). The cases below assert both
+// halves, because either one alone is either a stall or a determinism break.
+
+TEST_CASE("a sound that is not playing still has its clip fetched")
+{
+    // The whole point: a sound authored in a scene is prefetched from the first
+    // frame the scene is alive, so by the time anything plays it there is
+    // nothing left to decode. `playing` is never set here.
+    REQUIRE(luaug::platform::initIo());
+    Fixture fixture;
+    ContentFixture content;
+    fixture.system.setContentMounts(&content.mounts);
+
+    const InstanceId id = fixture.make("Sound");
+    fixture.sound(id).content = "asset://sfx/tone.wav";
+
+    CHECK(fixture.system.stats().clipsLoaded == 0);
+
+    settleAudio(fixture);
+
+    CHECK(fixture.system.stats().clipsLoaded == 1);
+}
+
+TEST_CASE("the tick answers the same whether the prefetch won or not")
+{
+    // **The determinism assertion, and it is the reason the synchronous path
+    // stays.** One system is given every chance to prefetch; the other is given
+    // none and goes straight to a tick. Both must report the same duration, or
+    // the world hash depends on the disk.
+    ContentFixture content;
+
+    double withPrefetch = 0.0;
+    {
+        REQUIRE(luaug::platform::initIo());
+        Fixture fixture;
+        fixture.system.setContentMounts(&content.mounts);
+        const InstanceId id = fixture.make("Sound");
+        fixture.sound(id).content = "asset://sfx/long.wav";
+        settleAudio(fixture);
+        withPrefetch = fixture.system.clipDuration("asset://sfx/long.wav");
+    }
+
+    double without = 0.0;
+    {
+        Fixture fixture;
+        fixture.system.setContentMounts(&content.mounts);
+        // No `update` at all, so nothing was ever prefetched.
+        without = fixture.system.clipDuration("asset://sfx/long.wav");
+    }
+
+    CHECK(withPrefetch > 2.9);
+    CHECK(withPrefetch == doctest::Approx(without));
+}
+
+TEST_CASE("a URN that names nothing is fetched once and does not leak its slot")
+{
+    // D131's class of defect: a failed asynchronous read whose slot nobody
+    // releases, and at five hundred and twelve every read in the process is
+    // refused. Six hundred attempts is past that by a margin.
+    REQUIRE(luaug::platform::initIo());
+    Fixture fixture;
+    ContentFixture content;
+    fixture.system.setContentMounts(&content.mounts);
+
+    const InstanceId id = fixture.make("Sound");
+    for (int attempt = 0; attempt < 600; ++attempt) {
+        fixture.sound(id).content = "asset://sfx/not-a-file.wav";
+        fixture.system.update(*fixture.world, InstanceId{});
+    }
+
+    // And a real one still resolves afterwards, which is the assertion that
+    // actually catches exhaustion: the counters would look fine either way.
+    fixture.sound(id).content = "asset://sfx/tone.wav";
+    settleAudio(fixture);
+    CHECK(fixture.system.clipDuration("asset://sfx/tone.wav") > 0.0);
+}
+
+TEST_CASE("tearing down with a fetch in flight leaves nothing behind")
+{
+    // A decode job writes into memory the system owns, and returning while one
+    // runs is a use-after-free that reproduces on a fast machine and never on a
+    // slow one -- the lesson `MeshLoader` and `UiText` each paid for once.
+    REQUIRE(luaug::platform::initIo());
+    ContentFixture content;
+    {
+        Fixture fixture;
+        fixture.system.setContentMounts(&content.mounts);
+        const InstanceId id = fixture.make("Sound");
+        fixture.sound(id).content = "asset://sfx/long.wav";
+        // One pass only: the read is started and deliberately not waited for.
+        fixture.system.update(*fixture.world, InstanceId{});
+    }
+    // Reaching here without a fault is the assertion.
+    CHECK(true);
 }
