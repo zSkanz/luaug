@@ -370,6 +370,19 @@ struct LocalShadows
 // depth range does not collapse.
 inline constexpr f32 kLocalShadowNearPlane = 0.05f;
 
+// **The bias is in NORMALISED depth here, where the cascade's is in metres.**
+// A cascade is orthographic, so a metre is a fixed fraction of its depth range
+// and stating it that way makes one number mean the same thing in all four. A
+// local light is perspective: its precision is spent near the light and a metre
+// at the far end of its range is a far smaller fraction of the buffer than a
+// metre at the near end, so a bias in metres would be four different biases.
+inline constexpr f32 kLocalShadowDepthBias = 0.0015f;
+
+// In texels of the local atlas. Smaller than the sun's reach because a local
+// tile is 512 where a cascade is 1024, and the same world-space penumbra
+// therefore costs half the taps.
+inline constexpr f32 kLocalShadowFilterTexels = 1.5f;
+
 // Assigns tiles to the candidates worth spending them on.
 //
 // **The order is by apparent size and it must be stable**, which is a

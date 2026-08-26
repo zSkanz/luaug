@@ -1253,10 +1253,14 @@ local Classes: { Schema.Class } = {
             },
             {
                 Name = "Shadows",
-                Inert = true,
                 Type = "boolean",
-                Doc = "Whether this light should cast shadows. Stored and reported faithfully, and not yet acted "
-                    .. "on: this release casts shadows from the sun alone.",
+                Doc = "Whether this light casts shadows.\n\n**It costs SIX tiles of a sixteen-tile atlas**, because "
+                    .. "a point light shines in every direction and a shadow map does not: it is six maps, one per "
+                    .. "face of a cube around the light, where a SpotLight is one. Two point lights and four spots "
+                    .. "fill the atlas; three point lights do not fit.\n\nWhen more lights ask than there are tiles, "
+                    .. "the ones nearest and largest on screen are served and the rest simply do not cast. A light "
+                    .. "that loses is not dimmed and does not flicker: the order is by apparent size with ties "
+                    .. "broken by creation order, so it is the same answer on every frame and on every machine.",
             },
         },
     },
@@ -1301,9 +1305,13 @@ local Classes: { Schema.Class } = {
             },
             {
                 Name = "Shadows",
-                Inert = true,
                 Type = "boolean",
-                Doc = "Whether this light should cast shadows. Stored and not yet acted on, as on PointLight.",
+                Doc = "Whether this light casts shadows.\n\n**It costs one tile of a sixteen-tile atlas**, where a "
+                    .. "PointLight costs six, so the two are budgeted against each other rather than counted "
+                    .. "separately.\n\nWhen more lights ask than there are tiles, the ones nearest and largest on "
+                    .. "screen are served and the rest simply do not cast. A light that loses is not dimmed and does "
+                    .. "not flicker: the order is by apparent size with ties broken by creation order, so it is the "
+                    .. "same answer on every frame and on every machine.",
             },
         },
     },

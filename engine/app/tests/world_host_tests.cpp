@@ -627,11 +627,18 @@ TEST_CASE("two runs of the same script and seed produce the same world hash")
     CHECK(runOnce(1234u) == runOnce(1234u));
 }
 
-TEST_CASE("the two lights' Shadows properties are the ones marked")
+TEST_CASE("nothing in this engine is marked inert any more")
 {
-    // Named rather than counted, because the point of the marker is that a
-    // specific property tells the truth about itself. A count would pass while
-    // the wrong one was marked.
+    // **This case used to assert the opposite**, and its reversal is the point.
+    // `PointLight.Shadows` and `SpotLight.Shadows` were the last two properties
+    // carrying the marker: stored, returned faithfully, and acted on by nothing.
+    // They are the only two the marker ever had at once, and they cast now
+    // (`render::shadow.h`), so the marker has no members left.
+    //
+    // The case is kept rather than deleted because the assertion it makes is
+    // still worth making, in the other direction: a property that goes back to
+    // being inert should have to say so here, and the marker's whole purpose is
+    // that a surface which does nothing admits it rather than looking finished.
     Captured log;
     app::WorldHost host;
     REQUIRE_FALSE(host.boot({}).has_value());
@@ -643,14 +650,12 @@ TEST_CASE("the two lights' Shadows properties are the ones marked")
         REQUIRE(id != scene::InvalidClass);
         const scene::PropertyDesc* shadows = classes.findProperty(id, atoms.lookup("Shadows"));
         REQUIRE(shadows != nullptr);
-        CHECK(shadows->inert);
-        // Backed, which is the difference the marker is making: it stores and
-        // returns what was written.
+        CHECK_FALSE(shadows->inert);
+        // Still backed, which it always was. What changed is that something
+        // reads it.
         CHECK(shadows->get != nullptr);
         CHECK(shadows->set != nullptr);
 
-        // And its neighbours are not marked, so "inert" is a statement about
-        // this property rather than about the class.
         const scene::PropertyDesc* brightness = classes.findProperty(id, atoms.lookup("Brightness"));
         REQUIRE(brightness != nullptr);
         CHECK_FALSE(brightness->inert);

@@ -235,12 +235,41 @@ Mat4 perspective(f32 fovYRadians, f32 aspect, f32 nearZ, f32 farZ) noexcept
     return result;
 }
 
+namespace {
+
+// The up vector to actually build a basis from.
+//
+// **A direction parallel to the requested `up` is an ordinary request, not a
+// degenerate one.** Looking straight down is the case, and both `lookAt`
+// functions used to fail it: the matrix one normalised a zero cross product, and
+// the CFrame one returned the IDENTITY rotation -- so `CFrame.lookAt` from
+// directly above a target aimed along -Z instead of down, silently, because the
+// rotation it produced was a perfectly valid one that nobody had asked for. It
+// aimed every spotlight, camera and turret pointed at something directly above
+// or below it in the wrong direction.
+//
+// The degenerate input the identity IS the answer for is `eye == target`, and
+// that is tested separately and before this.
+//
+// The fallback is +Z unless the direction is itself mostly Z, which is the
+// standard choice and the one that keeps the roll continuous everywhere except
+// exactly at the pole -- where a roll is not defined by the inputs at all.
+[[nodiscard]] Vec3 basisUp(Vec3 back, Vec3 up) noexcept
+{
+    const Vec3 requested = normalize(up);
+    if (length(cross(requested, back)) > kParallelEpsilon)
+        return requested;
+    return std::abs(back.z) < 0.9f ? Vec3{0.0f, 0.0f, 1.0f} : Vec3{1.0f, 0.0f, 0.0f};
+}
+
+} // namespace
+
 Mat4 lookAt(Vec3 eye, Vec3 target, Vec3 up) noexcept
 {
     // -Z is forward, matching the LookVector definition in api-design.md, so
     // the basis is built from the vector pointing *back* from the target.
     const Vec3 back = normalize(eye - target);
-    const Vec3 right = normalize(cross(up, back));
+    const Vec3 right = normalize(cross(basisUp(back, up), back));
     const Vec3 trueUp = cross(back, right);
 
     Mat4 result;
@@ -400,9 +429,14 @@ CFrameD inverse(const CFrameD& cf) noexcept
 
 CFrameD lookAtCFrame(DVec3 eye, DVec3 target, Vec3 up) noexcept
 {
-    // The identity rotation at `eye` is the documented answer for both
-    // degenerate inputs (api-design.md §2.3): a camera pointed at itself should
-    // stop moving, not poison every value it touches for the rest of the run.
+    // The identity rotation at `eye` is the documented answer for `eye ==
+    // target` (api-design.md §2.3): a camera pointed at itself should stop
+    // moving, not poison every value it touches for the rest of the run.
+    //
+    // **It used to be the answer for a second case too, and that was wrong.** A
+    // direction parallel to the requested `up` -- looking straight down -- is an
+    // ordinary request, and answering it with the identity aimed the thing along
+    // -Z instead. `basisUp` below serves it.
     CFrameD result;
     result.position = eye;
 
@@ -417,7 +451,10 @@ CFrameD lookAtCFrame(DVec3 eye, DVec3 target, Vec3 up) noexcept
     const f64 scale = 1.0 / std::sqrt(lengthSquared);
     const Vec3 back = toVec3(DVec3{delta.x * scale, delta.y * scale, delta.z * scale});
 
-    const Vec3 right = cross(normalize(up), back);
+    // `basisUp` rather than `up`: a direction parallel to the requested up is an
+    // ordinary request that this used to answer with the identity. See its own
+    // comment; the degenerate input handled above is `eye == target`.
+    const Vec3 right = cross(basisUp(back, up), back);
     if (length(right) <= kParallelEpsilon)
         return result;
 

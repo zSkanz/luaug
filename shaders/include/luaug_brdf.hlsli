@@ -169,7 +169,30 @@ float3 shadeDirect(Surface surface, float3 lightDirection, float3 radiance)
 }
 
 // A point or spot light, including its distance and cone falloff.
-float3 evaluatePunctualLight(Surface surface, GpuLight light)
+// --- Local shadows: a spot or a point occluding itself -----------------------
+//
+// **The half `PointLight.Shadows` and `SpotLight.Shadows` were missing for three
+// milestones.** `render::shadow.h` owns the atlas layout and the projections.
+//
+// Only the part that touches no texture is here. The LOOKUP lives in
+// `luaug_forward.hlsli`, and not by preference: this file is included BEFORE the
+// texture declarations are, so a sampler named here does not exist yet. The same
+// boundary the sun's cascade sampling sits on.
+
+// Which of the six faces a direction belongs to, in `render::CubeFace` order:
+// +X, -X, +Y, -Y, +Z, -Z. The dominant axis, which is exactly how a cube map
+// samples and is why the face projections are ninety degrees.
+uint localShadowFace(float3 direction)
+{
+    const float3 magnitude = abs(direction);
+    if (magnitude.x >= magnitude.y && magnitude.x >= magnitude.z)
+        return direction.x >= 0.0f ? 0u : 1u;
+    if (magnitude.y >= magnitude.z)
+        return direction.y >= 0.0f ? 2u : 3u;
+    return direction.z >= 0.0f ? 4u : 5u;
+}
+
+float3 evaluatePunctualLight(Surface surface, GpuLight light, float shadow)
 {
     const float3 toLight = light.PositionRange.xyz - surface.Position;
     const float distanceSquared = max(dot(toLight, toLight), LuaugEpsilon);
@@ -196,7 +219,9 @@ float3 evaluatePunctualLight(Surface surface, GpuLight light)
     const float cosTheta = dot(light.DirectionCosAngle.xyz, -lightDirection);
     const float cone = saturate((cosTheta - cosOuter) / max(cosInner - cosOuter, LuaugEpsilon));
 
-    return shadeDirect(surface, lightDirection, light.Color.rgb * (attenuation * cone));
+    // `shadow` is 1 for every light that casts nothing, which is what makes a
+    // scene with no casting local light pay nothing for this.
+    return shadeDirect(surface, lightDirection, light.Color.rgb * (attenuation * cone * shadow));
 }
 
 // --- Image-based lighting ----------------------------------------------------

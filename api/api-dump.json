@@ -1537,8 +1537,7 @@
         },
         {
           "Name": "Shadows",
-          "Type": "boolean",
-          "Inert": true
+          "Type": "boolean"
         }
       ],
       "Methods": [],
@@ -1819,8 +1818,7 @@
         },
         {
           "Name": "Shadows",
-          "Type": "boolean",
-          "Inert": true
+          "Type": "boolean"
         }
       ],
       "Methods": [],

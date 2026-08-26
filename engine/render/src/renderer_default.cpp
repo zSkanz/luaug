@@ -427,6 +427,12 @@ private:
     u32 exposureIndex_ = 0;
     bool exposureInitialised_ = false;
     rhi::TextureHandle shadowMap_{};
+    // The local-light atlas and this frame's assignment of its tiles. Held
+    // across frames only so the vector behind `localCandidates_` keeps its
+    // capacity; nothing in either survives a frame.
+    rhi::TextureHandle localShadowMap_{};
+    LocalShadows localShadows_{};
+    std::vector<LocalShadowCandidate> localCandidates_;
     // 1x1 stand-ins for a material that has no map. `textureFlags` are
     // multipliers rather than branches, so the shader samples every slot
     // whatever the flag says -- and an unbound descriptor read is not a black
@@ -1081,6 +1087,21 @@ std::optional<core::EngineError> DefaultRenderer::ensureShadowMap(rhi::IDevice& 
     if (!shadowMap_.valid())
         return core::makeError(LUAUG_TR("render.err.target_create_failed"));
 
+    // The LOCAL atlas, for spots and points (`shadow.h`). Fixed size rather than
+    // scaled by the shadow settings: its tiles are per light and not per camera
+    // slice, so the quality dial that sizes a cascade says nothing about it.
+    if (localShadowMap_.valid())
+        device.destroy(localShadowMap_);
+    localShadowMap_ = device.createTexture({
+        .format = kShadowFormat,
+        .usage = rhi::TextureUsage::DepthStencilTarget | rhi::TextureUsage::Sampled,
+        .width = kLocalShadowAtlasResolution,
+        .height = kLocalShadowAtlasResolution,
+        .debugName = "local-shadow-atlas",
+    });
+    if (!localShadowMap_.valid())
+        return core::makeError(LUAUG_TR("render.err.target_create_failed"));
+
     shadowTile_ = settings_.shadowTileResolution;
     // A new atlas is a new texel size, so last frame's box would be remembered
     // against a lattice that no longer exists.
@@ -1258,9 +1279,10 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
         *pipeline = {};
     }
     for (rhi::TextureHandle* texture :
-         {&hdr_, &depth_, &ldr_, &occlusion_, &occlusionBlur_, &outlineMask_, &luminance64_, &luminance8_,
-          &exposure_[0], &exposure_[1], &shadowMap_, &whitePixel_, &flatNormalPixel_, &blackPixel_, &environmentMap_,
-          &brdfLut_, &clusterGrid_, &lightIndices_, &lightData_}) {
+         {&hdr_,          &depth_,           &ldr_,         &occlusion_,      &occlusionBlur_, &outlineMask_,
+          &luminance64_,  &luminance8_,      &exposure_[0], &exposure_[1],    &shadowMap_,     &localShadowMap_,
+          &whitePixel_,   &flatNormalPixel_, &blackPixel_,  &environmentMap_, &brdfLut_,       &clusterGrid_,
+          &lightIndices_, &lightData_}) {
         if (texture->valid())
             device.destroy(*texture);
         *texture = {};
@@ -1609,7 +1631,7 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
                 const auto orDefault = [](rhi::TextureHandle handle, rhi::TextureHandle fallback) {
                     return handle.valid() ? handle : fallback;
                 };
-                const std::array<rhi::TextureBinding, 11> textures{
+                const std::array<rhi::TextureBinding, 12> textures{
                     rhi::TextureBinding{orDefault(material.baseColor, whitePixel_), linearSampler_},
                     rhi::TextureBinding{orDefault(material.normal, flatNormalPixel_), linearSampler_},
                     rhi::TextureBinding{orDefault(material.metallicRoughness, whitePixel_), linearSampler_},
@@ -1621,6 +1643,7 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
                     rhi::TextureBinding{lightIndices_, pointSampler_},
                     rhi::TextureBinding{lightData_, pointSampler_},
                     rhi::TextureBinding{occlusion_, linearSampler_},
+                    rhi::TextureBinding{localShadowMap_, shadowSampler_},
                 };
                 cmd.bindTextures(rhi::ShaderStage::Fragment, 0, textures);
                 boundMaterial = draw.material;
@@ -1726,6 +1749,41 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             ? std::span<const RenderLight>(world.lights.data(), settings_.lightBudget)
             : std::span<const RenderLight>(world.lights);
     buildClusters(world.camera, budgetedLights, clusters_);
+
+    // --- Local shadows: which lights get a tile ------------------------------
+    //
+    // **This is `PointLight.Shadows` and `SpotLight.Shadows` finally meaning
+    // something** (`shadow.h`, and decision 5 of the finish-line ledger). Done
+    // here rather than in `buildClusters` because it is a question about the
+    // ATLAS and not about the clusters, and because the answer has to be written
+    // into the light table before that table is uploaded a few lines below.
+    localCandidates_.clear();
+    for (const RenderLight& light : budgetedLights) {
+        LocalShadowCandidate candidate;
+        if (light.shadows) {
+            candidate.position = light.position;
+            candidate.direction = light.direction;
+            candidate.range = light.range;
+            candidate.cosHalfAngle = light.kind == LightKind::Spot ? light.spotCosHalfAngle : -1.0f;
+        }
+        // A light that casts nothing still occupies an INDEX, because the fit
+        // answers with candidate indices and those have to be the light table's
+        // own. Its range is zero, which the fit refuses -- so it costs a slot in
+        // a vector and nothing else.
+        localCandidates_.push_back(candidate);
+    }
+    localShadows_ = fitLocalShadows(localCandidates_);
+
+    // The tile goes in `Color.w`, which was genuinely unused. -1 means "casts
+    // nothing", which is what every light starts as.
+    for (u32 index = 0; index < clusters_.lightCount; ++index)
+        clusters_.lightData[static_cast<usize>(index) * 12 + 7] = -1.0f;
+    for (u32 entry = 0; entry < localShadows_.count; ++entry) {
+        const LocalShadow& shadow = localShadows_.entries[entry];
+        if (shadow.candidate < clusters_.lightCount)
+            clusters_.lightData[static_cast<usize>(shadow.candidate) * 12 + 7] = static_cast<f32>(shadow.firstTile);
+    }
+
     cmd.uploadTexture(clusterGrid_, asBytes(clusters_.grid.data(), clusters_.grid.size() * sizeof(f32)), 0);
     cmd.uploadTexture(lightIndices_, asBytes(clusters_.indices.data(), clusters_.indices.size() * sizeof(f32)), 0);
     cmd.uploadTexture(lightData_, asBytes(clusters_.lightData.data(), clusters_.lightData.size() * sizeof(f32)), 0);
@@ -1813,6 +1871,45 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             const f32 filterReach = cascades.texelWorld[index] * kShadowFilterMaxTexels;
             const CullSphere cull{cascades.cullCentre[index], cascades.cullRadius[index] + filterReach};
             drawGeometry(cmd, world, meshes, cascades.viewProjection[index], shadowPipeline_, shadowSkinnedPipeline_,
+                         Selection::Shadow, &cull);
+        }
+    }
+    cmd.endRenderPass();
+    cmd.popDebugGroup();
+
+    // --- Local shadow pass ---------------------------------------------------
+    //
+    // The same shape as the pass above and a different fit: one target, one
+    // viewport per tile. **It runs even with nothing to draw**, for the reason
+    // the cascade pass does -- a cleared depth of 1 reads as lit, so a tile
+    // nobody rendered into is a light that shadows nothing rather than a light
+    // that shadows everything with last frame's depths.
+    //
+    // Each tile culls against its own light's sphere. Without that, a scene with
+    // six casting lights would submit its whole geometry six times, which is the
+    // cost that makes a tile budget necessary rather than nice.
+    cmd.pushDebugGroup("local-shadow");
+    cmd.beginRenderPass({
+        .colorAttachments = {},
+        .depthStencil = {.texture = localShadowMap_, .loadOp = rhi::LoadOp::Clear, .storeOp = rhi::StoreOp::Store},
+        .debugName = "local-shadow",
+    });
+    for (u32 entry = 0; entry < localShadows_.count; ++entry) {
+        const LocalShadow& shadow = localShadows_.entries[entry];
+        const LocalShadowCandidate& candidate = localCandidates_[shadow.candidate];
+        for (u32 face = 0; face < shadow.tileCount; ++face) {
+            const LocalShadowTileRect rect = localShadowTileRect(shadow.firstTile + face);
+            cmd.setPipeline(shadowPipeline_);
+            cmd.setViewport({.x = static_cast<f32>(rect.x),
+                             .y = static_cast<f32>(rect.y),
+                             .width = static_cast<f32>(rect.width),
+                             .height = static_cast<f32>(rect.height)});
+            cmd.setScissor({.x = static_cast<core::i32>(rect.x),
+                            .y = static_cast<core::i32>(rect.y),
+                            .width = static_cast<core::i32>(rect.width),
+                            .height = static_cast<core::i32>(rect.height)});
+            const CullSphere cull{candidate.position, candidate.range};
+            drawGeometry(cmd, world, meshes, shadow.viewProjection[face], shadowPipeline_, shadowSkinnedPipeline_,
                          Selection::Shadow, &cull);
         }
     }
@@ -1987,6 +2084,22 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         frame.shadowParams[1] = kShadowNormalOffsetFilters;
         frame.shadowParams[2] = kShadowCascadeBlend;
         frame.shadowParams[3] = kShadowDepthBiasMetres;
+
+        // The local atlas: one matrix per TILE, and how many of them are live.
+        // Zero live tiles is what a scene with no casting spot or point gets,
+        // and the shader skips the whole lookup on it.
+        for (u32 entry = 0; entry < localShadows_.count; ++entry) {
+            const LocalShadow& shadow = localShadows_.entries[entry];
+            for (u32 face = 0; face < shadow.tileCount; ++face) {
+                const u32 tile = shadow.firstTile + face;
+                if (tile < kLocalShadowTileCount)
+                    frame.localShadowViewProjection[tile] = shadow.viewProjection[face];
+            }
+        }
+        frame.localShadowParams[0] = static_cast<f32>(localShadows_.tilesUsed);
+        frame.localShadowParams[1] = 1.0f / static_cast<f32>(kLocalShadowAtlasResolution);
+        frame.localShadowParams[2] = kLocalShadowDepthBias;
+        frame.localShadowParams[3] = kLocalShadowFilterTexels;
 
         frame.environmentParams[0] = static_cast<f32>(kEnvironmentMipCount);
         frame.environmentParams[1] = 1.0f;

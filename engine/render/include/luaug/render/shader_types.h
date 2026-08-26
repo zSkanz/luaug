@@ -24,6 +24,7 @@
 
 #include "luaug/core/math.h"
 #include "luaug/core/types.h"
+#include "luaug/render/shadow.h"
 
 namespace luaug::render {
 
@@ -145,9 +146,25 @@ struct GpuFrameUniforms
     // ambient on the diffuse lobe; `ambient` above is ADDED to it rather than
     // replaced by it, so `Lighting.Ambient` still means what it documents.
     f32 irradianceSh[9][4]{};
+    // **One matrix per LOCAL shadow tile, not per light** (shadow.h). A spot
+    // occupies one tile and a point occupies six, so sixteen matrices is the
+    // whole atlas whatever mix of lights filled it -- and the fragment shader
+    // indexes them with the same number the light table hands it, which is what
+    // keeps the two from ever disagreeing about which tile belongs to whom.
+    //
+    // A kilobyte a frame. The alternative was packing them into the light data
+    // texture beside the light rows, which would have cost four texture rows per
+    // spot and twenty-four per point and put a matrix where nothing else is one.
+    core::Mat4 localShadowViewProjection[kLocalShadowTileCount];
+    // x how many tiles are live this frame, y one over the atlas resolution in
+    // texels, z the depth bias in normalised units, w the filter radius in
+    // texels. Zero live tiles is what a scene with no casting local light gets,
+    // and the shader skips the whole lookup on it.
+    f32 localShadowParams[4]{};
 };
 
-static_assert(sizeof(GpuFrameUniforms) == 208 + 256 + 144, "GpuFrameUniforms is a cbuffer layout");
+static_assert(sizeof(GpuFrameUniforms) == 208 + 256 + 144 + 64 * kLocalShadowTileCount + 16,
+              "GpuFrameUniforms is a cbuffer layout; see luaug_forward.hlsli");
 
 // Fragment stage, `b1 space3`. Per material rather than per frame, because it
 // changes with the bind set and the sort key already groups draws by material.

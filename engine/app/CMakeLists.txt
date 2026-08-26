@@ -570,6 +570,25 @@ if(LUAUG_BUILD_TESTS)
         SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
         TIMEOUT 180)
 
+    # Local shadows, as a differential and for exactly the same reason -- see
+    # the driver. `SpotLight.Shadows` and `PointLight.Shadows` were accepted,
+    # read back and plumbed to `RenderLight::shadows` for three milestones while
+    # nothing acted on them, and no instrument in this repository could tell.
+    #
+    # Not a `gpu-golden`: there is no checked-in image and no reference GPU. It
+    # compares this machine's own renders against each other, which is why it is
+    # a gate everywhere rather than only where a golden was recorded.
+    add_test(NAME local_shadow_differential
+        COMMAND ${CMAKE_COMMAND}
+            -DHOST=$<TARGET_FILE:luaug_host>
+            -DIMGCMP=$<TARGET_FILE:imgcmp>
+            -DSCRIPT=${CMAKE_SOURCE_DIR}/tests/screenshots/localshadow
+            -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/local-shadow-differential
+            -P ${CMAKE_SOURCE_DIR}/tests/screenshots/run_local_shadow_gate.cmake)
+    set_tests_properties(local_shadow_differential PROPERTIES
+        SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
+        TIMEOUT 180)
+
     # M8's editor-seam proof, and ADR 0017's standing condition coming due: two
     # `WorldHost`s alive at once, each with its own `ScriptRuntime` -- two Luau
     # VMs -- rendered into two targets.

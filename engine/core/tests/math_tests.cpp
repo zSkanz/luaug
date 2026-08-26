@@ -467,9 +467,20 @@ TEST_CASE("lookAtCFrame aims -m[2] at the target")
 TEST_CASE("lookAtCFrame degenerates to the identity rotation rather than NaN")
 {
     // api-design.md §2.3: "a camera pointed at itself should stop moving, not
-    // poison every value it touches for the rest of the run." Both degenerate
-    // inputs land on the identity rotation AT the eye, not on a zero frame and
+    // poison every value it touches for the rest of the run." The degenerate
+    // input lands on the identity rotation AT the eye, not on a zero frame and
     // not on NaN.
+    //
+    // **There used to be a second case here and it was wrong** (D144). "The up
+    // hint is parallel to the direction" was documented and tested as producing
+    // the identity too, and it conflated two different situations: with
+    // `eye == target` there is no direction at all, and with a parallel up there
+    // is a perfectly well-defined direction and only the ROLL about it is
+    // undetermined. Answering the second with the identity threw away the part
+    // the caller had asked for -- so `CFrame.lookAt` from directly above a
+    // target aimed along -Z instead of down, silently, and every spotlight,
+    // camera and turret pointed at something directly above or below it was
+    // aimed somewhere else.
     const DVec3 eye{4.0, -7.0, 2.0};
 
     SUBCASE("target equal to the eye")
@@ -481,27 +492,40 @@ TEST_CASE("lookAtCFrame degenerates to the identity rotation rather than NaN")
         CHECK(cf.position == eye);
     }
 
-    SUBCASE("up hint parallel to the look direction")
+    SUBCASE("up hint parallel to the look direction: the DIRECTION still holds")
     {
-        // Looking straight down -Y with up = +Y: the hint has no roll to give.
+        // Looking straight down -Y with up = +Y. The hint has no roll to give,
+        // so a roll is chosen; the direction is not negotiable.
         const CFrameD cf = lookAtCFrame(eye, DVec3{eye.x, eye.y - 5.0, eye.z}, Vec3{0.0f, 1.0f, 0.0f});
         CHECK_FALSE(anyNan(cf.rotation));
-        CHECK(near(cf.rotation, Mat3{}));
         CHECK(cf.position == eye);
+        // -Z is the look axis, so the third column is BACK and the look is its
+        // negation.
+        CHECK(cf.rotation.m[2][0] == doctest::Approx(0.0).epsilon(1e-5));
+        CHECK(cf.rotation.m[2][1] == doctest::Approx(1.0).epsilon(1e-5));
+        CHECK(cf.rotation.m[2][2] == doctest::Approx(0.0).epsilon(1e-5));
+        CHECK(isOrthonormal(cf.rotation));
     }
 
-    SUBCASE("up hint antiparallel to the look direction")
+    SUBCASE("up hint antiparallel to the look direction: likewise")
     {
         const CFrameD cf = lookAtCFrame(eye, DVec3{eye.x, eye.y + 5.0, eye.z}, Vec3{0.0f, 1.0f, 0.0f});
         CHECK_FALSE(anyNan(cf.rotation));
-        CHECK(near(cf.rotation, Mat3{}));
+        CHECK(cf.rotation.m[2][1] == doctest::Approx(-1.0).epsilon(1e-5));
+        CHECK(isOrthonormal(cf.rotation));
     }
 
-    SUBCASE("a zero up hint")
+    SUBCASE("a zero up hint is the same situation as a parallel one")
     {
+        // No roll was specified, so one is chosen -- and the DIRECTION is still
+        // honoured, which is the whole of D144. Treated identically to the
+        // parallel case on purpose: both are "the caller gave a direction and no
+        // usable roll", and a special case here would be a second answer to one
+        // question.
         const CFrameD cf = lookAtCFrame(eye, DVec3{0.0, 0.0, 0.0}, Vec3{});
         CHECK_FALSE(anyNan(cf.rotation));
-        CHECK(near(cf.rotation, Mat3{}));
+        CHECK(isOrthonormal(cf.rotation));
+        CHECK(cf.position == eye);
     }
 
     SUBCASE("very nearly parallel is still a real frame, not a snap to identity")

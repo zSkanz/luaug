@@ -744,10 +744,16 @@ whatever their cross product requires. `Lerp(goal, alpha)` interpolates the
 translation linearly and **slerps** the rotation, so the halfway frame sits at
 an equal angle from each end; `alpha` is not clamped, and values outside [0, 1]
 extrapolate. `CFrame.lookAt(pos, target, up?)` defaults `up` to `(0, 1, 0)`;
-where the direction from `pos` to `target` is degenerate (zero length) or `up`
-is parallel to it, the result is the **identity rotation at `pos`** rather than
+where the direction from `pos` to `target` is degenerate (zero length) the result
+is the **identity rotation at `pos`** rather than
 a frame full of NaN — a camera pointed at itself should stop moving, not poison
-every value it touches for the rest of the run.
+every value it touches for the rest of the run. **An `up` parallel to the
+direction is NOT that case** (D144): the direction is perfectly well defined and
+only the roll about it is undetermined, so a roll is chosen — `(0, 0, 1)`, or
+`(1, 0, 0)` where the direction is itself mostly Z — and the direction is
+honoured. This used to answer with the identity too, which threw away the part
+the caller had asked for and aimed every spotlight, camera and turret pointed
+straight up or straight down along −Z instead.
 
 **`Random` and R10.** A seeded generator is reproducible: the same seed
 produces the same stream for the same engine build on the same platform, which

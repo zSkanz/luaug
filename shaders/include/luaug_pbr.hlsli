@@ -52,7 +52,12 @@ struct GpuLight
 {
     // xyz position in the shading space (camera-relative), w range.
     float4 PositionRange;
-    // rgb colour premultiplied by brightness, w unused.
+    // rgb colour premultiplied by brightness. **w is the light's first LOCAL
+    // shadow tile, or -1 for a light that casts none** -- the atlas index
+    // `LocalShadowViewProjection` is also indexed by, so the matrix and the tile
+    // can never come apart. It was genuinely unused until then, which is why it
+    // is here rather than in a fourth row that would have cost every light in
+    // the table sixteen more bytes.
     float4 Color;
     // xyz spot direction, w cosine of the half angle. See
     // `luaug_brdf.hlsli`'s `evaluatePunctualLight` for what w == 1 means and
@@ -117,6 +122,17 @@ cbuffer GpuFrameUniforms : register(b0, space3)
     // Irradiance as nine SH coefficients, cosine-convolved and divided by pi on
     // the CPU, so `evaluateIrradiance` multiplies straight by the albedo.
     float4 IrradianceSh[9];
+    // **One per LOCAL shadow tile, not per light.** A spot occupies one tile and
+    // a point occupies six, so sixteen is the whole atlas whatever mix filled
+    // it -- and the index comes from the light table, which is what stops the
+    // two ever disagreeing about whose tile is whose. `render::shadow.h` owns
+    // the layout; `kLocalShadowTileCount` there is this 16.
+    column_major float4x4 LocalShadowViewProjection[16];
+    // x live tiles this frame, y one over the atlas resolution in texels,
+    // z depth bias in normalised units, w filter radius in texels. Zero live
+    // tiles skips the lookup entirely, which is what a scene with no casting
+    // local light must cost.
+    float4 LocalShadowParams;
 };
 #endif
 

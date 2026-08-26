@@ -62,6 +62,82 @@ Texture2D<float> LightIndexTexture : register(t8, space2);
 SamplerState LightIndexSampler : register(s8, space2);
 Texture2D LightDataTexture : register(t9, space2);
 SamplerState LightDataSampler : register(s9, space2);
+
+// The LOCAL shadow atlas: four by four tiles of 512, one for a spot and six for
+// a point (`render::shadow.h`). Separate from `ShadowMap` above, which is the
+// sun's four cascades -- a cascade is orthographic and remembers its box between
+// frames, a local light is perspective and does not move unless the light does,
+// so one texture for both would be one resolution for two budgets.
+Texture2D<float> LocalShadowAtlas : register(t11, space2);
+SamplerState LocalShadowAtlasSampler : register(s11, space2);
+
+// 1 where the light reaches the fragment, 0 where something is in the way.
+//
+// **Returns 1 for every light that casts nothing**, which is what makes this
+// free in a scene with no shadow-casting local light: the tile is -1, the branch
+// is uniform across the wave, and nothing is sampled.
+float localShadowFactor(Surface surface, GpuLight light)
+{
+    const float firstTile = light.Color.w;
+    if (firstTile < 0.0f || LocalShadowParams.x <= 0.0f)
+        return 1.0f;
+
+    // A point light is the one whose cone admits everything -- the same test
+    // `evaluatePunctualLight` below makes, and deliberately the same spelling so
+    // the two can never disagree about which kind of light this is.
+    const bool isPoint = light.DirectionCosAngle.w <= -1.0f;
+    const float3 fromLight = surface.Position - light.PositionRange.xyz;
+    const uint tile = uint(firstTile) + (isPoint ? localShadowFace(fromLight) : 0u);
+    if (float(tile) >= LocalShadowParams.x)
+        return 1.0f;
+
+    const float4 lightClip = mul(LocalShadowViewProjection[tile], float4(surface.Position, 1.0f));
+    if (lightClip.w <= 0.0f)
+        return 1.0f;
+
+    const float3 projected = lightClip.xyz / lightClip.w;
+    // Outside its own tile is not shadowed. A spot's cone is inside its
+    // projection by construction (`kSpotFovMargin`), so this is the rim of the
+    // map and not the rim of the light.
+    if (any(abs(projected.xy) > 1.0f) || projected.z < 0.0f || projected.z > 1.0f)
+        return 1.0f;
+
+    // Clip space to the tile's own texels, then to atlas coordinates. The atlas
+    // is row-major four by four, which `render::localShadowTileRect` asserts and
+    // this arithmetic has to match.
+    const float2 tileUv = float2(projected.x * 0.5f + 0.5f, 0.5f - projected.y * 0.5f);
+    const float tilesPerSide = 4.0f;
+    const float2 tileOrigin = float2(float(tile % 4u), float(tile / 4u)) / tilesPerSide;
+
+    // **Clamped inside the tile, which is the same tax the cascade atlas pays**:
+    // a filter tap near a tile edge would otherwise read the neighbouring
+    // light's depth and put its shadow in this one.
+    const float texel = LocalShadowParams.y;
+    const float radius = LocalShadowParams.w;
+    const float2 tileMin = tileOrigin + texel;
+    const float2 tileMax = tileOrigin + (1.0f / tilesPerSide) - texel;
+
+    const float compare = projected.z - LocalShadowParams.z;
+
+    // Four taps in a rotated-square pattern rather than one. A single tap is a
+    // hard binary edge at any resolution; four is enough to read as a penumbra
+    // at the tile sizes this atlas uses and is what the sun's own filter starts
+    // from.
+    float lit = 0.0f;
+    const float2 offsets[4] = {
+        float2(-0.7f, -0.7f),
+        float2(0.7f, -0.7f),
+        float2(-0.7f, 0.7f),
+        float2(0.7f, 0.7f),
+    };
+    [unroll] for (uint tap = 0; tap < 4; ++tap)
+    {
+        const float2 uv = clamp(tileOrigin + tileUv / tilesPerSide + offsets[tap] * radius * texel, tileMin, tileMax);
+        const float depth = LocalShadowAtlas.SampleLevel(LocalShadowAtlasSampler, uv, 0).r;
+        lit += compare <= depth ? 1.0f : 0.0f;
+    }
+    return lit * 0.25f;
+}
 // Screen-space ambient occlusion, from the depth prepass (`ssao.hlsl`). Read in
 // SCREEN space rather than interpolated, because it is a property of the pixel
 // and not of the surface.
@@ -126,7 +202,7 @@ float3 evaluateClusteredLights(Surface surface, float2 pixel, float viewDepth)
         light.DirectionCosAngle =
             clusterFetch4(LightDataTexture, LightDataSampler, 2u, lightIndex, 3u, LUAUG_MAX_CLUSTERED_LIGHTS);
 
-        color += evaluatePunctualLight(surface, light);
+        color += evaluatePunctualLight(surface, light, localShadowFactor(surface, light));
     }
     return color;
 }
