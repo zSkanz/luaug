@@ -265,7 +265,12 @@ that sends the next session to the wrong place.
 
 ### S6 — Inert surfaces resolved
 
-- [ ] **S6.1** `PointLight.Shadows` / `SpotLight.Shadows` — honour or remove.
+- [x] **S6.1** `PointLight.Shadows` / `SpotLight.Shadows` — honour or remove.
+      **Honoured.** A sixteen-tile atlas of their own, one tile per spot and
+      six per point, with a stable budget and a differential gate whose claim
+      is that the property must CHANGE the picture. They were the last two
+      `Inert` properties in the engine; the marker now has no members.
+      Running the proof found D144, which was not ours.
 - [ ] **S6.2** `Enum.CollisionFidelity.Precise` — accepted and silently a hull.
 - [ ] **S6.3** The parallel scheduler phases that nothing runs in.
 - [ ] **S6.4** The dev protocol's two reserved verbs.
