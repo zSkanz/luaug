@@ -627,6 +627,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     bool lastUiPointerDown = false;
     std::string uiTypedText;
     bool uiBackspace = false;
+    // The caret's own keys (S6.7). One flag per key rather than a state, because
+    // this is what happened THIS frame and the caret is what it moved to.
+    bool uiForwardDelete = false;
+    bool uiCaretLeft = false;
+    bool uiCaretRight = false;
+    bool uiCaretHome = false;
+    bool uiCaretEnd = false;
     bool uiSubmit = false;
     render::DebugDraw debugDraw;
     ui::DrawList uiDrawList;
@@ -2638,6 +2645,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // not persist, and a snapshot cannot express them.
             uiTypedText.clear();
             uiBackspace = false;
+            uiForwardDelete = false;
+            uiCaretLeft = false;
+            uiCaretRight = false;
+            uiCaretHome = false;
+            uiCaretEnd = false;
             uiSubmit = false;
             for (const platform::Event& event : events) {
                 switch (event.type) {
@@ -2657,6 +2669,16 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                         uiBackspace = true;
                     else if (event.key == platform::Key::Return)
                         uiSubmit = true;
+                    else if (event.key == platform::Key::Delete)
+                        uiForwardDelete = true;
+                    else if (event.key == platform::Key::Left)
+                        uiCaretLeft = true;
+                    else if (event.key == platform::Key::Right)
+                        uiCaretRight = true;
+                    else if (event.key == platform::Key::Home)
+                        uiCaretHome = true;
+                    else if (event.key == platform::Key::End)
+                        uiCaretEnd = true;
                     break;
                 default:
                     break;
@@ -2893,6 +2915,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             interaction.released = !uiPointerDown && lastUiPointerDown;
             interaction.text = uiTypedText;
             interaction.backspace = uiBackspace;
+            interaction.forwardDelete = uiForwardDelete;
+            interaction.caretLeft = uiCaretLeft;
+            interaction.caretRight = uiCaretRight;
+            interaction.caretHome = uiCaretHome;
+            interaction.caretEnd = uiCaretEnd;
             interaction.submit = uiSubmit;
             lastUiPointerDown = uiPointerDown;
             const ui::InteractionResult uiResult = ui::updateInteraction(host->world(), host->uiService(), interaction);

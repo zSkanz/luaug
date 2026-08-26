@@ -244,6 +244,17 @@ struct InteractionInput
     // UTF-8, as the platform delivered it this frame. Empty for most frames.
     std::string_view text;
     bool backspace = false;
+    // Forward delete, which is a different key and a different edit: backspace
+    // takes what is BEFORE the caret and this takes what is after. Without both
+    // a caret can only ever be used to insert.
+    bool forwardDelete = false;
+    // Caret movement, as the four things a single-line field can do with it.
+    // Separate flags rather than a signed step, because a frame that saw both
+    // arrows should do nothing rather than average them.
+    bool caretLeft = false;
+    bool caretRight = false;
+    bool caretHome = false;
+    bool caretEnd = false;
     bool submit = false;
 };
 

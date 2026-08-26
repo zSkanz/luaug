@@ -130,6 +130,12 @@ Key translateScancode(SDL_Scancode scancode) noexcept
         return Key::Tab;
     case SDL_SCANCODE_BACKSPACE:
         return Key::Backspace;
+    case SDL_SCANCODE_HOME:
+        return Key::Home;
+    case SDL_SCANCODE_END:
+        return Key::End;
+    case SDL_SCANCODE_DELETE:
+        return Key::Delete;
     case SDL_SCANCODE_LSHIFT:
         return Key::LeftShift;
     case SDL_SCANCODE_RSHIFT:
@@ -236,6 +242,9 @@ constexpr KeyNaming KeyNames[] = {
     {Key::Right, "Right"},
     {Key::Up, "Up"},
     {Key::Down, "Down"},
+    {Key::Home, "Home"},
+    {Key::End, "End"},
+    {Key::Delete, "Delete"},
 };
 
 // Every gamepad SDL reports is opened, because an unopened one produces no

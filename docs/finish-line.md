@@ -483,7 +483,21 @@ that sends the next session to the wrong place.
 - [ ] **S6.4** The dev protocol's two reserved verbs.
 - [ ] **S6.5** TLS — needs an approved decision record before it needs code.
 - [ ] **S6.6** KTX2 HDR; glTF topologies; the second UV set half-importer.
-- [ ] **S6.7** A text caret.
+- [x] **S6.7** A text caret — built. `TextInput`'s doc has promised "typed
+      text, backspace and a caret" since the class existed, and the caret was
+      the one it did not have: the editor appended and backspaced at the END,
+      so a typo four characters back meant deleting everything after it. The
+      field was here once with nothing moving it, `inertcheck` found it, and
+      the comment that replaced it said a real caret would arrive with the code
+      that moves it — which is what this is. Arrows, Home, End, backspace and
+      forward delete; the caret steps whole code points so it never lands
+      inside a UTF-8 sequence; a script assigning `Text` puts it at the end,
+      which is the only position always in range. Three keys were added to the
+      platform and to `Enum.KeyCode`, INSIDE the keyboard block — the resolver
+      reaches a code by subtraction over a contiguous block — which renumbered
+      the mouse and gamepad items and is safe because a scene stores an enum
+      item by name. Seven cases. Clicking to place it is left: that needs the
+      glyph advances the layout produced, and the layout is a different pass.
 - [ ] **S6.8** An animation clip addressable on its own.
 - [ ] **S6.9** i18n plural rules beyond English.
 - [ ] **S6.10** Jolt on a real job pool.

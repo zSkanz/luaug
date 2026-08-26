@@ -365,6 +365,54 @@ void emit(const scene::World& world, const Entry& entry, DrawList& out)
 
         buildTextGeometry(text, label->font, size, label->textWrapped ? self->absoluteSize.x : 0.0f, box,
                           label->horizontalAlignment, label->verticalAlignment, color, 1.0f, entry.scissor, out.quads);
+
+        // --- The caret (S6.7) -------------------------------------------------
+        //
+        // **A bar where the next character goes**, and only in the field that
+        // has focus. Drawn after the text so it is never behind a glyph, and as
+        // an ordinary quad so it goes through the same scissor and the same
+        // batch -- a caret that needed its own pass would be a second way to
+        // draw a rectangle.
+        //
+        // Measured rather than assumed: the x is the width of the text BEFORE
+        // it, so the caret sits between two glyphs however wide they are, and
+        // the alignment offset is recomputed the same way `buildTextGeometry`
+        // computes it. A single line, because `TextInput` is single-line -- the
+        // class doc says so and a wrapped caret is a different feature.
+        const scene::TextInputComponent* field = world.textInputs().find(entry.id);
+        if (field != nullptr && field->focused) {
+            const std::string_view whole = label->text;
+            const usize at = std::min(static_cast<usize>(field->caret), whole.size());
+            const TextRunMetrics before = measureText(whole.substr(0, at), label->font, size, 0.0f);
+            const TextRunMetrics all = measureText(whole, label->font, size, 0.0f);
+
+            f32 x = box.min.x;
+            if (label->horizontalAlignment == 1)
+                x += (box.max.x - box.min.x - all.size.x) * 0.5f;
+            else if (label->horizontalAlignment == 2)
+                x += box.max.x - box.min.x - all.size.x;
+            x += before.size.x;
+
+            const f32 height = all.size.y > 0.0f ? all.size.y : size;
+            f32 y = box.min.y;
+            if (label->verticalAlignment == 1)
+                y += (box.max.y - box.min.y - height) * 0.5f;
+            else if (label->verticalAlignment == 2)
+                y += box.max.y - box.min.y - height;
+
+            // A hair over one pixel, so it is visible at every scale without
+            // being a glyph in its own right.
+            constexpr f32 kCaretWidth = 1.5f;
+            DrawQuad caret;
+            caret.min = core::Vec2{x, y};
+            caret.max = core::Vec2{x + kCaretWidth, y + height};
+            caret.color = label->textColor;
+            caret.alpha = 1.0f;
+            // No texture, so the shader multiplies by white and this is a flat
+            // bar -- the same path every solid rectangle in the UI takes.
+            caret.scissor = entry.scissor;
+            out.quads.push_back(caret);
+        }
     }
 }
 

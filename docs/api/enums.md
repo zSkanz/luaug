@@ -197,42 +197,45 @@ Items are analogue or digital, and mixing them is the one mistake this enum make
 | `Right` | 61 |  |
 | `Up` | 62 |  |
 | `Down` | 63 |  |
-| `MouseLeft` | 64 |  |
-| `MouseMiddle` | 65 |  |
-| `MouseRight` | 66 |  |
-| `MouseX1` | 67 |  |
-| `MouseX2` | 68 |  |
-| `MouseMovement` | 69 | The pointer's motion this tick, as a Vector2 in pixels. An analogue source: bind it to a Direction2D action for a look control, never to a Bool one. |
-| `MouseWheel` | 70 | The wheel's motion this tick, in notches, positive away from the user. Analogue, like MouseMovement -- a Direction1D source rather than a button. |
-| `ButtonSouth` | 71 | The bottom face button: A on an Xbox pad, B on a Nintendo one, Cross on a PlayStation one. Named by POSITION because the legend moves with the hardware and a saved binding must not. |
-| `ButtonEast` | 72 | The right face button. |
-| `ButtonWest` | 73 | The left face button. |
-| `ButtonNorth` | 74 | The top face button. |
-| `ButtonBack` | 75 |  |
-| `ButtonGuide` | 76 |  |
-| `ButtonStart` | 77 |  |
-| `ButtonLeftStick` | 78 | The left stick pressed IN. The stick's direction is LeftThumbstick. |
-| `ButtonRightStick` | 79 | The right stick pressed IN. The stick's direction is RightThumbstick. |
-| `ButtonLeftShoulder` | 80 |  |
-| `ButtonRightShoulder` | 81 |  |
-| `DpadUp` | 82 |  |
-| `DpadDown` | 83 |  |
-| `DpadLeft` | 84 |  |
-| `DpadRight` | 85 |  |
-| `LeftStickX` | 86 |  |
-| `LeftStickY` | 87 |  |
-| `RightStickX` | 88 |  |
-| `RightStickY` | 89 |  |
-| `LeftTrigger` | 90 | The left trigger, 0 released to 1 fully pulled. Analogue over the positive range only, which is why a released trigger reads 0 rather than -1. |
-| `RightTrigger` | 91 | The right trigger, 0 released to 1 fully pulled. |
-| `LeftThumbstick` | 92 | The left stick as a Vector2, both axes at once -- the source a Direction2D action binds for movement. The individual axes are LeftStickX and LeftStickY. |
-| `RightThumbstick` | 93 | The right stick as a Vector2. |
-| `Virtual1` | 94 | A source that is not hardware, written by `InputService:SetVirtualState` (§2.4). It is a KeyCode like any other, so it binds, sinks, resolves and REPLAYS like any other -- which is the whole point: a HUD button that fed an action through a side door would be a second input model, and the recorded stream would not contain it.<br><br>**It carries a VALUE and not a press.** A button writes 1 and 0; a slider writes anything between. Bound to a `Bool` action it counts as pressed past half deflection, which is the rule every analogue source here follows.<br><br>Four of them, because a touch scheme is a thumbstick and two or three buttons and four is one more than that. They are numbered rather than named for a purpose, because the purpose is the game's. |
-| `Virtual2` | 95 |  |
-| `Virtual3` | 96 |  |
-| `Virtual4` | 97 |  |
-| `VirtualStick1` | 98 | `Virtual1` and `Virtual2` as one Vector2 -- the source a `Direction2D` action binds for an on-screen thumbstick. The same relationship `LeftThumbstick` has to `LeftStickX` and `LeftStickY`, and the reason the virtual seam carries a value: design an on-screen BUTTON and the thumbstick does not fit later. |
-| `VirtualStick2` | 99 | `Virtual3` and `Virtual4` as one Vector2. |
+| `Home` | 64 | **In the keyboard block rather than appended**, which is what shifted every mouse and gamepad item below it by three. The resolver reaches a keyboard code by SUBTRACTION over a contiguous block and a `static_assert` holds this list and `platform::Key` to the same length, so appending was not open. Renumbering is safe because a scene stores an enum item by NAME -- which `scene_file.cpp` says it does precisely so that renumbering survives. |
+| `End` | 65 |  |
+| `Delete` | 66 |  |
+| `MouseLeft` | 67 |  |
+| `MouseMiddle` | 68 |  |
+| `MouseRight` | 69 |  |
+| `MouseX1` | 70 |  |
+| `MouseX2` | 71 |  |
+| `MouseMovement` | 72 | The pointer's motion this tick, as a Vector2 in pixels. An analogue source: bind it to a Direction2D action for a look control, never to a Bool one. |
+| `MouseWheel` | 73 | The wheel's motion this tick, in notches, positive away from the user. Analogue, like MouseMovement -- a Direction1D source rather than a button. |
+| `ButtonSouth` | 74 | The bottom face button: A on an Xbox pad, B on a Nintendo one, Cross on a PlayStation one. Named by POSITION because the legend moves with the hardware and a saved binding must not. |
+| `ButtonEast` | 75 | The right face button. |
+| `ButtonWest` | 76 | The left face button. |
+| `ButtonNorth` | 77 | The top face button. |
+| `ButtonBack` | 78 |  |
+| `ButtonGuide` | 79 |  |
+| `ButtonStart` | 80 |  |
+| `ButtonLeftStick` | 81 | The left stick pressed IN. The stick's direction is LeftThumbstick. |
+| `ButtonRightStick` | 82 | The right stick pressed IN. The stick's direction is RightThumbstick. |
+| `ButtonLeftShoulder` | 83 |  |
+| `ButtonRightShoulder` | 84 |  |
+| `DpadUp` | 85 |  |
+| `DpadDown` | 86 |  |
+| `DpadLeft` | 87 |  |
+| `DpadRight` | 88 |  |
+| `LeftStickX` | 89 |  |
+| `LeftStickY` | 90 |  |
+| `RightStickX` | 91 |  |
+| `RightStickY` | 92 |  |
+| `LeftTrigger` | 93 | The left trigger, 0 released to 1 fully pulled. Analogue over the positive range only, which is why a released trigger reads 0 rather than -1. |
+| `RightTrigger` | 94 | The right trigger, 0 released to 1 fully pulled. |
+| `LeftThumbstick` | 95 | The left stick as a Vector2, both axes at once -- the source a Direction2D action binds for movement. The individual axes are LeftStickX and LeftStickY. |
+| `RightThumbstick` | 96 | The right stick as a Vector2. |
+| `Virtual1` | 97 | A source that is not hardware, written by `InputService:SetVirtualState` (§2.4). It is a KeyCode like any other, so it binds, sinks, resolves and REPLAYS like any other -- which is the whole point: a HUD button that fed an action through a side door would be a second input model, and the recorded stream would not contain it.<br><br>**It carries a VALUE and not a press.** A button writes 1 and 0; a slider writes anything between. Bound to a `Bool` action it counts as pressed past half deflection, which is the rule every analogue source here follows.<br><br>Four of them, because a touch scheme is a thumbstick and two or three buttons and four is one more than that. They are numbered rather than named for a purpose, because the purpose is the game's. |
+| `Virtual2` | 98 |  |
+| `Virtual3` | 99 |  |
+| `Virtual4` | 100 |  |
+| `VirtualStick1` | 101 | `Virtual1` and `Virtual2` as one Vector2 -- the source a `Direction2D` action binds for an on-screen thumbstick. The same relationship `LeftThumbstick` has to `LeftStickX` and `LeftStickY`, and the reason the virtual seam carries a value: design an on-screen BUTTON and the thumbstick does not fit later. |
+| `VirtualStick2` | 102 | `Virtual3` and `Virtual4` as one Vector2. |
 
 ## Enum.LogLevel
 

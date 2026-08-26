@@ -77,6 +77,14 @@ struct Fixture
         return ui::updateInteraction(*world, service, input);
     }
 
+    // The caret's own keys (S6.7), as a whole `InteractionInput` rather than six
+    // more defaulted parameters on the one above -- which would be a signature
+    // nobody can read a call to.
+    ui::InteractionResult send(const ui::InteractionInput& input)
+    {
+        return ui::updateInteraction(*world, service, input);
+    }
+
     [[nodiscard]] std::vector<std::string> events()
     {
         std::vector<std::string> names;
@@ -199,7 +207,14 @@ TEST_CASE("focus follows the press, and typing reaches the focused field")
 
     // Backspace removes a whole UTF-8 sequence, not a byte: dropping one byte of
     // a two-byte character leaves a string no renderer can read.
-    fixture.world->textLabels().find(field)->text = "a\xC3\xA9";
+    //
+    // **Through `setProperty` rather than into the component**, which is what
+    // a script's own assignment does -- and it is what puts the caret at the
+    // end of the new string (S6.7). Writing the component directly leaves the
+    // caret pointing into text that no longer exists, which is a state nothing
+    // outside a test can produce.
+    REQUIRE(fixture.world->setProperty(field, fixture.world->atoms().intern("Text"),
+                                       scene::Value{std::string("a\xC3\xA9")}) == scene::World::SetResult::Changed);
     fixture.interact(Vec2{10.0f, 10.0f}, false, false, {}, true);
     CHECK(fixture.world->textLabels().find(field)->text == "a");
 
@@ -226,4 +241,186 @@ TEST_CASE("Return submits and releases focus")
     CHECK_FALSE(fixture.world->textInputs().find(field)->focused);
     const std::vector<std::string> after = fixture.events();
     CHECK(std::ranges::find(after, "FocusLost") != after.end());
+}
+
+// --- The caret (S6.7) ---------------------------------------------------------
+//
+// **`TextInput`'s own doc has promised "typed text, backspace and a caret"
+// since the class existed**, and the caret was the one it did not have: the
+// editor appended and backspaced at the END, so a typo four characters back
+// meant deleting everything after it.
+//
+// The field was here once with nothing moving it, and it was removed for that
+// reason -- `inertcheck` found it, and the comment that replaced it said a real
+// caret would arrive with the code that moves it. These are that code's cases.
+
+namespace {
+
+// A focused field with `seed` in it and the caret wherever focus left it.
+[[nodiscard]] InstanceId focusedField(Fixture& fixture, std::string_view seed)
+{
+    const InstanceId field = fixture.child("TextInput", fixture.screen);
+    fixture.world->uiObjects().find(field)->size = core::UDim2{core::UDim{0.0f, 200.0f}, core::UDim{0.0f, 30.0f}};
+    fixture.run();
+    fixture.interact(Vec2{10.0f, 10.0f}, true, false);
+    if (!seed.empty())
+        fixture.interact(Vec2{10.0f, 10.0f}, false, false, seed);
+    return field;
+}
+
+} // namespace
+
+TEST_CASE("the caret starts at the end of what is already there")
+{
+    // Which is what clicking into a field means everywhere: the caret goes after
+    // the text and typing continues it.
+    Fixture fixture;
+    const InstanceId field = fixture.child("TextInput", fixture.screen);
+    fixture.world->uiObjects().find(field)->size = core::UDim2{core::UDim{0.0f, 200.0f}, core::UDim{0.0f, 30.0f}};
+    REQUIRE(fixture.world->setProperty(field, fixture.world->atoms().intern("Text"),
+                                       scene::Value{std::string("hello")}) == scene::World::SetResult::Changed);
+    fixture.run();
+
+    fixture.interact(Vec2{10.0f, 10.0f}, true, false);
+    CHECK(fixture.world->textInputs().find(field)->caret == 5);
+}
+
+TEST_CASE("typing inserts where the caret is, not at the end")
+{
+    // The whole feature. Without it a typo four characters back means deleting
+    // everything after it.
+    Fixture fixture;
+    const InstanceId field = focusedField(fixture, "hello");
+
+    ui::InteractionInput left;
+    left.pointer = Vec2{10.0f, 10.0f};
+    left.caretLeft = true;
+    fixture.send(left);
+    fixture.send(left);
+    CHECK(fixture.world->textInputs().find(field)->caret == 3);
+
+    fixture.interact(Vec2{10.0f, 10.0f}, false, false, "XY");
+    CHECK(fixture.world->textLabels().find(field)->text == "helXYlo");
+    CHECK(fixture.world->textInputs().find(field)->caret == 5);
+}
+
+TEST_CASE("backspace takes what is before the caret and delete takes what is after")
+{
+    // Two keys and two edits. With only one of them a caret can be used to
+    // insert and nothing else.
+    Fixture fixture;
+    const InstanceId field = focusedField(fixture, "abcd");
+
+    ui::InteractionInput left;
+    left.pointer = Vec2{10.0f, 10.0f};
+    left.caretLeft = true;
+    fixture.send(left);
+    fixture.send(left);
+    REQUIRE(fixture.world->textInputs().find(field)->caret == 2);
+
+    ui::InteractionInput back;
+    back.pointer = Vec2{10.0f, 10.0f};
+    back.backspace = true;
+    fixture.send(back);
+    CHECK(fixture.world->textLabels().find(field)->text == "acd");
+    CHECK(fixture.world->textInputs().find(field)->caret == 1);
+
+    ui::InteractionInput forward;
+    forward.pointer = Vec2{10.0f, 10.0f};
+    forward.forwardDelete = true;
+    fixture.send(forward);
+    CHECK(fixture.world->textLabels().find(field)->text == "ad");
+    // Forward delete does NOT move the caret, which is what makes holding it
+    // eat the rest of the line rather than walking backwards through it.
+    CHECK(fixture.world->textInputs().find(field)->caret == 1);
+}
+
+TEST_CASE("Home and End go to the two ends")
+{
+    Fixture fixture;
+    const InstanceId field = focusedField(fixture, "abcd");
+
+    ui::InteractionInput home;
+    home.pointer = Vec2{10.0f, 10.0f};
+    home.caretHome = true;
+    fixture.send(home);
+    CHECK(fixture.world->textInputs().find(field)->caret == 0);
+
+    ui::InteractionInput end;
+    end.pointer = Vec2{10.0f, 10.0f};
+    end.caretEnd = true;
+    fixture.send(end);
+    CHECK(fixture.world->textInputs().find(field)->caret == 4);
+}
+
+TEST_CASE("the caret steps whole characters, so it never lands inside one")
+{
+    // Bytes everywhere except where a step has to be a character. A caret inside
+    // a UTF-8 sequence is an insertion that splits it, and a string no renderer
+    // can read.
+    Fixture fixture;
+    const InstanceId field = focusedField(fixture, "a\xC3\xA9z");
+    REQUIRE(fixture.world->textInputs().find(field)->caret == 4);
+
+    ui::InteractionInput left;
+    left.pointer = Vec2{10.0f, 10.0f};
+    left.caretLeft = true;
+    fixture.send(left); // past 'z'
+    CHECK(fixture.world->textInputs().find(field)->caret == 3);
+    fixture.send(left); // past the two-byte sequence, in one step
+    CHECK(fixture.world->textInputs().find(field)->caret == 1);
+}
+
+TEST_CASE("the caret stops at both ends rather than running off them")
+{
+    Fixture fixture;
+    const InstanceId field = focusedField(fixture, "ab");
+
+    ui::InteractionInput left;
+    left.pointer = Vec2{10.0f, 10.0f};
+    left.caretLeft = true;
+    for (int press = 0; press < 6; ++press)
+        fixture.send(left);
+    CHECK(fixture.world->textInputs().find(field)->caret == 0);
+
+    // And a backspace at the start does nothing rather than eating a byte that
+    // is not there.
+    ui::InteractionInput back;
+    back.pointer = Vec2{10.0f, 10.0f};
+    back.backspace = true;
+    fixture.send(back);
+    CHECK(fixture.world->textLabels().find(field)->text == "ab");
+
+    ui::InteractionInput right;
+    right.pointer = Vec2{10.0f, 10.0f};
+    right.caretRight = true;
+    for (int press = 0; press < 6; ++press)
+        fixture.send(right);
+    CHECK(fixture.world->textInputs().find(field)->caret == 2);
+
+    ui::InteractionInput forward;
+    forward.pointer = Vec2{10.0f, 10.0f};
+    forward.forwardDelete = true;
+    fixture.send(forward);
+    CHECK(fixture.world->textLabels().find(field)->text == "ab");
+}
+
+TEST_CASE("a script assigning Text puts the caret at the end")
+{
+    // The only answer that is always in range. A caret left where it was points
+    // into a string that no longer exists: at best somewhere arbitrary, at worst
+    // inside a UTF-8 sequence.
+    Fixture fixture;
+    const InstanceId field = focusedField(fixture, "abcd");
+
+    ui::InteractionInput home;
+    home.pointer = Vec2{10.0f, 10.0f};
+    home.caretHome = true;
+    fixture.send(home);
+    REQUIRE(fixture.world->textInputs().find(field)->caret == 0);
+
+    REQUIRE(fixture.world->setProperty(field, fixture.world->atoms().intern("Text"),
+                                       scene::Value{std::string("a much longer value")}) ==
+            scene::World::SetResult::Changed);
+    CHECK(fixture.world->textInputs().find(field)->caret == 19);
 }

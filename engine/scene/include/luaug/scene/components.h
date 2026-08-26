@@ -626,11 +626,28 @@ struct TextLabelComponent
 struct TextInputComponent
 {
     std::string placeholderText;
-    // **No caret.** There was a `caret` field here and nothing ever moved it:
-    // v1's editor appends and backspaces at the end, which is what the class's
-    // own doc promises. A field that named a feature nobody had written is the
-    // same lie `Inert` exists to make impossible, and `inertcheck` is what found
-    // it. When a real caret arrives it arrives with the code that moves it.
+
+    // **Where the next character goes**, as a BYTE offset into `Text` (S6.7).
+    //
+    // This field was here once with nothing moving it, and it was taken out for
+    // that reason -- a field naming a feature nobody had written is the lie
+    // `Inert` exists to make impossible, and `inertcheck` found it. The comment
+    // that replaced it said a real caret would arrive with the code that moves
+    // it. This is that code: `ui::interaction` moves it on every arrow, home,
+    // end, insertion and deletion, and `ui::draw` puts a bar there.
+    //
+    // **Bytes and not code points**, which is the same choice `ScriptDocument`
+    // makes and for the same reason: the text is UTF-8, every offset that
+    // reaches a renderer or a substring is a byte offset, and converting at each
+    // boundary is where the off-by-ones live. Movement steps whole code points
+    // so a caret never lands inside one.
+    //
+    // Clamped into the text on every use rather than trusted: `Text` is a
+    // property a script may assign at any moment, and a caret left past the end
+    // of a string somebody just shortened is a crash rather than a wrong
+    // picture.
+    u32 caret = 0;
+
     bool focused = false;
 };
 

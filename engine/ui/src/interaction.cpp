@@ -84,20 +84,89 @@ void probe(const scene::World& world, core::InstanceId id, Vec2 point, Rect clip
         probe(world, child, point, childClip, best, bestZ);
 }
 
-// Appends one UTF-8 sequence, or removes one. Bytes rather than codepoints
-// everywhere except here, where a backspace has to remove a whole sequence --
-// dropping one byte of a two-byte character leaves a string no renderer can
-// read.
-void edit(std::string& text, std::string_view added, bool backspace)
+// Whether a byte is a UTF-8 continuation, which is what makes "one character"
+// a thing this file can step over.
+[[nodiscard]] bool isContinuation(char c) noexcept
 {
-    if (backspace && !text.empty()) {
-        usize cut = text.size() - 1;
-        while (cut > 0 && (static_cast<unsigned char>(text[cut]) & 0xC0u) == 0x80u)
-            --cut;
-        text.erase(cut);
+    return (static_cast<unsigned char>(c) & 0xC0u) == 0x80u;
+}
+
+// The offset one whole code point before `at`, or 0. Bytes everywhere except
+// where a step has to be a character: taking one byte off a two-byte sequence
+// leaves a string no renderer can read.
+[[nodiscard]] usize stepBack(std::string_view text, usize at) noexcept
+{
+    if (at == 0)
+        return 0;
+    usize cut = at - 1;
+    while (cut > 0 && isContinuation(text[cut]))
+        --cut;
+    return cut;
+}
+
+// The offset one whole code point after `at`, or the end.
+[[nodiscard]] usize stepForward(std::string_view text, usize at) noexcept
+{
+    if (at >= text.size())
+        return text.size();
+    usize next = at + 1;
+    while (next < text.size() && isContinuation(text[next]))
+        ++next;
+    return next;
+}
+
+// Applies one frame's typing at `caret`, and moves it (S6.7).
+//
+// **Order is what makes this correct**: delete, then insert, then move -- a
+// frame that saw a backspace AND text is one where the platform delivered both,
+// and inserting first would put the new character where the old one was about to
+// be taken from.
+//
+// `caret` is clamped in rather than trusted, because `Text` is a property a
+// script may assign at any moment and a caret past the end of a string somebody
+// just shortened is a crash rather than a wrong picture.
+void edit(std::string& text, u32& caret, std::string_view added, bool backspace, bool forwardDelete)
+{
+    usize at = std::min(static_cast<usize>(caret), text.size());
+    // And onto a boundary, in case the assignment left it inside a sequence.
+    while (at > 0 && at < text.size() && isContinuation(text[at]))
+        --at;
+
+    if (backspace && at > 0) {
+        const usize from = stepBack(text, at);
+        text.erase(from, at - from);
+        at = from;
     }
-    if (!added.empty())
-        text.append(added);
+    if (forwardDelete && at < text.size()) {
+        const usize to = stepForward(text, at);
+        text.erase(at, to - at);
+    }
+    if (!added.empty()) {
+        text.insert(at, added);
+        at += added.size();
+    }
+
+    caret = static_cast<u32>(at);
+}
+
+// Moves the caret without touching the text. Separate from `edit` because a
+// frame can do either, both, or neither, and one function that did all of it
+// would decide an order nobody asked about.
+void moveCaret(std::string_view text, u32& caret, const InteractionInput& input)
+{
+    usize at = std::min(static_cast<usize>(caret), text.size());
+    if (input.caretHome)
+        at = 0;
+    if (input.caretEnd)
+        at = text.size();
+    // **Left and right in that order, and both applied.** A frame carrying both
+    // is one where the platform delivered both, and honouring one arbitrarily
+    // would drop a keystroke somebody made.
+    if (input.caretLeft)
+        at = stepBack(text, at);
+    if (input.caretRight)
+        at = stepForward(text, at);
+    caret = static_cast<u32>(at);
 }
 
 } // namespace
@@ -165,6 +234,14 @@ InteractionResult updateInteraction(scene::World& world, core::InstanceId uiServ
             g_state.focused = wanted;
             if (scene::TextInputComponent* next = world.textInputs().find(wanted); next != nullptr) {
                 next->focused = true;
+                // **At the end on focus** (S6.7), which is what clicking into a
+                // field means everywhere: the caret goes after what is already
+                // there and typing continues it. Positioning it under the
+                // pointer needs the glyph advances the layout produced, and the
+                // layout is a different pass -- so this is the honest half, and
+                // it is the half people use.
+                if (const scene::TextLabelComponent* label = world.textLabels().find(wanted); label != nullptr)
+                    next->caret = static_cast<u32>(label->text.size());
                 fire(world, wanted, "Focused");
             }
         }
@@ -181,7 +258,15 @@ InteractionResult updateInteraction(scene::World& world, core::InstanceId uiServ
     if (g_state.focused.valid()) {
         if (scene::TextLabelComponent* label = world.textLabels().find(g_state.focused); label != nullptr) {
             const std::string before = label->text;
-            edit(label->text, input.text, input.backspace);
+            scene::TextInputComponent* field = world.textInputs().find(g_state.focused);
+            // A focused element is always a `TextInput` -- focus is only taken
+            // by one -- but the pools are separate and a caller could have
+            // removed the component between the press and here.
+            u32 discarded = 0;
+            u32& caret = field != nullptr ? field->caret : discarded;
+
+            moveCaret(label->text, caret, input);
+            edit(label->text, caret, input.text, input.backspace, input.forwardDelete);
             if (label->text != before) {
                 // The same fact a script's own write produces, so a handler on
                 // `GetPropertyChangedSignal("Text")` sees typing exactly as it

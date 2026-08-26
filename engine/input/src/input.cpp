@@ -17,7 +17,7 @@ namespace {
 // so a KeyCode item inserted in the middle is a boot failure rather than a
 // binding that quietly names a different key.
 constexpr i32 KeyboardFirst = 1;
-constexpr i32 KeyboardCount = 63;
+constexpr i32 KeyboardCount = 66;
 
 // The keyboard block IS `platform::Key`, item for item and in the same order,
 // which is what makes `keyCodeOf` a subtraction rather than a table. Asserted
@@ -25,25 +25,25 @@ constexpr i32 KeyboardCount = 63;
 // shift every gamepad code by one.
 static_assert(static_cast<i32>(platform::Key::Count) == KeyboardCount + 1,
               "Enum.KeyCode's keyboard block and platform::Key must be the same list");
-constexpr i32 MouseButtonFirst = KeyboardFirst + KeyboardCount; // 64
+constexpr i32 MouseButtonFirst = KeyboardFirst + KeyboardCount; // 67
 constexpr i32 MouseButtonCount = 5;
-constexpr i32 MouseMovement = MouseButtonFirst + MouseButtonCount; // 69
-constexpr i32 MouseWheel = MouseMovement + 1;                      // 70
-constexpr i32 PadButtonFirst = MouseWheel + 1;                     // 71
+constexpr i32 MouseMovement = MouseButtonFirst + MouseButtonCount; // 72
+constexpr i32 MouseWheel = MouseMovement + 1;                      // 73
+constexpr i32 PadButtonFirst = MouseWheel + 1;                     // 74
 constexpr i32 PadButtonCount = 15;
-constexpr i32 PadAxisFirst = PadButtonFirst + PadButtonCount; // 86
+constexpr i32 PadAxisFirst = PadButtonFirst + PadButtonCount; // 89
 constexpr i32 PadAxisCount = 6;
-constexpr i32 LeftThumbstick = PadAxisFirst + PadAxisCount; // 92
-constexpr i32 RightThumbstick = LeftThumbstick + 1;         // 93
+constexpr i32 LeftThumbstick = PadAxisFirst + PadAxisCount; // 95
+constexpr i32 RightThumbstick = LeftThumbstick + 1;         // 96
 
 // The virtual block (M6): four axes a script writes and two composites over
 // them. Not hardware, and deliberately IN the same arrays as hardware -- a
 // virtual source that lived somewhere else would be a second input model, and
 // the recorded stream would not carry it.
-constexpr i32 VirtualFirst = RightThumbstick + 1; // 94
+constexpr i32 VirtualFirst = RightThumbstick + 1; // 97
 constexpr i32 VirtualCount = 4;
-constexpr i32 VirtualStick1 = VirtualFirst + VirtualCount; // 98
-constexpr i32 VirtualStick2 = VirtualStick1 + 1;           // 99
+constexpr i32 VirtualStick1 = VirtualFirst + VirtualCount; // 101
+constexpr i32 VirtualStick2 = VirtualStick1 + 1;           // 102
 
 // The axes, by name, so the two stick composites can find their halves.
 constexpr i32 LeftStickX = PadAxisFirst;

@@ -4418,47 +4418,47 @@
         },
         {
           "Name": "ButtonBack",
-          "Value": 75
-        },
-        {
-          "Name": "ButtonEast",
-          "Value": 72
-        },
-        {
-          "Name": "ButtonGuide",
-          "Value": 76
-        },
-        {
-          "Name": "ButtonLeftShoulder",
-          "Value": 80
-        },
-        {
-          "Name": "ButtonLeftStick",
           "Value": 78
         },
         {
-          "Name": "ButtonNorth",
-          "Value": 74
+          "Name": "ButtonEast",
+          "Value": 75
         },
         {
-          "Name": "ButtonRightShoulder",
-          "Value": 81
-        },
-        {
-          "Name": "ButtonRightStick",
+          "Name": "ButtonGuide",
           "Value": 79
         },
         {
-          "Name": "ButtonSouth",
-          "Value": 71
+          "Name": "ButtonLeftShoulder",
+          "Value": 83
         },
         {
-          "Name": "ButtonStart",
+          "Name": "ButtonLeftStick",
+          "Value": 81
+        },
+        {
+          "Name": "ButtonNorth",
           "Value": 77
         },
         {
+          "Name": "ButtonRightShoulder",
+          "Value": 84
+        },
+        {
+          "Name": "ButtonRightStick",
+          "Value": 82
+        },
+        {
+          "Name": "ButtonSouth",
+          "Value": 74
+        },
+        {
+          "Name": "ButtonStart",
+          "Value": 80
+        },
+        {
           "Name": "ButtonWest",
-          "Value": 73
+          "Value": 76
         },
         {
           "Name": "C",
@@ -4467,6 +4467,10 @@
         {
           "Name": "D",
           "Value": 17
+        },
+        {
+          "Name": "Delete",
+          "Value": 66
         },
         {
           "Name": "Digit0",
@@ -4514,23 +4518,27 @@
         },
         {
           "Name": "DpadDown",
-          "Value": 83
+          "Value": 86
         },
         {
           "Name": "DpadLeft",
-          "Value": 84
+          "Value": 87
         },
         {
           "Name": "DpadRight",
-          "Value": 85
+          "Value": 88
         },
         {
           "Name": "DpadUp",
-          "Value": 82
+          "Value": 85
         },
         {
           "Name": "E",
           "Value": 18
+        },
+        {
+          "Name": "End",
+          "Value": 65
         },
         {
           "Name": "Escape",
@@ -4597,6 +4605,10 @@
           "Value": 21
         },
         {
+          "Name": "Home",
+          "Value": 64
+        },
+        {
           "Name": "I",
           "Value": 22
         },
@@ -4630,19 +4642,19 @@
         },
         {
           "Name": "LeftStickX",
-          "Value": 86
+          "Value": 89
         },
         {
           "Name": "LeftStickY",
-          "Value": 87
+          "Value": 90
         },
         {
           "Name": "LeftThumbstick",
-          "Value": 92
+          "Value": 95
         },
         {
           "Name": "LeftTrigger",
-          "Value": 90
+          "Value": 93
         },
         {
           "Name": "M",
@@ -4650,31 +4662,31 @@
         },
         {
           "Name": "MouseLeft",
-          "Value": 64
-        },
-        {
-          "Name": "MouseMiddle",
-          "Value": 65
-        },
-        {
-          "Name": "MouseMovement",
-          "Value": 69
-        },
-        {
-          "Name": "MouseRight",
-          "Value": 66
-        },
-        {
-          "Name": "MouseWheel",
-          "Value": 70
-        },
-        {
-          "Name": "MouseX1",
           "Value": 67
         },
         {
-          "Name": "MouseX2",
+          "Name": "MouseMiddle",
           "Value": 68
+        },
+        {
+          "Name": "MouseMovement",
+          "Value": 72
+        },
+        {
+          "Name": "MouseRight",
+          "Value": 69
+        },
+        {
+          "Name": "MouseWheel",
+          "Value": 73
+        },
+        {
+          "Name": "MouseX1",
+          "Value": 70
+        },
+        {
+          "Name": "MouseX2",
+          "Value": 71
         },
         {
           "Name": "N",
@@ -4718,19 +4730,19 @@
         },
         {
           "Name": "RightStickX",
-          "Value": 88
+          "Value": 91
         },
         {
           "Name": "RightStickY",
-          "Value": 89
+          "Value": 92
         },
         {
           "Name": "RightThumbstick",
-          "Value": 93
+          "Value": 96
         },
         {
           "Name": "RightTrigger",
-          "Value": 91
+          "Value": 94
         },
         {
           "Name": "S",
@@ -4766,27 +4778,27 @@
         },
         {
           "Name": "Virtual1",
-          "Value": 94
-        },
-        {
-          "Name": "Virtual2",
-          "Value": 95
-        },
-        {
-          "Name": "Virtual3",
-          "Value": 96
-        },
-        {
-          "Name": "Virtual4",
           "Value": 97
         },
         {
-          "Name": "VirtualStick1",
+          "Name": "Virtual2",
           "Value": 98
         },
         {
-          "Name": "VirtualStick2",
+          "Name": "Virtual3",
           "Value": 99
+        },
+        {
+          "Name": "Virtual4",
+          "Value": 100
+        },
+        {
+          "Name": "VirtualStick1",
+          "Value": 101
+        },
+        {
+          "Name": "VirtualStick2",
+          "Value": 102
         },
         {
           "Name": "W",

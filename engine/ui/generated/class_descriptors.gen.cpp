@@ -427,7 +427,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     textInputDesc.super = textLabelClass;
     textInputDesc.flags = scene::ClassFlags::None;
     textInputDesc.defaultName = atoms.intern("TextInput");
-    textInputDesc.doc = "A single-line editable field (\302\247" "2.2). Typed text, backspace and a caret; no selection, no clipboard, no undo and no IME composition beyond what the platform delivers as text.";
+    textInputDesc.doc = "A single-line editable field (\302\247" "2.2). Typed text, a caret you can move with the arrows, Home and End, and both kinds of delete; no selection, no clipboard, no undo and no IME composition beyond what the platform delivers as text.\012\012**The caret starts at the end and goes back there whenever a script assigns `Text`**, which is the only position that is always in range: a caret left where it was would point into a string that no longer exists. Clicking does not yet place it -- that needs the glyph advances the layout produced, and the layout is a different pass.";
     textInputDesc.properties = textInputProperties;
     textInputDesc.events = textInputEvents;
     textInputDesc.attachComponents = native::attachTextInputComponents;

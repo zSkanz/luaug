@@ -377,6 +377,13 @@ bool setTextLabelText(scene::World& world, core::InstanceId id, const Value& val
     if (text == nullptr)
         return false;
     component->text = *text;
+    // **A script assigning `Text` puts the caret at the end** (S6.7), which is
+    // what every text field does when its value is set programmatically -- and
+    // it is the only answer that is always in range. A caret left where it was
+    // points into a string that no longer exists: at best somewhere arbitrary,
+    // at worst inside a UTF-8 sequence.
+    if (scene::TextInputComponent* field = world.textInputs().find(id); field != nullptr)
+        field->caret = static_cast<core::u32>(component->text.size());
     markLayoutDirty(world, id);
     return true;
 }

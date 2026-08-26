@@ -5,7 +5,9 @@
 - Inherits [`TextLabel`](textlabel.md)
 - Created with `Instance.new("TextInput")`
 
-A single-line editable field (§2.2). Typed text, backspace and a caret; no selection, no clipboard, no undo and no IME composition beyond what the platform delivers as text.
+A single-line editable field (§2.2). Typed text, a caret you can move with the arrows, Home and End, and both kinds of delete; no selection, no clipboard, no undo and no IME composition beyond what the platform delivers as text.
+
+**The caret starts at the end and goes back there whenever a script assigns `Text`**, which is the only position that is always in range: a caret left where it was would point into a string that no longer exists. Clicking does not yet place it -- that needs the glyph advances the layout produced, and the layout is a different pass.
 
 **Members below are the ones this class DECLARES.** Everything its base
 offers is on the base's page, which is what keeps one added member on

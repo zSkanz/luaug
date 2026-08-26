@@ -296,92 +296,104 @@ local Definition: Schema.Definition = {
                 { Name = "Right", Value = 61 },
                 { Name = "Up", Value = 62 },
                 { Name = "Down", Value = 63 },
-                { Name = "MouseLeft", Value = 64 },
-                { Name = "MouseMiddle", Value = 65 },
-                { Name = "MouseRight", Value = 66 },
-                { Name = "MouseX1", Value = 67 },
-                { Name = "MouseX2", Value = 68 },
+                {
+                    Name = "Home",
+                    Value = 64,
+                    Doc = "**In the keyboard block rather than appended**, which is what shifted every mouse "
+                        .. "and gamepad item below it by three. The resolver reaches a keyboard code by "
+                        .. "SUBTRACTION over a contiguous block and a `static_assert` holds this list and "
+                        .. "`platform::Key` to the same length, so appending was not open. Renumbering is "
+                        .. "safe because a scene stores an enum item by NAME -- which `scene_file.cpp` says "
+                        .. "it does precisely so that renumbering survives.",
+                },
+                { Name = "End", Value = 65 },
+                { Name = "Delete", Value = 66 },
+                { Name = "MouseLeft", Value = 67 },
+                { Name = "MouseMiddle", Value = 68 },
+                { Name = "MouseRight", Value = 69 },
+                { Name = "MouseX1", Value = 70 },
+                { Name = "MouseX2", Value = 71 },
                 {
                     Name = "MouseMovement",
-                    Value = 69,
+                    Value = 72,
                     Doc = "The pointer's motion this tick, as a Vector2 in pixels. An analogue source: bind it to a "
                         .. "Direction2D action for a look control, never to a Bool one.",
                 },
                 {
                     Name = "MouseWheel",
-                    Value = 70,
+                    Value = 73,
                     Doc = "The wheel's motion this tick, in notches, positive away from the user. Analogue, like "
                         .. "MouseMovement -- a Direction1D source rather than a button.",
                 },
                 {
                     Name = "ButtonSouth",
-                    Value = 71,
+                    Value = 74,
                     Doc = "The bottom face button: A on an Xbox pad, B on a Nintendo one, Cross on a PlayStation one. Named "
                         .. "by POSITION because the legend moves with the hardware and a saved binding must not.",
                 },
                 {
                     Name = "ButtonEast",
-                    Value = 72,
+                    Value = 75,
                     Doc = "The right face button.",
                 },
                 {
                     Name = "ButtonWest",
-                    Value = 73,
+                    Value = 76,
                     Doc = "The left face button.",
                 },
                 {
                     Name = "ButtonNorth",
-                    Value = 74,
+                    Value = 77,
                     Doc = "The top face button.",
                 },
-                { Name = "ButtonBack", Value = 75 },
-                { Name = "ButtonGuide", Value = 76 },
-                { Name = "ButtonStart", Value = 77 },
+                { Name = "ButtonBack", Value = 78 },
+                { Name = "ButtonGuide", Value = 79 },
+                { Name = "ButtonStart", Value = 80 },
                 {
                     Name = "ButtonLeftStick",
-                    Value = 78,
+                    Value = 81,
                     Doc = "The left stick pressed IN. The stick's direction is LeftThumbstick.",
                 },
                 {
                     Name = "ButtonRightStick",
-                    Value = 79,
+                    Value = 82,
                     Doc = "The right stick pressed IN. The stick's direction is RightThumbstick.",
                 },
-                { Name = "ButtonLeftShoulder", Value = 80 },
-                { Name = "ButtonRightShoulder", Value = 81 },
-                { Name = "DpadUp", Value = 82 },
-                { Name = "DpadDown", Value = 83 },
-                { Name = "DpadLeft", Value = 84 },
-                { Name = "DpadRight", Value = 85 },
-                { Name = "LeftStickX", Value = 86 },
-                { Name = "LeftStickY", Value = 87 },
-                { Name = "RightStickX", Value = 88 },
-                { Name = "RightStickY", Value = 89 },
+                { Name = "ButtonLeftShoulder", Value = 83 },
+                { Name = "ButtonRightShoulder", Value = 84 },
+                { Name = "DpadUp", Value = 85 },
+                { Name = "DpadDown", Value = 86 },
+                { Name = "DpadLeft", Value = 87 },
+                { Name = "DpadRight", Value = 88 },
+                { Name = "LeftStickX", Value = 89 },
+                { Name = "LeftStickY", Value = 90 },
+                { Name = "RightStickX", Value = 91 },
+                { Name = "RightStickY", Value = 92 },
                 {
                     Name = "LeftTrigger",
-                    Value = 90,
+                    Value = 93,
                     Doc = "The left trigger, 0 released to 1 fully pulled. Analogue over the positive range only, which is "
                         .. "why a released trigger reads 0 rather than -1.",
                 },
                 {
                     Name = "RightTrigger",
-                    Value = 91,
+                    Value = 94,
                     Doc = "The right trigger, 0 released to 1 fully pulled.",
                 },
                 {
                     Name = "LeftThumbstick",
-                    Value = 92,
+                    Value = 95,
                     Doc = "The left stick as a Vector2, both axes at once -- the source a Direction2D action binds for "
                         .. "movement. The individual axes are LeftStickX and LeftStickY.",
                 },
                 {
                     Name = "RightThumbstick",
-                    Value = 93,
+                    Value = 96,
                     Doc = "The right stick as a Vector2.",
                 },
                 {
                     Name = "Virtual1",
-                    Value = 94,
+                    Value = 97,
                     Doc = "A source that is not hardware, written by `InputService:SetVirtualState` (§2.4). It is "
                         .. "a KeyCode like any other, so it binds, sinks, resolves and REPLAYS like any other -- "
                         .. "which is the whole point: a HUD button that fed an action through a side door would "
@@ -392,12 +404,12 @@ local Definition: Schema.Definition = {
                         .. "scheme is a thumbstick and two or three buttons and four is one more than that. They "
                         .. "are numbered rather than named for a purpose, because the purpose is the game's.",
                 },
-                { Name = "Virtual2", Value = 95 },
-                { Name = "Virtual3", Value = 96 },
-                { Name = "Virtual4", Value = 97 },
+                { Name = "Virtual2", Value = 98 },
+                { Name = "Virtual3", Value = 99 },
+                { Name = "Virtual4", Value = 100 },
                 {
                     Name = "VirtualStick1",
-                    Value = 98,
+                    Value = 101,
                     Doc = "`Virtual1` and `Virtual2` as one Vector2 -- the source a `Direction2D` action binds "
                         .. "for an on-screen thumbstick. The same relationship `LeftThumbstick` has to "
                         .. "`LeftStickX` and `LeftStickY`, and the reason the virtual seam carries a value: "
@@ -405,7 +417,7 @@ local Definition: Schema.Definition = {
                 },
                 {
                     Name = "VirtualStick2",
-                    Value = 99,
+                    Value = 102,
                     Doc = "`Virtual3` and `Virtual4` as one Vector2.",
                 },
             } :: { Schema.EnumItem },

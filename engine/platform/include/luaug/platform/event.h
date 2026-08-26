@@ -119,6 +119,16 @@ enum class Key : u16
     Right,
     Up,
     Down,
+    // The three a caret needs and nothing else did (S6.7). At the end of the
+    // KEYBOARD block rather than at the end of `Enum.KeyCode`, because the
+    // resolver's `keyCodeOf` is a subtraction over a contiguous block and a
+    // `static_assert` holds the two lists to the same length. Renumbering the
+    // mouse and gamepad items below is safe: a scene stores an enum item by
+    // NAME, which `scene_file.cpp` says it does precisely so that renumbering
+    // survives.
+    Home,
+    End,
+    Delete,
 
     // Not a key. The count is what sizes a keyboard snapshot, and having it
     // here is what stops that array from being a number somebody has to keep in

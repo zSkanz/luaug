@@ -2017,7 +2017,7 @@ void registerEnums(EnumRegistry& enums, core::AtomTable& atoms)
     enums.registerEnum(runContextDesc);
 
     // --- KeyCode ---
-    static std::array<EnumItemDesc, 100> keyCodeItems;
+    static std::array<EnumItemDesc, 103> keyCodeItems;
     keyCodeItems = {{
         EnumItemDesc{
             .name = atoms.intern("Unknown"),
@@ -2340,183 +2340,198 @@ void registerEnums(EnumRegistry& enums, core::AtomTable& atoms)
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("MouseLeft"),
+            .name = atoms.intern("Home"),
             .value = 64,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("MouseMiddle"),
+            .name = atoms.intern("End"),
             .value = 65,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("MouseRight"),
+            .name = atoms.intern("Delete"),
             .value = 66,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("MouseX1"),
+            .name = atoms.intern("MouseLeft"),
             .value = 67,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("MouseX2"),
+            .name = atoms.intern("MouseMiddle"),
             .value = 68,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("MouseMovement"),
+            .name = atoms.intern("MouseRight"),
             .value = 69,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("MouseWheel"),
+            .name = atoms.intern("MouseX1"),
             .value = 70,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("ButtonSouth"),
+            .name = atoms.intern("MouseX2"),
             .value = 71,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("ButtonEast"),
+            .name = atoms.intern("MouseMovement"),
             .value = 72,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("ButtonWest"),
+            .name = atoms.intern("MouseWheel"),
             .value = 73,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("ButtonNorth"),
+            .name = atoms.intern("ButtonSouth"),
             .value = 74,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("ButtonBack"),
+            .name = atoms.intern("ButtonEast"),
             .value = 75,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("ButtonGuide"),
+            .name = atoms.intern("ButtonWest"),
             .value = 76,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("ButtonStart"),
+            .name = atoms.intern("ButtonNorth"),
             .value = 77,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("ButtonLeftStick"),
+            .name = atoms.intern("ButtonBack"),
             .value = 78,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("ButtonRightStick"),
+            .name = atoms.intern("ButtonGuide"),
             .value = 79,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("ButtonLeftShoulder"),
+            .name = atoms.intern("ButtonStart"),
             .value = 80,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("ButtonRightShoulder"),
+            .name = atoms.intern("ButtonLeftStick"),
             .value = 81,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("DpadUp"),
+            .name = atoms.intern("ButtonRightStick"),
             .value = 82,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("DpadDown"),
+            .name = atoms.intern("ButtonLeftShoulder"),
             .value = 83,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("DpadLeft"),
+            .name = atoms.intern("ButtonRightShoulder"),
             .value = 84,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("DpadRight"),
+            .name = atoms.intern("DpadUp"),
             .value = 85,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("LeftStickX"),
+            .name = atoms.intern("DpadDown"),
             .value = 86,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("LeftStickY"),
+            .name = atoms.intern("DpadLeft"),
             .value = 87,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("RightStickX"),
+            .name = atoms.intern("DpadRight"),
             .value = 88,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("RightStickY"),
+            .name = atoms.intern("LeftStickX"),
             .value = 89,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("LeftTrigger"),
+            .name = atoms.intern("LeftStickY"),
             .value = 90,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("RightTrigger"),
+            .name = atoms.intern("RightStickX"),
             .value = 91,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("LeftThumbstick"),
+            .name = atoms.intern("RightStickY"),
             .value = 92,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("RightThumbstick"),
+            .name = atoms.intern("LeftTrigger"),
             .value = 93,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("Virtual1"),
+            .name = atoms.intern("RightTrigger"),
             .value = 94,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("Virtual2"),
+            .name = atoms.intern("LeftThumbstick"),
             .value = 95,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("Virtual3"),
+            .name = atoms.intern("RightThumbstick"),
             .value = 96,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("Virtual4"),
+            .name = atoms.intern("Virtual1"),
             .value = 97,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("VirtualStick1"),
+            .name = atoms.intern("Virtual2"),
             .value = 98,
             .docKey = {},
         },
         EnumItemDesc{
-            .name = atoms.intern("VirtualStick2"),
+            .name = atoms.intern("Virtual3"),
             .value = 99,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Virtual4"),
+            .value = 100,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("VirtualStick1"),
+            .value = 101,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("VirtualStick2"),
+            .value = 102,
             .docKey = {},
         },
     }};
