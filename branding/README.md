@@ -5,67 +5,95 @@ why these live at the top level rather than buried under `docs/`.
 
 | File | What it is |
 |---|---|
-| `luaug-logotipo-original.svg` | The artwork as delivered, on its green plate. Source of truth; the two below are derived from it. |
-| `luaug-logo.svg` | The wordmark, transparent, cropped to its own bounds. |
-| `luaug-mark.svg` | The `</>` symbol alone, square. This is the icon. |
-| `luaug-logo-512.png` | Raster wordmark for README and docs. |
-| `icon/luaug-{16..256}.png` | The symbol at each size an OS asks for. |
-| `icon/luaug.ico` | The same set as one Windows icon resource. |
+| `luaug-mark.svg` | **The source of truth.** The mark, written as four circles and one arc. |
+| `icon/luaug-{16..256}.png` | The mark at each size an OS asks for, rendered from the SVG's numbers. |
+| `icon/luaug.ico` | The same set as one Windows icon resource. Every entry PNG — see below. |
+| `luaug-mark-512.png` | Raster mark for anywhere a PNG is wanted. |
+| `luaug-logo-512.png` | The wordmark, set in Inter. See *the wordmark has no SVG*. |
+| `luaug-lockup-horizontal.png` | Mark beside wordmark. The default lockup. |
+| `luaug-lockup-stacked.png` | Mark over wordmark, for square-ish space. |
+| `luaug-social-card.png` | 1280×640, GitHub's link preview. |
 
-## Why the icon is the symbol and not the wordmark
+## The mark
 
-The wordmark is 3.2:1. Rendered into the square an OS icon actually gets, it is
-a smear at 16 px and marginal at 32 px — the `</>` above the letters disappears
-first, which is the part that says what this is. The symbol reads at every size
-down to 16 px. So the wordmark is for READMEs and docs pages, and the mark is
-for windows, taskbars and installers.
+A crescent inside an orbit, with a satellite sitting on the ring where the ring
+breaks for it. `lua` is *moon*, and Luau is what this engine embeds — the lineage
+is honest, and the mark is not Lua's own planet-and-orbit.
 
-## Removing the green was not deleting one shape
+**It is one colour.** The design had a navy satellite; navy disappears on a dark
+taskbar, and a two-colour mark would then need two files for something no OS
+switches between. It never needed the colour, because the **gap** around the
+satellite already makes it a distinct object. That rule — *a distinction carried
+by colour is not a distinction* — is what eliminated three of the eight
+candidates this replaced, and it applies to the finished mark too.
 
-The original is a traced bitmap, not drawn vectors: 31 paths, ~30 near-identical
-colours, and coordinates carrying eleven decimal places. The green plate is one
-path — but the counters of the letters (the enclosed space inside `a`, inside
-`u`) were traced as their own green shapes, because in a bitmap that space *is*
-background. Deleting only the plate leaves a green block sitting inside the `a`.
+**Recolour it freely.** One fill, one stroke, both `#12B0FF`. There is no dark
+variant file and there must not be one: two drawings of the same mark drift.
 
-So the green-family fills are classified — `g > r and g > b`, near-white
-excluded — and then split by what each one *is*, which a bounding box cannot tell
-you and rendering can:
+## Why the icon is the mark and not the wordmark
 
-- The **plate** is deleted.
-- The **counter of the `a`** is punched out with a `<mask>`. Deleting it leaves
-  the letter filled solid; masking makes it a hole, which is what it always was.
-- Everything else is **anti-aliasing fringe** and is deleted. One of those,
-  `#C6E0D3`, has a 129×160 bounding box and almost no area — a sliver down the
-  edge of the second `u`. Promoting it to a counter on the strength of its box
-  would have cut a chunk out of that letter, which is why each candidate was
-  rendered alone and looked at before anything was masked.
+The wordmark is about 3:1. Rendered into the square an OS icon actually gets it
+is a smear at 16 px. The mark reads at every size down to 16, which was tested
+before it was chosen rather than assumed after.
 
-The blues and whites are byte-for-byte from the original. **If the logo is ever
-re-traced, this has to be redone** — a fresh trace brings its own fringe colours
-and its own counters.
+## `luaug-mark.svg` is written, not traced
+
+Four circles and one circular arc, whole numbers, 1.7 KB.
+
+What it replaced was an **autotraced bitmap**: 31 paths, around thirty
+near-identical colours, coordinates carrying eleven decimal places, and the
+counters of the letters existing as separate green shapes because in a bitmap the
+inside of an `a` *is* background. That is why the old letterforms were irregular
+and why they could not be corrected — there was nothing to correct, only pixels
+that had been guessed at.
+
+The rasters in `icon/` are rendered from this file's numbers, restated once in
+the build script. **There is no SVG rasteriser in this repository and there must
+not be one**: adding a dependency for six icons would be an ADR for an artifact
+that changes when the logo changes, which is approximately never. Same trade
+ADR 0032 makes for DXC — commit the artifact, write down where it came from.
+
+## The wordmark has no SVG, and that is the better record
+
+`LuauG` is **set in Inter Bold 700, optical size 32, tracking −1.5%**, from
+`third_party/inter` (OFL-1.1) — already the engine's default typeface by human
+decision, so the UI and the wordmark share a face.
+
+The record for it is that recipe, not a file of outline curves. The recipe
+reproduces it exactly *and* names the typeface; Béziers do neither.
+
+**The `G` is not coloured or weighted separately.** Beyond the fact that such a
+device dies when the wordmark is flattened to one ink, splitting `Luau` from `G`
+points at the *language* — and R7 and ADR 0020 are the whole reason this engine
+does not present itself as Roblox-adjacent. It is one name.
+
+**Never ask an image model for the letters.** That is what produced the wordmark
+this replaced, whose two `u`s did not match each other.
+
+## Every entry of `luaug.ico` is PNG, and it is written by hand
+
+The window icon is decoded by `stb_image`, and a BMP-encoded icon entry would
+need a DIB reader nothing in this engine has. Pillow writes BMP entries below
+256 px, so the ICONDIR structure is assembled by hand.
+
+`engine/platform/tests/platform_tests.cpp` asserts that the first four bytes of
+the icon the executable carries are a PNG signature. If this is ever regenerated
+with a tool, that test is where it says so — rather than in a window that quietly
+has no picture.
 
 ## Where these get used
 
-Nothing consumes them yet. Wiring them is **M8's application-identity scope**
-(see `docs/roadmap.md` § M8), and it is scheduled there rather than done early
-for a reason: the load-bearing half is not the engine's own icon, it is that a
-game built with `luaug build` carries *its* icon and not ours. That needs
-`luaug.toml` to have an `icon` key and `luaug build` to exist, and both are M8.
+`branding/luaug.rc` compiles `icon/luaug.ico` into `luaug-host` and into the
+platform test binary. A game built with `luaug build` carries *its* icon, not
+ours; ours is the fallback (`tools/cli/commands/build.luau`).
 
-The cheap half — the dev host's own window wearing the mark — can land any time
-`engine/app` is open anyway. It is `SDL_SetWindowIcon` over `stb_image` on the
-embedded 64 px PNG, and it is worth doing before the first docs screenshots are
-taken, because a default SDL icon in a README reads as unfinished.
+## How this one was chosen
 
-## Regenerating the rasters
+Eight candidates across four directions, in `art/branding/`, each judged on two
+rules before taste got a turn: **identifiable at 16 px**, and **survives being
+flattened to one colour**. Five of the eight failed by resembling something that
+already exists — a loading spinner, a Rubik's cube, the Microsoft logo, an eye,
+and the fullscreen button.
 
-The PNGs and the `.ico` were produced from `luaug-mark.svg` and
-`luaug-logo.svg` by flattening the Bézier segments and filling them, then
-downsampling with a Lanczos filter, and they are checked in rather than built.
-
-That is deliberate: rasterising SVG at build time needs a rasteriser, and this
-repository pins every tool it depends on (R5) — adding one for six icons would
-be a dependency ADR for an artifact that changes when the logo changes, which is
-approximately never. The same trade `ADR 0032` makes for DXC: commit the
-artifact, write down where it came from.
+The brief, the candidates and the full argument are in
+[`art/branding/README.md`](../art/branding/README.md).
