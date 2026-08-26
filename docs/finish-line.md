@@ -544,7 +544,19 @@ that sends the next session to the wrong place.
       objects and stopped on another session's mid-edit file. It becomes
       blocking once it has been green once, which the job says out loud.
 - [ ] **S7.6** The nightly real-image golden job that two documents promise.
-- [ ] **S7.7** Five of nine examples are never booted.
+- [x] **S7.7** Examples that no gate boots — fixed, and the count was FOUR
+      rather than five: `01-instances` was already driven by
+      `tests/determinism/example01` and `04-obby` by `tests/replay/obby`, both
+      of which point straight at the example directory. The four nobody ran
+      were `02-meshes`, `03-physics-playground`, `06-scene` and `11-ocean`.
+
+      One gate each, and the assertion is `FAIL_REGULAR_EXPRESSION` on the
+      log's own `[error]` and `[warn]` prefixes rather than a per-example
+      string — because that is the check that catches decay. A missing mesh, a
+      refused write, a script that raised on tick one and left the world empty
+      are all a log line, and every one of them ends with the host exiting zero
+      and reporting its frames: "it ran" is exactly the claim that was already
+      true of a broken example. Break-verified with a `warn` in one of them.
 - [ ] **S7.8** The shell is entered by no test on any machine.
 - [ ] **S7.9** The one test that builds the shell returns green without running.
 - [ ] **S7.10** `tools/iconpatch`, the exotic importer, the SDL3 GPU backend and

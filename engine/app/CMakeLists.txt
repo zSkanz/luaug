@@ -632,6 +632,33 @@ if(LUAUG_BUILD_TESTS)
     # A differential for the same reason the one above is: there is no reference
     # GPU and no checked-in image, so what it compares is this machine's own
     # frame with the grid on against the same frame with it off.
+    # --- Every example boots, and boots CLEAN (S7.7) ------------------------
+    #
+    # **Five of these were booted by no gate on any machine.** An example is a
+    # promise that a thing works, and the ones nothing runs are the ones that
+    # quietly stop working: a renamed property, a moved asset, a class that
+    # started refusing something. None of that breaks a build.
+    #
+    # The assertion is `FAIL_REGULAR_EXPRESSION` on the log's own error and
+    # warning prefixes rather than a per-example string. That is the check that
+    # actually catches decay: a missing mesh, a refused write, a script that
+    # raised on tick one and left the world empty are all a `[error]` line, and
+    # every one of them ends with the host still exiting zero and reporting its
+    # frames. "It ran" is exactly the claim that was already true of a broken
+    # example.
+    #
+    # `--rhi=null` because none of it needs a device: what is under test is the
+    # script, the scene and the assets, and a CI runner with no Vulkan driver
+    # must not turn "this machine has no graphics" into a red build.
+    foreach(example 01-instances 02-meshes 03-physics-playground 06-scene 11-ocean 12-ragdoll)
+        add_test(NAME example_boot_${example}
+            COMMAND luaug_host "${CMAKE_SOURCE_DIR}/examples/${example}"
+                    --headless --frames=20 --exit --rhi=null)
+        set_tests_properties(example_boot_${example} PROPERTIES
+            FAIL_REGULAR_EXPRESSION "\\[error\\];\\[warn\\]"
+            TIMEOUT 120)
+    endforeach()
+
     # `examples/12-ragdoll` builds its characters from a RIG, and that is the
     # part worth gating: `Ragdoll:Build` reads a skeleton, so a change that broke
     # the joint lookup, the skinned loader or the profile's alias list would
