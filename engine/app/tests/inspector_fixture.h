@@ -382,6 +382,11 @@ struct Fixture
     // what the stage needs from these is that they exist.
     scene::ClassId workspaceClass = scene::InvalidClass;
     scene::ClassId partClass = scene::InvalidClass;
+    // **What Group puts things into**, and registered here for the same reason
+    // `Part` is: a verb that cannot find its container makes nothing, silently,
+    // and "the feature is off" is exactly what a test must be able to tell
+    // apart from "the feature ran".
+    scene::ClassId modelClass = scene::InvalidClass;
     scene::ClassId materialClass = scene::InvalidClass;
     scene::ClassId cameraClass = scene::InvalidClass;
     scene::ClassId pointLightClass = scene::InvalidClass;
@@ -586,6 +591,13 @@ struct Fixture
             .properties = partProperties,
             .attachComponents = [](scene::World& w, core::InstanceId id) { w.parts().add(id, scene::PartComponent{}); },
             .detachComponents = [](scene::World& w, core::InstanceId id) { w.parts().remove(id); },
+        });
+        modelClass = classes.registerClass({
+            .name = atoms.intern("Model"),
+            .defaultName = atoms.intern("Model"),
+            .attachComponents = [](scene::World& w,
+                                   core::InstanceId id) { w.models().add(id, scene::ModelComponent{}); },
+            .detachComponents = [](scene::World& w, core::InstanceId id) { w.models().remove(id); },
         });
         materialProperties = {
             scene::PropertyDesc{

@@ -1623,6 +1623,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // a span into the inspector would be a span into a vector that
                 // has been rewritten underneath it.
                 if (editorCommands.deleteSelection || editorCommands.duplicateSelection ||
+                    editorCommands.groupSelection || editorCommands.ungroupSelection ||
                     editorCommands.reparentTo.valid()) {
                     const std::vector<core::InstanceId> acting(inspector.selectionSet().begin(),
                                                                inspector.selectionSet().end());
@@ -1634,6 +1635,17 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     }
                     if (editorCommands.duplicateSelection) {
                         (void)editor.duplicateInstances(authored(), acting, authoredRoot(), inspector);
+                    }
+                    // Group before ungroup, so a frame that somehow carried both
+                    // ends with the group taken apart rather than with a group
+                    // around what was just freed. Neither key can produce that
+                    // pair; the order is stated so it cannot depend on which
+                    // `if` came first.
+                    if (editorCommands.groupSelection) {
+                        (void)editor.groupSelection(authored(), acting, authoredRoot(), inspector);
+                    }
+                    if (editorCommands.ungroupSelection) {
+                        (void)editor.ungroupSelection(authored(), acting, authoredRoot(), inspector);
                     }
                 }
                 // **Colouring a folder**, from either panel. Which store it

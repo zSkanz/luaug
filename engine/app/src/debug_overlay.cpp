@@ -1400,6 +1400,13 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                                     static_cast<int>(count));
                 if (ImGui::MenuItem(duplicateLabel, "Ctrl+D", false, !engineOwned))
                     commands->duplicateSelection = true;
+                if (ImGui::MenuItem("Group", "Ctrl+G", false, !engineOwned))
+                    commands->groupSelection = true;
+                // Offered only on something that HAS children, because
+                // ungrouping a part is not a thing and a greyed row says that
+                // better than a refusal after the click does.
+                if (ImGui::MenuItem("Ungroup", "Ctrl+Shift+G", false, !engineOwned && world.firstChild(row.id).valid()))
+                    commands->ungroupSelection = true;
 
                 // **Copy, cut and the two pastes**, greyed rather than refused
                 // afterwards -- which is the rule every other item in this menu
@@ -5484,6 +5491,17 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         if (ImGui::GetIO().KeyCtrl && !engineOwned) {
             if (ImGui::IsKeyPressed(ImGuiKey_D, false))
                 commands.duplicateSelection = true;
+
+            // **Ctrl+G and Ctrl+Shift+G**, which is the pair every editor uses
+            // and therefore the pair a hand already knows. Shift for the
+            // opposite of a verb is the same rule ctrl-Z and ctrl-shift-Z
+            // follow one row up.
+            if (ImGui::IsKeyPressed(ImGuiKey_G, false)) {
+                if (ImGui::GetIO().KeyShift)
+                    commands.ungroupSelection = true;
+                else
+                    commands.groupSelection = true;
+            }
             if (ImGui::IsKeyPressed(ImGuiKey_C, false))
                 commands.copySelection = true;
             if (ImGui::IsKeyPressed(ImGuiKey_X, false))

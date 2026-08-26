@@ -1736,6 +1736,174 @@ bool Editor::deleteInstances(scene::World& world, std::span<const core::Instance
     return true;
 }
 
+namespace {
+
+// The shallowest instance that is an ancestor of, or equal to, every id.
+//
+// **Where a group goes.** Grouping four things from two branches has to put the
+// container somewhere both of them can reach, and that is their common ancestor
+// -- picking the first one's parent would silently move the other three into a
+// branch nobody asked about.
+[[nodiscard]] core::InstanceId commonParent(const scene::World& world, std::span<const core::InstanceId> ids,
+                                            core::InstanceId root)
+{
+    core::InstanceId shared = core::InstanceId{};
+    for (const core::InstanceId id : ids) {
+        const core::InstanceId parent = world.parentOf(id);
+        if (!parent.valid())
+            continue;
+        if (!shared.valid()) {
+            shared = parent;
+            continue;
+        }
+        if (shared == parent)
+            continue;
+
+        // Walk `shared` up until it covers `parent` too. Bounded by the tree's
+        // depth, and `root` is the backstop for two branches that meet nowhere
+        // -- which a world with more than one top-level tree can produce.
+        core::InstanceId walk = shared;
+        while (walk.valid() && !world.isAncestorOf(walk, parent))
+            walk = world.parentOf(walk);
+        shared = walk.valid() ? walk : root;
+    }
+    return shared;
+}
+
+} // namespace
+
+bool Editor::groupSelection(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId root,
+                            Inspector& inspector)
+{
+    if (ids.empty()) {
+        m_status = EditorStatus{"select something to group", true};
+        return false;
+    }
+
+    std::vector<core::InstanceId> ordered;
+    orderByTree(world, root, ids, ordered);
+
+    std::vector<core::InstanceId> movable;
+    bool wantsModel = false;
+    for (const core::InstanceId id : ordered) {
+        if (!world.alive(id) || id == root || isEngineOwned(world, id, root))
+            continue;
+        // **A `Model` when anything has a transform.** A model has a pivot,
+        // extents and a scale, all meaningless around four scripts -- and a
+        // folder around four parts throws away the one thing grouping parts is
+        // for.
+        wantsModel = wantsModel || world.parts().find(id) != nullptr || world.models().find(id) != nullptr;
+        movable.push_back(id);
+    }
+
+    if (movable.empty()) {
+        m_status = EditorStatus{"nothing there can be grouped -- the world and its services stay where they are", true};
+        return false;
+    }
+
+    const scene::ClassId containerClass = world.classes().findId(world.atoms().intern(wantsModel ? "Model" : "Folder"));
+    if (containerClass == scene::InvalidClass) {
+        m_status = EditorStatus{"this build has no class to group into", true};
+        return false;
+    }
+
+    const core::InstanceId parent = commonParent(world, movable, root);
+
+    // **Recorded before the create**, so one ctrl-Z takes the whole group back
+    // rather than leaving an empty container behind.
+    m_history.record(world, movable.size() == 1 ? "Group" : "Group " + std::to_string(movable.size()));
+
+    const core::InstanceId container = world.create(containerClass);
+    if (!container.valid()) {
+        m_status = EditorStatus{"this build has no class to group into", true};
+        return false;
+    }
+    world.setName(container, world.atoms().intern(wantsModel ? "Model" : "Folder"));
+    (void)world.setParent(container, parent.valid() ? parent : root);
+
+    core::usize moved = 0;
+    for (const core::InstanceId id : movable) {
+        // The container cannot be moved into itself, and neither can anything
+        // ABOVE it -- which `commonParent` makes impossible by construction and
+        // `setParent` refuses anyway. Counted rather than assumed.
+        if (!world.setParent(id, container).has_value())
+            ++moved;
+    }
+
+    inspector.pruneDead(world);
+    inspector.onWorldRestored();
+    // **The container, selected.** Grouping is a thing you do in order to then
+    // move the group, so leaving the children selected would mean the next drag
+    // undoes the reason you grouped them.
+    inspector.select(container);
+    inspector.reveal(container);
+    m_status = EditorStatus{"grouped " + std::to_string(moved) + " instance(s)", false};
+    return true;
+}
+
+bool Editor::ungroupSelection(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId root,
+                              Inspector& inspector)
+{
+    if (ids.empty()) {
+        m_status = EditorStatus{"select a group to take apart", true};
+        return false;
+    }
+
+    std::vector<core::InstanceId> containers;
+    for (const core::InstanceId id : ids) {
+        // **Only something with children.** Ungrouping a part is not a thing,
+        // and a verb that silently destroyed one would be the worst possible
+        // reading of a key nobody meant to press.
+        if (world.alive(id) && !isEngineOwned(world, id, root) && world.firstChild(id).valid())
+            containers.push_back(id);
+    }
+
+    if (containers.empty()) {
+        m_status = EditorStatus{"nothing selected has anything in it to take out", true};
+        return false;
+    }
+
+    m_history.record(world, containers.size() == 1 ? "Ungroup" : "Ungroup " + std::to_string(containers.size()));
+
+    std::vector<core::InstanceId> freed;
+    for (const core::InstanceId container : containers) {
+        const core::InstanceId parent = world.parentOf(container);
+
+        // **Collected before any of them moves.** `firstChild`/`nextSibling` is
+        // a live list, and reparenting while walking it drops every child after
+        // the first -- which is the shape of bug that leaves three of five in a
+        // container the editor then destroys.
+        std::vector<core::InstanceId> children;
+        for (core::InstanceId child = world.firstChild(container); child.valid(); child = world.nextSibling(child)) {
+            children.push_back(child);
+        }
+
+        for (const core::InstanceId child : children) {
+            if (!world.setParent(child, parent.valid() ? parent : root).has_value())
+                freed.push_back(child);
+        }
+
+        // Only once it is empty. A container that kept a child the tree refused
+        // to move is a container that still holds something, and destroying it
+        // would take that something with it.
+        if (!world.firstChild(container).valid())
+            (void)world.destroy(container);
+    }
+
+    world.retireDestroyed();
+    inspector.pruneDead(world);
+    inspector.onWorldRestored();
+
+    // What came out, selected -- because that is what somebody is now looking at
+    // and what they are about to move.
+    inspector.select(freed);
+    if (!freed.empty())
+        inspector.reveal(freed.front());
+
+    m_status = EditorStatus{"took out " + std::to_string(freed.size()) + " instance(s)", false};
+    return true;
+}
+
 bool Editor::duplicateInstances(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId root,
                                 Inspector& inspector)
 {

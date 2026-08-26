@@ -3642,3 +3642,184 @@ TEST_CASE("a resize to the same size is not a resize")
     CHECK(countLines(rhi::captureStream(*device), "\"createTexture\"") == 0);
     CHECK(countLines(rhi::captureStream(*device), "\"destroy\"") == 0);
 }
+
+// --- Group and Ungroup (S5.4) ------------------------------------------------
+
+TEST_CASE("grouping parts makes a Model, and grouping anything else makes a Folder")
+{
+    // **The whole rule, and it is the right one.** A `Model` has a pivot,
+    // extents and a scale, all meaningless around four scripts; a `Folder`
+    // around four parts throws away the one thing grouping parts is for.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId a = world.create(fixture.partClass);
+    const core::InstanceId b = world.create(fixture.partClass);
+    REQUIRE_FALSE(world.setParent(a, root).has_value());
+    REQUIRE_FALSE(world.setParent(b, root).has_value());
+
+    const std::array<core::InstanceId, 2> parts{a, b};
+    REQUIRE(editor.groupSelection(world, parts, root, inspector));
+
+    const core::InstanceId container = inspector.selection();
+    REQUIRE(container.valid());
+    CHECK(world.classOf(container) == fixture.modelClass);
+    CHECK(world.parentOf(a) == container);
+    CHECK(world.parentOf(b) == container);
+    CHECK(world.parentOf(container) == root);
+    CHECK(world.childCount(root) == 1);
+
+    // And the same gesture over things with no transform.
+    const core::InstanceId plainA = fixture.widget(world, "A");
+    const core::InstanceId plainB = fixture.widget(world, "B");
+    REQUIRE_FALSE(world.setParent(plainA, root).has_value());
+    REQUIRE_FALSE(world.setParent(plainB, root).has_value());
+    const std::array<core::InstanceId, 2> plain{plainA, plainB};
+    REQUIRE(editor.groupSelection(world, plain, root, inspector));
+    CHECK(world.classOf(inspector.selection()) == fixture.folderClass);
+}
+
+TEST_CASE("a group from two branches lands where both can reach it")
+{
+    // Picking the first one's parent would silently move the other three into a
+    // branch nobody asked about -- the shape of bug somebody notices a week
+    // later when the wrong folder is in the wrong place.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId left = fixture.widget(world, "Left");
+    const core::InstanceId right = fixture.widget(world, "Right");
+    REQUIRE_FALSE(world.setParent(left, root).has_value());
+    REQUIRE_FALSE(world.setParent(right, root).has_value());
+
+    const core::InstanceId one = fixture.widget(world, "One");
+    const core::InstanceId two = fixture.widget(world, "Two");
+    REQUIRE_FALSE(world.setParent(one, left).has_value());
+    REQUIRE_FALSE(world.setParent(two, right).has_value());
+
+    const std::array<core::InstanceId, 2> across{one, two};
+    REQUIRE(editor.groupSelection(world, across, root, inspector));
+    CHECK(world.parentOf(inspector.selection()) == root);
+}
+
+TEST_CASE("grouping is one undo step and it takes the container with it")
+{
+    // A step that left an empty container behind would be a step that undid
+    // most of what it did, which is worse than one that undid none of it.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId a = fixture.widget(world, "A");
+    const core::InstanceId b = fixture.widget(world, "B");
+    REQUIRE_FALSE(world.setParent(a, root).has_value());
+    REQUIRE_FALSE(world.setParent(b, root).has_value());
+
+    const std::array<core::InstanceId, 2> pair{a, b};
+    REQUIRE(editor.groupSelection(world, pair, root, inspector));
+    REQUIRE(world.childCount(root) == 1);
+
+    REQUIRE(editor.undo(world, inspector));
+    CHECK(world.childCount(root) == 2);
+    CHECK(world.parentOf(a) == root);
+    CHECK(world.parentOf(b) == root);
+}
+
+TEST_CASE("ungrouping takes every child out, not just the first")
+{
+    // **`firstChild`/`nextSibling` is a LIVE list**, and reparenting while
+    // walking it drops every child after the first -- which leaves four of five
+    // in a container the editor then destroys. Five children, because two would
+    // pass with the bug present half the time.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId container = fixture.widget(world, "Group");
+    REQUIRE_FALSE(world.setParent(container, root).has_value());
+
+    std::vector<core::InstanceId> children;
+    for (int index = 0; index < 5; ++index) {
+        const core::InstanceId child = fixture.widget(world, "Child");
+        REQUIRE_FALSE(world.setParent(child, container).has_value());
+        children.push_back(child);
+    }
+
+    const std::array<core::InstanceId, 1> one{container};
+    REQUIRE(editor.ungroupSelection(world, one, root, inspector));
+
+    CHECK_FALSE(world.alive(container));
+    CHECK(world.childCount(root) == 5);
+    for (const core::InstanceId child : children)
+        CHECK(world.parentOf(child) == root);
+    // And what came out is selected, because that is what somebody is now
+    // looking at and about to move.
+    CHECK(inspector.selectionCount() == 5);
+}
+
+TEST_CASE("ungrouping something with nothing in it is refused rather than deleting it")
+{
+    // The worst possible reading of a key nobody meant to press. A part is not
+    // a group, and a verb that quietly destroyed one would be indistinguishable
+    // from Delete on the wrong row.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId leaf = fixture.widget(world, "Leaf");
+    REQUIRE_FALSE(world.setParent(leaf, root).has_value());
+
+    const std::array<core::InstanceId, 1> one{leaf};
+    CHECK_FALSE(editor.ungroupSelection(world, one, root, inspector));
+    CHECK(world.alive(leaf));
+    CHECK(editor.status().failed);
+}
+
+TEST_CASE("group then ungroup leaves the tree where it started")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId a = fixture.widget(world, "A");
+    const core::InstanceId b = fixture.widget(world, "B");
+    const core::InstanceId c = fixture.widget(world, "C");
+    for (const core::InstanceId id : {a, b, c})
+        REQUIRE_FALSE(world.setParent(id, root).has_value());
+
+    const std::array<core::InstanceId, 3> three{a, b, c};
+    REQUIRE(editor.groupSelection(world, three, root, inspector));
+    const std::array<core::InstanceId, 1> container{inspector.selection()};
+    REQUIRE(editor.ungroupSelection(world, container, root, inspector));
+
+    CHECK(world.childCount(root) == 3);
+    for (const core::InstanceId id : three)
+        CHECK(world.parentOf(id) == root);
+}
+
+TEST_CASE("nothing selected is refused with a reason rather than making an empty group")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+    const core::InstanceId root = fixture.widget(world, "Root");
+
+    CHECK_FALSE(editor.groupSelection(world, {}, root, inspector));
+    CHECK(editor.status().failed);
+    CHECK(world.childCount(root) == 0);
+}

@@ -296,7 +296,17 @@ that sends the next session to the wrong place.
 - [ ] **S5.1** Anything that is not a `BasePart` can be picked and drawn.
 - [ ] **S5.2** The manipulator moves a `Model`, a `Camera`, an `Attachment`.
 - [ ] **S5.3** Selection resolves to the meaningful ancestor, with drill-down.
-- [ ] **S5.4** Group / Ungroup.
+- [x] **S5.4** Group / Ungroup — built, Ctrl+G and Ctrl+Shift+G, in the
+      Explorer's context menu, one undo step each. The container is a `Model`
+      when anything in the selection has a transform and a `Folder` when
+      nothing does: a model has a pivot, extents and a scale, all meaningless
+      around four scripts, and a folder around four parts throws away the one
+      thing grouping parts is for. It lands under the shallowest COMMON parent,
+      so grouping across two branches does not silently move things into one of
+      them. Ungroup refuses something with no children rather than destroying
+      it. Seven cases, and the live-list one is break-verified: walking
+      `firstChild`/`nextSibling` while reparenting drops four of five children
+      into a container the editor then destroys.
 - [x] **S5.5** Tags — built. The manual names the tag path as the PRIMARY way a
       script finds what a streamed world brought in, and until now the only way
       to put one on anything was to write a line of Luau, in a world whose

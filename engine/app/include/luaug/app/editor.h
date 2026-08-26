@@ -461,6 +461,12 @@ struct EditorCommands
     // added to the right-click to avoid.
     bool deleteSelection = false;
     bool duplicateSelection = false;
+    // **Group puts the selection under one new instance; ungroup takes the
+    // children out and destroys the container.** Two flags rather than one with
+    // a direction, because they are two verbs a person means separately and a
+    // toolbar draws two buttons for.
+    bool groupSelection = false;
+    bool ungroupSelection = false;
     // Rename an instance. Both halves or neither -- and singular, because
     // renaming four things to one name is not a thing anybody means.
     core::InstanceId renameInstance;
@@ -569,9 +575,9 @@ struct EditorCommands
     // it, and the flag is cleared where the write happens.
     [[nodiscard]] bool mutatesWorld() const noexcept
     {
-        return createClass != scene::InvalidClass || deleteSelection || duplicateSelection || reparentTo.valid() ||
-               renameInstance.valid() || paste || pasteInto || cutSelection || !placeStamp.empty() ||
-               breakStamp.valid() || stampSubject.valid() || undo || redo || newScene;
+        return createClass != scene::InvalidClass || deleteSelection || duplicateSelection || groupSelection ||
+               ungroupSelection || reparentTo.valid() || renameInstance.valid() || paste || pasteInto || cutSelection ||
+               !placeStamp.empty() || breakStamp.valid() || stampSubject.valid() || undo || redo || newScene;
     }
 
     [[nodiscard]] bool any() const noexcept
@@ -580,10 +586,11 @@ struct EditorCommands
                undo || redo || colorAsked || copySelection || cutSelection || paste || pasteInto ||
                stampSubject.valid() || !stampFolder.empty() || !placeStamp.empty() || breakStamp.valid() ||
                !openStamp.empty() || saveStamp || closeStamp || createClass != scene::InvalidClass || deleteSelection ||
-               duplicateSelection || reparentTo.valid() || renameInstance.valid() || !saveAs.empty() ||
-               !openScene.empty() || !createFolder.empty() || !deleteContent.empty() || !duplicateContent.empty() ||
-               newStampClass != scene::InvalidClass || !renameContent.empty() || !assignStampPath.empty() ||
-               importAssets || importParent.valid() || openScript.valid();
+               duplicateSelection || groupSelection || ungroupSelection || reparentTo.valid() ||
+               renameInstance.valid() || !saveAs.empty() || !openScene.empty() || !createFolder.empty() ||
+               !deleteContent.empty() || !duplicateContent.empty() || newStampClass != scene::InvalidClass ||
+               !renameContent.empty() || !assignStampPath.empty() || importAssets || importParent.valid() ||
+               openScript.valid();
     }
 };
 
@@ -1271,6 +1278,35 @@ public:
     // editor: an operation over a set has to be a function of the set).
     bool deleteInstances(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId root,
                          Inspector& inspector);
+    // **Puts `ids` under one new container and selects it** (S5.4).
+    //
+    // The container is a `Model` when anything in the selection has a transform
+    // and a `Folder` when nothing does. That is the whole rule, and it is the
+    // right one: a `Model` has a pivot, extents and a scale, all of which are
+    // meaningless around four scripts -- and a `Folder` around four parts throws
+    // away the one thing grouping parts is for.
+    //
+    // It is created under the SHALLOWEST common parent, so grouping things from
+    // two branches does not silently move the group into one of them.
+    //
+    // Refused, with a reason, when: nothing is selected, everything selected is
+    // engine-owned, or the selection includes the authored root -- a world
+    // cannot be put inside something in it.
+    bool groupSelection(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId root,
+                        Inspector& inspector);
+
+    // **Takes each selected container's children out and destroys it**, and
+    // selects what came out.
+    //
+    // Only containers: something with no children is not a group, and refusing
+    // it by name is better than a verb that silently deletes a part. The
+    // children keep their world transform, because ungrouping is a change to the
+    // TREE and not to where anything is -- a `Model` has no transform of its own
+    // to have been applying, so this is true by construction and is asserted
+    // rather than arranged.
+    bool ungroupSelection(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId root,
+                          Inspector& inspector);
+
     bool duplicateInstances(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId root,
                             Inspector& inspector);
 
