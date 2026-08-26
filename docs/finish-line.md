@@ -286,7 +286,14 @@ that sends the next session to the wrong place.
       `--no-tests=error` beside it, because an empty suite is not a passing
       one either. **The CI half is still owed** and belongs with S7.2.
 - [ ] **S7.4** No gate builds the three Windows profiles the release ships.
-- [ ] **S7.5** `linux-clang-asan` is fully wired and run by nothing.
+- [~] **S7.5** `linux-clang-asan` is fully wired and run by nothing. **Now
+      run**: a `-Only asan` stage locally and a non-blocking nightly job,
+      both through the same script. Two blockers found and fixed, neither in
+      our code — the image had no sanitizer runtime, and UBSan's `vptr` check
+      aborted the shader compiler on a SPIRV-Cross downcast at build time.
+      **Its first full green run is still owed** — it reached 1,170 of 1,214
+      objects and stopped on another session's mid-edit file. It becomes
+      blocking once it has been green once, which the job says out loud.
 - [ ] **S7.6** The nightly real-image golden job that two documents promise.
 - [ ] **S7.7** Five of nine examples are never booted.
 - [ ] **S7.8** The shell is entered by no test on any machine.
