@@ -1657,6 +1657,28 @@ public:
     void adoptCamera(const core::CFrameD& cframe) noexcept;
     [[nodiscard]] bool cameraAdopted() const noexcept { return m_cameraAdopted; }
 
+    // **Whether the viewport is showing the editor's camera while the game
+    // runs** (S5.8), and it is off.
+    //
+    // Pressing play hands the view to the game's camera, which is what pressing
+    // play means. Detaching takes the VIEW back without touching the simulation:
+    // the world keeps ticking, the game's camera keeps doing whatever it does,
+    // and you fly around and watch. That is the only way to see a running game
+    // from anywhere other than where it puts you -- an enemy behind a wall, a
+    // chunk that failed to stream, a character stuck inside geometry the player
+    // camera is inside of too.
+    //
+    // **It takes the pointer back as well**, and that is not a separate
+    // decision: the fly camera is driven by a right-drag, and a game holding the
+    // pointer (D069) means the drag never reaches the editor -- so detaching
+    // without it is a camera you cannot turn.
+    //
+    // Cleared by play and by stop, because "am I looking through my own camera"
+    // is a question about the current run and not a preference. Reading it while
+    // editing answers false, since the view is already the editor's there.
+    [[nodiscard]] bool cameraDetached() const noexcept { return m_cameraDetached && m_run != RunState::Editing; }
+    void setCameraDetached(bool detached) noexcept { m_cameraDetached = detached; }
+
     // **F: put the camera where it can see what is selected**, which every
     // editor in this shape does and which somebody's hands therefore already
     // know. The DIRECTION is kept and only the position moves: reorienting as
@@ -1814,6 +1836,7 @@ private:
     bool m_closeRequested = false;
     core::CFrameD m_cameraCFrame;
     bool m_cameraAdopted = false;
+    bool m_cameraDetached = false;
     // Where `focusCamera` is taking the position, and how long it has left.
     core::DVec3 m_focusTarget;
     f32 m_focusRemaining = 0.0f;

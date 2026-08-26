@@ -3293,6 +3293,22 @@ void drawTransport(Editor& editor, EditorCommands& commands, EditorDialogs& dial
         if (toolButton(icons::ActionForward, "step", "advance exactly one simulation tick"))
             editor.requestStep();
         ImGui::EndDisabled();
+
+        // **Look somewhere else while it runs** (S5.8). Only in play mode,
+        // because while editing the view is already the editor's -- a button
+        // that did nothing in the state somebody spends most of their time in
+        // would be furniture.
+        ImGui::SameLine();
+        const bool detached = editor.cameraDetached();
+        if (detached)
+            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        if (toolButton(icons::ActionVisible, "eye",
+                       detached ? "looking through the editor's camera -- click to go back to the game's"
+                                : "fly the editor's camera while the game runs. The simulation is untouched")) {
+            editor.setCameraDetached(!detached);
+        }
+        if (detached)
+            ImGui::PopStyleColor();
     }
 
     // --- The manipulators -----------------------------------------------

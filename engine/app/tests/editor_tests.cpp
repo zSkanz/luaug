@@ -3936,3 +3936,64 @@ TEST_CASE("something with no transform anywhere gets no gizmo, which is honest")
 
     CHECK_FALSE(editor.gizmoFrame(world, inspector).has_value());
 }
+
+// --- Looking somewhere else while it runs (S5.8) -----------------------------
+
+TEST_CASE("the view detaches only while something is running")
+{
+    // While editing the view is already the editor's, so the question does not
+    // arise -- and a flag that answered true there would make the transport
+    // button meaningful in a state it has nothing to do.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    editor.setCameraDetached(true);
+    CHECK_FALSE(editor.cameraDetached());
+
+    editor.play(world);
+    // Play CLEARS it, so this is not the write above surviving.
+    CHECK_FALSE(editor.cameraDetached());
+    editor.setCameraDetached(true);
+    CHECK(editor.cameraDetached());
+}
+
+TEST_CASE("pressing play attaches, and so does stopping")
+{
+    // Detaching is a thing somebody does DURING a run to look at something.
+    // Carrying it into the next one would mean pressing play and finding the
+    // view somewhere they left it a session ago, with nothing on screen saying
+    // why.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    editor.play(world);
+    editor.setCameraDetached(true);
+    REQUIRE(editor.cameraDetached());
+
+    editor.stop(world, inspector);
+    CHECK_FALSE(editor.cameraDetached());
+
+    editor.play(world);
+    CHECK_FALSE(editor.cameraDetached());
+}
+
+TEST_CASE("detaching does not touch the simulation")
+{
+    // The whole claim: the world keeps ticking and the game's camera keeps doing
+    // whatever it does. A "detach" that paused would be a second pause button
+    // that says something else.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    editor.play(world);
+    const app::RunState before = editor.runState();
+    editor.setCameraDetached(true);
+    CHECK(editor.runState() == before);
+    CHECK(editor.allowedTicks(3) == 3u);
+}

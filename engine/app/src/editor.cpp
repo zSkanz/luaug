@@ -148,6 +148,11 @@ void Editor::play(scene::World& world)
     // the editor".
     m_playSnapshot = std::make_unique<scene::WorldSnapshot>(world.snapshot());
     m_run = RunState::Playing;
+    // **Attached, every time play is pressed** (S5.8). Detaching is a thing
+    // somebody does DURING a run to look at something; carrying it into the next
+    // one would mean pressing play and finding the view somewhere they left it a
+    // session ago, with nothing on screen saying why.
+    m_cameraDetached = false;
     m_status = EditorStatus{"playing", false};
 }
 
@@ -164,6 +169,7 @@ void Editor::setPaused(bool paused) noexcept
 void Editor::stop(scene::World& world, Inspector& inspector)
 {
     m_run = RunState::Editing;
+    m_cameraDetached = false;
     if (m_playSnapshot == nullptr)
         return;
 

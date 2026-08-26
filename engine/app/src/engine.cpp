@@ -2290,7 +2290,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // that reads `InputService.PointerLocked` sees what it wrote, which
             // keeps the property honest and keeps a replay of a game that locks
             // its pointer legal.
-            const bool editorOwnsPointer = options.editor && editing(editor.runState());
+            // **A detached view owns the pointer too**, and that is not a
+            // second decision: the fly camera is driven by a right-drag, and a
+            // game holding the pointer (D069) means the drag never reaches the
+            // editor -- so detaching without this is a camera you cannot turn.
+            const bool editorOwnsPointer = options.editor && (editing(editor.runState()) || editor.cameraDetached());
             // **While turning the camera the pointer is hidden and held**, which
             // is SDL's relative mode and is what puts the cursor back exactly
             // where it was when the button is released. Without it a right-drag
@@ -2825,8 +2829,16 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             const core::InstanceId gameCamera = host->currentCamera();
             const bool gameHasCamera = host->world().alive(gameCamera) && !host->world().destroyed(gameCamera) &&
                                        host->world().cameras().find(gameCamera) != nullptr;
-            const bool useEditorView =
-                options.editor && editor.cameraAdopted() && (editing(editor.runState()) || !gameHasCamera);
+            // **Or the view was DETACHED** (S5.8). Pressing play hands the
+            // view to the game's camera, which is what pressing play means;
+            // detaching takes the view back without touching the simulation, so
+            // the world keeps ticking and you fly around and watch. It is the
+            // only way to see a running game from anywhere other than where it
+            // puts you -- an enemy behind a wall, a chunk that failed to stream,
+            // a character stuck inside geometry the player camera is inside of
+            // too.
+            const bool useEditorView = options.editor && editor.cameraAdopted() &&
+                                       (editing(editor.runState()) || editor.cameraDetached() || !gameHasCamera);
             // **The selection, drawn as a silhouette rather than as a box.** The
             // wire box E1 shipped says where a thing's BOUNDS are, which for
             // anything that is not a cube is a shape the object does not have --

@@ -360,7 +360,16 @@ that sends the next session to the wrong place.
       result before writing it -- which is what stops a Settings box turning a
       working project into one the engine will not open. Seventeen cases, most
       of them asserting what the edit did NOT touch.
-- [ ] **S5.8** Camera control during play.
+- [x] **S5.8** Camera control during play — built, as an eye button in the
+      transport that appears only while something is running. Detaching takes
+      the VIEW back without touching the simulation: the world keeps ticking
+      and the game's camera keeps doing whatever it does. It is the only way to
+      see a running game from anywhere other than where it puts you -- an enemy
+      behind a wall, a chunk that failed to stream, a character stuck inside
+      geometry the player camera is inside of too. It takes the pointer back
+      too, which is not a second decision: the fly camera is a right-drag, and
+      a game holding the pointer (D069) means the drag never arrives. Cleared
+      by play and by stop, because it is a question about the current run.
 - [x] **S5.9** The Streaming panel in the editor shell — built, inside Stats.
       `drawShell` has drawn those counters since M7 and `drawEditorShell` was
       never handed the host, so the one shell in which somebody is AUTHORING a
