@@ -181,6 +181,38 @@ to a file and taxes every configuration to enable.
 | M6 | `examples/04-obby` | `win-msvc-dev` | worst frame | 1.84 ms | — |
 | M6 | `examples/04-obby` | `win-msvc-dev` | draws / triangles | 15 / 172 — solid parts now, where M5's playground was 0 / 0 |
 | M6 | `luaug_ui_tests` (a laid-out tree, then two more frames touching nothing) | `win-msvc-dev` | `layoutStats().solverRuns` on an idle frame | **0** | 0 — asserted, not measured |
+| **E9** | `tests/bench/sockets200` (200 anchored posts, each with a free arm on a `BallSocketConstraint`; half limited, half not) | `win-msvc-dev` | mean sim tick | **0.66 ms** | 16 ms |
+| E9 | `tests/bench/sockets200` | `win-msvc-dev` | worst sim tick | 1.11 ms | — |
+| E9 | `tests/bench/sockets200` | `win-msvc-dev` | physics: apply / step / writeback | 0.019 / 0.584 / 0.051 ms | — |
+| **E9** | `tests/bench/ragdoll10` (10 humanoids, 160 bodies and 150 joints in **10 islands**, dropped and still moving at tick 300) | `win-msvc-dev` | mean sim tick | **0.31 ms** | 16 ms |
+| E9 | `tests/bench/ragdoll10` | `win-msvc-dev` | worst sim tick | 0.75 ms | — |
+| E9 | `tests/bench/ragdoll10` | `win-msvc-dev` | physics: apply / step / writeback | 0.012 / 0.262 / 0.034 ms | — |
+| E9 | `tests/bench/physics1k` **after the constraint family** (the same scene, unchanged) | `win-msvc-dev` | mean sim tick | **2.00 ms** | 16 ms — unchanged from M5's 2.02, which is the claim |
+| E9 | `tests/bench/churn10k` **after the constraint family** (the same scene, unchanged) | `win-msvc-dev` | mean sim tick | **6.98 ms** | 16 ms — 7.32 at M6, so the three new per-tick passes cost a scene with no joints in it nothing |
+
+**A ragdoll is cheaper than two hundred sockets, and the ratio is the point.**
+`sockets200` is 400 bodies in 200 two-body islands and costs 0.58 ms of solver;
+`ragdoll10` is 160 bodies in 10 sixteen-body islands and costs 0.26 ms. Per BODY
+the ragdoll is slightly dearer -- a sixteen-body island has to be solved together
+every iteration, where two hundred two-body islands are two hundred independent
+problems the solver splits apart -- and per SCENE it is far cheaper, because ten
+characters is a hundred and sixty bodies and two hundred joints is four hundred.
+
+The number worth carrying forward: **a ragdoll costs about 26 microseconds of
+solver while it is moving**, so a fight with ten of them is a quarter of a
+millisecond and thirty of them would still be under one. An island that has gone
+to sleep costs nothing at all, which is why the bench drops them rather than
+posing them -- ten settled heaps would have measured the sleep heuristic and
+reported it as a ragdoll price.
+
+**The constraint family's three new per-tick passes cost a jointless scene
+nothing, and that was the gate.** Attachment resolution, the second `applyScene`
+walk and constraint retirement are each a walk over a pool, and every one of
+those pools is empty in `physics1k` and `churn10k` -- which is what their rows
+above say: 2.00 against M5's 2.02, and 6.98 against M6's 7.32. Both are inside
+run-to-run noise on this machine, and neither moved in the direction a new
+per-tick walk would move them.
+
 
 **UI cost is relayout and not draw, and the roadmap asked for the two to be
 measured separately.** The draw half is in the obby row above: fifteen draws for

@@ -292,7 +292,18 @@ RagdollBuildResult buildRagdoll(World& world, const SkeletonHost& skeleton, core
         if (constraintClass == InvalidClass)
             continue;
 
-        const CFrameD at{built[index].origin, childFrame.rotation};
+        // **Which way the joint's own X points, and the two kinds want opposite
+        // answers.** A swing-twist measures its cone from that axis and twists
+        // about it, so for a shoulder it has to run DOWN the bone -- the limb's
+        // own +Y. A hinge turns about it, and an elbow turns about an axis
+        // ACROSS the bone, which is what the limb's own X already is.
+        //
+        // Getting this wrong is not subtle and is not visible either: every ball
+        // socket starts thirty degrees outside a sixty-degree cone, sixty joints
+        // push at once to fix it, and the character launches. That is what it
+        // did, and the determinism scenario is where it showed up.
+        const CFrameD at{built[index].origin,
+                         limb.kind == 2 ? childFrame.rotation : childFrame.rotation * core::rotationZ(kQuarterTurn)};
         const core::InstanceId end0 = world.create(classes.attachment);
         const core::InstanceId end1 = world.create(classes.attachment);
         if (!end0.valid() || !end1.valid())

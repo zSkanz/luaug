@@ -1,0 +1,8 @@
+{
+  "name": "ragdoll",
+  "script": "init.luau",
+  "seed": 20260826,
+  "ticks": 3000,
+  "checkpointEvery": 150,
+  "sameBuildOnly": true
+}

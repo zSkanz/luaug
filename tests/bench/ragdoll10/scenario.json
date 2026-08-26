@@ -1,0 +1,7 @@
+{
+  "name": "ragdoll10",
+  "script": "init.luau",
+  "seed": 2609,
+  "ticks": 300,
+  "budgetMs": 16.0
+}
