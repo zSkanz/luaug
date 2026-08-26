@@ -603,7 +603,10 @@ struct UIObjectComponent
 struct TextLabelComponent
 {
     std::string text;
-    // An `asset://` URI to a TrueType file; empty means the built-in face.
+    // An `asset://` URI to a TrueType file. Empty is the engine's own default
+    // face -- Inter, staged beside the binary -- and so is the literal name
+    // `Inter`. The built-in vector face is what is left when even that file is
+    // absent; it is not what an empty `Font` asks for.
     std::string font;
     core::Color3 textColor{0.0f, 0.0f, 0.0f};
     f32 textSize = 14.0f;
@@ -678,7 +681,19 @@ struct AudioGroupComponent
 // A field the mixer wrote would be the wall clock entering the world.
 struct SoundComponent
 {
-    // An `asset://` URI. Stored and not yet decoded (M7).
+    // An `asset://` URI, kept as the script wrote it. `audio` resolves it
+    // against the content mounts and decodes the file into the mixer's own
+    // format, cached under this string; a URI that resolves to nothing is
+    // audibly a placeholder tone rather than silence, and its timeline is then
+    // measured against the placeholder's length rather than a real one.
+    //
+    // **The first ask decodes the whole file on the calling thread**, and that
+    // is still open (D129): the render frame reaches it, and so does the sim
+    // tick, through the clip length `timePosition` is compared against. The
+    // tick's half cannot simply become asynchronous -- it advances
+    // `TimePosition` and clears `Playing` on the tick that fires `Ended`, and
+    // the world hash covers both, so a length that depended on when a decode
+    // finished would be a world hash that depended on disk speed (R10).
     std::string content;
     core::InstanceId group;
     // Seconds. f64 because it is compared against `simTime`-shaped quantities

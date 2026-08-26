@@ -57,7 +57,89 @@ namespace luaug::app {
 
 #if LUAUG_DEBUG_UI
 
+// --- What this shell decides, as opposed to what it draws -------------------
+//
+// Two answers that are arithmetic rather than pixels, and they sit OUT of the
+// anonymous namespace below on purpose. The only case in `debug_overlay_tests`
+// that builds this shell needs a display and a GPU device, and where either is
+// missing it returns before it asserts -- so a check written inside it reports
+// a pass it never ran. A decision that is a reachable function is a decision
+// every machine can check, which is the same move `collectTree` made in
+// `inspector.h`.
+
+// **Ask, or act: the one gate in front of every verb that empties the scene.**
+//
+// Five doors lead to the same loss -- File > New Scene, opening another scene,
+// making a project, leaving for one, and quitting -- and the toolbar's New was
+// a sixth that acted on the spot. A person learns the rule from the doors that
+// knock, so the one that stays silent does not read as an exception: it reads
+// as "there was nothing to lose".
+//
+// `unsavedWork` is passed rather than read off the `Editor` so this stays a
+// decision over values. `scene` is what `Pending::OpenScene` was going to open
+// and is ignored by the other four; it has to survive the question, because the
+// answer arrives frames after the double-click and by then the browser is
+// looking somewhere else.
+void issueOrAsk(EditorDialogs::Pending what, bool unsavedWork, std::string_view scene, EditorDialogs& dialogs,
+                EditorCommands& commands)
+{
+    if (what == EditorDialogs::Pending::None)
+        return;
+
+    // Nothing to lose, so nothing to ask about: a dialog raised over a clean
+    // scene is one people learn to dismiss without reading, and then dismiss
+    // over a dirty one too.
+    if (unsavedWork) {
+        dialogs.pending = what;
+        dialogs.pendingScene = std::string(scene);
+        return;
+    }
+
+    switch (what) {
+    case EditorDialogs::Pending::Quit:
+        commands.quit = true;
+        break;
+    case EditorDialogs::Pending::NewScene:
+        commands.newScene = true;
+        break;
+    case EditorDialogs::Pending::OpenScene:
+        commands.openScene = std::string(scene);
+        break;
+    case EditorDialogs::Pending::NewProject:
+        commands.newProject = true;
+        break;
+    case EditorDialogs::Pending::OpenProject:
+        commands.openProject = true;
+        break;
+    case EditorDialogs::Pending::None:
+        break;
+    }
+}
+
+// **How tall the Console's log is: everything the panel has left, less the room
+// the REPL line under it needs.**
+//
+// It was a fixed 160 px inside a window somebody can drag taller, so enlarging
+// the Console added empty space BELOW the log rather than showing more of it --
+// which is the only thing making a console bigger is ever for.
+//
+// `minimum` is a floor rather than tidiness. The same console is drawn at the
+// foot of the F3 overlay's scrolling window, where what is left can be a few
+// pixels or none, and ImGui reads a non-positive child height as "fill the
+// rest, less this much" -- so an unclamped subtraction would make the log grow
+// as the room for it shrank.
+[[nodiscard]] f32 consoleLogHeight(f32 available, f32 reservedBelow, f32 minimum) noexcept
+{
+    const f32 height = available - reservedBelow;
+    return height < minimum ? minimum : height;
+}
+
 namespace {
+
+// What the log falls back to where there is nothing to fill: the height it was
+// fixed at before it could fill anything, so the F3 overlay's console keeps the
+// shape it has always had.
+constexpr f32 kConsoleLogMinHeight = 160.0f;
 
 // Bound at construction, read while drawing. These sit beside ImGui's own
 // process-wide context rather than inside the class for two reasons: that
@@ -2668,7 +2750,13 @@ void drawConsole(script::ScriptRuntime* runtime)
     const std::string_view needle{filter.data()};
     core::usize shown = 0;
 
-    if (ImGui::BeginChild("log", ImVec2(0.0f, 160.0f), ImGuiChildFlags_Borders)) {
+    // **The log is the part that grows.** One REPL line and its spacing sit
+    // under it and everything else the panel has is the log's -- see
+    // `consoleLogHeight`, which is where the arithmetic is asserted.
+    const f32 logHeight =
+        consoleLogHeight(ImGui::GetContentRegionAvail().y, ImGui::GetFrameHeightWithSpacing(), kConsoleLogMinHeight);
+
+    if (ImGui::BeginChild("log", ImVec2(0.0f, logHeight), ImGuiChildFlags_Borders)) {
         std::lock_guard<std::mutex> lock(log.mutex);
         // **Cleared under the same lock the sink writes under.** A clear that
         // raced a line from another thread would drop one that arrived after the
@@ -2722,11 +2810,13 @@ void drawConsole(script::ScriptRuntime* runtime)
 
 // Play, pause and step, above the image they act on.
 //
-// **There is no Stop, and its absence is deliberate** (D058). Stop means "put
-// the world back the way it was before I pressed play", and this engine cannot
-// remember an edited world yet -- nothing can serialize one. A Stop that
-// silently rebuilt from the scripts would throw away whatever somebody had
-// changed, which is worse than a button that is not there.
+// **There IS a Stop, and what makes it honest is `World::snapshot` and
+// `World::restore`** (D058, closed 2026-08-23). Stop means "put the world back
+// the way it was before I pressed play" -- back to the EDITED state, not to the
+// scripted one -- and while nothing could remember an edited world that was a
+// button this engine could not ship. The pair arrived with the transport, so it
+// can: pressing play remembers the world, pressing stop puts it back, and the
+// status line under this toolbar says so in the same words.
 // The transport, in the order and the shape Unity and Unreal both use.
 //
 // **Play and stop are one button because they are opposites**; pause is a
@@ -2734,7 +2824,7 @@ void drawConsole(script::ScriptRuntime* runtime)
 // pressing play asks "run my game", pressing stop asks "give me my world back",
 // and a button that means one of them while showing the other is the first
 // thing a person notices.
-void drawTransport(Editor& editor, EditorCommands& commands, const IconAtlas* icons)
+void drawTransport(Editor& editor, EditorCommands& commands, EditorDialogs& dialogs, const IconAtlas* icons)
 {
     const RunState run = editor.runState();
     const bool inPlay = editor.inPlayMode();
@@ -2872,9 +2962,14 @@ void drawTransport(Editor& editor, EditorCommands& commands, const IconAtlas* ic
     // A world to start in. Beside save rather than in the content browser,
     // because "give me somewhere to begin" is a thing you do to the WORLD and
     // the browser is about files.
+    //
+    // **Through the same gate File > New Scene uses**, and it did not used to
+    // be: this button emptied the scene on the spot while the identical menu
+    // item asked. The one door a hand reaches for without opening a menu was
+    // the only one that threw an hour's work away in silence.
     ImGui::SameLine();
     if (toolButton(icons::ActionNew, "new", "empty the scene and start over -- anything unsaved is gone"))
-        commands.newScene = true;
+        issueOrAsk(EditorDialogs::Pending::NewScene, editor.hasUnsavedWork(), {}, dialogs, commands);
 
     ImGui::SameLine();
     // **Save asks for a name when there is nothing to overwrite.** An editor
@@ -3074,8 +3169,8 @@ void drawViewportBody(Editor& editor, rhi::TextureHandle texture, EditorCommands
     }
 }
 
-void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& commands, bool& open,
-                  const IconAtlas* icons)
+void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& commands, EditorDialogs& dialogs,
+                  bool& open, const IconAtlas* icons)
 {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     // **Room for the camera**, painted over the gap by `drawTabIcons`. Before
@@ -3086,7 +3181,7 @@ void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& co
     ImGui::PopStyleVar();
 
     if (visible) {
-        drawTransport(editor, commands, icons);
+        drawTransport(editor, commands, dialogs, icons);
         drawViewportBody(editor, texture, commands);
     }
     ImGui::End();
@@ -3439,16 +3534,11 @@ struct ContentLayout
 }
 
 // Opening another scene loses whatever is unsaved, so it asks the same question
-// closing does -- through the same `dialogs.pending`, which is what keeps one
-// answer for four doors (ADR 0055's launcher added the third and fourth).
+// closing does -- through the same gate, which is what keeps one answer for the
+// doors that reach it (ADR 0055's launcher added two of them).
 void openSceneOrAsk(Editor& editor, EditorCommands& commands, EditorDialogs& dialogs, std::string_view path)
 {
-    if (editor.hasUnsavedWork()) {
-        dialogs.pending = EditorDialogs::Pending::OpenScene;
-        dialogs.pendingScene = std::string(path);
-        return;
-    }
-    commands.openScene = std::string(path);
+    issueOrAsk(EditorDialogs::Pending::OpenScene, editor.hasUnsavedWork(), path, dialogs, commands);
 }
 
 void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs,
@@ -4003,34 +4093,23 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
 
     if (ImGui::BeginMenu("File")) {
         // **Anything that would throw work away asks first**, and it asks in one
-        // place: `dialogs.pending` remembers which door was used and the answer
-        // re-issues it. Without work to lose there is nothing to ask about, and
-        // a dialog that appeared anyway would be a dialog people learn to
-        // dismiss without reading.
-        const auto guard = [&](EditorDialogs::Pending what) {
-            if (!editor.hasUnsavedWork())
-                return false;
-            dialogs.pending = what;
-            return true;
+        // place: `issueOrAsk` decides, `dialogs.pending` remembers which door
+        // was used, and the answer re-issues it through the same function.
+        const auto verb = [&](EditorDialogs::Pending what) {
+            issueOrAsk(what, editor.hasUnsavedWork(), {}, dialogs, commands);
         };
 
         // **A project is a process** (ADR 0055), so both of these start the
         // browser and close this editor rather than swapping a project inside a
         // running one. The browser is where a project is made and where one is
         // picked, which is why File has no second copy of either.
-        if (ImGui::MenuItem("New Project...")) {
-            if (!guard(EditorDialogs::Pending::NewProject))
-                commands.newProject = true;
-        }
-        if (ImGui::MenuItem("Open Project...")) {
-            if (!guard(EditorDialogs::Pending::OpenProject))
-                commands.openProject = true;
-        }
+        if (ImGui::MenuItem("New Project..."))
+            verb(EditorDialogs::Pending::NewProject);
+        if (ImGui::MenuItem("Open Project..."))
+            verb(EditorDialogs::Pending::OpenProject);
         ImGui::Separator();
-        if (ImGui::MenuItem("New Scene")) {
-            if (!guard(EditorDialogs::Pending::NewScene))
-                commands.newScene = true;
-        }
+        if (ImGui::MenuItem("New Scene"))
+            verb(EditorDialogs::Pending::NewScene);
         ImGui::Separator();
         // **Ctrl+S saves whatever is being edited**, and on a stamp stage that
         // is the stamp. One shortcut rather than two, because "save what I am
@@ -4052,10 +4131,8 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
         if (ImGui::MenuItem("Save Scene As..."))
             dialogs.saveAs = true;
         ImGui::Separator();
-        if (ImGui::MenuItem("Exit")) {
-            if (!guard(EditorDialogs::Pending::Quit))
-                commands.quit = true;
-        }
+        if (ImGui::MenuItem("Exit"))
+            verb(EditorDialogs::Pending::Quit);
         ImGui::EndMenu();
     }
 
@@ -4533,25 +4610,11 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         // Three answers and no more, in the order every application puts them:
         // keep the work, throw it away, or change your mind.
         const auto proceed = [&]() {
-            switch (dialogs.pending) {
-            case EditorDialogs::Pending::Quit:
-                commands.quit = true;
-                break;
-            case EditorDialogs::Pending::NewScene:
-                commands.newScene = true;
-                break;
-            case EditorDialogs::Pending::OpenScene:
-                commands.openScene = dialogs.pendingScene;
-                break;
-            case EditorDialogs::Pending::NewProject:
-                commands.newProject = true;
-                break;
-            case EditorDialogs::Pending::OpenProject:
-                commands.openProject = true;
-                break;
-            case EditorDialogs::Pending::None:
-                break;
-            }
+            // The answer re-issues the verb through the gate that raised the
+            // question, with the work now knowingly discarded -- so there is
+            // one place that turns a verb into a command and it is the same one
+            // the doors call.
+            issueOrAsk(dialogs.pending, /*unsavedWork=*/false, dialogs.pendingScene, dialogs, commands);
             dialogs.pending = EditorDialogs::Pending::None;
             dialogs.pendingScene.clear();
             editor.clearCloseRequest();
@@ -4759,7 +4822,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
 
     if (editor != nullptr) {
         if (panels.viewport)
-            drawViewport(*editor, viewport, commands, panels.viewport, icons);
+            drawViewport(*editor, viewport, commands, dialogs, panels.viewport, icons);
         if (panels.content)
             drawContent(*editor, commands, panels, dialogs, icons, world, inspector);
     }

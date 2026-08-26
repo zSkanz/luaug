@@ -3,6 +3,13 @@
 // unit test's. It is the contract around it: that it is inert wherever there is
 // nothing to draw with, that being inert costs the frame loop nothing, and that
 // F3 is what turns it on where there is.
+//
+// And what the shell DECIDES, which is a different thing from what it draws.
+// The one case below that builds the shell needs a display and a GPU device,
+// and where either is missing it returns before it asserts -- so a check
+// written inside it reports a pass it never ran. Every decision this shell
+// makes with arithmetic rather than with pixels is therefore a function, and
+// the cases at the foot of this file call those on any machine at all.
 #include "luaug/app/backends.h"
 #include "luaug/app/debug_overlay.h"
 #include "luaug/app/frame_scheduler.h"
@@ -21,15 +28,36 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "icon_ids.gen.h"
 #include "inspector_fixture.h"
 
 using luaug::app::DebugOverlay;
+using luaug::app::EditorCommands;
+using luaug::app::EditorDialogs;
 using luaug::app::Frame;
 using luaug::app::Inspector;
 using luaug::core::EngineError;
+
+// **Declared here rather than included from `debug_overlay.h`.** Both are
+// defined in `debug_overlay.cpp`, outside the anonymous namespace the rest of
+// that file lives in, and the header is where the declarations belong -- the
+// change that added them owned the shell's source and this suite and not its
+// header. `inspector.h` carries `collectTree` for exactly this reason and is
+// the shape to move these into.
+namespace luaug::app {
+
+// Ask, or act: the one gate in front of every verb that empties the scene.
+void issueOrAsk(EditorDialogs::Pending what, bool unsavedWork, std::string_view scene, EditorDialogs& dialogs,
+                EditorCommands& commands);
+
+// How tall the Console's log child is, given the room the panel has left.
+[[nodiscard]] luaug::core::f32 consoleLogHeight(luaug::core::f32 available, luaug::core::f32 reservedBelow,
+                                                luaug::core::f32 minimum) noexcept;
+
+} // namespace luaug::app
 
 namespace {
 
@@ -492,4 +520,108 @@ TEST_CASE("on a real device, F3 flips the panel")
 
     device->releaseWindow(*window);
     luaug::platform::shutdown();
+}
+
+// --- The decisions, on any machine ------------------------------------------
+
+// **Five verbs lead to the same loss, and a person learns the rule from the
+// doors that knock.** File > New Scene, opening another scene, making a
+// project, leaving for one, and quitting all throw away every edit since the
+// last save. The toolbar's New was a sixth door onto the second of them and it
+// acted on the spot, so the one door a hand reaches for without opening a menu
+// was the one that never asked.
+//
+// A table rather than one case, because the claim is about the SET: a verb
+// added tomorrow is a row here, and a row that fails is a door wired past the
+// gate.
+TEST_CASE("every verb that empties the scene asks before it acts")
+{
+    const std::array<EditorDialogs::Pending, 5> doors{
+        EditorDialogs::Pending::Quit,       EditorDialogs::Pending::NewScene,    EditorDialogs::Pending::OpenScene,
+        EditorDialogs::Pending::NewProject, EditorDialogs::Pending::OpenProject,
+    };
+
+    for (const EditorDialogs::Pending door : doors) {
+        CAPTURE(static_cast<int>(door));
+
+        EditorDialogs dialogs;
+        EditorCommands commands;
+        luaug::app::issueOrAsk(door, /*unsavedWork=*/true, "levels/one.scene.json", dialogs, commands);
+
+        // Parked as a question, and nothing issued: the frame loop must see no
+        // command at all this frame, whichever door was used.
+        CHECK(dialogs.pending == door);
+        CHECK_FALSE(commands.quit);
+        CHECK_FALSE(commands.newScene);
+        CHECK_FALSE(commands.newProject);
+        CHECK_FALSE(commands.openProject);
+        CHECK(commands.openScene.empty());
+    }
+}
+
+// The other half of the same rule, and the reason the gate is not simply a
+// dialog: a question with nothing behind it is one people learn to dismiss
+// without reading, so a clean scene acts immediately.
+TEST_CASE("with nothing to lose, the same verbs act at once")
+{
+    const auto issued = [](EditorDialogs::Pending door) {
+        EditorDialogs dialogs;
+        EditorCommands commands;
+        luaug::app::issueOrAsk(door, /*unsavedWork=*/false, "levels/one.scene.json", dialogs, commands);
+        CHECK(dialogs.pending == EditorDialogs::Pending::None);
+        CHECK(dialogs.pendingScene.empty());
+        return commands;
+    };
+
+    CHECK(issued(EditorDialogs::Pending::Quit).quit);
+    CHECK(issued(EditorDialogs::Pending::NewScene).newScene);
+    CHECK(issued(EditorDialogs::Pending::NewProject).newProject);
+    CHECK(issued(EditorDialogs::Pending::OpenProject).openProject);
+    CHECK(issued(EditorDialogs::Pending::OpenScene).openScene == "levels/one.scene.json");
+}
+
+// The scene a double-click asked for has to survive the question, because the
+// answer arrives frames later and by then the browser is looking elsewhere.
+TEST_CASE("the scene an open was asking for is carried across the question")
+{
+    EditorDialogs dialogs;
+    EditorCommands commands;
+    luaug::app::issueOrAsk(EditorDialogs::Pending::OpenScene, /*unsavedWork=*/true, "levels/two.scene.json", dialogs,
+                           commands);
+    CHECK(dialogs.pending == EditorDialogs::Pending::OpenScene);
+    CHECK(dialogs.pendingScene == "levels/two.scene.json");
+
+    // And the answer re-issues it through the same gate, which is what makes
+    // the question one place rather than five.
+    luaug::app::issueOrAsk(dialogs.pending, /*unsavedWork=*/false, dialogs.pendingScene, dialogs, commands);
+    CHECK(commands.openScene == "levels/two.scene.json");
+}
+
+// **The Console is a docked, resizable panel, so its log has to be the part
+// that grows.** It was a child of a fixed 160 px, which meant dragging the
+// panel taller added empty room UNDER the log rather than showing more of it --
+// the one thing making a console bigger is ever for.
+TEST_CASE("the console's log takes the room the panel has, less the line below it")
+{
+    // One REPL line and its spacing sit under the log; everything else the
+    // panel has is the log's.
+    const luaug::core::f32 repl = 26.0f;
+    const luaug::core::f32 floorHeight = 160.0f;
+
+    CHECK(static_cast<double>(luaug::app::consoleLogHeight(600.0f, repl, floorHeight)) == doctest::Approx(574.0));
+
+    // Enlarging the panel enlarges the LOG, one pixel for one pixel. This is
+    // the assertion the fixed height fails.
+    CHECK(static_cast<double>(luaug::app::consoleLogHeight(900.0f, repl, floorHeight)) == doctest::Approx(874.0));
+    CHECK(static_cast<double>(luaug::app::consoleLogHeight(900.0f, repl, floorHeight) -
+                              luaug::app::consoleLogHeight(600.0f, repl, floorHeight)) == doctest::Approx(300.0));
+
+    // **A floor, and it is not tidiness.** The same console is drawn at the
+    // foot of the F3 overlay's scrolling window, where what is left can be a
+    // few pixels or none -- and ImGui reads a non-positive child height as
+    // "fill the rest, less this much", so an unclamped subtraction would make
+    // the log grow as the room for it shrank.
+    CHECK(static_cast<double>(luaug::app::consoleLogHeight(40.0f, repl, floorHeight)) == doctest::Approx(160.0));
+    CHECK(static_cast<double>(luaug::app::consoleLogHeight(0.0f, repl, floorHeight)) == doctest::Approx(160.0));
+    CHECK(static_cast<double>(luaug::app::consoleLogHeight(-120.0f, repl, floorHeight)) == doctest::Approx(160.0));
 }

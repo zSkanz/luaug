@@ -486,3 +486,297 @@ TEST_CASE("no cache root is the behaviour this tool always had")
     CHECK(second.stats.meshesCompiled == first.stats.meshesCompiled);
     CHECK(first.pack == second.pack);
 }
+
+// --- What a loose texture is FOR ----------------------------------------------
+//
+// A `Material` in a project's content says what each of its maps is: `ColorMap`
+// and `EmissiveMap` are colour, `NormalMap` and `MetallicRoughnessMap` are
+// numbers (`api/defs/instances.api.luau`). Every image below is the same
+// two-by-two PNG, so the ONLY thing that can make two of them different blobs is
+// the transfer function they were encoded with.
+
+namespace {
+
+[[nodiscard]] std::string materialNode(const std::string& name, const std::string& maps)
+{
+    return R"({"class":"Material","name":")" + name + R"(","properties":{)" + maps + "}}";
+}
+
+[[nodiscard]] std::string modelNode(const std::string& name, const std::string& child)
+{
+    return R"({"class":"Model","name":")" + name + R"(","children":[)" + child + "]}";
+}
+
+[[nodiscard]] std::string stampedNode(const std::string& name, const std::string& stamp, const std::string& overrides)
+{
+    return R"({"stamp":")" + stamp + R"(","name":")" + name + R"(","overrides":{)" + overrides + "}}";
+}
+
+// A scene whose `Workspace` holds exactly these nodes. Assembled rather than
+// written out per case, because the cases differ only in which maps a material
+// names and a literal apiece would bury that.
+[[nodiscard]] std::string sceneOf(const std::vector<std::string>& children)
+{
+    std::string text = R"({"format":"luaug-scene","version":1,)"
+                       R"("root":{"class":"Workspace","name":"Workspace","children":[)";
+    for (usize i = 0; i < children.size(); ++i) {
+        if (i > 0)
+            text += ',';
+        text += children[i];
+    }
+    text += "]}}";
+    return text;
+}
+
+struct MaterialFixture
+{
+    std::filesystem::path root;
+
+    MaterialFixture()
+    {
+        std::error_code ec;
+        root = std::filesystem::temp_directory_path(ec) / "luaug-assetc-material-tests";
+        std::filesystem::remove_all(root, ec);
+        std::filesystem::create_directories(root / "textures", ec);
+        std::filesystem::create_directories(root / "scenes", ec);
+        std::filesystem::create_directories(root / "stamps", ec);
+        REQUIRE(std::filesystem::is_directory(root / "textures"));
+
+        const std::filesystem::path data = LUAUG_ASSET_TEST_DATA;
+        for (const char* name :
+             {"both.png", "colour.png", "glow.png", "normal.png", "orm.png", "overridden.png", "unclaimed.png"}) {
+            Fixture::copy(data / "checker.png", root / "textures" / name);
+        }
+
+        // The stamp names `both.png` as a normal map; the scene names it as a
+        // colour map. One image, two uses, and the pack holds it once.
+        Fixture::write(root / "stamps" / "post.stamp.json",
+                       R"({"format":"luaug-scene","version":1,"root":)" +
+                           modelNode("Post", materialNode("Skin", R"("NormalMap":"asset://textures/both.png")")) + "}");
+        writeScene({});
+    }
+
+    ~MaterialFixture()
+    {
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+    }
+
+    MaterialFixture(const MaterialFixture&) = delete;
+    MaterialFixture& operator=(const MaterialFixture&) = delete;
+
+    // `extra` is appended to the standing cast, so a case can author a material
+    // that claims an image nothing claimed before.
+    void writeScene(const std::vector<std::string>& extra) const
+    {
+        std::vector<std::string> children{
+            materialNode("Brick", R"("ColorMap":"asset://textures/colour.png",)"
+                                  R"("NormalMap":"asset://textures/normal.png",)"
+                                  R"("MetallicRoughnessMap":"asset://textures/orm.png",)"
+                                  R"("EmissiveMap":"asset://textures/glow.png")"),
+            // Nested, because a material is an instance and lives wherever the
+            // author put it -- not in a list at the top of the file.
+            modelNode("Nested", materialNode("Packed", R"("ColorMap":"asset://textures/both.png")")),
+            stampedNode("Post", "post", R"("Skin":{"NormalMap":"asset://textures/overridden.png"})"),
+        };
+        children.insert(children.end(), extra.begin(), extra.end());
+        Fixture::write(root / "scenes" / "main.scene.json", sceneOf(children));
+    }
+
+    [[nodiscard]] CompileResult build() const
+    {
+        CompileOptions options;
+        options.inputRoot = root;
+        return compile(options);
+    }
+};
+
+// Whether the blob the manifest names for `urn` was encoded through the sRGB
+// curve. Read back out of the KTX2's own data format descriptor, so this asks
+// the produced bytes rather than the tool's intent.
+[[nodiscard]] bool encodedAsColour(const CompileResult& result, const luaug::asset::Pack& pack, const std::string& urn)
+{
+    const ManifestEntry* const entry = findUrn(result, urn);
+    REQUIRE_MESSAGE(entry != nullptr, "no manifest row for " << urn);
+    luaug::asset::TranscodeOptions options;
+    options.forceUncompressed = true;
+    luaug::asset::TextureAsset texture;
+    REQUIRE_FALSE(luaug::asset::transcodeTexture(pack.blob(entry->hash), options, texture).has_value());
+    return texture.srgb;
+}
+
+} // namespace
+
+TEST_CASE("a material decides whether a loose texture is colour or numbers")
+{
+    seedRealCatalog();
+    const MaterialFixture fixture;
+
+    const CompileResult result = fixture.build();
+    REQUIRE_MESSAGE(result.ok, result.diagnostic);
+
+    luaug::asset::Pack pack;
+    REQUIRE_FALSE(luaug::asset::Pack::openVerified(result.pack, pack).has_value());
+
+    CHECK(encodedAsColour(result, pack, "asset://textures/colour.png"));
+    CHECK(encodedAsColour(result, pack, "asset://textures/glow.png"));
+    // The defect: a normal map run through the sRGB curve has every value bent
+    // by a smooth amount, which reads as bad lighting rather than as a broken
+    // texture.
+    CHECK_FALSE(encodedAsColour(result, pack, "asset://textures/normal.png"));
+    CHECK_FALSE(encodedAsColour(result, pack, "asset://textures/orm.png"));
+}
+
+TEST_CASE("an image no material claims is still colour")
+{
+    // The honest answer for a standalone image: nothing in the project says
+    // what it is for, and colour is what most loose textures are.
+    seedRealCatalog();
+    const MaterialFixture fixture;
+
+    const CompileResult result = fixture.build();
+    REQUIRE_MESSAGE(result.ok, result.diagnostic);
+
+    luaug::asset::Pack pack;
+    REQUIRE_FALSE(luaug::asset::Pack::openVerified(result.pack, pack).has_value());
+    CHECK(encodedAsColour(result, pack, "asset://textures/unclaimed.png"));
+}
+
+TEST_CASE("an image used as colour and as numbers is encoded as colour")
+{
+    // Wrong for one of its two uses and right for the other, and it is what
+    // keeps a shared blob shared: splitting it would put the same pixels in the
+    // pack twice under two names. The glTF branch already answers this way.
+    seedRealCatalog();
+    const MaterialFixture fixture;
+
+    const CompileResult result = fixture.build();
+    REQUIRE_MESSAGE(result.ok, result.diagnostic);
+
+    luaug::asset::Pack pack;
+    REQUIRE_FALSE(luaug::asset::Pack::openVerified(result.pack, pack).has_value());
+    CHECK(encodedAsColour(result, pack, "asset://textures/both.png"));
+}
+
+TEST_CASE("a map named only in a stamp override is found")
+{
+    // An override is a property map keyed by a path inside the placed stamp
+    // (ADR 0051), and a material map set there is as real as one set in
+    // `properties`.
+    seedRealCatalog();
+    const MaterialFixture fixture;
+
+    const CompileResult result = fixture.build();
+    REQUIRE_MESSAGE(result.ok, result.diagnostic);
+
+    luaug::asset::Pack pack;
+    REQUIRE_FALSE(luaug::asset::Pack::openVerified(result.pack, pack).has_value());
+    CHECK_FALSE(encodedAsColour(result, pack, "asset://textures/overridden.png"));
+}
+
+TEST_CASE("the same pixels under two transfer functions are two blobs")
+{
+    seedRealCatalog();
+    const MaterialFixture fixture;
+
+    const CompileResult result = fixture.build();
+    REQUIRE_MESSAGE(result.ok, result.diagnostic);
+
+    // Every image in this fixture is the same PNG, so a difference in hash can
+    // only be the transfer function -- and the SAMENESS proves the pack still
+    // stores one copy of each answer rather than one per file.
+    const ManifestEntry* const colour = findUrn(result, "asset://textures/colour.png");
+    const ManifestEntry* const glow = findUrn(result, "asset://textures/glow.png");
+    const ManifestEntry* const normal = findUrn(result, "asset://textures/normal.png");
+    const ManifestEntry* const orm = findUrn(result, "asset://textures/orm.png");
+    REQUIRE(colour != nullptr);
+    REQUIRE(glow != nullptr);
+    REQUIRE(normal != nullptr);
+    REQUIRE(orm != nullptr);
+
+    CHECK(colour->hash == glow->hash);
+    CHECK(normal->hash == orm->hash);
+    CHECK_FALSE(colour->hash == normal->hash);
+}
+
+TEST_CASE("a material that starts claiming a texture recompiles it")
+{
+    // The cache key has to carry the answer. Without it the first build's sRGB
+    // blob comes back under the same name once the material that makes the
+    // image a normal map is authored -- a cache that is wrong rather than slow,
+    // which is the one thing this design says it must never be.
+    seedRealCatalog();
+    const MaterialFixture fixture;
+
+    CompileOptions options;
+    options.inputRoot = fixture.root;
+    options.cacheRoot = fixture.root / ".cache";
+
+    const CompileResult first = compile(options);
+    REQUIRE_MESSAGE(first.ok, first.diagnostic);
+
+    fixture.writeScene({materialNode("Late", R"("NormalMap":"asset://textures/unclaimed.png")")});
+
+    const CompileResult second = compile(options);
+    REQUIRE_MESSAGE(second.ok, second.diagnostic);
+
+    luaug::asset::Pack pack;
+    REQUIRE_FALSE(luaug::asset::Pack::openVerified(second.pack, pack).has_value());
+    CHECK_FALSE(encodedAsColour(second, pack, "asset://textures/unclaimed.png"));
+}
+
+TEST_CASE("a content directory with materials builds byte-identically twice")
+{
+    // The pre-pass reads the already-sorted source list and merges with
+    // colour-wins, so its answer cannot depend on the order it saw things in.
+    seedRealCatalog();
+    const MaterialFixture fixture;
+
+    const CompileResult first = fixture.build();
+    const CompileResult second = fixture.build();
+    REQUIRE(first.ok);
+    REQUIRE(second.ok);
+    CHECK(first.pack == second.pack);
+    CHECK(first.manifest == second.manifest);
+}
+
+TEST_CASE("two files with identical bytes keep their own names through the cache")
+{
+    // A cache entry carries the manifest ROW its source produced, and a row is
+    // a NAME -- so a key made only of content handed the second of two
+    // byte-identical files the first one's row and dropped its own. Every image
+    // in this fixture is the same PNG, which is what makes it the reproduction:
+    // seven files, one row, six names gone.
+    //
+    // It happened inside a single build, not only across two: the second file
+    // read the cache the first had just written.
+    seedRealCatalog();
+    const MaterialFixture fixture;
+
+    // The uncached build goes FIRST, because a cache directory inside the
+    // content root is skipped only by the build that is told where it is.
+    const CompileResult uncached = fixture.build();
+    REQUIRE_MESSAGE(uncached.ok, uncached.diagnostic);
+
+    CompileOptions options;
+    options.inputRoot = fixture.root;
+    options.cacheRoot = fixture.root / ".cache";
+    const CompileResult cold = compile(options);
+    REQUIRE_MESSAGE(cold.ok, cold.diagnostic);
+
+    const CompileResult warm = compile(options);
+    REQUIRE_MESSAGE(warm.ok, warm.diagnostic);
+    CHECK(warm.stats.cacheHits > 0);
+
+    // The claim the whole design rests on: a cache is faster and not different.
+    CHECK(cold.manifest == uncached.manifest);
+    CHECK(warm.manifest == uncached.manifest);
+    CHECK(cold.pack == uncached.pack);
+    CHECK(warm.pack == uncached.pack);
+
+    for (const char* name :
+         {"both.png", "colour.png", "glow.png", "normal.png", "orm.png", "overridden.png", "unclaimed.png"}) {
+        const std::string urn = std::string("asset://textures/") + name;
+        CHECK_MESSAGE(findUrn(warm, urn) != nullptr, "the cached build lost " << urn);
+    }
+}

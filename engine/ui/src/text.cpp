@@ -1,36 +1,42 @@
 // Text measurement and glyph geometry for the UI (ADR 0011, api-design.md
 // §2.2's `TextLabel`).
 //
-// **v1's face is `stb_easy_font`, and that is a scope decision rather than a
-// preference.** ADR 0011 names stb_truetype, and stb_truetype needs a TrueType
-// FILE. The human chose Inter (OFL 1.1) as the default on 2026-08-21 and put its
-// vendoring in M7 with the rest of the asset pipeline, so this milestone ships
-// the built-in vector face already inside `third_party/stb` and `TextLabel.Font`
-// stays `Inert` with M7 named in its own doc.
+// **The face is a real TrueType one, and `TextLabel.Font` is what chooses it.**
+// ADR 0011 named stb_truetype and M7 is where it arrived: the default is Inter
+// (OFL 1.1, human decision 2026-08-21), vendored and staged beside the binary,
+// and any other name is resolved by the app's content mounts through
+// `setFaceProvider`. The property is HONOURED rather than `Inert` -- the
+// api-dump carries no `Inert` mark on it, and `measureText` below is where the
+// name becomes a face.
 //
-// What that costs, stated so nobody has to discover it: ASCII only, one weight,
-// no kerning, and a fixed glyph shape that scales by multiplication.
+// **`stb_easy_font` is the FALLBACK, not the face.** A build whose content
+// directory has no font still draws text, and a test that runs without staged
+// content still measures it; text vanishing because an asset is missing is the
+// failure mode a fallback exists to prevent. What it costs, stated so nobody
+// has to discover it from a screenshot: ASCII only, one weight, no kerning, and
+// a fixed glyph shape that scales by multiplication.
 //
 // **The glyph store is a CACHE and not a bake, and that is the decision this
 // file exists to have made** (human decision, 2026-08-21). An atlas baked once
-// at boot works exactly as long as there is one face at one size, and that stops
-// being true the moment M7 hands over a game's own font -- at which point a bake
-// is a rewrite rather than a widening. So the store below is keyed by **face,
-// size and codepoint** and filled on demand, while there is still exactly one
-// face to fill it with. For a vector face the size half of that key is
-// redundant, because the glyph scales by multiplication; for a raster one it is
-// not, and putting it in now is the whole point.
+// at boot works exactly as long as there is one face at one size, and M7 ended
+// both halves of that: a project names its own font, and a `TextSize` a tween is
+// animating asks for sizes nobody declared. So the store below is keyed by
+// **face, size and codepoint** and filled on demand. For the fallback vector
+// face the size half of that key is redundant, because the glyph scales by
+// multiplication; for a rasterised one it is not, and it was put there a
+// milestone before anything needed it.
 //
-// **Unicode is the same decision from the other side.** The face is ASCII and a
-// game written in Portuguese already needs á ç ã õ, so the text is decoded as
-// UTF-8 into codepoints and a codepoint the face cannot draw gets a **visible
-// replacement box** rather than nothing, a question mark, or the mojibake that
-// reading the bytes one at a time would produce. A player seeing boxes knows the
-// font is missing glyphs; a player seeing `Ã¡` learns nothing.
+// **Unicode is the same decision from the other side.** The text is decoded as
+// UTF-8 into codepoints rather than read a byte at a time, because a game
+// written in Portuguese needs á ç ã õ and the fallback face has none of them.
+// A codepoint the face in hand cannot draw gets a **visible replacement box**
+// rather than nothing, a question mark, or the mojibake that reading the bytes
+// one at a time would produce. A player seeing boxes knows the font is missing
+// glyphs; a player seeing `Ã¡` learns nothing.
 //
-// The seam is `measureText` and `buildTextGeometry`. When a real face arrives,
-// the cache's key, its miss path and both signatures stay; what changes is what
-// fills an entry.
+// The seam is `measureText` and `buildTextGeometry`, and it held: the real face
+// arrived without moving either signature, the cache's key or its miss path.
+// What changed was what fills an entry.
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
 #include "luaug/core/text_key.h"
@@ -63,13 +69,13 @@ namespace {
 
 using core::Vec2;
 
-// What `stb_easy_font` draws at scale 1: capitals are seven pixels tall and a
-// line is twelve. Named because three places divide by them, and a magic 12 in
-// three files is a magic 12 nobody can change.
 // The default face's name, as `TextLabel.Font` spells it. An empty `Font` and
 // this name are the same request.
 constexpr std::string_view DefaultFaceName = "Inter";
 
+// What `stb_easy_font` draws at scale 1: capitals are seven pixels tall and a
+// line is twelve. Named because three places divide by them, and a magic 12 in
+// three files is a magic 12 nobody can change.
 constexpr f32 BuiltInLineHeight = 12.0f;
 constexpr f32 BuiltInAscent = 7.0f;
 
@@ -166,8 +172,9 @@ struct GlyphEntry
     f32 advance = 0.0f;
     u32 firstQuad = 0;
     u32 quadCount = 0;
-    // Whether the quads sample the atlas or are solid rectangles. The two faces
-    // differ here and nowhere else, which is what the M6 seam was built for.
+    // Whether the quads sample the atlas or are solid rectangles. Here and in
+    // the metrics is where the two faces differ, and nowhere else -- which is
+    // what the M6 seam was built for.
     bool textured = false;
 };
 

@@ -14,6 +14,7 @@
 #include "luaug/rhi/capture.h"
 #include "luaug/scene/components.h"
 #include "luaug/scene/enum_registry.h"
+#include "luaug/scene/pivot.h"
 #include "luaug/scene/scene_file.h"
 #include "luaug/scene/world.h"
 
@@ -1405,6 +1406,139 @@ TEST_CASE("placing a stamp builds its subtree, selects it, and one undo takes al
     const bool couldUndo = editor.history().canUndo();
     CHECK_FALSE(editor.instantiateStamp(world, "no-such-stamp", root, root, inspector));
     CHECK(editor.history().canUndo() == couldUndo);
+}
+
+namespace {
+// **The real classes, because the defect is about a class that has no `CFrame`
+// property.** The inspector fixture's `Part` carries a component and declares
+// only `Material`, so a placement asserted over it would be asserted over a
+// world where nothing has a `CFrame` to write -- which is the very condition
+// under test, and would make both cases below agree by accident.
+struct StampRig
+{
+    core::AtomTable atoms;
+    scene::ClassRegistry classes;
+    scene::EnumRegistry enums;
+    scene::World world;
+    Editor editor;
+    Inspector inspector;
+    core::InstanceId root;
+
+    explicit StampRig(const StampProject& project) : world(classes, enums, atoms, 1234u)
+    {
+        scene::generated::registerClasses(classes, atoms);
+        scene::generated::registerEnums(enums, atoms);
+        editor.openContent(project.root / "content");
+        root = world.create(classes.findId(atoms.intern("Folder")));
+        REQUIRE(root.valid());
+    }
+
+    [[nodiscard]] core::InstanceId make(std::string_view className, std::string_view instanceName,
+                                        core::InstanceId parent)
+    {
+        const core::InstanceId id = world.create(classes.findId(atoms.intern(className)));
+        REQUIRE(id.valid());
+        world.setName(id, atoms.intern(instanceName));
+        REQUIRE_FALSE(world.setParent(id, parent).has_value());
+        return id;
+    }
+
+    [[nodiscard]] core::InstanceId part(std::string_view instanceName, core::InstanceId parent, core::DVec3 at)
+    {
+        const core::InstanceId id = make("Part", instanceName, parent);
+        scene::PartComponent* component = world.parts().find(id);
+        REQUIRE(component != nullptr);
+        component->cframe.position = at;
+        return id;
+    }
+
+    // Looked up by NAME, because what a placement produces is a fresh subtree
+    // read out of a file: the ids of what was stamped say nothing about it.
+    [[nodiscard]] core::DVec3 positionOf(core::InstanceId parent, std::string_view childName)
+    {
+        const core::InstanceId id = world.findFirstChild(parent, atoms.intern(childName));
+        REQUIRE(id.valid());
+        const scene::PartComponent* component = world.parts().find(id);
+        REQUIRE(component != nullptr);
+        return component->cframe.position;
+    }
+};
+
+// Where an adopted camera looking down -Z puts what it spawns. The editor's own
+// distance, restated so the expected point is arithmetic a reader can check
+// rather than a number copied out of the source.
+constexpr core::DVec3 kEye{100.0, 5.0, 100.0};
+constexpr core::DVec3 kSpawn{100.0, 5.0, 92.0};
+} // namespace
+
+TEST_CASE("a stamp whose root is a Model lands in front of the camera, subtree and all")
+{
+    // **The defect, and the reason nobody hit it sooner.** Placement wrote a
+    // `CFrame` property and threw the result away. `Model` has no `CFrame` --
+    // it is moved by its PIVOT -- so the write was refused, silently, and the
+    // subtree stayed at the coordinates the file records. For anything authored
+    // near where it was built that is the world origin, which in a streamed
+    // world is nowhere near whoever dropped it. A `Part` root does have a
+    // `CFrame`, and a `Part` root is what every earlier case here uses.
+    StampProject project("model-root");
+    StampRig rig(project);
+
+    const core::InstanceId cart = rig.make("Model", "Cart", rig.root);
+    (void)rig.part("Body", cart, {0.0, 0.0, 0.0});
+    (void)rig.part("Wheel", cart, {2.0, 0.0, 0.0});
+    REQUIRE(rig.editor.createStamp(rig.world, cart, rig.root, "cart"));
+
+    rig.editor.adoptCamera(core::CFrameD{kEye, core::Mat3{}});
+    REQUIRE(rig.editor.instantiateStamp(rig.world, "cart", rig.root, rig.root, rig.inspector));
+
+    const core::InstanceId placed = rig.inspector.selection();
+    REQUIRE(placed.valid());
+    CHECK(placed != cart);
+
+    // No primary part, so the model's pivot is the centre of its extents box --
+    // (1, 0, 0) for two same-sized parts two metres apart. That point is what
+    // lands on the spawn, and everything under the model comes with it.
+    const core::DVec3 pivot = scene::pivotOf(rig.world, placed).position;
+    CHECK(pivot.x == doctest::Approx(kSpawn.x));
+    CHECK(pivot.y == doctest::Approx(kSpawn.y));
+    CHECK(pivot.z == doctest::Approx(kSpawn.z));
+
+    const core::DVec3 body = rig.positionOf(placed, "Body");
+    CHECK(body.x == doctest::Approx(kSpawn.x - 1.0));
+    CHECK(body.y == doctest::Approx(kSpawn.y));
+    CHECK(body.z == doctest::Approx(kSpawn.z));
+
+    // The layout comes with it rather than collapsing: a placement that moved
+    // the pivot and left the parts, or moved every part onto one point, would
+    // both satisfy an assertion about the pivot alone.
+    const core::DVec3 wheel = rig.positionOf(placed, "Wheel");
+    CHECK(wheel.x == doctest::Approx(body.x + 2.0));
+    CHECK(wheel.y == doctest::Approx(body.y));
+    CHECK(wheel.z == doctest::Approx(body.z));
+}
+
+TEST_CASE("a stamp whose root is a Part still lands exactly where it always did")
+{
+    // The case that already worked, asserted so that giving `Model` an answer
+    // cannot quietly give `Part` a different one. Placement is `PivotTo` now,
+    // and `PivotTo` on a part whose pivot offset is the identity is
+    // `CFrame = target` -- the same write, arrived at from the other end.
+    StampProject project("part-root");
+    StampRig rig(project);
+
+    const core::InstanceId crate = rig.part("Crate", rig.root, {3.0, 0.0, -7.0});
+    REQUIRE(rig.editor.createStamp(rig.world, crate, rig.root, "crate"));
+
+    rig.editor.adoptCamera(core::CFrameD{kEye, core::Mat3{}});
+    REQUIRE(rig.editor.instantiateStamp(rig.world, "crate", rig.root, rig.root, rig.inspector));
+
+    const core::InstanceId placed = rig.inspector.selection();
+    REQUIRE(placed.valid());
+    const scene::PartComponent* component = rig.world.parts().find(placed);
+    REQUIRE(component != nullptr);
+    CHECK(component->cframe.position.x == doctest::Approx(kSpawn.x));
+    CHECK(component->cframe.position.y == doctest::Approx(kSpawn.y));
+    CHECK(component->cframe.position.z == doctest::Approx(kSpawn.z));
 }
 
 TEST_CASE("editing a stamped instance keeps its mark")

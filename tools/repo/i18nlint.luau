@@ -8,6 +8,10 @@
 	catalog doubles as the hash -> name registry; a key missing from it would
 	make the engine unable to name its own message and degrade it to
 	`[i18n:missing:xxxxxxxx]` at runtime. This turns that into a build failure.
+	`LUAUG_TR` is the sanctioned spelling of a key but not the only one that
+	reaches a person -- the dev protocol puts the key NAME on the wire because
+	the peer is what resolves it -- so this half sweeps key-SHAPED literals
+	wherever they are written, not the macro alone (D139).
 
 	**No user-facing string is written at a call site.** R3's other half, and
 	the M3 gate's fourth item. It is a SINK lint rather than a literal lint (M3
@@ -408,6 +412,172 @@ local function lintCliFile(file: string, findings: { Finding })
     end
 end
 
+--- Every string literal in `source`, each with the offset of its opening quote.
+---
+--- Comment-aware, and it has to be. This engine's comments are prose, prose has
+--- apostrophes, and a scanner that read `the overlay's` as the start of a
+--- character literal would run to the next apostrophe several paragraphs down
+--- and be out of step with the file for the rest of it. Having to know where
+--- the comments are answers the other question too: a key named in a comment is
+--- documentation rather than something the program emits, so this sweep does
+--- not look there.
+---
+--- Raw string literals are skipped whole. The only one in non-test engine code
+--- is `R"({"op":")"` -- a JSON fragment with its own quotes in it -- and a
+--- scanner that walked into it would come out the far side mismatched.
+local function stringLiterals(source: string): { { text: string, at: number } }
+    local literals: { { text: string, at: number } } = {}
+    local size = #source
+    local index = 1
+
+    while index <= size do
+        local c = string.sub(source, index, index)
+        local ahead = string.sub(source, index + 1, index + 1)
+
+        if c == "/" and ahead == "/" then
+            local newline = string.find(source, "\n", index + 2, true)
+            index = if newline == nil then size + 1 else newline + 1
+        elseif c == "/" and ahead == "*" then
+            local close = string.find(source, "*/", index + 2, true)
+            index = if close == nil then size + 1 else close + 2
+        elseif c == "'" and string.match(string.sub(source, index - 1, index - 1), "%x") == nil then
+            -- A quote after a hex digit is C++'s DIGIT SEPARATOR, not a
+            -- character literal: this engine writes `1'000'000'000.0` and
+            -- `0x5741'4D50u`, and reading the first of those as an open quote
+            -- put the scanner out of step from `frame_scheduler.cpp:32` to the
+            -- end of the file -- silently, because a blind sweep reports a
+            -- clean tree. Nothing here writes a prefixed literal (`u8'a'`,
+            -- `L'a'`), which is the only other thing that puts a quote after
+            -- an identifier character.
+            index += 1
+            while index <= size do
+                local ch = string.sub(source, index, index)
+                if ch == "\\" then
+                    index += 2
+                    continue
+                end
+                index += 1
+                if ch == "'" then
+                    break
+                end
+            end
+        elseif c == "R" and ahead == '"' and string.match(string.sub(source, index - 1, index - 1), "[%w_]") == nil then
+            -- `R"delim(` ... `)delim"`, delimiter included so the rare non-empty
+            -- one closes where C++ says it closes.
+            local open = string.find(source, "(", index + 2, true)
+            if open == nil then
+                index += 2
+                continue
+            end
+            local delimiter = string.sub(source, index + 2, open - 1)
+            local close = string.find(source, `){delimiter}"`, open + 1, true)
+            index = if close == nil then size + 1 else close + #delimiter + 2
+        elseif c == '"' then
+            local scan = index + 1
+            while scan <= size do
+                local ch = string.sub(source, scan, scan)
+                if ch == "\\" then
+                    scan += 2
+                    continue
+                end
+                if ch == '"' then
+                    break
+                end
+                scan += 1
+            end
+            table.insert(literals, { text = string.sub(source, index + 1, scan - 1), at = index })
+            index = scan + 1
+        else
+            index += 1
+        end
+    end
+
+    return literals
+end
+
+--- The segment that makes a dotted literal a message key rather than a path.
+local KeySpine: { [string]: boolean } = { err = true, warn = true, info = true }
+
+--- Whether `text` is spelled the way this catalog spells a message key.
+---
+--- The test is `err`, `warn` or `info` as an INTERIOR dotted segment, every
+--- segment lower-case and snake_case. That is the catalog's own spine: all but
+--- a handful of the engine's keys carry it, and no literal in the engine that
+--- is NOT a key is spelled that way.
+---
+--- Deliberately narrower than "dotted and lower-case", which is the rule a
+--- first reading suggests and which would be useless here. The engine writes
+--- `luaug.toml`, `init.luau`, `xxhash.h`, `graphics.bloom`, `project.name`,
+--- `window.title` and `environment.brdf` -- file names, TOML paths and asset
+--- ids -- and every one of them is that shape. A gate that cried about those
+--- would be suppressed within the week, which is the same argument the M3
+--- brief's Decision 8 makes about literals in general. The lower-case rule
+--- earns its place the same way: `services.cpp` tells a caller it wanted
+--- `Enum.KeyCode.Virtual1..Virtual4`, and a class or enum name is nobody's
+--- catalog key.
+---
+--- The handful it gives up are the keys with no severity segment -- the boot
+--- banner, the usage text, the window title. Every one of them is written
+--- through `LUAUG_TR`, where `collectKeyUses` already has it, and widening the
+--- shape to reach them would cost the precision that makes this sweep quiet
+--- enough to keep.
+local function looksLikeMessageKey(text: string): boolean
+    local segments: { string } = {}
+    for segment in string.gmatch(text, "[^.]+") do
+        if string.match(segment, "^[a-z][a-z0-9_]*$") == nil then
+            return false
+        end
+        table.insert(segments, segment)
+    end
+
+    -- Rejoining catches an empty segment, which `[^.]+` would otherwise drop
+    -- and let `a..b.err.c` pass as four well-formed segments.
+    if #segments < 3 or table.concat(segments, ".") ~= text then
+        return false
+    end
+
+    for position = 2, #segments - 1 do
+        if KeySpine[segments[position]] then
+            return true
+        end
+    end
+    return false
+end
+
+--- Guards the sweep the way `SinkCallsSeen` guards the other one: a shape test
+--- that stopped matching would report a clean tree forever.
+local KeyLiteralsSeen = { count = 0 }
+
+--- Key-shaped literals written outside `LUAUG_TR`.
+---
+--- This is the shape that got `dev.err.not_implemented` past this gate from M3
+--- until D139: the dev protocol answers a reserved verb with the key on a JSON
+--- writer, and a field on a wire message is neither a macro use nor an argument
+--- to a named sink. Being outside the macro is legal there and is not what is
+--- reported -- naming a key that no catalog has is.
+local function collectRawKeyLiterals(files: { string }): { { key: string, file: string, line: number } }
+    local uses: { { key: string, file: string, line: number } } = {}
+    for _, file in files do
+        local source = fs.readFileToString(file)
+        for _, literal in stringLiterals(source) do
+            if not looksLikeMessageKey(literal.text) then
+                continue
+            end
+            KeyLiteralsSeen.count += 1
+
+            -- The macro's own argument is `collectKeyUses`'s to report;
+            -- counting it here as well would name the same key twice.
+            local before = string.sub(source, math.max(1, literal.at - 24), literal.at - 1)
+            if string.find(before, "LUAUG_TR%s*%(%s*$") ~= nil then
+                continue
+            end
+
+            table.insert(uses, { key = literal.text, file = file, line = lineOf(source, literal.at) })
+        end
+    end
+    return uses
+end
+
 --- Every `LUAUG_TR("…")` in the engine, and every `tr("…")` in the CLI.
 local function collectKeyUses(files: { string }, pattern: string): { { key: string, file: string } }
     local uses: { { key: string, file: string } } = {}
@@ -435,6 +605,23 @@ local function reportMissing(
     return missing
 end
 
+--- The same failure, said differently because the reader has to be told why a
+--- plain string literal is being held to the catalog at all.
+local function reportMissingRawKeys(
+    uses: { { key: string, file: string, line: number } },
+    keys: { [string]: boolean },
+    catalog: string
+): number
+    local missing = 0
+    for _, use in uses do
+        if not keys[use.key] then
+            print(`i18nlint: {use.file}:{use.line}: "{use.key}" is spelled like a message key and is not in {catalog}`)
+            missing += 1
+        end
+    end
+    return missing
+end
+
 local function main()
     local engineFiles: { string } = {}
     for _, root in EngineRoots do
@@ -449,9 +636,11 @@ local function main()
 
     local engineUses = collectKeyUses(engineFiles, 'LUAUG_TR%(%s*"([^"]*)"%s*%)')
     local cliUses = collectKeyUses(cliFiles, 'tr%(%s*"([^"]*)"')
+    local engineRawKeys = collectRawKeyLiterals(engineFiles)
 
     local missing = reportMissing(engineUses, engineKeys, EngineCatalogPath)
         + reportMissing(cliUses, cliKeys, CliCatalogPath)
+        + reportMissingRawKeys(engineRawKeys, engineKeys, EngineCatalogPath)
 
     local findings: { Finding } = {}
     for _, file in engineFiles do
@@ -465,11 +654,16 @@ local function main()
         print(`i18nlint: {finding.file}:{finding.line}: {finding.detail} (R3)`)
     end
 
+    -- A key on the wire is a reference like any other, so it counts here or the
+    -- unreferenced tally would name an entry that something does use.
     local used: { [string]: boolean } = {}
     for _, use in engineUses do
         used[use.key] = true
     end
     for _, use in cliUses do
+        used[use.key] = true
+    end
+    for _, use in engineRawKeys do
         used[use.key] = true
     end
 
@@ -489,8 +683,9 @@ local function main()
     end
 
     print(
-        `i18nlint: {#engineUses + #cliUses} references, {total} catalog keys, {unused} unreferenced, `
-            .. `{#engineFiles + #cliFiles} file(s) and {SinkCallsSeen.count} sink call(s) swept`
+        `i18nlint: {#engineUses + #cliUses + #engineRawKeys} references, {total} catalog keys, {unused} unreferenced, `
+            .. `{#engineFiles + #cliFiles} file(s), {SinkCallsSeen.count} sink call(s) and `
+            .. `{KeyLiteralsSeen.count} key literal(s) swept`
     )
 
     -- A sweep that matched nothing would report a clean tree forever, which is
@@ -498,6 +693,9 @@ local function main()
     -- that only ever writes `core::makeError(`.
     if SinkCallsSeen.count == 0 then
         fail("the sweep matched no sink calls at all, so it proved nothing")
+    end
+    if KeyLiteralsSeen.count == 0 then
+        fail("the sweep matched no key-shaped literals at all, so it proved nothing")
     end
 
     if missing > 0 then

@@ -5,6 +5,7 @@
 #include <luaug/render/debug_draw.h>
 #include <luaug/rhi/device.h>
 #include <luaug/scene/class_registry.h>
+#include <luaug/scene/pivot.h>
 #include <luaug/scene/scene_file.h>
 #include <luaug/scene/world.h>
 
@@ -15,6 +16,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace luaug::app {
 using core::Vec3;
@@ -1431,6 +1433,54 @@ bool Editor::createStamp(scene::World& world, core::InstanceId id, core::Instanc
     return true;
 }
 
+namespace {
+// **A `Model` is moved by its PIVOT, because a pivot is the only handle it
+// has.** `Model` declares no `CFrame` property at all, so a placement that
+// wrote one wrote nothing: the class refused it, the refusal was a return value
+// nobody read, and the subtree stayed at the coordinates its file records --
+// which for anything authored near where it was built is the world origin.
+// `Part` does have a `CFrame`, and a `Part` root is the case that got tried.
+//
+// This is `PivotTo` (`instance_binding.cpp`) reached without a VM, off the same
+// `scene::pivotOf`. `pivot.h` was lifted out of the binding precisely so that
+// "where is the middle of this model" has one answer below `script`, and it
+// names an editor gizmo as a caller; nothing in `engine/app` had asked it yet.
+// The rule about what travels comes with it: a model moves every part under it,
+// which is what keeps the layout somebody built, and a part moves alone,
+// because what hangs off a part is welds and constraints rather than geometry.
+void pivotTo(scene::World& world, core::InstanceId id, const core::CFrameD& target)
+{
+    // `delta` puts the pivot on the target, and everything the object owns moves
+    // by that same transform -- which is what preserves relative layout.
+    const core::CFrameD delta = target * core::inverse(scene::pivotOf(world, id));
+    const core::NameAtom cframeProperty = world.atoms().intern("CFrame");
+
+    if (world.models().find(id) != nullptr) {
+        std::vector<core::InstanceId> descendants;
+        world.collectDescendants(id, descendants);
+        for (const core::InstanceId descendant : descendants) {
+            const scene::PartComponent* part = world.parts().find(descendant);
+            if (part == nullptr)
+                continue;
+            // Through `setProperty` rather than into the component, so the
+            // renderer and anything watching `CFrame` see it by the path they
+            // already have. The component is what says the write can land, so
+            // the result answers nothing this has not already asked.
+            world.setProperty(descendant, cframeProperty, scene::Value{delta * part->cframe});
+        }
+        return;
+    }
+
+    if (const scene::PartComponent* part = world.parts().find(id); part != nullptr) {
+        world.setProperty(id, cframeProperty, scene::Value{delta * part->cframe});
+        return;
+    }
+
+    if (const scene::CameraComponent* camera = world.cameras().find(id); camera != nullptr)
+        world.setProperty(id, cframeProperty, scene::Value{delta * camera->cframe});
+}
+} // namespace
+
 bool Editor::instantiateStamp(scene::World& world, std::string_view name, core::InstanceId parent,
                               core::InstanceId root, Inspector& inspector, bool linked)
 {
@@ -1466,13 +1516,17 @@ bool Editor::instantiateStamp(scene::World& world, std::string_view name, core::
     // In front of the camera rather than at the origin, for the reason
     // `createInstance` places a new part there: something four kilometres from
     // the view is something nobody finds.
+    //
+    // **Through the pivot**, because the root of a stamp is a `Model` as often
+    // as not -- grouping parts is what produces one -- and a `Model` has no
+    // `CFrame` to write. See `pivotTo` above for what that cost.
     if (m_cameraAdopted) {
         const core::Mat3& basis = m_cameraCFrame.rotation;
         const Vec3 forward{-basis.m[2][0], -basis.m[2][1], -basis.m[2][2]};
         constexpr f32 kSpawnDistance = 8.0f;
-        core::CFrameD placed_at;
-        placed_at.position = m_cameraCFrame.position + core::toDVec3(forward * kSpawnDistance);
-        (void)world.setProperty(placed, world.atoms().intern("CFrame"), scene::Value{placed_at});
+        core::CFrameD spawn;
+        spawn.position = m_cameraCFrame.position + core::toDVec3(forward * kSpawnDistance);
+        pivotTo(world, placed, spawn);
     }
 
     // **A copy is a placement that forgets where it came from.** Same subtree,

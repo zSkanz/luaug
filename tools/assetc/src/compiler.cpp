@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <map>
 #include <system_error>
 
 namespace luaug::assetc {
@@ -36,6 +37,11 @@ using asset::AssetKind;
     return "asset://" + text;
 }
 
+[[nodiscard]] bool endsWith(std::string_view text, std::string_view suffix)
+{
+    return text.size() > suffix.size() && text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
 [[nodiscard]] SourceKind classify(const std::filesystem::path& path)
 {
     const std::string name = lowercase(path.filename().string());
@@ -44,7 +50,7 @@ using asset::AssetKind;
     // Matched on the compound suffix rather than on `.json`, so an ordinary
     // JSON file a project keeps in its content directory rides through as raw
     // rather than being refused for not being a chunk.
-    if (name.size() > 11 && name.compare(name.size() - 11, 11, ".chunk.json") == 0) {
+    if (endsWith(name, ".chunk.json")) {
         return SourceKind::Chunk;
     }
 
@@ -80,14 +86,25 @@ using asset::AssetKind;
 //
 // Bump it when: an encoder parameter moves, a format version moves, the
 // importer starts producing different geometry, or the naming rules change.
-constexpr core::u32 kCompilerRules = 1;
+//
+// 2: a loose texture a `Material` names as a normal or metallic-roughness map
+// is encoded as numbers rather than as colour, so what this tool produces for
+// such an image moved.
+constexpr core::u32 kCompilerRules = 2;
 
 // What one source compiled to, remembered between runs.
 //
-// Keyed by content: the source bytes, the companions it read, the pinned
-// options and the rules version. That is the whole input to a pure function, so
-// a hit is not a guess -- it is the same answer arrived at without doing the
-// work again. **A miss is never wrong, only slow.**
+// Keyed by everything that decides the answer: the source bytes, its own name,
+// the pinned options, the rules version, and -- for a loose texture -- what the
+// project's materials say it is for. That is the whole input to a pure
+// function, so a hit is not a guess: it is the same answer arrived at without
+// doing the work again. **A miss is never wrong, only slow.**
+//
+// **A COMPANION the source reads is NOT in the key**, and this comment used to
+// say it was. A glTF that names an external image beside it keys on its own
+// bytes alone, so editing that image leaves the mesh's compiled copy of it
+// stale while the loose image itself recompiles. Nothing outside these tests
+// sets `cacheRoot` yet, which is the only reason it has not bitten.
 struct CachedSource
 {
     // The blobs this source produced, in the order it produced them, each with
@@ -108,11 +125,18 @@ struct CachedSource
 
 // The key for one source. Everything that could change the answer goes in, and
 // nothing that could not.
-[[nodiscard]] ContentHash cacheKey(std::span<const std::byte> sourceBytes, const CompileOptions& options,
-                                   SourceKind kind)
+[[nodiscard]] ContentHash cacheKey(std::span<const std::byte> sourceBytes, std::string_view urn,
+                                   const CompileOptions& options, SourceKind kind, bool colourData)
 {
     core::ContentHasher hasher;
     hasher.update(sourceBytes);
+
+    // **The URN, because the cached VALUE names the source.** An entry carries
+    // the manifest rows this file produced and a row IS a name, so two
+    // byte-identical files under two names are not the same answer. Keying on
+    // content alone made the second of them inherit the first one's row and
+    // lose its own -- within a single build, not only across two.
+    hasher.update(std::as_bytes(std::span<const char>(urn.data(), urn.size())));
 
     // The pinned options, byte for byte. An upstream default change is a diff in
     // this tool (Decision 1), so hashing the struct is hashing the decision.
@@ -123,6 +147,12 @@ struct CachedSource
     hasher.update(std::as_bytes(std::span<const core::u32, 1>{&rules, 1}));
     const auto kindValue = static_cast<core::u32>(kind);
     hasher.update(std::as_bytes(std::span<const core::u32, 1>{&kindValue, 1}));
+    // **What the project's materials say a loose image is for**, because it
+    // decides the transfer function and so the bytes. Without it, the sRGB blob
+    // written before the material existed comes back under the same name after
+    // it does -- a cache that is wrong rather than slow.
+    const core::u32 colourValue = colourData ? 1u : 0u;
+    hasher.update(std::as_bytes(std::span<const core::u32, 1>{&colourValue, 1}));
     return hasher.finish();
 }
 
@@ -218,6 +248,135 @@ struct CachedSource
         out.instances.push_back(instance);
     }
     return std::nullopt;
+}
+
+// --- What a loose texture is FOR ---------------------------------------------
+//
+// A `Material` is an instance like any other, so a project's materials live in
+// its scenes and its stamps, wherever their author put them -- and those files
+// are already sources. Reading them says what each image they name is, which is
+// the one thing a standalone image cannot say about itself.
+
+// The four `Material` properties that name an image, and whether what they name
+// is colour or numbers (`api/defs/instances.api.luau`): `ColorMap` is sampled
+// and multiplied by `Color`, `EmissiveMap` is what the surface glows with, and
+// the other two are values a shader reads rather than a picture anybody looks
+// at.
+struct MaterialMap
+{
+    std::string_view property;
+    bool colour;
+};
+
+constexpr MaterialMap kMaterialMaps[] = {
+    {"ColorMap", true},
+    {"EmissiveMap", true},
+    {"NormalMap", false},
+    {"MetallicRoughnessMap", false},
+};
+
+// What the project's materials say each image is for, by URN. Ordered rather
+// than hashed for the reason every container in this file is: an answer that
+// depended on a hash order would be an answer that depended on the machine.
+using TextureUses = std::map<std::string, bool>;
+
+// One property map -- a `Material`'s `properties`, or one entry of an
+// `overrides` block, which is the same shape at a path inside a placed stamp.
+void readMaterialMaps(const core::JsonValue& properties, TextureUses& out)
+{
+    if (properties.type() != core::JsonType::Object) {
+        return;
+    }
+    for (const MaterialMap& map : kMaterialMaps) {
+        const std::string_view urn = properties[map.property].asString();
+        if (urn.empty()) {
+            continue;
+        }
+        // **Colour wins**, for the reason the glTF branch gives: an image used
+        // as both is one blob, and splitting it would put the same pixels in
+        // the pack twice under two names. Merging with an OR is also what makes
+        // the answer independent of the order the sources were read in.
+        const auto [entry, inserted] = out.emplace(std::string(urn), map.colour);
+        if (!inserted) {
+            entry->second = entry->second || map.colour;
+        }
+    }
+}
+
+void collectMaterialMaps(const core::JsonValue& value, TextureUses& out)
+{
+    switch (value.type()) {
+    case core::JsonType::Array:
+        for (usize index = 0; index < value.size(); ++index) {
+            collectMaterialMaps(value.at(index), out);
+        }
+        break;
+
+    case core::JsonType::Object: {
+        if (value["class"].asString() == "Material") {
+            readMaterialMaps(value["properties"], out);
+        }
+        // **A placed stamp's edits count.** A scene records them under
+        // `overrides`, keyed by the path inside the stamp, and a map set there
+        // is as real as one set in `properties` (ADR 0051). What the path names
+        // is somewhere in the stamp FILE, so its class is not written down here
+        // -- which is why this reads the property names, and it is sound
+        // because `Material` is the only class that declares them.
+        if (const core::JsonValue overrides = value["overrides"]; overrides.type() == core::JsonType::Object) {
+            for (usize index = 0; index < overrides.size(); ++index) {
+                readMaterialMaps(overrides[overrides.keyAt(index)], out);
+            }
+        }
+        for (usize index = 0; index < value.size(); ++index) {
+            collectMaterialMaps(value[value.keyAt(index)], out);
+        }
+        break;
+    }
+
+    default:
+        break;
+    }
+    // Recursion is bounded by the parser: a document nested deeper than
+    // `core::JsonDocument` allows never parses in the first place.
+}
+
+// **Run after the sort and before anything is encoded.** The sort is the first
+// of the four determinism rules and this must not disturb it; reading a second
+// time here rather than remembering during the walk is what keeps it untouched.
+[[nodiscard]] TextureUses collectTextureUses(std::span<const SourceFile> sources)
+{
+    TextureUses uses;
+    for (const SourceFile& source : sources) {
+        const std::string name = lowercase(source.path.filename().string());
+        if (!endsWith(name, ".scene.json") && !endsWith(name, ".stamp.json") && !endsWith(name, ".chunk.json")) {
+            continue;
+        }
+
+        std::vector<std::byte> bytes;
+        if (!readWhole(source.path, bytes)) {
+            continue;
+        }
+        core::JsonDocument document;
+        // **A file that will not parse is left alone here.** The branch that
+        // compiles it is the one that owns saying so -- a chunk source with a
+        // diagnostic, a scene riding through as raw -- and refusing the build
+        // twice for one file would report it twice.
+        const std::string_view text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        if (!document.parse(text, source.relative.generic_string())) {
+            continue;
+        }
+        collectMaterialMaps(document.root(), uses);
+    }
+    return uses;
+}
+
+// Unclaimed is colour. That is still the honest default for a standalone image:
+// nothing in the project says what it is for, it is what most loose textures
+// are, and it is what this has always done.
+[[nodiscard]] bool looseTextureIsColour(const TextureUses& uses, const std::string& urn)
+{
+    const auto found = uses.find(urn);
+    return found == uses.end() || found->second;
 }
 
 } // namespace
@@ -438,6 +597,17 @@ CompileResult compile(const CompileOptions& options)
         return result;
     }
 
+    // **What the project's materials say each loose image is for**, decided
+    // before anything is encoded because the answer lives in another file: a
+    // texture's transfer function is a property of what REFERENCES it.
+    //
+    // Skipped when there is no loose texture to decide about, which is every
+    // content directory that is only meshes and chunks -- and the streamed
+    // world the determinism gate builds is one of them.
+    const bool anyLooseTexture =
+        std::any_of(sources.begin(), sources.end(), [](const SourceFile& s) { return s.kind == SourceKind::Texture; });
+    const TextureUses textureUses = anyLooseTexture ? collectTextureUses(sources) : TextureUses{};
+
     asset::PackWriter pack;
     std::vector<ManifestEntry> manifest;
     asset::ChunkIndex chunkIndex;
@@ -449,12 +619,17 @@ CompileResult compile(const CompileOptions& options)
             return result;
         }
 
+        const std::string urn = urnFor(source.relative);
+        // Only a loose texture has a transfer function to decide; for everything
+        // else this is a constant, so a mesh's key does not move.
+        const bool textureIsColour = source.kind == SourceKind::Texture ? looseTextureIsColour(textureUses, urn) : true;
+
         // **Answered from the cache when the inputs are the ones it was written
         // for.** A chunk is not cached: it is cheap to build and its blob is
         // written beside the pack rather than into it, so there is nothing here
         // to hand back.
         const bool cacheable = options.cacheRoot.empty() ? false : source.kind != SourceKind::Chunk;
-        const ContentHash key = cacheable ? cacheKey(bytes, options, source.kind) : ContentHash{};
+        const ContentHash key = cacheable ? cacheKey(bytes, urn, options, source.kind, textureIsColour) : ContentHash{};
         if (cacheable) {
             std::vector<std::byte> cachedBytes;
             CachedSource cached;
@@ -565,7 +740,7 @@ CompileResult compile(const CompileOptions& options)
 
             const std::vector<std::byte> encoded = asset::encodeMesh(compiled);
             ManifestEntry entry;
-            entry.urn = urnFor(source.relative);
+            entry.urn = urn;
             entry.hash = pack.addContent(AssetKind::Mesh, encoded);
             entry.kind = AssetKind::Mesh;
             entry.originalBytes = bytes.size();
@@ -587,18 +762,23 @@ CompileResult compile(const CompileOptions& options)
                 result.diagnostic = source.relative.generic_string() + ": " + error->message;
                 return result;
             }
-            // A loose image in the content directory, with no material to say
-            // what it is for. Colour is the honest default: it is what most
-            // standalone textures in a project are, and it is what this has
-            // always done.
+            // **What a `Material` in this project says this image is for.**
+            // `ColorMap` and `EmissiveMap` are colour; `NormalMap` and
+            // `MetallicRoughnessMap` are numbers, and bending those through the
+            // sRGB curve makes every value wrong by a smooth amount that reads
+            // as bad lighting rather than as a broken texture -- the same defect
+            // the glTF branch above was fixed for, arriving by the other door.
+            //
+            // An image NO material claims stays colour, which is the honest
+            // default for a standalone image and what this has always done.
             std::vector<std::byte> encoded;
-            if (const auto error = encodeTexture(image, true, encoded)) {
+            if (const auto error = encodeTexture(image, textureIsColour, encoded)) {
                 result.diagnostic = source.relative.generic_string() + ": " + error->message;
                 return result;
             }
 
             ManifestEntry entry;
-            entry.urn = urnFor(source.relative);
+            entry.urn = urn;
             entry.hash = pack.addContent(AssetKind::Texture, encoded);
             entry.kind = AssetKind::Texture;
             entry.originalBytes = bytes.size();
@@ -653,7 +833,7 @@ CompileResult compile(const CompileOptions& options)
 
         case SourceKind::Raw: {
             ManifestEntry entry;
-            entry.urn = urnFor(source.relative);
+            entry.urn = urn;
             entry.hash = pack.addContent(AssetKind::Raw, bytes);
             entry.kind = AssetKind::Raw;
             entry.originalBytes = bytes.size();

@@ -188,14 +188,54 @@ else
     # A defect referred to anywhere else has to exist here. This is the half
     # that catches the opposite mistake from a deletion: a ledger or a brief
     # citing D0xx that the register never had.
+    #
+    # **`defects.md` is swept too, and excluding it was a hole rather than a
+    # saving.** A row citing another row is the commonest citation in this
+    # repository -- one defect is regularly the other half of an earlier one, or
+    # the reason an earlier one was looked for -- and none of those was checked
+    # by anything. D121 cited a defect that had never been given a row at all
+    # and went through a green gate for a day.
+    #
+    # What the exclusion was protecting against is real, and is handled by
+    # stripping instead: a ROW DEFINITION is not a citation. `| D121 |` at the
+    # start of a line is the register making the claim, not a document relying
+    # on one, and a row allowed to satisfy itself proves nothing. So the id
+    # field comes off the front of each row and everything after it is prose,
+    # read exactly as prose is read anywhere else.
     while IFS=: read -r file cited; do
         if ! grep -qE "^\| $cited " docs/defects.md; then
             err "cites $cited, which docs/defects.md does not list" "$file"
             status=1
         fi
-    done < <(grep -RonE '\bD[0-9]{3}\b' --include='*.md' \
-        --exclude-dir=third_party --exclude=defects.md . |
-        sed -E 's/^([^:]+):[0-9]+:/\1:/' | sort -u)
+    done < <({
+        grep -RonE '\bD[0-9]{3}\b' --include='*.md' \
+            --exclude-dir=third_party --exclude=defects.md . |
+            sed -E 's/^([^:]+):[0-9]+:/\1:/'
+        sed -E 's/^\| D[0-9]{3} \|//' docs/defects.md |
+            { grep -oE '\bD[0-9]{3}\b' || true; } |
+            sed -E 's|^|./docs/defects.md:|'
+    } | sort -u)
+
+    # And an unfilled placeholder is a citation too -- of nothing.
+    #
+    # The check above needs three digits to see a citation, so `D-`, which is
+    # what somebody writes when the number is not known yet, was invisible to it
+    # twice over: in the file it did not read, in a shape it could not match.
+    # Both of the ones that survived were pointing at real defects; one of them
+    # had no row anywhere, which is the disappearance the register exists to
+    # stop.
+    #
+    # Two things are deliberately NOT a placeholder. A letter after the hyphen
+    # is an ordinary hyphenated word -- `D-numbered` work, in a brief -- and a
+    # backtick after it means the text is QUOTING the placeholder rather than
+    # leaving one, which the mission file and D136 both do on purpose. That is
+    # the same carve-out the legal sweep above makes: a document that has to
+    # name what is forbidden must be able to spell it.
+    while IFS= read -r file; do
+        err "cites 'D-', which is a placeholder where a defect id belongs" "$file"
+        status=1
+    done < <(grep -RlE '\bD-([^0-9A-Za-z`]|$)' --include='*.md' \
+        --exclude-dir=third_party . | sort -u)
 fi
 
 if [[ $status -eq 0 ]]; then

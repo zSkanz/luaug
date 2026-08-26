@@ -1951,8 +1951,21 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     // Answered rather than ignored: `asset-changed` and `eval`
                     // are reserved by the protocol and a caller that gets
                     // silence cannot tell "not yet" from "lost".
+                    //
+                    // The key travels as its NAME rather than through
+                    // `LUAUG_TR`, because a `TextKey` is a four-byte hash and
+                    // the peer is what resolves it, in the peer's locale. That
+                    // is a spelling the i18n lint could not see, and this key
+                    // spent from M3 to D139 naming nothing in any catalog --
+                    // so a client that resolved it got the
+                    // `[i18n:missing:xxxxxxxx]` marker. The lint sweeps
+                    // key-shaped literals now, whoever writes them.
+                    //
+                    // `of` is the verb, and it is the message's `{of}`: the
+                    // field and the placeholder carry the same name so that a
+                    // client can hand the reply's own fields to the catalog.
                     replyOk("error", command.id, [&command](core::JsonWriter& writer) {
-                        writer.field("key", "dev.err.not_implemented");
+                        writer.field("key", "engine.dev.err.not_implemented");
                         writer.field("of", command.type);
                     });
                     break;
