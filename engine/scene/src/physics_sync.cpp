@@ -286,6 +286,7 @@ void PhysicsSync::applyBody(core::InstanceId id, PartComponent& part, RigidBodyC
 
         record.handle = handle;
         record.live = true;
+        record.backendMotion = desc.motion;
         ++m_bodyCount;
         return;
     }
@@ -311,17 +312,37 @@ void PhysicsSync::applyBody(core::InstanceId id, PartComponent& part, RigidBodyC
             return;
         record.handle = handle;
         record.live = true;
+        record.backendMotion = desc.motion;
         ++m_bodyCount;
         return;
     }
 
     if (describedDifferently) {
-        // The record takes the ATTEMPT either way. A refusal leaves the body as
-        // it was -- which is the right outcome, because the alternative to a
-        // stale hull is no hull at all -- and recording what was asked for is
-        // what stops it being asked again every tick.
-        (void)m_backend.updateBody(m_world, record.handle, desc);
-        remember();
+        const bool applied = m_backend.updateBody(m_world, record.handle, desc);
+        if (applied) {
+            remember();
+            record.backendMotion = desc.motion;
+        }
+        else {
+            // **A refusal leaves the body as it was, so only the retry gate is
+            // recorded** (D135). Committing the whole description would be the
+            // mirror claiming the backend took a motion type and a friction it
+            // refused -- and because `describedDifferently` then goes false for
+            // ever, an `Anchored` part would keep falling with its friction
+            // change permanently lost.
+            //
+            // These three ARE recorded, and that is what keeps "a refused
+            // rebuild costs one attempt" true: they are the comparison the
+            // retry is gated on. Everything else stays as the backend has it,
+            // so the incremental branch below pushes it through
+            // `setBodyMaterial`, `setBodyFlags` and `setBodyGroup` next tick --
+            // and `record.written` stays as it was, so a `CFrame` written in the
+            // same tick as a refused rebuild is delivered next tick rather than
+            // recorded as delivered and swallowed.
+            record.shape = withoutPoints(desc.shape);
+            record.motion = desc.motion;
+            record.density = desc.density;
+        }
     }
     else {
         if (record.friction != desc.friction || record.restitution != desc.restitution) {
@@ -346,7 +367,7 @@ void PhysicsSync::applyBody(core::InstanceId id, PartComponent& part, RigidBodyC
             m_backend.setBodyTransform(m_world, record.handle, part.cframe);
             record.written = part.cframe;
         }
-        else if (record.motion == physics::MotionType::Kinematic) {
+        else if (record.backendMotion == physics::MotionType::Kinematic) {
             // **A kinematic body that was not written this tick is told to stay
             // where it is**, and that is not a no-op: `MoveKinematic` sets a
             // velocity, and a body nobody re-targets keeps the last one and
@@ -895,7 +916,7 @@ void PhysicsSync::writeBack()
         // line `churn10k`'s writeback went from 0.03 ms to 9.9 ms the moment
         // moving anchored parts became kinematic. The measurement is what found
         // it, which is the whole argument for `perf-baselines.md`.
-        if (record.motion == physics::MotionType::Kinematic)
+        if (record.backendMotion == physics::MotionType::Kinematic)
             continue;
 
         // The QUIET write: straight into the component, with the changed set

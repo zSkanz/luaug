@@ -326,5 +326,78 @@ describe("Script.Enabled", function()
             task.wait()
             expect(made()):ToBe("Survivor")
         end)
+
+        it("still runs its own Destroying handler", function()
+            -- **The one exception, and the reason the rule needed a reason
+            -- rather than a bool.** `Destroying` is the documented last chance
+            -- to clean up, and `World::destroy` MARKS the instance before it
+            -- queues the fire -- so a script's own `Destroying` handler is owned
+            -- by an instance that is already destroyed. "A destroyed script does
+            -- not run" made the hook unreachable for the one script that most
+            -- needs it, with no diagnostic at all.
+            --
+            -- The `Connected` marker goes first, so a failure here says which
+            -- half broke: no marker means the script never started, marker and
+            -- no `Cleaned` means the handler was suppressed.
+            local script = sleeping(
+                "Dying",
+                [[
+					local function mark(name)
+						local p = Instance.new("Part")
+						p.Name = name
+						p.Parent = workspace:FindFirstChild("ScriptEnabledSpec")
+					end
+					script.Destroying:Connect(function()
+						mark("Cleaned")
+					end)
+					mark("Connected")
+				]]
+            )
+
+            script.Enabled = true
+            task.wait()
+            expect(made()):ToBe("Connected")
+
+            script:Destroy()
+            task.wait()
+            task.wait()
+            expect(made()):ToBe("Connected,Cleaned")
+        end)
+
+        it("does not run any OTHER signal it had connected", function()
+            -- Which is the half that keeps D097 fixed. The exception is for the
+            -- `Destroying` fire and for nothing else: a handler on a sibling's
+            -- `ChildAdded`, connected by a script that has since been destroyed,
+            -- stays silent.
+            local other = Instance.new("Folder")
+            other.Name = "ScriptDestroyedWatched"
+            other.Parent = workspace
+
+            local script = sleeping(
+                "Watcher",
+                [[
+					local watched = workspace:FindFirstChild("ScriptDestroyedWatched")
+					watched.ChildAdded:Connect(function()
+						local p = Instance.new("Part")
+						p.Name = "Heard"
+						p.Parent = workspace:FindFirstChild("ScriptEnabledSpec")
+					end)
+				]]
+            )
+
+            script.Enabled = true
+            task.wait()
+            script:Destroy()
+            task.wait()
+
+            local poke = Instance.new("Folder")
+            poke.Name = "Poke"
+            poke.Parent = other
+            task.wait()
+            task.wait()
+
+            expect(made()):ToBe("")
+            other:Destroy()
+        end)
     end)
 end)

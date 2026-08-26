@@ -14,6 +14,7 @@
 #include "luaug/rhi/capture.h"
 #include "luaug/scene/components.h"
 #include "luaug/scene/enum_registry.h"
+#include "luaug/scene/scene_file.h"
 #include "luaug/scene/world.h"
 
 #include <algorithm>
@@ -3256,6 +3257,120 @@ TEST_CASE("the whole material workflow survives a save and a reopen")
 
     // Still an instance of the file, so editing the stamp reaches it.
     CHECK(reopened.stampOf(stored->material).valid());
+}
+
+TEST_CASE("dropping the same material twice does not eat a press of ctrl-Z")
+{
+    // The file's own invariant, from the case above: **a step that undoes
+    // nothing eats a press of ctrl-Z.** A drop onto a part that already wears
+    // what was dropped is exactly that, and it was the hole left in it --
+    // `UndoStack::record` clears the redo stack, so a step taken back afterwards
+    // has already destroyed a real redo future and leaves a junk one behind.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId workspace = world.create(fixture.workspaceClass);
+    world.setName(workspace, fixture.atoms.intern("Workspace"));
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+
+    const std::filesystem::path scratch =
+        std::filesystem::temp_directory_path() / "luaug-editor-tests" / "assign-twice";
+    std::error_code ec;
+    std::filesystem::remove_all(scratch, ec);
+    std::filesystem::create_directories(scratch, ec);
+
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(scratch);
+
+    const core::InstanceId authored = world.create(fixture.materialClass);
+    world.setName(authored, fixture.atoms.intern("Wooden"));
+    world.materials().add(authored, scene::MaterialComponent{});
+    REQUIRE(world.setParent(authored, workspace) == std::nullopt);
+    REQUIRE(editor.createStamp(world, authored, workspace, "wooden"));
+
+    const core::InstanceId part = world.create(fixture.partClass);
+    world.setName(part, fixture.atoms.intern("Crate"));
+    world.parts().add(part, scene::PartComponent{});
+    REQUIRE(world.setParent(part, workspace) == std::nullopt);
+
+    const core::InstanceId targets[] = {part};
+    REQUIRE(editor.assignStampTo(world, workspace, workspace, "wooden", "Material", targets));
+    const core::usize afterFirst = editor.history().depth();
+
+    // The same drop again. It succeeds -- the part is wearing what was dropped
+    // on it, which is what was asked for -- and it records nothing.
+    REQUIRE(editor.assignStampTo(world, workspace, workspace, "wooden", "Material", targets));
+    CHECK(editor.history().depth() == afterFirst);
+    CHECK(world.parts().find(part)->material == authored);
+}
+
+TEST_CASE("a material assigned inside an open stamp survives the stamp's own save")
+{
+    // **A stamp is written from its root DOWN**, so a reference to anything
+    // beside the stamp rather than under it is one the file cannot carry: the
+    // save drops it to null, the next open shows an untextured part, and
+    // `restamp` pushes that null into every instance in the world. Silently, in
+    // every direction.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId workspace = world.create(fixture.workspaceClass);
+    world.setName(workspace, fixture.atoms.intern("Workspace"));
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+
+    const std::filesystem::path scratch =
+        std::filesystem::temp_directory_path() / "luaug-editor-tests" / "assign-inside";
+    std::error_code ec;
+    std::filesystem::remove_all(scratch, ec);
+    std::filesystem::create_directories(scratch, ec);
+
+    Editor editor;
+    Inspector inspector;
+    editor.openContent(scratch);
+
+    // A material stamp to drop, and a part-with-a-child stamp to drop it into.
+    const core::InstanceId authored = world.create(fixture.materialClass);
+    world.setName(authored, fixture.atoms.intern("Wooden"));
+    world.materials().add(authored, scene::MaterialComponent{});
+    REQUIRE(world.setParent(authored, workspace) == std::nullopt);
+    REQUIRE(editor.createStamp(world, authored, workspace, "wooden"));
+    REQUIRE(world.destroy(authored));
+    world.retireDestroyed();
+
+    const core::InstanceId crate = world.create(fixture.partClass);
+    world.setName(crate, fixture.atoms.intern("Crate"));
+    world.parts().add(crate, scene::PartComponent{});
+    REQUIRE(world.setParent(crate, workspace) == std::nullopt);
+
+    // Placed UNDER the subtree that is about to be written, which is the whole
+    // of the fix: the parent is the stamp's root and not the workspace beside it.
+    const core::InstanceId targets[] = {crate};
+    REQUIRE(editor.assignStampTo(world, workspace, crate, "wooden", "Material", targets));
+
+    const scene::PartComponent* before = world.parts().find(crate);
+    REQUIRE(before != nullptr);
+    REQUIRE(before->material.valid());
+    // Under the part, not beside it.
+    CHECK(world.parentOf(before->material) == crate);
+
+    // Written as a stamp would be, and read back into a fresh world.
+    scene::SceneIoReport wrote;
+    const std::string text = scene::writeStamp(world, crate, &wrote);
+    CHECK(wrote.droppedReferences == 0);
+
+    scene::World reopened(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId reopenedWorkspace = reopened.create(fixture.workspaceClass);
+    reopened.setName(reopenedWorkspace, fixture.atoms.intern("Workspace"));
+    reopened.workspaces().add(reopenedWorkspace, scene::WorkspaceComponent{});
+    const core::InstanceId placed = scene::readStamp(reopened, text, reopenedWorkspace, "crate");
+    REQUIRE(placed.valid());
+
+    const scene::PartComponent* after = reopened.parts().find(placed);
+    REQUIRE(after != nullptr);
+    // **Still wearing it.** This is the assertion the defect was: it came back
+    // as a null reference, and nothing said so.
+    REQUIRE(after->material.valid());
+    CHECK(reopened.alive(after->material));
+    CHECK(reopened.materials().find(after->material) != nullptr);
 }
 
 TEST_CASE("what one edit costs, in snapshots" * doctest::skip())

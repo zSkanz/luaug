@@ -226,6 +226,14 @@ void ThumbnailCache::collectReads()
 
         auto work = std::make_unique<Work>();
         const bool got = status == platform::IoStatus::Ready && platform::takeIoResult(entry.read, work->bytes);
+        // **A request that ended without being TAKEN still holds its
+        // slot** -- `takeIoResult` releases one only for `Ready`, and the
+        // pool is a fixed 512. A project with missing files would fill it
+        // and every later read would be refused, which reads as "textures
+        // stopped loading after a while" and has nothing in the log.
+        // `cancelIo` is the documented way to let a terminal one go.
+        if (!got)
+            platform::cancelIo(entry.read);
         entry.read = {};
         if (!got || work->bytes.empty()) {
             entry.stage = Stage::Failed;

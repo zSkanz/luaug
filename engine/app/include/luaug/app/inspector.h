@@ -117,9 +117,16 @@ enum class EditorKind : core::u8
     // somebody to type a program into a property grid is not the offer to make
     // when a tab two panels over is a code editor.
     Code,
-    // Displayed and never written. Reparenting from the panel is out of M4's
-    // scope, and `Parent` is an Instance property -- so an editable reference
-    // widget would be the one feature the brief excluded, arriving by accident.
+    // A reference to another instance: a picker, a drag from the Explorer, a
+    // drag of a stamp from the content browser, and a `go` that follows it.
+    //
+    // **It was read-only until D130**, deliberately: reparenting from the panel
+    // was out of M4's scope and `Parent` is an Instance property, so an editable
+    // reference widget would have been the one feature that brief excluded
+    // arriving by accident. `BasePart.Material` is what changed the answer -- a
+    // property whose entire purpose is to be set -- and the rule survived in
+    // `editable()` for a while after this comment stopped being true, which is
+    // exactly how a feature ships inert.
     InstanceRef,
     EnumCombo,
 };

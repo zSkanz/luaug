@@ -1530,13 +1530,25 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                                                   inspector, editorCommands.placeStampLinked);
                 }
                 if (!editorCommands.assignStampPath.empty()) {
-                    // Under the workspace when one has to be placed: a
-                    // `Material` is not scenery and has nowhere else obvious to
-                    // live, and the person who dropped it will want to find it
-                    // to edit it.
-                    (void)editor.assignStampTo(
-                        authored(), authoredRoot(), stageOf() != nullptr ? stageOf()->workspace() : host->workspace(),
-                        editorCommands.assignStampPath, editorCommands.assignStampProperty, inspector.selectionSet());
+                    // **Inside the stamp when a stamp is open** (D133). A stamp
+                    // is written from its root DOWN, so a `Material` placed
+                    // beside it is a reference the file cannot carry: the save
+                    // drops it to `null`, the next open shows an untextured
+                    // part, and `restamp` pushes that null into every instance
+                    // of the stamp in the world. Under the workspace otherwise,
+                    // because a `Material` is not scenery and has nowhere else
+                    // obvious to live -- and whoever dropped it will want to
+                    // find it again to edit it.
+                    //
+                    // The SEARCH root stays the whole authored tree either way.
+                    // Narrowing it to the stamp would stop the search finding a
+                    // material that is already there and place a duplicate.
+                    const core::InstanceId placeUnder =
+                        editor.stampSession().open() && editor.stampSession().root.valid()
+                            ? editor.stampSession().root
+                            : (stageOf() != nullptr ? stageOf()->workspace() : host->workspace());
+                    (void)editor.assignStampTo(authored(), authoredRoot(), placeUnder, editorCommands.assignStampPath,
+                                               editorCommands.assignStampProperty, inspector.selectionSet());
                 }
                 if (editorCommands.breakStamp.valid())
                     (void)editor.breakStamp(authored(), editorCommands.breakStamp);

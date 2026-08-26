@@ -571,7 +571,13 @@ void invokeFire(lua_State* L, const DeferredEntry& entry)
             // script's connections stay connected and stop being invoked).
             lua_getref(L, ref);
             const core::InstanceId owningScript = scriptOfFunction(L, -1);
-            if (resumptionSuppressed(L, owningScript)) {
+            const SuppressReason reason = suppressionFor(L, owningScript);
+            // **`Destroying` is the one exception, and only for its own fire**
+            // (D132). Every other reason suppresses, and every other signal on a
+            // destroyed script suppresses, which is what keeps D097 fixed.
+            const bool suppressed =
+                reason != SuppressReason::None && !(entry.destroyingHook && reason == SuppressReason::Destroyed);
+            if (suppressed) {
                 lua_pop(L, 1);
                 continue;
             }
@@ -909,8 +915,15 @@ void enqueueSceneChanges(lua_State* L, std::span<const scene::Change> changes)
 
         case scene::ChangeKind::Destroying: {
             const SignalId id = eventSignal(sys.destroying);
-            if (id.valid())
+            if (id.valid()) {
                 enqueueFire(L, id, 0, 0);
+                // Marked on the entry the call above just made, which is the
+                // last one in the queue when it made one at all. See
+                // `DeferredEntry::destroyingHook`.
+                if (!sys.queue.empty() && sys.queue.back().kind == EntryKind::Fire && sys.queue.back().signal == id) {
+                    sys.queue.back().destroyingHook = true;
+                }
+            }
 
             // Straight after the fire, so a fire queued for this instance later
             // in the same drain finds no live connections and invokes nothing.

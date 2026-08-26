@@ -202,7 +202,21 @@ bool editable(const scene::PropertyDesc& descriptor) noexcept
         return false;
 
     const EditorKind kind = editorFor(descriptor);
-    return kind != EditorKind::ReadOnlyText && kind != EditorKind::InstanceRef && kind != EditorKind::Code;
+    // **`InstanceRef` used to be here, and taking it out is the whole of D130.**
+    //
+    // A reference was deliberately read-only at M4 -- reparenting from the panel
+    // was out of that milestone's scope, and `Parent` is an Instance property,
+    // so an editable reference widget would have been the one feature the brief
+    // excluded arriving by accident. The panel grew a real reference editor
+    // later, with a picker, a drag from the Explorer and a drag from the content
+    // browser, and this predicate was not told.
+    //
+    // The result was a feature that was entirely inert in the shipped editor: the
+    // button came up disabled, the drop target was never installed, and
+    // `BasePart.Material` -- a property whose only purpose is to be set -- could
+    // not be set by any means. Nothing caught it because every test reached the
+    // COMMAND and none reached the predicate.
+    return kind != EditorKind::ReadOnlyText && kind != EditorKind::Code;
 }
 
 scene::EnumId enumDomainOf(const scene::EnumRegistry& enums, const scene::PropertyDesc& descriptor) noexcept

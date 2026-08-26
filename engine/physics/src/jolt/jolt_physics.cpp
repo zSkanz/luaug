@@ -829,11 +829,16 @@ public:
         }
         const JPH::ShapeRefC shape = buildShape(desc.shape);
         if (shape == nullptr) {
-            // **The body stays what it was**, which is the useful answer: a
-            // degenerate hull -- four or more points that are all coplanar --
-            // closes to nothing, and replacing a working box with nothing would
-            // drop the part through the floor. Reported so the caller can say so
-            // once rather than retrying it every tick.
+            // **The body stays what it was**, which is the useful answer:
+            // replacing a working box with nothing would drop the part through
+            // the floor. Reported so the caller can say so once rather than
+            // retrying it every tick.
+            //
+            // What actually reaches here is a shape Jolt's builder rejects or a
+            // description it cannot make -- and NOT, as this comment used to
+            // claim, a coplanar quad: `ConvexHullBuilder` accepts one and gives
+            // it a small thickness. Naming a case that does not happen is worse
+            // than naming none, because somebody writes a test around it.
             return false;
         }
 

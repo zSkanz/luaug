@@ -1235,7 +1235,13 @@ bool Editor::saveStamp(scene::World& game, core::InstanceId gameRoot)
     }
 
     scene::SceneIoReport report;
-    const std::string text = scene::writeStamp(m_stage->world(), m_stamp.root, &report);
+    // **The stamps this stamp names, for the reason `save` gives about a scene**
+    // (D133). A stamp can contain a stamped instance -- a lamp post inside a
+    // street -- and without the library every one of them is written in full and
+    // unlinked, so editing the lamp post stops reaching the street. `save` has
+    // done this since ADR 0051 landed and this path never learned it.
+    scene::StampLibrary stamps(m_stage->world(), stampSource());
+    const std::string text = scene::writeStamp(m_stage->world(), m_stamp.root, &report, &stamps);
     const std::filesystem::path absolute = m_content.root() / std::filesystem::path(m_stamp.path);
     if (!platform::createDirectories(absolute.parent_path()) || !platform::writeTextFile(absolute, text)) {
         m_status = EditorStatus{"could not write " + m_stamp.path, true};
@@ -1277,7 +1283,18 @@ bool Editor::saveStamp(scene::World& game, core::InstanceId gameRoot)
     // one lamp post did not move is how a person stops trusting the link.
     if (moved.unlinkedStamps > 0)
         message += ", " + std::to_string(moved.unlinkedStamps) + " left alone (changed structurally)";
-    m_status = EditorStatus{message, false};
+    // **Counted rather than swallowed**, exactly as `save` counts a scene's
+    // (D133). A stamp is written from its root DOWN, so a reference pointing at
+    // anything outside that subtree cannot be carried -- and pointing a part
+    // inside a stamp at a `Material` that sits beside the stamp rather than
+    // under it is the ordinary way to arrive here. It came back as `null` on the
+    // next open, silently, and `restamp` then pushed that null into every
+    // instance in the world.
+    if (report.droppedReferences > 0) {
+        message += ", " + std::to_string(report.droppedReferences) +
+                   " reference(s) outside the stamp were dropped -- put what they name INSIDE it";
+    }
+    m_status = EditorStatus{message, report.droppedReferences > 0};
     return true;
 }
 
@@ -1480,14 +1497,17 @@ bool Editor::assignStampTo(scene::World& world, core::InstanceId root, core::Ins
     const core::NameAtom mark = world.atoms().intern(relative);
     const core::NameAtom field = world.atoms().intern(property);
 
-    // **Recorded before anything, including the search**, so the placement and
-    // every write it enables are one press of ctrl-Z. Two steps would mean
-    // undoing a drop left a material in the world that nothing points at.
-    m_history.record(world, "Assign");
-
     // The one already in the world wins. Document order, so which one is found
     // is a fact about the tree rather than about pool layout -- and so two runs
     // of the same gesture on the same scene agree.
+    //
+    // **Searched BEFORE anything is recorded** (D134), because the search does
+    // not mutate and because of what comes next: dropping the same material on
+    // a part that already wears it must not record a step. `UndoStack::record`
+    // clears the redo stack, so a step taken back afterwards has already
+    // destroyed a real redo future and leaves a junk one behind -- the file's
+    // own invariant is "a step that undoes nothing eats a press of ctrl-Z", and
+    // this was the hole left in it.
     core::InstanceId subject;
     static thread_local std::vector<TreeRow> rows;
     collectTree(world, root, rows);
@@ -1497,6 +1517,33 @@ bool Editor::assignStampTo(scene::World& world, core::InstanceId root, core::Ins
             break;
         }
     }
+
+    if (subject.valid()) {
+        bool everyTargetAlready = true;
+        core::usize live = 0;
+        for (const core::InstanceId target : targets) {
+            if (!world.alive(target) || world.destroyed(target))
+                continue;
+            ++live;
+            const std::optional<scene::Value> held = world.getProperty(target, field);
+            if (!held.has_value() || !std::holds_alternative<core::InstanceId>(*held) ||
+                std::get<core::InstanceId>(*held) != subject) {
+                everyTargetAlready = false;
+                break;
+            }
+        }
+        if (live > 0 && everyTargetAlready) {
+            // Nothing to do, and saying so is the honest answer: the part is
+            // wearing what was dropped on it.
+            m_status = EditorStatus{"already " + relative, false};
+            return true;
+        }
+    }
+
+    // **Recorded before the world is touched**, so the placement and every write
+    // it enables are one press of ctrl-Z. Two steps would mean undoing a drop
+    // left a material in the world that nothing points at.
+    m_history.record(world, "Assign");
 
     if (!subject.valid()) {
         std::string text;

@@ -323,6 +323,13 @@ void StreamingHost::pump(f64 budgetMilliseconds)
             m_manager.onChunkLoaded(m_reads[index].second.id, bytes);
         }
         else {
+            // **The slot goes back** (D131). `pumpIo` releases one only for a
+            // request that carries a callback, and this one polls; `takeIoResult`
+            // releases one only for `Ready`. So a chunk whose file is missing
+            // kept its slot for ever, and the pool is a fixed 512 -- past which
+            // every asynchronous read in the process is refused, including the
+            // ones that keep material textures off the frame thread.
+            platform::cancelIo(m_reads[index].first);
             m_manager.onChunkFailed(m_reads[index].second.id);
         }
         m_reads.erase(m_reads.begin() + static_cast<std::ptrdiff_t>(index));

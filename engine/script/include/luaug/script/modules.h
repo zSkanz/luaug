@@ -262,15 +262,36 @@ void adoptMountedEntries(lua_State* L, std::vector<ModuleRegistry::Entry> entrie
 // moment a fire decides whether to invoke it.
 [[nodiscard]] core::InstanceId scriptOfFunction(lua_State* L, int index);
 
-// Whether a resumption belonging to this script must be dropped: it names a
-// `Script` that has been destroyed, or a live one whose `Enabled` is false.
+// WHY a resumption belonging to this script would be dropped.
+//
+// **A reason rather than a bool, and D132 is why** (see `signals.cpp`). One
+// caller has to treat one of these differently: `Instance.Destroying` is the
+// documented last chance to clean up, `World::destroy` marks the instance
+// BEFORE queueing that fire, and a script's own `Destroying` handler is
+// therefore owned by an instance that is already destroyed. Suppressing it
+// makes the hook unreachable for the script that owns it. Every other reason,
+// and every other signal, still suppresses.
+enum class SuppressReason : core::u8
+{
+    // Run it.
+    None,
+    // The instance is gone entirely -- retired, or an id from another world.
+    // Never runs, under any rule: there is nothing left to run on behalf of.
+    Retired,
+    // Destroyed and not yet retired (D097). Not in the world means not running,
+    // which is what the class documents and what `Enabled = false` already did
+    // for the weaker case.
+    Destroyed,
+    // Live, and `Enabled` is false (ADR 0059 rule 2).
+    Disabled,
+};
+
+[[nodiscard]] SuppressReason suppressionFor(lua_State* L, core::InstanceId script);
+
+// The ordinary question, for every caller that has no exception to make.
 //
 // **Invalid is never suppressed.** A thread with no owning script is the
 // engine's own, and a rule about scripts must not reach one.
-//
-// **Destroyed always is** (D097). Not in the world means not running, which is
-// what the class documents and what `Enabled = false` already did for the
-// weaker case.
 [[nodiscard]] bool resumptionSuppressed(lua_State* L, core::InstanceId script);
 
 // How many entry scripts were mounted. The conformance runner reports it, and a

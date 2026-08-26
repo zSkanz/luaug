@@ -150,6 +150,18 @@ struct DeferredEntry
 
     // `TaskCallback`: the thread to resume, held by registry ref.
     int threadRef = -1;
+
+    // **This fire is `Instance.Destroying`** (D132).
+    //
+    // It is the documented last chance to clean up, and `World::destroy` marks
+    // the instance BEFORE queueing it -- so a script's own `Destroying` handler
+    // is owned by an instance that is already destroyed, and the rule that a
+    // destroyed script does not run makes the hook unreachable for the one
+    // script that most needs it. This entry, and only this entry, lets
+    // `SuppressReason::Destroyed` through. `Retired` and `Disabled` still
+    // suppress, and every other signal on a destroyed subtree still suppresses,
+    // or D097 comes straight back.
+    bool destroyingHook = false;
 };
 
 // Per-VM. Held by `VmContext` as a pointer and owned by `ScriptRuntime`, which

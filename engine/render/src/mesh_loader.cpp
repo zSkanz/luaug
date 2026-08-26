@@ -241,6 +241,14 @@ core::u32 MeshLoader::pumpTextures(rhi::IDevice& device, rhi::ICmdList& cmd, con
             pending.work = std::make_unique<TextureWork>();
             const bool got =
                 status == platform::IoStatus::Ready && platform::takeIoResult(pending.read, pending.work->bytes);
+            // **A request that ended without being TAKEN still holds its
+            // slot** -- `takeIoResult` releases one only for `Ready`, and the
+            // pool is a fixed 512. A project with missing files would fill it
+            // and every later read would be refused, which reads as "textures
+            // stopped loading after a while" and has nothing in the log.
+            // `cancelIo` is the documented way to let a terminal one go.
+            if (!got)
+                platform::cancelIo(pending.read);
             pending.read = {};
             if (!got || pending.work->bytes.empty()) {
                 // A material without its texture still draws, in its own

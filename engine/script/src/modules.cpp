@@ -691,10 +691,10 @@ core::InstanceId scriptOfFunction(lua_State* L, int index)
     return out;
 }
 
-bool resumptionSuppressed(lua_State* L, core::InstanceId script)
+SuppressReason suppressionFor(lua_State* L, core::InstanceId script)
 {
     if (!script.valid())
-        return false;
+        return SuppressReason::None;
     scene::World& w = world(L);
     // **A destroyed script is stopped** (D097). The `Script` class already
     // documents this -- "one that is not in the world does not run, which is the
@@ -714,15 +714,22 @@ bool resumptionSuppressed(lua_State* L, core::InstanceId script)
     // valid, dead and reached this function named a script that used to exist.
     // Destroyed-but-not-retired counts: `World::destroy` unlinks and marks, and
     // a paused world may not drain for many frames.
-    if (!w.alive(script) || w.destroyed(script))
-        return true;
+    if (!w.alive(script))
+        return SuppressReason::Retired;
+    if (w.destroyed(script))
+        return SuppressReason::Destroyed;
     if (w.classOf(script) != w.classes().findId(w.atoms().lookup("Script")))
-        return false;
+        return SuppressReason::None;
     const std::optional<scene::Value> value = w.getProperty(script, w.atoms().intern("Enabled"));
     if (!value.has_value())
-        return false;
+        return SuppressReason::None;
     const auto* flag = std::get_if<bool>(&value.value());
-    return flag != nullptr && !*flag;
+    return flag != nullptr && !*flag ? SuppressReason::Disabled : SuppressReason::None;
+}
+
+bool resumptionSuppressed(lua_State* L, core::InstanceId script)
+{
+    return suppressionFor(L, script) != SuppressReason::None;
 }
 
 std::vector<ModuleRegistry::Entry> mountedEntries(lua_State* L)

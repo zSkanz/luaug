@@ -192,6 +192,16 @@ private:
         // carries the same information without keeping a pointer to it.
         physics::ShapeDesc shape;
         physics::MotionType motion = physics::MotionType::Dynamic;
+        // **What the backend actually has**, as against `motion`, which is what
+        // was last ASKED for (D135).
+        //
+        // They differ only after a refused rebuild -- and they have to, because
+        // `motion` is part of the comparison that decides whether to ask again
+        // and this one is the answer to "is this body kinematic". Reading the
+        // attempted one for that question tells `writeBack` to skip a body the
+        // solver is still moving, and tells the kinematic re-target to keep
+        // aiming a body that is not kinematic.
+        physics::MotionType backendMotion = physics::MotionType::Dynamic;
         bool collidable = true;
         bool queryable = true;
         u16 group = 0;

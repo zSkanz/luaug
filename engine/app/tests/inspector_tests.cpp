@@ -1136,3 +1136,44 @@ TEST_CASE("every Content property the engine ships says which files it accepts")
     // property that names one is an instance reference rather than a path.
     CHECK(contentProperties == 9);
 }
+
+TEST_CASE("a reference with a setter is editable, and one without is not")
+{
+    // **The predicate that made a whole feature inert** (D130). A reference was
+    // deliberately read-only at M4 -- reparenting from the panel was out of that
+    // brief's scope -- and `editable` said so by naming `EditorKind::InstanceRef`
+    // outright. The panel later grew a real reference editor: a picker, a drag
+    // from the Explorer, a drag of a stamp from the browser. This predicate was
+    // not told, so the button came up disabled and the drop target was never
+    // installed, and `BasePart.Material` -- a property whose entire purpose is to
+    // be set -- could not be set by any means.
+    //
+    // Nothing caught it because every test reached the COMMAND behind the widget
+    // and none reached the one predicate that decides whether the widget is
+    // live. This is that test.
+    Fixture fixture;
+
+    std::vector<const scene::PropertyDesc*> properties;
+    collectProperties(fixture.classes, fixture.widgetClass, properties);
+
+    const scene::PropertyDesc* link = nullptr;
+    const scene::PropertyDesc* owner = nullptr;
+    for (const scene::PropertyDesc* descriptor : properties) {
+        const std::string_view name = fixture.atoms.text(descriptor->name);
+        if (name == "Link")
+            link = descriptor;
+        if (name == "Owner")
+            owner = descriptor;
+    }
+    REQUIRE(link != nullptr);
+    REQUIRE(owner != nullptr);
+
+    REQUIRE(editorFor(*link) == EditorKind::InstanceRef);
+    REQUIRE(link->set != nullptr);
+    CHECK(editable(*link));
+
+    // And the rule that DOES still hold: read-only is read-only, whatever kind
+    // of editor the type would otherwise get. `Owner` is a reference too.
+    REQUIRE(editorFor(*owner) == EditorKind::InstanceRef);
+    CHECK_FALSE(editable(*owner));
+}

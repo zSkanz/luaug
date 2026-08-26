@@ -313,6 +313,14 @@ void UiText::pumpImages(rhi::IDevice& device, rhi::ICmdList& cmd)
             image.work = std::make_unique<ImageWork>();
             const bool got =
                 status == platform::IoStatus::Ready && platform::takeIoResult(image.read, image.work->bytes);
+            // **A request that ended without being TAKEN still holds its
+            // slot** -- `takeIoResult` releases one only for `Ready`, and the
+            // pool is a fixed 512. A project with missing files would fill it
+            // and every later read would be refused, which reads as "textures
+            // stopped loading after a while" and has nothing in the log.
+            // `cancelIo` is the documented way to let a terminal one go.
+            if (!got)
+                platform::cancelIo(image.read);
             image.read = {};
             if (bytesInFlight_ > 0)
                 --bytesInFlight_;

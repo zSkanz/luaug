@@ -1588,11 +1588,15 @@ TEST_CASE("a hull is rebuilt when the points behind it change")
 
 TEST_CASE("a refused rebuild costs one attempt, and the body it had stays")
 {
-    // A degenerate hull -- four or more points that are all coplanar -- closes
-    // to nothing, and Jolt refuses it. Replacing a working box with nothing
-    // would drop the part through the floor, so the body stays what it was; and
-    // the mirror records what it ASKED for, which is what stops it asking again
-    // on every tick for ever.
+    // What the mirror does when the backend will not take a description.
+    //
+    // **The refusal is the fake's, and deliberately so.** The obvious real case
+    // would be a degenerate hull, but Jolt's `ConvexHullBuilder` accepts a
+    // coplanar quad and gives it a thickness -- so writing this against real
+    // geometry would be writing it against a refusal that does not happen. What
+    // is under test is the MIRROR's rule: a body the backend will not rebuild
+    // stays what it was, and the record keeps what was ASKED for, which is what
+    // stops it being asked again on every tick for ever.
     Mirror mirror;
     const core::InstanceId id = mirror.part("Slab");
     MeshPartComponent slab;
