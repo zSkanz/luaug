@@ -12,7 +12,8 @@ import re
 from pathlib import Path
 from PIL import Image
 
-ART = Path(r"D:\Projects\LuauG\art\editor-icons")
+# Repo-relative, because an absolute path is a script that runs on one machine.
+ART = Path(__file__).resolve().parent.parent / "art" / "editor-icons"
 OUT = Path(__file__).resolve().parent / "default"
 
 CANVAS = 256

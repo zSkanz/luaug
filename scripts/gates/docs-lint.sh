@@ -86,13 +86,18 @@ echo "== legal sweep (R7) =="
 # documentation site's table of contents, and one of the sections it declares is
 # the migration guide. A generator cannot emit a section title it may not spell,
 # and moving the title out of the file would only move the problem.
+# `art/` is allowed for the first reason as well, and it is the largest case of
+# it: the briefs and review notes in that directory state R7 AS A DRAWING
+# CONSTRAINT -- "it must resemble no existing engine's mark, and not Roblox,
+# which here is a legal line and not a taste one" -- and that sentence is the
+# rule doing its job. An artist who cannot be told what not to draw will draw it.
 # `branding/README.md` is allowed for the first reason too, and it is the
 # clearest case of it in the repository: the sentence that trips this lint is
 # the one explaining why the wordmark does NOT split `Luau` from `G`, because
 # splitting them would point at the language. That is R7's own reasoning
 # written down, and a lint that forbids stating a rule is a lint working
 # against it.
-allowed='^(\./)?(README\.md|CONTRIBUTING\.md|NOTICE|MASTER_PROMPT\.md|CLAUDE\.md|PROGRESS\.md|docs/|templates/README\.md|examples/README\.md|tests/README\.md|runtime/README\.md|api/README\.md|engine/README\.md|tools/README\.md|third_party/README\.md|branding/README\.md|\.vscode/settings\.json|scripts/gates/|api/generator/gen_reference\.luau|api/generator/site/nav\.luau)'
+allowed='^(\./)?(README\.md|CONTRIBUTING\.md|NOTICE|MASTER_PROMPT\.md|CLAUDE\.md|PROGRESS\.md|docs/|templates/README\.md|examples/README\.md|tests/README\.md|runtime/README\.md|api/README\.md|engine/README\.md|tools/README\.md|third_party/README\.md|branding/README\.md|\.vscode/settings\.json|scripts/gates/|api/generator/gen_reference\.luau|api/generator/site/nav\.luau|art/)'
 while IFS= read -r f; do
     if ! [[ "$f" =~ $allowed ]]; then
         err "'Roblox' referenced outside the allowed docs set (rule R7)" "$f"

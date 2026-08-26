@@ -85,3 +85,19 @@ examples/05-streaming/content/world/
 # `examples/10-open-world`'s world is generated the same way and for the same
 # reason: 289 chunk sources, 4.8 MB of JSON, from a hundred committed lines.
 examples/10-open-world/content/world/
+
+# `art/` is source, not scratch: `icons/bake.py` reads the masters under
+# `art/editor-icons/` to produce the theme under `icons/default/`, which IS
+# committed. A generated artifact whose input is missing is an artifact nobody
+# can regenerate, so the masters belong in the repository.
+#
+# What does NOT belong is the part of a working directory that is a working
+# directory: drafts that were retired, marks that were rejected, and a folder
+# whose own name says it is temporary. They are large, they are history nobody
+# will read, and a public repository cannot take them back out of its history
+# afterwards. The reasoning that produced the surviving art is kept -- every
+# brief, every review note and every sheet under `art/communication/` -- because
+# that is the part somebody drawing the next icon needs.
+art/**/_to_delete/
+art/editor-icons/temporary/
+art/branding/candidates/
