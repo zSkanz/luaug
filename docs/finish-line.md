@@ -240,9 +240,12 @@ that sends the next session to the wrong place.
       object-store writer, `luaug_assetc_lib` linked into the app under the
       editor flag, and the store mounted between the source tree and the pack.
       Opening a project compiles it and importing compiles what it brought.
-      **The owner's `.fbx` loads because of it.** What is left is
-      `splitByPrimitive` reaching a world — a model still arrives as one opaque
-      `MeshPart` rather than a `Model` of named pieces.
+      **The owner's `.fbx` loads because of it.** `splitByPrimitive` reaches
+      the pack too: a multi-primitive model produces one blob per piece under a
+      URN fragment, BESIDE the whole-model blob, so every existing scene still
+      resolves. What is left is the editor placing a `Model` of named
+      `MeshPart`s rather than one opaque part — the compiler can name the
+      pieces and nothing asks it to.
 - [x] **S4.3** Step 11's unbuilt half — parallel texture encode. **Built**:
       one texture per worker with basis's own threading still off, merged in
       source order. **20.2 s to 8.1 s** on five textures, and the determinism

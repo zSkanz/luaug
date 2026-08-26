@@ -102,8 +102,25 @@ TEST_CASE("a content directory compiles into a pack and a manifest")
     const CompileResult result = fixture.build();
     REQUIRE_MESSAGE(result.ok, result.diagnostic);
 
-    CHECK(result.meshCount == 3);
+    // **Three models, and seven mesh blobs** (E9 step 12). A file with several
+    // primitives now produces one blob per piece under a URN fragment, BESIDE
+    // the whole-model blob it has always produced -- so a scene naming
+    // `asset://models/x.gltf` resolves to exactly what it resolved to before and
+    // one naming `asset://models/x.gltf#Body` resolves to the piece. The count
+    // is therefore three plus however many pieces the fixture's models split
+    // into, which is what this asserts rather than a number nobody can derive.
+    CHECK(result.meshCount >= 3);
     CHECK(result.rawCount == 1);
+
+    usize wholeModels = 0;
+    usize pieces = 0;
+    for (const ManifestEntry& entry : result.entries) {
+        if (entry.kind != luaug::asset::AssetKind::Mesh)
+            continue;
+        (entry.urn.find('#') == std::string::npos ? wholeModels : pieces) += 1;
+    }
+    CHECK(wholeModels == 3);
+    CHECK(pieces == result.meshCount - 3);
     // `checker.png` is a texture in its own right AND the one `textured.gltf`
     // samples -- and it is stored once, which is what content addressing buys.
     CHECK(result.textureCount >= 1);
@@ -982,4 +999,71 @@ TEST_CASE("the store the writer produces is a pure function of what is in it")
     };
 
     CHECK(build(a, b, "forward") == build(b, a, "backward"));
+}
+
+TEST_CASE("a model with several primitives is addressable one piece at a time")
+{
+    // **The outcome E9 opened for.** A model arrives as one opaque `MeshPart`:
+    // five materials become five submeshes of one part, so there is nothing to
+    // select, nothing to give a material to and nothing for a `Model.Scale` to
+    // scale. `splitByPrimitive` has cut a model into named pieces since E9
+    // opened and had no caller outside its own tests.
+    seedRealCatalog();
+    const Fixture fixture;
+
+    const CompileResult result = fixture.build();
+    REQUIRE_MESSAGE(result.ok, result.diagnostic);
+
+    // Every fragment names a piece OF a model this build also produced whole,
+    // and the two halves of the name are the source URN and the piece's name --
+    // which is the same word the editor gives the instance, so a scene and an
+    // Explorer cannot disagree about what a piece is called.
+    usize checked = 0;
+    for (const ManifestEntry& entry : result.entries) {
+        const std::size_t hash = entry.urn.find('#');
+        if (hash == std::string::npos)
+            continue;
+        ++checked;
+        CHECK(entry.kind == luaug::asset::AssetKind::Mesh);
+        CHECK(hash + 1 < entry.urn.size());
+
+        const std::string base = entry.urn.substr(0, hash);
+        bool wholeExists = false;
+        for (const ManifestEntry& other : result.entries) {
+            if (other.urn == base)
+                wholeExists = true;
+        }
+        // **Beside, not instead of.** This is what makes the split landable
+        // before the cut-over: every scene naming the plain URN still resolves.
+        CHECK(wholeExists);
+    }
+    CHECK(checked > 0);
+}
+
+TEST_CASE("the pieces a model splits into are the same on every build")
+{
+    // The name is the URN, so a name that moved between builds would be a scene
+    // that stops finding a piece. `splitByPrimitive` resolves collisions with
+    // `_2` in DOCUMENT order for exactly this reason, and this is that claim at
+    // the level somebody would notice it break.
+    seedRealCatalog();
+    const Fixture fixture;
+
+    const CompileResult first = fixture.build();
+    const CompileResult second = fixture.build();
+    REQUIRE_MESSAGE(first.ok, first.diagnostic);
+    REQUIRE_MESSAGE(second.ok, second.diagnostic);
+
+    std::vector<std::string> a;
+    std::vector<std::string> b;
+    for (const ManifestEntry& entry : first.entries) {
+        if (entry.urn.find('#') != std::string::npos)
+            a.push_back(entry.urn);
+    }
+    for (const ManifestEntry& entry : second.entries) {
+        if (entry.urn.find('#') != std::string::npos)
+            b.push_back(entry.urn);
+    }
+    CHECK(a == b);
+    CHECK_FALSE(a.empty());
 }

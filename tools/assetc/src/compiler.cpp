@@ -5,6 +5,7 @@
 #include "luaug/asset/gltf.h"
 #include "luaug/asset/image.h"
 #include "luaug/asset/mesh_format.h"
+#include "luaug/asset/model_split.h"
 #include "luaug/assetc/exotic.h"
 #include "luaug/core/json.h"
 #include "luaug/core/json_writer.h"
@@ -865,6 +866,59 @@ CompileResult compile(const CompileOptions& options)
             rememberEntry(entry);
             manifest.push_back(std::move(entry));
             result.meshCount += 1;
+
+            // --- And one blob per primitive, under a fragment (E9 step 12) ---
+            //
+            // **A model arrives as one opaque `MeshPart` and that is the wrong
+            // shape**: five materials become five submeshes of one part, so
+            // there is nothing to select, nothing to give a material to and
+            // nothing for a `Model.Scale` to scale. `splitByPrimitive` has cut
+            // an `asset::Model` into named pieces since E9 opened and had no
+            // caller outside its own tests.
+            //
+            // **Emitted BESIDE the whole model rather than instead of it**, and
+            // that is what makes this landable before the cut-over: every scene
+            // naming `asset://models/horse.gltf` still resolves to exactly the
+            // blob it resolved to before, and a scene naming
+            // `asset://models/horse.gltf#Body` resolves to the piece. Step 14
+            // is where the whole-model row goes away, and it is last because it
+            // is the only irreversible one.
+            //
+            // The fragment IS the piece's name (decision 7 in the finish-line
+            // ledger), which is also the instance name the editor gives it --
+            // so a person reading a scene sees the same word the Explorer shows
+            // them.
+            const std::vector<asset::ModelPiece> pieces = asset::splitByPrimitive(model);
+            // One piece is the whole model, which every static single-primitive
+            // file and every skinned file produces. Emitting a fragment for it
+            // would be a second name for one blob.
+            if (pieces.size() > 1) {
+                for (const asset::ModelPiece& piece : pieces) {
+                    asset::CompiledMesh compiledPiece;
+                    if (const auto error = asset::compileMesh(piece.model, slots, options.mesh, compiledPiece)) {
+                        result.diagnostic = source.relative.generic_string() + "#" + piece.name + ": " + error->message;
+                        return result;
+                    }
+
+                    const std::vector<std::byte> pieceBytes = asset::encodeMesh(compiledPiece);
+                    ManifestEntry pieceEntry;
+                    pieceEntry.urn = urn + "#" + piece.name;
+                    pieceEntry.hash = pack.addContent(AssetKind::Mesh, pieceBytes);
+                    pieceEntry.kind = AssetKind::Mesh;
+                    // The SOURCE file's size, because that is what this piece
+                    // came out of and there is no smaller original to name.
+                    pieceEntry.originalBytes = bytes.size();
+                    pieceEntry.storedBytes = pieceBytes.size();
+                    pieceEntry.lodCount = static_cast<u32>(compiledPiece.lods.size());
+                    pieceEntry.vertexCount = static_cast<u32>(compiledPiece.vertices.size());
+                    pieceEntry.meshletCount = static_cast<u32>(compiledPiece.meshlets.meshlets.size());
+                    result.stats.meshesCompiled += 1;
+                    remember(AssetKind::Mesh, pieceBytes);
+                    rememberEntry(pieceEntry);
+                    manifest.push_back(std::move(pieceEntry));
+                    result.meshCount += 1;
+                }
+            }
             break;
         }
 
