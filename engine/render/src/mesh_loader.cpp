@@ -436,13 +436,15 @@ void MeshLoader::syncPrimitives(rhi::IDevice& device, rhi::ICmdList& cmd, scene:
 }
 
 u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world, core::InstanceId root,
-                     MeshCache& cache, MeshLibrary& library, SkeletonLibrary* skeletons)
+                     MeshCache& cache, MeshLibrary& library, SkeletonLibrary* skeletons,
+                     std::vector<core::NameAtom>* completed)
 {
     if (!root.valid())
         return 0;
 
     u32 loaded = 0;
 
+    core::u32 meshesThisCall = 0;
     world.meshParts().forEach([&](core::InstanceId id, const scene::MeshPartComponent& meshPart) {
         (void)id;
         const core::NameAtom content = meshPart.meshContent;
@@ -468,6 +470,34 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
         // ADR 0010 keeps the second forever as the dev-mode path, and the first
         // is what a shipped game reads.
         const asset::ResolvedContent resolved = mounts_ != nullptr ? mounts_->resolve(urn) : asset::ResolvedContent{};
+
+        // **One mesh per call while deferred** (D125). A parse is the largest
+        // synchronous thing left in a frame -- measured at 191 ms for a
+        // 60,000-vertex glTF with 677 joints, plus 21 ms to read it -- and
+        // `sync` loaded EVERY missing mesh it found in one frame with no budget
+        // at all, so dropping a folder of five models in meant one frame of
+        // roughly a second.
+        //
+        // A budget of one rather than a millisecond count, because a parse
+        // cannot be split: any budget needs a floor of one whole mesh, and one
+        // whole mesh is already more than a frame. What this buys is that N
+        // meshes cost N frames instead of one frame N times as long, which is
+        // the difference between a tool that hitches and a tool that stops.
+        //
+        // **Why not on the job pool.** `jobs.h` rule 1 is explicit -- no
+        // blocking IO on a worker -- and `importGltf` reads a glTF's external
+        // `.bin` and `.png` files itself, from `baseDirectory`, as part of
+        // parsing. The COMPILED path below has no external files and does go to
+        // the pool; the loose path cannot until the importer can be handed
+        // buffers somebody else read, which is a change to `asset` and is
+        // recorded rather than smuggled in here. E9's whole direction -- a loose
+        // `.gltf` stops working and everything arrives compiled -- retires this
+        // caveat rather than fixing it.
+        if (deferredMeshes_) {
+            if (meshesThisCall > 0)
+                return;
+            ++meshesThisCall;
+        }
 
         MeshLibrary::Entry entry;
         core::EngineError uploadError;
@@ -571,6 +601,8 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
             for (const asset::Vertex& vertex : geometry.vertices)
                 entry.positions.push_back(vertex.position);
             library.set(content, entry);
+            if (completed != nullptr)
+                completed->push_back(content);
 
             if (skeletons != nullptr && !compiled.joints.empty())
                 skeletons->set(content, SkeletonLibrary::Entry{std::move(compiled.joints), std::move(compiled.clips)});
@@ -656,6 +688,8 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
             for (const asset::Vertex& vertex : model.mesh.vertices)
                 entry.positions.push_back(vertex.position);
             library.set(content, entry);
+            if (completed != nullptr)
+                completed->push_back(content);
 
             // The skeleton half of the same file, handed to whoever asked for
             // it. Read here rather than in a second pass because the file was

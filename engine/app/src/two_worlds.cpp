@@ -43,6 +43,11 @@ struct Session
 {
     WorldHost host;
     render::MeshCache meshes;
+    // **Synchronous, explicitly** (D125). This harness compares two worlds
+    // frame for frame, so a mesh or a map that arrived on a different frame in
+    // one of them would be the difference it is looking for -- and the loader's
+    // default is already synchronous, which is exactly why the intent has to be
+    // written down rather than left to be true by accident.
     render::MeshLoader loader;
     render::MeshLibrary library;
     rhi::TextureHandle target;
@@ -85,6 +90,10 @@ struct Session
         return error;
 
     session.loader.setContentRoot(project / "content");
+    // Said rather than inherited: see the member's own comment. A default that
+    // happens to be right is a default somebody can change.
+    session.loader.setDeferredMeshes(false);
+    session.loader.setDeferredTextures(false);
 
     // Each world gets its own seed, so a world that reads one is still telling
     // the truth about which world it is. Both are literals: a seed drawn from

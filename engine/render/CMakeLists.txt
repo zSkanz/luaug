@@ -80,5 +80,6 @@ if(LUAUG_BUILD_TESTS)
     # `asset` rather than copied: two copies of one fixture is two things to keep
     # in step for no gain.
     target_compile_definitions(luaug_render_tests PRIVATE
-        LUAUG_RENDER_TEST_IMAGE="${CMAKE_SOURCE_DIR}/engine/asset/tests/data/checker.png")
+        LUAUG_RENDER_TEST_IMAGE="${CMAKE_SOURCE_DIR}/engine/asset/tests/data/checker.png"
+        LUAUG_RENDER_TEST_MESH_DIR="${CMAKE_SOURCE_DIR}/engine/asset/tests/data")
 endif()

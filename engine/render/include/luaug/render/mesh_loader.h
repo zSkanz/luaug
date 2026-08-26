@@ -28,6 +28,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <vector>
 
 namespace luaug::scene {
 class World;
@@ -68,7 +69,21 @@ public:
     // belongs to the HOST rather than to the renderer: animation advances on the
     // SimClock and has to run in a headless replay.
     core::u32 sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world, core::InstanceId root,
-                   MeshCache& cache, MeshLibrary& library, SkeletonLibrary* skeletons = nullptr);
+                   MeshCache& cache, MeshLibrary& library, SkeletonLibrary* skeletons = nullptr,
+                   std::vector<core::NameAtom>* completed = nullptr);
+
+    // `completed`, when given, is APPENDED with the content name of every mesh
+    // this call put into the library.
+    //
+    // **A count cannot answer "which".** The frame loop hands a mesh's vertex
+    // positions to the physics mirror, and it did that by walking the WHOLE
+    // library whenever the count was non-zero -- a full copy of every loaded
+    // mesh's positions, and a free of the previous one, every frame anything
+    // landed. Synchronous loading hid it inside one or two frames; spreading N
+    // completions over N frames turns it into N(N+1)/2 copies of everything.
+    //
+    // Names rather than entries, because the library owns the entry and the
+    // caller is about to look it up anyway.
 
     // Loads every texture the world's `Material` instances name and the library
     // does not yet hold. Same safe point, same rules, same return as `sync`.
@@ -106,6 +121,34 @@ public:
     // compared. Those all want the loader finished before the frame is. An
     // interactive shell wants the opposite, and says so.
     void setDeferredTextures(bool deferred) noexcept { deferredTextures_ = deferred; }
+
+    // **Whether a mesh may take more than one frame to arrive** (D125).
+    //
+    // Measured on the model E9 opened for: 21 ms to read and **191 ms to
+    // parse** a 2937 KiB glTF of 60,688 vertices and 677 joints. `sync` loaded
+    // every missing mesh it found in one frame with no budget at all, so
+    // dropping a folder of five models into a project meant one frame of about
+    // a second -- and a `MeshPart` created by a script did the same thing mid-
+    // play.
+    //
+    // Deferred, one mesh lands per call. **A budget of one and not a
+    // millisecond count**, because a parse cannot be split: any budget needs a
+    // floor of one whole mesh and one whole mesh already exceeds a frame. What
+    // it buys is that N meshes cost N frames rather than one frame N times as
+    // long.
+    //
+    // **What a part collides as while it waits.** A `MeshPart` whose points
+    // have not arrived collides as a Box of its `Size` -- deliberate, tested
+    // (`physics_sync_tests.cpp`), and the reason it never falls through
+    // anything. The honest caveat is that the box is a superset of the hull only
+    // when `MeshSize` was authored correctly and the mesh is centred on its
+    // origin, neither of which is enforced; a rare pop is possible where a hull
+    // would have let something through.
+    //
+    // **Off by default**, and that default is what keeps every golden
+    // byte-identical: a capture records the frame it was told to record, and
+    // geometry that arrives three frames later is a different picture.
+    void setDeferredMeshes(bool deferred) noexcept { deferredMeshes_ = deferred; }
 
     // How many textures are being read or decoded right now. Zero in the
     // synchronous mode, always.
@@ -156,6 +199,7 @@ private:
     asset::TranscodeOptions transcode_;
     bool primitivesUploaded_ = false;
     bool deferredTextures_ = false;
+    bool deferredMeshes_ = false;
 
     // Everything a decode job touches, in ONE heap allocation.
     //

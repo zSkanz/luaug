@@ -499,6 +499,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // that has one -- the browser asks while it draws and this answers between
     // frames.
     ThumbnailCache thumbnails;
+    // Which meshes finished loading this frame, so the physics mirror is handed
+    // those and not the whole library. Held across frames rather than declared
+    // in the loop, so the allocation happens once.
+    std::vector<core::NameAtom> meshCompletions;
     // What was last written to `.luaug/editor.json`, so the write happens on a
     // change rather than every frame.
     std::string rememberedScene;
@@ -690,7 +694,18 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // told to record, and a texture arriving two frames later is a different
     // picture. They want the loader finished before the frame is. An editor
     // wants the frame finished before the loader is.
-    meshLoader.setDeferredTextures(options.editor && !options.headless);
+    meshLoader.setDeferredTextures(!options.headless);
+    // **And meshes, one per frame** (D125). A parse is 191 ms for the model E9
+    // opened for, and `sync` had no budget at all -- five models dropped in was
+    // one frame of about a second, in the editor and mid-play alike.
+    //
+    // `!options.headless` rather than `options.editor`, for both of these. A
+    // shipping game hitches on exactly the same code, and `--headless` is what
+    // every capture, screenshot and determinism driver runs under -- so no
+    // golden can observe the deferred path, and the product gets the fix
+    // instead of only the tool. (`options.editor && !options.headless` is
+    // identically `options.editor`: `main.cpp` refuses the two together.)
+    meshLoader.setDeferredMeshes(!options.headless);
     // The same mounts the meshes come from, so `TextLabel.Font` can name a face
     // out of the project the same way `MeshPart.MeshContent` names a model.
     uiText.setMounts(&contentMounts);
@@ -2418,17 +2433,26 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     return;
                 meshLoader.syncPrimitives(*device, *cmd, world, meshCache, meshLibrary);
                 (void)meshLoader.syncTextures(*device, *cmd, world, textureLibrary);
-                if (meshLoader.sync(*device, *cmd, world, workspace, meshCache, meshLibrary) > 0 &&
-                    host->physics() != nullptr) {
-                    // A mesh finished loading, so the physics mirror can be told
-                    // what it collides as. Pushed from here because this is the
-                    // one place that can see both the render library and the
-                    // mirror -- `render` is L4 and `scene` is L3, and neither is
-                    // allowed to reach the other.
-                    meshLibrary.forEach([&](core::NameAtom content, const render::MeshLibrary::Entry& entry) {
-                        if (!entry.positions.empty())
-                            host->physics()->setCollisionPoints(content, entry.positions);
-                    });
+                // **Only what finished, not the whole library** (D124). A mesh
+                // that lands means the physics mirror can be told what it
+                // collides as -- and this used to walk every entry whenever the
+                // count was non-zero, copying every loaded mesh's positions and
+                // freeing the previous copy, on every frame anything landed.
+                // Synchronous loading hid it inside one or two frames; spreading
+                // N completions over N frames makes it N(N+1)/2 copies.
+                //
+                // Pushed from here because this is the one place that can see
+                // both the render library and the mirror -- `render` is L4 and
+                // `scene` is L3, and neither is allowed to reach the other.
+                meshCompletions.clear();
+                (void)meshLoader.sync(*device, *cmd, world, workspace, meshCache, meshLibrary, nullptr,
+                                      &meshCompletions);
+                if (host->physics() != nullptr) {
+                    for (const core::NameAtom content : meshCompletions) {
+                        const render::MeshLibrary::Entry* entry = meshLibrary.find(content);
+                        if (entry != nullptr && !entry->positions.empty())
+                            host->physics()->setCollisionPoints(content, entry->positions);
+                    }
                 }
             };
             loadFor(host->world(), host->workspace());

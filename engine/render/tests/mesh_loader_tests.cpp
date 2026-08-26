@@ -13,6 +13,7 @@
 #include "luaug/core/i18n.h"
 #include "luaug/jobs/jobs.h"
 #include "luaug/platform/async_io.h"
+#include "luaug/render/mesh_cache.h"
 #include "luaug/render/mesh_loader.h"
 #include "luaug/rhi/backends.h"
 #include "luaug/scene/class_registry.h"
@@ -286,4 +287,126 @@ TEST_CASE("the pipeline works with real threads, and with the queue growing unde
 
     if (startedPool)
         jobs::shutdown();
+}
+
+TEST_CASE("the loader says WHICH meshes it loaded, not just how many")
+{
+    // **A count cannot answer \"which\".** The frame loop hands a mesh's vertex
+    // positions to the physics mirror, and it did that by walking the whole
+    // library whenever the count was non-zero -- a full copy of every loaded
+    // mesh's positions on every frame anything landed. Synchronous loading hid
+    // that inside one or two frames; spreading N completions over N frames turns
+    // it into N(N+1)/2 copies.
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+
+    render::MeshCache cache;
+    render::MeshLibrary library;
+    render::MeshLoader loader;
+    std::vector<core::NameAtom> completed;
+
+    // A world with no MeshParts loads nothing and appends nothing.
+    (void)loader.sync(*fixture.device, *fixture.cmd, world, core::InstanceId{}, cache, library, nullptr, &completed);
+    CHECK(completed.empty());
+
+    // And the out-parameter is optional, which every production caller but one
+    // relies on.
+    (void)loader.sync(*fixture.device, *fixture.cmd, world, core::InstanceId{}, cache, library);
+
+    loader.destroy(*fixture.device);
+    cache.destroy(*fixture.device);
+}
+
+namespace {
+
+// A world of `MeshPart`s, each naming one real glTF from `asset`'s fixtures.
+// The URN is the path itself, which is what `resolve` falls back to when no
+// mount answers -- the dev-mode path ADR 0010 keeps forever.
+[[nodiscard]] core::usize fillWithMeshes(Fixture& fixture, scene::World& world, scene::ClassId meshPartClass,
+                                         core::InstanceId workspace)
+{
+    (void)fixture;
+    static const char* const kFiles[] = {"quad.gltf", "textured.gltf", "two_materials.gltf", "flat_normals.gltf"};
+    core::usize named = 0;
+    for (const char* file : kFiles) {
+        const std::filesystem::path path = std::filesystem::path(LUAUG_RENDER_TEST_MESH_DIR) / file;
+        if (!std::filesystem::exists(path))
+            continue;
+        const core::InstanceId id = world.create(meshPartClass);
+        scene::PartComponent part;
+        world.parts().add(id, part);
+        scene::MeshPartComponent mesh;
+        mesh.meshContent = world.atoms().intern(path.generic_string());
+        world.meshParts().add(id, mesh);
+        (void)world.setParent(id, workspace);
+        ++named;
+    }
+    return named;
+}
+
+} // namespace
+
+TEST_CASE("meshes arrive one frame at a time, or all at once, and it is a decision")
+{
+    // **A parse is the largest synchronous thing left in a frame.** Measured at
+    // 191 ms for the model E9 opened for, plus 21 ms to read it -- and `sync`
+    // loaded every missing mesh it found in ONE frame with no budget at all, so
+    // a folder of five models was one frame of about a second.
+    //
+    // A budget of one whole mesh rather than a millisecond count, because a
+    // parse cannot be split: any budget needs a floor of one, and one already
+    // exceeds a frame. What it buys is N frames instead of one frame N times as
+    // long.
+    Fixture fixture;
+    const scene::ClassId meshPartClass = fixture.classes.registerClass({
+        .name = fixture.atoms.intern("MeshPart"),
+        .defaultName = fixture.atoms.intern("MeshPart"),
+    });
+    const scene::ClassId workspaceClass = fixture.classes.registerClass({
+        .name = fixture.atoms.intern("Workspace"),
+        .defaultName = fixture.atoms.intern("Workspace"),
+    });
+
+    SUBCASE("synchronous: everything in the frame that asked")
+    {
+        scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+        const core::InstanceId workspace = world.create(workspaceClass);
+        const core::usize named = fillWithMeshes(fixture, world, meshPartClass, workspace);
+        REQUIRE(named > 1);
+
+        render::MeshCache cache;
+        render::MeshLibrary library;
+        render::MeshLoader loader;
+
+        (void)loader.sync(*fixture.device, *fixture.cmd, world, workspace, cache, library);
+        CHECK(library.size() == named);
+
+        loader.destroy(*fixture.device);
+        cache.destroy(*fixture.device);
+    }
+
+    SUBCASE("deferred: one per call, and all of them eventually")
+    {
+        scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+        const core::InstanceId workspace = world.create(workspaceClass);
+        const core::usize named = fillWithMeshes(fixture, world, meshPartClass, workspace);
+        REQUIRE(named > 1);
+
+        render::MeshCache cache;
+        render::MeshLibrary library;
+        render::MeshLoader loader;
+        loader.setDeferredMeshes(true);
+
+        (void)loader.sync(*fixture.device, *fixture.cmd, world, workspace, cache, library);
+        CHECK(library.size() == 1);
+
+        // **And it drains.** A budget that never finishes is a world whose
+        // geometry never appears, which is worse than the hitch it replaced.
+        for (core::usize call = 0; call < named + 4 && library.size() < named; ++call)
+            (void)loader.sync(*fixture.device, *fixture.cmd, world, workspace, cache, library);
+        CHECK(library.size() == named);
+
+        loader.destroy(*fixture.device);
+        cache.destroy(*fixture.device);
+    }
 }
