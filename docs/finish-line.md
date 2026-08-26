@@ -201,8 +201,15 @@ that sends the next session to the wrong place.
       for exactly that is structurally blind to it.
 - [ ] **S3.6** Three comments that are live doc/code lies.
 - [ ] **S3.7** The Console's log is a fixed-height child in a resizable panel.
-- [ ] **S3.8** D129 — a sound's first play decodes on the calling thread. Open
-      by decision; this campaign settles it rather than re-deferring it.
+- [x] **S3.8** D129 — a sound's first play decodes on the calling thread.
+      **Settled: a prefetch with a synchronous floor.** The read is async and
+      the decode is a job, both started from the frame and never from the
+      tick; if the tick asks for a clip that has not landed it decodes it
+      itself, so the answer is identical either way and the world hash cannot
+      learn the disk's speed. **The earlier session's reason for leaving it
+      open was wrong** — it said the repository has no audio file to measure
+      with, and `audio_tests.cpp` has carried a WAV writer since M7.
+      `Sound.Loaded` still fires immediately, now as a written decision.
 - [ ] **S3.9** D066 — a quarantined instrument whose successor is named and
       unbuilt.
 - [ ] **S3.10** D092 — opening a project runs every entry script's file scope,
