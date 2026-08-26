@@ -354,9 +354,8 @@ TEST_CASE("the budget is tiles, so a point that does not fit does not block the 
     // stopped at the first refusal would be a queue, and one large light near
     // the camera would take every shadow in the scene with it.
     const render::LocalShadowCandidate candidates[] = {
-        pointAt({0.0f, 0.0f, -1.0f}, 100.0f), pointAt({0.0f, 0.0f, -2.0f}, 100.0f),
-        spotAt({0.0f, 0.0f, -3.0f}, 100.0f),  pointAt({0.0f, 0.0f, -4.0f}, 100.0f),
-        spotAt({0.0f, 0.0f, -5.0f}, 100.0f),
+        pointAt({0.0f, 0.0f, -1.0f}, 100.0f), pointAt({0.0f, 0.0f, -2.0f}, 100.0f), spotAt({0.0f, 0.0f, -3.0f}, 100.0f),
+        pointAt({0.0f, 0.0f, -4.0f}, 100.0f), spotAt({0.0f, 0.0f, -5.0f}, 100.0f),
     };
 
     const render::LocalShadows shadows = render::fitLocalShadows(candidates);
@@ -420,9 +419,8 @@ TEST_CASE("a point light six faces cover every direction around it")
 
     const render::LocalShadow& shadow = shadows.entries[0];
     const core::Vec3 directions[] = {
-        {1.0f, 0.0f, 0.0f},  {-1.0f, 0.0f, 0.0f},  {0.0f, 1.0f, 0.0f},
-        {0.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 1.0f},   {0.0f, 0.0f, -1.0f},
-        {0.6f, 0.6f, 0.53f}, {-0.5f, 0.7f, -0.5f}, {0.4f, -0.8f, 0.45f},
+        {1.0f, 0.0f, 0.0f},  {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f},   {0.0f, -1.0f, 0.0f},  {0.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, -1.0f}, {0.6f, 0.6f, 0.53f}, {-0.5f, 0.7f, -0.5f}, {0.4f, -0.8f, 0.45f},
     };
 
     for (const core::Vec3& direction : directions) {

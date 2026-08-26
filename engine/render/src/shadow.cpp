@@ -380,9 +380,9 @@ struct CubeAxis
 };
 
 constexpr CubeAxis kCubeAxes[kPointShadowTiles] = {
-    {{1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}},  {{-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-    {{0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}},  {{0.0f, -1.0f, 0.0f}, {0.0f, 0.0f, -1.0f}},
-    {{0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f}},  {{0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f}},
+    {{1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}}, {{-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}},
+    {{0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}}, {{0.0f, -1.0f, 0.0f}, {0.0f, 0.0f, -1.0f}},
+    {{0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f}}, {{0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f}},
 };
 
 // What a light is worth a tile for: how large it looms from the camera, which in
