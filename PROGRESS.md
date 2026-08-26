@@ -428,6 +428,77 @@ Entries for the planning session and for M0 through M4 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there when this file passed its ~300-line cap.
 
+- **2026-08-26 (session 25, Claude Opus): the audit finished, and most of what it
+  found was not what it went looking for.** Twelve commits on top of session 24's
+  thirteen, behind a green six-stage gate throughout.
+
+  **The instruction was "fix everything", so the open items from the previous
+  session were scouted before they were touched** -- five parallel
+  investigations, each adversarially verified, and the verifier won on eight of
+  the eleven disagreements. That is worth recording on its own: every one of the
+  eight was a claim about behaviour that reading the code carefully refuted, and
+  two of them would have produced a fix pointing the wrong way.
+
+  **The editor's opening frame went from about 280 ms to 78.** The icon atlas was
+  131 ms of it and is now 12 (session 24). The split-sum BRDF table was another
+  85 -- 512 importance samples per texel over a 256-square table, serially, on
+  the first frame that renders, in every shell with a camera and not only in the
+  editor. It parallelises exactly like the environment prefilter beside it,
+  bit-identical by construction because each texel is written once from its own
+  x, y and sample index -- which is the requirement and not a nicety: the capture
+  goldens carry a content hash of those 32 KB and run in CI on both tiers. What
+  is LEFT of that frame is 109 ms of GPU driver compiling pipeline state, which
+  is written down rather than chased.
+
+  **Three live faults in the physics mirror, none of which had ever fired.** A
+  body the backend refused was asked for again every tick for ever, burning a
+  body generation each time and saying nothing. A refused rebuild was recorded as
+  done and never retried. And `BodyRecord` kept a `std::span` whose documented
+  lifetime is the create call and no longer -- already dangling in the tree, not
+  a hazard being introduced. They had never fired because a mesh used to finish
+  loading inside the frame that created the part, which is precisely what the
+  next change stopped being true. Fixed as one change, because each without the
+  others is worse, and break-verified one fault at a time -- the first two masked
+  the third until it was isolated.
+
+  **Everything that read and decoded a file on the frame thread now has a
+  budget or a pipeline.** Meshes: 21 ms to read and 191 ms to parse the model E9
+  opened for, with no bound at all, so five models dropped in was one frame of
+  about a second. One per frame now -- a budget of one WHOLE mesh, because a
+  parse cannot be split and any budget needs a floor of one. UI images: the same
+  three stages the material maps got, and its state machine had no test file at
+  all. The skeleton pass stopped pulling every PNG beside every model off disk to
+  throw them away, and its memo of what it had tried stopped being a linear scan
+  run per mesh per tick for ever.
+
+  **Learned: `!options.headless` was the predicate all along.** Session 24 wired
+  the texture deferral as `options.editor && !options.headless`, which is
+  identically `options.editor` because the CLI refuses the two together -- so the
+  editor got the fix and the product did not. Every deferral is
+  `!options.headless` now: a shipping game hitches on the same code, and
+  `--headless` is what every capture, screenshot and determinism driver runs
+  under, so no golden can observe any of it.
+
+  **Learned again, twice, about pointers a job holds.** The deferred texture path
+  shipped without waiting for its own decodes at teardown, and then -- found by
+  re-reading rather than by a failure -- was handing a job the address of a
+  `bool` INSIDE a vector that grows. Both are the same lesson at different
+  granularities: everything a job touches belongs in one heap allocation, and
+  three pointers into a vector is three chances to get it wrong.
+
+  **Left open on purpose, with the reason.** A sound's first play decodes the
+  whole file on the calling thread, and the tick's half cannot be made
+  asynchronous without making the world hash depend on disk speed. The shape that
+  works is a prefetch with a blocking join. It was not written because this
+  repository contains no audio file, so neither the cost nor the fix could be
+  measured -- and building it on a guess is the thing this whole session was
+  about not doing.
+
+  **Next:** E9's steps 12, 14 and 15 are still the plan. `MeshLoader::sync`'s
+  parse is still on the frame thread and cannot leave it until `importGltf` can
+  be handed buffers somebody else read; E9's own direction retires that rather
+  than fixing it.
+
 - **2026-08-25 (session 24, Claude Opus): the editor audited, and "everything
   reloads" turned out to be a measurement.** Thirteen commits, behind a green
   six-stage gate throughout.
