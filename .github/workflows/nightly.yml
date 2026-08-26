@@ -44,14 +44,21 @@ jobs:
   # run on a developer's machine, through the same script, for the afternoon
   # somebody is chasing a lifetime bug.
   #
-  # Non-blocking on purpose, for now: this repository has never had a green
-  # sanitizer run, so the first reports are findings rather than regressions and
-  # a red merge queue would not help anybody read them. It becomes blocking once
-  # it has been green once -- and that promise is written here so it can be
-  # held to.
+  # **It has been green once, so it blocks.** That was written here as a promise
+  # while it had never passed, and it is being kept: on 2026-08-26 the first
+  # complete run finished clean -- 41 of 41 ctest entries, 1,158 conformance
+  # cases and the hot-reload gate, under AddressSanitizer and
+  # UndefinedBehaviorSanitizer together.
+  #
+  # Getting there found four things and only one of them was in our code, which
+  # is the argument for the whole stage: a heap-use-after-free in `World::clone`
+  # holding a pointer into a slot map across an insert that grew it; a missing
+  # sanitizer runtime in the image; a vendored downcast that aborted the shader
+  # compiler at build time; and a CLI that did not know the instrumented preset
+  # existed, so the suite ran green and then failed with no output at all.
   # ---------------------------------------------------------------------------
   sanitizers:
-    name: ASan + UBSan (non-blocking)
+    name: ASan + UBSan
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -73,7 +80,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            ninja-build libclang-rt-18-dev \
+            ninja-build libclang-rt-18-dev llvm-18 \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
             libxi-dev libxss-dev libxtst-dev libxkbcommon-dev \
             libthai-dev libfribidi-dev \
@@ -102,6 +109,10 @@ jobs:
         env:
           LUAUG_LINUX_PRESET: linux-clang-asan
           ASAN_OPTIONS: detect_leaks=0:halt_on_error=1:abort_on_error=1
+          # Without a symbolizer every report is a column of addresses, and the
+          # failure is a warning rather than an error -- so it looks like it worked.
+          ASAN_SYMBOLIZER_PATH: /usr/lib/llvm-18/bin/llvm-symbolizer
+          UBSAN_SYMBOLIZER_PATH: /usr/lib/llvm-18/bin/llvm-symbolizer
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: bash scripts/gates/linux-build.sh
 
@@ -115,9 +126,9 @@ jobs:
             echo "\`linux-clang-asan\`: AddressSanitizer and UndefinedBehaviorSanitizer over"
             echo "the whole ctest suite, the conformance run and the hot-reload gate."
             echo
-            echo "Non-blocking until it has been green once. A report here is a real defect"
-            echo "in code no other gate in this repository can see -- D131, a leaked IO slot,"
-            echo "was exactly this class."
+            echo "A report here is a real defect in code no other gate in this repository"
+            echo "can see: the first green run had to fix a heap-use-after-free in"
+            echo "\`World::clone\` to get there."
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------------

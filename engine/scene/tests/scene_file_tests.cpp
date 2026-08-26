@@ -738,3 +738,153 @@ TEST_CASE("restamp leaves an instance whose shape has moved on, and counts it")
     // And a stamp nobody in the world is an instance of moves nothing.
     CHECK(scene::restamp(fixture.world, workspace, "some-other-stamp", before, after, &moved) == 0);
 }
+
+// --- Instance-valued overrides on a placed stamp (D142) ----------------------
+//
+// **The rule these three test was written for a case narrower than the rule.**
+// `collectOverrides` skipped every `ValueType::Instance` property outright,
+// with the reasoning that a reference inside a stamp resolves inside that stamp
+// and the two worlds' ids are not comparable — both true, and neither one a
+// reason to skip a reference that was CHANGED, or one that points somewhere
+// else entirely. Ids are not comparable; paths are, and the loader has resolved
+// instance properties by path through a deferred pass since the format existed.
+//
+// The third case is the one the skip was protecting and it must keep passing:
+// an untouched internal reference is not an override, or every placed stamp in
+// a world would carry one for nothing.
+
+TEST_CASE("a reference re-pointed inside a placed stamp is an override, not a silent revert")
+{
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+
+    const core::InstanceId rig = fixture.world.create(fixture.schema.modelClass);
+    fixture.world.setName(rig, fixture.atom("Rig"));
+    (void)fixture.world.setParent(rig, workspace);
+    const core::InstanceId a = partUnder(fixture, rig, "A", {});
+    (void)partUnder(fixture, rig, "B", {});
+    (void)fixture.world.setProperty(rig, fixture.schema.primaryPartProperty, scene::Value{a});
+
+    const std::string stampText = scene::writeStamp(fixture.world, rig);
+    fixture.world.setStamp(rig, fixture.atom("rig"));
+
+    // This instance points at the OTHER child. The stamp still says `A`.
+    core::InstanceId b;
+    for (core::InstanceId child = fixture.world.firstChild(rig); child.valid();
+         child = fixture.world.nextSibling(child)) {
+        if (fixture.world.atoms().text(fixture.world.name(child)) == "B")
+            b = child;
+    }
+    REQUIRE(b.valid());
+    (void)fixture.world.setProperty(rig, fixture.schema.primaryPartProperty, scene::Value{b});
+
+    const auto source = [&stampText](std::string_view) -> std::optional<std::string> { return stampText; };
+    scene::StampLibrary library(fixture.world, source);
+
+    SceneIoReport wrote;
+    const std::string text = scene::writeScene(fixture.world, &wrote, &library);
+    CHECK(wrote.stamped == 1);
+    // **The assertion the defect was.** The write produced no override at all,
+    // so the file recorded the stamp's choice and the edit was gone.
+    CHECK(wrote.overrides >= 1);
+    CHECK(wrote.droppedReferences == 0);
+
+    Fixture reloaded;
+    (void)makeWorkspace(reloaded);
+    SceneIoReport read;
+    REQUIRE_FALSE(scene::readScene(reloaded.world, text, &read, source).has_value());
+    CHECK(read.stamped == 1);
+
+    core::InstanceId placed;
+    reloaded.world.models().forEach([&](core::InstanceId id, const scene::ModelComponent&) {
+        if (reloaded.world.atoms().text(reloaded.world.name(id)) == "Rig")
+            placed = id;
+    });
+    REQUIRE(placed.valid());
+    const std::optional<scene::Value> primary = reloaded.world.getProperty(placed, reloaded.schema.primaryPartProperty);
+    REQUIRE(primary.has_value());
+    const core::InstanceId restored = std::get<core::InstanceId>(*primary);
+    REQUIRE(restored.valid());
+    CHECK(reloaded.world.atoms().text(reloaded.world.name(restored)) == "B");
+}
+
+TEST_CASE("a reference from inside a placed stamp to something beside it survives the save")
+{
+    // The shape the human hit: a `Material` living in the world, assigned to a
+    // part inside a placed stamp. The stamp file cannot carry it — it is not
+    // under the stamp's root — so the SCENE has to, as an override naming the
+    // full path. This is the placed-stamp twin of D133, which was the same loss
+    // one level up.
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+
+    const core::InstanceId rig = fixture.world.create(fixture.schema.modelClass);
+    fixture.world.setName(rig, fixture.atom("Rig"));
+    (void)fixture.world.setParent(rig, workspace);
+    const core::InstanceId a = partUnder(fixture, rig, "A", {});
+    (void)fixture.world.setProperty(rig, fixture.schema.primaryPartProperty, scene::Value{a});
+
+    const std::string stampText = scene::writeStamp(fixture.world, rig);
+    fixture.world.setStamp(rig, fixture.atom("rig"));
+
+    // Beside the stamp, not under it.
+    const core::InstanceId beside = partUnder(fixture, workspace, "Beside", {});
+    (void)fixture.world.setProperty(rig, fixture.schema.primaryPartProperty, scene::Value{beside});
+
+    const auto source = [&stampText](std::string_view) -> std::optional<std::string> { return stampText; };
+    scene::StampLibrary library(fixture.world, source);
+
+    SceneIoReport wrote;
+    const std::string text = scene::writeScene(fixture.world, &wrote, &library);
+    CHECK(wrote.overrides >= 1);
+    // **Nothing dropped and nothing silent.** The old path did not even count
+    // this as a dropped reference: it never reached the writer that counts.
+    CHECK(wrote.droppedReferences == 0);
+    CHECK(text.find("Beside") != std::string::npos);
+
+    Fixture reloaded;
+    (void)makeWorkspace(reloaded);
+    REQUIRE_FALSE(scene::readScene(reloaded.world, text, nullptr, source).has_value());
+
+    core::InstanceId placed;
+    reloaded.world.models().forEach([&](core::InstanceId id, const scene::ModelComponent&) {
+        if (reloaded.world.atoms().text(reloaded.world.name(id)) == "Rig")
+            placed = id;
+    });
+    REQUIRE(placed.valid());
+    const std::optional<scene::Value> primary = reloaded.world.getProperty(placed, reloaded.schema.primaryPartProperty);
+    REQUIRE(primary.has_value());
+    const core::InstanceId restored = std::get<core::InstanceId>(*primary);
+    REQUIRE(restored.valid());
+    CHECK(reloaded.world.atoms().text(reloaded.world.name(restored)) == "Beside");
+}
+
+TEST_CASE("an untouched reference inside a placed stamp is not an override")
+{
+    // The invariant the blanket skip was protecting, and the reason the fix
+    // compares PATHS rather than ids: every placed stamp in a world holds
+    // internal references, and recording one per instance would turn a mark
+    // plus a placement into a mark plus a placement plus a lie about what was
+    // edited.
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+
+    const core::InstanceId rig = fixture.world.create(fixture.schema.modelClass);
+    fixture.world.setName(rig, fixture.atom("Rig"));
+    (void)fixture.world.setParent(rig, workspace);
+    const core::InstanceId a = partUnder(fixture, rig, "A", {});
+    (void)partUnder(fixture, rig, "B", {});
+    (void)fixture.world.setProperty(rig, fixture.schema.primaryPartProperty, scene::Value{a});
+
+    const std::string stampText = scene::writeStamp(fixture.world, rig);
+    fixture.world.setStamp(rig, fixture.atom("rig"));
+
+    const auto source = [&stampText](std::string_view) -> std::optional<std::string> { return stampText; };
+    scene::StampLibrary library(fixture.world, source);
+
+    SceneIoReport wrote;
+    const std::string text = scene::writeScene(fixture.world, &wrote, &library);
+    CHECK(wrote.stamped == 1);
+    CHECK(wrote.overrides == 0);
+    CHECK(text.find("overrides") == std::string::npos);
+}

@@ -135,7 +135,22 @@ SoakVerdict SoakRecorder::evaluate(const SoakThresholds& thresholds) const
         const core::I18nArg args[] = {
             {"peak", static_cast<core::i64>(verdict.peakResidentBytes / (1024 * 1024))},
             {"ceiling", static_cast<core::i64>(thresholds.memoryCeilingBytes / (1024 * 1024))}};
+#ifdef LUAUG_SANITIZERS_ENABLED
+        // **Measured and reported, not gating, under a sanitizer.** An
+        // instrumented build pays two to three times the memory before the
+        // engine allocates a byte -- shadow pages and redzones -- so this check
+        // would be measuring the tool. The first sanitizer run this repository
+        // ever performed failed here at 410 MiB against a 192 MiB ceiling while
+        // reporting a median frame of 1.03 ms, which is the shape of a gate
+        // asserting the wrong thing.
+        //
+        // It goes to `quarantined` rather than being skipped, so the number is
+        // still in the report and a real regression is still visible to anybody
+        // reading it -- the same distinction D066 put this list here for.
+        verdict.quarantined.push_back(core::makeError(LUAUG_TR("engine.soak.err.over_ceiling"), args));
+#else
         verdict.failures.push_back(core::makeError(LUAUG_TR("engine.soak.err.over_ceiling"), args));
+#endif
     }
 
     // Both conditions, and the floor is why: a proportional bound alone calls a

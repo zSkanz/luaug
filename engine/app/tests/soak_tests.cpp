@@ -160,8 +160,28 @@ TEST_CASE("the declared ceiling is only asserted when it is declared")
     }
 
     CHECK(recorder.evaluate({}).ok);
-    CHECK_FALSE(recorder.evaluate({.memoryCeilingBytes = 512u * 1024u * 1024u}).ok);
     CHECK(recorder.evaluate({.memoryCeilingBytes = 1024u * 1024u * 1024u}).ok);
+
+    // **A breach is REPORTED in either build, and gates in only one of them.**
+    // An instrumented build spends two to three times the memory on shadow
+    // pages and redzones before the engine allocates a byte, so under a
+    // sanitizer this check measures the tool -- the first sanitizer run this
+    // repository ever performed failed here at 410 MiB against a 192 MiB
+    // ceiling while reporting a median frame of 1.03 ms.
+    //
+    // Asserted as two shapes rather than compiled away, because "this assertion
+    // does not exist in that configuration" is how a check quietly stops
+    // existing in every configuration.
+    const SoakVerdict breached = recorder.evaluate({.memoryCeilingBytes = 512u * 1024u * 1024u});
+#ifdef LUAUG_SANITIZERS_ENABLED
+    CHECK(mentionsQuarantined(breached, "engine.soak.err.over_ceiling"));
+    CHECK(breached.ok);
+    CHECK(breached.failures.empty());
+#else
+    CHECK(mentions(breached, "engine.soak.err.over_ceiling"));
+    CHECK_FALSE(breached.ok);
+    CHECK_FALSE(breached.failures.empty());
+#endif
 }
 
 TEST_CASE("a world that grows and never shrinks fails, with no hitch anywhere")

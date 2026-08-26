@@ -11,7 +11,7 @@
 # type this downcast claims" -- with no boundary state at all, so silencing it
 # for one directory costs nothing anywhere else.
 #
-# **Which is what this file is for, and it names exactly one check.**
+# **Which is what this file is for.**
 # SPIRV-Cross's C API stores its internal types behind opaque handle structs and
 # recovers them with a downcast that `vptr` correctly identifies as undefined:
 #
@@ -25,11 +25,36 @@
 # where the code we may not touch lives, and stays on everywhere else, including
 # on every downcast in `engine/`.
 #
-# **Add to this file the way this entry was added**: name the check, name the
-# file, and paste the diagnostic. A blanket `src:*third_party*` would have been
-# one line and would have quietly taken AddressSanitizer off a third of the
-# binary.
+# **Two diagnostics forced it, and both are in code R13 forbids editing.**
+#
+#   third_party/spirv_cross/spirv_cross_c.cpp:2311
+#   runtime error: downcast of address ... which does not point to an object of
+#   type 'const struct spvc_type_s'; object is of type 'spirv_cross::SPIRType'
+#
+# -- SPIRV-Cross recovering its internal types from opaque C handles, which
+# aborted the shader compiler at BUILD time, at 124 of 1,263 objects.
+#
+#   third_party/enet/protocol.c:1021
+#   runtime error: member access within null pointer of type 'ENetProtocolHeader'
+#
+# -- `(size_t) & ((ENetProtocolHeader *) 0) -> sentTime`, an `offsetof` written
+# by hand: an ADDRESS is taken and nothing is read through it, which is why it
+# has worked everywhere for twenty years and is undefined by the letter.
+#
+# **The scope is all of UndefinedBehaviorSanitizer, for vendored code only, and
+# saying so is more honest than the alternative.** A first attempt named the
+# two individual checks -- `[vptr]` and `[null]` -- and the second one did not
+# take, for a reason not worth chasing: the entries are matched against a group
+# name, and pretending to a precision that is not being achieved is worse than
+# a wider exclusion with its edges written down. A UBSan report in a tree we
+# may not edit is a report nobody can act on.
+#
+# **AddressSanitizer is NOT excluded from anything.** It is the half that finds
+# defects here -- the first run found a heap-use-after-free in `World::clone`,
+# a pointer into a slot map held across an insert that grew it -- and a
+# blanket `src:*third_party*` outside a section header would have taken it off
+# a third of the binary in one line.
 
-[vptr]
+[undefined]
 src:*/third_party/*
 src:*\third_party\*

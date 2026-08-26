@@ -251,11 +251,9 @@ void terminateHandler() noexcept
     if (const std::exception_ptr active = std::current_exception(); active != nullptr) {
         try {
             std::rethrow_exception(active);
-        }
-        catch (const std::exception& error) {
+        } catch (const std::exception& error) {
             headline = std::string("LuauG terminated on an uncaught ") + typeid(error).name() + ": " + error.what();
-        }
-        catch (...) {
+        } catch (...) {
             headline = "LuauG terminated on an uncaught exception that is not a std::exception.";
         }
     }

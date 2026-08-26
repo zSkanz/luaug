@@ -275,7 +275,7 @@ void collectPaths(const World& world, core::InstanceId id, const std::string& pr
 // Emits the properties of `liveId` that differ from `refId`, under
 // `overridePath`. Recurses into children by position.
 //
-// **An instance-valued property is compared by PATH, not by id** (D137). The
+// **An instance-valued property is compared by PATH, not by id** (D142). The
 // live value names an instance in the live world and the reference names one in
 // the stamp's own, so the two ids are not comparable -- which is true, and was
 // for a long time the reason this skipped every `ValueType::Instance` property
@@ -368,8 +368,8 @@ void collectOverrides(JsonWriter& out, bool& anyOverride, const World& live, cor
     core::InstanceId liveChild = live.firstChild(liveId);
     core::InstanceId referenceChild = reference.firstChild(refId);
     while (liveChild.valid() && referenceChild.valid()) {
-        collectOverrides(out, anyOverride, live, liveChild, reference, referenceChild, stampRoot, referenceRoot,
-                         paths, report);
+        collectOverrides(out, anyOverride, live, liveChild, reference, referenceChild, stampRoot, referenceRoot, paths,
+                         report);
         liveChild = live.nextSibling(liveChild);
         referenceChild = reference.nextSibling(referenceChild);
     }

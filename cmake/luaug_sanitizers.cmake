@@ -30,5 +30,18 @@ if(NOT LUAUG_SANITIZE STREQUAL "")
         # about what to instrument, and the linker has no use for it.
         add_compile_options(-fsanitize-ignorelist=${CMAKE_CURRENT_LIST_DIR}/sanitize-ignorelist.txt)
     endif()
+    # **So the code can tell.** One gate asserts a MEMORY CEILING, and an
+    # instrumented build spends two to three times the memory on shadow pages
+    # and redzones before the engine allocates anything -- so under a sanitizer
+    # that check measures the sanitizer. `soak.cpp` reads this and reports the
+    # ceiling rather than gating on it.
+    add_compile_definitions(LUAUG_SANITIZERS_ENABLED=1)
+
+    # The ignorelist's CONTENT has to trigger a reconfigure. Without this, an
+    # edit to it changes no command line, so ninja rebuilds nothing and the new
+    # entry silently does not apply -- which cost one confused sanitizer run.
+    set_property(DIRECTORY "${CMAKE_SOURCE_DIR}" APPEND PROPERTY
+        CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/sanitize-ignorelist.txt")
+
     message(STATUS "LuauG: sanitizers enabled -> ${LUAUG_SANITIZE}")
 endif()

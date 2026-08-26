@@ -34,6 +34,12 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     # poisoning. That is a vendored file R13 forbids editing, so the image is
     # the only place this can be fixed.
         libclang-rt-18-dev \
+    # `llvm-symbolizer`, without which every sanitizer report is a column of
+    # hexadecimal addresses and the tool is worth nothing. It ships in `llvm-18`
+    # rather than with the runtime above, and the failure mode is a WARNING --
+    # "Failed to use and restart external symbolizer" -- rather than an error, so
+    # a report looks like it worked while naming nothing.
+        llvm-18 \
     # Deliberately NOT clang-tools. CMake 3.28+ would want `clang-scan-deps` to
     # scan C++20 translation units for module dependencies, and Ubuntu ships
     # that binary only under a versioned name, so the default configuration

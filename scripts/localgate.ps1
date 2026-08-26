@@ -323,6 +323,13 @@ Invoke-Stage 'linux' {
 # Its own build volume, so an instrumented tree never shares object files with
 # the ordinary Tier-2 one.
 Invoke-Stage 'asan' {
+    # **Opt-in, and this line is what makes it so.** `Invoke-Stage` runs every
+    # stage when no `-Only` is given, which would have put a two-to-three-times
+    # slower instrumented build into the gate a person runs before every push.
+    if (-not $Only) {
+        Write-Host '[gate] asan: skipped (opt-in; run scripts/localgate.ps1 -Only asan)' -ForegroundColor DarkGray
+        return
+    }
     Initialize-Tier2Image
     docker volume create luaug-tier2-asan | Out-Null
 
@@ -340,6 +347,8 @@ Invoke-Stage 'asan' {
     docker run --name luaug-tier2-asan `
         -e LUAUG_LINUX_PRESET=linux-clang-asan `
         -e ASAN_OPTIONS=detect_leaks=0:halt_on_error=1:abort_on_error=1 `
+        -e ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-18/bin/llvm-symbolizer `
+        -e UBSAN_SYMBOLIZER_PATH=/usr/lib/llvm-18/bin/llvm-symbolizer `
         -e UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 `
         -v "${repo}:/repo" `
         -v "luaug-tier2-asan:/build" `
