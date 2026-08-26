@@ -5,6 +5,8 @@
 #include <luaug/core/types.h>
 
 #include <optional>
+#include <span>
+#include <vector>
 
 // Turning a click into an instance.
 //
@@ -113,6 +115,55 @@ struct PickHit
 // not, because it is not a thing the person is looking at.
 [[nodiscard]] std::optional<PickHit> pickNearest(const scene::World& world, core::InstanceId root,
                                                  const PickRay& ray) noexcept;
+
+// --- What is not a part (S5.1) -----------------------------------------------
+//
+// **An editor in which you cannot click a camera or a light is an editor in
+// which those things do not exist.** Picking walked the part pool and nothing
+// else, so a `Camera`, a `PointLight`, an `Attachment` and a `Ragdoll` could be
+// reached only through the Explorer -- and the one you want to move is the one
+// you can see in the viewport.
+//
+// A marker is a point and a radius. Nothing here is drawn: `drawPickMarkers` in
+// the frame loop is what puts a cross on screen, and this is what a click
+// intersects.
+
+// Where an instance IS, for the purpose of pointing at it.
+//
+// **An instance with no transform of its own is at its nearest ancestor that has
+// one.** That is not a fallback, it is the rule the renderer already follows: a
+// `PointLight` has no position and is lit from the part it hangs on, so a marker
+// anywhere else would be a marker for a light that is not there.
+[[nodiscard]] std::optional<core::DVec3> markerPoint(const scene::World& world, core::InstanceId id);
+
+struct PickMarker
+{
+    core::InstanceId instance;
+    core::DVec3 at;
+};
+
+// Every instance under `root` that is worth a marker: a camera, a light, an
+// attachment, a ragdoll -- anything the world can locate and the renderer draws
+// no geometry for. `out` is cleared first.
+//
+// **A part is never a marker**, because a part has a shape and clicking its
+// shape is what picking already does. A marker over one would be a second,
+// smaller target on top of a bigger correct one.
+void collectPickMarkers(const scene::World& world, core::InstanceId root, std::vector<PickMarker>& out);
+
+// The marker the ray passes closest to the centre of, within `radius` metres,
+// or nothing.
+//
+// **`occludedBeyond` is what stops a marker being clicked through a wall.** Pass
+// the distance of the nearest solid hit, or infinity when there is none: a
+// marker further than that (plus its own radius, so one sitting ON a surface
+// still wins) is behind something and is not what somebody is pointing at.
+[[nodiscard]] std::optional<PickHit> pickMarker(std::span<const PickMarker> markers, const PickRay& ray, f32 radius,
+                                                f32 occludedBeyond) noexcept;
+
+// How big a marker is, in metres. Small enough not to be a target over the part
+// it sits on, big enough to hit without aiming.
+inline constexpr f32 kPickMarkerRadius = 0.28f;
 
 // --- The manipulators -------------------------------------------------------
 //

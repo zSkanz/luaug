@@ -387,6 +387,10 @@ struct Fixture
     // and "the feature is off" is exactly what a test must be able to tell
     // apart from "the feature ran".
     scene::ClassId modelClass = scene::InvalidClass;
+    // **What a bone is**, and registered for the same reason `Model` is: the
+    // marker sweep and the manipulator both locate one through its own pool, and
+    // a fixture with no such class would let both pass while finding nothing.
+    scene::ClassId attachmentClass = scene::InvalidClass;
     scene::ClassId materialClass = scene::InvalidClass;
     scene::ClassId cameraClass = scene::InvalidClass;
     scene::ClassId pointLightClass = scene::InvalidClass;
@@ -598,6 +602,13 @@ struct Fixture
             .attachComponents = [](scene::World& w,
                                    core::InstanceId id) { w.models().add(id, scene::ModelComponent{}); },
             .detachComponents = [](scene::World& w, core::InstanceId id) { w.models().remove(id); },
+        });
+        attachmentClass = classes.registerClass({
+            .name = atoms.intern("Attachment"),
+            .defaultName = atoms.intern("Attachment"),
+            .attachComponents = [](scene::World& w,
+                                   core::InstanceId id) { w.attachments().add(id, scene::AttachmentComponent{}); },
+            .detachComponents = [](scene::World& w, core::InstanceId id) { w.attachments().remove(id); },
         });
         materialProperties = {
             scene::PropertyDesc{

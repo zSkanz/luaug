@@ -11,8 +11,11 @@
 #include "luaug/scene/components.h"
 #include "luaug/scene/world.h"
 
+#include <array>
 #include <cmath>
 #include <doctest/doctest.h>
+#include <limits>
+#include <vector>
 
 #include "inspector_fixture.h"
 
@@ -600,4 +603,110 @@ TEST_CASE("a manipulator four kilometres out is picked exactly as one at arm's l
     REQUIRE(start.has_value());
     REQUIRE(end.has_value());
     CHECK(close(static_cast<f32>(end->x - start->x), 2.0f, 0.01f));
+}
+
+// --- What is not a part (S5.1) -----------------------------------------------
+//
+// **An editor in which you cannot click a camera or a light is an editor in
+// which those things do not exist.** Picking walked the part pool and nothing
+// else, so a `Camera`, a `PointLight`, an `Attachment` and a `Ragdoll` could be
+// reached only through the Explorer -- and the one you want to move is the one
+// you can see in the viewport.
+
+TEST_CASE("an instance with no transform of its own is at its nearest ancestor that has one")
+{
+    // Not a fallback: it is the rule the RENDERER already follows. A
+    // `PointLight` has no position and is lit from the part it hangs on, so a
+    // marker anywhere else would be a marker for a light that is not there.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId lamp = world.create(fixture.partClass);
+    REQUIRE_FALSE(world.setParent(lamp, root).has_value());
+    world.parts().find(lamp)->cframe.position = core::DVec3{4.0, 3.0, -2.0};
+
+    const core::InstanceId glow = world.create(fixture.pointLightClass);
+    REQUIRE_FALSE(world.setParent(glow, lamp).has_value());
+
+    const std::optional<core::DVec3> at = app::markerPoint(world, glow);
+    REQUIRE(at.has_value());
+    CHECK(at->x == doctest::Approx(4.0));
+    CHECK(at->y == doctest::Approx(3.0));
+    CHECK(at->z == doctest::Approx(-2.0));
+}
+
+TEST_CASE("a part is never a marker, because clicking its shape is what picking already does")
+{
+    // A marker over a part would be a second, smaller target on top of a bigger
+    // correct one -- so aiming at the middle of a crate would select the crate
+    // through a pinhole and miss it everywhere else.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId crate = world.create(fixture.partClass);
+    REQUIRE_FALSE(world.setParent(crate, root).has_value());
+
+    std::vector<app::PickMarker> markers;
+    app::collectPickMarkers(world, root, markers);
+    for (const app::PickMarker& marker : markers)
+        CHECK(marker.instance != crate);
+}
+
+TEST_CASE("a marker the ray passes near is picked, and one it misses is not")
+{
+    const std::array<app::PickMarker, 1> markers{app::PickMarker{core::InstanceId{}, core::DVec3{0.0, 0.0, -10.0}}};
+    const app::PickRay straight{{0.0, 0.0, 0.0}, {0.0f, 0.0f, -1.0f}};
+
+    const std::optional<app::PickHit> hit =
+        app::pickMarker(markers, straight, 0.3f, std::numeric_limits<core::f32>::infinity());
+    REQUIRE(hit.has_value());
+    CHECK(static_cast<core::f64>(hit->distance) == doctest::Approx(10.0));
+
+    // A ray a metre off the side, with a thirty-centimetre marker.
+    const app::PickRay wide{{1.0, 0.0, 0.0}, {0.0f, 0.0f, -1.0f}};
+    CHECK_FALSE(app::pickMarker(markers, wide, 0.3f, std::numeric_limits<core::f32>::infinity()).has_value());
+}
+
+TEST_CASE("a marker behind a wall is not what somebody is pointing at")
+{
+    // The other half of making markers win over geometry: being smaller must not
+    // make one harder to click, and being behind a wall must still make it
+    // unreachable.
+    const std::array<app::PickMarker, 1> markers{app::PickMarker{core::InstanceId{}, core::DVec3{0.0, 0.0, -10.0}}};
+    const app::PickRay straight{{0.0, 0.0, 0.0}, {0.0f, 0.0f, -1.0f}};
+
+    // A solid hit at five metres: the marker at ten is behind it.
+    CHECK_FALSE(app::pickMarker(markers, straight, 0.3f, 5.0f).has_value());
+    // A solid hit at ten and a marker at ten: the marker sits ON the surface,
+    // which is where every light on a part is. It has to win, or most lights are
+    // permanently unclickable.
+    CHECK(app::pickMarker(markers, straight, 0.3f, 10.0f).has_value());
+}
+
+TEST_CASE("a marker behind the camera is never picked")
+{
+    const std::array<app::PickMarker, 1> markers{app::PickMarker{core::InstanceId{}, core::DVec3{0.0, 0.0, 10.0}}};
+    const app::PickRay forward{{0.0, 0.0, 0.0}, {0.0f, 0.0f, -1.0f}};
+    CHECK_FALSE(app::pickMarker(markers, forward, 0.3f, std::numeric_limits<core::f32>::infinity()).has_value());
+}
+
+TEST_CASE("two overlapping markers resolve to the one the pointer is more on")
+{
+    // A marker is an aiming target rather than geometry, so the nearest ALONG
+    // the ray is the wrong answer: the one further away can be the one under the
+    // pointer, and that is the one somebody meant.
+    const core::InstanceId near{1, 1};
+    const core::InstanceId far{2, 1};
+    const std::array<app::PickMarker, 2> markers{
+        app::PickMarker{near, core::DVec3{0.25, 0.0, -5.0}},
+        app::PickMarker{far, core::DVec3{0.02, 0.0, -9.0}},
+    };
+    const app::PickRay straight{{0.0, 0.0, 0.0}, {0.0f, 0.0f, -1.0f}};
+
+    const std::optional<app::PickHit> hit =
+        app::pickMarker(markers, straight, 0.5f, std::numeric_limits<core::f32>::infinity());
+    REQUIRE(hit.has_value());
+    CHECK(hit->instance == far);
 }

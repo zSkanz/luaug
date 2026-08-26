@@ -151,6 +151,105 @@ std::optional<PickHit> pickNearest(const scene::World& world, core::InstanceId r
     return best;
 }
 
+// --- What is not a part (S5.1) -----------------------------------------------
+
+std::optional<core::DVec3> markerPoint(const scene::World& world, core::InstanceId id)
+{
+    // Its own transform first, in the order a thing is most specifically
+    // located: an attachment knows where it is in the world, a camera and a part
+    // know where they are outright.
+    if (const scene::AttachmentComponent* attachment = world.attachments().find(id); attachment != nullptr)
+        return attachment->worldCFrame.position;
+    if (const scene::CameraComponent* camera = world.cameras().find(id); camera != nullptr)
+        return camera->cframe.position;
+    if (const scene::PartComponent* part = world.parts().find(id); part != nullptr)
+        return part->cframe.position;
+
+    // **Otherwise the nearest ancestor that has one**, which is not a fallback
+    // but the rule the renderer already follows: a `PointLight` has no position
+    // and is lit from the part it hangs on, so a marker anywhere else would be a
+    // marker for a light that is not there.
+    for (core::InstanceId walk = world.parentOf(id); walk.valid(); walk = world.parentOf(walk)) {
+        if (const scene::PartComponent* part = world.parts().find(walk); part != nullptr)
+            return part->cframe.position;
+        if (const scene::AttachmentComponent* attachment = world.attachments().find(walk); attachment != nullptr)
+            return attachment->worldCFrame.position;
+        if (const scene::CameraComponent* camera = world.cameras().find(walk); camera != nullptr)
+            return camera->cframe.position;
+    }
+    return std::nullopt;
+}
+
+void collectPickMarkers(const scene::World& world, core::InstanceId root, std::vector<PickMarker>& out)
+{
+    out.clear();
+
+    // **Pool order, and one pass per pool.** Walking the tree instead would ask
+    // every instance whether it is one of five things; walking the pools asks
+    // five pools what is in them, and the pools are what the answer is about.
+    const auto sweep = [&](auto& pool) {
+        pool.forEach([&](core::InstanceId id, const auto&) {
+            if (!inWorld(world, id, root))
+                return;
+            // **A part is never a marker.** A part has a shape and clicking its
+            // shape is what picking already does; a marker over one would be a
+            // second, smaller target on top of a bigger correct one.
+            if (world.parts().find(id) != nullptr)
+                return;
+            if (const std::optional<core::DVec3> at = markerPoint(world, id); at.has_value())
+                out.push_back(PickMarker{id, *at});
+        });
+    };
+
+    sweep(world.cameras());
+    sweep(world.attachments());
+    sweep(world.pointLights());
+    sweep(world.spotLights());
+    sweep(world.ragdolls());
+}
+
+std::optional<PickHit> pickMarker(std::span<const PickMarker> markers, const PickRay& ray, f32 radius,
+                                  f32 occludedBeyond) noexcept
+{
+    std::optional<PickHit> best;
+    f32 bestOffset = radius;
+
+    for (const PickMarker& marker : markers) {
+        // Along the ray, and how far off it. Both in f32 after one subtraction
+        // in f64, which is the same narrowing rule every other world-space
+        // computation in this engine follows (ADR 0014).
+        const Vec3 toMarker = core::toVec3(marker.at - ray.origin);
+        const f32 along = core::dot(toMarker, ray.direction);
+        if (along <= 0.0f)
+            continue; // Behind the camera.
+
+        // **Plus its own radius**, so a marker sitting exactly ON a surface
+        // still wins over the surface. Without that, every light on a part is
+        // permanently unclickable -- which is most lights.
+        if (along > occludedBeyond + radius)
+            continue;
+
+        const Vec3 closest = toMarker - ray.direction * along;
+        const f32 offset = core::length(closest);
+        if (offset > radius)
+            continue;
+
+        // **The one the ray passes NEAREST**, not the nearest along the ray. A
+        // marker is an aiming target rather than geometry: two overlapping ones
+        // are resolved by which the pointer is more on, which is what somebody
+        // meant. Ties break on the lower index so two markers at one point pick
+        // the same one every time (R10 is not at stake here, but a selection
+        // that flickers is).
+        if (offset < bestOffset ||
+            (offset == bestOffset && best.has_value() && marker.instance.index < best->instance.index)) {
+            bestOffset = offset;
+            best = PickHit{marker.instance, along};
+        }
+    }
+
+    return best;
+}
+
 // --- The manipulators -------------------------------------------------------
 
 namespace {

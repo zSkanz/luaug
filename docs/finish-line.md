@@ -293,8 +293,29 @@ that sends the next session to the wrong place.
 
 ### S5 — The editor's declared verbs
 
-- [ ] **S5.1** Anything that is not a `BasePart` can be picked and drawn.
-- [ ] **S5.2** The manipulator moves a `Model`, a `Camera`, an `Attachment`.
+- [x] **S5.1** Anything that is not a `BasePart` can be picked and drawn —
+      built. Picking walked the part pool and nothing else, so a `Camera`, a
+      `PointLight`, an `Attachment` and a `Ragdoll` could be reached only
+      through the Explorer, and the one you want to move is the one you can
+      see. A marker is a point and a radius: an instance with no transform of
+      its own is at its nearest ancestor that has one, which is the rule the
+      RENDERER already follows for a light. A marker wins over geometry when
+      the ray passes within its radius and it is not behind the solid hit --
+      both halves are needed, since being smaller must not make it harder to
+      click and being behind a wall must still make it unreachable. Drawn as a
+      wire sphere at exactly the pick radius, so what is visible is what is
+      clickable.
+- [x] **S5.2** The manipulator moves a `Model`, a `Camera`, an `Attachment` —
+      built, and each is transformed the way it is DEFINED. A part and a camera
+      own a world `CFrame` and take one straight; an `Attachment.CFrame` is
+      relative to the part it is on, so a world transform is divided back
+      through the parent's frame captured at the drag's start; a `Model` has no
+      transform at all and moves by moving every part under it, which is what
+      `PivotTo` means. The gizmo sits at a model's PIVOT, because anywhere else
+      the parts would move by a different amount than the handle travelled.
+      Four cases, including the one that is silently wrong: a gizmo at an
+      attachment's LOCAL frame sits at the origin for every bone on a character
+      ten metres out, which reads as the gizmo not appearing.
 - [ ] **S5.3** Selection resolves to the meaningful ancestor, with drill-down.
 - [x] **S5.4** Group / Ungroup — built, Ctrl+G and Ctrl+Shift+G, in the
       Explorer's context menu, one undo step each. The container is a `Model`

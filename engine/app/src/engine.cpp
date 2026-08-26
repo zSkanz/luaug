@@ -21,6 +21,7 @@
 #include "luaug/app/inspector.h"
 #include "luaug/app/launcher.h"
 #include "luaug/app/partition_cache.h"
+#include "luaug/app/picking.h"
 #include "luaug/app/reference_grid.h"
 #include "luaug/app/reload.h"
 #include "luaug/app/screenshot.h"
@@ -2411,6 +2412,29 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         if (const render::AnimationSystem* animation = host->animation();
             animation != nullptr && overlay.has_value() && overlay->panels().showSkeletons) {
             drawSkeletons(host->world(), *animation, debugDraw);
+        }
+
+        // **What is not a part, drawn** (S5.1). A `Camera`, a `PointLight`, an
+        // `Attachment` and a `Ragdoll` have no geometry, so before this the
+        // viewport was a picture with things missing from it -- and a thing you
+        // cannot see is a thing you cannot click even once picking knows about
+        // it.
+        //
+        // A wire sphere at the marker's own pick radius, so what is drawn is
+        // exactly what is clickable. Editor only: a running game draws its own
+        // world and has no business showing the author's furniture.
+        if (options.editor) {
+            static std::vector<PickMarker> markers;
+            collectPickMarkers(host->world(), authoredRoot(), markers);
+            for (const PickMarker& marker : markers) {
+                // Brighter for the selected one, because the reason to look at
+                // these is to find the one you are moving.
+                const bool chosen = inspector.isSelected(marker.instance);
+                debugDraw.wireSphere(core::toVec3(marker.at), kPickMarkerRadius,
+                                     chosen ? render::DebugColor::fromLinear(1.0f, 0.85f, 0.35f)
+                                            : render::DebugColor::fromLinear(0.45f, 0.55f, 0.70f),
+                                     12);
+            }
         }
 
         // The reference grid, at the SAME step the translate snap uses -- lines

@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdio>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -2355,6 +2356,78 @@ void Editor::setSnapStep(GizmoMode mode, f32 step) noexcept
     m_preferencesDirty = true;
 }
 
+namespace {
+
+// Where the manipulator sits for an instance, in WORLD space, or nothing when
+// the instance is not anywhere.
+//
+// **Four kinds, and each is located the way it is defined** (S5.2). A part is
+// its own `CFrame`; a camera is too. An attachment's `CFrame` is relative to the
+// part it is on, so the world one is the derived `WorldCFrame` the mirror keeps.
+// A `Model` has no transform at all and is located by its PIVOT, which is what
+// `PivotTo` moves and therefore the only point a gizmo on one could honestly be.
+[[nodiscard]] std::optional<core::CFrameD> gizmoTransformOf(const scene::World& world, core::InstanceId id)
+{
+    if (const scene::PartComponent* part = world.parts().find(id); part != nullptr)
+        return part->cframe;
+    if (const scene::CameraComponent* camera = world.cameras().find(id); camera != nullptr)
+        return camera->cframe;
+    if (const scene::AttachmentComponent* attachment = world.attachments().find(id); attachment != nullptr)
+        return attachment->worldCFrame;
+    if (world.models().find(id) != nullptr)
+        return scene::pivotOf(world, id);
+    return std::nullopt;
+}
+
+} // namespace
+
+// Puts one dragged instance at `after`, in world space, by whatever route its
+// kind is transformed through (S5.2).
+//
+// **Through the inspector's queue in every case**, which is what keeps a gizmo
+// drag one undo step and one safe point however many kinds are in the selection
+// -- and what stops a `Model` needing its own history handling.
+void Editor::applyDragTransform(scene::World& world, Inspector& inspector, core::usize index,
+                                const core::CFrameD& after)
+{
+    const GizmoDrag& drag = *m_drag;
+    const core::InstanceId id = drag.targets[index];
+    const core::NameAtom cframeName = world.atoms().intern("CFrame");
+
+    switch (drag.kinds[index]) {
+    case DragKind::Attachment:
+        // **Divided back through the parent**, because an `Attachment.CFrame` is
+        // relative to the part it is on. Writing the world frame straight in
+        // would move a bone by the part's own transform on top of the drag --
+        // which on a character ten metres out is a bone ten metres away.
+        inspector.enqueue(id, cframeName, scene::Value{core::inverse(drag.parents[index]) * after});
+        return;
+
+    case DragKind::Model: {
+        // A `Model` has no transform, so moving it is moving everything under
+        // it by the same delta -- which is exactly what `PivotTo` means and the
+        // only thing that keeps the parts' relative layout.
+        const core::CFrameD delta = after * core::inverse(drag.before[index]);
+        std::vector<core::InstanceId> descendants;
+        world.collectDescendants(id, descendants);
+        for (const core::InstanceId descendant : descendants) {
+            const scene::PartComponent* part = world.parts().find(descendant);
+            if (part == nullptr)
+                continue;
+            inspector.enqueue(descendant, cframeName, scene::Value{delta * part->cframe});
+        }
+        return;
+    }
+
+    case DragKind::Part:
+    case DragKind::Camera:
+    default:
+        // Both own a world `CFrame` outright, and both expose it as `CFrame`.
+        inspector.enqueue(id, cframeName, scene::Value{after});
+        return;
+    }
+}
+
 std::optional<GizmoFrame> Editor::gizmoFrame(const scene::World& world, const Inspector& inspector) const
 {
     if (!editing(m_run) || !m_hasCamera)
@@ -2364,12 +2437,17 @@ std::optional<GizmoFrame> Editor::gizmoFrame(const scene::World& world, const In
     if (!primary.valid() || !world.alive(primary))
         return std::nullopt;
 
-    const scene::PartComponent* part = world.parts().find(primary);
-    if (part == nullptr)
+    // **Whatever the primary IS, if it is somewhere** (S5.2). The manipulator
+    // read the part pool and nothing else, so selecting a `Camera`, an
+    // `Attachment` or a `Model` gave no gizmo at all -- and the two verbs an
+    // editor has for moving something are the gizmo and typing numbers into the
+    // grid.
+    const std::optional<core::CFrameD> located = gizmoTransformOf(world, primary);
+    if (!located.has_value())
         return std::nullopt;
 
     GizmoFrame frame;
-    frame.transform.position = part->cframe.position;
+    frame.transform.position = located->position;
     // World axes unless somebody asked for the part's own. A rotated crate is
     // unusable in world space and a wall is unusable in local, which is why this
     // is a choice rather than a decision made here.
@@ -2381,7 +2459,7 @@ std::optional<GizmoFrame> Editor::gizmoFrame(const scene::World& world, const In
     // the same toggle for the same reason, and the alternative is a handle that
     // lies about what it does.
     const bool local = m_gizmoLocal || m_gizmoMode == GizmoMode::Scale;
-    frame.transform.rotation = local ? part->cframe.rotation : core::Mat3{};
+    frame.transform.rotation = local ? located->rotation : core::Mat3{};
     frame.size = metresPerPixel(m_projection, m_viewport, m_cameraOrigin, frame.transform.position) * kGizmoPixels;
 
     if (!(frame.size > 0.0f))
@@ -2453,12 +2531,38 @@ bool Editor::driveGizmo(scene::World& world, Inspector& inspector)
         // selection may hold a folder and a part, and dragging the part is a
         // thing somebody meant.
         for (const core::InstanceId id : inspector.selectionSet()) {
-            const scene::PartComponent* part = world.parts().find(id);
-            if (part == nullptr)
+            const std::optional<core::CFrameD> at = gizmoTransformOf(world, id);
+            if (!at.has_value())
                 continue;
+
+            const scene::PartComponent* part = world.parts().find(id);
+            DragKind kind = DragKind::Part;
+            core::CFrameD parent;
+            if (part != nullptr) {
+                kind = DragKind::Part;
+            }
+            else if (world.cameras().find(id) != nullptr) {
+                kind = DragKind::Camera;
+            }
+            else if (world.attachments().find(id) != nullptr) {
+                kind = DragKind::Attachment;
+                // What the local `CFrame` is relative to. Derived from the two
+                // frames the mirror already keeps rather than looked up through
+                // the tree, so a bone under a bone is right for free.
+                if (const scene::AttachmentComponent* attachment = world.attachments().find(id);
+                    attachment != nullptr) {
+                    parent = attachment->worldCFrame * core::inverse(attachment->cframe);
+                }
+            }
+            else {
+                kind = DragKind::Model;
+            }
+
             drag.targets.push_back(id);
-            drag.before.push_back(part->cframe);
-            drag.sizes.push_back(part->size);
+            drag.before.push_back(*at);
+            drag.sizes.push_back(part != nullptr ? part->size : core::Vec3{1.0f, 1.0f, 1.0f});
+            drag.kinds.push_back(kind);
+            drag.parents.push_back(parent);
         }
         if (drag.targets.empty())
             return false;
@@ -2478,7 +2582,9 @@ bool Editor::driveGizmo(scene::World& world, Inspector& inspector)
     GizmoDrag& drag = *m_drag;
     m_hover = drag.handle;
 
-    const core::NameAtom cframeName = world.atoms().intern("CFrame");
+    // `CFrame` is interned by `applyDragTransform`, which is where every
+    // transform write now goes -- four kinds write it four ways, and the one
+    // place that knows which is the one that names the property.
     const core::NameAtom sizeName = world.atoms().intern("Size");
 
     if (m_gizmoMode == GizmoMode::Rotate) {
@@ -2514,7 +2620,7 @@ bool Editor::driveGizmo(scene::World& world, Inspector& inspector)
             // and what turning each in place would not be.
             const Vec3 offset = core::toVec3(before.position - pivot);
             after.position = pivot + core::toDVec3(turn * offset);
-            inspector.enqueue(drag.targets[index], cframeName, scene::Value{after});
+            applyDragTransform(world, inspector, index, after);
         }
         return true;
     }
@@ -2554,7 +2660,7 @@ bool Editor::driveGizmo(scene::World& world, Inspector& inspector)
         for (core::usize index = 0; index < drag.targets.size(); ++index) {
             core::CFrameD after = drag.before[index];
             after.position = after.position + delta;
-            inspector.enqueue(drag.targets[index], cframeName, scene::Value{after});
+            applyDragTransform(world, inspector, index, after);
         }
         return true;
     }
@@ -2736,7 +2842,25 @@ std::optional<PickHit> Editor::resolvePick(const scene::World& world, core::Inst
     if (!m_hasCamera)
         return std::nullopt;
 
-    const std::optional<PickHit> hit = pickNearest(world, root, rayThrough(request.pixel));
+    const PickRay ray = rayThrough(request.pixel);
+    std::optional<PickHit> hit = pickNearest(world, root, ray);
+
+    // **What is not a part** (S5.1). Picking walked the part pool and nothing
+    // else, so a `Camera`, a `PointLight`, an `Attachment` and a `Ragdoll` could
+    // be reached only through the Explorer -- and the one you want to move is
+    // the one you can see.
+    //
+    // A marker wins over geometry when the ray passes within its radius AND it
+    // is not behind the solid hit: a marker is an aiming target rather than a
+    // shape, so being smaller must not make it harder to click, and being behind
+    // a wall must still make it unreachable.
+    static std::vector<PickMarker> markers;
+    collectPickMarkers(world, root, markers);
+    if (const std::optional<PickHit> marker = pickMarker(
+            markers, ray, kPickMarkerRadius, hit.has_value() ? hit->distance : std::numeric_limits<f32>::infinity());
+        marker.has_value()) {
+        hit = marker;
+    }
 
     // **Ctrl adds and removes; a plain click replaces.** The same gesture the
     // Explorer's rows use, because it is the same question asked of a different

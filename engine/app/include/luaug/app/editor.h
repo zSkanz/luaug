@@ -1717,6 +1717,31 @@ private:
     // A drag in progress. `start` is where the pointer was solved to on the
     // frame the button went down, and `before` is every selected instance's
     // transform at that moment -- the two things a delta is measured from.
+    // What a drag is moving, and HOW to move it (S5.2).
+    //
+    // **Four kinds, because four things are transformed four ways.** A part and
+    // a camera each own a world `CFrame` and take one straight; an attachment's
+    // `CFrame` is relative to the part it is on, so a world transform has to be
+    // divided back through the parent's; a `Model` has no transform at all and
+    // moves by moving every part under it, which is what `PivotTo` does.
+    //
+    // The kind is decided ONCE, when the drag starts, rather than asked per
+    // frame: an instance does not change what it is mid-drag, and re-deciding
+    // would put four pool lookups in the hot path of a gesture that runs every
+    // frame.
+    enum class DragKind : core::u8
+    {
+        Part,
+        Camera,
+        Attachment,
+        Model,
+    };
+
+    // Puts one dragged instance at a world `CFrame` by whatever route its kind
+    // is transformed through. Defined beside the drag because it reads
+    // `m_drag`'s parallel arrays.
+    void applyDragTransform(scene::World& world, Inspector& inspector, core::usize index, const core::CFrameD& after);
+
     struct GizmoDrag
     {
         GizmoHandle handle;
@@ -1726,6 +1751,12 @@ private:
         std::vector<core::InstanceId> targets;
         std::vector<core::CFrameD> before;
         std::vector<core::Vec3> sizes;
+        std::vector<DragKind> kinds;
+        // For an attachment, the parent's world frame at the START of the drag;
+        // identity for everything else. Captured rather than read live because
+        // dragging a bone whose part is itself being dragged would otherwise
+        // divide by a frame that has already moved this tick.
+        std::vector<core::CFrameD> parents;
         core::u64 gesture = 0;
     };
 

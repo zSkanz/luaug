@@ -3823,3 +3823,116 @@ TEST_CASE("nothing selected is refused with a reason rather than making an empty
     CHECK(editor.status().failed);
     CHECK(world.childCount(root) == 0);
 }
+
+// --- The manipulator over what is not a part (S5.2) --------------------------
+//
+// The gizmo read the part pool and nothing else, so selecting a `Camera`, an
+// `Attachment` or a `Model` gave no gizmo at all -- and the two verbs an editor
+// has for moving something are the gizmo and typing numbers into the grid.
+
+TEST_CASE("a camera gets a gizmo, at the camera")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId camera = world.create(fixture.cameraClass);
+    REQUIRE_FALSE(world.setParent(camera, root).has_value());
+    world.cameras().find(camera)->cframe.position = core::DVec3{3.0, 2.0, 1.0};
+
+    editor.setViewport({0.0f, 0.0f, 800.0f, 600.0f});
+    editor.setCamera(core::perspective(1.0f, 800.0f / 600.0f, 0.1f, 500.0f), core::Mat4{}, core::DVec3{0.0, 0.0, 40.0});
+    inspector.select(camera);
+
+    const std::optional<GizmoFrame> frame = editor.gizmoFrame(world, inspector);
+    REQUIRE(frame.has_value());
+    CHECK(frame->transform.position.x == doctest::Approx(3.0));
+    CHECK(frame->transform.position.y == doctest::Approx(2.0));
+}
+
+TEST_CASE("a model gets a gizmo at its PIVOT, which is the point PivotTo moves")
+{
+    // A `Model` has no transform at all, so the only point a gizmo on one could
+    // honestly be is the pivot -- anywhere else and dragging it would move the
+    // parts by a different amount than the handle travelled.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId model = world.create(fixture.modelClass);
+    REQUIRE_FALSE(world.setParent(model, root).has_value());
+
+    const core::InstanceId a = world.create(fixture.partClass);
+    const core::InstanceId b = world.create(fixture.partClass);
+    REQUIRE_FALSE(world.setParent(a, model).has_value());
+    REQUIRE_FALSE(world.setParent(b, model).has_value());
+    world.parts().find(a)->cframe.position = core::DVec3{-2.0, 0.0, 0.0};
+    world.parts().find(b)->cframe.position = core::DVec3{2.0, 0.0, 0.0};
+
+    editor.setViewport({0.0f, 0.0f, 800.0f, 600.0f});
+    editor.setCamera(core::perspective(1.0f, 800.0f / 600.0f, 0.1f, 500.0f), core::Mat4{}, core::DVec3{0.0, 0.0, 40.0});
+    inspector.select(model);
+
+    const std::optional<GizmoFrame> frame = editor.gizmoFrame(world, inspector);
+    REQUIRE(frame.has_value());
+    // Between the two parts, which is where `pivotOf` puts it.
+    CHECK(frame->transform.position.x == doctest::Approx(0.0).epsilon(0.01));
+}
+
+TEST_CASE("an attachment gets a gizmo at its WORLD frame, not its local one")
+{
+    // **The case that is silently wrong.** An `Attachment.CFrame` is relative to
+    // the part it is on, so a gizmo placed at the local frame sits at the origin
+    // for every bone on a character standing ten metres out -- which looks like
+    // the gizmo not appearing.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId host = world.create(fixture.partClass);
+    REQUIRE_FALSE(world.setParent(host, root).has_value());
+    world.parts().find(host)->cframe.position = core::DVec3{10.0, 0.0, 0.0};
+
+    const core::InstanceId bone = world.create(fixture.attachmentClass);
+    REQUIRE_FALSE(world.setParent(bone, host).has_value());
+    scene::AttachmentComponent* attachment = world.attachments().find(bone);
+    REQUIRE(attachment != nullptr);
+    attachment->cframe.position = core::DVec3{0.0, 1.0, 0.0};
+    // What the mirror keeps, and what the gizmo has to read.
+    attachment->worldCFrame.position = core::DVec3{10.0, 1.0, 0.0};
+
+    editor.setViewport({0.0f, 0.0f, 800.0f, 600.0f});
+    editor.setCamera(core::perspective(1.0f, 800.0f / 600.0f, 0.1f, 500.0f), core::Mat4{}, core::DVec3{0.0, 0.0, 40.0});
+    inspector.select(bone);
+
+    const std::optional<GizmoFrame> frame = editor.gizmoFrame(world, inspector);
+    REQUIRE(frame.has_value());
+    CHECK(frame->transform.position.x == doctest::Approx(10.0));
+    CHECK(frame->transform.position.y == doctest::Approx(1.0));
+}
+
+TEST_CASE("something with no transform anywhere gets no gizmo, which is honest")
+{
+    // A `Folder` is not somewhere. A manipulator on one would be a handle that
+    // moves nothing, which is worse than no handle.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId folder = world.create(fixture.folderClass);
+    REQUIRE_FALSE(world.setParent(folder, root).has_value());
+
+    editor.setViewport({0.0f, 0.0f, 800.0f, 600.0f});
+    editor.setCamera(core::perspective(1.0f, 800.0f / 600.0f, 0.1f, 500.0f), core::Mat4{}, core::DVec3{0.0, 0.0, 40.0});
+    inspector.select(folder);
+
+    CHECK_FALSE(editor.gizmoFrame(world, inspector).has_value());
+}
