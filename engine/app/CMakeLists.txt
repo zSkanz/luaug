@@ -248,6 +248,29 @@ if(LUAUG_BUILD_TESTS)
     target_compile_definitions(luaug_app_tests PRIVATE
         LUAUG_TEST_THUMBNAIL_DIR="${LUAUG_TEST_THUMBNAIL_DIR}")
 
+    # --- The shell, registered so it can report NOT having run (S7.8, S7.9) --
+    #
+    # `on a real device, F3 flips the panel` is the only test that enters the
+    # editor shell -- it draws the explorer, the properties table and every
+    # widget under a real device with validation on. Where there is no display
+    # it returns before it asserts, and inside the `app` suite that is a pass:
+    # 456 other cases really did run, so nothing is red and nothing says the
+    # shell was not entered.
+    #
+    # It is not hypothetical. The Linux tier has a Vulkan device through
+    # lavapipe and no display at all, so this ran on exactly one of the two
+    # machines the gate uses and the summary reported green on both.
+    #
+    # Registering the case AGAIN on its own is what fixes that: with only this
+    # case in it, "did not run" and "the test skipped" are the same statement,
+    # and `SKIP_REGULAR_EXPRESSION` turns the message it already prints into a
+    # CTest skip. It costs one window and one device -- about a second -- and
+    # buys a summary line that tells the truth about the shell on every machine.
+    add_test(NAME editor_shell COMMAND luaug_app_tests "--test-case=*F3 flips*")
+    set_tests_properties(editor_shell PROPERTIES
+        SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
+        TIMEOUT 120)
+
     # Gate: --version must report the pin and the ABI constants (ADR 0031).
     # Asserted on the real binary rather than in-process, so it also proves the
     # provenance header actually reached the shipped executable.

@@ -48,7 +48,14 @@ echo "== test =="
 # ABSENCE of a Vulkan device was doing the work, so the tests skipped and nobody
 # noticed. Installing lavapipe gave the tier a device and turned a skip into a
 # red, which is how a comment that had never been executed came to light.
-ctest --preset "$preset" --output-on-failure --label-exclude gpu-golden
+# **Under a virtual display** (S7.8). This tier has a Vulkan device through
+# lavapipe and had no screen at all, so every test that opens a window returned
+# before it asserted -- and the one test that enters the editor shell reported a
+# pass on a machine it had never run on. `xvfb-run -a` picks a free display
+# number and tears the server down afterwards; tests that ask for a headless
+# platform still get one, because that is a parameter they pass rather than
+# something they infer from the environment.
+xvfb-run -a ctest --preset "$preset" --output-on-failure --label-exclude gpu-golden
 
 # The CLI's own path to the same suite, which the M3 gate requires green "on
 # both tiers". It runs the engine the build above produced -- LUAUG_BUILD_ROOT

@@ -3,8 +3,17 @@
 # The roadmap already anticipates gates running locally rather than on a hosted
 # runner ("a scripted local gate ... recorded in the gate log either way"). This
 # is that, for the Linux tier: the same distribution `ubuntu-latest` currently
-# resolves to, the same compiler, and the same dependency list
+# resolves to, the same compiler, and the dependency list
 # `.github/workflows/ci.yml` installs.
+#
+# **A superset of that list, in two places, and both are deliberate.** This
+# image carries `mesa-vulkan-drivers` and `vulkan-tools`, which give the tier a
+# software Vulkan device the hosted runner has not got, and `xvfb`, which gives
+# it a screen. Together those are what let this tier run the tests that need a
+# window and a device -- the editor shell among them -- instead of reporting a
+# pass it never earned (S7.8). The direction matters: the image may test MORE
+# than CI does, never less, so a gate that is green here and red there is still
+# a bug in the change rather than in the image.
 #
 # It exists so a portability break is found in seconds on the machine that
 # caused it, instead of minutes later on metered CI. Keeping the two in step is
@@ -68,6 +77,14 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends \
         libdbus-1-dev libibus-1.0-dev libudev-dev \
         libwayland-dev wayland-protocols libdecor-0-dev \
         mesa-vulkan-drivers vulkan-tools \
+    # A DISPLAY, which is the difference between running the editor shell and
+    # reporting that it was skipped (S7.8). This tier already has a Vulkan
+    # device through lavapipe, so the one thing between it and the shell test
+    # was a screen to open a window on -- and `linux-build.sh` runs `ctest`
+    # under `xvfb-run` for exactly that. Same class of package as
+    # `vulkan-tools` beside it: it is how the tier TESTS, not something the
+    # engine links.
+        xvfb \
     && rm -rf /var/lib/apt/lists/*
 
 # The Luau toolchain, from the same `rokit.toml` a developer installs. `luaug

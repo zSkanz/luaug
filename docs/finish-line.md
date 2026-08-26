@@ -557,8 +557,48 @@ that sends the next session to the wrong place.
       are all a log line, and every one of them ends with the host exiting zero
       and reporting its frames: "it ran" is exactly the claim that was already
       true of a broken example. Break-verified with a `warn` in one of them.
-- [ ] **S7.8** The shell is entered by no test on any machine.
-- [ ] **S7.9** The one test that builds the shell returns green without running.
+- [x] **S7.8** The shell is entered on both tiers now, and drawn on both. One
+      test enters it — `on a real device, F3 flips the panel`, which builds a
+      real SDL_GPU device with validation on, loads the icon atlas and renders
+      the explorer and the properties table over every widget the fixture has.
+      It ran on Windows. It could not run on Linux for a reason that had nothing
+      to do with the shell: the Tier-2 image has a software Vulkan device through
+      lavapipe and **no screen at all**, so the case returned at its first line.
+
+      The image gets `xvfb` and `linux-build.sh` runs `ctest` under `xvfb-run`.
+      Both are a superset of what the hosted runner installs, which the
+      Dockerfile now states rather than claiming a parity it has not had since
+      lavapipe went in: the image may test MORE than CI, never less.
+
+      It crashed the moment it could run — **D147**, a segfault inside SDL3's own
+      `VULKAN_DestroyDevice`. The case called `platform::shutdown()` by hand
+      while its window and device were locals declared after it, so both were
+      destroyed after SDL had gone. `run`, `runLauncher` and `runTwoWorlds` all
+      carry a `PlatformScope` declared before the window for exactly this; the
+      test had none. All three cases in the file have one now, the two on the
+      Null backend included, where the shape rather than the fault is what
+      matters.
+
+      And the window is created VISIBLE, which is the difference between the
+      shell drawing on Linux and not: a hidden window gets a backbuffer on
+      Windows and gets none under lavapipe, so `.visible = false` — there to
+      stop a window flashing — was silently costing the tier every assertion
+      past the atlas. It is 320×200 for a tenth of a second, against the whole
+      ImGui recording path getting a second driver and a second compiler.
+- [x] **S7.9** The test that builds the shell can no longer return green without
+      running. It is registered with CTest a second time on its own, as
+      `editor_shell`, with `SKIP_REGULAR_EXPRESSION` matching the
+      `LUAUG_TEST_SKIP` token this repository already uses — so with only that
+      case in it, "did not run" and "the test skipped" become the same
+      statement, and the summary says `Skipped` where it used to say nothing.
+      Inside the 457-case `app` suite it could not: 456 other cases really did
+      run, so the run was green and honest and the shell's absence from it was
+      invisible.
+
+      The other door that token cannot cover is an early return INSIDE the
+      device block, which would leave a case that passes having drawn nothing.
+      So the drawing is counted and `CHECK(shellFrames >= 4)` asserts it — the
+      claim stated as an assertion instead of as a comment.
 - [ ] **S7.10** `tools/iconpatch`, the exotic importer, the SDL3 GPU backend and
       the forward renderer.
 - [ ] **S7.11** The input harness that found three defects and was never

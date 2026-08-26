@@ -145,6 +145,14 @@ TEST_CASE("the overlay is inert on a backend that draws nothing")
     const auto initError = luaug::platform::init({.headless = true});
     REQUIRE_MESSAGE(!initError.has_value(), (initError ? initError->detail : std::string{}));
 
+    // Shutdown last, after the device and the window that outlive it in
+    // declaration order (D147). The backend here destroys nothing, so this is
+    // the shape rather than a live fault -- and the shape is what bit.
+    struct PlatformScope
+    {
+        ~PlatformScope() { luaug::platform::shutdown(); }
+    } platformScope;
+
     EngineError error;
     const auto window = luaug::platform::createWindow(
         {.titleKey = LUAUG_TR("platform.window.title"), .width = 320, .height = 200, .visible = false}, &error);
@@ -172,8 +180,6 @@ TEST_CASE("the overlay is inert on a backend that draws nothing")
     REQUIRE(cmd != nullptr);
     overlay.render(*cmd, luaug::rhi::TextureHandle{}, Frame{});
     device->submitAndPresent();
-
-    luaug::platform::shutdown();
 }
 
 TEST_CASE("visibility is off until something asks for it")
@@ -182,6 +188,14 @@ TEST_CASE("visibility is off until something asks for it")
 
     const auto initError = luaug::platform::init({.headless = true});
     REQUIRE_MESSAGE(!initError.has_value(), (initError ? initError->detail : std::string{}));
+
+    // Shutdown last, after the device and the window that outlive it in
+    // declaration order (D147). The backend here destroys nothing, so this is
+    // the shape rather than a live fault -- and the shape is what bit.
+    struct PlatformScope
+    {
+        ~PlatformScope() { luaug::platform::shutdown(); }
+    } platformScope;
 
     EngineError error;
     const auto window =
@@ -199,42 +213,68 @@ TEST_CASE("visibility is off until something asks for it")
 
     overlay.setVisible(true);
     CHECK(overlay.visible());
-
-    luaug::platform::shutdown();
 }
 
 // The path that needs a driver AND a display: a real SDL_GPU device with a
 // claimed window is the only configuration where the overlay is not inert.
 // Skipped where either is missing, for the reason the rhi tests give -- a red
 // build meaning "this runner has no GPU" is a check nobody can act on.
+// **The `LUAUG_TEST_SKIP` token in every message below is load-bearing**
+// (S7.8, S7.9), and it is the one this repository already uses for exactly this.
+// This case is registered with CTest a second time on its own, as `editor_shell`
+// with a `SKIP_REGULAR_EXPRESSION` matching that token, so a machine with no
+// display reports SKIPPED instead of passed. It reported passed for the whole of
+// v1: the Linux tier has a Vulkan device through lavapipe and no display at all,
+// so the one test that enters the shell returned green there without entering
+// it, and the summary said nothing.
 TEST_CASE("on a real device, F3 flips the panel")
 {
     seedRealCatalog();
 
     if (const auto initError = luaug::platform::init({.headless = false}); initError.has_value()) {
-        MESSAGE("no display on this machine, skipping: " << initError->detail);
+        MESSAGE("LUAUG_TEST_SKIP: no display on this machine: " << initError->detail);
         return;
     }
 
+    // **Declaration order is shutdown order reversed**, which is the idiom both
+    // `run` and `runLauncher` document and this case did not have. SDL_GPU needs
+    // the window released from its device before the window dies, and the device
+    // needs SDL still standing when IT dies. Calling `shutdown()` by hand at the
+    // end did neither: `window` and `device` are locals declared after it, so
+    // they were destroyed after SDL was already gone.
+    //
+    // It crashed in SDL3's own `VULKAN_DestroyDevice`, on Linux only, and only
+    // once this case was given a display to run on at all -- for the whole of v1
+    // the Linux tier had a Vulkan device and no screen, so the case returned at
+    // the first line and reported a pass (S7.8, D147).
+    struct PlatformScope
+    {
+        ~PlatformScope() { luaug::platform::shutdown(); }
+    } platformScope;
+
     EngineError error;
+    // **Visible, and that is the whole difference between drawing the shell and
+    // not** (S7.8). A hidden window gets a backbuffer on Windows and gets none
+    // under lavapipe, so `.visible = false` -- which was here to keep a window
+    // from flashing during a test run -- silently cost the Linux tier every
+    // assertion past the icon atlas. It is 320x200 for a tenth of a second, and
+    // buying the entire ImGui recording path a second driver and a second
+    // compiler with validation on is worth a flash.
     const auto window = luaug::platform::createWindow(
-        {.titleKey = LUAUG_TR("platform.window.title"), .width = 320, .height = 200, .visible = false}, &error);
+        {.titleKey = LUAUG_TR("platform.window.title"), .width = 320, .height = 200, .visible = true}, &error);
     if (window == nullptr) {
-        MESSAGE("no window on this machine, skipping: " << error.detail);
-        luaug::platform::shutdown();
+        MESSAGE("LUAUG_TEST_SKIP: no window on this machine: " << error.detail);
         return;
     }
 
     const luaug::rhi::DeviceResult device =
         luaug::app::createDevice({.backend = luaug::rhi::BackendId::SdlGpu, .debug = true}, &error);
     if (device == nullptr) {
-        MESSAGE("no GPU device on this machine, skipping: " << error.detail);
-        luaug::platform::shutdown();
+        MESSAGE("LUAUG_TEST_SKIP: no GPU device on this machine: " << error.detail);
         return;
     }
     if (!device->claimWindow(*window)) {
-        MESSAGE("the device would not claim a window on this machine, skipping");
-        luaug::platform::shutdown();
+        MESSAGE("LUAUG_TEST_SKIP: the device would not claim a window on this machine");
         return;
     }
 
@@ -268,6 +308,8 @@ TEST_CASE("on a real device, F3 flips the panel")
         // for: the scene's pass closes, then the overlay opens its own. The
         // device was created with validation on, so a driver that objects to
         // what ImGui recorded fails here rather than in someone's screenshot.
+        std::size_t shellFrames = 0;
+
         luaug::rhi::ICmdList* cmd = device->beginFrame();
         REQUIRE(cmd != nullptr);
 
@@ -500,12 +542,21 @@ TEST_CASE("on a real device, F3 flips the panel")
             const std::array<luaug::core::InstanceId, 2> across{inspected.zulu, inspected.gadget};
             inspector.select(across);
             overlay.render(*cmd, swapchain.texture, Frame{.index = 4, .renderDt = 1.0 / 60.0});
+            shellFrames += 4 + rows.size();
+
+            // **The claim, stated as an assertion instead of as a comment.**
+            // Everything above draws and asserts nothing, so a refactor that
+            // returned early anywhere inside this block would leave a test that
+            // passes having entered the shell zero times -- which is the exact
+            // failure the skip token exists to make visible, arriving through
+            // the one door that token does not cover.
+            CHECK(shellFrames >= 4);
         }
         else {
             // Said out loud rather than passing quietly: a hidden window that
             // hands out no backbuffer means the draw half of this test did not
             // run, and a silent skip would read as coverage it does not have.
-            MESSAGE("no swapchain for a hidden window on this machine; the overlay draw was not exercised");
+            MESSAGE("LUAUG_TEST_SKIP: no swapchain for a hidden window; the overlay draw was not exercised");
         }
         atlas.destroy(*device);
         device->submitAndPresent();
@@ -519,7 +570,6 @@ TEST_CASE("on a real device, F3 flips the panel")
     }
 
     device->releaseWindow(*window);
-    luaug::platform::shutdown();
 }
 
 // --- The decisions, on any machine ------------------------------------------
