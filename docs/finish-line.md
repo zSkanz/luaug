@@ -210,15 +210,26 @@ that sends the next session to the wrong place.
       open was wrong** — it said the repository has no audio file to measure
       with, and `audio_tests.cpp` has carried a WAV writer since M7.
       `Sound.Loaded` still fires immediately, now as a written decision.
-- [ ] **S3.9** D066 — a quarantined instrument whose successor is named and
-      unbuilt.
-- [ ] **S3.10** D092 — opening a project runs every entry script's file scope,
-      so a world nobody authored appears before anything is played. The design
-      is settled and recorded; the implementation is not, and
-      `templates/starter/src/scripts/main.luau` has to change with it or a
-      scaffolded project opens empty.
-- [ ] **S3.11** `content/schenes/` is misspelled in `templates/starter` and in
-      `testingproject`. Fix both or neither.
+- [x] **S3.9** D066 — a quarantined instrument whose successor is named and
+      unbuilt. **Built**, and the run corrected the design: it is a place
+      visited twice rather than a return to the start, because the flagship's
+      path never comes back — 232 m was its nearest approach across 835 m.
+      `examples/05-streaming` flies a circular orbit and carries it: 2.62 m
+      apart, 14,401 frames apart, 1,685 instances both times. The quarantined
+      check stays beside it, still measuring and still not gating.
+- [x] **S3.10** ~~D092~~ — **already built, and the handover had the number
+      wrong.** D092 is a sound defect and is fixed; the one meant is **D096**,
+      "opening a project in the editor RUNS every entry script's file scope",
+      and it is fixed too. Both halves of ADR 0058 are in the tree: boot mounts
+      and does not start (`engine.cpp`'s `.startScripts = !options.editor`), and
+      stop tears the VM down and rebuilds it (`restartRuntime`, after the
+      restore and after the debugger detaches, in that order and for stated
+      reasons). Verified by reading the code rather than by trusting the report.
+- [x] **S3.11** ~~`content/schenes/` is misspelled in `templates/starter`~~ —
+      **it is not.** The template has `content/scenes/` and its `luaug.toml`
+      names `scenes/main.scene.json`. The only misspelled copies were the
+      scratch under `examples/05-streaming` (deleted in S1.4) and one in a
+      project outside this repository, which is the owner's to rename.
 
 ### S4 — E9 closed
 

@@ -162,6 +162,22 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
             options.soakCeilingBytes = parsed * 1024 * 1024;
             continue;
         }
+        if (arg.starts_with("--soak-return-radius=")) {
+            // Whole metres, like every other numeric flag here parses: a radius
+            // in centimetres is not a thing a fly-through declares, and the
+            // shared `numericValue` is what keeps a bad value a NAMED error
+            // rather than a silent zero -- which for this option would turn the
+            // check off instead of failing.
+            const std::string_view value = arg.substr(arg.find('=') + 1);
+            luaug::core::u64 parsed = 0;
+            if (!numericValue(value, parsed) || parsed == 0) {
+                const std::array<I18nArg, 2> badValue{I18nArg{"option", arg}, I18nArg{"value", value}};
+                luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.bad_value"), badValue);
+                return kExitUsage;
+            }
+            options.soakReturnRadiusMetres = static_cast<luaug::core::f32>(parsed);
+            continue;
+        }
         if (arg.starts_with("--soak-min-instances=")) {
             const std::string_view value = arg.substr(arg.find('=') + 1);
             luaug::core::u64 parsed = 0;

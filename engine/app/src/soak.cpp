@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <sstream>
 #include <string_view>
 
@@ -179,6 +180,96 @@ SoakVerdict SoakRecorder::evaluate(const SoakThresholds& thresholds) const
         verdict.quarantined.push_back(core::makeError(LUAUG_TR("engine.soak.err.growing"), args));
     }
 
+    // --- A place visited twice: D066's named successor, built ----------------
+    //
+    // **The comparison load cannot move.** The quarantined check above reads two
+    // windows of a run and therefore reads how far materialisation fell behind
+    // in each of them, which is a fact about the machine as much as about the
+    // engine. This reads the SAME PLACE twice: whatever the millisecond budget
+    // did in between, the same position holds the same chunks, so the resident
+    // set has to come back to what it was. A world that leaked has more, and no
+    // budget can produce that.
+    //
+    // **A revisited place rather than a return to the start**, which is a
+    // correction the first run of this check produced rather than a design: the
+    // flagship's fly-through never comes back to where it began -- its nearest
+    // approach was 797 metres -- because a walk leg followed by a flight leg
+    // goes onward. Any place visited early and again late makes the same claim
+    // and covers that path as well as a circuit.
+    if (thresholds.returnRadiusMetres > 0.0f && m_samples.size() >= 8) {
+        const auto distance = [](core::Vec3 a, core::Vec3 b) noexcept {
+            const f64 dx = static_cast<f64>(a.x) - static_cast<f64>(b.x);
+            const f64 dy = static_cast<f64>(a.y) - static_cast<f64>(b.y);
+            const f64 dz = static_cast<f64>(a.z) - static_cast<f64>(b.z);
+            return std::sqrt(dx * dx + dy * dy + dz * dz);
+        };
+
+        const usize count = m_samples.size();
+        const usize earlyEnd = count / 4;
+        const usize lateBegin = count - count / 4;
+
+        // **Strided, so the search is bounded rather than quadratic in the run.**
+        // A ten-minute soak is tens of thousands of frames and the honest answer
+        // does not need every pair: the focus moves continuously, so sampling
+        // one frame in N finds the same nearest approach to within how far it
+        // travels in N frames. The stride is chosen so that neither side ever
+        // examines more than `kRevisitSamples` points.
+        constexpr usize kRevisitSamples = 384;
+        const usize earlyStride = earlyEnd > kRevisitSamples ? earlyEnd / kRevisitSamples : 1;
+        const usize lateSpan = count - lateBegin;
+        const usize lateStride = lateSpan > kRevisitSamples ? lateSpan / kRevisitSamples : 1;
+
+        f64 closest = std::numeric_limits<f64>::max();
+        f64 furthest = 0.0;
+        usize bestEarly = 0;
+        usize bestLate = 0;
+        for (usize early = 0; early < earlyEnd; early += earlyStride) {
+            for (usize late = lateBegin; late < count; late += lateStride) {
+                const f64 apart = distance(m_samples[early].focus, m_samples[late].focus);
+                furthest = std::max(furthest, apart);
+                if (apart < closest) {
+                    closest = apart;
+                    bestEarly = early;
+                    bestLate = late;
+                }
+            }
+        }
+
+        verdict.furthestMetres = furthest;
+        verdict.closestReturnMetres = closest == std::numeric_limits<f64>::max() ? 0.0 : closest;
+
+        // The path has to actually GO somewhere, or every frame revisits every
+        // other one and the check is vacuous in the other direction.
+        const bool moved = furthest > static_cast<f64>(thresholds.departureMetres);
+        const bool revisited = moved && closest <= static_cast<f64>(thresholds.returnRadiusMetres);
+
+        verdict.focusReturned = revisited;
+        if (revisited) {
+            verdict.departureInstances = m_samples[bestEarly].instanceCount;
+            verdict.returnInstances = m_samples[bestLate].instanceCount;
+            verdict.revisitFrameGap = bestLate - bestEarly;
+
+            const auto allowed =
+                static_cast<u64>(static_cast<f64>(verdict.departureInstances) * (1.0 + thresholds.returnTolerance));
+            if (verdict.departureInstances > thresholds.growthFloor && verdict.returnInstances > allowed) {
+                const core::I18nArg args[] = {{"start", static_cast<core::i64>(verdict.departureInstances)},
+                                              {"back", static_cast<core::i64>(verdict.returnInstances)}};
+                verdict.failures.push_back(core::makeError(LUAUG_TR("engine.soak.err.return_grew"), args));
+            }
+        }
+        else {
+            // **A failure and not a skip.** A caller that declared a radius said
+            // its path revisits somewhere; if it did not, this check measured
+            // nothing, and a check that quietly does not run is the exact shape
+            // of gate this file already caught once.
+            const core::I18nArg args[] = {{"radius", static_cast<core::f64>(thresholds.returnRadiusMetres)},
+                                          {"departure", static_cast<core::f64>(thresholds.departureMetres)},
+                                          {"closest", verdict.closestReturnMetres},
+                                          {"furthest", verdict.furthestMetres}};
+            verdict.failures.push_back(core::makeError(LUAUG_TR("engine.soak.err.never_returned"), args));
+        }
+    }
+
     verdict.ok = verdict.failures.empty();
     return verdict;
 }
@@ -216,6 +307,16 @@ std::string SoakRecorder::report(const SoakThresholds& thresholds) const
     out << "  \"earlyInstances\": " << verdict.earlyInstances << ",\n";
     out << "  \"lateInstances\": " << verdict.lateInstances << ",\n";
     out << "  \"peakInstances\": " << verdict.peakInstances << ",\n";
+    // The returning-focus check, whatever the verdict: a passing run's numbers
+    // are the baseline the next one is read against, and `focusReturned` false
+    // with a radius declared is the case that says the check measured nothing
+    // rather than that it found nothing.
+    out << "  \"focusReturned\": " << (verdict.focusReturned ? "true" : "false") << ",\n";
+    out << "  \"departureInstances\": " << verdict.departureInstances << ",\n";
+    out << "  \"returnInstances\": " << verdict.returnInstances << ",\n";
+    out << "  \"closestReturnMetres\": " << fixed(verdict.closestReturnMetres, 2) << ",\n";
+    out << "  \"furthestMetres\": " << fixed(verdict.furthestMetres, 2) << ",\n";
+    out << "  \"revisitFrameGap\": " << verdict.revisitFrameGap << ",\n";
     out << "  \"minimumInstances\": " << thresholds.minimumInstances << ",\n";
 
     out << "  \"histogram\": [\n";

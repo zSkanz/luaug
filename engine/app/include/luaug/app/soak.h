@@ -18,6 +18,7 @@
 #pragma once
 
 #include "luaug/core/error.h"
+#include "luaug/core/math.h"
 #include "luaug/core/types.h"
 
 #include <string>
@@ -25,6 +26,7 @@
 
 namespace luaug::app {
 
+using core::f32;
 using core::f64;
 using core::u64;
 using core::usize;
@@ -81,6 +83,39 @@ struct SoakThresholds
     // exactly what a leak-detector should see, which is why it cannot be the
     // only thing it looks at.
     u64 minimumInstances = 0;
+
+    // --- The revisited-place check (D066's named successor) ------------------
+    //
+    // **It is a place visited twice, not a return to the start**, and that
+    // distinction came from running it rather than from designing it. The first
+    // version asked whether the focus came back to where the soak began, which
+    // the flagship's fly-through never does: it reported a nearest approach of
+    // 797 metres, because a walk leg followed by a flight leg goes onward rather
+    // than round. Asking instead whether ANY place is visited early and again
+    // late makes the same claim and covers that path, a patrol, a figure-eight
+    // and a circuit alike.
+    //
+    // The pair is searched between the first quarter of the run and the last, so
+    // the two visits are far apart in time and a leak has the whole soak to
+    // accumulate in between.
+    //
+    // **Zero asserts nothing**, like every other threshold here: only the caller
+    // running a particular fly-through knows whether its path doubles back. When
+    // it IS declared and no place is revisited, that is a FAILURE and not a
+    // skip -- a check that quietly does not run is the shape of gate this
+    // repository keeps finding, and `streaming_soak` once passed over eleven
+    // instances in 0.17 seconds with a clean bill of health.
+    f32 returnRadiusMetres = 0.0f;
+
+    // How far the path has to span for a revisit to mean anything: a focus that
+    // barely moves revisits every place it is in, on every frame.
+    f32 departureMetres = 40.0f;
+
+    // How much larger the resident set may be on the second visit than on the
+    // first. Tighter than `growthTolerance` on purpose: that one has to absorb
+    // two windows of a run that may hold genuinely different amounts of world,
+    // and this one compares the same place with itself.
+    f64 returnTolerance = 0.08;
 };
 
 struct SoakSample
@@ -92,6 +127,25 @@ struct SoakSample
     f64 streamingMs = 0.0;
     u64 residentBytes = 0;
     u64 instanceCount = 0;
+
+    // Where the streaming focus was, in world metres.
+    //
+    // **This is what makes D066's successor possible.** The growth check
+    // compares the last quarter of a run against the second, and that measures
+    // how far materialisation fell behind as much as it measures the engine --
+    // it flaked twice on exactly that, and was quarantined rather than widened
+    // because widening it would have removed the only thing watching a streamed
+    // world for a leak. A focus that RETURNS to where it started is a
+    // comparison load cannot move: the same place, the same chunks, the same
+    // resident set, whatever the millisecond budget did in between.
+    // **Braced, and that is not cosmetic.** Every other field here carries a
+    // default member initialiser, and Clang's `-Wmissing-field-initializers`
+    // -- an error under `-Werror` on this tier and silent under MSVC -- fires
+    // for a designated-initialiser list that omits a field which has none. Eight
+    // existing call sites construct a sample without naming a focus, and they
+    // are right to: a soak that does not declare a return radius has no use for
+    // one.
+    core::Vec3 focus{};
 };
 
 struct SoakVerdict
@@ -111,6 +165,25 @@ struct SoakVerdict
     u64 earlyInstances = 0;
     u64 lateInstances = 0;
     u64 peakInstances = 0;
+
+    // The returning-focus check's own two numbers, and whether it ran at all.
+    // Populated whatever the verdict, because a passing run's numbers are the
+    // baseline the next one is read against.
+    bool focusReturned = false;
+    u64 departureInstances = 0;
+    u64 returnInstances = 0;
+    // How many frames apart the two visits were, so a pair that is technically
+    // early-and-late but only seconds apart is visible rather than trusted.
+    usize revisitFrameGap = 0;
+    // The nearest any early frame came to any late one. Reported whatever the
+    // verdict, and it is what makes a failure actionable: "no place was
+    // revisited" is a sentence somebody can only act on if it also says how near
+    // the path came to revisiting one. It is also how the radius was CHOSEN
+    // rather than guessed.
+    f64 closestReturnMetres = 0.0;
+    // How far the path spans, so a fly-through that barely moves is
+    // distinguishable from one that moves and never doubles back.
+    f64 furthestMetres = 0.0;
 
     // Keyed rather than prose (R3), in the order they were found, and empty
     // when `ok`. A gate's failure message is the most-read string it has, and

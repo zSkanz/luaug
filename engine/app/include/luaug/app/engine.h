@@ -124,6 +124,11 @@ struct EngineOptions
     // decision; which scene an editor opens is the person's.
     std::string startupScene;
 
+    // The returning-focus soak check (D066's successor). Zero asserts nothing,
+    // like every other soak threshold: only the caller running a particular
+    // fly-through knows whether its path comes back.
+    core::f32 soakReturnRadiusMetres = 0.0f;
+
     // **Write the world the scripts just built to a scene, then exit.**
     //
     // The one thing ADR 0047's migration needs and cannot do without: a project

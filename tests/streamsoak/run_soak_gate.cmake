@@ -22,6 +22,16 @@ endforeach()
 # already run the generator by hand (D046).
 include("${CMAKE_CURRENT_LIST_DIR}/../support/ensure_generated_world.cmake")
 
+# **The returning-focus check is opt-in per scene** (D066's successor). Only the
+# caller running a particular fly-through knows whether its path comes back, so a
+# soak that declares no radius does not run it -- and one that DOES declare a
+# radius and then never returns fails, because a check that quietly did not run
+# is the shape of gate this repository keeps finding.
+set(return_radius_flag "")
+if(DEFINED RETURN_RADIUS_M AND NOT RETURN_RADIUS_M STREQUAL "")
+    set(return_radius_flag "--soak-return-radius=${RETURN_RADIUS_M}")
+endif()
+
 set(built "${PROJECT}/.luaug")
 file(MAKE_DIRECTORY "${built}")
 
@@ -55,6 +65,7 @@ execute_process(
         --soak-report=${REPORT}
         --soak-ceiling-mb=${CEILING_MB}
         --soak-min-instances=${MIN_INSTANCES}
+        ${return_radius_flag}
     RESULT_VARIABLE soakResult
     OUTPUT_VARIABLE soakOutput
     ERROR_VARIABLE soakOutput)

@@ -1048,6 +1048,17 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // Resident size is read per frame rather than sampled, because
                 // the number the gate wants is a PEAK and a peak between two
                 // samples is a peak nobody saw.
+                // **The PRIMARY focus, in world metres.** The returning-focus
+                // check (D066's successor) compares the same place with itself,
+                // so it needs to know where the place was -- and it is the
+                // FIRST focus rather than a centroid, because a world with two
+                // of them has two paths and averaging them describes neither.
+                // A world with none reports the origin, which never departs and
+                // so never claims a return.
+                core::Vec3 focusPosition;
+                if (const std::vector<asset::StreamingFocus> foci = streaming.collectFoci(); !foci.empty())
+                    focusPosition = core::toVec3(foci.front().position);
+
                 soak.sample({.frameMs = frameMs,
                              // The PREVIOUS frame's pump, because this sample is
                              // taken before this frame's. Off by one frame and
@@ -1055,7 +1066,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                              // once, which is the property a histogram needs.
                              .streamingMs = streaming.lastPumpMilliseconds(),
                              .residentBytes = platform::residentBytes(),
-                             .instanceCount = static_cast<core::u64>(host->world().instanceCount())});
+                             .instanceCount = static_cast<core::u64>(host->world().instanceCount()),
+                             .focus = focusPosition});
             }
             lastFrameNs = sampleNs;
         }
@@ -2919,7 +2931,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     std::optional<core::EngineError> soakFailure;
     if (!options.soakReportPath.empty()) {
         const SoakThresholds thresholds{.memoryCeilingBytes = options.soakCeilingBytes,
-                                        .minimumInstances = options.soakMinimumInstances};
+                                        .minimumInstances = options.soakMinimumInstances,
+                                        .returnRadiusMetres = options.soakReturnRadiusMetres};
         const SoakVerdict verdict = soak.evaluate(thresholds);
 
         std::ofstream report(options.soakReportPath, std::ios::binary);

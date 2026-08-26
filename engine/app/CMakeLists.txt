@@ -389,7 +389,18 @@ if(LUAUG_BUILD_TESTS)
             -DREPORT=${CMAKE_CURRENT_BINARY_DIR}/streaming-soak.json
             -DFRAMES=18000
             -DCEILING_MB=192
-            -DMIN_INSTANCES=1000
+                -DMIN_INSTANCES=1000
+            # **D066's named successor lives here**, because this fly-through is
+            # a circular orbit: the camera comes back to every place it has been,
+            # several times over three hundred seconds. Eight metres is well
+            # inside one chunk, so a revisit means the same chunks -- and
+            # therefore the same resident set, unless something leaked.
+            #
+            # It replaces nothing: the quarantined quarter-against-quarter check
+            # stays where it is, still measuring and still not gating, because
+            # what it watches for has no other instrument on a path that does not
+            # double back.
+            -DRETURN_RADIUS_M=8
             -P ${CMAKE_SOURCE_DIR}/tests/streamsoak/run_soak_gate.cmake)
     set_tests_properties(streaming_soak PROPERTIES TIMEOUT 600)
 
@@ -429,6 +440,12 @@ if(LUAUG_BUILD_TESTS)
             -DFRAMES=6000
             -DCEILING_MB=384
             -DMIN_INSTANCES=2000
+            # **No return radius here, and that is a measurement rather than an
+            # omission.** D066's successor needs a path that doubles back, and
+            # this one does not: over 5,939 frames the nearest an early frame
+            # came to a late one was 232 m across a path spanning 835 m, because
+            # a walk leg followed by a flight leg goes onward rather than round.
+            # `streaming_soak` flies a circular orbit and carries the check.
             -P ${CMAKE_SOURCE_DIR}/tests/streamsoak/run_soak_gate.cmake)
     set_tests_properties(openworld_soak PROPERTIES TIMEOUT 900)
 

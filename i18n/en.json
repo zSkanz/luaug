@@ -76,6 +76,8 @@
   "engine.soak.err.slow_frames": "The 99th-percentile frame took {p99} ms, over the {threshold} ms this soak allows. That is the whole frame rather than streaming alone, so read it as \"something is slow\" rather than as an attribution.",
   "engine.soak.err.over_ceiling": "Peak resident memory was {peak} MiB, over the declared ceiling of {ceiling} MiB.",
   "engine.soak.err.growing": "The world grew from {early} to {late} instances between the second and the fourth quarter of the run; a streamed world flattens.",
+  "engine.soak.err.return_grew": "The focus came back to a place it had already been and the world did not: {start} instances the first time, {back} the second. The same place holds the same chunks, so what is left over is a leak rather than a budget.",
+  "engine.soak.err.never_returned": "No place was visited both early and late in this soak: the nearest an early frame came to a late one was {closest} m against a {radius} m radius, and the path spans {furthest} m against a {departure} m minimum. A soak that declares a radius is declaring that its path doubles back somewhere, and this check measured nothing without it.",
   "engine.soak.err.report_write_failed": "Could not write the soak report to {path}.",
   "engine.soak.err.failed": "The soak gate failed: {failures} check(s) did not pass. See the report at {path}.",
   "engine.frame.info.summary": "Ran {frames} frames, {ticks} simulation ticks.",

@@ -271,3 +271,133 @@ TEST_CASE("the report carries the histogram the gate is required to assert")
     CHECK(report.find("\"upperMs\": 33.0") != std::string::npos);
     CHECK(report.find("\"upperMs\": null") != std::string::npos);
 }
+
+// --- A place visited twice: D066's named successor ---------------------------
+//
+// **What it replaces and why it is not the same check.** The quarantined growth
+// check compares the second quarter of a run against the fourth, so it reads how
+// far materialisation fell behind in each window -- a fact about the machine as
+// much as about the engine, which is why the same binary over the same 5,939
+// frames failed it once and passed it twice minutes later. This reads the SAME
+// PLACE twice instead. Whatever the millisecond budget did in between, one
+// position holds one set of chunks; a resident set that does not come back to
+// what it was is a leak and cannot be anything else.
+
+namespace {
+
+// A soak that walks out along +X and comes back the same way, with a fixed
+// instance count -- the shape of a healthy circuit.
+[[nodiscard]] SoakRecorder outAndBack(core::u64 there, core::u64 back, int steps = 400)
+{
+    SoakRecorder recorder(0);
+    for (int index = 0; index < steps; ++index) {
+        // A triangle wave: out to `steps/2` metres and back to zero.
+        const int half = steps / 2;
+        const int along = index <= half ? index : steps - index;
+        recorder.sample({.frameMs = 8.0,
+                         .residentBytes = 64u * 1024u * 1024u,
+                         .instanceCount = index <= half ? there : back,
+                         .focus = core::Vec3{static_cast<core::f32>(along), 0.0f, 0.0f}});
+    }
+    return recorder;
+}
+
+constexpr SoakThresholds kRevisit{.growthFloor = 100, .returnRadiusMetres = 4.0f, .departureMetres = 40.0f};
+
+} // namespace
+
+TEST_CASE("a path that comes back to a place it has been, with the world it left there, passes")
+{
+    seedRealCatalog();
+    const SoakVerdict verdict = outAndBack(4000, 4000).evaluate(kRevisit);
+
+    CHECK(verdict.ok);
+    CHECK(verdict.focusReturned);
+    CHECK(verdict.departureInstances == 4000);
+    CHECK(verdict.returnInstances == 4000);
+    // Far apart in time, which is the half that makes a leak have somewhere to
+    // accumulate. A pair that is technically early-and-late but adjacent would
+    // prove nothing.
+    CHECK(verdict.revisitFrameGap > 100);
+}
+
+TEST_CASE("the same path with more world at the end of it does not")
+{
+    seedRealCatalog();
+    // Ten per cent more, against an eight per cent tolerance.
+    const SoakVerdict verdict = outAndBack(4000, 4400).evaluate(kRevisit);
+
+    CHECK_FALSE(verdict.ok);
+    CHECK(verdict.focusReturned);
+    CHECK(mentions(verdict, "engine.soak.err.return_grew"));
+    CHECK(verdict.returnInstances == 4400);
+}
+
+TEST_CASE("a little more world is inside the tolerance, because streaming is not exact")
+{
+    seedRealCatalog();
+    // Two per cent. A chunk boundary crossed a frame earlier on the way back is
+    // a real difference and not a leak, and a check with no tolerance at all
+    // would be one nobody could keep green.
+    const SoakVerdict verdict = outAndBack(4000, 4080).evaluate(kRevisit);
+    CHECK(verdict.ok);
+}
+
+TEST_CASE("a path that never doubles back FAILS rather than passing quietly")
+{
+    // **The vacuous pass, refused.** A caller that declares a radius is saying
+    // its fly-through revisits somewhere; if it does not, this check measured
+    // nothing -- and this file already caught one gate passing over eleven
+    // instances in 0.17 seconds with a clean bill of health.
+    //
+    // This is the case the flagship's soak actually produced: 232 m was the
+    // nearest an early frame came to a late one, across a path spanning 835 m.
+    seedRealCatalog();
+    SoakRecorder recorder(0);
+    for (int index = 0; index < 400; ++index) {
+        recorder.sample({.frameMs = 8.0,
+                         .residentBytes = 64u * 1024u * 1024u,
+                         .instanceCount = 4000,
+                         .focus = core::Vec3{static_cast<core::f32>(index) * 3.0f, 0.0f, 0.0f}});
+    }
+
+    const SoakVerdict verdict = recorder.evaluate(kRevisit);
+    CHECK_FALSE(verdict.ok);
+    CHECK_FALSE(verdict.focusReturned);
+    CHECK(mentions(verdict, "engine.soak.err.never_returned"));
+    // And it says how near it came, because "it did not double back" is only
+    // actionable with a number beside it.
+    CHECK(verdict.closestReturnMetres > 0.0);
+    CHECK(verdict.furthestMetres > verdict.closestReturnMetres);
+}
+
+TEST_CASE("a focus that barely moves does not revisit its way to a pass")
+{
+    // Every frame is within the radius of every other, which would satisfy a
+    // naive revisit test on frame one. The path has to actually GO somewhere.
+    seedRealCatalog();
+    SoakRecorder recorder(0);
+    for (int index = 0; index < 400; ++index) {
+        recorder.sample({.frameMs = 8.0,
+                         .residentBytes = 64u * 1024u * 1024u,
+                         .instanceCount = 4000,
+                         .focus = core::Vec3{static_cast<core::f32>(index % 3), 0.0f, 0.0f}});
+    }
+
+    const SoakVerdict verdict = recorder.evaluate(kRevisit);
+    CHECK_FALSE(verdict.ok);
+    CHECK_FALSE(verdict.focusReturned);
+    CHECK(mentions(verdict, "engine.soak.err.never_returned"));
+}
+
+TEST_CASE("no radius declared asserts nothing at all")
+{
+    // Zero asserts nothing, like every other threshold in this file: only the
+    // caller running a particular fly-through knows whether its path doubles
+    // back, and a soak whose path does not must not fail for it.
+    seedRealCatalog();
+    const SoakVerdict verdict = outAndBack(4000, 9000).evaluate({.growthFloor = 100});
+    CHECK_FALSE(verdict.focusReturned);
+    CHECK_FALSE(mentions(verdict, "engine.soak.err.return_grew"));
+    CHECK_FALSE(mentions(verdict, "engine.soak.err.never_returned"));
+}
