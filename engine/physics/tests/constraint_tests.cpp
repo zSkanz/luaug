@@ -321,7 +321,7 @@ TEST_CASE("updateBody re-anchors the constraints on the body it replaced")
             reshaped.shape.points = kOffsetHull;
             reshaped.transform = rig.physics->bodyState(rig.world, hanging).transform;
             reshaped.motion = MotionType::Dynamic;
-            rig.physics->updateBody(rig.world, hanging, reshaped);
+            REQUIRE(rig.physics->updateBody(rig.world, hanging, reshaped));
         }
 
         rig.step(120);

@@ -145,7 +145,18 @@ private:
     // reason every other cache in this repository is one: a world has a handful
     // of distinct collision meshes, and a flat array has an order that an
     // unordered container does not (R10).
-    std::vector<std::pair<core::NameAtom, std::vector<core::Vec3>>> m_collisionPoints;
+    // A point cloud and which version of it this is. The version is what a
+    // `ShapeDesc` carries instead of the points, so a body can be asked "is your
+    // hull still current" without anybody keeping a span (`physics/types.h`).
+    struct CollisionMesh
+    {
+        std::vector<core::Vec3> points;
+        u64 revision = 0;
+    };
+    std::vector<std::pair<core::NameAtom, CollisionMesh>> m_collisionPoints;
+    // Counted up on every replacement, across all content: one counter is
+    // enough, and one per mesh would be a second thing to keep in step.
+    u64 m_collisionRevision = 0;
 
     SkeletonHost* m_skeleton = nullptr;
 
@@ -161,8 +172,24 @@ private:
         // old one's body.
         u32 generation = 0;
         physics::BodyHandle handle;
-        // The shape and motion the body was built with. A change to any of them
-        // is a rebuild rather than a setter.
+        // **Whether the backend actually holds a body for this record.**
+        //
+        // False for one that was asked for and refused -- a degenerate hull is
+        // the case that reaches it. The generation is still this instance's, so
+        // the refusal is REMEMBERED: without that, `createBody` was re-attempted
+        // every tick for ever, silently burning a body generation each time.
+        // `retireUnseen` and `bodyHandleOf` both read this, because destroying
+        // or handing out a handle that names nothing is worse than either.
+        bool live = false;
+        // **What was last handed to the backend, not what it has.** They differ
+        // only when it refused, and nothing reads this except the comparison
+        // that decides whether to hand it something new -- so "attempted" is the
+        // honest reading and it is what stops a refusal being retried per tick.
+        //
+        // The hull's `points` span is CLEARED before it is stored. Its
+        // documented lifetime is the create call and no longer, and the vector
+        // behind it is replaced whenever a mesh loads; `pointsRevision` is what
+        // carries the same information without keeping a pointer to it.
         physics::ShapeDesc shape;
         physics::MotionType motion = physics::MotionType::Dynamic;
         bool collidable = true;

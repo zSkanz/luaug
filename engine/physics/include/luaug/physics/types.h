@@ -95,7 +95,23 @@ struct ShapeDesc
 
     // ConvexHull only. Points are in the part's local space and the span must
     // outlive the `createBody` call and no longer.
+    //
+    // **Nobody may keep it.** A mirror that stored this desc across ticks would
+    // be holding a span into a vector the next mesh load replaces, which is a
+    // dangling read rather than a stale one. `pointsRevision` exists so a caller
+    // can answer "are these the same points" without keeping them.
     std::span<const core::Vec3> points;
+
+    // Which VERSION of that point cloud, counted up every time the cloud behind
+    // a content name is replaced.
+    //
+    // A mirror decides whether to rebuild a body by comparing two `ShapeDesc`s,
+    // and two hulls with the same type and the same size are not the same hull
+    // if the geometry underneath them changed -- which is exactly what a mesh
+    // arriving late, or a hot reload replacing one, does. Comparing the spans
+    // would mean keeping one; comparing a counter costs eight bytes and keeps
+    // nothing.
+    core::u64 pointsRevision = 0;
 
     // ConvexHull only: what to multiply each point by on the way in.
     //

@@ -40,9 +40,27 @@ namespace {
     return physics::ShapeType::Box;
 }
 
+// Whether two descriptions ask for the same body.
+//
+// **`pointsRevision` is here because the geometry can change underneath a hull
+// that is otherwise identical** -- a mesh finishing its load, or a hot reload
+// replacing one. Without it, a `MeshPart` that came up as a hull and then had
+// its points replaced kept the first hull for ever, and the only reason nobody
+// hit it is that meshes used to load inside the frame that created the part.
+//
+// The spans themselves are deliberately not compared. Comparing them would mean
+// keeping one, and `ShapeDesc::points` may not outlive the create call.
 [[nodiscard]] bool sameShape(const physics::ShapeDesc& a, const physics::ShapeDesc& b) noexcept
 {
-    return a.type == b.type && a.size == b.size;
+    return a.type == b.type && a.size == b.size && a.pointScale == b.pointScale && a.pointsRevision == b.pointsRevision;
+}
+
+// The description as a RECORD may keep it: everything except the span, whose
+// documented lifetime is the call it was handed to.
+[[nodiscard]] physics::ShapeDesc withoutPoints(physics::ShapeDesc shape) noexcept
+{
+    shape.points = {};
+    return shape;
 }
 
 } // namespace
@@ -132,9 +150,10 @@ physics::ShapeDesc PhysicsSync::shapeOf(core::InstanceId id, const PartComponent
         const core::NameAtom content = mesh->meshContent;
         const auto at = std::lower_bound(m_collisionPoints.begin(), m_collisionPoints.end(), content,
                                          [](const auto& entry, core::NameAtom key) { return entry.first.id < key.id; });
-        if (at != m_collisionPoints.end() && at->first == content && at->second.size() >= 4) {
+        if (at != m_collisionPoints.end() && at->first == content && at->second.points.size() >= 4) {
             shape.type = physics::ShapeType::ConvexHull;
-            shape.points = at->second;
+            shape.points = at->second.points;
+            shape.pointsRevision = at->second.revision;
             // The same `Size / MeshSize` the renderer draws with, so the hull is
             // the shape on screen and not the shape in the file. The box branch
             // above needs no equivalent: it is already `part.size`.
@@ -228,31 +247,45 @@ void PhysicsSync::applyBody(core::InstanceId id, PartComponent& part, RigidBodyC
 
     const physics::BodyDesc desc = descOf(id, part, body, record.movingUntilTick > tick);
 
+    // Everything the record keeps about a description, minus the span it may not
+    // keep. One place, because a field written in one branch and forgotten in
+    // the other is how the two paths below used to disagree.
+    const auto remember = [&record, &desc, &part] {
+        record.shape = withoutPoints(desc.shape);
+        record.motion = desc.motion;
+        record.density = desc.density;
+        record.friction = desc.friction;
+        record.restitution = desc.restitution;
+        record.collidable = desc.collidable;
+        record.queryable = desc.queryable;
+        record.group = desc.group;
+        record.written = part.cframe;
+    };
+
     if (record.generation != id.generation) {
         // The slot is empty, or it holds a body that belonged to a different
         // instance in the same slot. Either way this instance has no body yet.
-        if (record.generation != 0) {
+        if (record.generation != 0 && record.live) {
             m_backend.destroyBody(m_world, record.handle);
             --m_bodyCount;
         }
 
-        const physics::BodyHandle handle = m_backend.createBody(m_world, desc);
-        if (!handle.valid()) {
-            record = BodyRecord{};
-            return;
-        }
+        record = BodyRecord{};
         record.generation = id.generation;
-        record.handle = handle;
-        record.shape = desc.shape;
-        record.motion = desc.motion;
-        record.collidable = desc.collidable;
-        record.queryable = desc.queryable;
-        record.group = desc.group;
-        record.friction = desc.friction;
-        record.restitution = desc.restitution;
-        record.density = desc.density;
-        record.written = part.cframe;
         record.seen = true;
+        remember();
+
+        // **Remembered whether or not it worked**, which is the fix: a refusal
+        // used to zero the record, so the next tick saw an empty slot and asked
+        // again -- for ever, once per tick, burning a body generation each time
+        // and saying nothing. Now the attempt is recorded, and only a
+        // description that actually DIFFERS is worth another one.
+        const physics::BodyHandle handle = m_backend.createBody(m_world, desc);
+        if (!handle.valid())
+            return;
+
+        record.handle = handle;
+        record.live = true;
         ++m_bodyCount;
         return;
     }
@@ -262,17 +295,33 @@ void PhysicsSync::applyBody(core::InstanceId id, PartComponent& part, RigidBodyC
     // A shape, motion type or density change is a rebuild on the backend's
     // side, so it is one call rather than four setters -- and the handle
     // survives it, because everything above holds one.
-    if (!sameShape(record.shape, desc.shape) || record.motion != desc.motion || record.density != desc.density) {
-        m_backend.updateBody(m_world, record.handle, desc);
-        record.shape = desc.shape;
-        record.motion = desc.motion;
-        record.density = desc.density;
-        record.friction = desc.friction;
-        record.restitution = desc.restitution;
-        record.collidable = desc.collidable;
-        record.queryable = desc.queryable;
-        record.group = desc.group;
-        record.written = part.cframe;
+    const bool describedDifferently =
+        !sameShape(record.shape, desc.shape) || record.motion != desc.motion || record.density != desc.density;
+
+    if (!record.live) {
+        // There is no body to set anything on. Asking again only when the
+        // description has changed is what keeps a refusal costing one attempt:
+        // a hull whose points have since arrived, or a size that moved, is a
+        // different question and gets asked.
+        if (!describedDifferently)
+            return;
+        remember();
+        const physics::BodyHandle handle = m_backend.createBody(m_world, desc);
+        if (!handle.valid())
+            return;
+        record.handle = handle;
+        record.live = true;
+        ++m_bodyCount;
+        return;
+    }
+
+    if (describedDifferently) {
+        // The record takes the ATTEMPT either way. A refusal leaves the body as
+        // it was -- which is the right outcome, because the alternative to a
+        // stale hull is no hull at all -- and recording what was asked for is
+        // what stops it being asked again every tick.
+        (void)m_backend.updateBody(m_world, record.handle, desc);
+        remember();
     }
     else {
         if (record.friction != desc.friction || record.restitution != desc.restitution) {
@@ -701,9 +750,15 @@ void PhysicsSync::retireUnseen()
     for (BodyRecord& record : m_bodies) {
         if (record.generation == 0 || record.seen)
             continue;
-        m_backend.destroyBody(m_world, record.handle);
+        // **`live` decides whether there is anything to destroy.** A record that
+        // remembers a REFUSAL carries this instance's generation and no body, so
+        // destroying it would hand the backend a handle that names nothing and
+        // take the count down for a body that was never made.
+        if (record.live) {
+            m_backend.destroyBody(m_world, record.handle);
+            --m_bodyCount;
+        }
         record = BodyRecord{};
-        --m_bodyCount;
     }
     for (auto it = m_characters.begin(); it != m_characters.end();) {
         if (it->second.seen) {
@@ -728,7 +783,10 @@ physics::BodyHandle PhysicsSync::bodyHandleOf(core::InstanceId id) const
     // asking only about the generation would hand a joint a body that is about
     // to be destroyed under it. The joint would then be marked seen, survive the
     // sweep, and hold a dangling pointer inside the solver.
-    return record.generation == id.generation && record.seen ? record.handle : physics::BodyHandle{};
+    //
+    // **And `live`**, for the reason `retireUnseen` reads it: a record that
+    // remembers a refusal has this instance's generation and no body behind it.
+    return record.generation == id.generation && record.seen && record.live ? record.handle : physics::BodyHandle{};
 }
 
 void PhysicsSync::applyConstraint(core::InstanceId id, ConstraintComponent& constraint)
@@ -1044,11 +1102,18 @@ void PhysicsSync::setCollisionPoints(core::NameAtom content, std::vector<core::V
 {
     const auto at = std::lower_bound(m_collisionPoints.begin(), m_collisionPoints.end(), content,
                                      [](const auto& entry, core::NameAtom key) { return entry.first.id < key.id; });
+    // **Counted up on every replacement**, and never reset. It is what tells a
+    // body whose hull came from this cloud that the geometry underneath it is
+    // not the geometry it was built with -- a question two `ShapeDesc`s could
+    // not answer from type and size alone, and could only answer by comparing
+    // spans nobody is allowed to keep.
+    ++m_collisionRevision;
     if (at != m_collisionPoints.end() && at->first == content) {
-        at->second = std::move(points);
+        at->second.points = std::move(points);
+        at->second.revision = m_collisionRevision;
         return;
     }
-    m_collisionPoints.insert(at, {content, std::move(points)});
+    m_collisionPoints.insert(at, {content, CollisionMesh{std::move(points), m_collisionRevision}});
 }
 
 } // namespace luaug::scene

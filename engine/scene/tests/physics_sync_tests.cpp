@@ -32,6 +32,13 @@ public:
     {
         physics::BodyHandle handle;
         physics::BodyDesc desc;
+        // **A COPY of the hull, because the span is not ours to keep.**
+        // `ShapeDesc::points` is documented as outliving the call and no
+        // longer, and the vector behind it belongs to the mirror -- which
+        // replaces it whenever a mesh loads. Two cases here used to read
+        // `desc.shape.points` after the fact, which happened to work only
+        // because nothing had replaced it yet.
+        std::vector<core::Vec3> points;
     };
 
     [[nodiscard]] physics::WorldHandle createWorld(const physics::WorldDesc&) override
@@ -54,12 +61,28 @@ public:
 
     [[nodiscard]] physics::BodyHandle createBody(physics::WorldHandle, const physics::BodyDesc& desc) override
     {
+        // **The span is not kept**, for the reason the update below gives: its
+        // documented lifetime is this call, and the vector behind it belongs to
+        // whoever is mirroring.
+        physics::BodyDesc kept = desc;
+        std::vector<core::Vec3> points(desc.shape.points.begin(), desc.shape.points.end());
+        kept.shape.points = {};
+        if (refuseCreates) {
+            // The attempt is still recorded, because what a case wants to count
+            // is how many times the mirror ASKED.
+            created.push_back(Created{physics::BodyHandle{}, kept, std::move(points)});
+            return {};
+        }
         const physics::BodyHandle handle{nextBody++, 1};
-        created.push_back(Created{handle, desc});
+        created.push_back(Created{handle, kept, std::move(points)});
         live.push_back(handle);
         calls.emplace_back("createBody", handle.index);
         return handle;
     }
+
+    // Set by a case that wants to see what the mirror does when the backend
+    // will not make a body -- a degenerate hull is the real one.
+    bool refuseCreates = false;
 
     void destroyBody(physics::WorldHandle, physics::BodyHandle handle) override
     {
@@ -127,10 +150,22 @@ public:
         impulses.emplace_back(handle, impulse);
     }
 
-    void updateBody(physics::WorldHandle, physics::BodyHandle handle, const physics::BodyDesc& desc) override
+    // **The span is not kept**, because the caller's contract says it may not
+    // outlive the call and this fake used to store the whole desc. A test that
+    // read `rebuilt.back().desc.shape.points` afterwards was reading a span into
+    // whatever the mirror had at the time.
+    bool updateBody(physics::WorldHandle, physics::BodyHandle handle, const physics::BodyDesc& desc) override
     {
-        rebuilt.push_back(Created{handle, desc});
+        physics::BodyDesc kept = desc;
+        std::vector<core::Vec3> points(desc.shape.points.begin(), desc.shape.points.end());
+        kept.shape.points = {};
+        rebuilt.push_back(Created{handle, kept, std::move(points)});
+        return !refuseUpdates;
     }
+
+    // Set by a case that wants to see what the mirror does when the backend
+    // will not take a description -- a degenerate hull is the real one.
+    bool refuseUpdates = false;
 
     void setBodyMaterial(physics::WorldHandle, physics::BodyHandle, f32 friction, f32 restitution) override
     {
@@ -651,7 +686,7 @@ TEST_CASE("a MeshPart collides as a hull once its points have been handed over")
 
     REQUIRE(mirror.backend.created.size() == 1);
     CHECK(mirror.backend.created[0].desc.shape.type == physics::ShapeType::ConvexHull);
-    CHECK(mirror.backend.created[0].desc.shape.points.size() == 4);
+    CHECK(mirror.backend.created[0].points.size() == 4);
 }
 
 TEST_CASE("a hull is scaled by Size over MeshSize, like the mesh on screen")
@@ -679,7 +714,7 @@ TEST_CASE("a hull is scaled by Size over MeshSize, like the mesh on screen")
     CHECK(shape.type == physics::ShapeType::ConvexHull);
     // A factor rather than pre-scaled points: the points are SHARED across every
     // part naming this file, and scaling them here would be a copy per body.
-    CHECK(shape.points.size() == 4);
+    CHECK(mirror.backend.created[0].points.size() == 4);
     CHECK(shape.pointScale.x == 2.0f);
     CHECK(shape.pointScale.y == 3.0f);
     CHECK(shape.pointScale.z == 2.0f);
@@ -1427,4 +1462,160 @@ TEST_CASE("the ragdoll drive runs before the pose is committed")
     CHECK(skeleton.commits == 1);
     REQUIRE(skeleton.committed.size() == 1);
     CHECK(skeleton.overrides.empty());
+}
+
+// --- What the mirror remembers about a refusal -------------------------------
+
+TEST_CASE("a body the backend refuses is asked for once, not once a tick")
+{
+    // **The retry storm.** A refusal used to zero the record, so the next tick
+    // saw an empty slot and asked again -- for ever, once per tick, burning a
+    // body generation each time and saying nothing at all. Nobody noticed
+    // because nothing in the engine refused a body until a hull could arrive
+    // late enough to be degenerate.
+    Mirror mirror;
+    mirror.backend.refuseCreates = true;
+    (void)mirror.part("Crate");
+
+    mirror.step();
+    REQUIRE(mirror.backend.created.size() == 1);
+    CHECK(mirror.sync.bodyCount() == 0);
+
+    for (int tick = 0; tick < 20; ++tick)
+        mirror.step();
+
+    // One attempt, twenty ticks later.
+    CHECK(mirror.backend.created.size() == 1);
+    CHECK(mirror.sync.bodyCount() == 0);
+}
+
+TEST_CASE("a refused body is asked for again when the description changes")
+{
+    // The other half, and the half that makes remembering safe rather than
+    // final: a hull whose points have since arrived, or a part somebody
+    // resized, is a different question and gets asked.
+    Mirror mirror;
+    mirror.backend.refuseCreates = true;
+    const core::InstanceId id = mirror.part("Crate");
+
+    mirror.step();
+    REQUIRE(mirror.backend.created.size() == 1);
+    mirror.step();
+    REQUIRE(mirror.backend.created.size() == 1);
+
+    mirror.backend.refuseCreates = false;
+    mirror.fixture.world.parts().find(id)->size = core::Vec3{2.0f, 2.0f, 2.0f};
+    mirror.step();
+
+    CHECK(mirror.backend.created.size() == 2);
+    CHECK(mirror.sync.bodyCount() == 1);
+}
+
+TEST_CASE("a record that remembers a refusal is not destroyed as though it held a body")
+{
+    // `retireUnseen` destroys anything with a generation and no `seen`. A
+    // refusal keeps this instance's generation and has no body, so without the
+    // `live` flag the sweep hands the backend a handle naming nothing and takes
+    // the count below zero.
+    Mirror mirror;
+    mirror.backend.refuseCreates = true;
+    const core::InstanceId id = mirror.part("Crate");
+    mirror.step();
+    REQUIRE(mirror.sync.bodyCount() == 0);
+
+    REQUIRE(mirror.fixture.world.setParent(id, core::InstanceId{}) == std::nullopt);
+    mirror.step();
+
+    CHECK(mirror.backend.destroyed.empty());
+    CHECK(mirror.sync.bodyCount() == 0);
+}
+
+TEST_CASE("a constraint on a part with no body is not made")
+{
+    // `bodyHandleOf` is private and reached through the constraint walk, which
+    // is the only caller and the one that matters: a record remembering a
+    // refusal carries this instance's generation with no body behind it, and a
+    // joint handed that handle would hold a dangling pointer inside the solver.
+    Mirror mirror;
+    mirror.backend.refuseCreates = true;
+    (void)mirror.part("Anchor");
+    (void)mirror.part("Hanging");
+    mirror.step();
+
+    CHECK(mirror.backend.constraints.empty());
+}
+
+TEST_CASE("a hull is rebuilt when the points behind it change")
+{
+    // **The one that async mesh loading depends on.** Two hulls with the same
+    // type and the same size are not the same hull if the geometry underneath
+    // them was replaced -- a mesh finishing its load, or a hot reload swapping
+    // one. `sameShape` compared type and size and nothing else, so the first
+    // hull a `MeshPart` got was the hull it kept for ever.
+    //
+    // The spans are deliberately not compared: comparing them would mean
+    // keeping one, and `ShapeDesc::points` may not outlive the create call.
+    Mirror mirror;
+    const core::InstanceId id = mirror.part("Rock");
+    MeshPartComponent rock;
+    rock.meshContent = mirror.fixture.world.atoms().intern("asset://models/rock.glb");
+    rock.collisionFidelity = 1;
+    mirror.fixture.world.meshParts().add(id, rock);
+
+    const std::vector<core::Vec3> first{{0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}};
+    mirror.sync.setCollisionPoints(mirror.fixture.world.atoms().intern("asset://models/rock.glb"), first);
+    mirror.step();
+    REQUIRE(mirror.backend.created.size() == 1);
+    CHECK(mirror.backend.created[0].desc.shape.type == physics::ShapeType::ConvexHull);
+    const core::usize rebuiltBefore = mirror.backend.rebuilt.size();
+
+    // The same COUNT and the same size, so nothing but the revision can tell
+    // these apart -- which is the case a span comparison would also have caught
+    // and a type-and-size comparison cannot.
+    const std::vector<core::Vec3> second{
+        {0.0f, 0.0f, 0.0f}, {2.0f, 0.0f, 0.0f}, {0.0f, 2.0f, 0.0f}, {0.0f, 0.0f, 2.0f}};
+    mirror.sync.setCollisionPoints(mirror.fixture.world.atoms().intern("asset://models/rock.glb"), second);
+    mirror.step();
+
+    CHECK(mirror.backend.rebuilt.size() == rebuiltBefore + 1);
+
+    // And it settles: an unchanged cloud is not a reason to rebuild anything.
+    const core::usize after = mirror.backend.rebuilt.size();
+    mirror.step();
+    mirror.step();
+    CHECK(mirror.backend.rebuilt.size() == after);
+}
+
+TEST_CASE("a refused rebuild costs one attempt, and the body it had stays")
+{
+    // A degenerate hull -- four or more points that are all coplanar -- closes
+    // to nothing, and Jolt refuses it. Replacing a working box with nothing
+    // would drop the part through the floor, so the body stays what it was; and
+    // the mirror records what it ASKED for, which is what stops it asking again
+    // on every tick for ever.
+    Mirror mirror;
+    const core::InstanceId id = mirror.part("Slab");
+    MeshPartComponent slab;
+    slab.meshContent = mirror.fixture.world.atoms().intern("asset://models/slab.glb");
+    slab.collisionFidelity = 1;
+    mirror.fixture.world.meshParts().add(id, slab);
+    mirror.step();
+    REQUIRE(mirror.backend.created.size() == 1);
+
+    mirror.backend.refuseUpdates = true;
+    const std::vector<core::Vec3> flat{{0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}};
+    mirror.sync.setCollisionPoints(mirror.fixture.world.atoms().intern("asset://models/slab.glb"), flat);
+    mirror.step();
+    const core::usize attempts = mirror.backend.rebuilt.size();
+    CHECK(attempts == 1);
+
+    for (int tick = 0; tick < 20; ++tick)
+        mirror.step();
+    CHECK(mirror.backend.rebuilt.size() == attempts);
+
+    // The body is still there. It is the old shape, which is the honest
+    // outcome: the alternative to a stale hull is no hull at all.
+    CHECK(mirror.sync.bodyCount() == 1);
+    CHECK(mirror.backend.destroyed.empty());
+    (void)id;
 }

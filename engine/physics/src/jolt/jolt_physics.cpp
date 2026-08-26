@@ -821,15 +821,20 @@ public:
     // handle survives it: everything above holds one, and the caller asked for
     // the body to change rather than to be replaced. Velocity is carried across
     // so that resizing a falling part does not stop it in mid-air.
-    void updateBody(BodyHandle handle, const BodyDesc& desc)
+    [[nodiscard]] bool updateBody(BodyHandle handle, const BodyDesc& desc)
     {
         BodyRecord* record = resolve(handle);
         if (record == nullptr) {
-            return;
+            return false;
         }
         const JPH::ShapeRefC shape = buildShape(desc.shape);
         if (shape == nullptr) {
-            return;
+            // **The body stays what it was**, which is the useful answer: a
+            // degenerate hull -- four or more points that are all coplanar --
+            // closes to nothing, and replacing a working box with nothing would
+            // drop the part through the floor. Reported so the caller can say so
+            // once rather than retrying it every tick.
+            return false;
         }
 
         const BodyState previous = bodyState(handle);
@@ -843,7 +848,7 @@ public:
         if (!instantiate(*record, handle, desc, shape)) {
             record->alive = false;
             m_freeBodies.push_back(handle.index);
-            return;
+            return false;
         }
         if (desc.motion != MotionType::Static) {
             bodies.SetLinearAndAngularVelocity(record->id, toJolt(previous.linearVelocity),
@@ -854,6 +859,7 @@ public:
         // holds a pointer to the destroyed one. Rebuilt in creation order, so a
         // resized limb stays attached and the solve sequence does not move.
         rebuildConstraintsOn(handle);
+        return true;
     }
 
     void destroyBody(BodyHandle handle)
@@ -2380,11 +2386,10 @@ public:
         }
     }
 
-    void updateBody(WorldHandle handle, BodyHandle body, const BodyDesc& desc) override
+    bool updateBody(WorldHandle handle, BodyHandle body, const BodyDesc& desc) override
     {
-        if (JoltWorld* world = resolve(handle); world != nullptr) {
-            world->updateBody(body, desc);
-        }
+        JoltWorld* world = resolve(handle);
+        return world != nullptr && world->updateBody(body, desc);
     }
 
     void setBodyMaterial(WorldHandle handle, BodyHandle body, f32 friction, f32 restitution) override

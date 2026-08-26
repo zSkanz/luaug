@@ -73,7 +73,14 @@ public:
     // Changing the motion type or the shape is a recreate on Jolt's side, so it
     // is one call rather than a setter per field: a body that must be rebuilt
     // keeps its handle, its user data and its place in the world.
-    virtual void updateBody(WorldHandle world, BodyHandle body, const BodyDesc& desc) = 0;
+    // False when the backend refused the new description and the body is
+    // therefore still the one it was: a degenerate hull that no convex builder
+    // can close is the case that reaches this, and it used to be silent.
+    //
+    // **The caller records what it ATTEMPTED either way**, so a refusal costs
+    // one attempt rather than one per tick -- and `ShapeDesc::pointsRevision` is
+    // what makes the next genuinely different description try again.
+    [[nodiscard]] virtual bool updateBody(WorldHandle world, BodyHandle body, const BodyDesc& desc) = 0;
 
     // Friction, restitution, collidability, queryability and group, none of
     // which need the body rebuilt.
