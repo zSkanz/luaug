@@ -65,11 +65,28 @@ struct TreeRow
 // (Decision 15). It carries a `Value` rather than a widget's raw bytes because
 // that is what `setProperty` takes, so nothing between here and the world has
 // to know which editor produced it.
+// What a queued edit IS. Three kinds, one queue, and that is the point: undo,
+// the safe point and the coalescing key all work on the queue, so a third way to
+// change an instance would be a third thing that had to be taught each of them.
+enum class WriteKind : core::u8
+{
+    // `World::setProperty` -- the same call a script's assignment makes.
+    Property,
+    // `World::setAttribute`. A `Nil` value REMOVES it, which is the world's own
+    // rule and not this queue's.
+    Attribute,
+    // `World::addTag` / `removeTag`, chosen by `value` holding `true` or
+    // `false`. A tag is a name and not a value, so the boolean is the verb.
+    Tag,
+};
+
 struct PendingWrite
 {
     core::InstanceId target;
+    // The property, the attribute or the tag -- whichever `kind` says.
     core::NameAtom property;
     scene::Value value;
+    WriteKind kind = WriteKind::Property;
 };
 
 // What the drain did with one write. Reported back to the panel so a refusal is
@@ -429,6 +446,14 @@ public:
 
     // Queues an edit. Never writes: see Decision 15 and `applyPending`.
     void enqueue(core::InstanceId target, core::NameAtom property, scene::Value value);
+
+    // **Attributes and tags go through the SAME queue**, and that is what makes
+    // them undoable and safe-point-applied without either of those learning a
+    // new shape. An attribute is a value on an instance and a tag is a name on
+    // one; the panel that edits them is the Properties panel, so the path they
+    // take to the world is the property path.
+    void enqueueAttribute(core::InstanceId target, core::NameAtom attribute, scene::Value value);
+    void enqueueTag(core::InstanceId target, core::NameAtom tag, bool present);
 
     [[nodiscard]] usize pendingCount() const noexcept { return pending_.size(); }
     [[nodiscard]] std::span<const PendingWrite> pending() const noexcept { return pending_; }

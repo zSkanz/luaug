@@ -1177,3 +1177,108 @@ TEST_CASE("a reference with a setter is editable, and one without is not")
     REQUIRE(editorFor(*owner) == EditorKind::InstanceRef);
     CHECK_FALSE(editable(*owner));
 }
+
+// --- Attributes and tags through the same queue (S5.5, S5.15) ----------------
+//
+// **One queue, three kinds**, and that is the point: undo, the safe point and
+// the coalescing key all work on the queue, so a third way to change an instance
+// would be a third thing that had to be taught each of them.
+
+TEST_CASE("an attribute waits for the drain, exactly as a property does")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId subject = fixture.widget(world, "Subject");
+
+    Inspector inspector;
+    inspector.select(subject);
+    inspector.enqueueAttribute(subject, fixture.atom("Difficulty"), scene::Value{core::f64{3.0}});
+
+    // Decision 15 covers an attribute for the same reason it covers a property:
+    // the panel draws after the tick, so applying where the value was typed
+    // would mutate the world after the tick the drawn frame came from.
+    CHECK(inspector.pendingCount() == 1);
+    CHECK(std::holds_alternative<std::monostate>(world.getAttribute(subject, fixture.atom("Difficulty"))));
+
+    inspector.applyPending(world);
+    CHECK(world.getAttribute(subject, fixture.atom("Difficulty")) == scene::Value{core::f64{3.0}});
+    REQUIRE(inspector.outcomes().size() == 1);
+    CHECK(inspector.outcomes()[0].result == SetResult::Changed);
+}
+
+TEST_CASE("a nil attribute removes it, which is the world's rule and not the panel's")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId subject = fixture.widget(world, "Subject");
+
+    Inspector inspector;
+    inspector.enqueueAttribute(subject, fixture.atom("Difficulty"), scene::Value{core::f64{3.0}});
+    inspector.applyPending(world);
+    REQUIRE(world.getAttribute(subject, fixture.atom("Difficulty")) == scene::Value{core::f64{3.0}});
+
+    inspector.enqueueAttribute(subject, fixture.atom("Difficulty"), scene::Value{});
+    inspector.applyPending(world);
+    CHECK(std::holds_alternative<std::monostate>(world.getAttribute(subject, fixture.atom("Difficulty"))));
+}
+
+TEST_CASE("a tag is added and removed by the same queue, and the boolean is the verb")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId subject = fixture.widget(world, "Subject");
+
+    Inspector inspector;
+    inspector.enqueueTag(subject, fixture.atom("Landmark"), true);
+    CHECK_FALSE(world.hasTag(subject, fixture.atom("Landmark")));
+
+    inspector.applyPending(world);
+    CHECK(world.hasTag(subject, fixture.atom("Landmark")));
+
+    inspector.enqueueTag(subject, fixture.atom("Landmark"), false);
+    inspector.applyPending(world);
+    CHECK_FALSE(world.hasTag(subject, fixture.atom("Landmark")));
+}
+
+TEST_CASE("tagging something that already carries the tag is Unchanged rather than refused")
+{
+    // **The normal case over a selection, not an error.** Tagging four things
+    // when one already carries the tag must not read as three successes and a
+    // refusal -- the refusal toast would fire on the one gesture people use
+    // tags for.
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId subject = fixture.widget(world, "Subject");
+
+    Inspector inspector;
+    inspector.enqueueTag(subject, fixture.atom("Landmark"), true);
+    inspector.enqueueTag(subject, fixture.atom("Landmark"), true);
+    inspector.applyPending(world);
+
+    REQUIRE(inspector.outcomes().size() == 2);
+    CHECK(inspector.outcomes()[0].result == SetResult::Changed);
+    CHECK(inspector.outcomes()[1].result == SetResult::Unchanged);
+    CHECK(world.hasTag(subject, fixture.atom("Landmark")));
+}
+
+TEST_CASE("the three kinds share one queue, and they apply in the order they were typed")
+{
+    // What makes them one undo step and one safe point. A separate queue per
+    // kind would apply in whatever order the queues were drained in, which is a
+    // fact about this file rather than about what somebody did.
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId subject = fixture.widget(world, "Subject");
+
+    Inspector inspector;
+    inspector.enqueue(subject, fixture.atom("Count"), scene::Value{core::f64{2.0}});
+    inspector.enqueueAttribute(subject, fixture.atom("Difficulty"), scene::Value{core::f64{5.0}});
+    inspector.enqueueTag(subject, fixture.atom("Landmark"), true);
+    CHECK(inspector.pendingCount() == 3);
+
+    inspector.applyPending(world);
+    CHECK(inspector.pendingCount() == 0);
+    CHECK(world.getProperty(subject, fixture.atom("Count")) == scene::Value{core::f64{2.0}});
+    CHECK(world.getAttribute(subject, fixture.atom("Difficulty")) == scene::Value{core::f64{5.0}});
+    CHECK(world.hasTag(subject, fixture.atom("Landmark")));
+}

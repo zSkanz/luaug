@@ -297,7 +297,13 @@ that sends the next session to the wrong place.
 - [ ] **S5.2** The manipulator moves a `Model`, a `Camera`, an `Attachment`.
 - [ ] **S5.3** Selection resolves to the meaningful ancestor, with drill-down.
 - [ ] **S5.4** Group / Ungroup.
-- [ ] **S5.5** Tags, so the documented primary addressing path is reachable.
+- [x] **S5.5** Tags — built. The manual names the tag path as the PRIMARY way a
+      script finds what a streamed world brought in, and until now the only way
+      to put one on anything was to write a line of Luau, in a world whose
+      whole point is that it is authored. Chips under the Properties grid, add
+      and remove over the whole selection, and a picker of the names this world
+      already uses -- because a typo is a tag nothing will ever find, which
+      looks exactly like a working one.
 - [ ] **S5.6** A stamp override is visible, revertable and appliable.
 - [ ] **S5.7** Project settings, which needs a TOML writer the engine lacks.
 - [ ] **S5.8** Camera control during play.
@@ -323,7 +329,20 @@ that sends the next session to the wrong place.
       editor's panel does not.
 - [ ] **S5.13** Snap step editable; a reference grid drawn.
 - [ ] **S5.14** Properties search and categories.
-- [ ] **S5.15** Attributes.
+- [x] **S5.15** Attributes — built, beside the tags and through the same queue.
+      A property is declared by a class and an attribute is not, which is why
+      it is a section rather than more rows: the panel cannot know what to show
+      until it asks the instance. Edits `bool`, `number`, `string`, `Vector3`
+      and `Color3`; names the rest rather than hiding them, because a `CFrame`
+      attribute is legal and a matrix is not a one-line widget.
+
+      **The queue is what made both of these small.** `PendingWrite` grew a
+      `WriteKind`, so an attribute and a tag ride the same path a property
+      does -- one undo step, one safe point, one coalescing key -- rather than
+      each teaching those three about a new shape. Five cases assert it,
+      including that tagging something already tagged is `Unchanged` and not a
+      refusal: that is the normal case over a selection, and reporting it as a
+      failure would fire the toast on the one gesture people use tags for.
 - [ ] **S5.16** Thumbnails for meshes, scenes and stamps; a material swatch.
 - [ ] **S5.17** Pivot/centre choice for a multi-selection.
 - [~] **S5.18** Sibling reordering. **The `World` verb is built** — a move

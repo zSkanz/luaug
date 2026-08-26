@@ -598,17 +598,67 @@ core::u64 coalesceKeyFor(core::u64 gesture, std::span<const PendingWrite> pendin
 
 void Inspector::enqueue(core::InstanceId target, core::NameAtom property, scene::Value value)
 {
-    pending_.push_back(PendingWrite{target, property, std::move(value)});
+    pending_.push_back(PendingWrite{target, property, std::move(value), WriteKind::Property});
+}
+
+void Inspector::enqueueAttribute(core::InstanceId target, core::NameAtom attribute, scene::Value value)
+{
+    pending_.push_back(PendingWrite{target, attribute, std::move(value), WriteKind::Attribute});
+}
+
+void Inspector::enqueueTag(core::InstanceId target, core::NameAtom tag, bool present)
+{
+    pending_.push_back(PendingWrite{target, tag, scene::Value{present}, WriteKind::Tag});
 }
 
 void Inspector::applyPending(scene::World& world)
 {
     for (const PendingWrite& write : pending_) {
-        // Decision 14, and the whole of it: the same call a script's assignment
-        // makes, so the change queue, the `readOnly` refusal and the world hash
-        // all see an overlay edit exactly as they see a scripted one.
-        const scene::World::SetResult result = world.setProperty(write.target, write.property, write.value);
-        recordOutcome(WriteOutcome{write.target, write.property, result});
+        switch (write.kind) {
+        case WriteKind::Attribute: {
+            // **The world's own refusal, reported the same way a property's
+            // is.** `setAttribute` rejects a value outside the documented
+            // domain, and a panel that swallowed that would be a field somebody
+            // types into and watches do nothing.
+            const bool accepted = world.setAttribute(write.target, write.property, write.value);
+            recordOutcome(
+                WriteOutcome{write.target, write.property,
+                             accepted ? scene::World::SetResult::Changed : scene::World::SetResult::InvalidValue});
+            break;
+        }
+        case WriteKind::Tag: {
+            const auto* present = std::get_if<bool>(&write.value);
+            const bool wanted = present != nullptr && *present;
+            // **Asked BEFORE, because the world's own answer cannot tell these
+            // apart.** `addTag` is idempotent and says `true` whether it added
+            // the tag or found it already there; `false` means the instance is
+            // gone. So "did anything move" is a question only this side can
+            // answer, and it has to be asked first.
+            const bool already = world.hasTag(write.target, write.property);
+            const bool accepted =
+                wanted ? world.addTag(write.target, write.property) : world.removeTag(write.target, write.property);
+
+            // **`Unchanged` and not a failure.** Tagging four things when one
+            // already carries it is the NORMAL case over a selection, and
+            // reporting it as a refusal would fire the toast on the one gesture
+            // people use tags for.
+            recordOutcome(WriteOutcome{write.target, write.property,
+                                       !accepted           ? scene::World::SetResult::InvalidValue
+                                       : already == wanted ? scene::World::SetResult::Unchanged
+                                                           : scene::World::SetResult::Changed});
+            break;
+        }
+        case WriteKind::Property:
+        default: {
+            // Decision 14, and the whole of it: the same call a script's
+            // assignment makes, so the change queue, the `readOnly` refusal and
+            // the world hash all see an overlay edit exactly as they see a
+            // scripted one.
+            const scene::World::SetResult result = world.setProperty(write.target, write.property, write.value);
+            recordOutcome(WriteOutcome{write.target, write.property, result});
+            break;
+        }
+        }
     }
     pending_.clear();
 }

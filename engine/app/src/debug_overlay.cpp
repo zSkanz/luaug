@@ -2529,6 +2529,227 @@ void drawEditor(scene::World& world, core::InstanceId root, Inspector& inspector
 // frame, and its state between frames has nowhere else to live.
 core::u64 g_propertyGesture = 0;
 
+// --- Attributes (S5.15) -------------------------------------------------------
+//
+// **A property is declared by a class and an attribute is not**, which is the
+// whole difference and the whole reason this is a separate section rather than
+// more rows in the grid above. A class's properties are a fixed list the IDL
+// names; an attribute is whatever this instance was given, so the panel cannot
+// know what to show until it asks.
+//
+// The primary's, not the selection's. Over four instances "the attributes" is
+// four different lists, and merging them would invent a row for something three
+// of them do not have -- so the section says whose it is and edits reach the
+// whole selection only when somebody presses the button that says so.
+void drawAttributes(scene::World& world, Inspector& inspector, core::InstanceId primary,
+                    std::span<const core::InstanceId> targets)
+{
+    if (!ImGui::CollapsingHeader("Attributes"))
+        return;
+
+    static scene::AttributeMap rows;
+    rows.clear();
+    world.collectAttributes(primary, rows);
+
+    if (rows.empty())
+        ImGui::TextDisabled("none");
+
+    for (const auto& [name, value] : rows) {
+        ImGui::PushID(static_cast<int>(name.id));
+        const std::string_view text = world.atoms().text(name);
+
+        const float trash = ImGui::GetFrameHeight();
+        const float inner = ImGui::GetStyle().ItemInnerSpacing.x;
+        ImGui::SetNextItemWidth(140.0f);
+        ImGui::TextUnformatted(text.data(), text.data() + text.size());
+        ImGui::SameLine(150.0f);
+        ImGui::SetNextItemWidth(-(trash + inner));
+
+        // **Typed by what it HOLDS.** An attribute has no declared type, so the
+        // widget follows the value -- which also means changing the type is
+        // deleting it and adding it again, and that is the honest shape rather
+        // than a type dropdown that would silently reinterpret a number as a
+        // string.
+        scene::Value edited = value;
+        bool changed = false;
+        if (const auto* flag = std::get_if<bool>(&value)) {
+            bool held = *flag;
+            changed = ImGui::Checkbox("##value", &held);
+            edited = scene::Value{held};
+        }
+        else if (const auto* number = std::get_if<f64>(&value)) {
+            f64 held = *number;
+            changed = ImGui::DragScalar("##value", ImGuiDataType_Double, &held, 0.01f);
+            edited = scene::Value{held};
+        }
+        else if (const auto* str = std::get_if<std::string>(&value)) {
+            std::array<char, 192> buffer{};
+            if (str->size() + 1 <= buffer.size())
+                std::snprintf(buffer.data(), buffer.size(), "%s", str->c_str());
+            changed = ImGui::InputText("##value", buffer.data(), buffer.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+            edited = scene::Value{std::string(buffer.data())};
+        }
+        else if (const auto* offset = std::get_if<core::Vec3>(&value)) {
+            std::array<f32, 3> held{offset->x, offset->y, offset->z};
+            changed = ImGui::DragFloat3("##value", held.data(), 0.01f);
+            edited = scene::Value{core::Vec3{held[0], held[1], held[2]}};
+        }
+        else if (const auto* tint = std::get_if<core::Color3>(&value)) {
+            std::array<f32, 3> held{tint->r, tint->g, tint->b};
+            changed = ImGui::ColorEdit3("##value", held.data(), ImGuiColorEditFlags_NoInputs);
+            edited = scene::Value{core::Color3{held[0], held[1], held[2]}};
+        }
+        else {
+            // A `CFrame`, a `UDim2` and a `Rect` are legal attributes too and
+            // have no one-line widget -- a matrix is twelve numbers, and this
+            // section is a list rather than a second property grid. Named
+            // rather than hidden, because a person needs to know it is there
+            // even where the panel cannot edit it, and the `x` beside it still
+            // removes it.
+            ImGui::TextDisabled("<%s>", scene::valueTypeName(scene::valueType(value)));
+        }
+        if (changed)
+            inspector.enqueueAttribute(primary, name, edited);
+
+        ImGui::SameLine(0.0f, inner);
+        // A `Nil` REMOVES it, which is `World::setAttribute`'s own rule rather
+        // than something this panel invented.
+        if (ImGui::Button("x", ImVec2(trash, 0.0f)))
+            inspector.enqueueAttribute(primary, name, scene::Value{});
+        ImGui::PopID();
+    }
+
+    ImGui::Separator();
+    static std::array<char, 96> newName{};
+    static int newType = 1;
+    ImGui::SetNextItemWidth(140.0f);
+    ImGui::InputTextWithHint("##attr-name", "name", newName.data(), newName.size());
+    ImGui::SameLine(150.0f);
+    ImGui::SetNextItemWidth(110.0f);
+    ImGui::Combo("##attr-type", &newType, "true/false\0number\0text\0vector\0colour\0");
+    ImGui::SameLine();
+    const bool named = newName[0] != '\0';
+    if (!named)
+        ImGui::BeginDisabled();
+    if (ImGui::Button("Add")) {
+        const core::NameAtom atom = world.atoms().intern(std::string_view(newName.data()));
+        // The four the section can EDIT, plus text. Offering a `CFrame` here
+        // would put a row on screen the panel then refuses to change, which is
+        // worse than not offering it.
+        scene::Value seed{std::string()};
+        if (newType == 0)
+            seed = scene::Value{false};
+        else if (newType == 1)
+            seed = scene::Value{f64{0.0}};
+        else if (newType == 3)
+            seed = scene::Value{core::Vec3{}};
+        else if (newType == 4)
+            seed = scene::Value{core::Color3{1.0f, 1.0f, 1.0f}};
+        // **Added to the whole selection**, unlike the edits above. "Give these
+        // four a `Difficulty`" is the thing somebody wants an attribute for,
+        // and doing it one instance at a time is the thing they would give up
+        // on.
+        for (const core::InstanceId target : targets) {
+            if (world.alive(target))
+                inspector.enqueueAttribute(target, atom, seed);
+        }
+        newName.fill(0);
+    }
+    if (!named)
+        ImGui::EndDisabled();
+}
+
+// --- Tags (S5.5) --------------------------------------------------------------
+//
+// **The documented PRIMARY addressing path, and it had no editor surface at
+// all.** `docs/manual/assets/streaming.md` names the tag path as the way a
+// script finds what a streamed world brought in, `TagService:GetTagged` is the
+// call, and until now the only way to put a tag on anything was to write a line
+// of Luau -- in a world whose whole point is that it is authored.
+void drawTags(scene::World& world, Inspector& inspector, core::InstanceId primary,
+              std::span<const core::InstanceId> targets)
+{
+    if (!ImGui::CollapsingHeader("Tags"))
+        return;
+
+    static scene::TagSet held;
+    held.clear();
+    world.collectTags(primary, held);
+
+    if (held.empty())
+        ImGui::TextDisabled("none");
+
+    // Chips, wrapped, because a tag is a short word and a row each would make
+    // six of them a column of mostly empty space.
+    const float wrap = ImGui::GetContentRegionAvail().x;
+    float used = 0.0f;
+    for (const core::NameAtom tag : held) {
+        const std::string label = std::string(world.atoms().text(tag)) + "  x";
+        const float width = ImGui::CalcTextSize(label.c_str()).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        if (used > 0.0f && used + width < wrap)
+            ImGui::SameLine();
+        else
+            used = 0.0f;
+        used += width + ImGui::GetStyle().ItemSpacing.x;
+
+        ImGui::PushID(static_cast<int>(tag.id));
+        if (ImGui::Button(label.c_str())) {
+            // Removed from the WHOLE selection. A chip is drawn from the
+            // primary's list, and somebody clicking it with four things
+            // selected means all four.
+            for (const core::InstanceId target : targets) {
+                if (world.alive(target))
+                    inspector.enqueueTag(target, tag, false);
+            }
+        }
+        ImGui::PopID();
+    }
+
+    ImGui::Separator();
+    static std::array<char, 96> pending{};
+    const float addWidth = ImGui::GetFrameHeight() * 2.4f;
+    ImGui::SetNextItemWidth(-(addWidth + ImGui::GetStyle().ItemInnerSpacing.x));
+    const bool entered = ImGui::InputTextWithHint("##tag-name", "tag", pending.data(), pending.size(),
+                                                  ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+    const bool pressed = ImGui::Button("Add", ImVec2(addWidth, 0.0f));
+    if ((entered || pressed) && pending[0] != '\0') {
+        const core::NameAtom atom = world.atoms().intern(std::string_view(pending.data()));
+        for (const core::InstanceId target : targets) {
+            if (world.alive(target))
+                inspector.enqueueTag(target, atom, true);
+        }
+        pending.fill(0);
+    }
+
+    // **What this world already uses.** A tag is free text and a typo is a tag
+    // nothing will ever find -- which is the single worst failure this feature
+    // has, because it looks exactly like a working one. Offering the names
+    // already in use is what turns that from a silent bug into a click.
+    static scene::TagSet known;
+    known.clear();
+    world.collectAllTags(known);
+    if (known.empty())
+        return;
+
+    ImGui::SameLine();
+    if (ImGui::SmallButton("..."))
+        ImGui::OpenPopup("tag-pick");
+    if (ImGui::BeginPopup("tag-pick")) {
+        for (const core::NameAtom tag : known) {
+            const std::string_view text = world.atoms().text(tag);
+            if (ImGui::Selectable(std::string(text).c_str())) {
+                for (const core::InstanceId target : targets) {
+                    if (world.alive(target))
+                        inspector.enqueueTag(target, tag, true);
+                }
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::EndPopup();
+    }
+}
+
 void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspector, ContentTree* tree = nullptr,
                     const IconAtlas* icons = nullptr, audio::AudioSystem* audio = nullptr,
                     EditorCommands* commands = nullptr)
@@ -2652,6 +2873,16 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
             ImGui::PopID();
         }
         ImGui::EndTable();
+    }
+
+    // **Below the grid, and collapsed by default.** A class's properties are the
+    // answer to "what is this"; attributes and tags are the answer to "what did
+    // somebody decide about it", which is a question asked far less often and by
+    // somebody who came looking.
+    if (const core::InstanceId primary = inspector.selection(); world.alive(primary)) {
+        ImGui::Spacing();
+        drawAttributes(world, inspector, primary, targets);
+        drawTags(world, inspector, primary, targets);
     }
 
     // **A drag in this panel is ONE edit**, and this is what tells the undo
