@@ -509,7 +509,17 @@ that sends the next session to the wrong place.
       refusal. A joint the target rig lacks is skipped rather than guessed, so
       a horse's clip on a person moves what they share and nothing else. Four
       cases, break-verified — three fail without it.
-- [ ] **S6.9** i18n plural rules beyond English.
+- [x] **S6.9** i18n plural rules beyond English — built, as a CLDR SUBSET that
+      says which. A catalog knew its own text and did not know its own
+      language, so every locale was pluralised by English's rule: right for
+      about half the languages anybody translates a game into and wrong for the
+      rest in a way a translator cannot work around. The file's own name is now
+      the locale, so `i18n/pl.json` is Polish with nothing to keep in step.
+      Seven rule SHAPES rather than a few hundred locales, because that is what
+      the languages games ship in fall into, and anything unnamed falls back to
+      English — so nothing got worse and the named ones got right. Nine cases,
+      checked at the counts where each rule turns over rather than at 1 and 2,
+      which is where a hand-written rule is always right.
 - [ ] **S6.10** Jolt on a real job pool.
 - [ ] **S6.11** The four outstanding items of the rendering reference decision.
 - [ ] **S6.12** Decision 10 above, and whichever half of the dot-access

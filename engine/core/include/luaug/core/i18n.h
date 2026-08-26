@@ -5,8 +5,15 @@
 // code path that hardcodes English.
 //
 // v1 scope: flat JSON per locale, `{param}` placeholders, CLDR plural
-// categories selected by a `count` parameter. English plural rules only at
-// launch (ADR 0019); ICU-grade formatting, dates and gender are reserved.
+// categories selected by a `count` parameter. ICU-grade formatting, dates and
+// gender are reserved.
+//
+// **Plural rules were English's for every locale until S6.9**, which ADR 0019
+// accepted at launch on the grounds that English was the only catalog shipped.
+// It is now a CLDR SUBSET keyed by language subtag -- see `setLocale` -- because
+// the cost of getting it wrong falls entirely on the translator: a catalog that
+// offers `few` and never selects it reads as broken grammar to the people it was
+// written for, and there is nothing they can do about it from their side.
 #pragma once
 
 #include "luaug/core/text_key.h"
@@ -73,7 +80,29 @@ public:
 
     [[nodiscard]] usize size() const noexcept { return entries_.size(); }
 
+    // --- Which language's plural rules apply (S6.9) --------------------------
+    //
+    // **A catalog knows its own text and did not know its own language**, so
+    // every locale was pluralised by English's rule -- one or other. That is
+    // right for about half the languages anybody translates a game into and
+    // wrong for the rest in a way a translator cannot work around: Polish needs
+    // three forms, Russian three, Arabic six, and Japanese one. A catalog that
+    // offers `few` and never selects it is a translation that reads as broken
+    // grammar to the people it was written for.
+    //
+    // The BCP-47 language subtag, lowercased -- `pt` out of `pt-BR`, `zh` out of
+    // `zh-Hans`. Region does not change a cardinal rule in CLDR, and the two
+    // cases where a script arguably does are not ones this subset distinguishes.
+    //
+    // `loadFromFile` takes it from the file's stem, so `i18n/pl.json` is Polish
+    // with no second place to say so. Empty is English, which is what a catalog
+    // built in a test or from a string is.
+    void setLocale(std::string_view locale);
+    [[nodiscard]] std::string_view locale() const noexcept { return locale_; }
+
 private:
+    std::string locale_;
+
     struct Entry
     {
         std::string name;

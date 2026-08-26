@@ -166,3 +166,163 @@ TEST_CASE("catalog plurals")
         CHECK(catalog.format(LUAUG_TR("reloaded")) == "Reloaded {count} scripts.");
     }
 }
+
+// --- Plural rules beyond English (S6.9) --------------------------------------
+//
+// **A catalog knew its own text and did not know its own language**, so every
+// locale was pluralised by English's rule. That is right for about half the
+// languages anybody translates a game into and wrong for the rest in a way a
+// translator cannot work around: a catalog that offers `few` and never selects
+// it reads as broken grammar to the people it was written for.
+//
+// The numbers below are the published CLDR cardinal categories, checked at the
+// counts where each rule turns over -- which is where a hand-written rule goes
+// wrong, and never at 1 and 2.
+
+namespace {
+
+// A catalog for `locale` whose one entry names every category, so the selected
+// one is what comes back.
+[[nodiscard]] Catalog pluralCatalog(std::string_view locale)
+{
+    Catalog catalog;
+    catalog.setLocale(locale);
+    const Catalog::LoadResult loaded = catalog.loadFromJson(R"({
+        "count": {
+            "zero": "zero",
+            "one": "one",
+            "two": "two",
+            "few": "few",
+            "many": "many",
+            "other": "other"
+        }
+    })",
+                                                            "<plural>");
+    REQUIRE_MESSAGE(loaded.ok, loaded.diagnostic);
+    return catalog;
+}
+
+[[nodiscard]] std::string categoryOf(const Catalog& catalog, i64 count)
+{
+    const I18nArg args[] = {{"count", count}};
+    return catalog.format(LUAUG_TR("count"), args);
+}
+
+} // namespace
+
+TEST_CASE("English is one and other, and so is every language the subset does not name")
+{
+    const Catalog english = pluralCatalog("en");
+    CHECK(categoryOf(english, 0) == "other");
+    CHECK(categoryOf(english, 1) == "one");
+    CHECK(categoryOf(english, 2) == "other");
+
+    // German, Spanish, Swedish -- the shape most of Europe shares, reached by
+    // the fallback rather than by being listed.
+    const Catalog german = pluralCatalog("de");
+    CHECK(categoryOf(german, 1) == "one");
+    CHECK(categoryOf(german, 5) == "other");
+}
+
+TEST_CASE("a language with no plural gets one form for every count")
+{
+    // The most visible of the lot to get wrong: the translator has ONE string
+    // and the engine asks for a category that is not in the file.
+    const Catalog japanese = pluralCatalog("ja");
+    CHECK(categoryOf(japanese, 0) == "other");
+    CHECK(categoryOf(japanese, 1) == "other");
+    CHECK(categoryOf(japanese, 7) == "other");
+}
+
+TEST_CASE("French and Brazilian Portuguese put zero with one")
+{
+    // "0 jour" rather than "0 jours", which is the one difference from English
+    // and the one nobody remembers.
+    const Catalog french = pluralCatalog("fr");
+    CHECK(categoryOf(french, 0) == "one");
+    CHECK(categoryOf(french, 1) == "one");
+    CHECK(categoryOf(french, 2) == "other");
+
+    // The region is dropped: `pt-BR` is `pt`.
+    const Catalog brazilian = pluralCatalog("pt-BR");
+    CHECK(categoryOf(brazilian, 0) == "one");
+    CHECK(categoryOf(brazilian, 3) == "other");
+}
+
+TEST_CASE("Russian turns over at the last digit and again at the teens")
+{
+    // The published rule, checked where it turns: 21 is `one` and 11 is not;
+    // 22 is `few` and 12 is not. A hand-written rule gets 1 and 2 right and
+    // these wrong.
+    const Catalog russian = pluralCatalog("ru");
+    CHECK(categoryOf(russian, 1) == "one");
+    CHECK(categoryOf(russian, 21) == "one");
+    CHECK(categoryOf(russian, 11) == "many");
+    CHECK(categoryOf(russian, 2) == "few");
+    CHECK(categoryOf(russian, 24) == "few");
+    CHECK(categoryOf(russian, 12) == "many");
+    CHECK(categoryOf(russian, 5) == "many");
+    CHECK(categoryOf(russian, 0) == "many");
+}
+
+TEST_CASE("Polish is the same shape with a different one")
+{
+    // 21 is `many` in Polish and `one` in Russian, which is exactly why it is
+    // spelled out rather than folded in with the Slavic block.
+    const Catalog polish = pluralCatalog("pl");
+    CHECK(categoryOf(polish, 1) == "one");
+    CHECK(categoryOf(polish, 21) == "many");
+    CHECK(categoryOf(polish, 2) == "few");
+    CHECK(categoryOf(polish, 22) == "few");
+    CHECK(categoryOf(polish, 12) == "many");
+    CHECK(categoryOf(polish, 5) == "many");
+}
+
+TEST_CASE("Czech has a few that is only two to four")
+{
+    const Catalog czech = pluralCatalog("cs");
+    CHECK(categoryOf(czech, 1) == "one");
+    CHECK(categoryOf(czech, 3) == "few");
+    CHECK(categoryOf(czech, 5) == "other");
+    // And 22 is NOT few, unlike every Slavic language beside it.
+    CHECK(categoryOf(czech, 22) == "other");
+}
+
+TEST_CASE("Arabic is the six-category case, which is why zero and two exist")
+{
+    const Catalog arabic = pluralCatalog("ar");
+    CHECK(categoryOf(arabic, 0) == "zero");
+    CHECK(categoryOf(arabic, 1) == "one");
+    CHECK(categoryOf(arabic, 2) == "two");
+    CHECK(categoryOf(arabic, 3) == "few");
+    CHECK(categoryOf(arabic, 10) == "few");
+    CHECK(categoryOf(arabic, 11) == "many");
+    CHECK(categoryOf(arabic, 99) == "many");
+    CHECK(categoryOf(arabic, 100) == "other");
+}
+
+TEST_CASE("a negative count pluralises as its magnitude")
+{
+    // "-1 item" reading as "-1 items" is the kind of thing nobody notices until
+    // a refund appears in a shop.
+    const Catalog english = pluralCatalog("en");
+    CHECK(categoryOf(english, -1) == "one");
+    CHECK(categoryOf(english, -2) == "other");
+
+    const Catalog russian = pluralCatalog("ru");
+    CHECK(categoryOf(russian, -21) == "one");
+}
+
+TEST_CASE("a category the catalog does not carry falls back rather than showing nothing")
+{
+    // Which is what makes the subset safe: a rule that selects `few` against a
+    // catalog written with only `one` and `other` must still produce text.
+    Catalog polish;
+    polish.setLocale("pl");
+    const Catalog::LoadResult loaded =
+        polish.loadFromJson(R"({ "count": { "one": "one", "other": "other" } })", "<partial>");
+    REQUIRE_MESSAGE(loaded.ok, loaded.diagnostic);
+
+    const I18nArg args[] = {{"count", i64{3}}};
+    CHECK(polish.format(LUAUG_TR("count"), args) == "other");
+}
