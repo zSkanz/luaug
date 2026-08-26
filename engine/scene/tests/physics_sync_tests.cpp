@@ -1496,6 +1496,61 @@ TEST_CASE("Blend carries the driven joint part of the way, and 0 leaves the clip
     CHECK(skeleton.committed[0].model.position.y == doctest::Approx(2.0));
 }
 
+// --- The mirror with nothing ticking (S5.10) ---------------------------------
+
+TEST_CASE("mirror creates the bodies the tree describes and advances nothing")
+{
+    // **What an editor's collision view is drawn from.** A paused world never
+    // calls `step`, so the backend holds no bodies at all, and a wireframe of a
+    // world with no bodies in it is an empty picture that looks exactly like a
+    // working one.
+    Mirror mirror;
+    const core::InstanceId crate = mirror.part("Crate", {0.0, 4.0, 0.0});
+
+    mirror.sync.mirror();
+    CHECK(mirror.backend.live.size() == 1);
+    CHECK(mirror.backend.steps == 0);
+    // And the tree is untouched: a view that wrote back would move a part an
+    // author is in the middle of placing.
+    CHECK(mirror.transform(crate).cframe.position.y == doctest::Approx(4.0));
+}
+
+TEST_CASE("mirror retires what the tree no longer has")
+{
+    // Mark and sweep, exactly as a tick does it -- so an editor that deletes a
+    // part does not leave a collider drawn where it used to be.
+    Mirror mirror;
+    const core::InstanceId crate = mirror.part("Crate");
+    mirror.sync.mirror();
+    REQUIRE(mirror.backend.live.size() == 1);
+
+    mirror.fixture.world.destroy(crate);
+    mirror.sync.mirror();
+    CHECK(mirror.backend.live.empty());
+}
+
+TEST_CASE("mirror raises no contact, because nobody is playing")
+{
+    // The reason this is not `step(0)`. A zero-length step still runs the
+    // solver, the character controllers and the contact diff -- so it would fire
+    // `Touched` in the editor, which is a handler running in a world nobody has
+    // pressed play on.
+    Mirror mirror;
+    const core::InstanceId first = mirror.part("A");
+    const core::InstanceId second = mirror.part("B");
+    mirror.sync.mirror();
+    [[maybe_unused]] const auto ignored = mirror.fixture.world.changes().take();
+
+    physics::ContactEvent event;
+    event.phase = physics::ContactPhase::Began;
+    event.firstUserData = mirror.sync.userDataOf(first);
+    event.secondUserData = mirror.sync.userDataOf(second);
+    mirror.backend.contacts.push_back(event);
+
+    mirror.sync.mirror();
+    CHECK(mirror.fixture.world.changes().take().empty());
+}
+
 // --- What the mirror remembers about a refusal -------------------------------
 
 TEST_CASE("a body the backend refuses is asked for once, not once a tick")

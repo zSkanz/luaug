@@ -85,6 +85,23 @@ public:
     // signals. Called from the sim tick and from nowhere else.
     void step(f64 fixedDt);
 
+    // The mirror WITHOUT the simulation: create, update and retire the bodies
+    // the tree describes, and advance nothing.
+    //
+    // **What an editor's collision view is drawn from.** A paused world never
+    // ticks, so `step` is never called, so the backend holds no bodies at all --
+    // and a wireframe of a world with no bodies in it is an empty picture that
+    // looks exactly like a working one. This is what puts the shapes there, so
+    // the editor can ask the backend what it thinks a part's collider is rather
+    // than deriving a second answer beside it.
+    //
+    // **Deliberately not `step(0)`.** A zero-length step still runs the solver,
+    // the character controllers and the contact diff -- so it would raise
+    // `Touched` while nobody is playing, advance a character by whatever a
+    // zero-dt controller does, and write results back over the tree an author is
+    // editing. None of those is a thing a view may do.
+    void mirror();
+
     // --- The floating origin (ADR 0014, architecture.md §10) ------------------
     //
     // The tree stores absolute f64 and always has; what the origin changes is

@@ -340,6 +340,23 @@ struct EditorPanels
     // Off by default: it is four lines per cell for every cell the index knows
     // about, which for a real world is thousands.
     bool showChunkGrid = false;
+
+    // **Whether the viewport draws what the SOLVER thinks each part is**, and it
+    // is off.
+    //
+    // The one picture that can disagree with the rendered one, which is what
+    // makes it worth having: a `MeshPart`'s collider is a hull rather than its
+    // triangles, a `Capsule`'s caps are hemispheres the collider never
+    // stretches, and a `Wedge` collides as its whole box. Every one of those is
+    // invisible until something falls through the world.
+    //
+    // `DebugService:ShowPanel("Physics")` has shown it in a running game since
+    // M5, and a script call is not something an editor has -- so an author
+    // building a level was the one person who could not see the colliders they
+    // were placing.
+    //
+    // Off by default: it is a line per shape edge for every body in the world.
+    bool showCollision = false;
 };
 
 // What the shell asked for this frame, drained by the frame loop at the safe

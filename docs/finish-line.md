@@ -278,7 +278,18 @@ that sends the next session to the wrong place.
       bone instead of along it, so every shoulder started outside its own limit
       and the character launched. What is left is `import_matches_build` and
       the rendercapture leg, both of which belong to step 14.
-- [ ] **S4.8** E5's unfinished half.
+- [x] **S4.8** E5's unfinished half — **the screenshot row is closed, and it
+      is closed by moving the picture rather than by finding a way to
+      photograph a panel.** The row asked for a screenshot of the chunk-state
+      overlay; the overlay was ImGui, ImGui cannot render headlessly, and the
+      row sat PENDING from the day the milestone closed. `drawChunkGrid` puts
+      the grid in the WORLD through `DebugDraw` -- one cell outline per chunk
+      coloured by state, a post at one corner, each focus's two rings -- which
+      is both better for a person (streaming is a question about space) and
+      capturable, because `--headless --screenshot` already reaches the
+      ordinary renderer. `tests/screenshots/chunkgrid` is the differential.
+      The other half, migrating `05-streaming` and `10-open-world` off the
+      generator path, is the human's own ask and is not E5's gate.
 
 ### S5 — The editor's declared verbs
 
@@ -290,11 +301,26 @@ that sends the next session to the wrong place.
 - [ ] **S5.6** A stamp override is visible, revertable and appliable.
 - [ ] **S5.7** Project settings, which needs a TOML writer the engine lacks.
 - [ ] **S5.8** Camera control during play.
-- [ ] **S5.9** The Streaming panel in the editor shell — blocks E5's last gate
-      row.
-- [ ] **S5.10** The physics wireframe from edit mode.
+- [x] **S5.9** The Streaming panel in the editor shell — built, inside Stats.
+      `drawShell` has drawn those counters since M7 and `drawEditorShell` was
+      never handed the host, so the one shell in which somebody is AUTHORING a
+      streamed world was the one that could not see what streaming was doing.
+- [x] **S5.10** The physics wireframe from edit mode — built, and it needed
+      more than a menu item. `DebugService:ShowPanel("Physics")` is a SCRIPT
+      call and edit mode runs no game script, so the one person who could not
+      see the colliders they were placing was the author placing them. The
+      switch is `View > Collision Shapes`; the half that was missing is
+      `PhysicsSync::mirror()`, because a paused world never calls `step`, so
+      the backend held no bodies at all and the wireframe of a world with no
+      bodies is an empty picture that looks exactly like a working one.
+      Deliberately not `step(0)`: that still runs the solver, the character
+      controllers and the contact diff, so it would fire `Touched` in the
+      editor. Three cases assert it creates, retires, and raises nothing.
 - [ ] **S5.11** A console error jumps to the line that raised it.
-- [ ] **S5.12** The Stats panel shows what is already measured.
+- [~] **S5.12** The Stats panel shows what is already measured — **streaming
+      is in**, beside the frame and memory readouts it already had. What is
+      left is the render-side counters, which the F3 overlay shows and the
+      editor's panel does not.
 - [ ] **S5.13** Snap step editable; a reference grid drawn.
 - [ ] **S5.14** Properties search and categories.
 - [ ] **S5.15** Attributes.

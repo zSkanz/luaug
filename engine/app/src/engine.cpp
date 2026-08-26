@@ -2373,8 +2373,21 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // Behind `DebugService:ShowPanel("Physics")` rather than always on: it
         // is a line per shape edge for every body in the world, which is a frame
         // cost nobody should pay without asking.
-        if (scene::PhysicsSync* physics = host->physics();
-            physics != nullptr && script::panelOpen(host->runtime().state(), "Physics")) {
+        //
+        // **`View > Collision Shapes` is the second switch, and it is the one an
+        // EDITOR has** (S5.10). `ShowPanel` is a script call, and edit mode runs
+        // no game script -- so the one person who could not see the colliders
+        // they were placing was the author placing them.
+        const bool wantCollision = (overlay.has_value() && overlay->panels().showCollision) ||
+                                   script::panelOpen(host->runtime().state(), "Physics");
+        if (scene::PhysicsSync* physics = host->physics(); physics != nullptr && wantCollision) {
+            // **The mirror, when nothing is ticking.** A paused world never
+            // calls `step`, so the backend holds no bodies at all, and the
+            // wireframe of a world with no bodies is an empty picture that looks
+            // exactly like a working one. `mirror` creates and retires them
+            // without advancing anything.
+            if (host->world().engineState().paused)
+                physics->mirror();
             PhysicsWireframe sink(debugDraw);
             physics->backend().debugDraw(physics->worldHandle(), sink);
         }

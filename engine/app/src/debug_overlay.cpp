@@ -4270,6 +4270,11 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
             ImGui::SetTooltip("draw every skinned mesh's rig as lines, so a joint is something you can see before you "
                               "name it in a Bone");
         }
+        ImGui::MenuItem("Collision Shapes", nullptr, &panels.showCollision);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("draw what the SOLVER thinks each part is, which is not always what is drawn: a mesh "
+                              "collides as a hull, a wedge as its whole box");
+        }
         ImGui::MenuItem("Streaming Grid", nullptr, &panels.showChunkGrid);
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("draw the chunk grid and each focus's rings in the world, coloured by what each cell is "

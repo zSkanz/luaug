@@ -1094,6 +1094,13 @@ void PhysicsSync::setOrigin(core::DVec3 origin)
     // for nothing.
 }
 
+void PhysicsSync::mirror()
+{
+    if (!m_world.valid() || !m_workspace.valid())
+        return;
+    applyScene();
+}
+
 void PhysicsSync::step(f64 fixedDt)
 {
     if (!m_world.valid())
