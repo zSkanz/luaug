@@ -1,9 +1,24 @@
 #include "luaug/render/shadow.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <limits>
 
 namespace luaug::render {
+
+// How many candidates the ranking will look at in one frame. Past this a light
+// is refused without being weighed, which is reported rather than silent -- and
+// the number is far above the tile budget on purpose, so the ORDER is decided
+// among everything plausible even though only a few can be served.
+inline constexpr core::usize kMaxRankedCandidates = 256;
+
+// A spot's projection covers a little more than its cone. Fitted exactly, the
+// rim lands on the tile edge where a filter tap reads off the map.
+inline constexpr f32 kSpotFovMargin = 1.1f;
+inline constexpr f32 kMinSpotFov = 0.1f;
+inline constexpr f32 kMaxSpotFov = 2.8f;
+inline constexpr f32 kHalfPi = 1.5707963267948966f;
 namespace {
 
 using core::DVec3;
@@ -345,6 +360,154 @@ ShadowCascades fitShadowCascades(const ShadowFit& fit, const ShadowCascades* pre
 
     cascades.fitted = true;
     return cascades;
+}
+
+// --- Local lights ------------------------------------------------------------
+
+namespace {
+
+// The six cube directions and the up vector each one needs, in `CubeFace` order.
+//
+// **The up vectors are not arbitrary.** A look-at whose forward is parallel to
+// its up produces a degenerate basis, so the two vertical faces have to use a
+// different up from the four horizontal ones -- and the choice fixes which way
+// each face is oriented, which is a thing a shader and a test have to agree on
+// rather than discover.
+struct CubeAxis
+{
+    Vec3 forward;
+    Vec3 up;
+};
+
+constexpr CubeAxis kCubeAxes[kPointShadowTiles] = {
+    {{1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}},  {{-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}},
+    {{0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}},  {{0.0f, -1.0f, 0.0f}, {0.0f, 0.0f, -1.0f}},
+    {{0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f}},  {{0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f}},
+};
+
+// What a light is worth a tile for: how large it looms from the camera, which in
+// camera-relative space is its range over its distance. A light the camera is
+// inside gets the largest finite score there is rather than an infinity, so the
+// ordering below never has to reason about one.
+[[nodiscard]] f32 apparentSize(const LocalShadowCandidate& candidate) noexcept
+{
+    if (!(candidate.range > 0.0f))
+        return 0.0f;
+    const f32 distanceSquared = candidate.position.x * candidate.position.x +
+                                candidate.position.y * candidate.position.y +
+                                candidate.position.z * candidate.position.z;
+    const f32 distance = std::sqrt(distanceSquared);
+    // Inside its own range: as important as a light can be.
+    if (distance <= candidate.range)
+        return std::numeric_limits<f32>::max();
+    return candidate.range / distance;
+}
+
+[[nodiscard]] bool isPoint(const LocalShadowCandidate& candidate) noexcept
+{
+    // The same test `GpuLight` documents, and deliberately not a separate enum:
+    // two spellings of "which kind is this" is one that can disagree.
+    return !(candidate.cosHalfAngle > -1.0f);
+}
+
+} // namespace
+
+LocalShadowTileRect localShadowTileRect(u32 tile) noexcept
+{
+    LocalShadowTileRect rect;
+    const u32 wrapped = tile % kLocalShadowTileCount;
+    rect.x = (wrapped % kLocalShadowAtlasTiles) * kLocalShadowTileResolution;
+    rect.y = (wrapped / kLocalShadowAtlasTiles) * kLocalShadowTileResolution;
+    return rect;
+}
+
+LocalShadows fitLocalShadows(std::span<const LocalShadowCandidate> candidates, u32 tileBudget) noexcept
+{
+    LocalShadows out;
+    if (candidates.empty() || tileBudget == 0)
+        return out;
+    if (tileBudget > kLocalShadowTileCount)
+        tileBudget = kLocalShadowTileCount;
+
+    // Ordered by apparent size, ties by index. **A stable sort is not enough on
+    // its own** -- two lights at the same distance with the same range are a
+    // real case, a corridor of identical lamps -- so the index is part of the
+    // comparison rather than left to the algorithm's discretion.
+    struct Ranked
+    {
+        u32 index;
+        f32 size;
+    };
+    std::array<Ranked, kMaxRankedCandidates> ranked{};
+    core::usize rankedCount = 0;
+    for (core::usize index = 0; index < candidates.size() && rankedCount < ranked.size(); ++index) {
+        const f32 size = apparentSize(candidates[index]);
+        if (size <= 0.0f) {
+            ++out.refused;
+            continue;
+        }
+        ranked[rankedCount++] = Ranked{static_cast<u32>(index), size};
+    }
+    // Anything past the cap did not even get considered, and saying so is the
+    // difference between a budget and a silent truncation.
+    if (candidates.size() > ranked.size())
+        out.refused += static_cast<u32>(candidates.size() - ranked.size());
+
+    std::sort(ranked.begin(), ranked.begin() + static_cast<std::ptrdiff_t>(rankedCount),
+              [](const Ranked& a, const Ranked& b) noexcept {
+                  if (a.size != b.size)
+                      return a.size > b.size;
+                  return a.index < b.index;
+              });
+
+    for (core::usize slot = 0; slot < rankedCount; ++slot) {
+        const u32 index = ranked[slot].index;
+        const LocalShadowCandidate& candidate = candidates[index];
+        const bool point = isPoint(candidate);
+        const u32 tiles = point ? kPointShadowTiles : kSpotShadowTiles;
+
+        if (out.tilesUsed + tiles > tileBudget) {
+            // **Refused, and the loop keeps going.** A point light that does not
+            // fit must not stop the four spots behind it from fitting -- the
+            // budget is tiles and not a queue.
+            ++out.refused;
+            continue;
+        }
+
+        LocalShadow& shadow = out.entries[out.count];
+        shadow.candidate = index;
+        shadow.firstTile = out.tilesUsed;
+        shadow.tileCount = tiles;
+        shadow.nearPlane = kLocalShadowNearPlane;
+        shadow.farPlane = candidate.range;
+
+        if (point) {
+            const Mat4 projection = core::perspective(kHalfPi, 1.0f, shadow.nearPlane, shadow.farPlane);
+            for (u32 face = 0; face < kPointShadowTiles; ++face) {
+                const CubeAxis& axis = kCubeAxes[face];
+                shadow.viewProjection[face] =
+                    projection * core::lookAt(candidate.position, candidate.position + axis.forward, axis.up);
+            }
+        }
+        else {
+            // **The full cone and a little more.** The projection has to cover
+            // the cone the shading term evaluates, and a field of view fitted
+            // exactly to the half angle puts the cone's rim on the tile's edge
+            // where a filter tap reads off the map. Doubling the half angle and
+            // adding a margin costs resolution and buys a shadow whose edge is
+            // inside the picture.
+            const f32 halfAngle = std::acos(std::clamp(candidate.cosHalfAngle, -1.0f, 1.0f));
+            const f32 fov = std::clamp(2.0f * halfAngle * kSpotFovMargin, kMinSpotFov, kMaxSpotFov);
+            const Vec3 up = std::abs(candidate.direction.y) > 0.99f ? Vec3{0.0f, 0.0f, 1.0f} : Vec3{0.0f, 1.0f, 0.0f};
+            shadow.viewProjection[0] = core::perspective(fov, 1.0f, shadow.nearPlane, shadow.farPlane) *
+                                       core::lookAt(candidate.position, candidate.position + candidate.direction, up);
+        }
+
+        out.tilesUsed += tiles;
+        ++out.count;
+    }
+
+    return out;
 }
 
 } // namespace luaug::render

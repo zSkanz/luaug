@@ -282,4 +282,132 @@ struct ShadowFit
 // `kShadowDistance`, and the values in between are monotone.
 void shadowSplits(f32 nearPlane, f32 farDistance, f32 lambda, f32 (&out)[kShadowCascadeCount + 1]) noexcept;
 
+// --- Local lights: a second atlas, for spots and points ----------------------
+//
+// **`PointLight.Shadows` and `SpotLight.Shadows` were stored, plumbed all the
+// way to `RenderLight::shadows`, and read by no pass for three milestones.** The
+// roadmap asked for one of two answers -- honour them or remove them -- and each
+// milestone gave a third: M4 called it out of scope in a C++ comment, M4.5
+// marked the properties `Inert`, M7.5 brought four cascades and clustered lights
+// and did not come back to it. This is the first answer.
+//
+// R18 makes visual fidelity a v1 target, and a lamp that casts no shadow is one
+// of the most visible things a renderer can get wrong: it is the same complaint
+// as a cave lit by the sky.
+//
+// **A separate atlas from the sun's, and separate for a reason.** A cascade is
+// orthographic, fitted to a camera slice, and remembers its box between frames
+// to stop its lattice crawling (D048). A local light is perspective, fitted to
+// its own range, and does not move unless the light does -- so nothing about the
+// cascade fit applies, and sharing one texture would mean one resolution for two
+// problems with different budgets.
+
+// One tile. **512 rather than a cascade's 1024**, because the arithmetic is
+// different: a cascade covers a slice of the whole world and a spot covers a
+// cone the length of its own range, so the same texel count buys far more there.
+// Sixteen tiles at 512 is a 2048 atlas -- the same size as the cascade atlas
+// and the same 16 MiB at D32.
+inline constexpr u32 kLocalShadowTileResolution = 512;
+inline constexpr u32 kLocalShadowAtlasTiles = 4;
+inline constexpr u32 kLocalShadowAtlasResolution = kLocalShadowTileResolution * kLocalShadowAtlasTiles;
+inline constexpr u32 kLocalShadowTileCount = kLocalShadowAtlasTiles * kLocalShadowAtlasTiles;
+
+// A point light costs six tiles and a spot costs one, which is the whole reason
+// a budget exists rather than a count: sixteen spots fit, and two point lights
+// and four spots fit, and three point lights do not.
+inline constexpr u32 kPointShadowTiles = 6;
+inline constexpr u32 kSpotShadowTiles = 1;
+
+// A light asking for a shadow, in the snapshot's camera-relative space -- the
+// same space `GpuLight` is in, so a caller passes what it already has.
+//
+// Deliberately NOT `RenderLight`: this file computes matrices and knows nothing
+// about a renderer, which is what lets its answers be checked without one.
+struct LocalShadowCandidate
+{
+    core::Vec3 position;
+    // Spot only. Ignored when this is a point light.
+    core::Vec3 direction{0.0f, -1.0f, 0.0f};
+    f32 range = 0.0f;
+    // **-1 is a point light**, exactly as `GpuLight::directionCosAngle.w` spells
+    // it, so the two never disagree about which kind a light is.
+    f32 cosHalfAngle = -1.0f;
+};
+
+// One light that asked and got.
+struct LocalShadow
+{
+    // Which candidate this is, so the caller can write the tile back into its
+    // own light table without a second search.
+    u32 candidate = 0;
+    // Row-major into the atlas. A point light occupies `firstTile` through
+    // `firstTile + 5`, in the face order below.
+    u32 firstTile = 0;
+    u32 tileCount = kSpotShadowTiles;
+    // One per face for a point light; `[0]` alone for a spot.
+    core::Mat4 viewProjection[kPointShadowTiles];
+    // The range the depth was written against, so a shader can linearise it and
+    // a bias in metres can be turned into one in depth units.
+    f32 nearPlane = 0.0f;
+    f32 farPlane = 0.0f;
+};
+
+struct LocalShadows
+{
+    // At most one entry per tile, because the cheapest light costs one.
+    LocalShadow entries[kLocalShadowTileCount];
+    u32 count = 0;
+    u32 tilesUsed = 0;
+    // How many asked and did not get one. Reported rather than swallowed: a
+    // scene that quietly drops half its shadows every frame should be able to
+    // say so, and the Stats panel is where a person would look.
+    u32 refused = 0;
+};
+
+// **How near a local light's shadow starts.** A point light inside a lamp
+// housing would otherwise self-shadow the housing away; five centimetres is
+// under any geometry a light is placed inside and far enough from zero that the
+// depth range does not collapse.
+inline constexpr f32 kLocalShadowNearPlane = 0.05f;
+
+// Assigns tiles to the candidates worth spending them on.
+//
+// **The order is by apparent size and it must be stable**, which is a
+// correctness requirement rather than a nicety: a caster set that changes
+// between frames for a reason not on screen is shadows popping in and out, and
+// that is the defect this kind of work ships. Apparent size is `range /
+// distance` -- what a person perceives as "this light matters here" -- and a tie
+// is broken by the candidate's own index, which is pool order and therefore a
+// pure function of the operation sequence.
+//
+// A candidate whose apparent size is zero (no range, or the camera exactly on
+// it) is refused rather than given a degenerate projection.
+[[nodiscard]] LocalShadows fitLocalShadows(std::span<const LocalShadowCandidate> candidates,
+                                           u32 tileBudget = kLocalShadowTileCount) noexcept;
+
+// Where a tile sits in the atlas, in texels. Exposed because the render pass
+// sets a viewport from it and a test can check the two agree.
+struct LocalShadowTileRect
+{
+    u32 x = 0;
+    u32 y = 0;
+    u32 width = kLocalShadowTileResolution;
+    u32 height = kLocalShadowTileResolution;
+};
+
+[[nodiscard]] LocalShadowTileRect localShadowTileRect(u32 tile) noexcept;
+
+// The six faces of a cube shadow, in the order `viewProjection` stores them:
+// +X, -X, +Y, -Y, +Z, -Z. Named so a shader and a test can agree on which is
+// which without either one guessing.
+enum class CubeFace : u32
+{
+    PositiveX = 0,
+    NegativeX = 1,
+    PositiveY = 2,
+    NegativeY = 3,
+    PositiveZ = 4,
+    NegativeZ = 5,
+};
+
 } // namespace luaug::render

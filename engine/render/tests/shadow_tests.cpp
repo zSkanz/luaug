@@ -257,3 +257,204 @@ TEST_CASE("a sun straight overhead still produces a usable basis")
     CHECK(clip.z > 0.0f);
     CHECK(clip.z < 1.0f);
 }
+
+// --- Local lights: spots and points get shadows too ---------------------------
+//
+// **These are the first assertions `PointLight.Shadows` and `SpotLight.Shadows`
+// have ever had.** The properties were stored, plumbed to `RenderLight::shadows`
+// and read by nothing for three milestones, so there was nothing to test. What
+// is checked here is the half that needs no GPU and is the half most likely to
+// be wrong: which lights get a tile, in what order, and where each tile is.
+
+namespace {
+
+[[nodiscard]] render::LocalShadowCandidate spotAt(core::Vec3 position, core::f32 range,
+                                                  core::f32 cosHalfAngle = 0.7f) noexcept
+{
+    render::LocalShadowCandidate candidate;
+    candidate.position = position;
+    candidate.direction = core::Vec3{0.0f, -1.0f, 0.0f};
+    candidate.range = range;
+    candidate.cosHalfAngle = cosHalfAngle;
+    return candidate;
+}
+
+[[nodiscard]] render::LocalShadowCandidate pointAt(core::Vec3 position, core::f32 range) noexcept
+{
+    render::LocalShadowCandidate candidate;
+    candidate.position = position;
+    candidate.range = range;
+    // -1 is what makes it a point light, and it is `GpuLight`'s own spelling.
+    candidate.cosHalfAngle = -1.0f;
+    return candidate;
+}
+
+// Whether a world point lands inside the clip volume a matrix projects into.
+[[nodiscard]] bool insideClip(const core::Mat4& viewProjection, core::Vec3 point) noexcept
+{
+    // `transformPoint` returns the raw xyz and no w, which is right for the
+    // cascades above -- an orthographic w is always one -- and not enough here:
+    // a perspective divide by a NEGATIVE w mirrors a point behind the light into
+    // the volume in front of it, and every one of these cases would then pass by
+    // accident. So w is computed and its sign is checked before anything else.
+    const core::Vec3 clip = core::transformPoint(viewProjection, point);
+    const core::f32 w = viewProjection.m[0][3] * point.x + viewProjection.m[1][3] * point.y +
+                        viewProjection.m[2][3] * point.z + viewProjection.m[3][3];
+    if (!(w > 0.0f))
+        return false;
+    const core::f32 x = clip.x / w;
+    const core::f32 y = clip.y / w;
+    const core::f32 z = clip.z / w;
+    return x >= -1.0f && x <= 1.0f && y >= -1.0f && y <= 1.0f && z >= 0.0f && z <= 1.0f;
+}
+
+} // namespace
+
+TEST_CASE("the atlas is a four by four grid, row-major, and a tile index wraps")
+{
+    const render::LocalShadowTileRect first = render::localShadowTileRect(0);
+    CHECK(first.x == 0);
+    CHECK(first.y == 0);
+    CHECK(first.width == render::kLocalShadowTileResolution);
+
+    // The fifth tile starts the second row, which is what "row-major" has to
+    // mean for the shader index arithmetic to agree with this.
+    const render::LocalShadowTileRect fifth = render::localShadowTileRect(4);
+    CHECK(fifth.x == 0);
+    CHECK(fifth.y == render::kLocalShadowTileResolution);
+
+    const render::LocalShadowTileRect last = render::localShadowTileRect(render::kLocalShadowTileCount - 1);
+    CHECK(last.x == render::kLocalShadowTileResolution * 3);
+    CHECK(last.y == render::kLocalShadowTileResolution * 3);
+}
+
+TEST_CASE("a spot costs one tile and a point costs six")
+{
+    const render::LocalShadowCandidate candidates[] = {
+        spotAt({0.0f, 5.0f, -3.0f}, 20.0f),
+        pointAt({2.0f, 4.0f, -3.0f}, 20.0f),
+    };
+
+    const render::LocalShadows shadows = render::fitLocalShadows(candidates);
+    REQUIRE(shadows.count == 2);
+    CHECK(shadows.tilesUsed == render::kSpotShadowTiles + render::kPointShadowTiles);
+    CHECK(shadows.refused == 0);
+
+    // Tiles are handed out contiguously, so the second light starts where the
+    // first ended. The shader indexes faces off `firstTile`, so a gap would be a
+    // face sampled out of a tile belonging to another light.
+    const render::LocalShadow& second = shadows.entries[1];
+    CHECK(second.firstTile == shadows.entries[0].firstTile + shadows.entries[0].tileCount);
+}
+
+TEST_CASE("the budget is tiles, so a point that does not fit does not block the spots behind it")
+{
+    // Two points is twelve tiles; a third would be eighteen against sixteen. The
+    // spots after it cost one each and must still be served -- a budget that
+    // stopped at the first refusal would be a queue, and one large light near
+    // the camera would take every shadow in the scene with it.
+    const render::LocalShadowCandidate candidates[] = {
+        pointAt({0.0f, 0.0f, -1.0f}, 100.0f), pointAt({0.0f, 0.0f, -2.0f}, 100.0f),
+        spotAt({0.0f, 0.0f, -3.0f}, 100.0f),  pointAt({0.0f, 0.0f, -4.0f}, 100.0f),
+        spotAt({0.0f, 0.0f, -5.0f}, 100.0f),
+    };
+
+    const render::LocalShadows shadows = render::fitLocalShadows(candidates);
+    CHECK(shadows.tilesUsed <= render::kLocalShadowTileCount);
+    CHECK(shadows.refused == 1);
+
+    bool servedTheLastSpot = false;
+    for (core::u32 index = 0; index < shadows.count; ++index) {
+        if (shadows.entries[index].candidate == 4)
+            servedTheLastSpot = true;
+    }
+    CHECK(servedTheLastSpot);
+}
+
+TEST_CASE("order is by apparent size, and a tie is broken by index rather than by luck")
+{
+    // Two identical lamps at the same distance is a corridor, not a curiosity. A
+    // comparison that left the tie to the sort could return either order on
+    // either run, and a caster set that changes for a reason not on screen is
+    // shadows popping in and out.
+    const render::LocalShadowCandidate candidates[] = {
+        spotAt({0.0f, 0.0f, -50.0f}, 4.0f),
+        spotAt({3.0f, 0.0f, -20.0f}, 8.0f),
+        spotAt({-3.0f, 0.0f, -20.0f}, 8.0f),
+    };
+
+    const render::LocalShadows first = render::fitLocalShadows(candidates);
+    REQUIRE(first.count == 3);
+    // The small far one is last however the pair fell.
+    CHECK(first.entries[2].candidate == 0);
+
+    // And the answer is the same every time it is asked.
+    for (int again = 0; again < 8; ++again) {
+        const render::LocalShadows repeated = render::fitLocalShadows(candidates);
+        REQUIRE(repeated.count == first.count);
+        for (core::u32 index = 0; index < repeated.count; ++index)
+            CHECK(repeated.entries[index].candidate == first.entries[index].candidate);
+    }
+}
+
+TEST_CASE("a light with no range is refused rather than given a degenerate projection")
+{
+    const render::LocalShadowCandidate candidates[] = {spotAt({0.0f, 2.0f, -4.0f}, 0.0f)};
+    const render::LocalShadows shadows = render::fitLocalShadows(candidates);
+    CHECK(shadows.count == 0);
+    CHECK(shadows.refused == 1);
+    CHECK(shadows.tilesUsed == 0);
+}
+
+TEST_CASE("a point light six faces cover every direction around it")
+{
+    // The claim a cube shadow rests on: whichever way a receiver lies from the
+    // light, at least one face has it. A wrong `up` on one face turns into a band
+    // of the world that casts no shadow at all, which is the artefact this
+    // refuses.
+    const core::Vec3 lightPosition{1.0f, 2.0f, -3.0f};
+    const render::LocalShadowCandidate candidates[] = {pointAt(lightPosition, 30.0f)};
+    const render::LocalShadows shadows = render::fitLocalShadows(candidates);
+    REQUIRE(shadows.count == 1);
+    REQUIRE(shadows.entries[0].tileCount == render::kPointShadowTiles);
+
+    const render::LocalShadow& shadow = shadows.entries[0];
+    const core::Vec3 directions[] = {
+        {1.0f, 0.0f, 0.0f},  {-1.0f, 0.0f, 0.0f},  {0.0f, 1.0f, 0.0f},
+        {0.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 1.0f},   {0.0f, 0.0f, -1.0f},
+        {0.6f, 0.6f, 0.53f}, {-0.5f, 0.7f, -0.5f}, {0.4f, -0.8f, 0.45f},
+    };
+
+    for (const core::Vec3& direction : directions) {
+        const core::Vec3 target{lightPosition.x + direction.x * 5.0f, lightPosition.y + direction.y * 5.0f,
+                                lightPosition.z + direction.z * 5.0f};
+        int seen = 0;
+        for (core::u32 face = 0; face < render::kPointShadowTiles; ++face) {
+            if (insideClip(shadow.viewProjection[face], target))
+                ++seen;
+        }
+        CHECK(seen >= 1);
+    }
+}
+
+TEST_CASE("a spot projection contains the rim of its own cone")
+{
+    // Fitted exactly to the half angle, the rim lands ON the tile edge, where a
+    // filter tap reads off the map and the outline of the shadow map itself
+    // becomes the artefact. The margin is what this asserts.
+    const core::Vec3 lightPosition{0.0f, 10.0f, 0.0f};
+    const core::f32 cosHalfAngle = 0.7071f; // forty-five degrees
+    const render::LocalShadowCandidate candidates[] = {spotAt(lightPosition, 40.0f, cosHalfAngle)};
+    const render::LocalShadows shadows = render::fitLocalShadows(candidates);
+    REQUIRE(shadows.count == 1);
+
+    const core::Mat4& viewProjection = shadows.entries[0].viewProjection[0];
+    // Straight down the axis, well inside.
+    CHECK(insideClip(viewProjection, core::Vec3{0.0f, 0.0f, 0.0f}));
+    // On the rim: ten metres down and ten metres out is forty-five degrees.
+    CHECK(insideClip(viewProjection, core::Vec3{10.0f, 0.0f, 0.0f}));
+    CHECK(insideClip(viewProjection, core::Vec3{0.0f, 0.0f, 10.0f}));
+    // Well outside the cone is off the map, which is what keeps the resolution
+    // on the cone rather than on the room.
+    CHECK_FALSE(insideClip(viewProjection, core::Vec3{60.0f, 0.0f, 0.0f}));
+}
