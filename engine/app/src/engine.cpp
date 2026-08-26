@@ -11,6 +11,7 @@
 // libstdc++, which is a different version with a different transitive graph.
 // A header a translation unit uses is a header it includes.
 #include "luaug/app/backends.h"
+#include "luaug/app/content_import.h"
 #include "luaug/app/debug_overlay.h"
 #include "luaug/app/dev_control.h"
 #include "luaug/app/editor.h"
@@ -666,7 +667,70 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // the pack for exactly this reason.
     if (options.editor)
         editor.openContent(contentRoot);
+
+    // **Opening a project compiles what has no compiled form** (E9 step 12,
+    // assumption 3). A project cloned from git has a `content/` and no store, so
+    // without this it would need a command nobody told anybody to run -- and the
+    // difference is not cosmetic: the compiled path is the only one that reads
+    // an FBX at all, and it is BC7 with mips where the loose one is raw RGBA8.
+    //
+    // **It is cheap after the first time and that is the whole reason it can
+    // live here.** `importOne` goes through the same content-addressed cache a
+    // command-line build uses, so a re-open compiles nothing and reads a
+    // manifest. The first open of a large project pays once.
+    if (options.editor && isProject) {
+        std::vector<std::string> pending = editor.content().filesOfKind(ContentKind::Mesh);
+        for (std::string& texture : editor.content().filesOfKind(ContentKind::Texture))
+            pending.push_back(std::move(texture));
+
+        if (!pending.empty()) {
+            const ContentImportReport compiled = compileImported(options.scriptPath, contentRoot, pending);
+            // **Only when it did something.** Every re-open of a project would
+            // otherwise announce the same totals, because the counts are
+            // reported identically on a cache hit -- so the line would be there
+            // every time and mean nothing any time.
+            if (compiled.cacheMisses > 0) {
+                const std::array<core::I18nArg, 2> args{
+                    core::I18nArg{"meshes", static_cast<core::i64>(compiled.meshes)},
+                    core::I18nArg{"textures", static_cast<core::i64>(compiled.textures)}};
+                core::log(LogLevel::Info, LUAUG_TR("app.info.import_compiled"), args);
+            }
+            if (!compiled.failed.empty()) {
+                // Named and survivable: the loose file is still there, so a
+                // source the compiler refused is slower rather than absent --
+                // except for the formats only the compiler can read, and saying
+                // which one it was is the whole value of this line.
+                const std::array<core::I18nArg, 2> args{core::I18nArg{"name", compiled.failed.front()},
+                                                        core::I18nArg{"detail", compiled.diagnostic}};
+                core::log(LogLevel::Warn, LUAUG_TR("app.warn.import_compile"), args);
+            }
+        }
+    }
     if (isProject) {
+        // **The import store, between the source tree and the pack** (E9 step
+        // 12). `resolve` walks mounts in reverse, so this outranks the loose
+        // files -- which is the point: the compiled form of a texture is BC7
+        // with mips where the loose one is raw RGBA8, and the compiled form of a
+        // mesh is a `.lmesh` where the loose one is JSON re-parsed on every
+        // launch.
+        //
+        // A shipped pack still outranks BOTH, because it is mounted after. That
+        // ordering is what lets a project keep its editor store while a build
+        // ships something else entirely.
+        //
+        // A store that is not there yet is not an error: a project nobody has
+        // imported into has none, and the loose mount answers for everything.
+        const std::filesystem::path objects = importObjectsDir(options.scriptPath);
+        const std::filesystem::path storeIndex = importIndexPath(options.scriptPath);
+        if (std::filesystem::exists(storeIndex, pathError)) {
+            if (auto storeError = contentMounts.mountObjects(objects, storeIndex); storeError.has_value()) {
+                // Survivable for the same reason a bad pack is: the loose mount
+                // stands, so a broken store is a slower load rather than a world
+                // with no meshes in it.
+                core::logText(LogLevel::Warn, storeError->message);
+            }
+        }
+
         const std::filesystem::path pack = options.scriptPath / ".luaug" / "content.lpack";
         if (std::filesystem::exists(pack, pathError)) {
             if (auto mountError = contentMounts.mountPack(pack); mountError.has_value()) {
@@ -1441,6 +1505,28 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     const ContentTree::ImportReport report = editor.content().import(importedPaths);
                     importedPaths.clear();
                     editor.reportImport(report);
+
+                    // **And compiled, by the same call `assetc` makes**
+                    // (E9 step 12). The files are in `content/` either way --
+                    // that has not changed and a loose one still resolves -- and
+                    // what this adds is the compiled form beside them, in the
+                    // project's own object store: BC7 with mips where the loose
+                    // path uploads raw RGBA8, and a `.lmesh` where it re-parses
+                    // JSON on every launch.
+                    //
+                    // Companions are not compiled and are not meant to be: a
+                    // `.bin` and the images beside a `.gltf` are read BY it, and
+                    // compiling the model reads them.
+                    if (const ContentImportReport compiled =
+                            compileImported(options.scriptPath, editor.content().root(), report.imported);
+                        !compiled.failed.empty()) {
+                        // Named rather than counted, and not fatal: the loose
+                        // file is still there and still resolves, so a source
+                        // the compiler refused is slower rather than absent.
+                        const std::array<I18nArg, 2> args{I18nArg{"name", compiled.failed.front()},
+                                                          I18nArg{"detail", compiled.diagnostic}};
+                        luaug::core::log(LogLevel::Warn, LUAUG_TR("app.warn.import_compile"), args);
+                    }
 
                     // **And the instance, when the Explorer is what asked.** A
                     // mesh is the one kind the world has a class for today; a

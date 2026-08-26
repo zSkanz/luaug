@@ -55,13 +55,21 @@ local Layers: { [string]: number } = {
 
     app = 6,
 
-    -- A TOOL, above every module it may include. It is not part of the engine
-    -- and nothing in `engine/` may include it -- which is the whole point of
-    -- giving it a number rather than leaving it out: an edge from `app` into
-    -- `assetc` would be an ordinary downward edge and therefore allowed, and
-    -- E9's editor-side import is exactly that edge arriving deliberately rather
-    -- than by accident.
-    assetc = 7,
+    -- **Five, and not the seven a first attempt gave it.** The content compiler
+    -- is a tool, and the instinct is to put a tool above everything -- but this
+    -- table is about DEPENDENCIES, and `assetc` includes `asset` (2), `core`,
+    -- `platform` and `jobs` and nothing else. Seven made `app` including it an
+    -- upward edge, which the gate refused and was right to: the number was
+    -- describing what the module is FOR rather than what it depends on, and the
+    -- two are different questions.
+    --
+    -- At five it sits above every module it includes and below `app`, so the
+    -- editor's import (E9 step 12) is an ordinary downward edge and `scene`,
+    -- `render` and `audio` still may not reach it. That it is absent from a
+    -- shipping build is not this table's job and never was: it is linked only
+    -- under `LUAUG_DEBUG_UI`, beside ImGui and SDL3, which is what keeps the
+    -- basis encoder and assimp out of a shipped game.
+    assetc = 5,
 }
 
 -- architecture.md §2 gives `script` a dependency on `ui`, which sits at the

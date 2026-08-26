@@ -140,6 +140,8 @@
   "asset.material.err.malformed": "The material file is malformed: {detail}.",
   "asset.material.err.not_a_material": "{detail} is not a LuauG material.",
   "asset.objects.err.missing_object": "The compiled object {content} is not there. Re-import the asset that produced it.",
+  "app.info.import_compiled": "Compiled {meshes} mesh(es) and {textures} texture(s) into this project's object store.",
+  "app.warn.import_compile": "Imported {name} but could not compile it: {detail}. The file is in the project and still loads; it will be read in its source form rather than a compiled one.",
   "app.warn.project_config": "The project file could not be read, so the engine's own defaults are in effect: {reason}",
   "app.warn.pointer_lock_refused": "The window refused to hold the pointer, so turning the camera will stop at the edge of the screen.",
   "app.info.pointer_lock": "Pointer {state}.",

@@ -34,6 +34,7 @@ luaug_add_module(app
         src/picking.cpp
         src/editor.cpp
         src/content_tree.cpp
+        src/content_import.cpp
         src/icons.cpp
         src/thumbnails.cpp
         src/dev_control.cpp
@@ -91,7 +92,19 @@ endif()
 # that line should be an edit to a CMakeLists, not something an #include can do
 # on its own.
 if(LUAUG_DEBUG_UI)
-    target_link_libraries(luaug_app PRIVATE luaug::imgui SDL3::SDL3-static)
+    # **`assetc` is linked HERE and only here** (E9 step 12). It carries the
+    # basis encoder and assimp, which is exactly what
+    # `engine/asset/include/luaug/asset/texture.h` split the two halves apart to
+    # keep out of a shipped game -- so the editor compiles content on import and
+    # a shipping build still carries no encoder at all.
+    #
+    # The precedent is ImGui and SDL3 beside it: a dependency the tool has and
+    # the product does not, named in a CMakeLists so that crossing the line is an
+    # edit rather than something an `#include` can do on its own. The layering
+    # gate reads real include edges and places `assetc` at 5 -- above everything
+    # it includes and below `app` -- so this is an ordinary downward edge and
+    # `scene`, `render` and `audio` still may not reach it.
+    target_link_libraries(luaug_app PRIVATE luaug::imgui SDL3::SDL3-static luaug_assetc_lib)
 endif()
 
 # PUBLIC rather than PRIVATE: debug_overlay.h describes a class that is inert in
