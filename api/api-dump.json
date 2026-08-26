@@ -1549,12 +1549,28 @@
       "Tags": [],
       "Properties": [
         {
+          "Name": "Blend",
+          "Type": "number",
+          "Default": "1"
+        },
+        {
           "Name": "Enabled",
           "Type": "boolean",
           "Default": "false"
         }
       ],
-      "Methods": [],
+      "Methods": [
+        {
+          "Name": "Build",
+          "Parameters": [
+            {
+              "Name": "profile",
+              "Type": "{ any }"
+            }
+          ],
+          "Returns": ["number"]
+        }
+      ],
       "Events": []
     },
     {

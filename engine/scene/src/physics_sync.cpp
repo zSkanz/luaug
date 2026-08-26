@@ -697,7 +697,25 @@ void PhysicsSync::driveRagdolls()
             // Into the MESH's own space, because that is the space a pose is in.
             // The bone's world frame is where the limb ended up; dividing out
             // the mesh part's own transform is what carries it there.
-            const core::CFrameD model = core::inverse(mesh->cframe) * bone->worldCFrame;
+            const core::CFrameD simulated = core::inverse(mesh->cframe) * bone->worldCFrame;
+
+            // **`Blend` interpolates the POSE, not the solver.** At 0.5 the limb
+            // has fallen exactly as far as it would at 1 and the drawn joint is
+            // carried halfway there, which is what a stumble is: the clip keeps
+            // running and the character sags. Ramping it is what makes going
+            // down something other than a one-frame snap.
+            //
+            // The animated end comes from `jointModel`, which answers for a mesh
+            // in bind pose as well as for one mid-clip -- so a character with
+            // nothing playing blends towards where it is standing rather than
+            // towards nothing.
+            core::CFrameD model = simulated;
+            if (ragdoll.blend < 1.0f) {
+                core::CFrameD animated;
+                if (!m_skeleton->jointModel(meshPart, static_cast<u32>(bone->jointIndex), animated))
+                    continue;
+                model = core::lerp(animated, simulated, static_cast<f64>(ragdoll.blend));
+            }
             m_skeleton->setJointOverride(meshPart, static_cast<u32>(bone->jointIndex), model);
         }
     });

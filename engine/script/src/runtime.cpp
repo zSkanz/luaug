@@ -266,6 +266,11 @@ void ScriptRuntime::setAnimation(scene::AnimationHost* animation)
     m_impl->services.animation = animation;
 }
 
+void ScriptRuntime::setSkeleton(scene::SkeletonHost* skeleton)
+{
+    m_impl->services.skeleton = skeleton;
+}
+
 void ScriptRuntime::fireAnimationEnded(std::span<const scene::TrackId> ended)
 {
     luaug::script::fireAnimationEnded(m_impl->state, ended);

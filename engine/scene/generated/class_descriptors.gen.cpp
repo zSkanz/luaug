@@ -889,7 +889,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(fixedConstraintDesc);
 
     // --- Ragdoll ---
-    static std::array<PropertyDesc, 1> ragdollProperties;
+    static std::array<PropertyDesc, 2> ragdollProperties;
     ragdollProperties = {{
         PropertyDesc{
             .name = atoms.intern("Enabled"),
@@ -902,6 +902,26 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .get = native::getRagdollEnabled,
             .set = native::setRagdollEnabled,
         },
+        PropertyDesc{
+            .name = atoms.intern("Blend"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How much of the pose comes from the simulation: 1 is all of it, 0 is none. Clamped.\012\012**A POSE blend, not a solver one**, and the difference matters. This interpolates each driven joint between where the clip put it and where the limb ended up, which is what a stumble is: the character keeps running and sags. It does not make the simulation weaker -- the parts fall exactly as hard either way -- so a limb at 0.5 is drawn halfway to a body that is somewhere else entirely, and far from the pose it started in that reads as rubber. Driving the SOLVER towards a pose instead is a motorised joint, and it is a different feature.\012\012Ramping this from 0 to 1 over a few tenths of a second is how a character goes down without the frame it changes on being a visible snap, and ramping it back is how one gets up.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getRagdollBlend,
+            .set = native::setRagdollBlend,
+        },
+    }};
+    static std::array<MethodDesc, 1> ragdollMethods;
+    ragdollMethods = {{
+        MethodDesc{
+            .name = atoms.intern("Build"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Creates the limbs: one `Part` per joint the profile names, a `Bone` on each saying which joint it is, and a constraint holding it to the limb above. Returns how many limbs it made.\012\012**It creates ordinary instances and nothing else**, which is the whole shape of this class: what `Build` saves you is the arithmetic -- where each limb goes, how long it is, which way it points -- and everything it produces is a thing you can select, move, retune and delete. Run it once in the editor and save the scene, and the ragdoll is part of the prefab with no script involved.\012\012The limbs are placed at the rig's CURRENT pose, so a character that goes down mid-stride falls from where it was standing.\012\012A profile is an ordered list of limbs; `require(\"@luaug/ragdoll\").Humanoid` is a built-in one that fits the common humanoid rigs. Each entry is a table:\012\012- `Joint`: the joint's name, or a list of names tried in order -- the same shoulder is `mixamorig:LeftArm` or `upper_arm.L` depending on who exported it.\012- `Parent`: the 1-based index of the limb this hangs from, absent for the root. It must point at a limb declared BEFORE this one.\012- `Radius`, `LeafLength`: the capsule's radius, and the length to use for a limb with nothing below it. A limb's length is otherwise the distance to the joint under it.\012- `Kind`: `\"BallSocket\"`, `\"Hinge\"` or `\"Fixed\"`.\012- `Swing`, `Twist`: a ball socket's cone half-angle and twist range, in degrees. Present means it becomes a swing-twist, which is what a shoulder is.\012- `LimitLow`, `LimitHigh`: a hinge's range in degrees.\012\012**A limb the rig has no joint for is skipped, not refused**, and its children hang from the nearest limb that was built -- so one humanoid profile works on a rig with no toes. It errors when the ragdoll is not on a rigged MeshPart, when it already has limbs under it, when the profile is malformed, or when the rig shares no joint with it at all.",
+        },
     }};
     ClassDescriptor ragdollDesc;
     ragdollDesc.name = atoms.intern("Ragdoll");
@@ -910,6 +930,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     ragdollDesc.defaultName = atoms.intern("Ragdoll");
     ragdollDesc.doc = "Makes a character's pose come from the simulation instead of from a clip. Parent it to the `MeshPart` whose skeleton, put the limbs under it, and switch it on.\012\012**It owns nothing.** A ragdoll is parts, `Bone`s and constraints -- every one of them an instance you can see, select and move -- and this is the flag that says to drive the pose from them. A class that owned its own hidden bodies would be a second owner of things the physics mirror already creates from the tree, and two owners of one body is a rule broken.\012\012How the pose is found: every `Bone` under this ragdoll that names a joint, sitting on a part. The part is where the simulation put that limb and the bone says which joint it is. Nothing else is declared, which is also why a partial ragdoll works -- simulate a dozen bones and the fingers ride along on the wrist, because the joints nobody drives keep their own place relative to their parent.";
     ragdollDesc.properties = ragdollProperties;
+    ragdollDesc.methods = ragdollMethods;
     ragdollDesc.attachComponents = native::attachRagdollComponents;
     ragdollDesc.detachComponents = native::detachRagdollComponents;
     classes.registerClass(ragdollDesc);

@@ -809,6 +809,38 @@ declare extern type Ragdoll extends Instance with
     --- whatever clip is playing, from wherever it is standing -- the overrides stop being written and
     --- the next tick's pose is the animation's again.
     Enabled: boolean
+    --- How much of the pose comes from the simulation: 1 is all of it, 0 is none. Clamped. **A POSE
+    --- blend, not a solver one**, and the difference matters. This interpolates each driven joint
+    --- between where the clip put it and where the limb ended up, which is what a stumble is: the
+    --- character keeps running and sags. It does not make the simulation weaker -- the parts fall
+    --- exactly as hard either way -- so a limb at 0.5 is drawn halfway to a body that is somewhere else
+    --- entirely, and far from the pose it started in that reads as rubber. Driving the SOLVER towards a
+    --- pose instead is a motorised joint, and it is a different feature. Ramping this from 0 to 1 over
+    --- a few tenths of a second is how a character goes down without the frame it changes on being a
+    --- visible snap, and ramping it back is how one gets up.
+    Blend: number
+    --- Creates the limbs: one `Part` per joint the profile names, a `Bone` on each saying which joint
+    --- it is, and a constraint holding it to the limb above. Returns how many limbs it made. **It
+    --- creates ordinary instances and nothing else**, which is the whole shape of this class: what
+    --- `Build` saves you is the arithmetic -- where each limb goes, how long it is, which way it points
+    --- -- and everything it produces is a thing you can select, move, retune and delete. Run it once in
+    --- the editor and save the scene, and the ragdoll is part of the prefab with no script involved.
+    --- The limbs are placed at the rig's CURRENT pose, so a character that goes down mid-stride falls
+    --- from where it was standing. A profile is an ordered list of limbs;
+    --- `require("@luaug/ragdoll").Humanoid` is a built-in one that fits the common humanoid rigs. Each
+    --- entry is a table: - `Joint`: the joint's name, or a list of names tried in order -- the same
+    --- shoulder is `mixamorig:LeftArm` or `upper_arm.L` depending on who exported it. - `Parent`: the
+    --- 1-based index of the limb this hangs from, absent for the root. It must point at a limb declared
+    --- BEFORE this one. - `Radius`, `LeafLength`: the capsule's radius, and the length to use for a
+    --- limb with nothing below it. A limb's length is otherwise the distance to the joint under it. -
+    --- `Kind`: `"BallSocket"`, `"Hinge"` or `"Fixed"`. - `Swing`, `Twist`: a ball socket's cone
+    --- half-angle and twist range, in degrees. Present means it becomes a swing-twist, which is what a
+    --- shoulder is. - `LimitLow`, `LimitHigh`: a hinge's range in degrees. **A limb the rig has no
+    --- joint for is skipped, not refused**, and its children hang from the nearest limb that was built
+    --- -- so one humanoid profile works on a rig with no toes. It errors when the ragdoll is not on a
+    --- rigged MeshPart, when it already has limbs under it, when the profile is malformed, or when the
+    --- rig shares no joint with it at all.
+    function Build(self, profile: { any }): number
 end
 
 declare extern type Weld extends Instance with

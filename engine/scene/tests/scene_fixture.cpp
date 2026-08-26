@@ -74,6 +74,94 @@ bool setCFrame(World& world, core::InstanceId id, const Value& value)
     return true;
 }
 
+// --- Attachment and Constraint -----------------------------------------------
+//
+// One class stands in for `Attachment` and `Bone` here, and one for the three
+// constraints, exactly as the real hierarchy shares one component between them.
+
+Value getAttachmentCFrame(const World& world, core::InstanceId id)
+{
+    const AttachmentComponent* attachment = world.attachments().find(id);
+    return attachment == nullptr ? Value{} : Value{attachment->cframe};
+}
+
+bool setAttachmentCFrame(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* frame = std::get_if<core::CFrameD>(&value);
+    AttachmentComponent* attachment = world.attachments().find(id);
+    if (frame == nullptr || attachment == nullptr)
+        return false;
+    attachment->cframe = *frame;
+    return true;
+}
+
+Value getJointName(const World& world, core::InstanceId id)
+{
+    const AttachmentComponent* attachment = world.attachments().find(id);
+    return attachment == nullptr ? Value{} : Value{std::string(world.atoms().text(attachment->jointName))};
+}
+
+bool setJointName(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* text = std::get_if<std::string>(&value);
+    AttachmentComponent* attachment = world.attachments().find(id);
+    if (text == nullptr || attachment == nullptr)
+        return false;
+    attachment->jointName = world.atoms().intern(*text);
+    // The index is re-resolved against the rig, so a rename must not keep the
+    // old answer. -1 is what "not looked up yet" means.
+    attachment->jointIndex = -1;
+    return true;
+}
+
+Value getAttachment0(const World& world, core::InstanceId id)
+{
+    const ConstraintComponent* constraint = world.constraints().find(id);
+    return constraint == nullptr ? Value{} : Value{constraint->attachment0};
+}
+
+bool setAttachment0(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* other = std::get_if<core::InstanceId>(&value);
+    ConstraintComponent* constraint = world.constraints().find(id);
+    if (other == nullptr || constraint == nullptr)
+        return false;
+    constraint->attachment0 = *other;
+    return true;
+}
+
+Value getAttachment1(const World& world, core::InstanceId id)
+{
+    const ConstraintComponent* constraint = world.constraints().find(id);
+    return constraint == nullptr ? Value{} : Value{constraint->attachment1};
+}
+
+bool setAttachment1(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* other = std::get_if<core::InstanceId>(&value);
+    ConstraintComponent* constraint = world.constraints().find(id);
+    if (other == nullptr || constraint == nullptr)
+        return false;
+    constraint->attachment1 = *other;
+    return true;
+}
+
+Value getCollideConnected(const World& world, core::InstanceId id)
+{
+    const ConstraintComponent* constraint = world.constraints().find(id);
+    return constraint == nullptr ? Value{} : Value{constraint->collideConnected};
+}
+
+bool setCollideConnected(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* flag = std::get_if<bool>(&value);
+    ConstraintComponent* constraint = world.constraints().find(id);
+    if (flag == nullptr || constraint == nullptr)
+        return false;
+    constraint->collideConnected = *flag;
+    return true;
+}
+
 Value getShape(const World& world, core::InstanceId id)
 {
     const PartComponent* part = world.parts().find(id);
@@ -146,6 +234,10 @@ Hierarchy::Hierarchy()
     cframeProperty = atoms.intern("CFrame");
     shapeProperty = atoms.intern("Shape");
     primaryPartProperty = atoms.intern("PrimaryPart");
+    jointNameProperty = atoms.intern("JointName");
+    attachment0Property = atoms.intern("Attachment0");
+    attachment1Property = atoms.intern("Attachment1");
+    collideConnectedProperty = atoms.intern("CollideConnected");
 
     // Owned by this `Hierarchy`; the registry holds spans into them, which is
     // why the type is non-movable.
@@ -169,6 +261,21 @@ Hierarchy::Hierarchy()
     m_modelProperties = {
         PropertyDesc{
             .name = primaryPartProperty, .type = ValueType::Instance, .get = getPrimaryPart, .set = setPrimaryPart},
+    };
+    m_attachmentProperties = {
+        PropertyDesc{
+            .name = cframeProperty, .type = ValueType::CFrame, .get = getAttachmentCFrame, .set = setAttachmentCFrame},
+        PropertyDesc{.name = jointNameProperty, .type = ValueType::String, .get = getJointName, .set = setJointName},
+    };
+    m_constraintProperties = {
+        PropertyDesc{
+            .name = attachment0Property, .type = ValueType::Instance, .get = getAttachment0, .set = setAttachment0},
+        PropertyDesc{
+            .name = attachment1Property, .type = ValueType::Instance, .get = getAttachment1, .set = setAttachment1},
+        PropertyDesc{.name = collideConnectedProperty,
+                     .type = ValueType::Bool,
+                     .get = getCollideConnected,
+                     .set = setCollideConnected},
     };
 
     ClassDescriptor instanceClassDesc;
@@ -216,6 +323,7 @@ Hierarchy::Hierarchy()
     attachmentDesc.name = atoms.intern("Attachment");
     attachmentDesc.super = instanceClass;
     attachmentDesc.defaultName = atoms.intern("Attachment");
+    attachmentDesc.properties = m_attachmentProperties;
     attachmentDesc.attachComponents = [](World& world, core::InstanceId id) {
         world.attachments().add(id, AttachmentComponent{});
     };
@@ -234,6 +342,7 @@ Hierarchy::Hierarchy()
     constraintDesc.name = atoms.intern("Constraint");
     constraintDesc.super = instanceClass;
     constraintDesc.defaultName = atoms.intern("Constraint");
+    constraintDesc.properties = m_constraintProperties;
     constraintDesc.attachComponents = [](World& world, core::InstanceId id) {
         world.constraints().add(id, ConstraintComponent{});
     };

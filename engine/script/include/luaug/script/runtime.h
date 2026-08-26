@@ -136,6 +136,12 @@ public:
     // nothing rather than as an error.
     void setAnimation(scene::AnimationHost* animation);
 
+    // The joint seam `Ragdoll:Build` reads a rig through. The same object as the
+    // animation host in every build that has one; null in a build with no render
+    // module, where `Build` refuses rather than producing a ragdoll with no
+    // limbs in it.
+    void setSkeleton(scene::SkeletonHost* skeleton);
+
     // Enqueues `Ended` for each track the host reported finished. Called right
     // after `AnimationHost::sample`, so the signal lands in the same drain as
     // everything else that happened on that tick.

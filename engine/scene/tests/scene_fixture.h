@@ -64,6 +64,15 @@ struct Hierarchy
     core::NameAtom cframeProperty;
     core::NameAtom shapeProperty;
     core::NameAtom primaryPartProperty;
+    // **What a ragdoll build writes**, and the reason they are here: everything
+    // that touched an `Attachment` or a `Constraint` before wrote the component
+    // directly, so a caller going through `setProperty` -- which is what a build
+    // action and a scene load both do -- found no descriptor and silently wrote
+    // nothing. A fixture that mirrors the real hierarchy has to declare them.
+    core::NameAtom jointNameProperty;
+    core::NameAtom attachment0Property;
+    core::NameAtom attachment1Property;
+    core::NameAtom collideConnectedProperty;
 
     Hierarchy();
 
@@ -78,6 +87,8 @@ private:
     std::vector<PropertyDesc> m_basePartProperties;
     std::vector<PropertyDesc> m_partProperties;
     std::vector<PropertyDesc> m_modelProperties;
+    std::vector<PropertyDesc> m_attachmentProperties;
+    std::vector<PropertyDesc> m_constraintProperties;
 };
 
 // A world over that hierarchy, with the seed fixed so every test is a replay of

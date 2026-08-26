@@ -1464,6 +1464,38 @@ TEST_CASE("the ragdoll drive runs before the pose is committed")
     CHECK(skeleton.overrides.empty());
 }
 
+TEST_CASE("Blend carries the driven joint part of the way, and 0 leaves the clip alone")
+{
+    // **A POSE blend, not a solver one.** The limb has fallen exactly as far at
+    // 0.5 as at 1 -- nothing here touches the simulation -- and what changes is
+    // only how far the drawn joint is carried towards it. That is what a stumble
+    // is, and ramping it is what stops going down being a one-frame snap.
+    Mirror mirror;
+    RecordingSkeleton skeleton;
+    mirror.sync.setSkeleton(&skeleton);
+
+    // The animated `Hand` is at y = 2 in the mesh's space; the limb ends up at
+    // y = 4. Halfway between them is 3, and no other blend gives that number.
+    const Rag rag = ragdollOn(mirror, {0.0, 0.0, 0.0}, {0.0, 4.0, 0.0});
+    mirror.fixture.world.attachments().find(rag.bone)->jointName = mirror.fixture.world.atoms().intern("Hand");
+    RagdollComponent* ragdoll = mirror.fixture.world.ragdolls().find(rag.ragdoll);
+    ragdoll->enabled = true;
+    ragdoll->blend = 0.5f;
+
+    mirror.step();
+    REQUIRE(skeleton.committed.size() == 1);
+    CHECK(skeleton.committed[0].model.position.y == doctest::Approx(3.0));
+
+    // At zero the joint is written at the ANIMATION's own value rather than not
+    // written at all. Those are different: a joint that stopped being written
+    // would keep whatever the last tick left in the palette, so a ramp back to 0
+    // would freeze the character instead of handing it back to the clip.
+    ragdoll->blend = 0.0f;
+    mirror.step();
+    REQUIRE(skeleton.committed.size() == 1);
+    CHECK(skeleton.committed[0].model.position.y == doctest::Approx(2.0));
+}
+
 // --- What the mirror remembers about a refusal -------------------------------
 
 TEST_CASE("a body the backend refuses is asked for once, not once a tick")

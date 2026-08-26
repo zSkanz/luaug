@@ -1,9 +1,11 @@
 #include "luaug/script/instance_binding.h"
 
 #include "luaug/scene/pivot.h"
+#include "luaug/scene/ragdoll_build.h"
 #include "luaug/scene/scene_file.h"
 #include "luaug/scene/world.h"
 #include "luaug/script/datatypes.h"
+#include "luaug/script/services.h"
 #include "luaug/script/signals.h"
 
 #include <lua.h>
@@ -810,6 +812,126 @@ int methodCharacterJump(lua_State* L)
     return 0;
 }
 
+// --- Ragdoll (E9 step 13) -----------------------------------------------------
+
+// Degrees in, radians out. Every angle a person types in this API is in degrees
+// -- `HingeConstraint.LimitLow` is, and a profile that disagreed with the
+// property it fills would be a trap.
+[[nodiscard]] f32 degreesField(lua_State* L, int table, const char* key, f32 fallback)
+{
+    lua_getfield(L, table, key);
+    const f32 value = lua_isnumber(L, -1) ? static_cast<f32>(lua_tonumber(L, -1)) * 0.017453292519943295f : fallback;
+    lua_pop(L, 1);
+    return value;
+}
+
+[[nodiscard]] f32 numberField(lua_State* L, int table, const char* key, f32 fallback)
+{
+    lua_getfield(L, table, key);
+    const f32 value = lua_isnumber(L, -1) ? static_cast<f32>(lua_tonumber(L, -1)) : fallback;
+    lua_pop(L, 1);
+    return value;
+}
+
+// `Joint` is a string or a list of them. A list because the same shoulder is
+// `mixamorig:LeftArm` or `upper_arm.L` depending on who exported it, and a
+// profile that named one spelling would be a profile for one exporter.
+void readJointNames(lua_State* L, int table, std::vector<std::string>& out)
+{
+    lua_getfield(L, table, "Joint");
+    if (lua_isstring(L, -1)) {
+        out.emplace_back(lua_tostring(L, -1));
+    }
+    else if (lua_istable(L, -1)) {
+        const int names = lua_gettop(L);
+        for (int index = 1;; ++index) {
+            lua_rawgeti(L, names, index);
+            if (!lua_isstring(L, -1)) {
+                lua_pop(L, 1);
+                break;
+            }
+            out.emplace_back(lua_tostring(L, -1));
+            lua_pop(L, 1);
+        }
+    }
+    lua_pop(L, 1);
+}
+
+int methodRagdollBuild(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    luaL_checktype(L, 2, LUA_TTABLE);
+
+    scene::SkeletonHost* skeleton = context(L).services->skeleton;
+    if (skeleton == nullptr) {
+        // A build with no render module has no rig to read, and a ragdoll with
+        // no limbs in it would be a silent success nobody could debug.
+        raise(L, LUAUG_TR("scene.err.ragdoll_no_rig"));
+    }
+
+    // **Read into the profile in array order**, which becomes creation order,
+    // which is what an instance id is (R10). A table with holes stops at the
+    // first one, exactly as `ipairs` does and for the same reason: a profile
+    // whose length depended on `#` over a sparse table is a profile whose
+    // ragdoll depends on how Luau happened to size the array part.
+    scene::RagdollProfile profile;
+    for (int index = 1;; ++index) {
+        lua_rawgeti(L, 2, index);
+        if (!lua_istable(L, -1)) {
+            lua_pop(L, 1);
+            break;
+        }
+        const int entry = lua_gettop(L);
+
+        scene::RagdollLimb limb;
+        readJointNames(L, entry, limb.joints);
+
+        lua_getfield(L, entry, "Parent");
+        // 1-based in Luau, 0-based here -- and absent means the root, which is
+        // what -1 already means.
+        limb.parent = lua_isnumber(L, -1) ? static_cast<i32>(lua_tointeger(L, -1)) - 1 : -1;
+        lua_pop(L, 1);
+
+        limb.radius = numberField(L, entry, "Radius", 0.08f);
+        limb.leafLength = numberField(L, entry, "LeafLength", 0.18f);
+        limb.limitLow = degreesField(L, entry, "LimitLow", 1.0f);
+        limb.limitHigh = degreesField(L, entry, "LimitHigh", -1.0f);
+
+        lua_getfield(L, entry, "Kind");
+        const std::string_view kind = lua_isstring(L, -1) ? std::string_view(lua_tostring(L, -1)) : "BallSocket";
+        // `physics::ConstraintType`'s values, and the mapping lives here because
+        // this is where a person's word becomes one. A ball socket with limits
+        // IS a swing-twist, which is what the `LimitsEnabled` setter says -- so
+        // the presence of `Swing` is what decides between them rather than a
+        // fourth word nobody would know to type.
+        lua_pop(L, 1);
+        lua_getfield(L, entry, "Swing");
+        const bool limited = lua_isnumber(L, -1);
+        lua_pop(L, 1);
+        if (kind == "Hinge")
+            limb.kind = 2;
+        else if (kind == "Fixed")
+            limb.kind = 0;
+        else
+            limb.kind = limited ? 3 : 1;
+
+        limb.swingLimit = degreesField(L, entry, "Swing", 0.7f);
+        limb.twistLimit = degreesField(L, entry, "Twist", 0.4f);
+
+        profile.limbs.push_back(std::move(limb));
+        lua_pop(L, 1);
+    }
+
+    scene::World& w = world(L);
+    const scene::RagdollBuildResult result =
+        scene::buildRagdoll(w, *skeleton, id, profile, scene::resolveRagdollClasses(w));
+    if (result.error.has_value())
+        raise(L, *result.error);
+
+    lua_pushinteger(L, static_cast<int>(result.limbs));
+    return 1;
+}
+
 // --- Registration ------------------------------------------------------------
 
 // What `Instance` and `Model` declare. `WaitForChild` is absent on purpose: it
@@ -843,6 +965,7 @@ constexpr InstanceMethodBinding InstanceMethods[] = {
     {"BasePart", "ApplyImpulse", methodApplyImpulse},
     {"CharacterBody", "Move", methodCharacterMove},
     {"CharacterBody", "Jump", methodCharacterJump},
+    {"Ragdoll", "Build", methodRagdollBuild},
 };
 
 } // namespace

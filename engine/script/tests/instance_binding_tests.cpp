@@ -533,13 +533,14 @@ TEST_CASE("the boot-time method cross-check reports both directions")
     // `Sound:Play`/`Pause`/`Stop` and `AudioService:PlayLocal` did; 65 once
     // `AnimationPlayer:LoadAnimation` brought the animation runtime; 66 once
     // `InputService:IsKeyDown` arrived with ADR 0041's raw event surface, and 67
-    // once `InputService:SetVirtualState` opened the non-device seam; and 70 at
+    // once `InputService:SetVirtualState` opened the non-device seam; 70 at
     // M7, which added `StreamingService:AddFocus`, `:RemoveFocus` and
-    // `:LoadAreaAsync`. This number is what makes a DECLARED-but-unbound method
-    // impossible to ship: the IDL would count it and the binding table would
-    // not, which is `Inert` for a method.
-    CHECK(coverage.declared == 70);
-    CHECK(coverage.bound == 70);
+    // `:LoadAreaAsync`; and 71 at E9, which added `Ragdoll:Build`. This number
+    // is what makes a DECLARED-but-unbound method impossible to ship: the IDL
+    // would count it and the binding table would not, which is `Inert` for a
+    // method.
+    CHECK(coverage.declared == 71);
+    CHECK(coverage.bound == 71);
     CHECK(coverage.declaredWithoutBinding == 0);
 }
 

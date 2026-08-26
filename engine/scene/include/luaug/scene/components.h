@@ -347,6 +347,12 @@ struct RagdollComponent
     // doing nothing. On is a character whose every named joint comes from where
     // its part ended up.
     bool enabled = false;
+
+    // How much of each driven joint comes from the simulation, 0 to 1. A POSE
+    // blend: the limbs fall exactly as hard at 0.5 as at 1, and what changes is
+    // only how far the drawn joint is carried towards them. Ramping it is what
+    // makes going down and getting up something other than a one-frame snap.
+    f32 blend = 1.0f;
 };
 
 struct WeldComponent

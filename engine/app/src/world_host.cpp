@@ -30,7 +30,7 @@ using core::LogLevel;
 // a directory walk, because the set is the engine's own surface (ADR 0030) and
 // discovering it from a directory would make an accidentally-shipped file part
 // of the API.
-constexpr std::string_view RuntimeModules[] = {"camera", "testing"};
+constexpr std::string_view RuntimeModules[] = {"camera", "ragdoll", "testing"};
 
 // The conformance runner, as an ordinary entry script.
 //
@@ -276,6 +276,9 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
     // is the same answer a build with no render module gives.
     m_animation.emplace(*m_world, m_skeletons);
     m_runtime->setAnimation(&*m_animation);
+    // The same object through the narrower seam that names joints, which is
+    // what `Ragdoll:Build` reads a rig through.
+    m_runtime->setSkeleton(&*m_animation);
     m_runtime->setInput(&m_input);
 
 #if LUAUG_PHYSICS_JOLT
@@ -458,6 +461,9 @@ std::optional<core::EngineError> WorldHost::restartRuntime()
 
     if (m_animation.has_value())
         m_runtime->setAnimation(&*m_animation);
+    // The same object through the narrower seam that names joints, which is
+    // what `Ragdoll:Build` reads a rig through.
+    m_runtime->setSkeleton(&*m_animation);
     m_runtime->setInput(&m_input);
     if (m_physics.has_value())
         m_runtime->setPhysics(&*m_physics);

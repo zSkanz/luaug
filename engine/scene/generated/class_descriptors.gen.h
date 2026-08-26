@@ -194,6 +194,8 @@ void detachFixedConstraintComponents(World& world, core::InstanceId id);
 // Ragdoll
 Value getRagdollEnabled(const World& world, core::InstanceId id);
 bool setRagdollEnabled(World& world, core::InstanceId id, const Value& value);
+Value getRagdollBlend(const World& world, core::InstanceId id);
+bool setRagdollBlend(World& world, core::InstanceId id, const Value& value);
 void attachRagdollComponents(World& world, core::InstanceId id);
 void detachRagdollComponents(World& world, core::InstanceId id);
 

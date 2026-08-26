@@ -23,6 +23,7 @@
 #include "luaug/platform/event.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/physics_sync.h"
+#include "luaug/scene/skeleton_host.h"
 #include "luaug/script/animation.h"
 #include "luaug/script/binding.h"
 #include "luaug/script/reload_state.h"
@@ -227,6 +228,16 @@ public:
     // arrangement and same rule as `physics` above: null is a real state, and a
     // track that has no host plays nothing rather than raising.
     scene::AnimationHost* animation = nullptr;
+
+    // The same object as `animation` in every build that has one, through the
+    // narrower seam that names joints -- `AnimationHost` is about tracks and
+    // clips, and `Ragdoll:Build` needs to ask where an elbow is.
+    //
+    // A second pointer rather than a cast, because the two are separate
+    // interfaces on purpose and a host is free to implement one and not the
+    // other. Null is a real state, and `Build` says so rather than raising a
+    // sentence about a renderer nobody asked for.
+    scene::SkeletonHost* skeleton = nullptr;
 
     // Every `AnimationTrack` handle this VM has handed out. Append-only: a
     // record is four bytes and a signal id, and `LoadAnimation` is a load-once

@@ -315,6 +315,29 @@ bool setRagdollEnabled(World& world, core::InstanceId id, const Value& value)
     return true;
 }
 
+Value getRagdollBlend(const World& world, core::InstanceId id)
+{
+    const RagdollComponent* ragdoll = world.ragdolls().find(id);
+    return ragdoll == nullptr ? Value{} : Value{static_cast<f64>(ragdoll->blend)};
+}
+
+bool setRagdollBlend(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* amount = std::get_if<f64>(&value);
+    RagdollComponent* ragdoll = world.ragdolls().find(id);
+    if (amount == nullptr || ragdoll == nullptr)
+        return false;
+    // **Clamped here rather than refused**, because a blend is a dial and every
+    // dial in this API clamps: a script ramping one with `elapsed / duration`
+    // overshoots on the frame that finishes it, and refusing that write would
+    // leave the character halfway down forever. NaN clamps to 0 -- the
+    // comparisons below are both false for it, which lands on the animated pose
+    // rather than on a palette of NaNs that turns a character inside out.
+    const f64 clamped = *amount > 0.0 ? (*amount < 1.0 ? *amount : 1.0) : 0.0;
+    ragdoll->blend = static_cast<f32>(clamped);
+    return true;
+}
+
 // --- Constraint ---------------------------------------------------------------
 
 void attachConstraintComponents(World& world, core::InstanceId id)
