@@ -235,9 +235,14 @@ that sends the next session to the wrong place.
 
 - [x] **S4.1** Decide the split-piece URN form. **Settled: a fragment** -- see
       decision 7. Owes a decision record, which lands with E9's own.
-- [ ] **S4.2** Step 12 — the editor compiles on import: `assetc::importOne`,
-      the object-store writer, `luaug_assetc_lib` linked into the app, and
-      `splitByPrimitive` reaching a world.
+- [~] **S4.2** Step 12 — the editor compiles on import. **Four of five
+      built**: `assetc::importOne` (the same call, not a second one), the
+      object-store writer, `luaug_assetc_lib` linked into the app under the
+      editor flag, and the store mounted between the source tree and the pack.
+      Opening a project compiles it and importing compiles what it brought.
+      **The owner's `.fbx` loads because of it.** What is left is
+      `splitByPrimitive` reaching a world — a model still arrives as one opaque
+      `MeshPart` rather than a `Model` of named pieces.
 - [x] **S4.3** Step 11's unbuilt half — parallel texture encode. **Built**:
       one texture per worker with basis's own threading still off, merged in
       source order. **20.2 s to 8.1 s** on five textures, and the determinism
