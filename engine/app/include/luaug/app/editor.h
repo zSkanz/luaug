@@ -328,6 +328,18 @@ struct EditorPanels
     // per joint for every skinned mesh in the world, which is a frame cost
     // nobody should pay without asking.
     bool showSkeletons = false;
+
+    // **Whether the viewport draws the streaming grid**, and it is off.
+    //
+    // The Stats panel prints how many cells are resident and that is a different
+    // question from where the seam is. Streaming is about SPACE -- which cell
+    // the character is standing in, whether the ring is lopsided because a focus
+    // is off by half a cell, where the authored world stops -- and the answer to
+    // a question about space belongs in the space.
+    //
+    // Off by default: it is four lines per cell for every cell the index knows
+    // about, which for a real world is thousands.
+    bool showChunkGrid = false;
 };
 
 // What the shell asked for this frame, drained by the frame loop at the safe

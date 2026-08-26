@@ -4270,6 +4270,11 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
             ImGui::SetTooltip("draw every skinned mesh's rig as lines, so a joint is something you can see before you "
                               "name it in a Bone");
         }
+        ImGui::MenuItem("Streaming Grid", nullptr, &panels.showChunkGrid);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("draw the chunk grid and each focus's rings in the world, coloured by what each cell is "
+                              "doing. Only a project that streams has one");
+        }
         ImGui::Separator();
         // Not "close everything": somebody who has lost a panel behind another
         // wants the arrangement back, not an empty window.
@@ -4852,11 +4857,15 @@ void drawTabIcons(ImGuiID dockspace, const IconAtlas* icons, const scene::World*
     draw->PopClipRect();
 }
 
+// Declared here and defined beside the other overlay panels, because the editor
+// shell is drawn above them in this file and the Stats panel needs it.
+void drawStreaming(const StreamingHost& streaming);
+
 void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,
                      script::ScriptRuntime* runtime, Editor* editor, rhi::TextureHandle viewport, bool& laidOut,
                      EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs, IconAtlas* icons,
                      ScriptEditor* scripts, ScriptEditorCommands& scriptCommands, DebugView& debug,
-                     audio::AudioSystem* audio, bool furniture)
+                     audio::AudioSystem* audio, const StreamingHost* streaming, bool furniture)
 {
     // **First, before a single window is submitted.** A code pane that owns the
     // active id makes every other item in the frame unhoverable, so this is
@@ -5003,6 +5012,24 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
             drawStats(frame);
             if (runtime != nullptr)
                 drawMemory(*runtime);
+
+            // **The Streaming panel, which the editor could not reach until
+            // now** (E5's last gate row). `drawShell` -- the F3 overlay over a
+            // running game -- has drawn this since M7, and `drawEditorShell` was
+            // never handed the host, so the one shell in which somebody is
+            // AUTHORING a streamed world was the one that could not see what
+            // streaming was doing. Which is backwards: a player does not need to
+            // know how many chunks are resident and the person building the
+            // world does.
+            //
+            // In Stats rather than in a panel of its own, because that is what
+            // it is -- counters and a picture of where the focus is -- and a
+            // fourth dock for a project that streams and nothing for one that
+            // does not is furniture.
+            if (streaming != nullptr && streaming->active()) {
+                ImGui::SeparatorText("Streaming");
+                drawStreaming(*streaming);
+            }
         }
         ImGui::End();
     }
@@ -5969,7 +5996,7 @@ void DebugOverlay::render(rhi::ICmdList& cmd, rhi::TextureHandle target, const F
         drawLauncher(launcher_);
     else if (shell_ == Shell::Editor)
         drawEditorShell(frame, world_, root_, inspector_, runtime_, editor_, viewportTexture_, layoutBuilt_, commands_,
-                        panels_, dialogs_, icons_, scripts_, scriptCommands_, debugView_, audio_, visible_);
+                        panels_, dialogs_, icons_, scripts_, scriptCommands_, debugView_, audio_, streaming_, visible_);
     else
         drawShell(frame, world_, root_, inspector_, runtime_, streaming_);
     ImGui::Render();

@@ -1,0 +1,17 @@
+# The chunk-grid gate's project.
+#
+# `scene` is what makes it stream: a project whose world is DATA gets partitioned
+# on the way to the first frame, and the partition is what the streaming manager
+# has an index of. A world built in a script has no cells, so no grid, so no
+# picture -- which is why this is a project and not a bare init script the way
+# the other screenshot scenes are.
+
+[project]
+name = "LuauG Chunk Grid"
+id = "dev.luaug.chunkgrid"
+version = "1.0.0"
+engine = "0.1"
+scene = "scenes/main.scene.json"
+
+[window]
+title = "LuauG — Chunk Grid"

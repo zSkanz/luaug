@@ -1,0 +1,16 @@
+# The ragdoll example's project file.
+#
+# It has one because it loads a MODEL, and a model has to be found: the engine
+# mounts `content/` under `asset://` relative to the project, and a project is
+# what a `luaug.toml` makes a folder into. The three older examples that get by
+# with a path and the engine's defaults have nothing to resolve.
+
+[project]
+name = "LuauG Ragdoll"
+id = "dev.luaug.ragdoll"
+version = "1.0.0"
+engine = "0.1"
+
+[window]
+title = "LuauG — Ragdoll"
+size = [1600, 900]

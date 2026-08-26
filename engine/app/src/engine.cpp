@@ -11,6 +11,7 @@
 // libstdc++, which is a different version with a different transitive graph.
 // A header a translation unit uses is a header it includes.
 #include "luaug/app/backends.h"
+#include "luaug/app/chunk_overlay.h"
 #include "luaug/app/content_import.h"
 #include "luaug/app/debug_overlay.h"
 #include "luaug/app/dev_control.h"
@@ -2384,6 +2385,21 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         if (const render::AnimationSystem* animation = host->animation();
             animation != nullptr && overlay.has_value() && overlay->panels().showSkeletons) {
             drawSkeletons(host->world(), *animation, debugDraw);
+        }
+
+        // The streaming grid, behind `View > Streaming Grid` in the editor and
+        // `DebugService:ShowPanel("Streaming")` in a game -- the same pair of
+        // switches the physics wireframe has, and for the same reason: four
+        // lines per cell for every cell the index knows about is a frame cost
+        // nobody should pay without asking.
+        //
+        // Drawn at the camera's own height, so the grid follows somebody up a
+        // hill instead of being buried in it. A chunk is vertically unbounded --
+        // `chunkBounds` says so and means it -- so there is no height it
+        // belongs at, only a height it is USEFUL at.
+        if (streaming.active() && ((overlay.has_value() && overlay->panels().showChunkGrid) ||
+                                   script::panelOpen(host->runtime().state(), "Streaming"))) {
+            drawChunkGrid(streaming, editor.cameraCFrame().position.y, debugDraw);
         }
 
         if (!pendingSamples.empty()) {

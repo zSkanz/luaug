@@ -32,6 +32,7 @@ luaug_add_module(app
         src/launcher_run.cpp
         src/partition_cache.cpp
         src/picking.cpp
+        src/chunk_overlay.cpp
         src/skeleton_overlay.cpp
         src/editor.cpp
         src/content_tree.cpp
@@ -618,6 +619,41 @@ if(LUAUG_BUILD_TESTS)
             -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/local-shadow-differential
             -P ${CMAKE_SOURCE_DIR}/tests/screenshots/run_local_shadow_gate.cmake)
     set_tests_properties(local_shadow_differential PROPERTIES
+        SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
+        TIMEOUT 180)
+
+    # E5's screenshot row, which sat PENDING because the overlay it named was an
+    # ImGui panel and a panel cannot render headlessly. The grid is drawn through
+    # `DebugDraw` now -- in the world, where a question about space belongs --
+    # so the picture goes through the ordinary renderer and this can take it.
+    #
+    # A differential for the same reason the one above is: there is no reference
+    # GPU and no checked-in image, so what it compares is this machine's own
+    # frame with the grid on against the same frame with it off.
+    # `examples/12-ragdoll` builds its characters from a RIG, and that is the
+    # part worth gating: `Ragdoll:Build` reads a skeleton, so a change that broke
+    # the joint lookup, the skinned loader or the profile's alias list would
+    # leave the example running perfectly and empty -- six characters standing
+    # there that will not fall, with nothing in the log but a warning nobody
+    # reads.
+    #
+    # So the assertion is the COUNT. Sixteen limbs is what the shipped humanoid
+    # profile produces against the shipped rig, and any other number means one of
+    # the two moved. `--rhi=null` because none of that needs a device.
+    add_test(NAME example_ragdoll_builds
+        COMMAND luaug_host "${CMAKE_SOURCE_DIR}/examples/12-ragdoll" --headless --frames=10 --exit --rhi=null)
+    set_tests_properties(example_ragdoll_builds PROPERTIES
+        PASS_REGULAR_EXPRESSION "figure 6 built 16 limb\\(s\\)"
+        TIMEOUT 60)
+
+    add_test(NAME chunk_grid_differential
+        COMMAND ${CMAKE_COMMAND}
+            -DHOST=$<TARGET_FILE:luaug_host>
+            -DIMGCMP=$<TARGET_FILE:imgcmp>
+            -DPROJECT=${CMAKE_SOURCE_DIR}/tests/screenshots/chunkgrid
+            -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/chunk-grid-differential
+            -P ${CMAKE_SOURCE_DIR}/tests/screenshots/run_chunk_grid_gate.cmake)
+    set_tests_properties(chunk_grid_differential PROPERTIES
         SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
         TIMEOUT 180)
 
