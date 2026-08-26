@@ -610,6 +610,149 @@ TEST_CASE("an executable can read its own icon back out of itself")
 #endif
 }
 
+namespace {
+
+// One entry of an `.ico` directory, read from the file's own layout: 16 bytes,
+// little-endian, and a zero in the width or height byte means 256.
+struct IconEntry
+{
+    luaug::core::u32 width = 0;
+    luaug::core::u32 height = 0;
+    luaug::core::u32 offset = 0;
+    luaug::core::u32 size = 0;
+};
+
+[[nodiscard]] luaug::core::u32 readU16(const std::vector<std::byte>& bytes, std::size_t at)
+{
+    return static_cast<luaug::core::u32>(static_cast<unsigned char>(bytes[at])) |
+           (static_cast<luaug::core::u32>(static_cast<unsigned char>(bytes[at + 1])) << 8);
+}
+
+[[nodiscard]] luaug::core::u32 readU32(const std::vector<std::byte>& bytes, std::size_t at)
+{
+    return readU16(bytes, at) | (readU16(bytes, at + 2) << 16);
+}
+
+[[nodiscard]] bool isPng(const std::vector<std::byte>& bytes, std::size_t at, std::size_t size)
+{
+    static constexpr unsigned char kSignature[] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+    if (size < sizeof(kSignature) || at + sizeof(kSignature) > bytes.size())
+        return false;
+    for (std::size_t index = 0; index < sizeof(kSignature); ++index) {
+        if (static_cast<unsigned char>(bytes[at + index]) != kSignature[index])
+            return false;
+    }
+    return true;
+}
+
+} // namespace
+
+// --- The icon FILE, not the icon the executable happens to carry (S7.14) -----
+//
+// The case above reads an icon back out of this binary, which proves an icon is
+// there and that the largest entry decodes. It cannot say the icon is the RIGHT
+// one, it cannot see the six smaller sizes at all -- `applicationIconBytes`
+// returns only the largest, because that is what a window wants -- and on
+// anything but Windows it asserts emptiness and checks nothing.
+//
+// Those smaller sizes are the ones a person actually sees: 16 in the title bar,
+// 32 in the taskbar, 48 and 256 in Explorer. An icon rebuilt with a size missing
+// or a BMP entry looks perfect in the one place this suite was looking.
+
+TEST_CASE("every size in the icon file is present and PNG-compressed")
+{
+    std::vector<std::byte> bytes;
+    REQUIRE(luaug::platform::readFile(LUAUG_TEST_ICON, bytes));
+    REQUIRE(bytes.size() > 6);
+
+    // `ICONDIR`: a reserved zero, a type of 1 for an icon, then the count.
+    CHECK(readU16(bytes, 0) == 0);
+    CHECK(readU16(bytes, 2) == 1);
+    const luaug::core::u32 count = readU16(bytes, 4);
+    REQUIRE(count > 0);
+    REQUIRE(bytes.size() >= 6 + static_cast<std::size_t>(count) * 16);
+
+    std::vector<IconEntry> entries;
+    for (luaug::core::u32 index = 0; index < count; ++index) {
+        const std::size_t at = 6 + static_cast<std::size_t>(index) * 16;
+        IconEntry entry;
+        // Zero means 256 here, which is the size that matters most and the one
+        // a naive read discards -- the same trap `applicationIconBytes` names.
+        entry.width = static_cast<unsigned char>(bytes[at]) == 0 ? 256u : static_cast<unsigned char>(bytes[at]);
+        entry.height =
+            static_cast<unsigned char>(bytes[at + 1]) == 0 ? 256u : static_cast<unsigned char>(bytes[at + 1]);
+        entry.size = readU32(bytes, at + 8);
+        entry.offset = readU32(bytes, at + 12);
+        entries.push_back(entry);
+    }
+
+    for (const IconEntry& entry : entries) {
+        INFO("entry ", entry.width, "x", entry.height);
+        CHECK(entry.width == entry.height);
+        REQUIRE(entry.size > 0);
+        REQUIRE(entry.offset + entry.size <= bytes.size());
+        // **Every** entry, not just the largest. A BMP-encoded entry needs a DIB
+        // reader nothing in this engine has, and it is the small sizes an icon
+        // tool is most likely to emit that way.
+        CHECK(isPng(bytes, entry.offset, entry.size));
+    }
+
+    // One entry per `luaug-<size>.png` beside it, which is where they came from.
+    // A size added to the folder and forgotten in the `.ico` is the ordinary way
+    // this decays, and it decays silently.
+    for (const std::filesystem::directory_entry& png : std::filesystem::directory_iterator{LUAUG_TEST_ICON_DIR}) {
+        const std::string name = png.path().filename().string();
+        if (png.path().extension() != ".png" || name.rfind("luaug-", 0) != 0)
+            continue;
+        const std::string digits = name.substr(6, name.size() - 6 - 4);
+        const auto wanted = static_cast<luaug::core::u32>(std::stoul(digits));
+        INFO("no ", wanted, "x", wanted, " entry for ", name);
+        CHECK(std::any_of(entries.begin(), entries.end(),
+                          [wanted](const IconEntry& entry) { return entry.width == wanted; }));
+    }
+}
+
+TEST_CASE("the icon in the executable is the icon in the tree")
+{
+    const std::vector<std::byte> embedded = luaug::platform::applicationIconBytes();
+
+#if defined(_WIN32)
+    std::vector<std::byte> bytes;
+    REQUIRE(luaug::platform::readFile(LUAUG_TEST_ICON, bytes));
+
+    // The largest entry, chosen the same way `applicationIconBytes` chooses it.
+    const luaug::core::u32 count = readU16(bytes, 4);
+    REQUIRE(count > 0);
+    luaug::core::u32 bestPixels = 0;
+    std::size_t bestOffset = 0;
+    std::size_t bestSize = 0;
+    for (luaug::core::u32 index = 0; index < count; ++index) {
+        const std::size_t at = 6 + static_cast<std::size_t>(index) * 16;
+        const luaug::core::u32 width =
+            static_cast<unsigned char>(bytes[at]) == 0 ? 256u : static_cast<unsigned char>(bytes[at]);
+        if (width * width > bestPixels) {
+            bestPixels = width * width;
+            bestSize = readU32(bytes, at + 8);
+            bestOffset = readU32(bytes, at + 12);
+        }
+    }
+    REQUIRE(bestSize > 0);
+
+    // **Byte for byte.** This is the assertion that ties the two halves
+    // together: the case above checks a FILE and the case before it checks a
+    // BINARY, and without this nothing says they are the same artwork. A
+    // rebuilt `.ico` that never reached the resource compiler passes both of
+    // them on its own.
+    REQUIRE(embedded.size() == bestSize);
+    CHECK(std::memcmp(embedded.data(), bytes.data() + bestOffset, bestSize) == 0);
+#else
+    // Nothing to compare against: a Linux window's icon comes from a `.desktop`
+    // entry and a macOS one from the bundle. The file itself is still checked by
+    // the case above, on every platform.
+    CHECK(embedded.empty());
+#endif
+}
+
 TEST_CASE("setting the application id is safe to call with nothing to set")
 {
     // Idempotent and total, because it runs before anything else on a path where

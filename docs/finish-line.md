@@ -624,8 +624,30 @@ that sends the next session to the wrong place.
       read in ONE file — `render_world.cpp` reads a point light's `shadows` and a
       spot light's four lines apart — and the tool's comment says so instead of
       claiming otherwise.
-- [ ] **S7.14** The window icon test has never run against the hand-built `.ico`
-      now in the tree.
+- [x] **S7.14** The window icon test now runs against the hand-built `.ico`, and
+      against all seven of its sizes. What existed read an icon back out of the
+      test binary — which proves an icon is THERE, and three things beyond that
+      it cannot say. `applicationIconBytes` returns only the largest entry,
+      because that is what a window wants, so the six smaller ones were never
+      looked at; nothing tied the bytes in the binary to the file in the tree, so
+      a rebuilt `.ico` that never reached the resource compiler passed; and on
+      anything but Windows the case asserts emptiness and checks nothing at all.
+      The sizes it could not see are the ones a person actually sees — 16 in the
+      title bar, 32 in the taskbar, 48 and 256 in Explorer.
+
+      Two cases replace that. One parses `branding/icon/luaug.ico` itself, on
+      every platform: the `ICONDIR` header, then every entry square, in range,
+      and **PNG-compressed** — a BMP entry needs a DIB reader nothing in this
+      engine has, and it is the small sizes a rebuild is most likely to emit
+      that way — and one entry for every `luaug-<size>.png` beside it, because a
+      size added to the folder and forgotten in the `.ico` is the ordinary way
+      this decays. The other compares the largest entry of that file against
+      what the executable hands back, byte for byte, which is the assertion that
+      makes the other two mean something together.
+
+      Break-verified by pointing the definition at `tests/identity/game.ico`:
+      the shape case fails on the missing 24×24 and the identity case fails on
+      the bytes, and both pass again on the real one.
 
 ### S8 — Small debt, then the release
 

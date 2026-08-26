@@ -56,7 +56,14 @@ endif()
 
 if(LUAUG_BUILD_TESTS)
     target_compile_definitions(luaug_platform_tests PRIVATE
-        LUAUG_TEST_CATALOG="${CMAKE_SOURCE_DIR}/i18n/en.json")
+        LUAUG_TEST_CATALOG="${CMAKE_SOURCE_DIR}/i18n/en.json"
+        # The icon FILE, beside the resource that embeds it (S7.14). The
+        # embedded copy can only be read back on Windows, and reading it back
+        # proves the executable has an icon -- not that it has the RIGHT one,
+        # and not that the six sizes nobody reads back are sound. Handing the
+        # test the source file lets it check both, on every platform.
+        LUAUG_TEST_ICON="${CMAKE_SOURCE_DIR}/branding/icon/luaug.ico"
+        LUAUG_TEST_ICON_DIR="${CMAKE_SOURCE_DIR}/branding/icon")
 
     # A separate executable because it faults on purpose, and a doctest case
     # that faulted would take the runner with it. See `crash_probe.cpp`.
