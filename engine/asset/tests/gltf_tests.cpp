@@ -3,12 +3,14 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <doctest/doctest.h>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -1120,4 +1122,55 @@ TEST_CASE_FIXTURE(CatalogFixture, "gltf: no budget means no bake, whatever the r
 
     CHECK(model.skinned());
     CHECK_FALSE(model.bakedBindPose());
+}
+
+// --- What an import costs -----------------------------------------------------
+
+// Skipped unless asked for, because it reports a wall clock -- and pointed at a
+// file by a CMake cache variable rather than by the environment, because nothing
+// else in this engine reads an environment variable and that looks deliberate: a
+// build that behaves differently depending on the shell it was started from is a
+// build nobody can reason about.
+//
+//   cmake -S . -B <build> -DLUAUG_BENCH_GLTF=C:/path/to/scene.gltf
+//   luaug_asset_tests --test-case="*what an import costs*" -nt --no-skip
+//
+// The default is one of this repository's own fixtures, which is three kilobytes
+// and therefore answers "roughly zero" -- every question worth asking about
+// import cost is a question about somebody's real model. It exists because "is
+// parsing a mesh on the frame thread a problem" is a question about a NUMBER,
+// and the same question about textures turned out to be worth 90 ms a frame once
+// somebody measured it instead of reading the code.
+TEST_CASE("what an import costs" * doctest::skip())
+{
+    const std::filesystem::path path(LUAUG_BENCH_GLTF);
+    REQUIRE_MESSAGE(std::filesystem::exists(path), path.string());
+
+    const auto started = std::chrono::steady_clock::now();
+    std::ifstream stream(path, std::ios::binary);
+    REQUIRE(stream.good());
+    const std::vector<char> raw((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+    std::vector<std::byte> bytes(raw.size());
+    for (std::size_t i = 0; i < raw.size(); ++i)
+        bytes[i] = static_cast<std::byte>(raw[i]);
+    const auto afterRead = std::chrono::steady_clock::now();
+
+    luaug::asset::Model model;
+    luaug::asset::GltfImportOptions options;
+    const auto error = importGltf(bytes, path.parent_path(), options, model);
+    const auto afterImport = std::chrono::steady_clock::now();
+
+    const auto ms = [](auto from, auto to) {
+        return std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(to - from).count();
+    };
+
+    if (error.has_value()) {
+        MESSAGE("refused: " << error->message);
+        return;
+    }
+
+    MESSAGE(path.filename().string() << " " << (bytes.size() / 1024) << " KiB" << " read=" << ms(started, afterRead)
+                                     << " ms" << " import=" << ms(afterRead, afterImport) << " ms" << " vertices="
+                                     << model.mesh.vertices.size() << " primitives=" << model.mesh.submeshes.size()
+                                     << " joints=" << model.joints.size() << " images=" << model.images.size());
 }

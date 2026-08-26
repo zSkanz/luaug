@@ -69,4 +69,13 @@ if(LUAUG_BUILD_TESTS)
     target_compile_definitions(luaug_asset_tests PRIVATE
         LUAUG_TEST_CATALOG="${CMAKE_SOURCE_DIR}/i18n/en.json"
         LUAUG_ASSET_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
+
+    # The model the skipped import bench measures. Overridable, because the
+    # interesting answer comes from somebody's own asset -- the fixtures here are
+    # three kilobytes and answer "roughly zero" for every question worth asking.
+    if(NOT DEFINED LUAUG_BENCH_GLTF)
+        set(LUAUG_BENCH_GLTF "${CMAKE_SOURCE_DIR}/examples/02-meshes/content/models/scene.gltf")
+    endif()
+    target_compile_definitions(luaug_asset_tests PRIVATE
+        LUAUG_BENCH_GLTF="${LUAUG_BENCH_GLTF}")
 endif()
