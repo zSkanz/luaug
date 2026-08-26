@@ -283,6 +283,28 @@ bool sameValue(const scene::Value& a, const scene::Value& b) noexcept
     return a == b;
 }
 
+core::InstanceId resolveSelection(const scene::World& world, core::InstanceId root, core::InstanceId id,
+                                  core::InstanceId drilled)
+{
+    if (!id.valid() || !world.alive(id))
+        return id;
+
+    // **Inside what somebody opened, the rule is off.** Double-clicking into a
+    // model is how you get at its parts, and a resolve that pulled back out
+    // would make that gesture do nothing at all.
+    if (drilled.valid() && world.alive(drilled) && (id == drilled || world.isAncestorOf(drilled, id)))
+        return id;
+
+    // The OUTERMOST model at or above it, stopping below the root: walking past
+    // the root would resolve every click to the world itself.
+    core::InstanceId chosen = id;
+    for (core::InstanceId walk = id; walk.valid() && walk != root; walk = world.parentOf(walk)) {
+        if (world.models().find(walk) != nullptr)
+            chosen = walk;
+    }
+    return chosen;
+}
+
 scene::ClassId declaringClassOf(const scene::ClassRegistry& classes, scene::ClassId classId, core::NameAtom name)
 {
     scene::ClassId declaring = scene::InvalidClass;

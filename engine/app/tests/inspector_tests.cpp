@@ -51,6 +51,7 @@ using luaug::app::enumDomainOf;
 using luaug::app::formatValue;
 using luaug::app::Inspector;
 using luaug::app::propertyTag;
+using luaug::app::resolveSelection;
 using luaug::app::sameValue;
 using luaug::app::selectVisibleRange;
 using luaug::app::setResultLabel;
@@ -1347,4 +1348,114 @@ TEST_CASE("the grouping walks to the ROOT-most declarer, not the nearest")
         seen.push_back(declaring);
         group = declaring;
     }
+}
+
+// --- Which thing a click means (S5.3) ----------------------------------------
+//
+// **Clicking a wheel selects the car.** A `Model` is something somebody made in
+// order to move it as one, so a click that lands on a part inside it and selects
+// the part hands back the opposite of what the grouping was for. Group made this
+// unavoidable: before it, models were rare.
+
+TEST_CASE("a click on a part inside a model selects the model")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId car = world.create(fixture.modelClass);
+    const core::InstanceId wheel = world.create(fixture.partClass);
+    REQUIRE_FALSE(world.setParent(car, root).has_value());
+    REQUIRE_FALSE(world.setParent(wheel, car).has_value());
+
+    CHECK(resolveSelection(world, root, wheel, core::InstanceId{}) == car);
+}
+
+TEST_CASE("it resolves to the OUTERMOST model, not the nearest")
+{
+    // A car in a convoy is still a car, and the convoy is what you grabbed.
+    // Nearest-first would also make "one click, one level" a rule with memory in
+    // it: which level you got would depend on where you clicked last.
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId convoy = world.create(fixture.modelClass);
+    const core::InstanceId car = world.create(fixture.modelClass);
+    const core::InstanceId wheel = world.create(fixture.partClass);
+    REQUIRE_FALSE(world.setParent(convoy, root).has_value());
+    REQUIRE_FALSE(world.setParent(car, convoy).has_value());
+    REQUIRE_FALSE(world.setParent(wheel, car).has_value());
+
+    CHECK(resolveSelection(world, root, wheel, core::InstanceId{}) == convoy);
+}
+
+TEST_CASE("a folder is not a stopping point, because filing is not assembly")
+{
+    // A folder has no pivot, no extents and nothing that moves as one. Resolving
+    // to one would make every part in a tidy project unselectable -- which is
+    // every part in a tidy project.
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId folder = world.create(fixture.folderClass);
+    const core::InstanceId crate = world.create(fixture.partClass);
+    REQUIRE_FALSE(world.setParent(folder, root).has_value());
+    REQUIRE_FALSE(world.setParent(crate, folder).has_value());
+
+    CHECK(resolveSelection(world, root, crate, core::InstanceId{}) == crate);
+}
+
+TEST_CASE("inside what was drilled into, a click means what it hit")
+{
+    // The escape hatch that makes the rule bearable. Double-clicking into a
+    // model is how you get at its parts, and a resolve that pulled back out
+    // would make that gesture do nothing at all.
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId car = world.create(fixture.modelClass);
+    const core::InstanceId wheel = world.create(fixture.partClass);
+    REQUIRE_FALSE(world.setParent(car, root).has_value());
+    REQUIRE_FALSE(world.setParent(wheel, car).has_value());
+
+    CHECK(resolveSelection(world, root, wheel, car) == wheel);
+    // And a part in a DIFFERENT model still resolves, because opening one thing
+    // does not turn the rule off everywhere.
+    const core::InstanceId other = world.create(fixture.modelClass);
+    const core::InstanceId door = world.create(fixture.partClass);
+    REQUIRE_FALSE(world.setParent(other, root).has_value());
+    REQUIRE_FALSE(world.setParent(door, other).has_value());
+    CHECK(resolveSelection(world, root, door, car) == other);
+}
+
+TEST_CASE("the walk stops below the root, so a click never selects the world")
+{
+    // Walking past the root would resolve every click to the world itself,
+    // which is a selection nothing can act on.
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+
+    const core::InstanceId root = world.create(fixture.modelClass);
+    const core::InstanceId crate = world.create(fixture.partClass);
+    REQUIRE_FALSE(world.setParent(crate, root).has_value());
+
+    CHECK(resolveSelection(world, root, crate, core::InstanceId{}) == crate);
+}
+
+TEST_CASE("a dead or invalid id resolves to itself rather than walking a freed tree")
+{
+    Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId root = fixture.widget(world, "Root");
+
+    CHECK_FALSE(resolveSelection(world, root, core::InstanceId{}, core::InstanceId{}).valid());
+
+    const core::InstanceId gone = world.create(fixture.partClass);
+    REQUIRE_FALSE(world.setParent(gone, root).has_value());
+    REQUIRE(world.destroy(gone));
+    world.retireDestroyed();
+    CHECK(resolveSelection(world, root, gone, core::InstanceId{}) == gone);
 }

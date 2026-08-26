@@ -3580,8 +3580,14 @@ void drawViewportBody(Editor& editor, rhi::TextureHandle texture, EditorCommands
         editor.setPointer(inViewport, overImage && ImGui::IsMouseClicked(ImGuiMouseButton_Left),
                           ImGui::IsMouseDown(ImGuiMouseButton_Left));
 
-        if (overImage && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-            editor.requestPick(inViewport, ImGui::GetIO().KeyCtrl);
+        // **A double-click drills in** (S5.3). ImGui reports the second press
+        // as both a click and a double-click, so this is one request either
+        // way -- a first click that selected the model followed by a second
+        // that opened it is exactly the gesture, and treating them as two
+        // requests would make the first one's selection flicker.
+        if (overImage && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            editor.requestPick(inViewport, ImGui::GetIO().KeyCtrl, ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left));
+        }
 
         reportLookInput(editor, overImage);
     }
@@ -5522,6 +5528,14 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         // and the honest one: while you are testing, the tool keeps one key.
         if (editor != nullptr && editor->inPlayMode())
             commands.play = false;
+        else if (editor != nullptr && editor->drilled().valid()) {
+            // **One level out before letting go** (S5.3). Somebody who has
+            // double-clicked into a model and wants out again reaches for
+            // Escape; deselecting instead would leave them inside it with
+            // nothing selected, which is the state that looks like the drill
+            // being permanent.
+            editor->setDrilled(core::InstanceId{});
+        }
         else
             commands.clearSelection = true;
     }

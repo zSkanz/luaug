@@ -233,6 +233,29 @@ void collectProperties(const scene::ClassRegistry& classes, scene::ClassId class
 void collectCommonProperties(const scene::World& world, std::span<const core::InstanceId> targets,
                              std::vector<const scene::PropertyDesc*>& out);
 
+// What a click on `id` should actually select (S5.3).
+//
+// **Clicking a wheel selects the car.** Every editor with a scene graph does
+// this, and the reason is what Group made unavoidable here: a `Model` is a thing
+// somebody made in order to move it as one, so a click that lands on a part
+// inside it and selects the part hands back the opposite of what the grouping
+// was for.
+//
+// The answer is the OUTERMOST `Model` at or above `id`, stopping below `root`.
+// Outermost rather than nearest, because a car in a convoy is still a car and
+// the convoy is what you grabbed -- and because "one click, one level" is a rule
+// with no memory in it.
+//
+// `drilled` is what a person has already opened by double-clicking: anything at
+// or below it resolves to itself, which is the escape hatch that makes the rule
+// bearable. Pass an invalid id for none.
+//
+// A `Folder` is NOT a stopping point. A folder is filing rather than assembly --
+// it has no pivot, no extents and nothing that moves as one -- so resolving to
+// one would make every part in a tidy project unselectable.
+[[nodiscard]] core::InstanceId resolveSelection(const scene::World& world, core::InstanceId root, core::InstanceId id,
+                                                core::InstanceId drilled);
+
 // Which class in `classId`'s ancestry first declares `name`, root-most, or
 // `InvalidClass` when none does.
 //

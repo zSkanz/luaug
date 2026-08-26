@@ -148,6 +148,10 @@ struct PickRequest
     // what was already in it. The same gesture the Explorer's rows use, because
     // it is the same question asked of a different surface.
     bool additive = false;
+    // A double-click: drill INTO whatever this resolves to (S5.3). A single
+    // click selects the outermost `Model` above what it landed on, and this is
+    // the gesture that gets at the parts inside one.
+    bool opening = false;
 };
 
 // What the editor is doing with the world.
@@ -723,9 +727,9 @@ public:
     [[nodiscard]] core::DVec3 cameraOrigin() const noexcept { return m_cameraOrigin; }
     [[nodiscard]] bool hasCamera() const noexcept { return m_hasCamera; }
 
-    void requestPick(core::Vec2 pixelInViewport, bool additive = false) noexcept
+    void requestPick(core::Vec2 pixelInViewport, bool additive = false, bool opening = false) noexcept
     {
-        m_pending = PickRequest{pixelInViewport, additive};
+        m_pending = PickRequest{pixelInViewport, additive, opening};
     }
     [[nodiscard]] bool pickPending() const noexcept { return m_pending.has_value(); }
 
@@ -1587,6 +1591,15 @@ public:
     // still a drag, and one that ends outside it still ends.
     void setPointer(core::Vec2 pixelInViewport, bool pressed, bool down) noexcept;
 
+    // **What a double-click in the viewport opened** (S5.3), or nothing.
+    //
+    // A click resolves to the outermost `Model` above what it landed on, which
+    // is what makes a grouped thing a thing. Double-clicking is the escape
+    // hatch: it drills in, and from then on clicks inside that model select the
+    // parts. Clicking outside it, or pressing Escape, comes back out.
+    [[nodiscard]] core::InstanceId drilled() const noexcept { return m_drilled; }
+    void setDrilled(core::InstanceId id) noexcept { m_drilled = id; }
+
     // Runs the manipulator for this frame, at the frame's safe point like every
     // other world mutation.
     //
@@ -1766,6 +1779,7 @@ private:
     core::DVec3 m_cameraOrigin;
     bool m_hasCamera = false;
     std::optional<PickRequest> m_pending;
+    core::InstanceId m_drilled;
     RunState m_run = RunState::Editing;
     GizmoMode m_gizmoMode = GizmoMode::Translate;
     bool m_gizmoLocal = false;

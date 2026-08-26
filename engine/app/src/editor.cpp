@@ -2862,6 +2862,34 @@ std::optional<PickHit> Editor::resolvePick(const scene::World& world, core::Inst
         hit = marker;
     }
 
+    // **A click selects the thing, not the part it is made of** (S5.3). A
+    // `Model` is something somebody made in order to move it as one, so
+    // selecting the wheel of a car hands back the opposite of what the grouping
+    // was for. Double-clicking drills in, and a click outside what was drilled
+    // comes back out.
+    if (hit.has_value()) {
+        const core::InstanceId resolved = resolveSelection(world, root, hit->instance, m_drilled);
+
+        if (request.opening) {
+            // **Opening what was RESOLVED, not what was hit.** Double-clicking a
+            // wheel opens the car it is part of; a second double-click then
+            // opens whatever is inside that, one level per gesture.
+            m_drilled = resolved != hit->instance ? resolved : hit->instance;
+        }
+        else if (m_drilled.valid() && !world.isAncestorOf(m_drilled, resolved) && resolved != m_drilled) {
+            // Clicked outside what was open, so it is closed. Otherwise a drill
+            // would be permanent and the rule would be off for the rest of the
+            // session.
+            m_drilled = core::InstanceId{};
+        }
+
+        hit = PickHit{resolveSelection(world, root, hit->instance, m_drilled), hit->distance};
+    }
+    else if (!request.additive) {
+        // Empty space closes it too, for the same reason it deselects.
+        m_drilled = core::InstanceId{};
+    }
+
     // **Ctrl adds and removes; a plain click replaces.** The same gesture the
     // Explorer's rows use, because it is the same question asked of a different
     // surface -- and somebody who has ctrl-clicked four parts in the tree will

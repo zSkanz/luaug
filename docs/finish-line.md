@@ -316,7 +316,15 @@ that sends the next session to the wrong place.
       Four cases, including the one that is silently wrong: a gizmo at an
       attachment's LOCAL frame sits at the origin for every bone on a character
       ten metres out, which reads as the gizmo not appearing.
-- [ ] **S5.3** Selection resolves to the meaningful ancestor, with drill-down.
+- [x] **S5.3** Selection resolves to the meaningful ancestor, with drill-down —
+      built, and S5.4 is what made it unavoidable: before Group, models were
+      rare. A click selects the OUTERMOST `Model` at or above what it hit --
+      outermost because a car in a convoy is still a car, and because
+      nearest-first would make "one click, one level" a rule with memory in it.
+      A `Folder` is not a stopping point: filing is not assembly, and resolving
+      to one would make every part in a tidy project unselectable.
+      Double-clicking drills in, a click outside comes back out, and Escape
+      steps out one level before it lets go of the selection. Six cases.
 - [x] **S5.4** Group / Ungroup — built, Ctrl+G and Ctrl+Shift+G, in the
       Explorer's context menu, one undo step each. The container is a `Model`
       when anything in the selection has a transform and a `Folder` when
