@@ -780,3 +780,85 @@ TEST_CASE("two files with identical bytes keep their own names through the cache
         CHECK_MESSAGE(findUrn(warm, urn) != nullptr, "the cached build lost " << urn);
     }
 }
+
+// --- One source, compiled by the same call a full build uses (E9 step 12) ----
+//
+// **The claim `importOne` exists to make is structural**: the editor's import
+// and `assetc` produce the same blobs because they are the same function, not
+// because two implementations agree today. So what is checked here is exactly
+// that -- the bytes a one-source import produces are the bytes the full build
+// produced for that source, and nothing else came with them.
+
+TEST_CASE("importOne compiles one source and nothing else")
+{
+    seedRealCatalog();
+    const MaterialFixture fixture;
+
+    CompileOptions options;
+    options.inputRoot = fixture.root;
+
+    const CompileResult whole = compile(options);
+    REQUIRE_MESSAGE(whole.ok, whole.diagnostic);
+    REQUIRE(whole.entries.size() > 1);
+
+    const CompileResult one = importOne(options, fixture.root / "textures" / "normal.png");
+    REQUIRE_MESSAGE(one.ok, one.diagnostic);
+
+    // One row, and it is the row the full build gave that source.
+    REQUIRE(one.entries.size() == 1);
+    CHECK(one.entries[0].urn == "asset://textures/normal.png");
+
+    bool matched = false;
+    for (const ManifestEntry& entry : whole.entries) {
+        if (entry.urn != one.entries[0].urn)
+            continue;
+        matched = true;
+        // **The hash is the claim.** Same source, same options, same transfer
+        // function decided from the same materials, so the same content-addressed
+        // blob -- which is what lets an editor import and a command-line build
+        // share one cache and one pack.
+        CHECK(entry.hash == one.entries[0].hash);
+        CHECK(entry.kind == one.entries[0].kind);
+    }
+    CHECK(matched);
+}
+
+TEST_CASE("importOne still reads the whole tree to decide what a texture is for")
+{
+    // The narrowing is applied AFTER the walk on purpose. A texture's transfer
+    // function comes from the materials that name it, and those live in scenes
+    // and stamps this import is not compiling -- so an import that only looked
+    // at its own file would encode a normal map as colour, which is the exact
+    // defect the sRGB work closed.
+    seedRealCatalog();
+    const MaterialFixture fixture;
+
+    CompileOptions options;
+    options.inputRoot = fixture.root;
+
+    const CompileResult colour = importOne(options, fixture.root / "textures" / "colour.png");
+    const CompileResult normal = importOne(options, fixture.root / "textures" / "normal.png");
+    REQUIRE_MESSAGE(colour.ok, colour.diagnostic);
+    REQUIRE_MESSAGE(normal.ok, normal.diagnostic);
+    REQUIRE(colour.entries.size() == 1);
+    REQUIRE(normal.entries.size() == 1);
+
+    // The same pixels through two transfer functions are two different blobs.
+    // Equal hashes here would mean the material sweep did not run.
+    CHECK(colour.entries[0].hash != normal.entries[0].hash);
+}
+
+TEST_CASE("importOne on a path outside the input root compiles nothing")
+{
+    // A URN is the path relative to the root, so a source outside it has no
+    // name. Refused by producing nothing rather than by inventing one.
+    seedRealCatalog();
+    const MaterialFixture fixture;
+
+    CompileOptions options;
+    options.inputRoot = fixture.root;
+
+    const CompileResult outside = importOne(options, std::filesystem::path(LUAUG_ASSET_TEST_DATA) / "checker.png");
+    CHECK(outside.ok);
+    CHECK(outside.entries.empty());
+}

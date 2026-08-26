@@ -103,6 +103,18 @@ struct CompileOptions
     // A cache miss is never wrong, only slow. A cache that cannot be read or
     // written is a warning and the build proceeds.
     std::filesystem::path cacheRoot;
+
+    // **Compile only these, out of the whole tree** -- absolute paths, and empty
+    // means everything, which is what a full build passes.
+    //
+    // This is what makes `importOne` below the SAME CALL as a full build rather
+    // than a second implementation of it (E9 step 12). Two entry points that
+    // agree by inspection stop agreeing the first time one of them is changed;
+    // two that are one function cannot.
+    //
+    // A companion file is not listed here and does not need to be: a glTF reads
+    // its own `.bin` and its own images, so naming the `.gltf` names all of it.
+    std::vector<std::filesystem::path> only;
 };
 
 // What one run actually did, as counts rather than as a duration.
@@ -165,6 +177,18 @@ struct CompileResult
 // manifest -- have to agree with each other, and writing one before the other
 // is known would leave a half-built content directory behind on failure.
 [[nodiscard]] CompileResult compile(const CompileOptions& options);
+
+// One source, compiled exactly as a full build would compile it.
+//
+// **The editor's import and `assetc` produce the same blobs because they are the
+// same call** (E9 step 12), which is a structural claim rather than a promise:
+// this sets `CompileOptions::only` and forwards, so there is no second code path
+// to drift. What comes back is a `CompileResult` carrying that source's blobs
+// and manifest rows and nothing else.
+//
+// `sourcePath` is absolute and must lie under `options.inputRoot`, because a URN
+// is the path relative to that root and a source outside it has no name.
+[[nodiscard]] CompileResult importOne(const CompileOptions& options, const std::filesystem::path& sourcePath);
 
 // Encodes decoded pixels into the engine's texture container.
 //

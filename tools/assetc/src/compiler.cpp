@@ -466,6 +466,30 @@ std::vector<SourceFile> collectSources(const std::filesystem::path& root, const 
     return sources;
 }
 
+// The whole tree, narrowed to what a caller asked for. Applied AFTER the walk
+// and the sort rather than during them, so a one-source import sees exactly the
+// source a full build would have seen at that position -- same `relative`, same
+// `kind`, same URN.
+[[nodiscard]] std::vector<SourceFile> narrowTo(std::vector<SourceFile> sources,
+                                               std::span<const std::filesystem::path> only)
+{
+    if (only.empty())
+        return sources;
+
+    std::vector<SourceFile> kept;
+    kept.reserve(only.size());
+    for (SourceFile& source : sources) {
+        std::error_code ec;
+        for (const std::filesystem::path& wanted : only) {
+            if (std::filesystem::equivalent(source.path, wanted, ec)) {
+                kept.push_back(std::move(source));
+                break;
+            }
+        }
+    }
+    return kept;
+}
+
 namespace {
 
 // A cache entry is its own tiny binary format rather than JSON: it holds blobs,
@@ -593,7 +617,19 @@ CompileResult compile(const CompileOptions& options)
     CompileResult result;
 
     std::string diagnostic;
-    const std::vector<SourceFile> sources = collectSources(options.inputRoot, options.cacheRoot, diagnostic);
+    // **Two lists, and the difference is the whole of `importOne`'s correctness.**
+    // `allSources` is the tree, and the material sweep below reads it: a
+    // texture's transfer function comes from the materials that NAME it, and
+    // those live in scenes and stamps a one-source import is not compiling. An
+    // import that swept only its own file would encode every normal map as
+    // colour, which is exactly the defect the sRGB work closed.
+    //
+    // `sources` is what actually gets compiled. Narrowing after the walk and the
+    // sort is also what keeps a one-source import seeing the same `relative`,
+    // the same `kind` and therefore the same URN a full build would have given
+    // it at that position.
+    const std::vector<SourceFile> allSources = collectSources(options.inputRoot, options.cacheRoot, diagnostic);
+    const std::vector<SourceFile> sources = narrowTo(allSources, options.only);
     if (!diagnostic.empty()) {
         result.diagnostic = diagnostic;
         return result;
@@ -606,9 +642,11 @@ CompileResult compile(const CompileOptions& options)
     // Skipped when there is no loose texture to decide about, which is every
     // content directory that is only meshes and chunks -- and the streamed
     // world the determinism gate builds is one of them.
-    const bool anyLooseTexture =
-        std::any_of(sources.begin(), sources.end(), [](const SourceFile& s) { return s.kind == SourceKind::Texture; });
-    const TextureUses textureUses = anyLooseTexture ? collectTextureUses(sources) : TextureUses{};
+    // Asked of the WHOLE tree, like the sweep it guards: a one-source import of
+    // a texture must still find the materials that claim it.
+    const bool anyLooseTexture = std::any_of(allSources.begin(), allSources.end(),
+                                             [](const SourceFile& s) { return s.kind == SourceKind::Texture; });
+    const TextureUses textureUses = anyLooseTexture ? collectTextureUses(allSources) : TextureUses{};
 
     asset::PackWriter pack;
     std::vector<ManifestEntry> manifest;
@@ -1019,6 +1057,14 @@ bool writeFile(const std::filesystem::path& path, std::span<const std::byte> byt
         return false;
     }
     return true;
+}
+
+CompileResult importOne(const CompileOptions& options, const std::filesystem::path& sourcePath)
+{
+    CompileOptions one = options;
+    one.only.clear();
+    one.only.push_back(sourcePath);
+    return compile(one);
 }
 
 } // namespace luaug::assetc
