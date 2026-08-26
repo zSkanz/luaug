@@ -100,7 +100,6 @@ inline constexpr std::string_view ContentAudio = "content.Audio";
 inline constexpr std::string_view ContentChunk = "content.Chunk";
 inline constexpr std::string_view ContentFolder = "content.Folder";
 inline constexpr std::string_view ContentFont = "content.Font";
-inline constexpr std::string_view ContentMaterial = "content.Material";
 inline constexpr std::string_view ContentMesh = "content.Mesh";
 inline constexpr std::string_view ContentOther = "content.Other";
 inline constexpr std::string_view ContentScene = "content.Scene";
