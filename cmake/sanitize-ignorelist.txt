@@ -1,0 +1,35 @@
+# What the sanitizers must not look at, and it is deliberately almost nothing.
+#
+# `cmake/luaug_sanitizers.cmake` argues -- correctly -- that instrumentation has
+# to be GLOBAL: a binary where only some translation units are instrumented
+# reports false positives at the boundary, because ASan's container annotations
+# and its allocator disagree with uninstrumented code about the same objects.
+# That argument is about AddressSanitizer, and it holds.
+#
+# It does not hold for every UndefinedBehaviorSanitizer check. `vptr` is a
+# per-expression question -- "does this pointer really point at an object of the
+# type this downcast claims" -- with no boundary state at all, so silencing it
+# for one directory costs nothing anywhere else.
+#
+# **Which is what this file is for, and it names exactly one check.**
+# SPIRV-Cross's C API stores its internal types behind opaque handle structs and
+# recovers them with a downcast that `vptr` correctly identifies as undefined:
+#
+#   third_party/spirv_cross/spirv_cross_c.cpp:2311
+#   runtime error: downcast of address ... which does not point to an object of
+#   type 'const struct spvc_type_s'; object is of type 'spirv_cross::SPIRType'
+#
+# It fires while the shader compiler runs at BUILD time, so the sanitizer stage
+# could not finish linking, let alone run a test. R13 forbids editing a vendored
+# tree in place, and this is not our defect to fix -- so the check is turned off
+# where the code we may not touch lives, and stays on everywhere else, including
+# on every downcast in `engine/`.
+#
+# **Add to this file the way this entry was added**: name the check, name the
+# file, and paste the diagnostic. A blanket `src:*third_party*` would have been
+# one line and would have quietly taken AddressSanitizer off a third of the
+# binary.
+
+[vptr]
+src:*/third_party/*
+src:*\third_party\*

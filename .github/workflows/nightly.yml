@@ -29,6 +29,98 @@ concurrency:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # AddressSanitizer and UndefinedBehaviorSanitizer over the whole suite.
+  #
+  # **The preset had been fully wired and run by nothing.** `linux-clang-asan`
+  # has had configure, build and test entries in `CMakePresets.json` for a long
+  # time, with `LUAUG_SANITIZE=address,undefined`, and no gate on any machine
+  # ever invoked it. A preset nobody executes is the same shape of hole as a test
+  # that passes by skipping: it looks like coverage in the file and is none in
+  # fact.
+  #
+  # It is HERE rather than in `ci.yml` because an instrumented build is two to
+  # three times slower to compile and to run, and `ci.yml` gates a push. Nightly
+  # is where a slow gate belongs. `scripts/localgate.ps1 -Only asan` is the same
+  # run on a developer's machine, through the same script, for the afternoon
+  # somebody is chasing a lifetime bug.
+  #
+  # Non-blocking on purpose, for now: this repository has never had a green
+  # sanitizer run, so the first reports are findings rather than regressions and
+  # a red merge queue would not help anybody read them. It becomes blocking once
+  # it has been green once -- and that promise is written here so it can be
+  # held to.
+  # ---------------------------------------------------------------------------
+  sanitizers:
+    name: ASan + UBSan (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set out-of-tree build root (R14)
+        shell: bash
+        run: echo "LUAUG_BUILD_ROOT=${RUNNER_TEMP}/luaug-build" >> "$GITHUB_ENV"
+
+      # The same list ci.yml installs, plus the one package that is only needed
+      # here: the sanitizer runtime and its headers ship separately from the
+      # compiler that emits calls into them, and without it Luau's `lmem.cpp`
+      # fails to COMPILE on `<sanitizer/asan_interface.h>` rather than failing to
+      # link, which reads as a source error in a vendored file.
+      - name: Install build and SDL video dependencies
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build libclang-rt-18-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
+            libxi-dev libxss-dev libxtst-dev libxkbcommon-dev \
+            libthai-dev libfribidi-dev \
+            libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
+            libdbus-1-dev libibus-1.0-dev libudev-dev \
+            libwayland-dev wayland-protocols libdecor-0-dev
+
+      - name: Install the Luau toolchain (rokit)
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://raw.githubusercontent.com/rojo-rbx/rokit/main/scripts/install.sh | bash
+          echo "$HOME/.rokit/bin" >> "$GITHUB_PATH"
+          "$HOME/.rokit/bin/rokit" install --no-trust-check
+
+      # The same script the local gate runs, which is the whole point: when the
+      # two diverge, "it passes locally" stops meaning anything.
+      #
+      # `detect_leaks=0` is deliberate. The engine holds process-lifetime
+      # singletons -- the message catalog, the job pool, SDL's own state -- and
+      # reporting those on every run would bury the reports that matter. What is
+      # wanted is the memory-error half.
+      - name: Build and test under the sanitizers
+        timeout-minutes: 75
+        shell: bash
+        env:
+          LUAUG_LINUX_PRESET: linux-clang-asan
+          ASAN_OPTIONS: detect_leaks=0:halt_on_error=1:abort_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: bash scripts/gates/linux-build.sh
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Sanitizers"
+            echo
+            echo "\`linux-clang-asan\`: AddressSanitizer and UndefinedBehaviorSanitizer over"
+            echo "the whole ctest suite, the conformance run and the hot-reload gate."
+            echo
+            echo "Non-blocking until it has been green once. A report here is a real defect"
+            echo "in code no other gate in this repository can see -- D131, a leaked IO slot,"
+            echo "was exactly this class."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
   # Android NDK cross-compile (roadmap: "Early Android portability check").
   #
   # Compile-only, and there is no device anywhere in this project -- the point is

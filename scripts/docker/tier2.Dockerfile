@@ -26,6 +26,14 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     # pins. Versioned on purpose: clang-format's output changes between majors,
     # so "formatted" has to name one of them or it means nothing.
         clang-format-18 \
+    # The sanitizer runtime AND its headers, which are a separate package on
+    # Ubuntu from the compiler that emits calls into it. Without this the
+    # `linux-clang-asan` preset does not fail at link time, where it would be
+    # obvious -- it fails at COMPILE time on Luau's `lmem.cpp`, which includes
+    # `<sanitizer/asan_interface.h>` to tell ASan about its own allocator's
+    # poisoning. That is a vendored file R13 forbids editing, so the image is
+    # the only place this can be fixed.
+        libclang-rt-18-dev \
     # Deliberately NOT clang-tools. CMake 3.28+ would want `clang-scan-deps` to
     # scan C++20 translation units for module dependencies, and Ubuntu ships
     # that binary only under a versioned name, so the default configuration

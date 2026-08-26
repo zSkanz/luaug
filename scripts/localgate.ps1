@@ -17,6 +17,7 @@
 # Usage:
 #   scripts/localgate.ps1              # everything -- what you run before a push
 #   scripts/localgate.ps1 -Only docs   # one stage: docs | luau | format | windows | linux | shipping
+#   scripts/localgate.ps1 -Only asan   # address and UB sanitizers, opt-in (see below)
 #   scripts/localgate.ps1 -SkipLinux   # ONLY when Docker is genuinely unavailable
 #   scripts/localgate.ps1 -Only format -Fix   # rewrite the C++ tree instead of checking it
 #   scripts/localgate.ps1 -AllowSkips         # ONLY on a machine with no GPU
@@ -38,7 +39,7 @@
 [CmdletBinding()]
 param(
     [switch]$SkipLinux,
-    [ValidateSet('docs', 'luau', 'format', 'windows', 'linux', 'shipping')]
+    [ValidateSet('docs', 'luau', 'format', 'windows', 'linux', 'shipping', 'asan')]
     [string]$Only,
     # Only meaningful with -Only format: reformat in place rather than report.
     # Off by default, because a gate that edits your tree without being asked is
@@ -299,6 +300,51 @@ Invoke-Stage 'linux' {
         -v "luaug-tier2-build:/build" `
         luaug-tier2:latest bash scripts/gates/linux-build.sh
     if ($LASTEXITCODE -ne 0) { throw "the Tier-2 build or tests failed" }
+}
+
+# **The sanitizers, and they are opt-in for one reason only: they are slow.**
+#
+# `linux-clang-asan` has been fully wired -- configure, build and test presets,
+# with `LUAUG_SANITIZE=address,undefined` -- and run by nothing at all. A preset
+# nobody executes is the same shape of hole as a gate that passes by skipping:
+# it looks like coverage in the file and is none on the machine.
+#
+# It is not in the default run because an instrumented build is two to three
+# times slower to compile and to execute, and the standing gate is something a
+# person runs before every push. It belongs where slow gates belong, which is
+# the nightly job -- `.github/workflows/nightly.yml` runs it there -- and here
+# behind `-Only asan` for the afternoon somebody is chasing a lifetime bug.
+#
+# What it is expected to find, from this repository's own history: D131 was a
+# leaked IO slot, and the three-stage decode pipelines hand jobs pointers into
+# buffers whose lifetime is the whole argument for how they are written. Those
+# are exactly the defects ASan reports and no other gate here can.
+#
+# Its own build volume, so an instrumented tree never shares object files with
+# the ordinary Tier-2 one.
+Invoke-Stage 'asan' {
+    Initialize-Tier2Image
+    docker volume create luaug-tier2-asan | Out-Null
+
+    $existing = docker ps -aq --filter 'name=^luaug-tier2-asan$'
+    if ($existing) { docker rm -f luaug-tier2-asan | Out-Null }
+
+    # `detect_leaks=0`: this is a leak-check-free run on purpose. The engine
+    # holds process-lifetime singletons -- the message catalog, the job pool,
+    # SDL's own state -- and reporting those as leaks on every run would bury
+    # the reports that matter. What is wanted here is the memory-error half:
+    # use-after-free, buffer overflow, and the undefined-behaviour checks.
+    #
+    # `halt_on_error=1` so the first report is the exit code rather than a line
+    # in a log nobody reads.
+    docker run --name luaug-tier2-asan `
+        -e LUAUG_LINUX_PRESET=linux-clang-asan `
+        -e ASAN_OPTIONS=detect_leaks=0:halt_on_error=1:abort_on_error=1 `
+        -e UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 `
+        -v "${repo}:/repo" `
+        -v "luaug-tier2-asan:/build" `
+        luaug-tier2:latest bash scripts/gates/linux-build.sh
+    if ($LASTEXITCODE -ne 0) { throw "the sanitizer build or tests failed" }
 }
 
 # The one profile no other stage builds, and therefore the one that spent an
