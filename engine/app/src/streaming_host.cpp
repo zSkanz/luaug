@@ -299,8 +299,19 @@ void StreamingHost::pump(f64 budgetMilliseconds)
 
     // Completed reads first, so a chunk that arrived during the frame can
     // materialise in the same one rather than waiting for the next.
+    //
+    // **And the budget covers this loop too.** It used to be accounted for only
+    // inside `m_manager.tick(budget)` below, so the drain above it was bounded
+    // by nothing but `initIo`'s `maxInFlight` -- worst case, eight chunk decodes
+    // on one frame with no way to stop part way through. M7's gate claims zero
+    // hitches attributable to streaming, and a decode nobody can interrupt is
+    // exactly the shape of one. What is left in `m_reads` stays there; the loop
+    // resumes next frame where it stopped, which it was already written to do.
     platform::pumpIo();
     for (usize index = 0; index < m_reads.size();) {
+        if (budgetMilliseconds > 0.0 && static_cast<f64>(platform::nowNs() - startedNs) / 1.0e6 >= budgetMilliseconds) {
+            break;
+        }
         const platform::IoStatus status = platform::ioStatus(m_reads[index].first);
         if (status == platform::IoStatus::Pending) {
             ++index;

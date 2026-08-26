@@ -689,12 +689,19 @@ void WorldHost::syncSkeletons()
         const core::NameAtom content = meshPart.meshContent;
         if (content.id == 0 || m_skeletons.find(content) != nullptr)
             return;
-        if (std::find(m_skeletonsTried.begin(), m_skeletonsTried.end(), content.id) != m_skeletonsTried.end())
-            return;
+        // **A set, not a scan** (D126). This runs for every `MeshPart` in the
+        // world on every tick, for ever, long after all the parsing is done --
+        // and a linear search made that cost `meshParts x distinct
+        // skeleton-less meshes` per tick. A world of five hundred props whose
+        // meshes have no rigs paid a quarter of a million comparisons a tick to
+        // conclude nothing, which is a shape nobody notices until the numbers
+        // are large and then notices badly.
+        //
         // Remembered before anything can go wrong, so a file with no skeleton --
         // which is most of them -- costs one parse rather than one per tick
         // forever.
-        m_skeletonsTried.push_back(content.id);
+        if (!m_skeletonsTried.insert(content.id).second)
+            return;
 
         const std::string urn(m_world->atoms().text(content));
         constexpr std::string_view scheme = "asset://";

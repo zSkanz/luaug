@@ -1347,8 +1347,21 @@ std::optional<core::EngineError> importGltf(std::span<const std::byte> bytes,
     // -- a `.gltf` beside its `.bin` and its `.png`. GenerateMeshIndices gives
     // an unindexed primitive the trivial index buffer so there is one path
     // below rather than two.
-    const fg::Options parseOptions =
-        fg::Options::LoadExternalBuffers | fg::Options::LoadExternalImages | fg::Options::GenerateMeshIndices;
+    //
+    // **`skeletonOnly` does not ask for the images** (D126). The host's pass
+    // wants a skin and its clips and stops before a single texel is looked at
+    // -- and it runs for EVERY `MeshPart` in the world, including the ones it is
+    // about to conclude have no skeleton at all. Asking for the images anyway
+    // meant every PNG beside every model was read off disk, in the tick, to be
+    // thrown away: for the model this milestone opened for that is five images
+    // beside a mesh with a rig the pass then keeps, and for an ordinary static
+    // prop it is the whole texture set for nothing.
+    //
+    // The buffers stay: a skin's joints and its animation samplers are accessor
+    // data, and accessor data is what a `.bin` holds.
+    fg::Options parseOptions = fg::Options::LoadExternalBuffers | fg::Options::GenerateMeshIndices;
+    if (!options.skeletonOnly)
+        parseOptions |= fg::Options::LoadExternalImages;
 
     auto parsed = parser.loadGltf(data.get(), baseDirectory, parseOptions);
     if (!parsed)

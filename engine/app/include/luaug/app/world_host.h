@@ -33,6 +33,7 @@
 #include <span>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace luaug::render {
@@ -401,7 +402,12 @@ private:
     render::SkeletonLibrary m_skeletons;
     // Content atoms already attempted, so a file with no skeleton is parsed once
     // rather than once a tick forever.
-    std::vector<core::u32> m_skeletonsTried;
+    // **A set rather than a list**, because `syncSkeletons` asks about every
+    // `MeshPart` on every tick for ever and a linear scan made that cost
+    // `meshParts x distinct skeleton-less meshes`. Its iteration order never
+    // reaches anything observable -- membership is the only question asked of
+    // it -- so R10 has nothing to say here.
+    std::unordered_set<core::u32> m_skeletonsTried;
     std::optional<render::AnimationSystem> m_animation;
 
     // The two things `boot` was handed that a REBUILT runtime has to be handed

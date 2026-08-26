@@ -901,6 +901,32 @@ TEST_CASE_FIXTURE(CatalogFixture, "gltf: a texture the file names but does not s
     CHECK(model.mesh.vertices.empty());
 }
 
+TEST_CASE_FIXTURE(CatalogFixture, "gltf: the skeleton pass does not read the images")
+{
+    // **`syncSkeletons` runs for every `MeshPart` in the world, on every tick,
+    // and stops before a single texel is looked at** -- including for the meshes
+    // it is about to conclude have no skeleton at all. Asking the parser for the
+    // images anyway meant every PNG beside every model was pulled off disk, in
+    // the tick, to be thrown away.
+    //
+    // Asserted through a file whose image is not there, because that is the one
+    // way the difference is observable from outside: a pass that reads it fails,
+    // and a pass that does not read it does not care.
+    std::string text = fixtureText("textured.gltf");
+    REQUIRE(replaceAll(text, "\"uri\": \"checker.png\"", "\"uri\": \"absent.png\"") == 1u);
+
+    GltfImportOptions options;
+    options.skeletonOnly = true;
+    Model model;
+    CHECK_FALSE(importGltf(toBytes(text), dataDirectory(), options, model).has_value());
+
+    // And it is still the skeleton pass: no geometry, no images, whatever rig
+    // the file had. `textured.gltf` has none, which is the ordinary case and the
+    // one the cost was being paid for.
+    CHECK(model.images.empty());
+    CHECK(model.mesh.vertices.empty());
+}
+
 // --- Skinning and animation (M6) ---------------------------------------------
 
 TEST_CASE_FIXTURE(CatalogFixture, "gltf: a skinned mesh loads its skeleton, its weights and its clip")
