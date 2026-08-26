@@ -125,6 +125,18 @@ bool PhysicsSync::inWorld(core::InstanceId id) const
 // the machine was running (R10).
 constexpr u64 kAnchoredMovingTicks = 12;
 
+// `Enum.CollisionFidelity`'s items, by name rather than by the numbers they
+// happen to have. The component stores the raw value -- for the reason every
+// enum-valued component does, that a generated accessor needs no per-enum C++
+// type -- and reading it back against a literal is how D146 happened.
+enum class CollisionFidelity : i32
+{
+    Default = 0,
+    Hull = 1,
+    Box = 2,
+    Precise = 3,
+};
+
 physics::ShapeDesc PhysicsSync::shapeOf(core::InstanceId id, const PartComponent& part) const
 {
     physics::ShapeDesc shape;
@@ -144,7 +156,15 @@ physics::ShapeDesc PhysicsSync::shapeOf(core::InstanceId id, const PartComponent
     // falls through the floor.
     if (const MeshPartComponent* mesh = m_scene.meshParts().find(id); mesh != nullptr) {
         shape.type = physics::ShapeType::Box;
-        if (mesh->collisionFidelity == 0) {
+        // **`Box` is item 2, and this asked for item 0** (D146). Zero is
+        // `Default` -- the item whose whole meaning is "the engine chooses", and
+        // whose documented choice is a hull -- so every `MeshPart` nobody
+        // touched collided as its bounding box while the enum promised the
+        // geometry, and the one person who explicitly asked for a box got a
+        // hull. Both wrong, in opposite directions, from one constant; and the
+        // comment above has described the intended behaviour correctly the whole
+        // time.
+        if (mesh->collisionFidelity == static_cast<i32>(CollisionFidelity::Box)) {
             return shape;
         }
         const core::NameAtom content = mesh->meshContent;

@@ -748,6 +748,12 @@ TEST_CASE("CollisionFidelity Box is honoured exactly, points or no points")
     // The one fidelity that names a shape rather than an accuracy, and it means
     // what it says: a caller who asked for the bounding box gets it even when
     // the mesh's geometry is sitting right there.
+    //
+    // **This case said `Box` in its title and wrote 0** (D146), which is
+    // `Default`. The test and the code held the same wrong belief about which
+    // item was which, so the suite agreed with the defect and went on agreeing
+    // -- which is how one constant produced two opposite faults and neither was
+    // caught by a test written specifically about it.
     Mirror mirror;
     const core::NameAtom content = mirror.fixture.world.atoms().intern("asset://models/rock.glb");
     mirror.sync.setCollisionPoints(content, {core::Vec3{0.0f, 0.0f, 0.0f}, core::Vec3{1.0f, 0.0f, 0.0f},
@@ -756,7 +762,7 @@ TEST_CASE("CollisionFidelity Box is honoured exactly, points or no points")
     const core::InstanceId id = mirror.part("Rock");
     MeshPartComponent mesh;
     mesh.meshContent = content;
-    mesh.collisionFidelity = 0;
+    mesh.collisionFidelity = 2; // Enum.CollisionFidelity.Box
     mirror.fixture.world.meshParts().add(id, mesh);
     mirror.step();
 
@@ -1709,4 +1715,99 @@ TEST_CASE("a refused rebuild costs one attempt, and the body it had stays")
     CHECK(mirror.sync.bodyCount() == 1);
     CHECK(mirror.backend.destroyed.empty());
     (void)id;
+}
+
+// --- Which shape a fidelity asks for (D146, S6.2) ----------------------------
+//
+// **One constant, two defects, in opposite directions.** The mirror short-
+// circuited on item ZERO -- `Default`, whose whole meaning is "the engine
+// chooses" and whose documented choice is a hull -- so every `MeshPart` nobody
+// touched collided as its bounding box while the enum promised the geometry, and
+// the one person who explicitly asked for `Box` got a hull instead.
+//
+// Neither is visible in a screenshot and neither raises. What they produce is a
+// character walking on a box a metre outside a rock, or falling into a hull it
+// should have stood on.
+
+namespace {
+
+// A `MeshPart` with points loaded, so the hull branch has something to reach.
+[[nodiscard]] core::InstanceId meshWithPoints(Mirror& mirror, i32 fidelity)
+{
+    const core::InstanceId id = mirror.part("Rock");
+    MeshPartComponent mesh;
+    mesh.meshContent = mirror.fixture.world.atoms().intern("asset://models/rock.gltf");
+    mesh.collisionFidelity = fidelity;
+    mirror.fixture.world.meshParts().add(id, mesh);
+
+    // Four points is the minimum a hull needs, which is what the mirror checks.
+    const std::vector<core::Vec3> points{
+        {0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}};
+    mirror.sync.setCollisionPoints(mesh.meshContent, points);
+    return id;
+}
+
+[[nodiscard]] physics::ShapeType shapeOfLast(const Mirror& mirror)
+{
+    REQUIRE_FALSE(mirror.backend.created.empty());
+    return mirror.backend.created.back().desc.shape.type;
+}
+
+} // namespace
+
+TEST_CASE("Default asks the engine to choose, and the engine chooses the hull")
+{
+    // The item's own doc: "The engine chooses. In this release that is `Hull`."
+    // A box here is the enum saying one thing and the solver doing another, for
+    // every mesh nobody ever set the property on -- which is nearly all of them.
+    Mirror mirror;
+    (void)meshWithPoints(mirror, 0);
+    mirror.step();
+    CHECK(shapeOfLast(mirror) == physics::ShapeType::ConvexHull);
+}
+
+TEST_CASE("Box asks for the bounding box and gets it")
+{
+    Mirror mirror;
+    (void)meshWithPoints(mirror, 2);
+    mirror.step();
+    CHECK(shapeOfLast(mirror) == physics::ShapeType::Box);
+}
+
+TEST_CASE("Hull asks for the hull and gets it")
+{
+    Mirror mirror;
+    (void)meshWithPoints(mirror, 1);
+    mirror.step();
+    CHECK(shapeOfLast(mirror) == physics::ShapeType::ConvexHull);
+}
+
+TEST_CASE("Precise asks for the triangles and gets the hull, which the enum says it will")
+{
+    // Not silent and not a lie: `Enum.CollisionFidelity.Precise` documents that
+    // this release collides against a hull and reads back `Precise`. A
+    // triangle-mesh collider is a different shape class with different rules --
+    // it cannot be dynamic -- and it is asset-pipeline work.
+    Mirror mirror;
+    const core::InstanceId rock = meshWithPoints(mirror, 3);
+    mirror.step();
+    CHECK(shapeOfLast(mirror) == physics::ShapeType::ConvexHull);
+    // And the property reads back what was written, which is the half that makes
+    // it honest rather than merely unimplemented.
+    CHECK(mirror.fixture.world.meshParts().find(rock)->collisionFidelity == 3);
+}
+
+TEST_CASE("a mesh whose points have not arrived falls back to the box, whatever it asked for")
+{
+    // The frame before a file finishes loading. A body with no shape for one
+    // frame is a body that falls through the floor.
+    Mirror mirror;
+    const core::InstanceId id = mirror.part("Rock");
+    MeshPartComponent mesh;
+    mesh.meshContent = mirror.fixture.world.atoms().intern("asset://models/absent.gltf");
+    mesh.collisionFidelity = 1;
+    mirror.fixture.world.meshParts().add(id, mesh);
+
+    mirror.step();
+    CHECK(shapeOfLast(mirror) == physics::ShapeType::Box);
 }

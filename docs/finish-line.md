@@ -467,7 +467,18 @@ that sends the next session to the wrong place.
       is that the property must CHANGE the picture. They were the last two
       `Inert` properties in the engine; the marker now has no members.
       Running the proof found D144, which was not ours.
-- [ ] **S6.2** `Enum.CollisionFidelity.Precise` — accepted and silently a hull.
+- [x] **S6.2** `Enum.CollisionFidelity.Precise` — reviewed, and it is not
+      silent: the enum item's own doc says this release collides against a hull
+      and reads back `Precise`, and a triangle-mesh collider is a different
+      shape class with different rules (it cannot be dynamic) that belongs to
+      the asset pipeline. What reading `shapeOf` DID find is D146, which is
+      much worse than the thing the item names: the mirror short-circuited on
+      item ZERO, so every `MeshPart` nobody touched collided as its bounding
+      box while the enum promised a hull, and the one that asked for `Box` got
+      a hull. Two opposite faults from one constant, and a test titled
+      "CollisionFidelity Box is honoured exactly" was asserting the defect
+      because it used the same wrong number. Five cases now pin each fidelity
+      to the shape it asks for.
 - [ ] **S6.3** The parallel scheduler phases that nothing runs in.
 - [ ] **S6.4** The dev protocol's two reserved verbs.
 - [ ] **S6.5** TLS — needs an approved decision record before it needs code.
