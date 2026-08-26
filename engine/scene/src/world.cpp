@@ -343,6 +343,81 @@ std::optional<core::TextKey> World::setParent(core::InstanceId id, core::Instanc
     return std::nullopt;
 }
 
+std::optional<u32> World::siblingIndex(core::InstanceId id) const noexcept
+{
+    const InstanceRecord* record = m_instances.find(id);
+    if (record == nullptr || !record->parent.valid())
+        return std::nullopt;
+
+    u32 index = 0;
+    for (core::InstanceId cursor = firstChild(record->parent); cursor.valid(); cursor = nextSibling(cursor)) {
+        if (cursor == id)
+            return index;
+        ++index;
+    }
+    // Unreachable while the links hold: a child that names a parent is in that
+    // parent's list. Answering nullopt rather than asserting keeps a corrupted
+    // list from taking a caller down with it.
+    return std::nullopt;
+}
+
+World::MoveResult World::moveChild(core::InstanceId parent, core::InstanceId child, u32 index)
+{
+    const InstanceRecord* parentRecord = m_instances.find(parent);
+    const InstanceRecord* childRecord = m_instances.find(child);
+    if (parentRecord == nullptr || childRecord == nullptr || childRecord->parent != parent)
+        return MoveResult::NotAChild;
+    if (index >= parentRecord->childCount)
+        return MoveResult::IndexOutOfRange;
+
+    // Asked before anything moves. The caller's undo step is recorded on the
+    // strength of this answer, and a step that undoes nothing eats a press of
+    // ctrl-Z (D134).
+    //
+    // Walked rather than stored: the hierarchy is an intrusive singly-linked
+    // child list, so a child does not know its own index and there is nowhere to
+    // keep one that would not have to be maintained by every other verb that
+    // touches the list. The walk stops AT the child, so it is the distance to it
+    // and not the length of the list.
+    u32 current = 0;
+    for (core::InstanceId cursor = firstChild(parent); cursor.valid(); cursor = nextSibling(cursor)) {
+        if (cursor == child)
+            break;
+        ++current;
+    }
+    if (current == index)
+        return MoveResult::Unchanged;
+
+    // The duplicate-name chain is in CHILD order, so a reorder has to rebuild
+    // it exactly as a rename does -- otherwise `FindFirstChild` answers with a
+    // sibling that is no longer first (ADR 0026). Out before the move and back
+    // in after it, because the re-index walks the child list to find which
+    // same-name sibling now precedes this one, and that list has to be the one
+    // it will be.
+    unindexName(parent, child);
+    unlinkChild(child);
+
+    // Taken out and put back, which is what makes `index` the place the child
+    // ENDS at rather than the one it displaced: the walk below is over the list
+    // WITHOUT it. An invalid anchor is the end, which is where the last index
+    // lands.
+    core::InstanceId before;
+    u32 position = 0;
+    for (core::InstanceId cursor = firstChild(parent); cursor.valid(); cursor = nextSibling(cursor)) {
+        if (position == index) {
+            before = cursor;
+            break;
+        }
+        ++position;
+    }
+
+    // Re-found: `unlinkChild` has decremented the count through its own handle,
+    // and the record this started with is stale by one field.
+    linkChildBefore(*m_instances.find(parent), parent, child, before);
+    indexNameInChildOrder(parent, child);
+    return MoveResult::Moved;
+}
+
 core::InstanceId World::findFirstChild(core::InstanceId parent, core::NameAtom childName) const noexcept
 {
     const NameIndex* index = m_nameIndices.find(parent);
@@ -436,11 +511,24 @@ core::InstanceId World::clone(core::InstanceId id)
     };
 
     for (const core::InstanceId original : sources) {
+        // **Copied out BEFORE `create`, never read after it.** `create` inserts
+        // into this same slot map, and an insert that grows its vector moves
+        // every record in it -- so `record` points into freed memory the moment
+        // `create` returns. It read `record->name` there, and every clone in
+        // this engine was reading a dangling pointer.
+        //
+        // The same rule the deferred decode pipelines learned one at a time:
+        // nothing may hold a pointer into a container across a call that can
+        // make it grow. Here the container and the caller are the same object,
+        // which is what made it survive so long.
         const InstanceRecord* record = m_instances.find(original);
-        const core::InstanceId copy = create(record->classId);
+        const ClassId sourceClass = record->classId;
+        const core::NameAtom sourceName = record->name;
+
+        const core::InstanceId copy = create(sourceClass);
         if (!copy.valid())
             return {};
-        setName(copy, record->name);
+        setName(copy, sourceName);
         mapping[key(original)] = copy;
     }
 
@@ -695,19 +783,37 @@ void World::collectAllTags(TagSet& out) const
 
 void World::linkChild(InstanceRecord& parentRecord, core::InstanceId parentId, core::InstanceId childId)
 {
-    InstanceRecord* child = m_instances.find(childId);
-    child->parent = parentId;
-    child->nextSibling = core::InstanceId{};
-    child->prevSibling = parentRecord.lastChild;
-
     // Appended last: child order is parenting order, and a re-parented child
     // goes to the end (api-design.md §2.2).
-    if (parentRecord.lastChild.valid())
-        m_instances.find(parentRecord.lastChild)->nextSibling = childId;
-    else
-        parentRecord.firstChild = childId;
+    linkChildBefore(parentRecord, parentId, childId, core::InstanceId{});
+}
 
-    parentRecord.lastChild = childId;
+void World::linkChildBefore(InstanceRecord& parentRecord, core::InstanceId parentId, core::InstanceId childId,
+                            core::InstanceId beforeId)
+{
+    InstanceRecord* child = m_instances.find(childId);
+    child->parent = parentId;
+
+    if (beforeId.valid()) {
+        InstanceRecord* anchor = m_instances.find(beforeId);
+        child->prevSibling = anchor->prevSibling;
+        child->nextSibling = beforeId;
+        if (anchor->prevSibling.valid())
+            m_instances.find(anchor->prevSibling)->nextSibling = childId;
+        else
+            parentRecord.firstChild = childId;
+        anchor->prevSibling = childId;
+    }
+    else {
+        child->prevSibling = parentRecord.lastChild;
+        child->nextSibling = core::InstanceId{};
+        if (parentRecord.lastChild.valid())
+            m_instances.find(parentRecord.lastChild)->nextSibling = childId;
+        else
+            parentRecord.firstChild = childId;
+        parentRecord.lastChild = childId;
+    }
+
     ++parentRecord.childCount;
 }
 

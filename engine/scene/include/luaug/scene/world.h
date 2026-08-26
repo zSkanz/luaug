@@ -364,6 +364,79 @@ public:
     // NOT reorder the child (api-design.md §2.2).
     std::optional<core::TextKey> setParent(core::InstanceId id, core::InstanceId newParent);
 
+    // Where `id` sits among its parent's children, counting from zero. Nullopt
+    // when it has no parent and when the handle resolves to nothing -- an
+    // unparented instance has no siblings, and answering "first" would be
+    // indistinguishable from a real position.
+    //
+    // Beside `moveChild` because a caller that has to decide whether a move
+    // would change anything BEFORE it commits to an undo step needs the current
+    // position, and an editor that walked the list itself would be a second
+    // definition of "position among siblings".
+    [[nodiscard]] std::optional<u32> siblingIndex(core::InstanceId id) const noexcept;
+
+    // What `moveChild` did.
+    //
+    // An enum rather than an error key, for the reason `SetResult` below is
+    // one: the two refusals want different messages, and a move that changes
+    // nothing is neither a refusal nor a change -- which `std::optional<TextKey>`
+    // has no way to say.
+    enum class MoveResult : u8
+    {
+        Moved,
+        // Already at that index. Nothing was touched and nothing was enqueued:
+        // a step that changes nothing is a step that eats an undo, and
+        // recording one clears the redo stack with it (D134).
+        Unchanged,
+        // `child` is not a child of `parent` -- it belongs to something else,
+        // it has no parent at all, or one of the two handles no longer
+        // resolves. One answer for three, because each is the same statement
+        // about the same list; a caller that needs them apart has `parentOf`.
+        //
+        // A destroyed instance arrives here rather than at a `parent_locked` of
+        // its own: `destroy` unparents the whole subtree before it marks it, so
+        // there is no list left to hold a place in.
+        NotAChild,
+        // `index` is not a place in that child list. Refused rather than
+        // clamped: the index is computed from where a person let go of a row,
+        // and a clamp would put the instance somewhere else and report success.
+        IndexOutOfRange,
+    };
+
+    // Moves an existing child to `index` among its parent's children, counting
+    // from zero, where `index` is the place it will OCCUPY -- the child comes
+    // out of the list and goes back in at that position, which is how Unity's
+    // `SetSiblingIndex` and Godot's `move_child` both read. Reading it as
+    // "before whatever stands at `index` now" would land a downward drag one
+    // place short, every time.
+    //
+    // The one hierarchy verb that is not a re-parent. `setParent` appends and
+    // deliberately does not reorder (api-design.md §2.2), which is why dropping
+    // a row BETWEEN two rows in the editor's Explorer had nothing to call. It
+    // is engine-side: the script-facing API has no reorder and no signal for
+    // one, and a scene file is the only thing that records the result.
+    //
+    // **It enqueues nothing, and that is a decision rather than an omission.**
+    // `ChangeKind` has no reorder, and the six signals api-design.md §2.2 lists
+    // contain none this could feed -- so the only entries available would be a
+    // `ChildRemoved` and a `ChildAdded` for a child that never left its parent,
+    // which is two false statements to any handler that looks at the tree
+    // during the drain. The world hash sees the move regardless, because it
+    // walks the child list in sibling order; so does the serializer, which
+    // makes the same walk. That is what keeps a rearranged scene saving as what
+    // is on screen.
+    //
+    // **Cost is O(the parent's children), and it is the editor that pays it.**
+    // The links are per record, so the relink itself is a handful of stores;
+    // what is linear is finding the child's own position, finding the instance
+    // then standing at `index`, and putting the child back in the right place
+    // in its duplicate-name chain. A parent with a thousand children costs
+    // three walks of a thousand, once per drop, on no tick path. The
+    // alternative is a position stored per record, which every append would
+    // then have to maintain -- and the 10k-parts benchmark would pay for that
+    // on every parenting, to make a gesture nobody performs in a loop faster.
+    MoveResult moveChild(core::InstanceId parent, core::InstanceId child, u32 index);
+
     // O(1) and first in child order, duplicate names included (ADR 0026).
     [[nodiscard]] core::InstanceId findFirstChild(core::InstanceId parent, core::NameAtom childName) const noexcept;
     // Exact `ClassName` match, so asking for `BasePart` never finds a `Part`.
@@ -639,6 +712,12 @@ private:
     }
 
     void linkChild(InstanceRecord& parentRecord, core::InstanceId parentId, core::InstanceId childId);
+    // The general form: `beforeId` is the sibling the child is inserted ahead
+    // of, and an invalid one means the end. `linkChild` is this with the end,
+    // so an append and an insert cannot disagree about `firstChild`,
+    // `lastChild` or the count.
+    void linkChildBefore(InstanceRecord& parentRecord, core::InstanceId parentId, core::InstanceId childId,
+                         core::InstanceId beforeId);
     void unlinkChild(core::InstanceId childId);
     void indexName(core::InstanceId parentId, core::InstanceId childId);
     // The same, for a rename: a renamed child may belong in the middle of a

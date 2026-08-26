@@ -2,6 +2,9 @@
 
 // doctest stringifies whatever a CHECK compares, and that needs the stream
 // operators for std::string and std::string_view to be visible here.
+#include "luaug/scene/components.h"
+#include "luaug/scene/scene_file.h"
+
 #include <algorithm>
 #include <ostream>
 #include <string>
@@ -43,6 +46,18 @@ namespace {
     for (const Change& change : changes)
         out.push_back(change.kind);
     return out;
+}
+
+// A scene is rooted at a Workspace and the fixture has no Workspace class.
+// Attaching the component to a folder is what `scene_file_tests.cpp` does for
+// the same reason: teaching the fixture a class would edit a header four suites
+// share.
+[[nodiscard]] InstanceId makeWorkspace(Fixture& fixture)
+{
+    const InstanceId id = fixture.world.create(fixture.schema.folderClass);
+    fixture.world.setName(id, fixture.atom("Workspace"));
+    fixture.world.workspaces().add(id, luaug::scene::WorkspaceComponent{});
+    return id;
 }
 
 } // namespace
@@ -115,6 +130,311 @@ TEST_CASE("assigning the current parent again changes nothing and says nothing")
 
     CHECK(fixture.childNames(root) == std::vector<std::string>{"A", "B"});
     CHECK(drain(fixture.world).empty());
+}
+
+// --- Sibling order ----------------------------------------------------------
+//
+// `moveChild` is the one hierarchy verb that is not a re-parent. Everything
+// above this line is about a child arriving somewhere; these are about a child
+// that is already there ending up somewhere else in the same list.
+
+TEST_CASE("a child moves to the place it is given")
+{
+    Fixture fixture;
+    const InstanceId root = fixture.folder("Root");
+    const InstanceId a = fixture.folder("A");
+    const InstanceId b = fixture.folder("B");
+    const InstanceId c = fixture.folder("C");
+    const InstanceId d = fixture.folder("D");
+    for (const InstanceId child : {a, b, c, d})
+        REQUIRE_FALSE(fixture.world.setParent(child, root).has_value());
+    REQUIRE(fixture.childNames(root) == std::vector<std::string>{"A", "B", "C", "D"});
+
+    SUBCASE("forwards, to the place it will occupy and not the one it displaces")
+    {
+        // The distinction is the whole of the index contract: A leaves the list
+        // before it comes back, so index 2 is counted in the list of four that
+        // results. Reading it as "before whatever is at 2 now" would put A one
+        // place short of where a person dropped it, every time they dragged
+        // downward.
+        CHECK(fixture.world.moveChild(root, a, 2) == World::MoveResult::Moved);
+        CHECK(fixture.childNames(root) == std::vector<std::string>{"B", "C", "A", "D"});
+        CHECK(fixture.world.siblingIndex(a) == 2u);
+        CHECK(fixture.world.childCount(root) == 4);
+    }
+    SUBCASE("backwards")
+    {
+        CHECK(fixture.world.moveChild(root, d, 1) == World::MoveResult::Moved);
+        CHECK(fixture.childNames(root) == std::vector<std::string>{"A", "D", "B", "C"});
+        CHECK(fixture.world.siblingIndex(d) == 1u);
+        CHECK(fixture.world.childCount(root) == 4);
+    }
+    SUBCASE("to the front")
+    {
+        CHECK(fixture.world.moveChild(root, c, 0) == World::MoveResult::Moved);
+        CHECK(fixture.childNames(root) == std::vector<std::string>{"C", "A", "B", "D"});
+        CHECK(fixture.world.firstChild(root) == c);
+    }
+    SUBCASE("to the end, and the end is still where the next child is appended")
+    {
+        CHECK(fixture.world.moveChild(root, b, 3) == World::MoveResult::Moved);
+        CHECK(fixture.childNames(root) == std::vector<std::string>{"A", "C", "D", "B"});
+
+        // `lastChild` is what makes an append O(1). A reorder that moved the
+        // tail without telling the parent would leave it pointing at an
+        // instance in the middle, and the next thing parented here would land
+        // there -- which nothing about parenting would explain.
+        const InstanceId e = fixture.folder("E");
+        REQUIRE_FALSE(fixture.world.setParent(e, root).has_value());
+        CHECK(fixture.childNames(root) == std::vector<std::string>{"A", "C", "D", "B", "E"});
+    }
+    SUBCASE("and it is a move within one parent, not a re-parent")
+    {
+        (void)drain(fixture.world);
+        REQUIRE(fixture.world.moveChild(root, a, 3) == World::MoveResult::Moved);
+
+        CHECK(fixture.world.parentOf(a) == root);
+        // **Deliberately empty, and asserted rather than assumed.** `ChangeKind`
+        // has no reorder and the script-facing API has no signal one could
+        // feed, so the only entries available would be a `ChildRemoved` and a
+        // `ChildAdded` for a child that never left its parent -- two false
+        // statements to any handler that looks. See `moveChild`'s contract.
+        CHECK(drain(fixture.world).empty());
+    }
+}
+
+TEST_CASE("a reordered child list is still linked both ways")
+{
+    // `prevSibling` is private and nothing reads it back, so the only way to
+    // ask whether a reorder left it right is to make the world walk it:
+    // detaching a child from the middle is the operation that does.
+    Fixture fixture;
+    const InstanceId root = fixture.folder("Root");
+    const InstanceId a = fixture.folder("A");
+    const InstanceId b = fixture.folder("B");
+    const InstanceId c = fixture.folder("C");
+    for (const InstanceId child : {a, b, c})
+        REQUIRE_FALSE(fixture.world.setParent(child, root).has_value());
+
+    REQUIRE(fixture.world.moveChild(root, c, 0) == World::MoveResult::Moved);
+    REQUIRE(fixture.childNames(root) == std::vector<std::string>{"C", "A", "B"});
+
+    // From the middle, then from the head, then the tail: each fixes up a
+    // different pair of links.
+    REQUIRE_FALSE(fixture.world.setParent(a, InstanceId{}).has_value());
+    CHECK(fixture.childNames(root) == std::vector<std::string>{"C", "B"});
+    REQUIRE_FALSE(fixture.world.setParent(c, InstanceId{}).has_value());
+    CHECK(fixture.childNames(root) == std::vector<std::string>{"B"});
+    REQUIRE_FALSE(fixture.world.setParent(b, InstanceId{}).has_value());
+    CHECK(fixture.childNames(root).empty());
+    CHECK(fixture.world.childCount(root) == 0);
+    CHECK_FALSE(fixture.world.firstChild(root).valid());
+}
+
+TEST_CASE("moving a child to where it already is changes nothing and says so")
+{
+    Fixture fixture;
+    const InstanceId root = fixture.folder("Root");
+    const InstanceId a = fixture.folder("A");
+    const InstanceId b = fixture.folder("B");
+    REQUIRE_FALSE(fixture.world.setParent(a, root).has_value());
+    REQUIRE_FALSE(fixture.world.setParent(b, root).has_value());
+    (void)drain(fixture.world);
+    const u64 before = fixture.world.worldHash();
+
+    // Not a refusal and not a change. The caller's undo stack is why the two
+    // successes are told apart at all: a step that undoes nothing eats a press
+    // of ctrl-Z, and worse, recording one clears the redo stack (D134).
+    CHECK(fixture.world.moveChild(root, b, 1) == World::MoveResult::Unchanged);
+
+    CHECK(fixture.childNames(root) == std::vector<std::string>{"A", "B"});
+    CHECK(fixture.world.worldHash() == before);
+    CHECK(drain(fixture.world).empty());
+}
+
+TEST_CASE("a move that cannot mean anything is refused and the tree is untouched")
+{
+    Fixture fixture;
+    const InstanceId root = fixture.folder("Root");
+    const InstanceId a = fixture.folder("A");
+    const InstanceId b = fixture.folder("B");
+    const InstanceId elsewhere = fixture.folder("Elsewhere");
+    const InstanceId stranger = fixture.folder("Stranger");
+    const InstanceId loose = fixture.folder("Loose");
+    REQUIRE_FALSE(fixture.world.setParent(a, root).has_value());
+    REQUIRE_FALSE(fixture.world.setParent(b, root).has_value());
+    REQUIRE_FALSE(fixture.world.setParent(elsewhere, root).has_value());
+    REQUIRE_FALSE(fixture.world.setParent(stranger, elsewhere).has_value());
+    (void)drain(fixture.world);
+    const u64 before = fixture.world.worldHash();
+
+    SUBCASE("a child of somebody else")
+    {
+        CHECK(fixture.world.moveChild(root, stranger, 0) == World::MoveResult::NotAChild);
+    }
+    SUBCASE("something with no parent at all")
+    {
+        CHECK(fixture.world.moveChild(root, loose, 0) == World::MoveResult::NotAChild);
+    }
+    SUBCASE("a handle that no longer resolves")
+    {
+        REQUIRE(fixture.world.destroy(a));
+        fixture.world.retireDestroyed();
+        (void)drain(fixture.world);
+        CHECK(fixture.world.moveChild(root, a, 0) == World::MoveResult::NotAChild);
+    }
+    SUBCASE("a parent that no longer resolves")
+    {
+        REQUIRE(fixture.world.destroy(elsewhere));
+        fixture.world.retireDestroyed();
+        (void)drain(fixture.world);
+        CHECK(fixture.world.moveChild(elsewhere, stranger, 0) == World::MoveResult::NotAChild);
+    }
+    SUBCASE("one past the end")
+    {
+        // Three children, so 3 is not a place. Refused rather than clamped: the
+        // index comes from where a person let go of a row, and a clamp would
+        // put the instance somewhere else and report success.
+        CHECK(fixture.world.moveChild(root, a, 3) == World::MoveResult::IndexOutOfRange);
+        CHECK(fixture.childNames(root) == std::vector<std::string>{"A", "B", "Elsewhere"});
+        CHECK(fixture.world.worldHash() == before);
+    }
+    SUBCASE("far past the end")
+    {
+        CHECK(fixture.world.moveChild(root, a, 4242) == World::MoveResult::IndexOutOfRange);
+    }
+    SUBCASE("an index into an empty child list")
+    {
+        CHECK(fixture.world.moveChild(stranger, a, 0) == World::MoveResult::NotAChild);
+    }
+
+    CHECK(drain(fixture.world).empty());
+}
+
+TEST_CASE("siblingIndex answers for a child and refuses to guess otherwise")
+{
+    Fixture fixture;
+    const InstanceId root = fixture.folder("Root");
+    const InstanceId a = fixture.folder("A");
+    const InstanceId b = fixture.folder("B");
+    REQUIRE_FALSE(fixture.world.setParent(a, root).has_value());
+    REQUIRE_FALSE(fixture.world.setParent(b, root).has_value());
+
+    CHECK(fixture.world.siblingIndex(a) == 0u);
+    CHECK(fixture.world.siblingIndex(b) == 1u);
+
+    // Nullopt rather than zero. An unparented instance has no siblings, and an
+    // answer of "first" would be indistinguishable from a real one -- which is
+    // the caller deciding not to record an undo step for a move that would in
+    // fact have done something.
+    CHECK_FALSE(fixture.world.siblingIndex(root).has_value());
+    CHECK_FALSE(fixture.world.siblingIndex(InstanceId{}).has_value());
+}
+
+TEST_CASE("a reorder puts the duplicate-name chain back in child order")
+{
+    // The name chain is in CHILD order (ADR 0026), so a reorder has to rebuild
+    // it exactly as a rename does. Leaving it would make `FindFirstChild`
+    // answer with a sibling that is no longer first -- a wrong answer that
+    // nothing about the reorder would explain, from a lookup that never moved.
+    Fixture fixture;
+    const InstanceId root = fixture.folder("Root");
+    const InstanceId first = fixture.folder("Tree");
+    const InstanceId second = fixture.folder("Tree");
+    const InstanceId third = fixture.folder("Tree");
+    const auto tree = fixture.atom("Tree");
+    for (const InstanceId child : {first, second, third})
+        REQUIRE_FALSE(fixture.world.setParent(child, root).has_value());
+    REQUIRE(fixture.world.findFirstChild(root, tree) == first);
+
+    SUBCASE("the last one moved to the front is found first")
+    {
+        REQUIRE(fixture.world.moveChild(root, third, 0) == World::MoveResult::Moved);
+        CHECK(fixture.world.findFirstChild(root, tree) == third);
+
+        // And the rest of the chain still runs: renaming the new head away has
+        // to promote the one child order now puts first.
+        fixture.world.setName(third, fixture.atom("Bush"));
+        CHECK(fixture.world.findFirstChild(root, tree) == first);
+        fixture.world.setName(first, fixture.atom("Bush"));
+        CHECK(fixture.world.findFirstChild(root, tree) == second);
+    }
+    SUBCASE("the first one moved to the end is found last")
+    {
+        REQUIRE(fixture.world.moveChild(root, first, 2) == World::MoveResult::Moved);
+        CHECK(fixture.world.findFirstChild(root, tree) == second);
+        fixture.world.setName(second, fixture.atom("Bush"));
+        CHECK(fixture.world.findFirstChild(root, tree) == third);
+        fixture.world.setName(third, fixture.atom("Bush"));
+        CHECK(fixture.world.findFirstChild(root, tree) == first);
+    }
+    SUBCASE("one moved through the middle keeps every link")
+    {
+        const InstanceId other = fixture.folder("Bush");
+        REQUIRE_FALSE(fixture.world.setParent(other, root).has_value());
+        REQUIRE(fixture.world.moveChild(root, other, 1) == World::MoveResult::Moved);
+        CHECK(fixture.childNames(root) == std::vector<std::string>{"Tree", "Bush", "Tree", "Tree"});
+
+        // A name the chain does not hold must not have been dragged into it.
+        CHECK(fixture.world.findFirstChild(root, tree) == first);
+        CHECK(fixture.world.findFirstChild(root, fixture.atom("Bush")) == other);
+        fixture.world.setName(first, fixture.atom("Stump"));
+        CHECK(fixture.world.findFirstChild(root, tree) == second);
+    }
+}
+
+TEST_CASE("the world hash follows sibling order, and only when it moves")
+{
+    Fixture fixture;
+    const InstanceId root = fixture.folder("Root");
+    const InstanceId a = fixture.folder("A");
+    const InstanceId b = fixture.folder("B");
+    const InstanceId c = fixture.folder("C");
+    for (const InstanceId child : {a, b, c})
+        REQUIRE_FALSE(fixture.world.setParent(child, root).has_value());
+    const u64 base = fixture.world.worldHash();
+
+    REQUIRE(fixture.world.moveChild(root, c, 0) == World::MoveResult::Moved);
+    const u64 reordered = fixture.world.worldHash();
+    // A reorder the hash could not see is a scene that saves differently from
+    // what is on screen: the hash is the same walk the serializer makes.
+    CHECK(reordered != base);
+
+    REQUIRE(fixture.world.moveChild(root, c, 0) == World::MoveResult::Unchanged);
+    CHECK(fixture.world.worldHash() == reordered);
+
+    // The hash is a function of the order, not of how it got there.
+    REQUIRE(fixture.world.moveChild(root, c, 2) == World::MoveResult::Moved);
+    CHECK(fixture.world.worldHash() == base);
+}
+
+TEST_CASE("a reordered child list is what the scene file writes back")
+{
+    // Sibling order is part of what a scene reproduces, and until this verb
+    // existed every order a file could hold was one that parenting had
+    // produced. This is the round trip for an order somebody rearranged: it
+    // lives here rather than beside the format's own cases because what is
+    // under test is the verb, not the writer.
+    Fixture fixture;
+    const InstanceId workspace = makeWorkspace(fixture);
+    const InstanceId a = fixture.folder("A");
+    const InstanceId b = fixture.folder("B");
+    const InstanceId c = fixture.folder("C");
+    for (const InstanceId child : {a, b, c})
+        REQUIRE_FALSE(fixture.world.setParent(child, workspace).has_value());
+    REQUIRE(fixture.world.moveChild(workspace, c, 0) == World::MoveResult::Moved);
+    REQUIRE(fixture.childNames(workspace) == std::vector<std::string>{"C", "A", "B"});
+
+    const std::string text = luaug::scene::writeScene(fixture.world);
+
+    Fixture reloaded;
+    const InstanceId reloadedWorkspace = makeWorkspace(reloaded);
+    REQUIRE_FALSE(luaug::scene::readScene(reloaded.world, text).has_value());
+
+    CHECK(reloaded.childNames(reloadedWorkspace) == std::vector<std::string>{"C", "A", "B"});
+    // And the file is the same bytes the second time, which is the format's own
+    // oracle for "nothing was lost and nothing was invented".
+    CHECK(luaug::scene::writeScene(reloaded.world) == text);
 }
 
 TEST_CASE("descendants come back depth-first in document order")
