@@ -781,3 +781,176 @@ TEST_CASE("a canvas that fits gets no bar at all")
     ui::buildDrawList(*fixture.world, fixture.service, list);
     CHECK(list.quads.empty());
 }
+
+// --- `GuiObject.Rotation` (S7.13) --------------------------------------------
+//
+// **The property was stored, settable and drawn by nothing for the whole of
+// v1.** `inertcheck` could not see it: `rotation` is also a field of
+// `CFrame`, and the editor's camera code mentions that one on nearly every
+// line, so the by-name sweep counted a reader and reported nothing.
+//
+// The turn is an affine on the quad, so what these check is where a corner
+// lands -- and the corners are the only thing that moves. A quad's own frame,
+// which is what rounds its corners, is deliberately left upright.
+
+namespace {
+
+// Where the quad's four corners actually land, which is `min`/`max` put through
+// the quad's own transform. There is no other way to ask: after a turn the box
+// is not axis-aligned any more, and `min`/`max` still describe the upright one.
+[[nodiscard]] core::Vec2 turnedCorner(const ui::DrawQuad& quad, core::Vec2 point)
+{
+    return core::Vec2{quad.turn.x * point.x - quad.turn.y * point.y + quad.turnOffset.x,
+                      quad.turn.y * point.x + quad.turn.x * point.y + quad.turnOffset.y};
+}
+
+} // namespace
+
+TEST_CASE("a quarter turn about the centre swaps a rectangle's corners")
+{
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId frame = fixture.child("Frame", screen);
+    fixture.object(frame).position = core::UDim2{core::UDim{0.0f, 100.0f}, core::UDim{0.0f, 100.0f}};
+    fixture.object(frame).size = core::UDim2{core::UDim{0.0f, 40.0f}, core::UDim{0.0f, 20.0f}};
+    // Anchored at the middle. `absolutePosition` already has the anchor taken
+    // off it -- the box is (80, 90) to (120, 110) -- so the anchor point lands
+    // back on `Position`, and (100, 100) is the pivot.
+    fixture.object(frame).anchorPoint = core::Vec2{0.5f, 0.5f};
+    fixture.object(frame).rotation = 90.0f;
+    fixture.run();
+
+    ui::DrawList list;
+    ui::buildDrawList(*fixture.world, fixture.service, list);
+    REQUIRE(list.quads.size() == 1);
+    const ui::DrawQuad& quad = list.quads[0];
+
+    // Clockwise on a screen whose Y points down: the top-left corner (80, 90)
+    // swings up and to the RIGHT. Getting the sign wrong here draws every
+    // rotation backwards and looks entirely plausible until two of them meet.
+    const core::Vec2 topLeft = turnedCorner(quad, quad.min);
+    CHECK(topLeft.x == doctest::Approx(110.0).epsilon(0.001));
+    CHECK(topLeft.y == doctest::Approx(80.0).epsilon(0.001));
+
+    const core::Vec2 bottomRight = turnedCorner(quad, quad.max);
+    CHECK(bottomRight.x == doctest::Approx(90.0).epsilon(0.001));
+    CHECK(bottomRight.y == doctest::Approx(120.0).epsilon(0.001));
+
+    // The pivot is the one point a rotation leaves alone.
+    const core::Vec2 pivot = turnedCorner(quad, core::Vec2{100.0f, 100.0f});
+    CHECK(pivot.x == doctest::Approx(100.0).epsilon(0.001));
+    CHECK(pivot.y == doctest::Approx(100.0).epsilon(0.001));
+}
+
+TEST_CASE("the quad's own frame stays upright so a rounded corner stays round")
+{
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId frame = fixture.child("Frame", screen);
+    fixture.object(frame).size = core::UDim2{core::UDim{0.0f, 40.0f}, core::UDim{0.0f, 20.0f}};
+    fixture.object(frame).rotation = 37.0f;
+    fixture.run();
+
+    ui::DrawList list;
+    ui::buildDrawList(*fixture.world, fixture.service, list);
+    REQUIRE(list.quads.size() == 1);
+
+    // `min`/`max` are the UNROTATED box, and they have to stay that way: they
+    // are what the vertex builder measures the corner radius against, and a
+    // radius measured in a turned frame is an ellipse.
+    CHECK(list.quads[0].min.x == doctest::Approx(0.0));
+    CHECK(list.quads[0].min.y == doctest::Approx(0.0));
+    CHECK(list.quads[0].max.x == doctest::Approx(40.0));
+    CHECK(list.quads[0].max.y == doctest::Approx(20.0));
+}
+
+TEST_CASE("a child turns with its parent and then by its own")
+{
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId parent = fixture.child("Frame", screen);
+    fixture.object(parent).size = core::UDim2{core::UDim{0.0f, 100.0f}, core::UDim{0.0f, 100.0f}};
+    fixture.object(parent).rotation = 90.0f;
+
+    // Offset from the parent's own corner ON PURPOSE, so the two turns are
+    // about DIFFERENT points -- the parent's pivot is (0, 0) and the child's is
+    // (40, 0). Two turns about one point is the case that works under any
+    // representation and proves nothing.
+    const InstanceId child = fixture.child("Frame", parent);
+    fixture.object(child).position = core::UDim2{core::UDim{0.0f, 40.0f}, core::UDim{0.0f, 0.0f}};
+    fixture.object(child).size = core::UDim2{core::UDim{0.0f, 10.0f}, core::UDim{0.0f, 10.0f}};
+    fixture.object(child).rotation = 90.0f;
+    fixture.run();
+
+    ui::DrawList list;
+    ui::buildDrawList(*fixture.world, fixture.service, list);
+    REQUIRE(list.quads.size() == 2);
+    const ui::DrawQuad& inner = list.quads[1];
+
+    // The two 90s add to a half turn.
+    CHECK(inner.turn.x == doctest::Approx(-1.0).epsilon(0.001));
+    CHECK(inner.turn.y == doctest::Approx(0.0).epsilon(0.001));
+
+    // **And it is a half turn about NEITHER pivot.** Turned about (40, 0) the
+    // child's own corner would not move at all; it lands on (0, 40) instead,
+    // which is a rotation plus a translation and is exactly what an angle and a
+    // point cannot say.
+    const core::Vec2 topLeft = turnedCorner(inner, inner.min);
+    CHECK(topLeft.x == doctest::Approx(0.0).epsilon(0.001));
+    CHECK(topLeft.y == doctest::Approx(40.0).epsilon(0.001));
+    const core::Vec2 bottomRight = turnedCorner(inner, inner.max);
+    CHECK(bottomRight.x == doctest::Approx(-10.0).epsilon(0.001));
+    CHECK(bottomRight.y == doctest::Approx(30.0).epsilon(0.001));
+}
+
+TEST_CASE("an unrotated element carries the identity, and so does a rotated one's sibling")
+{
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId turned = fixture.child("Frame", screen);
+    fixture.object(turned).size = core::UDim2{core::UDim{0.0f, 10.0f}, core::UDim{0.0f, 10.0f}};
+    fixture.object(turned).rotation = 45.0f;
+
+    const InstanceId upright = fixture.child("Frame", screen);
+    fixture.object(upright).size = core::UDim2{core::UDim{0.0f, 20.0f}, core::UDim{0.0f, 20.0f}};
+    fixture.run();
+
+    ui::DrawList list;
+    ui::buildDrawList(*fixture.world, fixture.service, list);
+    REQUIRE(list.quads.size() == 2);
+
+    // A turn reaches descendants and nothing else. The sibling is the case that
+    // would break if the walk carried the rotation in a variable it forgot to
+    // restore -- which is exactly how the scissor index would break too.
+    CHECK(list.quads[1].turn.x == doctest::Approx(1.0));
+    CHECK(list.quads[1].turn.y == doctest::Approx(0.0));
+    CHECK(list.quads[1].turnOffset.x == doctest::Approx(0.0));
+    CHECK(list.quads[1].turnOffset.y == doctest::Approx(0.0));
+}
+
+TEST_CASE("a turn reaches every quad the element draws, not only its background")
+{
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId frame = fixture.child("ScrollFrame", screen);
+    fixture.object(frame).size = core::UDim2{core::UDim{0.0f, 100.0f}, core::UDim{0.0f, 100.0f}};
+    fixture.object(frame).rotation = 90.0f;
+
+    scene::ScrollFrameComponent* scroll = fixture.world->scrollFrames().find(frame);
+    REQUIRE(scroll != nullptr);
+    scroll->canvasSize = core::UDim2{core::UDim{0.0f, 100.0f}, core::UDim{0.0f, 400.0f}};
+    scroll->scrollBarThickness = 10.0f;
+    fixture.run();
+
+    ui::DrawList list;
+    ui::buildDrawList(*fixture.world, fixture.service, list);
+    // A background, a track and a thumb: three quads from one element, pushed
+    // by two different functions. Bars drawn upright inside a turned region is
+    // the failure that stamping the whole range instead of each push site is
+    // built to make impossible.
+    REQUIRE(list.quads.size() == 3);
+    for (const ui::DrawQuad& quad : list.quads) {
+        CHECK(quad.turn.x == doctest::Approx(0.0).epsilon(0.001));
+        CHECK(quad.turn.y == doctest::Approx(1.0).epsilon(0.001));
+    }
+}

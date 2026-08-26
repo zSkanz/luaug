@@ -1060,7 +1060,12 @@ declare extern type InputBinding extends Instance with
     --- own prompt. There is no prompt widget in v1 and there is not meant to be one -- a rebinding
     --- screen is a game's screen.
     DisplayName: string
-    --- A glyph for this binding, as an `asset://` URI. Empty means none.
+    --- A glyph for this binding, as an `asset://` URI. Empty means none -- a prompt with no glyph falls
+    --- back to `DisplayName`, which is why the two are set together or not at all. **The engine never
+    --- acts on this and never will**, for exactly the reason `DisplayName` gives: it is the same datum
+    --- in a picture instead of a word, read back by a GAME through `GetPreferredBinding` to draw its
+    --- own prompt. Nothing in the engine draws a prompt, so nothing in the engine loads this texture --
+    --- an `ImageLabel` the game points at it does.
     Image: Content
     --- Which device family this binding belongs to, DERIVED from `KeyCode` (ADR 0039). It is read-only
     --- because a settable one could disagree with the key beside it -- `DeviceType = Gamepad` on a
@@ -1094,7 +1099,13 @@ declare extern type UIObject extends Instance with
     AnchorPoint: Vector2
     --- Degrees clockwise about the anchor point. It rotates the DRAWING and not the layout: a rotated
     --- element still occupies its unrotated rectangle, which is what stops one spinning icon reflowing
-    --- a list every frame.
+    --- a list every frame. **Descendants turn with it**, and a descendant's own `Rotation` composes on
+    --- top -- a dial rotated 30 degrees with a needle rotated 90 draws the needle at 120, about the
+    --- dial's anchor and then its own. Three things the turn does not reach, all for the reason
+    --- `UICorner` gives: layout, which never sees it; the hit test, which stays the unrotated
+    --- rectangle, because a button you could see in one place and click in another is worse than one
+    --- that does not turn; and `ClipsDescendants`, whose rectangle stays axis-aligned, so a turned
+    --- child of a clipping parent is clipped by the parent's upright box.
     Rotation: number
     --- The fill behind the object's own content. No `3` suffix (§2.5, divergence #11).
     BackgroundColor: Color3

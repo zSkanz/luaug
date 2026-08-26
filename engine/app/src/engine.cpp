@@ -190,9 +190,17 @@ void buildUiGeometry(const ui::DrawList& list, core::Vec2 viewport, std::vector<
         const f32 halfX = (quad.max.x - quad.min.x) * 0.5f;
         const f32 halfY = (quad.max.y - quad.min.y) * 0.5f;
 
+        // The turn, from `GuiObject.Rotation` (S7.13). Applied to the POSITION
+        // and to nothing else: the two coordinates after it are the quad's own
+        // frame, and leaving them unrotated is what keeps a rounded corner round
+        // rather than turning it into an ellipse -- the fragment stage measures
+        // a distance in the quad's space, and the quad's space is not what
+        // moved.
         const auto corner = [&](f32 x, f32 y, f32 u, f32 v) {
-            return render::UiVertex{x,
-                                    y,
+            const f32 turnedX = quad.turn.x * x - quad.turn.y * y + quad.turnOffset.x;
+            const f32 turnedY = quad.turn.y * x + quad.turn.x * y + quad.turnOffset.y;
+            return render::UiVertex{turnedX,
+                                    turnedY,
                                     toByte(quad.color.r),
                                     toByte(quad.color.g),
                                     toByte(quad.color.b),

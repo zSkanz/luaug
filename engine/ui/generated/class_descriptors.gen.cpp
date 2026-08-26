@@ -134,7 +134,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .doc = "Degrees clockwise about the anchor point. It rotates the DRAWING and not the layout: a rotated element still occupies its unrotated rectangle, which is what stops one spinning icon reflowing a list every frame.",
+            .doc = "Degrees clockwise about the anchor point. It rotates the DRAWING and not the layout: a rotated element still occupies its unrotated rectangle, which is what stops one spinning icon reflowing a list every frame.\012\012**Descendants turn with it**, and a descendant's own `Rotation` composes on top -- a dial rotated 30 degrees with a needle rotated 90 draws the needle at 120, about the dial's anchor and then its own.\012\012Three things the turn does not reach, all for the reason `UICorner` gives: layout, which never sees it; the hit test, which stays the unrotated rectangle, because a button you could see in one place and click in another is worse than one that does not turn; and `ClipsDescendants`, whose rectangle stays axis-aligned, so a turned child of a clipping parent is clipped by the parent's upright box.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getUIObjectRotation,
             .set = native::setUIObjectRotation,

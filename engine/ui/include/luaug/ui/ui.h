@@ -93,6 +93,35 @@ struct DrawQuad
     // hit test -- `UICorner`'s own doc says so, and a button whose corner you
     // could see through but not click through would be worse than a square one.
     f32 cornerRadius = 0.0f;
+
+    // --- The turn, from `GuiObject.Rotation` ---------------------------------
+    //
+    // An affine `p -> R*p + t`, with `turn` holding `(cos, sin)` and
+    // `turnOffset` the translation. Identity is `(1, 0)` and `(0, 0)`, which is
+    // what a quad nobody turned carries.
+    //
+    // **A full affine rather than an angle and a pivot**, which is the shape it
+    // looks like it wants. A turned element inside a turned ancestor spins about
+    // two different points, and composing those is
+    // `R(a+b)(p - Q) + R(a)(Q - P) + P` -- a turn about one point plus a
+    // translation that is not that point. Angle-and-pivot cannot express it, so
+    // it would either lose nesting or acquire a special case; `R*p + t` composes
+    // as `(R_a*R_b, R_a*t_b + t_a)` and has neither.
+    //
+    // Applied to POSITION only. The vertex's own local frame -- the two
+    // coordinates `cornerRadius` measures against -- stays in the quad's upright
+    // space, so a rounded corner is still round after a turn instead of becoming
+    // an ellipse.
+    //
+    // **Named `turn` deliberately, and not after the property it carries.**
+    // `inertcheck` sweeps by field name, so a helper here wearing that name
+    // would itself count as a reader of the component field it is drawing --
+    // which is the collision that let `GuiObject.Rotation` sit stored and unread
+    // for the whole of v1 (S7.13). A word nothing else uses keeps the lint's
+    // answer about that field an honest one, and this comment avoids spelling
+    // it for exactly the same reason.
+    core::Vec2 turn{1.0f, 0.0f};
+    core::Vec2 turnOffset{0.0f, 0.0f};
 };
 
 struct DrawList

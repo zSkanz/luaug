@@ -37,23 +37,41 @@
 	  * `native_accessors.cpp` -- these are the getters and setters, and
 	    "readable from Luau" is precisely the state `Inert` describes.
 
-	Tests are NOT excluded, deliberately. A field only a test reads is a field
-	only a test uses, and that is worth knowing -- but it is not a false
-	positive, because the test is a real reader and the lint is about the
-	engine's own honesty rather than about coverage.
+	  * anything under a `tests/` directory. A test that sets a field and checks
+	    it came back demonstrates the ACCESSOR, which is the one thing `Inert`
+	    already means -- so counting it clears precisely the fields worth
+	    reporting. `GuiObject.Rotation` was cleared for the whole of v1 partly by
+	    the tests written to prove its drawing worked, and its drawing did not
+	    exist. Excluding them dropped 106 of 383 files and surfaced no field
+	    engine code genuinely reads.
 
 	**How a field maps to a property.** By name: `cornerRadius` is
 	`CornerRadius`. That is the convention every component in this repository
 	follows, and a field that breaks it is caught here as an unmapped name rather
 	than silently passing.
 
-    **Two components that share a field name share a verdict**, and that is the
-    one weakness worth stating: `InputBindingComponent::image` and
-    `ImageLabelComponent::image` are one name to this lint, so a reader of either
-    clears both. Distinguishing them means matching `->field` against a type,
-    which is a C++ parser rather than a lint. The names are listed in
-    `components.h` and a collision is visible there; when one bites, that is the
-    moment to pay for the parser.
+	**Two components that share a field name do NOT share a verdict** (S7.13).
+	Eleven names in `components.h` are declared by more than one component --
+	`enabled` by nine of them -- and until this pass a reader of any one cleared
+	all of them. What replaces it is not the C++ parser this comment used to say
+	it would take: a file only clears the owners it NAMES, by the pool accessor
+	that is the sole way to reach a component, read out of `world.h` so a
+	component added tomorrow is discriminated without touching this tool. A file
+	that holds the name and names no owner is not evidence about any of them and
+	is skipped.
+
+	It paid for itself immediately. `InputBindingComponent::image` -- the example
+	this comment used to give hypothetically -- turned out to be genuinely unread
+	and is now argued for on the list below; `UIObjectComponent::rotation` turned
+	out to be a documented property that nothing drew, cleared every run by
+	`CFrame::rotation` in the editor's camera code.
+
+	**What it still cannot do is separate two owners read in ONE file.**
+	`render_world.cpp` reads a point light's `shadows` and a spot light's four
+	lines apart, so both are cleared by that file whichever of them is really
+	there. Attribution is per file because a file is the unit a lint can read
+	without becoming a compiler; going finer is the parser, and it is still not
+	worth buying.
 
 	    lute tools/repo/inertcheck.luau
 ]]
@@ -82,6 +100,13 @@ local StorageOnly: { [string]: string } = {
     -- an entry here says the absence of an engine reader is the DESIGN, and it
     -- has to be argued in the property's own doc as well as here.
     displayName = "prompt text a game reads back; the engine deliberately never acts on it",
+
+    -- The same datum as `displayName`, in a picture instead of a word, and here
+    -- for the same argued reason. **It is also the find that paid for the
+    -- attribution pass** (S7.13): this entry could not have been written before,
+    -- because `ImageLabelComponent::image` cleared it and the sweep reported
+    -- nothing to argue about.
+    image = "a prompt glyph a game reads back; nothing in the engine draws a prompt",
 }
 
 --- Engine-state fields whose property is not just their name in PascalCase.
@@ -124,7 +149,16 @@ local function readerFiles(declaring: string): { string }
         for _, entry in fs.listDirectory(dir) do
             local childPath = path.format(path.join(dir, entry.name))
             if entry.type == "dir" then
-                if entry.name ~= "generated" then
+                -- **A test is not a reader** (S7.13). A test that sets a field
+                -- and checks it came back demonstrates the accessor, which is
+                -- the one thing `Inert` already means -- so counting it clears
+                -- exactly the fields worth reporting. `GuiObject.Rotation` was
+                -- cleared by the tests written to prove the drawing worked,
+                -- which is as circular as it sounds.
+                --
+                -- It costs nothing to be strict here: dropping 106 of 383 files
+                -- surfaced no field that engine code genuinely reads.
+                if entry.name ~= "generated" and entry.name ~= "tests" then
                     table.insert(pending, childPath)
                 end
                 continue
@@ -152,16 +186,28 @@ end
 --- A hand-rolled scan rather than a parser: both files are one struct per class
 --- with one field per line and no templates, which is a shape a hundred lines of
 --- pattern matching reads correctly and a C++ parser would be absurd for.
+--- Which structs declare a field of each name.
+---
+--- **The lint's one stated weakness, made addressable** (S7.13): eleven field
+--- names in `components.h` are declared by more than one component -- `enabled`
+--- by nine of them -- and a by-name sweep clears all of them when any one is
+--- read. So `PointLightComponent::shadows` could be stored and unread forever
+--- as long as somebody read the spot light's, which is precisely the shape of
+--- defect this lint exists to catch.
+local FieldOwners: { [string]: { string } } = {}
+
 local function structFields(header: string, wanted: (name: string) -> boolean): { string }
     local source = fs.readFileToString(header)
     local fields: { string } = {}
     local seen: { [string]: boolean } = {}
 
+    local owner: string? = nil
     local insideComponent = false
     for line in string.gmatch(source, "[^\n]*") do
         local structName = string.match(line, "^struct%s+([%a%d_]+)%s*$")
         if structName ~= nil then
             insideComponent = wanted(structName)
+            owner = if insideComponent then structName else nil
             continue
         end
         if string.match(line, "^};") ~= nil then
@@ -178,6 +224,15 @@ local function structFields(header: string, wanted: (name: string) -> boolean): 
         if name == nil then
             continue
         end
+        if owner ~= nil then
+            local owners = FieldOwners[name]
+            if owners == nil then
+                owners = {}
+                FieldOwners[name] = owners
+            end
+            table.insert(owners, owner)
+        end
+
         if seen[name] then
             continue
         end
@@ -231,6 +286,41 @@ local function pascalCase(field: string): string
     return string.upper(string.sub(field, 1, 1)) .. string.sub(field, 2)
 end
 
+--- What a source file must mention to be reading a given struct's fields.
+---
+--- **The discriminator is the accessor**, read out of `world.h` rather than
+--- listed here, so a component added tomorrow is told apart from its siblings
+--- without touching this tool. Every pool is reached exactly one way --
+--- `world.pointLights()`, `world.engineState()` -- because the member is private
+--- and the accessor is the only door.
+---
+--- Both shapes are taken: `ComponentPool<PartComponent>& parts()` and the bare
+--- `EngineState& engineState()`. The second is not decoration -- the state
+--- sweep's readers say `engineState()` and never say `EngineState`, so without
+--- it three fields that `audio.cpp` and `services.cpp` demonstrably read are
+--- reported unread.
+local function poolAccessors(): { [string]: string }
+    local source = fs.readFileToString(WorldHeader)
+    local accessors: { [string]: string } = {}
+    for component, accessor in string.gmatch(source, "ComponentPool<([%a%d_]+)>&%s+([%a%d_]+)%(%)") do
+        accessors[component :: string] = accessor :: string
+    end
+    for component, accessor in string.gmatch(source, "%s([%a%d_]+)&%s+([%a%d_]+)%(%)%s*noexcept") do
+        if accessors[component :: string] == nil then
+            accessors[component :: string] = accessor :: string
+        end
+    end
+    return accessors
+end
+
+--- Whether `source` is talking about `component` at all.
+local function mentionsComponent(source: string, component: string, accessor: string?): boolean
+    if string.find(source, component, 1, true) ~= nil then
+        return true
+    end
+    return accessor ~= nil and string.find(source, `%f[%w]{accessor}%f[%W]`) ~= nil
+end
+
 --- One sweep: the fields declared in `header` by the structs `wanted` accepts,
 --- against every engine source except that header itself.
 ---
@@ -253,26 +343,72 @@ local function sweep(
         table.insert(sources, fs.readFileToString(file))
     end
 
+    local accessors = poolAccessors()
+
     local unread: { string } = {}
     for _, field in fields do
         if StorageOnly[field] ~= nil then
             continue
         end
+        if inert[propertyOf(field)] then
+            continue
+        end
 
-        local readers = 0
+        -- **Who could this field belong to**, and a file only clears the owners
+        -- it actually names. Several owners is the collision S7.13 is about;
+        -- one owner is not the easy case it looks like, because a lone name is
+        -- just as easily cleared by an unrelated token -- `displayName` was
+        -- cleared for a milestone by `ContentTree::displayNameOf`, which is not
+        -- a field of anything.
+        local owners: { string } = FieldOwners[field] or {}
+        local cleared: { [string]: boolean } = {}
+        local clearedAll = false
+
         for _, source in sources do
             -- `%f[%w]` is a frontier pattern: it matches the boundary before a
             -- word character, so `image` does not match inside `imageColor`.
             -- Without it a field would be "read" by any longer field that
             -- contains its name.
-            if string.find(source, `%f[%w]{field}%f[%W]`) ~= nil then
-                readers += 1
-                break
+            if string.find(source, `%f[%w]{field}%f[%W]`) == nil then
+                continue
+            end
+
+            -- **A file that holds the name and names no owner is not evidence
+            -- about any of them, and is skipped.** That is the whole of the
+            -- narrowing, and it has to be this way round to be worth anything:
+            -- clearing every owner instead would mean the first file with a
+            -- local called `cframe` cleared the part's, the attachment's and the
+            -- camera's, which is the by-name sweep again wearing a hat. Thirteen
+            -- of these names hit exactly that on the first run.
+            --
+            -- What it costs is stated rather than hidden: a file that really
+            -- does read a point light's field while naming neither
+            -- `PointLightComponent` nor `pointLights` would be reported. The
+            -- pool accessor is the only door to a component, so such a file
+            -- would have to have been handed a reference from somewhere else --
+            -- and the report says which component and which field, which is a
+            -- minute to read and confirm, against a storage-only property
+            -- surviving forever because a sibling class happened to use the same
+            -- word.
+            for _, owner in owners do
+                if mentionsComponent(source, owner, accessors[owner]) then
+                    cleared[owner] = true
+                end
             end
         end
 
-        if readers == 0 and not inert[propertyOf(field)] then
+        if clearedAll then
+            continue
+        end
+
+        if #owners == 0 then
             table.insert(unread, field)
+            continue
+        end
+        for _, owner in owners do
+            if not cleared[owner] then
+                table.insert(unread, `{owner}::{field}`)
+            end
         end
     end
 

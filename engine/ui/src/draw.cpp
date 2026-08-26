@@ -22,7 +22,34 @@ struct Entry
     // walk, so it is a pure function of the tree (R10).
     u32 order = 0;
     u32 scissor = 0;
+    // The accumulated turn -- this element's `Rotation` composed with every
+    // turned ancestor's. Carried down the walk beside `scissor`, and for the
+    // same reason: both are inherited state that an element cannot compute from
+    // itself alone.
+    Vec2 turn{1.0f, 0.0f};
+    Vec2 turnOffset{0.0f, 0.0f};
 };
+
+// `Rotation` is degrees CLOCKWISE, and screen Y points down, so the ordinary
+// matrix is already the clockwise one: it takes `(1, 0)` to `(cos, sin)`, which
+// is rightwards and DOWN.
+[[nodiscard]] Vec2 turnAbout(f32 degrees, Vec2 pivot, Vec2& offset)
+{
+    const f32 radians = degrees * (3.14159265358979323846f / 180.0f);
+    const Vec2 axis{std::cos(radians), std::sin(radians)};
+    // `t = P - R*P`, which is what makes `p -> R*p + t` fix the pivot.
+    offset = Vec2{pivot.x - (axis.x * pivot.x - axis.y * pivot.y), pivot.y - (axis.y * pivot.x + axis.x * pivot.y)};
+    return axis;
+}
+
+// `(R_a, t_a) . (R_b, t_b)` = `(R_a*R_b, R_a*t_b + t_a)`.
+void composeTurn(Vec2 outerAxis, Vec2 outerOffset, Vec2& axis, Vec2& offset)
+{
+    const Vec2 combined{outerAxis.x * axis.x - outerAxis.y * axis.y, outerAxis.y * axis.x + outerAxis.x * axis.y};
+    offset = Vec2{outerAxis.x * offset.x - outerAxis.y * offset.y + outerOffset.x,
+                  outerAxis.y * offset.x + outerAxis.x * offset.y + outerOffset.y};
+    axis = combined;
+}
 
 // --- Images ------------------------------------------------------------------
 
@@ -240,14 +267,29 @@ void appendScrollBar(core::Rect box, ScrollAxis axis, f32 thickness, bool vertic
     out.push_back(thumb);
 }
 
-void collect(const scene::World& world, core::InstanceId id, u32 scissor, std::vector<Entry>& entries,
-             std::vector<Rect>& scissors)
+void collect(const scene::World& world, core::InstanceId id, u32 scissor, Vec2 turn, Vec2 turnOffset,
+             std::vector<Entry>& entries, std::vector<Rect>& scissors)
 {
     const scene::UIObjectComponent* self = world.uiObjects().find(id);
     if (self == nullptr || !self->visible)
         return;
 
-    entries.push_back(Entry{id, self->zIndex, static_cast<u32>(entries.size()), scissor});
+    // The pivot is the ANCHOR POINT, in window pixels: an element anchored at
+    // its centre spins in place and one anchored at a corner swings from it.
+    // Taken from the UNROTATED box, which is what makes `Rotation` a pure
+    // drawing property -- the layout that produced `absolutePosition` never saw
+    // the turn, and the next frame's layout will not either.
+    if (self->rotation != 0.0f) {
+        const Vec2 pivot{self->absolutePosition.x + self->anchorPoint.x * self->absoluteSize.x,
+                         self->absolutePosition.y + self->anchorPoint.y * self->absoluteSize.y};
+        Vec2 ownOffset{};
+        Vec2 ownAxis = turnAbout(self->rotation, pivot, ownOffset);
+        composeTurn(turn, turnOffset, ownAxis, ownOffset);
+        turn = ownAxis;
+        turnOffset = ownOffset;
+    }
+
+    entries.push_back(Entry{id, self->zIndex, static_cast<u32>(entries.size()), scissor, turn, turnOffset});
 
     u32 childScissor = scissor;
     // A ScrollFrame clips whatever `ClipsDescendants` says: a scrolling region
@@ -265,7 +307,7 @@ void collect(const scene::World& world, core::InstanceId id, u32 scissor, std::v
     }
 
     for (core::InstanceId child = world.firstChild(id); child.valid(); child = world.nextSibling(child))
-        collect(world, child, childScissor, entries, scissors);
+        collect(world, child, childScissor, turn, turnOffset, entries, scissors);
 }
 
 void emit(const scene::World& world, const Entry& entry, DrawList& out)
@@ -273,6 +315,31 @@ void emit(const scene::World& world, const Entry& entry, DrawList& out)
     const scene::UIObjectComponent* self = world.uiObjects().find(entry.id);
     if (self == nullptr)
         return;
+
+    // **Stamped over the range at the end rather than set at each push.** One
+    // element emits a background, two scroll bars, a picture, a glyph per
+    // character and possibly a caret, through four functions -- and a turn that
+    // had to be remembered at every one of those sites is a turn that will be
+    // forgotten at the next one somebody adds.
+    struct TurnStamp
+    {
+        DrawList& list;
+        const Entry& entry;
+        core::usize first;
+
+        ~TurnStamp()
+        {
+            if (entry.turn.x == 1.0f && entry.turn.y == 0.0f)
+                return;
+            for (core::usize index = first; index < list.quads.size(); ++index) {
+                list.quads[index].turn = entry.turn;
+                list.quads[index].turnOffset = entry.turnOffset;
+            }
+        }
+    };
+    // A destructor rather than a line at the bottom, because `emit` has four
+    // early returns and three of them are past the first quad it pushed.
+    const TurnStamp stamp{out, entry, out.quads.size()};
 
     const Rect box{self->absolutePosition, self->absolutePosition + self->absoluteSize};
     const f32 backgroundAlpha = 1.0f - self->backgroundTransparency;
@@ -444,7 +511,7 @@ void buildDrawList(const scene::World& world, core::InstanceId uiService, DrawLi
         entries.clear();
         for (core::InstanceId element = world.firstChild(screen); element.valid();
              element = world.nextSibling(element)) {
-            collect(world, element, 0, entries, out.scissors);
+            collect(world, element, 0, Vec2{1.0f, 0.0f}, Vec2{}, entries, out.scissors);
         }
 
         // `ZIndex` then document order, stably. One flat ordering per tree, and

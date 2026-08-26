@@ -269,7 +269,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .doc = "A glyph for this binding, as an `asset://` URI. Empty means none.",
+            .doc = "A glyph for this binding, as an `asset://` URI. Empty means none -- a prompt with no glyph falls back to `DisplayName`, which is why the two are set together or not at all.\012\012**The engine never acts on this and never will**, for exactly the reason `DisplayName` gives: it is the same datum in a picture instead of a word, read back by a GAME through `GetPreferredBinding` to draw its own prompt. Nothing in the engine draws a prompt, so nothing in the engine loads this texture -- an `ImageLabel` the game points at it does.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
             .get = native::getInputBindingImage,
             .set = native::setInputBindingImage,

@@ -575,7 +575,55 @@ that sends the next session to the wrong place.
       the near-miss from the other direction. A milestone tag is skipped and
       says so, because a check that goes quiet is indistinguishable from one
       that is not running.
-- [ ] **S7.13** `inertcheck`'s stated blind spot, live today.
+- [x] **S7.13** `inertcheck`'s stated blind spot — closed, and it was hiding two
+      real ones. The tool swept by field NAME, so eleven names in `components.h`
+      that more than one component declares (`enabled` by nine) shared a single
+      verdict: a reader of any one cleared all of them. Its own comment offered
+      `InputBindingComponent::image` against `ImageLabelComponent::image` as the
+      hypothetical, and said the fix was a C++ parser.
+
+      It is not a parser. **A file only clears the owners it names**, by the pool
+      accessor — read out of `world.h` rather than listed, so a component added
+      tomorrow is discriminated for free, and taking `EngineState& engineState()`
+      as well as `ComponentPool<T>&` because the state sweep's readers say
+      `engineState()` and never say `EngineState`. A file that holds the name and
+      names no owner is not evidence about any of them and is skipped — which has
+      to be that way round: clearing everyone instead is the by-name sweep again,
+      and on the first run thirteen of these fell straight through it. `tests/`
+      joined `generated/` and `native_accessors.cpp` on the excluded list, for
+      their reason: a test that sets a field and reads it back demonstrates the
+      accessor, which is exactly what `Inert` already means. That dropped 106 of
+      383 files and surfaced nothing engine code genuinely reads.
+
+      Two findings, both hand-confirmed. `InputBindingComponent::image` — the
+      comment's own hypothetical — is genuinely unread, and is the same datum as
+      `DisplayName` in a picture instead of a word: data a game reads back to
+      draw its own prompt. It now carries that argument in its Doc and sits on
+      the `StorageOnly` list beside its sibling. And `UIObjectComponent::rotation`
+      was a documented property that **nothing drew for the whole of v1**,
+      cleared every run by `CFrame::rotation` in the editor's camera code.
+
+      `GuiObject.Rotation` now works rather than being marked `Inert`, because
+      `Inert` means naming the milestone that will act on it and there is none —
+      v1 is closed. The quad carries a full affine `p -> R*p + t` and not an
+      angle and a pivot: a turned element inside a turned ancestor spins about
+      two different points, which composes to a rotation plus a translation that
+      angle-and-pivot cannot express. It is applied to POSITION only, so the
+      vertex's own frame stays upright and a rounded corner stays round instead
+      of becoming an ellipse; and it is stamped over the range of quads an
+      element emitted rather than at each push site, because one element draws a
+      background, two scroll bars, a picture and a glyph per character through
+      four functions. Layout, the hit test and `ClipsDescendants` do not see it,
+      which the property's Doc now says.
+
+      The helpers are called `turn` and not the obvious thing — a field here
+      wearing that name would itself have counted as a reader of the component
+      field it draws, which is the same collision one level down. Break-verified:
+      neutering the read makes the lint name `UIObjectComponent::rotation`, and
+      restoring it passes. What the pass still cannot do is separate two owners
+      read in ONE file — `render_world.cpp` reads a point light's `shadows` and a
+      spot light's four lines apart — and the tool's comment says so instead of
+      claiming otherwise.
 - [ ] **S7.14** The window icon test has never run against the hand-built `.ico`
       now in the tree.
 

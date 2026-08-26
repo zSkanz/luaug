@@ -1555,7 +1555,13 @@ local Classes: { Schema.Class } = {
                 Type = "Content",
                 ContentKind = "Texture",
                 Default = '""',
-                Doc = "A glyph for this binding, as an `asset://` URI. Empty means none.",
+                Doc = "A glyph for this binding, as an `asset://` URI. Empty means none -- a prompt with no "
+                    .. "glyph falls back to `DisplayName`, which is why the two are set together or not at "
+                    .. "all.\n\n**The engine never acts on this and never will**, for exactly the reason "
+                    .. "`DisplayName` gives: it is the same datum in a picture instead of a word, read back "
+                    .. "by a GAME through `GetPreferredBinding` to draw its own prompt. Nothing in the engine "
+                    .. "draws a prompt, so nothing in the engine loads this texture -- an `ImageLabel` the "
+                    .. "game points at it does.",
             },
             {
                 Name = "DeviceType",
@@ -1645,7 +1651,14 @@ local Classes: { Schema.Class } = {
                 Default = "0",
                 Doc = "Degrees clockwise about the anchor point. It rotates the DRAWING and not the layout: a "
                     .. "rotated element still occupies its unrotated rectangle, which is what stops one "
-                    .. "spinning icon reflowing a list every frame.",
+                    .. "spinning icon reflowing a list every frame.\n\n**Descendants turn with it**, and a "
+                    .. "descendant's own `Rotation` composes on top -- a dial rotated 30 degrees with a "
+                    .. "needle rotated 90 draws the needle at 120, about the dial's anchor and then its "
+                    .. "own.\n\nThree things the turn does not reach, all for the reason `UICorner` gives: "
+                    .. "layout, which never sees it; the hit test, which stays the unrotated rectangle, "
+                    .. "because a button you could see in one place and click in another is worse than one "
+                    .. "that does not turn; and `ClipsDescendants`, whose rectangle stays axis-aligned, so a "
+                    .. "turned child of a clipping parent is clipped by the parent's upright box.",
             },
             {
                 Name = "BackgroundColor",
