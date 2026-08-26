@@ -1,3 +1,4 @@
+#include "luaug/jobs/jobs.h"
 #include "luaug/render/environment.h"
 
 #include <cmath>
@@ -258,4 +259,46 @@ TEST_CASE("the sun's disc is far brighter than the sky, which is what puts it in
     const Vec3 atSun = evaluateSky(params, params.sunDirection);
     const Vec3 asideOfSun = evaluateSky(params, Vec3{1.0f, 0.2f, 0.0f});
     CHECK(atSun.x > asideOfSun.x * (kSunDiscIntensity * 0.5f));
+}
+
+TEST_CASE("the BRDF table is the same bytes however many workers baked it")
+{
+    // **The whole reason this bake could be parallelised at all.** 512
+    // importance samples per texel over a 256-square table is 33 million of
+    // them, on the first frame that renders -- and the capture goldens carry a
+    // content HASH of the result, so one ULP of drift reddens four gates that
+    // run in CI.
+    //
+    // The partition is a function of the data (`jobs.h`), so the answer must not
+    // depend on how many workers this machine has. That is asserted here the
+    // only way it can be: bake it with the pool in its documented SERIAL mode --
+    // an uninitialised pool walks the ranges in order on the calling thread --
+    // and again with real workers, and require the bytes to agree.
+    constexpr u32 kSize = 64;
+    const usize texels = static_cast<usize>(kSize) * kSize * 4;
+
+    const bool poolWasUp = luaug::jobs::initialized();
+    if (poolWasUp)
+        luaug::jobs::shutdown();
+
+    std::vector<u16> serial(texels, 0);
+    bakeBrdfLut(kSize, serial);
+
+    luaug::jobs::init(4);
+    std::vector<u16> parallel(texels, 0);
+    bakeBrdfLut(kSize, parallel);
+    luaug::jobs::shutdown();
+
+    if (poolWasUp)
+        luaug::jobs::init();
+
+    // Byte-identical, not near: a golden compares a hash.
+    CHECK(serial == parallel);
+
+    // And it baked something rather than agreeing about zeroes, which a
+    // comparison alone would happily do.
+    bool anyNonZero = false;
+    for (const u16 value : serial)
+        anyNonZero = anyNonZero || value != 0;
+    CHECK(anyNonZero);
 }

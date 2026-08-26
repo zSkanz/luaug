@@ -454,23 +454,36 @@ void bakeIrradianceSh(const SkyParams& params, Vec3 (&out)[9]) noexcept
         out[i] = out[i] * kConvolution[i];
 }
 
-void bakeBrdfLut(u32 size, std::span<u16> out)
+// One row of the split-sum table, and everything it needs.
+//
+// The same shape `LevelJob` and `bakeRows` have a few functions up, and for the
+// same reason: each texel is written once from `x`, `y` and a sample index, so
+// there is no shared accumulator and the output is a function of the DATA rather
+// than of how many workers this machine has. That is what keeps a golden a
+// golden -- the capture gates carry a content hash of these 32 KB.
+struct BrdfJob
 {
-    if (size == 0 || out.size() < static_cast<usize>(size) * size * 4)
-        return;
+    u32 size = 0;
+    u16* out = nullptr;
+};
+
+void bakeBrdfRows(void* user, usize begin, usize end, u32) noexcept
+{
+    const BrdfJob& job = *static_cast<const BrdfJob*>(user);
 
     constexpr u32 kSamples = 512;
     const Vec3 normal{0.0f, 0.0f, 1.0f};
 
-    for (u32 y = 0; y < size; ++y) {
-        const f32 roughness = (static_cast<f32>(y) + 0.5f) / static_cast<f32>(size);
+    for (usize row = begin; row < end; ++row) {
+        const auto y = static_cast<u32>(row);
+        const f32 roughness = (static_cast<f32>(y) + 0.5f) / static_cast<f32>(job.size);
         const f32 alpha = std::max(roughness * roughness, 1e-3f);
         // Smith's geometry term for IBL uses k = alpha / 2, which is the
         // remapping Karis publishes and is NOT the direct-lighting one.
         const f32 k = alpha * 0.5f;
 
-        for (u32 x = 0; x < size; ++x) {
-            const f32 nov = std::max((static_cast<f32>(x) + 0.5f) / static_cast<f32>(size), 1e-3f);
+        for (u32 x = 0; x < job.size; ++x) {
+            const f32 nov = std::max((static_cast<f32>(x) + 0.5f) / static_cast<f32>(job.size), 1e-3f);
             const Vec3 view{std::sqrt(1.0f - nov * nov), 0.0f, nov};
 
             f32 scaleTerm = 0.0f;
@@ -496,13 +509,36 @@ void bakeBrdfLut(u32 size, std::span<u16> out)
                 biasTerm += fc * visibility;
             }
 
-            const usize index = (static_cast<usize>(y) * size + x) * 4;
-            out[index + 0] = floatToHalf(scaleTerm / static_cast<f32>(kSamples));
-            out[index + 1] = floatToHalf(biasTerm / static_cast<f32>(kSamples));
-            out[index + 2] = floatToHalf(0.0f);
-            out[index + 3] = floatToHalf(1.0f);
+            const usize index = (static_cast<usize>(y) * job.size + x) * 4;
+            job.out[index + 0] = floatToHalf(scaleTerm / static_cast<f32>(kSamples));
+            job.out[index + 1] = floatToHalf(biasTerm / static_cast<f32>(kSamples));
+            job.out[index + 2] = floatToHalf(0.0f);
+            job.out[index + 3] = floatToHalf(1.0f);
         }
     }
+}
+
+// **The split-sum table, baked across the pool.**
+//
+// 512 importance samples per texel over a 256-square table is 33 million of
+// them, and it happened on the first frame that renders -- serially. Measured at
+// roughly a tenth of a second, which is most of what was left of an editor's
+// opening frame after the icon atlas stopped being the answer.
+//
+// Bit-identical to the serial version by construction, which matters more here
+// than the speed: `tests/rendercapture/*.jsonl` record a content hash of this
+// texture, and one ULP of drift reddens four gates that run in CI.
+void bakeBrdfLut(u32 size, std::span<u16> out)
+{
+    if (size == 0 || out.size() < static_cast<usize>(size) * size * 4)
+        return;
+
+    BrdfJob job{.size = size, .out = out.data()};
+
+    // A grain of eight rows, for the reason the prefilter gives: enough that a
+    // range is real work, small enough that the table still splits across every
+    // worker.
+    jobs::parallelFor("environment.brdf", jobs::Domain::Render, 0, size, 8, &bakeBrdfRows, &job);
 }
 
 } // namespace luaug::render
