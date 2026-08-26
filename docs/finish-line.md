@@ -235,17 +235,16 @@ that sends the next session to the wrong place.
 
 - [x] **S4.1** Decide the split-piece URN form. **Settled: a fragment** -- see
       decision 7. Owes a decision record, which lands with E9's own.
-- [~] **S4.2** Step 12 — the editor compiles on import. **Four of five
-      built**: `assetc::importOne` (the same call, not a second one), the
-      object-store writer, `luaug_assetc_lib` linked into the app under the
-      editor flag, and the store mounted between the source tree and the pack.
-      Opening a project compiles it and importing compiles what it brought.
-      **The owner's `.fbx` loads because of it.** `splitByPrimitive` reaches
-      the pack too: a multi-primitive model produces one blob per piece under a
-      URN fragment, BESIDE the whole-model blob, so every existing scene still
-      resolves. What is left is the editor placing a `Model` of named
-      `MeshPart`s rather than one opaque part — the compiler can name the
-      pieces and nothing asks it to.
+- [x] **S4.2** Step 12 — the editor compiles on import. **Built, all five
+      pieces**: `assetc::importOne` (the same call, not a second one), the
+      object-store writer, `luaug_assetc_lib` linked under the editor flag, the
+      store mounted between the source tree and the pack, and
+      `splitByPrimitive` reaching both the pack and a world — a model dropped
+      in becomes a `Model` with one named `MeshPart` per primitive. Opening a
+      project compiles it; importing compiles what it brought.
+      **The owner's `.fbx` loads because of it**, and every existing scene
+      still resolves because a piece is emitted BESIDE the whole model rather
+      than instead of it. Step 14 removes the whole-model row and is last.
 - [x] **S4.3** Step 11's unbuilt half — parallel texture encode. **Built**:
       one texture per worker with basis's own threading still off, merged in
       source order. **20.2 s to 8.1 s** on five textures, and the determinism
