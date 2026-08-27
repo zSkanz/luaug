@@ -730,6 +730,39 @@ if(LUAUG_ASSETC_ASSIMP)
     set(ASSIMP_BUILD_STL_IMPORTER ON CACHE BOOL "" FORCE)
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     add_subdirectory(assimp ${CMAKE_BINARY_DIR}/third_party/assimp SYSTEM)
+
+    # **assimp's bundled zlib does not build on a modern macOS SDK**, and this
+    # is the one-line answer that touches no vendored byte (R13).
+    #
+    # zlib's `zutil.h` still carries a branch written for classic Mac OS:
+    #
+    #     #if defined(MACOS) || defined(TARGET_OS_MAC)
+    #     #  ifndef fdopen
+    #     #    define fdopen(fd,mode) NULL   /* No fdopen() */
+    #
+    # `TARGET_OS_MAC` is 1 on every Apple platform since OS X, so `fdopen`
+    # becomes an object-like macro expanding to `NULL` -- and the next system
+    # header to DECLARE `fdopen` becomes `FILE * NULL (int, const char *)`.
+    # The error lands in the SDK's `_stdio.h`, which is why it reads as a
+    # toolchain fault and is not one.
+    #
+    # Defining `fdopen` to itself satisfies the `#ifndef` so the branch is
+    # skipped. It is not a no-op macro trick for its own sake: an object-like
+    # macro does not expand inside its own expansion, so every use of `fdopen`
+    # resolves to `fdopen` and the SDK's real declaration survives intact.
+    #
+    # PRIVATE and Apple-only, so no other platform and no other target sees it,
+    # and every tier keeps compiling byte-identical vendored source. The
+    # alternative -- `ASSIMP_BUILD_ZLIB OFF` and the system zlib on Apple alone
+    # -- would make one platform link a library the others do not, which is a
+    # dependency difference rather than a compile flag.
+    #
+    # Found by the first CI run after the repository went public: macOS had been
+    # unbuildable since assimp was vendored and nothing could say so while
+    # Actions was dark.
+    if(APPLE AND TARGET zlibstatic)
+        target_compile_definitions(zlibstatic PRIVATE fdopen=fdopen)
+    endif()
 endif()
 
 # Restored so nothing above this directory inherits the ceiling. Our own build

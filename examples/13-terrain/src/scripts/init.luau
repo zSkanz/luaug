@@ -18,6 +18,9 @@ local Workspace = game:GetService("Workspace")
 --- A material id. Zero means "remove", so every non-zero value is some kind of
 --- ground; the palette is a game's business and one is enough to show a shape.
 local Rock = 1
+--- A second material, so painting has somewhere to go. What a palette means is
+--- a game's business; two is enough to show that changing one is not a sculpt.
+local Sand = 2
 
 local terrain = Instance.new("Terrain")
 terrain.Name = "Ground"
@@ -53,7 +56,31 @@ terrain:FillBall(vector.create(-5, 1, -3), 7, Rock)
 terrain:FillBall(vector.create(0, -1, 0), 4, 0)
 
 local height = terrain:HeightAt(0, 0)
-print(string.format("terrain: %d cell(s), ground at the middle is %.2f m", terrain.CellCount, height or 0))
+
+-- **Painting, which is the third verb and the one that changes nothing about
+-- where the ground is.** It writes material where there is already ground and
+-- nowhere else -- so it creates no voxel brick, promotes no column, and leaves
+-- this hill exactly as cheap as it was a line ago. That is why it is a verb of
+-- its own rather than a `FillBall` with a different number: sculpting and
+-- recolouring are two gestures a person makes for two reasons.
+--
+-- Material zero is refused here rather than treated as erase. Zero means erase
+-- to `FillBall`, and picking the first entry of a material list must not delete
+-- the hillside you were about to paint.
+local painted = terrain:PaintBall(vector.create(0, height or 0, 0), 7, Sand)
+
+-- The height is the top of the first ball -- centre 2, radius 9 -- so it should
+-- read exactly eleven metres. It read 10.52 until D153 was fixed, because a
+-- sample lying exactly ON a flat brush face was not counted as the brush's and
+-- the surface crossing was found a voxel low.
+print(
+    string.format(
+        "terrain: %d cell(s), ground at the middle is %.2f m, %d cell(s) painted",
+        terrain.CellCount,
+        height or 0,
+        painted
+    )
+)
 
 -- Something to stand on it, so the collider is visible as behaviour rather than
 -- only as a picture.

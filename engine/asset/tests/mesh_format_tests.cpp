@@ -382,6 +382,28 @@ TEST_CASE("a corrupted mesh is an error and never a crash")
         }
     }
 
+    // **A section count nothing could hold.** This is the flip that got out: the
+    // section table has no section describing it, so its count was read from the
+    // header and handed straight to `reserve` -- four billion records of
+    // twenty-four bytes, which is a `std::bad_alloc` escaping a decoder whose
+    // whole contract is "an error and never a crash". Asserted on its own rather
+    // than left to the sweep below, because whether the sweep reaches it depends
+    // on how much memory the machine has: it passed on a developer box for
+    // months and failed the first time CI ran it.
+    {
+        std::vector<std::byte> lying = good;
+        REQUIRE(lying.size() > 16);
+        // Bytes 12..15 are the section count, after the magic, the version and
+        // the reserved word.
+        for (usize at = 12; at < 16; ++at) {
+            lying[at] = std::byte{0xFF};
+        }
+        CompiledMesh decoded;
+        const auto error = decodeMesh(lying, decoded);
+        REQUIRE(error.has_value());
+        CHECK(error->message.find("asset.mesh.err.malformed") != std::string::npos);
+    }
+
     // And every single-bit flip in the header and the section table, which is
     // where a bad offset would come from.
     for (usize at = 0; at < 40 + 15 * 24 && at < good.size(); ++at) {

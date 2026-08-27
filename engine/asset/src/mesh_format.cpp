@@ -38,6 +38,8 @@ constexpr usize SectionBytes = 24;
 // the writer below emits; the two compressed streams -- vertices and skin --
 // are the only ones that cannot be checked this way, and `MaxMeshVertices` is
 // what stands in for it there.
+// The section table's own record: tag, count, offset, length.
+constexpr u64 SectionRecordBytes = 24;
 constexpr u64 LodRecordBytes = 32;
 constexpr u64 SubmeshRecordBytes = 36;
 constexpr u64 MaterialRecordBytes = 92;
@@ -717,6 +719,21 @@ std::optional<core::EngineError> decodeMesh(std::span<const std::byte> bytes, Co
     const u32 sectionCount = header.u32v();
     out.bounds = header.aabb();
     if (!header.ok()) {
+        return malformed();
+    }
+
+    // **The one count in this file that had no section to be checked against**,
+    // and therefore the one that reached an allocator.
+    //
+    // Every other `reserve` here goes through `countFits`, which exists for
+    // exactly this and says so. The section TABLE has no section describing it,
+    // so its count was read from the header and handed straight to `reserve` --
+    // and a single flipped bit in that field asks for four billion records of
+    // twenty-four bytes. The corruption case is named "an error and never a
+    // crash", and `std::bad_alloc` escaping a decoder is a crash; it survived
+    // locally only because a machine with enough memory to try can also fail to
+    // notice.
+    if (static_cast<u64>(sectionCount) * SectionRecordBytes > bytes.size() - header.at()) {
         return malformed();
     }
 
