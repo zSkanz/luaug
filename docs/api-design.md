@@ -999,8 +999,12 @@ or by being in the world the scene describes; no client/server folders yet.
   v1 multiplayer-ish pattern is a **sibling backend project run on Lute**
   (`backend/` using `@std/net.serve`), sharing `src/shared` via the alias —
   the @std convergence story keeping process boundaries honest from day one.
-  `src/client`/`src/server` folder names and `Enum.RunContext` are reserved;
-  the CLI warns if they exist in v1.
+  `src/client`/`src/server` folder names and `Enum.RunContext` are reserved.
+  **"The CLI warns if they exist in v1" was never built** (D149) — a repo-wide
+  search for either folder name outside this document finds nothing. The
+  reservation itself is real where it counts: `Enum.RunContext` is in
+  `api/defs/enums.api.luau` with both items and is honestly documented there as
+  read by nothing.
 
   **"Later" started 2026-08-27**, when phase 4 opened. Two things about this
   paragraph survive it rather than being replaced by it, and both matter: the
