@@ -544,6 +544,41 @@ Clang caught the last defect in each of the two commits, and it was the same one
 both times — `doctest::Approx` takes a `double` and an `f32` compared against it
 is a promotion MSVC does not diagnose.
 
+### B3, B4 and Part C — built (2026-08-27)
+
+The `.lterrain` format, the field raycast, the `Terrain` class, its storage, the
+world hash's contribution and the collider mirror. Four things worth carrying.
+
+**The raycast's first version snapped to the nearest lattice sample**, which
+makes the field a step function one voxel wide — so the bisection converged on a
+step's edge and every hit landed half a voxel out. On a flat field at y = 4 it
+reported 4.25, which reads as a rounding detail rather than a defect. Trilinear
+interpolation fixes it and buys something the snapped version could not have: the
+raycast now agrees with the MESHER, which interpolates along an edge for the same
+reason, so a hit sits on the triangle that was drawn there.
+
+**Promotion allocated four bricks where one carried the cave.** The examined
+column runs a brick above and below the brush, and the rest only repeated the
+height layer. `compact` reclaimed them — which is how it was found, by a test
+that expected zero reclaims and got three — but paying four times the memory on
+every dig and relying on a verb nobody calls automatically is the wrong shape. A
+partly-bricked column is legal, so those levels are simply not created.
+
+**Two gates earned their keep inside an hour.** `inertcheck` refused
+`fieldRevision` and `cellSize` as stored-and-unread, correctly: the mirror that
+reads them was the next step, so `fieldRevision` was removed until C4 brought its
+reader and `CellSize` carries `Inert` naming what will act on it. And the
+method-coverage test failed on the very next build after five methods were
+declared in the IDL — it counts declared against bound, which is `Inert` for a
+method, and it caught them before anything could reach a script and find a name
+that answered nothing.
+
+**A stale binary nearly produced false traces.** `ninja` failed inside the
+container and the replay ran the previous build anyway, recording Linux traces
+that predated the property that had moved them. Caught because the Clang errors
+were read rather than the recording being trusted — which is D040's lesson
+arriving through a different door.
+
 ## Risks entering F1
 
 1. **The slope precondition cascades.** Measured at A5 before anything depends
