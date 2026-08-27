@@ -37,7 +37,20 @@ using core::LogLevel;
     return initialized;
 }
 
-[[nodiscard]] enet_uint32 flagsFor(Delivery delivery) noexcept
+// The ENet flags one `Delivery` asks for.
+//
+// **`UNRELIABLE_FRAGMENT` is on both unreliable modes, and leaving it off was a
+// defect that only appeared above one MTU** (D150). `enet_peer_send` tests for
+// fragmentation FIRST, before it dispatches on unsequenced-versus-reliable
+// (`third_party/enet/peer.c:121`), and its fragment branch reads
+// `(flags & (RELIABLE | UNRELIABLE_FRAGMENT)) == UNRELIABLE_FRAGMENT`. With
+// neither bit set that test fails, so the `else` sends
+// `SEND_FRAGMENT | COMMAND_FLAG_ACKNOWLEDGE` -- **reliable, acknowledged and
+// head-of-line blocking**, which is the exact thing `UnreliableSequenced` is
+// chosen to avoid. The threshold is `mtu - sizeof(ENetProtocolHeader) -
+// sizeof(ENetProtocolSendFragment)`, about 1364 bytes at ENet's default MTU of
+// 1392, and a state delta is precisely the payload that crosses it.
+[[nodiscard]] constexpr enet_uint32 flagsFor(Delivery delivery) noexcept
 {
     switch (delivery) {
     case Delivery::Reliable:
@@ -46,12 +59,39 @@ using core::LogLevel;
         // ENet's UNSEQUENCED is the one that may arrive out of order. Its plain
         // unreliable packet is in fact sequenced, which is a naming trap this
         // switch exists to pay for once rather than at every call site.
-        return ENET_PACKET_FLAG_UNSEQUENCED;
+        //
+        // **A fragmented one is sequenced anyway**, and that is ENet's
+        // limitation rather than a choice made here: there is no unsequenced
+        // fragment command in the protocol, so a payload over one MTU gets a
+        // sequence number. Sequenced-and-droppable is still much nearer this
+        // mode's contract -- "may be dropped and may arrive out of order" --
+        // than the reliable, ordered delivery it used to silently become.
+        return ENET_PACKET_FLAG_UNSEQUENCED | ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT;
     case Delivery::UnreliableSequenced:
-        return 0;
+        return ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT;
     }
     return ENET_PACKET_FLAG_RELIABLE;
 }
+
+// **Asserted here rather than in a test, because no test can see it.** ENet is
+// linked PRIVATE precisely so that nothing above this file knows its constants
+// (the CMakeLists calls that "the R17 rule holding in the build graph"), and a
+// loopback round-trip cannot tell the two apart anyway: a packet that wrongly
+// became reliable still arrives, with the same bytes, in the same order. What
+// went wrong was invisible to every observation available to a test.
+//
+// A compile-time check costs nothing, runs on every build on every platform,
+// and reads as the contract it is guarding.
+static_assert((flagsFor(Delivery::Unreliable) & ENET_PACKET_FLAG_RELIABLE) == 0,
+              "an unreliable delivery must not be sent reliably");
+static_assert((flagsFor(Delivery::UnreliableSequenced) & ENET_PACKET_FLAG_RELIABLE) == 0,
+              "an unreliable-sequenced delivery must not be sent reliably");
+static_assert((flagsFor(Delivery::Unreliable) & ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT) != 0,
+              "an unreliable delivery must stay unreliable above one MTU (D150)");
+static_assert((flagsFor(Delivery::UnreliableSequenced) & ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT) != 0,
+              "an unreliable-sequenced delivery must stay unreliable above one MTU (D150)");
+static_assert((flagsFor(Delivery::Reliable) & ENET_PACKET_FLAG_RELIABLE) != 0,
+              "a reliable delivery must be sent reliably");
 
 class EnetTransport final : public ITransport
 {

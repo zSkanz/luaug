@@ -153,9 +153,13 @@ TEST_CASE("every delivery mode arrives over a link that drops nothing")
 
     // Loopback loses nothing, so this cannot distinguish the three modes by
     // their guarantees -- and it does not claim to. What it pins is that all
-    // three are WIRED: `Delivery::Unreliable` maps to ENet's UNSEQUENCED flag
-    // and `UnreliableSequenced` to no flag at all, which is a naming inversion
-    // an untested mapping gets backwards silently.
+    // three are WIRED.
+    //
+    // **It cannot see the mapping either**, which D150 is the proof of: the
+    // flags are asserted where they are written, in `enet_transport.cpp`, by
+    // `static_assert`. ENet is linked PRIVATE so this file cannot name its
+    // constants, and a packet that wrongly became reliable arrives anyway --
+    // same bytes, same order -- so there was nothing here to observe.
     auto server = createEnetTransport();
     auto client = createEnetTransport();
     REQUIRE_FALSE(server->open({.port = EchoPort, .maxPeers = 4, .channels = 2}).has_value());
@@ -214,4 +218,66 @@ TEST_CASE("the transport refuses what it cannot do instead of pretending")
     CHECK(transport->send(peer, bytesOf("x"), Delivery::Reliable, 2).has_value());
 
     CHECK(transport->connect("this-host-does-not-resolve.invalid", EchoPort, unused).has_value());
+}
+
+TEST_CASE("a payload larger than one MTU arrives whole, on every delivery mode")
+{
+    seedCatalog();
+
+    // **Multi-fragment reassembly was untested at every size that could
+    // fragment.** Every other case in this file sends four bytes, and ENet
+    // splits at `mtu - sizeof(ENetProtocolHeader) - sizeof(ENetProtocolSendFragment)`
+    // -- about 1364 at its default MTU of 1392 -- so the whole fragment path,
+    // on all three modes, had never run.
+    //
+    // That is also where D150 lived: an unreliable payload over that threshold
+    // silently became reliable, acknowledged and head-of-line blocking, because
+    // `enet_peer_send` checks for fragmentation BEFORE it dispatches on the
+    // unsequenced flag. This case cannot see that -- a wrongly-reliable packet
+    // arrives just the same -- so the flags are asserted at the mapping instead.
+    // What this case CAN see is the half a mapping assertion cannot: that the
+    // bytes come back, all of them, in the right order, after a round trip
+    // through several fragments.
+    auto server = createEnetTransport();
+    auto client = createEnetTransport();
+    REQUIRE_FALSE(server->open({.port = EchoPort, .maxPeers = 4, .channels = 2}).has_value());
+    REQUIRE_FALSE(client->open({.port = 0, .maxPeers = 4, .channels = 2}).has_value());
+
+    PeerId toServer;
+    REQUIRE_FALSE(client->connect("127.0.0.1", EchoPort, toServer).has_value());
+
+    std::vector<TransportEvent> serverEvents;
+    std::vector<TransportEvent> clientEvents;
+    REQUIRE(pumpUntil(*server, *client, serverEvents, clientEvents,
+                      [&] { return has(serverEvents, TransportEvent::Kind::Connected); }));
+
+    // Four fragments' worth at the default MTU, and NOT a repeated byte: a
+    // reassembly that dropped, duplicated or reordered a fragment would pass
+    // against a buffer of one repeated value. The pattern is a cheap
+    // position-dependent one so that every offset is distinguishable.
+    constexpr core::usize kPayloadBytes = 5000;
+    std::vector<u8> payload(kPayloadBytes);
+    for (core::usize at = 0; at < payload.size(); ++at)
+        payload[at] = static_cast<u8>((at * 31u + (at >> 8u)) & 0xFFu);
+
+    for (const Delivery delivery : {Delivery::Reliable, Delivery::Unreliable, Delivery::UnreliableSequenced}) {
+        CAPTURE(static_cast<int>(delivery));
+
+        REQUIRE_FALSE(client->send(toServer, payload, delivery, 1).has_value());
+
+        serverEvents.clear();
+        std::vector<u8> received;
+        (void)pumpUntil(*server, *client, serverEvents, clientEvents, [&] {
+            for (const TransportEvent& event : serverEvents) {
+                if (event.kind == TransportEvent::Kind::Message && event.payload.size() == kPayloadBytes) {
+                    received = event.payload;
+                    return true;
+                }
+            }
+            return false;
+        });
+
+        REQUIRE(received.size() == kPayloadBytes);
+        CHECK(received == payload);
+    }
 }
