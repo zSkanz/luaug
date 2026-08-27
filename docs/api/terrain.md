@@ -39,13 +39,13 @@ Converts back to the cheap encoding every column that no longer needs voxels, an
 
 **Nothing does this automatically, deliberately.** Which columns carry voxels is part of the world's state -- it is saved, and it is in the world hash -- so a terrain that quietly recompacted itself would be a world that changed when nobody touched it. Filling a cave back in leaves the bricks behind until you ask.
 
-### `FillBall(center: Vector3, radius: number, material: number): number`
+### `FillBall(center: vector, radius: number, material: number): number`
 
 Adds a ball of ground, or removes one when `material` is zero. Returns how many cells it changed.
 
 This is the verb a sculpting brush is made of, and it is the same one a script uses -- an explosion crater is `FillBall(hit.Position, 4, 0)`.
 
-### `FillBlock(center: Vector3, size: Vector3, material: number): number`
+### `FillBlock(center: vector, size: vector, material: number): number`
 
 The same, as an axis-aligned box. Returns how many cells it changed.
 

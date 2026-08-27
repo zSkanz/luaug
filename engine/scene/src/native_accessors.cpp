@@ -346,6 +346,8 @@ bool setTerrainMinHeight(World& world, core::InstanceId id, const Value& value)
     if (!finite(*height) || static_cast<f32>(*height) >= terrain->maxHeight)
         return false;
     terrain->minHeight = static_cast<f32>(*height);
+    terrain->field.setHeightRange(terrain->minHeight, terrain->maxHeight);
+    terrain->fieldRevision += 1;
     return true;
 }
 
@@ -364,6 +366,8 @@ bool setTerrainMaxHeight(World& world, core::InstanceId id, const Value& value)
     if (!finite(*height) || static_cast<f32>(*height) <= terrain->minHeight)
         return false;
     terrain->maxHeight = static_cast<f32>(*height);
+    terrain->field.setHeightRange(terrain->minHeight, terrain->maxHeight);
+    terrain->fieldRevision += 1;
     return true;
 }
 

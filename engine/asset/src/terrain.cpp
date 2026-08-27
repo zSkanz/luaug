@@ -239,6 +239,17 @@ void TerrainField::setBrick(BrickKey key, std::span<const u8> distances, std::sp
     insertOrReplace(m_bricks, key, makeBrick(distances, materials));
 }
 
+void TerrainField::setHeightRange(float minHeight, float maxHeight) noexcept
+{
+    // Refused rather than clamped if it is not a range: an inverted one would
+    // make every examination empty, and the symptom would be terrain that
+    // cannot be sculpted rather than an error.
+    if (!(maxHeight > minHeight))
+        return;
+    m_settings.minHeight = minHeight;
+    m_settings.maxHeight = maxHeight;
+}
+
 void TerrainField::removeBrick(BrickKey key)
 {
     const auto at = findEntry(m_bricks, key);

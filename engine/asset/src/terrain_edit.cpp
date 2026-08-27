@@ -167,6 +167,10 @@ struct ColumnVerdict
     // **One crossing, and it has to be ground-then-air.** A column that starts in
     // the air and ends in the ground is an overhang seen from below, and it is
     // not a height function however few crossings it has.
+    // **Solid at the bottom, air at the top, and one transition between them.**
+    // That is exactly what `sd = y - H` describes, and the bottom of the range
+    // is the world's floor rather than an arbitrary depth -- so "solid below"
+    // means solid as far as the world goes.
     verdict.singleValued = crossings == 0 || (crossings == 1 && !previousSolid);
     if (crossings == 0) {
         // All air or all ground. All ground has no surface in range, which means
@@ -299,8 +303,26 @@ EditReport applyBrush(TerrainField& field, const core::AABB& bounds, Depth depth
     const i32 maxX = high(bounds.max.x);
     const i32 minZ = low(bounds.min.z);
     const i32 maxZ = high(bounds.max.z);
-    const i32 minY = low(bounds.min.y) - ColumnMargin;
-    const i32 maxY = high(bounds.max.y) + ColumnMargin;
+    // **Clamped to the world's floor and ceiling, and the floor is what makes
+    // ground creatable at all.**
+    //
+    // The height encoding means "solid for every y below H", so a column is only
+    // height-encodable when everything under its surface is solid. Without this
+    // clamp the examination always reaches below whatever was filled, always
+    // finds air there, and always concludes the column is a floating slab -- so
+    // the FIRST fill into an empty world promoted to voxels, and so did every
+    // fill after it. The example that found this had a hill of 76 bricked cells
+    // and a `HeightAt` of zero.
+    //
+    // Below the floor is not air; it is outside the world. A column solid down
+    // to the floor is solid as far as anything can ask.
+    const i32 floorY = static_cast<i32>(std::floor(field.settings().minHeight / voxel));
+    const i32 ceilingY = static_cast<i32>(std::ceil(field.settings().maxHeight / voxel));
+    const i32 minY = std::max(low(bounds.min.y) - ColumnMargin, floorY);
+    const i32 maxY = std::min(high(bounds.max.y) + ColumnMargin, ceilingY);
+    if (maxY <= minY) {
+        return report;
+    }
 
     // **Every column is examined before any is written**, and the columns are
     // visited in a fixed order (R10). A brush that promoted as it went would put

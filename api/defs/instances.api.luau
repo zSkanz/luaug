@@ -1151,7 +1151,7 @@ local Classes: { Schema.Class } = {
             {
                 Name = "FillBall",
                 Parameters = {
-                    { Name = "center", Type = "Vector3" },
+                    { Name = "center", Type = "vector" },
                     { Name = "radius", Type = "number" },
                     { Name = "material", Type = "number" },
                 },
@@ -1165,8 +1165,8 @@ local Classes: { Schema.Class } = {
             {
                 Name = "FillBlock",
                 Parameters = {
-                    { Name = "center", Type = "Vector3" },
-                    { Name = "size", Type = "Vector3" },
+                    { Name = "center", Type = "vector" },
+                    { Name = "size", Type = "vector" },
                     { Name = "material", Type = "number" },
                 },
                 Returns = { "number" },

@@ -140,6 +140,25 @@ struct FieldSettings
     // second encoding, it is worth different values on a rolling island and an
     // alpine map, and nothing about the algorithm needs it fixed.
     core::u32 giveUpColumns = 8;
+
+    // **The world's floor and ceiling, in metres, and the floor is what makes
+    // ground creatable at all.**
+    //
+    // The height encoding means "solid for every y below H", so a column is only
+    // height-encodable when everything under its surface is solid. Examining a
+    // column below the world would always find air there -- and a slab with air
+    // under it is genuinely not a height function -- so the very first fill into
+    // an empty world would promote to voxels, and every fill after it, for ever.
+    //
+    // Clamping the examination to this range is what fixes that: below the floor
+    // is not air, it is outside the world, and a column that is solid down to
+    // the floor is solid as far as anything can ask.
+    //
+    // It is also the range a collider's height precision is spread across when
+    // it is built, which cannot be widened afterwards -- so the two meanings are
+    // one number for a reason rather than by coincidence.
+    float minHeight = -256.0f;
+    float maxHeight = 256.0f;
 };
 
 // A sample of the field: the signed distance in metres, and what it is made of.
@@ -204,6 +223,11 @@ public:
 
     // Drops a brick and, when its column has no bricks left, unmarks the column.
     void removeBrick(BrickKey key);
+
+    // Widens or narrows the world's floor and ceiling. Separate from the
+    // constructor because a terrain's range is authored after it exists, and
+    // changing it resamples nothing -- unlike `voxelSize`, which would.
+    void setHeightRange(float minHeight, float maxHeight) noexcept;
 
 private:
     FieldSettings m_settings;

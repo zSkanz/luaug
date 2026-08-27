@@ -2058,7 +2058,7 @@
           "Parameters": [
             {
               "Name": "center",
-              "Type": "Vector3"
+              "Type": "vector"
             },
             {
               "Name": "radius",
@@ -2077,11 +2077,11 @@
           "Parameters": [
             {
               "Name": "center",
-              "Type": "Vector3"
+              "Type": "vector"
             },
             {
               "Name": "size",
-              "Type": "Vector3"
+              "Type": "vector"
             },
             {
               "Name": "material",

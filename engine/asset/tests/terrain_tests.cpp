@@ -476,3 +476,77 @@ TEST_CASE("compact gives a column back only when its bricks carry nothing")
     CHECK(field.sample(8, 20, 8).distance > 0.0f);
     CHECK(field.sample(8, 30, 8).distance <= 0.0f);
 }
+
+TEST_CASE("ground that reaches the world's floor stays in the cheap encoding")
+{
+    // **The trap this pins cost a working example and 214 bricked cells.**
+    //
+    // The height encoding means "solid for every y below H", so a column is only
+    // height-encodable when everything under its surface is solid. The
+    // examination used to run a fixed margin below whatever was filled, always
+    // find air there, and always conclude the column was a floating slab -- so
+    // the FIRST fill into an empty world promoted to voxels, and so did every
+    // fill after it. Clamping the examination to the world's floor is what fixes
+    // it: below the floor is not air, it is outside the world.
+    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
+
+    // Past the floor rather than onto it: a brush that stops exactly at the
+    // floor leaves the sample there outside itself, which reads as air.
+    const EditReport ground = fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{16.0f, 40.0f, 16.0f}, 1);
+
+    CHECK(ground.promoted == 0);
+    CHECK(field.brickCount() == 0);
+
+    // And it IS ground: the surface is at the block's top, and everything below
+    // is solid.
+    const std::optional<float> height = heightAt(field, 0.0, 0.0);
+    REQUIRE(height.has_value());
+    // Within a voxel of the block's top. An absolute tolerance rather than
+    // `Approx`'s epsilon, which is RELATIVE -- and relative to zero is exact
+    // equality, which is not what a sampled surface can promise.
+    CHECK(std::abs(*height) <= kVoxel);
+    CHECK(field.sample(0, -40, 0).distance <= 0.0f);
+
+    // **A slab that does NOT reach the floor is a slab**, and costs voxels. Both
+    // are legal; the difference is stated rather than surprising.
+    TerrainField slab(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
+    const EditReport floating = fillBlock(slab, core::DVec3{0.0, 8.0, 0.0}, core::Vec3{16.0f, 4.0f, 16.0f}, 1);
+    CHECK(floating.promoted > 0);
+    CHECK(slab.brickCount() > 0);
+}
+
+TEST_CASE("a hill dug into keeps its cheap columns and bricks only the cave")
+{
+    // The whole design, end to end, as one arithmetic claim: a world sculpted
+    // like the terrain example should be mostly height tiles.
+    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -64.0f, .maxHeight = 64.0f});
+    fillBlock(field, core::DVec3{0.0, -40.0, 0.0}, core::Vec3{48.0f, 80.0f, 48.0f}, 1);
+    fillBall(field, core::DVec3{0.0, 2.0, 0.0}, 9.0, 1);
+
+    // **Mostly cheap, and the exception is geometry rather than a defect.** A
+    // ball placed tangent to flat ground floats a sliver above it around its
+    // rim -- the ball's underside curves away from the plane faster than the
+    // plane falls -- so those columns genuinely have two surfaces and genuinely
+    // are not height functions. It is a ring of a dozen columns around a hill
+    // eighteen metres across, which is the hybrid costing what it should.
+    const core::usize afterHill = field.brickCount();
+    CHECK(afterHill < field.tileCount() * 4);
+
+    // **`isBricked` answers per BRICK COLUMN, not per column**, which is worth
+    // knowing before relying on it: one promoted column writes a 16-cubed brick
+    // that then answers for all 256 columns under it. So the rim's ring reaches
+    // the middle's brick, and asking whether the exact centre is bricked is
+    // asking the wrong question. What the surface looks like is the right one.
+    CHECK(field.sample(0, 16, 0).distance <= 0.0f);
+
+    // The cave, which is the one thing a height map cannot express -- and now
+    // the middle of the hill IS bricked, which it was not a moment ago.
+    fillBall(field, core::DVec3{0.0, -1.0, 0.0}, 4.0, 0);
+    CHECK(field.brickCount() > afterHill);
+
+    // Ground above the cave and ground below it, which is the definition of the
+    // thing being demonstrated.
+    CHECK(field.sample(0, 16, 0).distance <= 0.0f);
+    CHECK(field.sample(0, -2, 0).distance > 0.0f);
+    CHECK(field.sample(0, -20, 0).distance <= 0.0f);
+}

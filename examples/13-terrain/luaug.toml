@@ -1,0 +1,18 @@
+# Terrain you can dig (F1, ADR 0067).
+#
+# **No scene file, deliberately.** Every other example that has a world loads one
+# from `content/`; this one sculpts its world in a script, because that is the
+# thing being demonstrated: `Terrain` is a class whose verbs are ordinary script
+# calls, and a valley carved by `FillBall` in `init.luau` is the same operation a
+# brush in the editor performs.
+
+[project]
+name = "LuauG Terrain"
+id = "dev.luaug.terrain"
+version = "1.0.0"
+engine = "0.1"
+
+[window]
+title = "LuauG — Terrain"
+width = 1280
+height = 720

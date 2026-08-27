@@ -892,9 +892,9 @@ declare extern type Terrain extends Instance with
     --- Adds a ball of ground, or removes one when `material` is zero. Returns how many cells it
     --- changed. This is the verb a sculpting brush is made of, and it is the same one a script uses --
     --- an explosion crater is `FillBall(hit.Position, 4, 0)`.
-    function FillBall(self, center: Vector3, radius: number, material: number): number
+    function FillBall(self, center: vector, radius: number, material: number): number
     --- The same, as an axis-aligned box. Returns how many cells it changed.
-    function FillBlock(self, center: Vector3, size: Vector3, material: number): number
+    function FillBlock(self, center: vector, size: vector, material: number): number
     --- The height of the ground at this column, in metres. **It answers about the height layer and says
     --- nothing about caves**, which is the honest shape of the question: a column with a cave in it has
     --- no single height. Cast a ray at it with `Workspace:Raycast` when what you want is the first

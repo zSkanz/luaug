@@ -50,6 +50,7 @@
 #include "luaug/render/render_world.h"
 #include "luaug/render/renderer.h"
 #include "luaug/render/shader_library.h"
+#include "luaug/render/terrain_loader.h"
 #include "luaug/render/transform_history.h"
 #include "luaug/render/ui_renderer.h"
 #include "luaug/rhi/device.h"
@@ -742,6 +743,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         }
     }
     meshLoader.setContentMounts(&contentMounts);
+
+    // **Terrain's own loader**, beside the one it shares a cache and a library
+    // with. Separate because nothing about it reads a file: the geometry is
+    // computed from a field that is already in memory, so none of `MeshLoader`'s
+    // mounts, budgets or failure memory means anything here.
+    render::TerrainLoader terrainLoader;
     // **The editor reads its textures off the frame; everything else does not**
     // (D118). A decode is 14 to 36 ms for an ordinary 1024-square PNG, and the
     // synchronous path loads every missing map it finds in one frame -- so
@@ -2861,6 +2868,17 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                             host->physics()->setCollisionPoints(content, entry->positions);
                     }
                 }
+
+                // **Terrain, at the mesh loader's own safe point and BEFORE
+                // extraction** (F1 Part E). The command list is open and no pass
+                // is, which is what an upload needs -- and the ordering is not a
+                // preference: anything registered after `extract` is invisible
+                // for exactly one frame, which reads as a flicker nobody can
+                // reproduce.
+                //
+                // The atom table is the world's, because the URN a tile is filed
+                // under has to be the same atom `extract` looks up.
+                (void)terrainLoader.sync(*device, *cmd, world, world.atoms(), meshCache, meshLibrary);
             };
             loadFor(host->world(), host->workspace());
             if (Editor::Stage* const openStage = stageOf(); openStage != nullptr)
