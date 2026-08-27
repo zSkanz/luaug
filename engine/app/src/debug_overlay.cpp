@@ -3917,7 +3917,12 @@ bool drawContentIcon(const IconAtlas* icons, const scene::World* world, const Co
 // the kind icon, which is what the row looked like before this existed.
 bool drawContentThumbnail(const ContentTree& tree, const ContentEntry& entry, float size)
 {
-    if (g_thumbnails == nullptr || g_device == nullptr || entry.kind != ContentKind::Texture)
+    // **Every kind that has a picture, not only textures** (S5.16). The cache
+    // answers `previewKindOf` itself and refuses what it cannot draw, so a
+    // folder or a sound never reaches a read -- guarding here as well would be a
+    // second opinion about which files have pictures, and the one that goes
+    // stale the day a third kind gets one.
+    if (g_thumbnails == nullptr || g_device == nullptr)
         return false;
 
     const ThumbnailCache::Thumbnail thumbnail = g_thumbnails->request(tree.absolute(entry));

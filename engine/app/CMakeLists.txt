@@ -32,6 +32,7 @@ luaug_add_module(app
         src/launcher_run.cpp
         src/partition_cache.cpp
         src/picking.cpp
+        src/preview_renderer.cpp
         src/pointer_ownership.cpp
         src/chunk_overlay.cpp
         src/reference_grid.cpp
@@ -239,6 +240,14 @@ if(LUAUG_BUILD_TESTS)
     # fixture is two things to keep in step for no gain.
     target_compile_definitions(luaug_app_tests PRIVATE
         LUAUG_TEST_IMAGE="${CMAKE_SOURCE_DIR}/engine/asset/tests/data/checker.png")
+
+    # One real mesh, so the preview's RENDER half has something to draw (S5.16).
+    # The engine's staged content is shaders, icons and templates -- no models --
+    # so a test that looked there skipped on every machine, which is the shape
+    # S7.9 is about. Borrowed from `asset`'s fixtures rather than copied: two
+    # copies of one quad is two things to keep in step.
+    target_compile_definitions(luaug_app_tests PRIVATE
+        LUAUG_TEST_MESH="${CMAKE_SOURCE_DIR}/engine/asset/tests/data/quad.gltf")
 
     # A folder of real textures for the skipped thumbnail bench, overridable
     # because the interesting answer comes from somebody's OWN 4K art rather than

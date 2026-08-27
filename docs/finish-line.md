@@ -493,7 +493,61 @@ that sends the next session to the wrong place.
       including that tagging something already tagged is `Unchanged` and not a
       refusal: that is the normal case over a selection, and reporting it as a
       failure would fire the toast on the one gesture people use tags for.
-- [ ] **S5.16** Thumbnails for meshes, scenes and stamps; a material swatch.
+- [x] **S5.16** Built, and what was already there was **a complete design with
+      no implementation** — the strongest form of the thing this campaign keeps
+      finding. `thumbnails.h` declared `PreviewKind`, `previewKindOf`,
+      `previewView`, `PreviewJob`, `PreviewResult`, `IPreviewRenderer`,
+      `Stage::Drawing`, `Work::model` and `MaxPreviewsPerFrame`, each with a full
+      contract. **Not one of them was defined, and nothing called any of them.**
+      The browser guarded on `ContentKind::Texture` and every other row wore an
+      icon.
+
+      **The two pure halves first**, because they are where a mistake is silent:
+      a preview slightly too close crops a model and reads as a modelling error,
+      and one far too far reads as an empty tile. `previewKindOf` delegates to
+      `contentKindOf` so the browser and the cache cannot disagree about what a
+      `.gltf` is, and reads the FILE NAME rather than the path — a folder
+      called `x.gltf` must not make everything inside it a mesh. `previewView`
+      frames against the bounding SPHERE, so a plank cannot fall out of frame
+      by being long along the axis the camera looks down, and an empty box
+      becomes a unit cube because `center` and `size` of an empty `AABB` are
+      built from infinities and a camera full of NaN is not recoverable. Seven
+      cases, including that ten times the radius is ten times the distance and
+      that the depth range scales to the asset.
+
+      **The render half draws through the ordinary renderer over a scratch
+      world**, which is the design decision worth stating: assembling
+      `RenderWorld::draws` by hand from an `asset::Model` would be a second copy
+      of `render_world.cpp`'s extraction, and the two would disagree the first
+      time either learned about a new material field. So a mesh becomes one
+      `MeshPart` and a subtree becomes that text read in, and both go through
+      `extract` and `IRenderer::render` exactly as a frame does — which also
+      means a preview is lit, shadowed and tonemapped by the same code as the
+      viewport, so a model looks in the browser like it will look in the world.
+
+      **The model is parsed off the frame and that is not an optimisation.** A
+      3 MB glTF parsed on the frame thread is D118 exactly, so the cache does it
+      on the job pool and the render half is handed a `Model`. The seam has no
+      "busy" answer by design — false means there will never be a picture —
+      so a preview that could not be drawn in one call would have to lie, which
+      is why `MeshLoader::uploadModel` exists.
+
+      **A material is shared as a stamp** (ADR 0060), so one arrives as a subtree
+      with no geometry and would frame as a picture of nothing. It gets a ball
+      wearing it instead, for the reason the stage's own material preview gives:
+      roughness, metalness and a normal map are all about how light moves ACROSS
+      a curvature, and a square of colour shows none of them. Only when there is
+      nothing else to look at — a stamp that happens to contain a material is
+      still a lamp post.
+
+      Verified on a real device: nine assertions over a real renderer, a real
+      glTF and a real 128-square texture coming back. **Two of the checks in that
+      test were earned rather than written**: `MeshPart` is a RENDER class, and a
+      test that registered only scene's descriptors was testing a world no build
+      has; and the engine's staged content holds no `.gltf`, so a test that
+      looked there skipped on every machine, which is the shape S7.9 is about.
+      Clang caught two more things MSVC did not — a double promotion and a dead
+      function left from the first design.
 - [x] **S5.17** Pivot/centre choice for a multi-selection — built, as a toggle
       beside the axis-space one because they are the same kind of question: one
       is which way the handles point and this is where they are. Over one

@@ -120,6 +120,21 @@ public:
     core::u32 forget(rhi::IDevice& device, std::span<const core::NameAtom> urns, TextureLibrary& textures,
                      MeshLibrary& meshes, MeshCache& cache);
 
+    // **An already-parsed model onto the GPU, under a name of the caller's
+    // choosing** (S5.16).
+    //
+    // The ordinary feed reads and parses inside `sync`; this is for a caller
+    // that has done both already and off the frame. The content browser's
+    // previews are the one: `ThumbnailCache` parses a glTF on the job pool
+    // precisely so the frame does not (D118), and the render half is then handed
+    // a `Model` with nowhere to put it.
+    //
+    // Uploads the images and the geometry, fills the library entry, and returns
+    // whether anything is there to draw. `urn` is what the entry is keyed by, so
+    // a `MeshPart` naming it will find this.
+    [[nodiscard]] bool uploadModel(rhi::IDevice& device, rhi::ICmdList& cmd, const asset::Model& model,
+                                   core::NameAtom urn, MeshCache& cache, MeshLibrary& library);
+
     // **Whether a texture may be read and decoded off the frame.**
     //
     // Measured on ordinary 1024-square PNGs out of a texture pack: 14 to 36 ms

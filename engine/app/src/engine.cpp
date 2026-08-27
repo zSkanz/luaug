@@ -23,6 +23,7 @@
 #include "luaug/app/partition_cache.h"
 #include "luaug/app/picking.h"
 #include "luaug/app/pointer_ownership.h"
+#include "luaug/app/preview_renderer.h"
 #include "luaug/app/reference_grid.h"
 #include "luaug/app/reload.h"
 #include "luaug/app/screenshot.h"
@@ -513,6 +514,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // that has one -- the browser asks while it draws and this answers between
     // frames.
     ThumbnailCache thumbnails;
+    // The half of a preview that needs a device and the host's registries. Held
+    // beside the cache it feeds and destroyed with it.
+    std::unique_ptr<HostPreviewRenderer> previewRenderer;
     // Which meshes finished loading this frame, so the physics mirror is handed
     // those and not the whole library. Held across frames rather than declared
     // in the loop, so the allocation happens once.
@@ -3090,7 +3094,19 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // the frame it appeared shows the picture on the next one. A shell
             // with no browser never asks, and this walks an empty list.
             if (options.editor)
-                thumbnails.flush(*device, *cmd);
+                // **Built on the first frame that has a renderer**, not at declaration:
+                // it borrows one, and `createRenderer` can fail on a machine whose
+                // shaders are missing. A cache with no preview renderer refuses a mesh
+                // at `request` and the row wears its icon, which is what every build did
+                // before previews existed -- so this arriving late is a picture that
+                // appears, never a frame that breaks.
+                if (previewRenderer == nullptr && renderer != nullptr && renderer->valid()) {
+                    previewRenderer = std::make_unique<HostPreviewRenderer>(
+                        host->world().classes(), host->world().enums(), host->world().atoms(), contentRoot,
+                        contentMounts, *renderer);
+                    thumbnails.setPreviewRenderer(previewRenderer.get());
+                }
+            thumbnails.flush(*device, *cmd);
             if (uiRenderer.valid())
                 // The atlas first: `buildUiGeometry` has already written UVs
                 // into it, and uploading after the draw would show this frame's
@@ -3369,6 +3385,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     debugRenderer.destroy(*device);
     iconAtlas.destroy(*device);
     thumbnails.destroy(*device);
+    if (previewRenderer != nullptr)
+        previewRenderer->destroy(*device);
     if (offscreen.valid())
         device->destroy(offscreen);
     if (window != nullptr)

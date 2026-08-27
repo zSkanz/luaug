@@ -368,6 +368,7 @@ private:
     [[nodiscard]] Entry* find(std::string_view key) noexcept;
     [[nodiscard]] core::usize inFlight() const noexcept;
     void admit();
+    void collectDraws(rhi::IDevice& device, rhi::ICmdList& cmd);
     void collectReads();
     void collectDecodes(rhi::IDevice& device, rhi::ICmdList& cmd);
     void drawPreviews(rhi::IDevice& device, rhi::ICmdList& cmd);
@@ -377,6 +378,7 @@ private:
     IPreviewRenderer* preview_ = nullptr;
     // Bumped by `flush`, so "least recently wanted" means "not asked for in the
     // most frames" without the caller having to have a frame number.
+    IPreviewRenderer* previews_ = nullptr;
     core::u64 frame_ = 0;
 };
 

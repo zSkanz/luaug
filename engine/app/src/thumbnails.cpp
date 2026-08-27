@@ -1,5 +1,7 @@
 #include "luaug/app/thumbnails.h"
 
+#include "luaug/app/content_tree.h"
+#include "luaug/asset/gltf.h"
 #include "luaug/asset/image.h"
 #include "luaug/platform/async_io.h"
 #include "luaug/rhi/descs.h"
@@ -178,8 +180,35 @@ ThumbnailCache::Thumbnail ThumbnailCache::request(const std::filesystem::path& p
     Entry made;
     made.key = key;
     made.lastWanted = frame_;
+    // **Asked up front rather than discovered after a read** (S5.16), which is
+    // what the kind is for: a folder, a sound or a font is never opened, and a
+    // mesh is not handed to an image decoder to find out it is not a picture.
+    made.kind = previewKindOf(path);
+    if (made.kind == PreviewKind::None || (made.kind != PreviewKind::Texture && previews_ == nullptr))
+        made.stage = Stage::Failed;
     entries_.push_back(std::move(made));
     return {};
+}
+
+void ThumbnailCache::setPreviewRenderer(IPreviewRenderer* renderer) noexcept
+{
+    const bool gained = previews_ == nullptr && renderer != nullptr;
+    previews_ = renderer;
+    if (!gained)
+        return;
+
+    // **Forgets what was refused for want of a renderer.** Without this, the
+    // order of two lines in the host's startup would decide whether a whole
+    // folder ever gets pictures -- the browser draws a frame, every mesh row is
+    // remembered as Failed, and a renderer arriving a moment later changes
+    // nothing. Only the refusals: a file that is genuinely not a picture stays
+    // failed.
+    for (Entry& entry : entries_) {
+        if (entry.stage == Stage::Failed && entry.kind != PreviewKind::None && entry.kind != PreviewKind::Texture &&
+            !entry.texture.valid()) {
+            entry.stage = Stage::Queued;
+        }
+    }
 }
 
 void ThumbnailCache::admit()
@@ -250,7 +279,38 @@ void ThumbnailCache::collectReads()
         // thread here to throw on. Nothing below can throw except an allocation,
         // and an allocation that fails in a thumbnail decoder is one the process
         // was not going to survive anyway.
-        entry.decode = jobs::schedule("thumbnail-decode", jobs::Domain::AssetIo, [target]() noexcept {
+        if (entry.kind == PreviewKind::Subtree) {
+            // Nothing to parse off the frame: the TEXT is the payload, and
+            // building a tree from it needs a world the render half has and this
+            // does not. Straight to the frame that has a command list.
+            target->ok = true;
+            entry.stage = Stage::Drawing;
+            continue;
+        }
+
+        // Where a glTF resolves its external buffers and images from. Set here
+        // rather than captured, because the job body has to stay copyable.
+        target->baseDirectory = std::filesystem::path(entry.key).parent_path();
+
+        const PreviewKind kind = entry.kind;
+        entry.decode = jobs::schedule("thumbnail-decode", jobs::Domain::AssetIo, [target, kind]() noexcept {
+            if (kind == PreviewKind::Mesh) {
+                // **Parsed here and not on the frame**, which is the whole
+                // reason this stage exists for a mesh: a 3 MB glTF parsed on the
+                // frame thread is D118, the defect that made the editor feel
+                // like it reloaded the world whenever anybody touched anything.
+                // Default options: a preview wants what the file says, and any
+                // switch turned on here would make the picture disagree with
+                // the thing the viewport draws.
+                const asset::GltfImportOptions options;
+                if (asset::importGltf(target->bytes, target->baseDirectory, options, target->model).has_value())
+                    return;
+                target->bytes.clear();
+                target->bytes.shrink_to_fit();
+                target->ok = true;
+                return;
+            }
+
             asset::Image decoded;
             if (asset::decodeImage(target->bytes, decoded).has_value())
                 return;
@@ -277,6 +337,12 @@ void ThumbnailCache::collectDecodes(rhi::IDevice& device, rhi::ICmdList& cmd)
             continue;
 
         entry.decode = {};
+        if (entry.kind == PreviewKind::Mesh) {
+            entry.stage = (entry.work != nullptr && entry.work->ok) ? Stage::Drawing : Stage::Failed;
+            if (entry.stage == Stage::Failed)
+                entry.work.reset();
+            continue;
+        }
         if (entry.work != nullptr && entry.work->ok) {
             // The one part that has to be here: an upload needs a command list,
             // and a command list belongs to a frame. It is also the cheap part
@@ -287,6 +353,57 @@ void ThumbnailCache::collectDecodes(rhi::IDevice& device, rhi::ICmdList& cmd)
         }
         entry.stage = entry.texture.valid() ? Stage::Ready : Stage::Failed;
         entry.work.reset();
+    }
+}
+
+void ThumbnailCache::collectDraws(rhi::IDevice& device, rhi::ICmdList& cmd)
+{
+    if (previews_ == nullptr)
+        return;
+
+    // **Budgeted, because a preview is an upload plus a pass and neither can be
+    // split.** One a frame: a folder of forty models fills in over forty frames
+    // rather than stopping the editor for one long one, which is the same
+    // trade every other stage in this pipeline makes.
+    usize drawn = 0;
+    while (drawn < MaxPreviewsPerFrame) {
+        Entry* next = nullptr;
+        for (Entry& entry : entries_) {
+            if (entry.stage != Stage::Drawing)
+                continue;
+            // Most recently wanted first, as `admit` does: what somebody is
+            // looking at now is drawn before what they scrolled past.
+            if (next == nullptr || entry.lastWanted > next->lastWanted)
+                next = &entry;
+        }
+        if (next == nullptr)
+            return;
+
+        PreviewJob job;
+        job.kind = next->kind;
+        job.path = std::filesystem::path(next->key);
+        job.edge = Edge;
+        if (next->work != nullptr) {
+            if (job.kind == PreviewKind::Mesh)
+                job.model = &next->work->model;
+            else if (job.kind == PreviewKind::Subtree) {
+                job.text =
+                    std::string_view(reinterpret_cast<const char*>(next->work->bytes.data()), next->work->bytes.size());
+            }
+        }
+
+        PreviewResult result;
+        const bool ok = previews_->drawPreview(device, cmd, job, result) && result.texture.valid();
+        if (ok) {
+            next->texture = result.texture;
+            next->width = result.width;
+            next->height = result.height;
+        }
+        next->stage = ok ? Stage::Ready : Stage::Failed;
+        // **Freed the moment the call returns**, which is the contract: a parsed
+        // glTF is the largest thing in this pipeline and nothing needs it twice.
+        next->work.reset();
+        ++drawn;
     }
 }
 
@@ -328,6 +445,7 @@ void ThumbnailCache::flush(rhi::IDevice& device, rhi::ICmdList& cmd)
     platform::pumpIo();
     collectReads();
     collectDecodes(device, cmd);
+    collectDraws(device, cmd);
     admit();
     evict(device);
 }
@@ -366,6 +484,95 @@ usize ThumbnailCache::pendingCount() const noexcept
             ++count;
     }
     return count;
+}
+
+// --- What a row is a picture of, and where it is drawn from (S5.16) ----------
+
+PreviewKind previewKindOf(const std::filesystem::path& path) noexcept
+{
+    // Delegated rather than re-decided, which is the header's own requirement:
+    // the browser and this cache cannot come to disagree about what a `.gltf`
+    // is if only one of them answers that question.
+    // The FILE NAME, because that is what the extension rule reads and a full
+    // path would make `.scene.json` inside a folder called `x.gltf` answer wrong.
+    const std::string name = path.filename().string();
+    switch (contentKindOf(name)) {
+    case ContentKind::Texture:
+        return PreviewKind::Texture;
+    case ContentKind::Mesh:
+        return PreviewKind::Mesh;
+    case ContentKind::Scene:
+    case ContentKind::Stamp:
+        // Two kinds to the browser -- one is opened and the other placed -- and
+        // one here, because both are drawn by pointing a camera at a subtree.
+        return PreviewKind::Subtree;
+    default:
+        // A folder, a sound, a font, a chunk, a file this build does not know.
+        // The row wears its class icon and this cache never opens it.
+        return PreviewKind::None;
+    }
+}
+
+render::ViewOverride previewView(const core::AABB& bounds) noexcept
+{
+    render::ViewOverride view;
+
+    // **An empty box is framed as a unit box at the origin.** `center` and
+    // `size` of an empty `AABB` are built from infinities and produce NaN, and a
+    // camera full of NaN is not recoverable -- a preview of nothing should be a
+    // picture of nothing rather than a crash or a black square nobody can
+    // explain.
+    core::Vec3 centre{0.0f, 0.0f, 0.0f};
+    f32 radius = 0.8660254f; // half the diagonal of a unit cube
+    if (bounds.min.x <= bounds.max.x && bounds.min.y <= bounds.max.y && bounds.min.z <= bounds.max.z) {
+        centre = core::Vec3{(bounds.min.x + bounds.max.x) * 0.5f, (bounds.min.y + bounds.max.y) * 0.5f,
+                            (bounds.min.z + bounds.max.z) * 0.5f};
+        const core::Vec3 extent{(bounds.max.x - bounds.min.x) * 0.5f, (bounds.max.y - bounds.min.y) * 0.5f,
+                                (bounds.max.z - bounds.min.z) * 0.5f};
+        // **The bounding SPHERE and not the box.** A sphere subtends the same
+        // angle from every direction, so the distance cannot depend on which way
+        // the fixed view happens to point and a model cannot fall out of frame
+        // because it is long along the axis the camera looks down. It costs a
+        // little empty space around a flat asset, which is the right way to be
+        // wrong.
+        radius = core::length(extent);
+        if (!(radius > 1.0e-4f))
+            radius = 1.0e-4f;
+    }
+
+    // **Three-quarter: above, in front, and to one side.** The convention rather
+    // than a preference -- a straight-on view of a cube is a square, and every
+    // asset browser worth using draws models this way so a box reads as a box
+    // and a character reads as facing somewhere.
+    const core::Vec3 direction = core::normalize(core::Vec3{-0.55f, -0.42f, -0.72f});
+
+    // A square target, so the vertical and horizontal fields of view are equal
+    // and one distance frames both. The half-angle is what the sphere has to fit
+    // inside; the margin keeps the silhouette off the edge of the tile.
+    constexpr f32 kFovDegrees = 35.0f;
+    constexpr f32 kMargin = 1.15f;
+    const f32 halfAngle = (kFovDegrees * 0.5f) * (3.14159265358979323846f / 180.0f);
+    const f32 distance = (radius * kMargin) / std::sin(halfAngle);
+
+    const core::Vec3 eye{centre.x - direction.x * distance, centre.y - direction.y * distance,
+                         centre.z - direction.z * distance};
+
+    // Widened explicitly. `DVec3` is f64 and these are f32, and an implicit
+    // promotion is `-Wdouble-promotion` on Clang -- which MSVC does not raise,
+    // so the Tier-2 stage is the only thing that would have caught it.
+    view.cframe = core::lookAtCFrame(
+        core::DVec3{static_cast<core::f64>(eye.x), static_cast<core::f64>(eye.y), static_cast<core::f64>(eye.z)},
+        core::DVec3{static_cast<core::f64>(centre.x), static_cast<core::f64>(centre.y),
+                    static_cast<core::f64>(centre.z)},
+        core::Vec3{0.0f, 1.0f, 0.0f});
+    view.fieldOfView = kFovDegrees;
+    // **Scaled to the asset rather than fixed**, so a preview of a one-metre
+    // crate and one of a two-hundred-metre terrain both have depth precision
+    // where the geometry is. A fixed 0.1-to-5000 range spends almost all of its
+    // precision on empty space for the first and runs out for the second.
+    view.nearPlane = std::max(0.01f, distance - radius * 2.0f);
+    view.farPlane = distance + radius * 4.0f;
+    return view;
 }
 
 } // namespace luaug::app

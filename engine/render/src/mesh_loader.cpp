@@ -739,6 +739,42 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
     return loaded;
 }
 
+bool MeshLoader::uploadModel(rhi::IDevice& device, rhi::ICmdList& cmd, const asset::Model& model, core::NameAtom urn,
+                             MeshCache& cache, MeshLibrary& library)
+{
+    if (!urn.valid() || model.mesh.vertices.empty())
+        return false;
+
+    core::EngineError uploadError;
+    // A file with a skin gets the second stream and one without gets exactly
+    // what an ordinary load uploads -- the same branch `sync` takes, so a
+    // preview and a viewport draw the same geometry.
+    const MeshHandle handle = model.skinned() ? cache.createSkinned(device, cmd, model.mesh, model.skin, &uploadError)
+                                              : cache.create(device, cmd, model.mesh, MeshUsage::Static, &uploadError);
+    if (!handle.valid()) {
+        core::logText(core::LogLevel::Warn, uploadError.message);
+        return false;
+    }
+
+    std::vector<rhi::TextureHandle> images;
+    images.reserve(model.images.size());
+    for (const asset::Image& image : model.images) {
+        const rhi::TextureHandle texture = uploadImage(device, cmd, image, "preview");
+        if (texture.valid())
+            textures_.push_back(texture);
+        images.push_back(texture);
+    }
+
+    MeshLibrary::Entry entry;
+    entry.mesh = handle;
+    fillEntry(entry, model.mesh.bounds, model.mesh.submeshes, model.materials, images, std::string_view{});
+    entry.positions.reserve(model.mesh.vertices.size());
+    for (const asset::Vertex& vertex : model.mesh.vertices)
+        entry.positions.push_back(vertex.position);
+    library.set(urn, entry);
+    return true;
+}
+
 core::u32 MeshLoader::forget(rhi::IDevice& device, std::span<const core::NameAtom> urns, TextureLibrary& textures,
                              MeshLibrary& meshes, MeshCache& cache)
 {
